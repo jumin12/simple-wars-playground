@@ -12,6 +12,68 @@ const MAX_INIT_BYTES = 48 * 1024 * 1024;
 
 const rooms = new Map();
 
+function lobbyCap(room) {
+  let mh = room.meta && room.meta.maxHumans != null ? parseInt(room.meta.maxHumans, 10) : MAX_PLAYERS;
+  if (!Number.isFinite(mh)) mh = MAX_PLAYERS;
+  return Math.min(MAX_PLAYERS, Math.max(2, mh));
+}
+
+function normalizeSeatTypes(meta) {
+  if (!meta || typeof meta !== 'object') return;
+  const cap = Math.min(MAX_PLAYERS, Math.max(2, parseInt(meta.maxHumans, 10) || MAX_PLAYERS));
+  meta.maxHumans = cap;
+  let st = Array.isArray(meta.seatTypes) ? meta.seatTypes.slice(0, cap) : [];
+  while (st.length < cap) st.push('human');
+  for (let i = 0; i < st.length; i++) {
+    const v = st[i];
+    if (v === 'bot' || v === 'closed') st[i] = v;
+    else st[i] = 'human';
+  }
+  meta.seatTypes = st;
+  let bots = 0;
+  for (let i = 0; i < st.length; i++) {
+    if (st[i] === 'bot') bots++;
+  }
+  meta.aiCount = bots;
+}
+
+/** First slot 1..cap that is `human` in seatTypes and not taken by a connected client. */
+function firstFreeHumanSlot(room) {
+  normalizeSeatTypes(room.meta);
+  const cap = lobbyCap(room);
+  const taken = new Set();
+  for (const c of room.clients) taken.add(c.slot);
+  const st = room.meta.seatTypes;
+  for (let s = 1; s <= cap; s++) {
+    if ((st[s - 1] || 'human') !== 'human') continue;
+    if (!taken.has(s)) return s;
+  }
+  return 0;
+}
+
+function assertMetaCompatibleWithRoom(room, metaTrial) {
+  const cap = Math.min(MAX_PLAYERS, Math.max(2, parseInt(metaTrial.maxHumans, 10) || MAX_PLAYERS));
+  let humanSeats = 0;
+  for (let i = 0; i < cap; i++) {
+    if ((metaTrial.seatTypes[i] || 'human') === 'human') humanSeats++;
+  }
+  if (humanSeats < 1) return 'At least one seat must be Human for real players';
+  for (const c of room.clients) {
+    if (c.slot > cap) return `Seat ${c.slot} is in use — raise max seats or remove players first`;
+    const st = metaTrial.seatTypes[c.slot - 1] || 'human';
+    if (st !== 'human') return `Seat ${c.slot} has a player — set it to Human first`;
+  }
+  return null;
+}
+
+function metaWire(room) {
+  normalizeSeatTypes(room.meta);
+  return {
+    ...room.meta,
+    occupiedSlots: room.clients.map((c) => c.slot).sort((a, b) => a - b),
+  };
+}
+
 function genLobbyId() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let s = '';
@@ -45,16 +107,15 @@ function getLobbyListPublic() {
   const out = [];
   for (const room of rooms.values()) {
     if (room.matchStarted) continue;
-    let mh = room.meta && room.meta.maxHumans != null ? parseInt(room.meta.maxHumans, 10) : MAX_PLAYERS;
-    if (!Number.isFinite(mh)) mh = MAX_PLAYERS;
-    const cap = Math.min(MAX_PLAYERS, Math.max(2, mh));
+    normalizeSeatTypes(room.meta);
+    const cap = lobbyCap(room);
     out.push({
       id: room.id,
       name: room.name,
       players: room.clients.length,
       max: cap,
       locked: !!room.password,
-      meta: room.meta || {},
+      meta: metaWire(room),
     });
   }
   return out;
@@ -73,15 +134,16 @@ function broadcastLobbyList() {
 
 function addClientToRoom(client, room) {
   client.room = room;
+  normalizeSeatTypes(room.meta);
   const isFirst = room.clients.length === 0;
+  const slot = firstFreeHumanSlot(room);
+  client.slot = slot > 0 ? slot : 1;
   room.clients.push(client);
   if (isFirst) {
-    client.slot = 1;
     client.isHost = true;
     room.host = client;
   } else {
     client.isHost = false;
-    client.slot = room.clients.length;
   }
   if (!room.meta.playerColors || typeof room.meta.playerColors !== 'object')
     room.meta.playerColors = {};
@@ -96,48 +158,25 @@ function leaveRoom(client) {
   const room = client.room;
   if (!room) return;
   const leftSlot = client.slot;
-  const colorByClient = new Map();
-  if (room.meta && typeof room.meta === 'object' && room.meta.playerColors) {
-    for (const c of room.clients) {
-      const col = room.meta.playerColors[String(c.slot)];
-      if (col) colorByClient.set(c, col);
-    }
-  }
   const idx = room.clients.indexOf(client);
   if (idx >= 0) room.clients.splice(idx, 1);
   const wasHost = room.host === client;
   if (wasHost) room.host = room.clients[0] || null;
 
-  const newPc = {};
-  for (let i = 0; i < room.clients.length; i++) {
-    const c = room.clients[i];
-    c.slot = i + 1;
+  for (const c of room.clients) {
     c.isHost = room.host === c;
-    const col = colorByClient.get(c);
-    if (col) newPc[String(i + 1)] = col;
   }
-  if (room.meta && typeof room.meta === 'object') room.meta.playerColors = newPc;
 
   if (wasHost && room.host) {
     try {
       if (room.host.ws.readyState === 1)
-        room.host.ws.send(JSON.stringify({ t: 'host_migrated', slot: room.host.slot }));
-    } catch (_) {}
-  }
-  for (const c of room.clients) {
-    try {
-      if (c.ws.readyState === 1)
-        c.ws.send(
-          JSON.stringify({
-            t: 'slot_sync',
-            slot: c.slot,
-            isHost: room.host === c,
-          }),
+        room.host.ws.send(
+          JSON.stringify({ t: 'host_migrated', slot: room.host.slot, isHost: true }),
         );
     } catch (_) {}
   }
   broadcastAll(room, { t: 'peer_left', slot: leftSlot, count: room.clients.length });
-  if (room.clients.length > 0) broadcastAll(room, { t: 'room_meta', meta: room.meta });
+  if (room.clients.length > 0) broadcastAll(room, { t: 'room_meta', meta: metaWire(room) });
   if (room.clients.length === 0) rooms.delete(room.id);
   client.room = null;
   client.slot = 0;
@@ -230,11 +269,11 @@ wss.on('connection', (ws) => {
           max: MAX_PLAYERS,
           lobbyName: room.name,
           players: room.clients.length,
-          meta: room.meta,
+          meta: metaWire(room),
         }),
       );
       broadcastAll(room, { t: 'peer_joined', slot: client.slot, count: room.clients.length });
-      broadcastAll(room, { t: 'room_meta', meta: room.meta });
+      broadcastAll(room, { t: 'room_meta', meta: metaWire(room) });
       broadcastLobbyList();
       return;
     }
@@ -251,10 +290,8 @@ wss.on('connection', (ws) => {
         );
         return;
       }
-      let mh = room.meta && room.meta.maxHumans != null ? parseInt(room.meta.maxHumans, 10) : MAX_PLAYERS;
-      if (!Number.isFinite(mh)) mh = MAX_PLAYERS;
-      const cap = Math.min(MAX_PLAYERS, Math.max(2, mh));
-      if (room.clients.length >= cap) {
+      normalizeSeatTypes(room.meta);
+      if (!firstFreeHumanSlot(room)) {
         ws.send(JSON.stringify({ t: 'error', msg: 'Lobby full' }));
         return;
       }
@@ -274,37 +311,63 @@ wss.on('connection', (ws) => {
           max: MAX_PLAYERS,
           lobbyName: room.name,
           players: room.clients.length,
-          meta: room.meta,
+          meta: metaWire(room),
         }),
       );
       broadcastAll(room, { t: 'peer_joined', slot: client.slot, count: room.clients.length });
-      broadcastAll(room, { t: 'room_meta', meta: room.meta });
+      broadcastAll(room, { t: 'room_meta', meta: metaWire(room) });
       broadcastLobbyList();
       return;
     }
 
     if (t === 'lobby_meta') {
       if (!client.room || !client.isHost || client.room.matchStarted) return;
-      const m = msg.meta;
-      if (m && typeof m === 'object') {
+      const m = msg.meta && typeof msg.meta === 'object' ? { ...msg.meta } : null;
+      if (m) {
+        delete m.occupiedSlots;
         const prevPc = (client.room.meta && client.room.meta.playerColors) || {};
-        client.room.meta = { ...client.room.meta, ...m };
+        const trial = { ...client.room.meta, ...m };
+        normalizeSeatTypes(trial);
+        const bad = assertMetaCompatibleWithRoom(client.room, trial);
+        if (bad) {
+          try {
+            ws.send(JSON.stringify({ t: 'error', msg: bad }));
+          } catch (_) {}
+          return;
+        }
+        client.room.meta = trial;
         if (!client.room.meta.playerColors || typeof client.room.meta.playerColors !== 'object')
           client.room.meta.playerColors = {};
         Object.assign(client.room.meta.playerColors, prevPc);
-        const mh = parseInt(client.room.meta.maxHumans, 10);
-        if (!Number.isFinite(mh)) client.room.meta.maxHumans = MAX_PLAYERS;
-        else client.room.meta.maxHumans = Math.min(MAX_PLAYERS, Math.max(2, mh));
+        normalizeSeatTypes(client.room.meta);
       }
-      broadcastAll(client.room, { t: 'room_meta', meta: client.room.meta });
+      broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
       broadcastLobbyList();
+      return;
+    }
+
+    if (t === 'kick_player') {
+      if (!client.room || !client.isHost || client.room.matchStarted) return;
+      const target = parseInt(msg.slot, 10) || 0;
+      if (target <= 0 || target === client.slot) return;
+      const victim = client.room.clients.find((c) => c.slot === target);
+      if (!victim) return;
+      try {
+        if (victim.ws.readyState === 1)
+          victim.ws.send(JSON.stringify({ t: 'kicked', msg: msg.reason || 'Removed by host' }));
+      } catch (_) {}
+      try {
+        victim.ws.close();
+      } catch (_) {}
       return;
     }
 
     if (t === 'lobby_color') {
       if (!client.room || client.room.matchStarted) return;
       const slot = parseInt(msg.slot, 10) || 0;
-      if (slot !== client.slot) return;
+      const cap = lobbyCap(client.room);
+      if (slot < 1 || slot > cap) return;
+      if (!client.isHost && slot !== client.slot) return;
       const hex = String(msg.color || '').trim();
       if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
       if (!client.room.meta.playerColors || typeof client.room.meta.playerColors !== 'object')
@@ -319,7 +382,7 @@ wss.on('connection', (ws) => {
         return;
       }
       client.room.meta.playerColors[String(slot)] = hex;
-      broadcastAll(client.room, { t: 'room_meta', meta: client.room.meta });
+      broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
       broadcastLobbyList();
       return;
     }

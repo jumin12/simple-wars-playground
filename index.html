@@ -4136,7 +4136,7 @@
                     <div class="mp-gl-grid">
                         <div>
                             <h3 style="margin:0 0 6px 0;font-size:1.08rem">Players <span id="mpGlSeatCapLabel"></span></h3>
-                            <p class="mp-gl-hint">Six seats max (similar to Risk). The host sets how many seats are open for this match. Filled rows are real players in order; open rows wait for joiners. Everyone picks a unique color for their slot.</p>
+                            <p class="mp-gl-hint">Up to six seats (like Risk). The host chooses how many seats are active, sets each to <strong>Human</strong>, <strong>AI bot</strong>, or <strong>Closed</strong>, picks colors, and can kick guests. Every open human seat must be filled (or changed to AI/Closed) before launch.</p>
                             <div id="mpGlSlots"></div>
                             <div id="mpGlMaxHumansRow" class="setup-row" style="display:none;margin-top:12px">
                                 <label>Max seats (join cap)</label>
@@ -4195,14 +4195,8 @@
             <div class="panel">
                 <h3>Match rules</h3>
                 <p style="font-size:14px;opacity:0.9;margin-top:0">These mirror solo setup and are shown in the lobby browser for other players.</p>
-                <div class="setup-row"><label>AI opponents</label>
-                    <select id="mpCfgAI" style="flex:1">
-                        <option value="1" selected>1</option>
-                        <option value="2">2</option>
-                        <option value="3">3</option>
-                        <option value="4">4</option>
-                        <option value="5">5</option>
-                    </select>
+                <div class="setup-row"><label>AI players</label>
+                    <p id="mpCfgAiNote" style="flex:1;font-size:13px;opacity:0.88;margin:0;line-height:1.45">Configure each seat in the lobby: set a slot to <strong>AI bot</strong> instead of a separate AI count.</p>
                 </div>
                 <div class="setup-row"><label>Victory</label>
                     <select id="mpCfgVictoryMode" style="flex:1">
@@ -5368,9 +5362,36 @@
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.humanSlots) return owner === 1;
             return gameData.mp.humanSlots.indexOf(owner) >= 0;
         }
+        function wodGetActiveFactionSlotsForMap() {
+            if(!gameData.mp || !gameData.mp.enabled) return null;
+            let maxH = gameData.mp.maxLobbySlots || 6;
+            let st = gameData.mp.seatTypes;
+            let hs = gameData.mp.humanSlots || [];
+            if(!st || !st.length) {
+                let pc = 1 + Math.max(0, gameData.aiCount | 0);
+                let out = [];
+                for(let i = 1; i <= pc && i <= maxH; i++) out.push(i);
+                return out;
+            }
+            let out = [];
+            for(let s = 1; s <= maxH; s++) {
+                let t = st[s - 1] || 'human';
+                if(t === 'closed') continue;
+                if(t === 'bot') {
+                    out.push(s);
+                    continue;
+                }
+                if(t === 'human' && hs.indexOf(s) >= 0) out.push(s);
+            }
+            return out.length ? out.sort((a, b) => a - b) : null;
+        }
         function wodGetMapPlayerCount() {
-            if(gameData.mp && gameData.mp.enabled && gameData.mp.humanSlots && gameData.mp.humanSlots.length) {
-                return Math.min(gameData.mp.humanSlots.length + Math.max(0, gameData.aiCount | 0), factionColors.length - 1);
+            if(gameData.mp && gameData.mp.enabled) {
+                let act = wodGetActiveFactionSlotsForMap();
+                if(act && act.length) return Math.min(act.length, factionColors.length - 1);
+                if(gameData.mp.humanSlots && gameData.mp.humanSlots.length) {
+                    return Math.min(gameData.mp.humanSlots.length + Math.max(0, gameData.aiCount | 0), factionColors.length - 1);
+                }
             }
             return Math.min((gameData.aiCount || 1) + 1, factionColors.length - 1);
         }
@@ -5435,6 +5456,8 @@
         }
         function wodMpBuildInitPayload() {
             let hs = gameData.mp && gameData.mp.humanSlots ? gameData.mp.humanSlots.slice() : [1];
+            let maxL = (gameData.mp && gameData.mp.maxLobbySlots) || 6;
+            let st = (gameData.mp && gameData.mp.seatTypes) ? gameData.mp.seatTypes.slice(0, maxL) : [];
             return {
                 v: 1,
                 hexList: gameData.hexList.map(wodStripHexForNet),
@@ -5450,6 +5473,8 @@
                 aiCount: gameData.aiCount,
                 victoryMode: gameData.victoryMode,
                 humanSlots: hs,
+                seatTypes: st,
+                maxLobbySlots: maxL,
                 money: gameData.money,
                 manpower: gameData.manpower,
                 income: gameData.income,
@@ -5739,14 +5764,25 @@
         function wodMpSyncHostCfgFromSetup() {
             wodMpCopyFieldToField('setupMapSize', 'mpCfgMapSize');
             wodMpCopyFieldToField('setupMapShape', 'mpCfgMapShape');
-            wodMpCopyFieldToField('setupAI', 'mpCfgAI');
             wodMpCopyFieldToField('setupVictoryMode', 'mpCfgVictoryMode');
             wodMpCopyFieldToField('setupMoney', 'mpCfgMoney');
             wodMpCopyFieldToField('setupPlayerColor', 'mpCfgPlayerColor');
             wodMpSyncMpCfgVictoryDetail();
         }
+        function wodMpEnsureDefaultSeatTypes(meta) {
+            if(!meta || typeof meta !== 'object') return;
+            let mh = Math.max(2, Math.min(6, parseInt(meta.maxHumans, 10) || 6));
+            meta.maxHumans = mh;
+            let st = Array.isArray(meta.seatTypes) ? meta.seatTypes.slice(0, mh) : [];
+            while(st.length < mh) st.push('human');
+            for(let i = 0; i < st.length; i++) {
+                if(st[i] !== 'bot' && st[i] !== 'closed') st[i] = 'human';
+            }
+            meta.seatTypes = st;
+        }
         function wodMpApplyRoomMeta(meta) {
             window.wodMpRoomMeta = meta && typeof meta === 'object' ? meta : {};
+            wodMpEnsureDefaultSeatTypes(window.wodMpRoomMeta);
             if(window.wodMpRoomMeta.playerColors) {
                 for(let k of Object.keys(window.wodMpRoomMeta.playerColors)) {
                     let i = parseInt(k, 10);
@@ -5757,8 +5793,6 @@
             if(ms && window.wodMpRoomMeta.mapSize != null) ms.value = String(window.wodMpRoomMeta.mapSize);
             let sh = document.getElementById('mpCfgMapShape');
             if(sh && window.wodMpRoomMeta.mapShape) sh.value = window.wodMpRoomMeta.mapShape;
-            let ai = document.getElementById('mpCfgAI');
-            if(ai && window.wodMpRoomMeta.aiCount != null) ai.value = String(Math.max(1, Math.min(5, parseInt(window.wodMpRoomMeta.aiCount, 10) || 1)));
             let vic = document.getElementById('mpCfgVictoryMode');
             if(vic && window.wodMpRoomMeta.victoryMode) vic.value = window.wodMpRoomMeta.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
             let mon = document.getElementById('mpCfgMoney');
@@ -5779,6 +5813,7 @@
                 income: gameData.income,
                 manpower: gameData.manpower,
                 aiCount: gameData.aiCount,
+                mp: gameData.mp,
                 selection: gameData.selection ? gameData.selection.slice() : [],
                 buildMode: gameData.buildMode
             };
@@ -5797,6 +5832,7 @@
             gameData.income = s.income;
             gameData.manpower = s.manpower;
             gameData.aiCount = s.aiCount;
+            gameData.mp = s.mp;
             gameData.selection = s.selection;
             gameData.buildMode = s.buildMode;
             syncBuildPlacementMobileUi();
@@ -5813,6 +5849,24 @@
                 gameData.mapRadius = r;
                 if(shapeEl) shapeEl.value = meta.mapShape || 'island';
                 gameData.loadedCustomMap = false;
+                wodMpEnsureDefaultSeatTypes(meta);
+                let maxH = Math.max(2, Math.min(6, parseInt(meta.maxHumans, 10) || 6));
+                let st = (meta.seatTypes && meta.seatTypes.length) ? meta.seatTypes.slice(0, maxH) : [];
+                while(st.length < maxH) st.push('human');
+                let hs = [];
+                for(let s = 1; s <= maxH; s++) {
+                    if((st[s - 1] || 'human') === 'human') hs.push(s);
+                }
+                gameData.mp = {
+                    enabled: true,
+                    isHost: true,
+                    localSlot: (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.slot) ? WodMultiplayer.api.slot : 1,
+                    humanSlots: hs,
+                    seatTypes: st,
+                    maxLobbySlots: maxH,
+                    eliminatedSlots: []
+                };
+                gameData.aiCount = st.filter(t => t === 'bot').length;
                 generateMap();
                 previewLoadedMap('mpLobbyMapPreview');
             } catch(err) {
@@ -5858,17 +5912,54 @@
                 } else used.add(String(cur).toLowerCase());
             }
         }
+        function wodMpPushLobbyMetaFromCurrentUi() {
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.sendLobbyMeta) return;
+            WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+        }
+        function wodMpValidateLaunchReady(meta) {
+            if(!meta || typeof meta !== 'object') return false;
+            wodMpEnsureDefaultSeatTypes(meta);
+            let maxH = Math.max(2, Math.min(6, parseInt(meta.maxHumans, 10) || 6));
+            let st = meta.seatTypes || [];
+            let occ = new Set(Array.isArray(meta.occupiedSlots) ? meta.occupiedSlots : []);
+            for(let s = 1; s <= maxH; s++) {
+                if((st[s - 1] || 'human') === 'human' && !occ.has(s)) {
+                    showNotification('Fill every open human seat, or change it to AI or Closed.');
+                    return false;
+                }
+            }
+            let factions = 0;
+            for(let s = 1; s <= maxH; s++) {
+                if((st[s - 1] || 'human') !== 'closed') factions++;
+            }
+            if(factions < 2) {
+                showNotification('Need at least two active seats (human or AI) to launch.');
+                return false;
+            }
+            let humanSeats = 0;
+            for(let i = 0; i < maxH; i++) {
+                if((st[i] || 'human') === 'human') humanSeats++;
+            }
+            if(humanSeats < 1) {
+                showNotification('Keep at least one Human seat in the lobby.');
+                return false;
+            }
+            return true;
+        }
         function wodMpRenderGameLobbyScreen() {
             let api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : {};
             let meta = window.wodMpRoomMeta || {};
+            wodMpEnsureDefaultSeatTypes(meta);
             let maxH = Math.max(2, Math.min(6, parseInt(meta.maxHumans, 10) || 6));
+            let st = meta.seatTypes || [];
+            let occ = new Set(Array.isArray(meta.occupiedSlots) ? meta.occupiedSlots : []);
             let capEl = document.getElementById('mpGlSeatCapLabel');
-            if(capEl) capEl.textContent = '(open seats: ' + maxH + ')';
+            if(capEl) capEl.textContent = '(seats in use: ' + maxH + ')';
             let sub = document.getElementById('mpGlSub');
             if(sub) {
                 let code = api.code ? 'Code: ' + api.code : '';
                 sub.innerHTML = wodMpEscapeHtml(api.lobbyName || 'Lobby') + (code ? ' · ' + wodMpEscapeHtml(code) : '') +
-                    ' · Your slot: <strong>' + (api.slot | 0) + '</strong> · Players connected: <strong>' + (wodMpLobbyCount | 0) + '</strong>';
+                    ' · Your slot: <strong>' + (api.slot | 0) + '</strong> · Humans connected: <strong>' + (wodMpLobbyCount | 0) + '</strong>';
             }
             let readout = document.getElementById('mpGlSettingsReadout');
             if(readout) {
@@ -5876,9 +5967,13 @@
                 if(!msL && meta.mapSize) msL = meta.mapSize === 40 ? 'Small' : (meta.mapSize === 80 ? 'Large' : 'Medium');
                 let shL = meta.mapShapeLabel;
                 if(!shL && meta.mapShape) shL = meta.mapShape === 'rectangle' ? 'Rectangle' : 'Island';
+                let botN = 0;
+                for(let i = 0; i < maxH; i++) {
+                    if(st[i] === 'bot') botN++;
+                }
                 readout.innerHTML =
                     '<strong>Map</strong> ' + wodMpEscapeHtml(msL || '—') + ' · ' + wodMpEscapeHtml(shL || '') +
-                    '<br><strong>AI opponents</strong> ' + (meta.aiCount != null ? (meta.aiCount | 0) : '—') +
+                    '<br><strong>AI seats</strong> ' + botN +
                     '<br><strong>Victory</strong> ' + wodMpEscapeHtml(meta.victoryLabel || '') +
                     '<br><strong>Starting cash</strong> $' + (meta.money != null ? (meta.money | 0) : '—');
             }
@@ -5899,17 +5994,38 @@
 
             let slotsEl = document.getElementById('mpGlSlots');
             if(slotsEl) {
-                let peerN = wodMpLobbyCount | 0;
                 let pc = meta.playerColors || {};
                 let html = '';
                 for(let s = 1; s <= 6; s++) {
                     let active = s <= maxH;
-                    let occ = s <= peerN;
+                    let seatT = (st[s - 1] || 'human');
+                    let isOcc = occ.has(s);
                     let rowClass = 'mp-gl-slot' + (active ? '' : ' mp-gl-slot--inactive');
-                    let status = !active ? '— Not in this match' : (occ ? (s === api.slot ? '<strong>You</strong>' : 'Player ' + s) : 'Open — waiting for join');
+                    let status = '';
+                    if(!active) status = '— Not in this match';
+                    else if(seatT === 'closed') status = '<em>Closed</em> — not playing';
+                    else if(seatT === 'bot') status = '<strong>AI</strong> occupies this seat';
+                    else if(isOcc) status = (s === api.slot) ? '<strong>You</strong> (human)' : 'Human player (connected)';
+                    else status = 'Open human seat — waiting for join';
+
+                    let typeCell = '';
+                    if(api.isHost && active) {
+                        let selH = seatT === 'human' ? ' selected' : '';
+                        let selB = seatT === 'bot' ? ' selected' : '';
+                        let selC = seatT === 'closed' ? ' selected' : '';
+                        typeCell = '<select class="mp-gl-seat-type" data-slot="' + s + '" style="flex:0 0 auto;max-width:120px;font-size:12px">' +
+                            '<option value="human"' + selH + '>Human</option>' +
+                            '<option value="bot"' + selB + '>AI bot</option>' +
+                            '<option value="closed"' + selC + '>Closed</option></select>';
+                    } else if(active) {
+                        typeCell = '<span style="font-size:12px;opacity:0.85">' + (seatT === 'bot' ? 'AI' : (seatT === 'closed' ? 'Closed' : 'Human')) + '</span>';
+                    } else typeCell = '<span style="opacity:0.45">—</span>';
+
                     let myHex = pc[String(s)] || factionColors[s] || '#999999';
                     let colorCell = '';
-                    if(occ && s === api.slot) {
+                    if(!active || seatT === 'closed') {
+                        colorCell = '<span style="opacity:0.55;font-size:12px">—</span>';
+                    } else if(api.isHost || (isOcc && s === api.slot)) {
                         let opts = '';
                         for(let i = 0; i < WOD_MP_LOBBY_PALETTE.length; i++) {
                             let hex = WOD_MP_LOBBY_PALETTE[i][0];
@@ -5920,17 +6036,44 @@
                             opts += '<option value="' + hex + '"' + sel + '>' + wodMpEscapeHtml(lab) + '</option>';
                         }
                         colorCell = '<select class="mp-gl-color-select" data-slot="' + s + '" style="flex:1;max-width:200px">' + opts + '</select>';
-                    } else if(occ) {
+                    } else {
                         colorCell = '<span class="mp-gl-swatch" style="background:' + myHex + '"></span><span style="font-size:11px;opacity:0.85">' + myHex + '</span>';
-                    } else colorCell = '<span style="opacity:0.55;font-size:12px">—</span>';
-                    html += '<div class="' + rowClass + '"><span class="mp-gl-slot-num">' + s + '</span><div style="flex:1;min-width:0">' + status + '</div>' + colorCell + '</div>';
+                    }
+
+                    let kickCell = '';
+                    if(api.isHost && isOcc && seatT === 'human' && s !== api.slot) {
+                        kickCell = '<button type="button" class="build-btn mp-gl-kick" data-slot="' + s + '" style="font-size:11px;padding:4px 8px">Kick</button>';
+                    } else kickCell = '<span style="width:48px"></span>';
+
+                    html += '<div class="' + rowClass + '" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)">' +
+                        '<span class="mp-gl-slot-num" style="min-width:1.2em">' + s + '</span>' +
+                        '<div style="flex:1;min-width:140px">' + status + '</div>' +
+                        typeCell + colorCell + kickCell + '</div>';
                 }
                 slotsEl.innerHTML = html;
+                slotsEl.querySelectorAll('.mp-gl-seat-type').forEach(sel => {
+                    sel.onchange = () => {
+                        let slot = parseInt(sel.getAttribute('data-slot'), 10);
+                        let v = sel.value;
+                        wodMpEnsureDefaultSeatTypes(window.wodMpRoomMeta);
+                        if(slot >= 1 && slot <= window.wodMpRoomMeta.maxHumans) {
+                            window.wodMpRoomMeta.seatTypes[slot - 1] = v;
+                        }
+                        wodMpPushLobbyMetaFromCurrentUi();
+                    };
+                });
                 slotsEl.querySelectorAll('.mp-gl-color-select').forEach(sel => {
                     sel.onchange = () => {
                         let slot = parseInt(sel.getAttribute('data-slot'), 10);
                         if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyColor)
                             WodMultiplayer.sendLobbyColor(slot, sel.value);
+                    };
+                });
+                slotsEl.querySelectorAll('.mp-gl-kick').forEach(btn => {
+                    btn.onclick = () => {
+                        let slot = parseInt(btn.getAttribute('data-slot'), 10);
+                        if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.kickPlayer)
+                            WodMultiplayer.kickPlayer(slot);
                     };
                 });
             }
@@ -5939,9 +6082,9 @@
             requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
         }
         function wodMpBuildLobbyMetaFromSetup() {
+            if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
             let mapSizeEl = document.getElementById('mpCfgMapSize');
             let shapeEl = document.getElementById('mpCfgMapShape');
-            let ai = document.getElementById('mpCfgAI');
             let vic = document.getElementById('mpCfgVictoryMode');
             let moneyEl = document.getElementById('mpCfgMoney');
             let msLab = mapSizeEl && mapSizeEl.options[mapSizeEl.selectedIndex];
@@ -5951,10 +6094,20 @@
             let mapShape = shapeEl ? shapeEl.value : 'island';
             let maxHumansEl = document.getElementById('mpGlMaxHumans');
             let maxHumans = maxHumansEl ? Math.max(2, Math.min(6, parseInt(maxHumansEl.value, 10) || 6)) : 6;
+            window.wodMpRoomMeta.maxHumans = maxHumans;
+            wodMpEnsureDefaultSeatTypes(window.wodMpRoomMeta);
+            let st = (window.wodMpRoomMeta.seatTypes || []).slice(0, maxHumans);
+            while(st.length < maxHumans) st.push('human');
+            window.wodMpRoomMeta.seatTypes = st;
+            let botCount = 0;
+            for(let i = 0; i < maxHumans; i++) {
+                if(st[i] === 'bot') botCount++;
+            }
             return {
                 mapSize,
                 mapShape,
-                aiCount: ai ? (parseInt(ai.value, 10) || 1) : 1,
+                aiCount: botCount,
+                seatTypes: st,
                 victoryMode: vic && vic.value === 'annihilation' ? 'annihilation' : 'domination',
                 money: moneyEl ? (parseInt(moneyEl.value, 10) || 1000) : 1000,
                 maxHumans,
@@ -6176,7 +6329,6 @@
                 mpCfgVictoryModeEl.addEventListener('change', wodMpSyncMpCfgVictoryDetail);
             }
             if(mpCfgRulesApply) mpCfgRulesApply.onclick = () => {
-                wodMpCopyFieldToField('mpCfgAI', 'setupAI');
                 wodMpCopyFieldToField('mpCfgVictoryMode', 'setupVictoryMode');
                 wodMpCopyFieldToField('mpCfgMoney', 'setupMoney');
                 wodMpCopyFieldToField('mpCfgPlayerColor', 'setupPlayerColor');
@@ -6211,15 +6363,23 @@
             let btnGlLaunch = document.getElementById('mpBtnGlLaunch');
             if(btnGlLaunch) btnGlLaunch.onclick = () => {
                 if(!WodMultiplayer.api || !WodMultiplayer.api.isHost) return;
-                wodMpLobbyCount = Math.max(wodMpLobbyCount | 0, 1);
-                let humans = [];
-                for(let i = 1; i <= wodMpLobbyCount; i++) humans.push(i);
-                if(humans.length > WOD_MP_MAX_PLAYERS) humans = humans.slice(0, WOD_MP_MAX_PLAYERS);
-                wodMpApplyMetaToSetupFields(window.wodMpRoomMeta);
-                wodMpApplyLaunchColorsFromHumans(window.wodMpRoomMeta, humans);
+                let meta = window.wodMpRoomMeta;
+                if(!wodMpValidateLaunchReady(meta)) return;
+                wodMpEnsureDefaultSeatTypes(meta);
+                let maxH = Math.max(2, Math.min(6, parseInt(meta.maxHumans, 10) || 6));
+                let st = (meta.seatTypes || []).slice(0, maxH);
+                while(st.length < maxH) st.push('human');
+                let occ = (meta.occupiedSlots || []).slice().sort((a, b) => a - b);
+                wodMpApplyMetaToSetupFields(meta);
+                wodMpApplyLaunchColorsFromHumans(meta, occ);
+                gameData.aiCount = st.filter(t => t === 'bot').length;
                 gameData.mp = {
-                    enabled: true, isHost: true, localSlot: WodMultiplayer.api.slot, humanSlots: humans,
-                    lobbyCount: wodMpLobbyCount, eliminatedSlots: []
+                    enabled: true, isHost: true, localSlot: WodMultiplayer.api.slot,
+                    humanSlots: occ,
+                    seatTypes: st,
+                    maxLobbySlots: maxH,
+                    lobbyCount: wodMpLobbyCount | 0,
+                    eliminatedSlots: []
                 };
                 hidePanels();
                 gameState = 'PLAYING';
@@ -6259,6 +6419,18 @@
             addEventListener('wod-mp-Error', (ev) => {
                 let m = ev && ev.detail && ev.detail.msg ? String(ev.detail.msg) : 'Error';
                 showNotification(m);
+            });
+            addEventListener('wod-mp-Kicked', (ev) => {
+                let m = ev && ev.detail && ev.detail.msg ? String(ev.detail.msg) : 'Removed from lobby';
+                showNotification(m);
+                if(typeof WodMultiplayer !== 'undefined')
+                    WodMultiplayer.requestLobbyList();
+                window.wodMpRoomMeta = {};
+                wodMpLobbyCount = 1;
+                wodMpRefreshMpPanelState();
+                let stKick = document.getElementById('mpStatus');
+                if(stKick) stKick.textContent = 'You were removed from the lobby.';
+                wodMpRenderLobbyList(typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api.lobbies : []);
             });
 
             addEventListener('wod-mp-LobbyList', (ev) => {
@@ -6319,10 +6491,15 @@
             addEventListener('wod-mp-MatchStart', (ev) => {
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.isHost) return;
                 if(!ev.detail || !ev.detail.payload) return;
+                let pl = ev.detail.payload;
                 gameData.mp = {
                     enabled: true, isHost: false, localSlot: WodMultiplayer.api.slot,
-                    humanSlots: ev.detail.payload.humanSlots || [1], eliminatedSlots: []
+                    humanSlots: pl.humanSlots || [1],
+                    seatTypes: pl.seatTypes || [],
+                    maxLobbySlots: pl.maxLobbySlots || 6,
+                    eliminatedSlots: []
                 };
+                if(pl.aiCount != null) gameData.aiCount = pl.aiCount;
                 hidePanels();
                 gameState = 'PLAYING';
                 pauseMenuBackgroundBattle();
@@ -9479,7 +9656,8 @@
             return null;
         }
 
-        function smoothStartingTerritory(playerCount) {
+        function smoothStartingTerritory(ownerIds) {
+            if(!ownerIds || ownerIds.length === 0) return;
             for(let pass = 0; pass < 2; pass++) {
                 let changes = [];
                 for(let hex of gameData.hexList) {
@@ -9489,7 +9667,7 @@
                     }
                     let bestOwner = hex.owner;
                     let bestCount = counts[bestOwner] || 0;
-                    for(let owner = 1; owner <= playerCount; owner++) {
+                    for(let owner of ownerIds) {
                         if((counts[owner] || 0) > bestCount) {
                             bestOwner = owner;
                             bestCount = counts[owner];
@@ -9501,23 +9679,24 @@
             }
         }
 
-        function spawnInitialFrontlineUnits(playerCount) {
+        function spawnInitialFrontlineUnits(ownerIds) {
+            if(!ownerIds || ownerIds.length === 0) return;
             let unitsPerOwner = Math.max(12, Math.min(28, Math.floor(gameData.mapRadius / 3.5))); // Doubled troops
             let minSep = gameData.hexRadius * 2.85;
             let minSepSq = minSep * minSep;
             let safeUnitSepSq = START_SPAWN_MIN_UNIT_DISTANCE * START_SPAWN_MIN_UNIT_DISTANCE;
             let frontHexesByOwner = {};
-            for(let owner = 1; owner <= playerCount; owner++) {
+            for(let owner of ownerIds) {
                 frontHexesByOwner[owner] = getOwnerFrontlineHexes(owner)
                     .filter(h => h.type !== 'mountain' && canUnitEnterHex({type: 'light', owner}, h))
                     .sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
             }
             let usedAll = [];
-            for(let owner = 1; owner <= playerCount; owner++) {
+            for(let owner of ownerIds) {
                 let frontHexes = frontHexesByOwner[owner];
                 if(frontHexes.length === 0) continue;
                 let enemyFrontHexes = [];
-                for(let other = 1; other <= playerCount; other++) {
+                for(let other of ownerIds) {
                     if(other !== owner) enemyFrontHexes.push(...(frontHexesByOwner[other] || []));
                 }
 
@@ -10205,6 +10384,50 @@
                     pCtx.fillRect(cx + hex.x*scale - pSize/2, cy + hex.y*scale - pSize/2, pSize + 1, pSize + 1);
                 }
             }
+
+            if(prevCanvas.id === 'mpLobbyMapPreview') {
+                for(let hex of gameData.hexList) {
+                    if(isWaterHex(hex) || !hex.owner) continue;
+                    for(let dir of hexDirections) {
+                        let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                        if(!nHex || isWaterHex(nHex) || nHex.owner === hex.owner) continue;
+                        pCtx.strokeStyle = 'rgba(0,0,0,0.42)';
+                        pCtx.lineWidth = Math.max(0.85, scale * 0.55);
+                        pCtx.beginPath();
+                        pCtx.moveTo(cx + hex.x * scale, cy + hex.y * scale);
+                        pCtx.lineTo(cx + nHex.x * scale, cy + nHex.y * scale);
+                        pCtx.stroke();
+                    }
+                }
+                for(let city of gameData.cities) {
+                    if(!city.owner) continue;
+                    let col = (typeof city.owner === 'number' && factionColors[city.owner]) ? factionColors[city.owner] : '#ecf0f1';
+                    let px = cx + city.x * scale;
+                    let py = cy + city.y * scale;
+                    let rad = Math.max(2.2, scale * 3.1);
+                    pCtx.fillStyle = col;
+                    pCtx.strokeStyle = 'rgba(0,0,0,0.55)';
+                    pCtx.lineWidth = 1;
+                    pCtx.beginPath();
+                    pCtx.arc(px, py, rad, 0, Math.PI * 2);
+                    pCtx.fill();
+                    pCtx.stroke();
+                }
+                for(let u of gameData.entities) {
+                    if(!u.owner || u.hp <= 0 || u.type === 'convoy') continue;
+                    let col = factionColors[u.owner] || '#bbb';
+                    let px = cx + u.x * scale;
+                    let py = cy + u.y * scale;
+                    let sz = Math.max(1.25, scale * 1.65);
+                    pCtx.fillStyle = col;
+                    pCtx.strokeStyle = 'rgba(0,0,0,0.35)';
+                    pCtx.lineWidth = 0.75;
+                    pCtx.beginPath();
+                    pCtx.rect(px - sz / 2, py - sz / 2, sz, sz);
+                    pCtx.fill();
+                    pCtx.stroke();
+                }
+            }
         }
 
         function previewMap() {
@@ -10227,7 +10450,8 @@
             let newRadius = mapSize ? parseInt(mapSize.value) : 120;
             
             let aiCount = document.getElementById('setupAI');
-            if(aiCount) gameData.aiCount = Math.max(1, Math.min(5, parseInt(aiCount.value, 10) || 1));
+            if(aiCount && (!gameData.mp || !gameData.mp.enabled))
+                gameData.aiCount = Math.max(1, Math.min(5, parseInt(aiCount.value, 10) || 1));
 
             let victorySel = document.getElementById('setupVictoryMode');
             gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
@@ -10332,7 +10556,18 @@
             
             let landHexes = gameData.hexList.filter(h => isClaimableLand(h));
             let allMapHexes = [...gameData.hexList];
-            let playerCount = wodGetMapPlayerCount();
+            let basePlayerCount = wodGetMapPlayerCount();
+            let activeOwners = (gameData.mp && gameData.mp.enabled) ? wodGetActiveFactionSlotsForMap() : null;
+            let playerCount = basePlayerCount;
+            let ownersList = [];
+            if(activeOwners && activeOwners.length > 0) {
+                ownersList = activeOwners;
+                playerCount = activeOwners.length;
+            } else {
+                activeOwners = null;
+                for(let o = 1; o <= basePlayerCount; o++) ownersList.push(o);
+                playerCount = basePlayerCount;
+            }
             if(landHexes.length === 0) return;
             
             // Reset owners first
@@ -10358,6 +10593,12 @@
 
             function ownerForHex(hex) {
                 let score = splitScore(hex);
+                if(activeOwners) {
+                    for(let i = 0; i < splitThresholds.length; i++) {
+                        if(score <= splitThresholds[i]) return activeOwners[i];
+                    }
+                    return activeOwners[playerCount - 1];
+                }
                 for(let i = 0; i < splitThresholds.length; i++) {
                     if(score <= splitThresholds[i]) return i + 1;
                 }
@@ -10390,15 +10631,16 @@
                     if(isClaimableLand(hex)) setHexOwner(hex, city.owner);
                 }
             }
-            smoothStartingTerritory(playerCount);
-            softenMountainHexBetweenOwners(playerCount);
-            ensureOwnersReachableByLand(playerCount);
-            ensureOwnedTilesReachFactionCities(playerCount);
+            smoothStartingTerritory(ownersList);
+            softenMountainHexBetweenOwners(ownersList);
+            ensureOwnersReachableByLand(ownersList);
+            ensureOwnedTilesReachFactionCities(ownersList);
 
             gameData.tradeTimer = 0;
 
             let startCities = [];
-            for(let owner = 1; owner <= playerCount; owner++) {
+            let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
+            for(let owner of ownersList) {
                 let center = ownerCenters[owner] || ownerCenters[1];
                 let candidates = gameData.cities.filter(c => c.owner === owner);
                 let harborEligible = candidates.filter(c => cityUrbanClusterEligibleForHarbor(c));
@@ -10475,21 +10717,21 @@
                 startCity.owner = owner;
                 startCity.hasFactory = true;
                 startCities.push(startCity);
-                gameData.aiMoneyByOwner[owner] = owner === 1 ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
-                gameData.aiManpowerByOwner[owner] = owner === 1 ? 0 : 5000;
+                gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
+                gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
             }
 
-            spawnInitialFrontlineUnits(playerCount);
+            spawnInitialFrontlineUnits(ownersList);
 
             wodMarkTerrainPoliticalDirty();
 
-            // Center Camera on Player
-            let start1 = startCities.find(c => c.owner === 1);
-            if(start1) {
+            // Center Camera on local player capital
+            let startMe = startCities.find(c => c.owner === locO);
+            if(startMe) {
                 let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
                 let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
-                gameData.camera.x = start1.x * gameData.camera.zoom - vw / 2;
-                gameData.camera.y = start1.y * gameData.camera.zoom - vh / 2;
+                gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
+                gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
             }
         }
 
@@ -10850,11 +11092,12 @@
         }
 
         /** BFS from each faction's towns so every owned infantry-passable tile can reach at least one friendly city footprint. */
-        function ensureOwnedTilesReachFactionCities(playerCount) {
+        function ensureOwnedTilesReachFactionCities(ownerIds) {
+            if(!ownerIds || ownerIds.length === 0) return;
             let probeTpl = { type: 'light', owner: 1 };
             for(let pass = 0; pass < 48; pass++) {
                 let carved = false;
-                owLoop: for(let owner = 1; owner <= playerCount; owner++) {
+                owLoop: for(let owner of ownerIds) {
                     probeTpl.owner = owner;
                     let seeds = [];
                     for(let city of gameData.cities) {
@@ -10908,13 +11151,14 @@
             wodMarkTerrainFullDirty();
         }
 
-        function softenMountainHexBetweenOwners(playerCount) {
-            if(playerCount < 2) return;
+        function softenMountainHexBetweenOwners(ownerIds) {
+            if(!ownerIds || ownerIds.length < 2) return;
+            let valid = new Set(ownerIds);
             let maxCarves = 16;
             let n = 0;
             for(let hex of gameData.hexList) {
                 if(n >= maxCarves) break;
-                if(hex.owner < 1 || hex.owner > playerCount) continue;
+                if(hex.owner < 1 || !valid.has(hex.owner)) continue;
                 for(let dir of cardinalHexDirections) {
                     if(n >= maxCarves) break;
                     let oth = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
@@ -10927,14 +11171,16 @@
             }
         }
 
-        function ensureOwnersReachableByLand(playerCount) {
-            if(playerCount < 2) return;
+        function ensureOwnersReachableByLand(ownerIds) {
+            if(!ownerIds || ownerIds.length < 2) return;
             let fake = {type: 'light', owner: 1};
             function passable(h) {
                 return h && !isWaterHex(h) && canUnitEnterHex(fake, h);
             }
-            for(let o1 = 1; o1 <= playerCount; o1++) {
-                for(let o2 = o1 + 1; o2 <= playerCount; o2++) {
+            for(let i = 0; i < ownerIds.length; i++) {
+                let o1 = ownerIds[i];
+                for(let j = i + 1; j < ownerIds.length; j++) {
+                    let o2 = ownerIds[j];
                     let starts = [];
                     let goalKeys = new Set();
                     for(let h of gameData.hexList) {

@@ -128,6 +128,12 @@
           if (msg.isHost != null) api.isHost = !!msg.isHost;
           emit('SlotSync', { slot: api.slot, isHost: api.isHost });
           break;
+        case 'kicked':
+          emit('Kicked', { msg: msg.msg || 'Removed from lobby' });
+          try {
+            if (ws && ws.readyState === 1) ws.close();
+          } catch (_) {}
+          break;
         case 'match_start':
           emit('MatchStart', { payload: msg.payload, fromSlot: msg.fromSlot });
           break;
@@ -258,6 +264,9 @@
     },
     sendLobbyColor(slot, color) {
       send({ t: 'lobby_color', slot: slot | 0, color: String(color || '').trim() });
+    },
+    kickPlayer(slot) {
+      send({ t: 'kick_player', slot: slot | 0 });
     },
     leaveLobby() {
       if (ws && ws.readyState === 1) send({ t: 'leave' });
