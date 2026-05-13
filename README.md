@@ -20,27 +20,40 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
 ## Production on Render
 
-Use **two** Render services: one for the **static site** (this repo root: `index.html`, `multiplayer-client.js`, assets) and one **Node Web** service for `server/` (the relay).
+You need **two** services. They get **two different URLs**:
 
-1. **Web service (relay)**  
-   - Root directory: `server`  
-   - Build: `npm install`  
-   - Start: `npm start`  
-   - Render sets `PORT`; the server already uses `process.env.PORT`.  
-   - Note: on the free tier, idle Web services sleep; multiplayer rooms disconnect when the instance sleeps.
+| Service | Example URL | Used for |
+|--------|-------------|----------|
+| **Static Site** | `https://simple-wars.onrender.com` | Opening the game in the browser |
+| **Web Service (Node)** | `https://simple-wars-mp.onrender.com` | WebSocket relay — use **`wss://simple-wars-mp.onrender.com`** in the game |
 
-2. **Static site**  
-   - Publish the repository root (or a subfolder that contains `index.html` at the site root).  
-   - Point the game at the relay using **WSS**. Either:
-     - Add **before** loading scripts in `index.html`:
+Do **not** set `WOD_MP_WS_URL` to your static `https://` link. Browsers need **`wss://`** to the **Node** service (same host as the Web Service, scheme `wss`).
 
-       ```html
-       <script>window.WOD_MP_WS_URL = 'wss://your-relay-name.onrender.com';</script>
-       ```
+### 1. Web Service (multiplayer relay)
 
-     - Or set the WebSocket URL in the Multiplayer panel (must be `wss://` when the page is served over HTTPS).
+In the service settings:
 
-3. **Optional:** import `render.yaml` as a Blueprint to provision the **Node relay**; add the static site as a second manual service (publish directory = repo root).
+- **Root Directory:** `server` (recommended) — then **Build:** `npm install`, **Start:** `npm start`.
+
+**If you leave Root Directory blank** (repo root), Render will use the root `package.json`: it runs `npm install` (which triggers `postinstall` → installs `server/`) and `npm start` → `node server/index.js`.
+
+If you see `ENOENT ... package.json` under `/opt/render/project/src/`, you have **Root Directory** set to `src` or a wrong folder. Clear it, set it to `server`, or use repo root with the root `package.json` above.
+
+### 2. Static Site (game)
+
+Typical settings:
+
+- **Root Directory:** leave **empty** (repository root, where `index.html` lives).
+- **Build Command:** leave **empty** (unless you add a front-end build later).
+- **Publish directory:** `.` — meaning “publish from the root of the repo” (the folder that contains `index.html`). On some Render UIs this field is labeled **Publish Directory** or “Directory to deploy”; use the repo root so `index.html` is at the site root.
+
+### 3. Point the game at the relay
+
+Set **`WOD_MP_WS_URL`** to **`wss://<your-node-service-name>.onrender.com`** (no path). You can put this in `index.html` before `multiplayer-client.js` or enter it in the Multiplayer panel.
+
+### Optional Blueprint
+
+`render.yaml` only defines the Node Web Service. Add the Static Site manually in the dashboard.
 
 ## GitHub
 
