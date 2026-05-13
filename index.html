@@ -232,6 +232,45 @@
         .cs-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
         .cs-dot.you { background: #2ecc71; }
         .cs-dot.ai { background: #3498db; }
+        .campaign-summary-panel.campaign-summary--mp-wide {
+            max-width: 920px;
+        }
+        .cs-mp-table-wrap {
+            overflow-x: auto;
+            margin-top: 6px;
+            -webkit-overflow-scrolling: touch;
+        }
+        .cs-mp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+            color: #ecf0f1;
+        }
+        .cs-mp-table th, .cs-mp-table td {
+            padding: 7px 8px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            vertical-align: middle;
+        }
+        .cs-mp-table th {
+            font-size: 0.65rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: rgba(241, 196, 15, 0.88);
+            white-space: nowrap;
+        }
+        .cs-mp-table tr:last-child td { border-bottom: none; }
+        .cs-mp-fname { display: flex; align-items: center; gap: 8px; min-width: 120px; }
+        .cs-mp-swatch {
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            flex-shrink: 0;
+            border: 1px solid rgba(0, 0, 0, 0.35);
+        }
+        .cs-mp-res-won { color: #2ecc71; font-weight: 800; }
+        .cs-mp-res-lost { color: #e74c3c; font-weight: 800; }
         .campaign-summary-actions { text-align: center; }
 
         /* Main Menu */
@@ -873,19 +912,27 @@
 
         .info-stats {
             display: flex;
-            justify-content: space-between;
-            gap: 10px;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 8px;
             font-size: 14px;
             font-weight: bold;
             font-variant-numeric: tabular-nums;
             font-feature-settings: "tnum" 1;
         }
 
-        .info-stats span {
-            flex: 1 1 0;
+        .info-stats .info-stat-line {
+            flex: none;
+            width: 100%;
             min-width: 0;
-            text-align: center;
-            white-space: nowrap;
+            text-align: left;
+            white-space: normal;
+            line-height: 1.35;
+        }
+        .info-stat-extra {
+            font-size: 13px;
+            font-weight: 700;
+            margin-top: 2px;
         }
 
         .info-card-edge-toggle {
@@ -991,6 +1038,7 @@
                     padding 0.26s cubic-bezier(0.32, 0.72, 0, 1),
                     min-height 0.26s cubic-bezier(0.32, 0.72, 0, 1);
                 overflow: hidden;
+                max-height: min(46vh, 360px);
             }
             #inGameUI .info-card.visible .info-card-edge-toggle {
                 display: inline-flex;
@@ -3466,7 +3514,7 @@
                 max-width: min(212px, calc(100vw - 16px));
                 margin: 0 auto 0 0;
                 padding: 9px 10px 10px;
-                max-height: min(32vh, 280px);
+                max-height: min(46vh, 360px);
                 font-size: 11px;
                 backdrop-filter: none;
                 background: rgba(12, 20, 30, 0.96);
@@ -4578,10 +4626,11 @@
                     </div>
                 </div>
                 <div class="info-stats">
-                    <span id="infoHP">HP: 100/100</span>
-                    <span id="infoMorale"></span>
-                    <span id="infoAction">Idle</span>
+                    <span id="infoHP" class="info-stat-line"></span>
+                    <span id="infoMorale" class="info-stat-line"></span>
+                    <span id="infoAction" class="info-stat-line"></span>
                 </div>
+                <div id="infoStatTanks" class="info-stat-line info-stat-extra" style="display:none" aria-hidden="true"></div>
                 <div id="infoEffects" class="effect-list"></div>
                 <div class="info-mobile-orders" id="infoMobileOrders" aria-label="Touch map orders">
                     <span class="info-mobile-orders-label">Touch — map orders</span>
@@ -5395,6 +5444,88 @@
             }
             return Math.min((gameData.aiCount || 1) + 1, factionColors.length - 1);
         }
+
+        let _wodSavedMathRandom = null;
+        function wodMulberry32(a) {
+            return function() {
+                let t = (a += 0x6d2b79f5);
+                t = Math.imul(t ^ (t >>> 15), t | 1);
+                t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function wodPushSeededRandom(seed) {
+            if(_wodSavedMathRandom) wodPopRandom();
+            _wodSavedMathRandom = Math.random;
+            let s = (seed >>> 0) || 1;
+            let gen = wodMulberry32(s);
+            Math.random = function() { return gen(); };
+        }
+        function wodPopRandom() {
+            if(_wodSavedMathRandom) Math.random = _wodSavedMathRandom;
+            _wodSavedMathRandom = null;
+        }
+        function wodMpLobbyPreviewSeed(meta) {
+            if(!meta || typeof meta !== 'object') return 0x9e3779b9;
+            let v = meta.lobbyMapSeed;
+            let s = (v != null && v !== '') ? (parseInt(v, 10) >>> 0) : 0;
+            if(!s) s = (((parseInt(meta.mapSize, 10) || 60) * 1315423911) ^ (String(meta.mapShape || '').length * 2246822519)) >>> 0;
+            return s || 0x6a09e667;
+        }
+        function wodBalanceCityCountsAmongOwners(ownerIds) {
+            if(!ownerIds || ownerIds.length < 2 || !gameData.cities || !gameData.cities.length) return;
+            function countFor(o) {
+                let n = 0;
+                for(let c of gameData.cities) if(c.owner === o) n++;
+                return n;
+            }
+            for(let pass = 0; pass < 160; pass++) {
+                let counts = ownerIds.map(o => ({ o, n: countFor(o) }));
+                counts.sort((a, b) => a.n - b.n);
+                let poor = counts[0].o;
+                let rich = counts[counts.length - 1].o;
+                if(counts[counts.length - 1].n - counts[0].n <= 1) return;
+                let donor = null;
+                for(let c of gameData.cities) {
+                    if(c.owner !== rich) continue;
+                    let ch = gameData.hexes[`${c.q},${c.r}`];
+                    if(!ch) continue;
+                    for(let nh of getNeighborHexes(ch)) {
+                        if(nh && isClaimableLand(nh) && nh.owner === poor) {
+                            donor = c;
+                            break;
+                        }
+                    }
+                    if(donor) break;
+                }
+                if(!donor) {
+                    for(let c of gameData.cities) {
+                        if(c.owner === rich) { donor = c; break; }
+                    }
+                }
+                if(!donor || donor.owner === poor) return;
+                donor.owner = poor;
+                let ch = gameData.hexes[`${donor.q},${donor.r}`];
+                if(ch) {
+                    setHexOwner(ch, poor);
+                    for(let pt of getHexesInRadius(donor.q, donor.r, 2)) {
+                        let hx = gameData.hexes[`${pt.q},${pt.r}`];
+                        if(hx && isClaimableLand(hx)) setHexOwner(hx, poor);
+                    }
+                }
+            }
+        }
+        function wodMpAllFactionSlotsForScoreboard() {
+            let set = new Set();
+            let act = (gameData.mp && gameData.mp.enabled) ? wodGetActiveFactionSlotsForMap() : null;
+            if(act) for(let s of act) set.add(s);
+            for(let c of gameData.cities) if(c.owner > 0) set.add(c.owner);
+            for(let u of gameData.entities) {
+                if(u.owner > 0 && u.hp > 0 && u.type !== 'convoy') set.add(u.owner);
+            }
+            return [...set].sort((a, b) => a - b);
+        }
+
         function wodHudMoney() {
             let o = wodLocalPlayerOwner();
             if(!gameData.mp || !gameData.mp.enabled) return gameData.money || 0;
@@ -5531,6 +5662,7 @@
         function wodMpClientApplyMatchEnd(me) {
             if(!me || !me.outcomes || gameData._campaignEnded) return;
             if(!gameData.mp || !gameData.mp.enabled) return;
+            gameData._mpLastMatchEnd = me;
             let slot = gameData.mp.localSlot;
             if(slot == null) return;
             let oc = me.outcomes[String(slot)];
@@ -5550,9 +5682,36 @@
         }
         function wodMpHostBroadcastFullEnd(winnerSlot, message) {
             if(!gameData.mp || !gameData.mp.humanSlots) return;
+            let act = wodGetActiveFactionSlotsForMap();
+            let slots = (act && act.length) ? act.slice() : gameData.mp.humanSlots.slice();
+            let seen = new Set();
             let outcomes = {};
-            for(let s of gameData.mp.humanSlots) outcomes[String(s)] = (s === winnerSlot) ? 'won' : 'lost';
+            for(let s of slots) {
+                if(seen.has(s)) continue;
+                seen.add(s);
+                outcomes[String(s)] = (s === winnerSlot) ? 'won' : 'lost';
+            }
+            for(let s of gameData.mp.humanSlots) {
+                if(seen.has(s)) continue;
+                seen.add(s);
+                outcomes[String(s)] = (s === winnerSlot) ? 'won' : 'lost';
+            }
             wodMpHostBroadcastMatchEnd({ outcomes, message, countAsBattleWon: false });
+        }
+        function wodMpMergeOutcomesAllActiveSlots(baseOutcomes) {
+            let merged = Object.assign({}, baseOutcomes || {});
+            let act = wodGetActiveFactionSlotsForMap();
+            let hs = (gameData.mp && gameData.mp.humanSlots) ? gameData.mp.humanSlots : [];
+            function ensure(list) {
+                if(!list) return;
+                for(let s of list) {
+                    let k = String(s);
+                    if(merged[k] == null || merged[k] === '') merged[k] = 'ongoing';
+                }
+            }
+            ensure(act);
+            ensure(hs);
+            return merged;
         }
         /** Host-only: MP win/elimination (FFA humans + AI). Clients apply results via snapshots / wodMpClientApplyMatchEnd. */
         function wodMpCheckEndConditionsHost(dt) {
@@ -5597,7 +5756,7 @@
                 for(let s of newCityElim) wodMpMarkSlotEliminated(s);
                 let outcomes = {};
                 for(let s of hs) outcomes[String(s)] = wodMpIsSlotEliminated(s) ? 'lost' : 'ongoing';
-                wodMpHostBroadcastMatchEnd({ outcomes, message: 'Defeat — all cities lost.', countAsBattleWon: false });
+                wodMpHostBroadcastMatchEnd({ outcomes: wodMpMergeOutcomesAllActiveSlots(outcomes), message: 'Defeat — all cities lost.', countAsBattleWon: false });
             }
 
             if(mode === 'annihilation') {
@@ -5611,7 +5770,7 @@
                     for(let s of newAnnih) wodMpMarkSlotEliminated(s);
                     let outcomes = {};
                     for(let s of hs) outcomes[String(s)] = wodMpIsSlotEliminated(s) ? 'lost' : 'ongoing';
-                    wodMpHostBroadcastMatchEnd({ outcomes, message: 'Defeat — annihilation: all your combat forces were destroyed.', countAsBattleWon: false });
+                    wodMpHostBroadcastMatchEnd({ outcomes: wodMpMergeOutcomesAllActiveSlots(outcomes), message: 'Defeat — annihilation: all your combat forces were destroyed.', countAsBattleWon: false });
                 }
             }
         }
@@ -5789,6 +5948,10 @@
                     if(i >= 1 && i < factionColors.length) factionColors[i] = window.wodMpRoomMeta.playerColors[k];
                 }
             }
+            let setupMs = document.getElementById('setupMapSize');
+            if(setupMs && window.wodMpRoomMeta.mapSize != null) setupMs.value = String(window.wodMpRoomMeta.mapSize);
+            let setupSh = document.getElementById('setupMapShape');
+            if(setupSh && window.wodMpRoomMeta.mapShape) setupSh.value = window.wodMpRoomMeta.mapShape;
             let ms = document.getElementById('mpCfgMapSize');
             if(ms && window.wodMpRoomMeta.mapSize != null) ms.value = String(window.wodMpRoomMeta.mapSize);
             let sh = document.getElementById('mpCfgMapShape');
@@ -5842,7 +6005,6 @@
             let meta = window.wodMpRoomMeta;
             if(!meta || gameState === 'PLAYING') return;
             let shapeEl = document.getElementById('setupMapShape');
-            let prevShape = shapeEl ? shapeEl.value : null;
             let snap = wodMpSnapshotLobbyGenBackup();
             try {
                 let r = parseInt(meta.mapSize, 10) || 60;
@@ -5867,13 +6029,21 @@
                     eliminatedSlots: []
                 };
                 gameData.aiCount = st.filter(t => t === 'bot').length;
-                generateMap();
+                let previewSeed = wodMpLobbyPreviewSeed(meta);
+                wodPushSeededRandom(previewSeed);
+                try {
+                    generateMap();
+                } finally {
+                    wodPopRandom();
+                }
                 previewLoadedMap('mpLobbyMapPreview');
             } catch(err) {
                 console.warn('Lobby preview', err);
             } finally {
                 wodMpRestoreLobbyGenBackup(snap);
-                if(shapeEl && prevShape != null) shapeEl.value = prevShape;
+                let msRestore = document.getElementById('setupMapSize');
+                if(msRestore && meta.mapSize != null) msRestore.value = String(meta.mapSize);
+                if(shapeEl && meta.mapShape) shapeEl.value = meta.mapShape;
             }
         }
         function wodMpApplyMetaToSetupFields(meta) {
@@ -6099,6 +6269,9 @@
             let st = (window.wodMpRoomMeta.seatTypes || []).slice(0, maxHumans);
             while(st.length < maxHumans) st.push('human');
             window.wodMpRoomMeta.seatTypes = st;
+            if(window.wodMpRoomMeta.lobbyMapSeed == null || window.wodMpRoomMeta.lobbyMapSeed === '')
+                window.wodMpRoomMeta.lobbyMapSeed = ((Math.random() * 0xfffffffe) | 0) >>> 0;
+            if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x5bd1e995;
             let botCount = 0;
             for(let i = 0; i < maxHumans; i++) {
                 if(st[i] === 'bot') botCount++;
@@ -6108,6 +6281,7 @@
                 mapShape,
                 aiCount: botCount,
                 seatTypes: st,
+                lobbyMapSeed: window.wodMpRoomMeta.lobbyMapSeed >>> 0,
                 victoryMode: vic && vic.value === 'annihilation' ? 'annihilation' : 'domination',
                 money: moneyEl ? (parseInt(moneyEl.value, 10) || 1000) : 1000,
                 maxHumans,
@@ -6309,6 +6483,9 @@
             if(mpCfgMapApply) mpCfgMapApply.onclick = () => {
                 wodMpCopyFieldToField('mpCfgMapSize', 'setupMapSize');
                 wodMpCopyFieldToField('mpCfgMapShape', 'setupMapShape');
+                if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
+                window.wodMpRoomMeta.lobbyMapSeed = (Math.imul(Date.now() >>> 0, 2246822519) ^ (window.wodMpRoomMeta.lobbyMapSeed || 0) ^ 0x9e3779b9) >>> 0;
+                if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x6a09e667;
                 previewMap();
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyMeta)
                     WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
@@ -7823,8 +8000,10 @@
             let subEl = document.getElementById('campaignSummarySub');
             let statsEl = document.getElementById('campaignSummaryStats');
             if(!overlay || !panel || !titleEl || !subEl || !statsEl) return;
+            let isMp = !!(gameData.mp && gameData.mp.enabled);
             panel.classList.toggle('campaign-summary--victory', outcomeKind === 'victory');
             panel.classList.toggle('campaign-summary--defeat', outcomeKind === 'defeat');
+            panel.classList.toggle('campaign-summary--mp-wide', isMp);
             titleEl.textContent = outcomeKind === 'victory' ? 'Victory' : 'Defeat';
             subEl.textContent = reasonLine || headline || '';
 
@@ -7834,7 +8013,6 @@
             let victoryRule = WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || '';
 
             let lo = wodLocalPlayerOwner();
-            let isMp = !!(gameData.mp && gameData.mp.enabled);
             let plyCities, enCities, enArmies, plyArmies, plyIncomeAcc, aiIncomeAcc;
             let plyMpLoss, aiMpLoss, plyTkLoss, aiTkLoss, plyShLoss, aiShLoss;
             let endCashVal, endMpVal;
@@ -7899,6 +8077,46 @@
             let townsCapSummary = isMp
                 ? ((gameData.sessionCitiesCapturedByOwner && gameData.sessionCitiesCapturedByOwner[lo]) || 0)
                 : (gameData.sessionCitiesCaptured || 0);
+
+            let mpFactionSection = '';
+            if(isMp) {
+                let endSpec = gameData._mpLastMatchEnd || {};
+                let ocEnd = endSpec.outcomes || {};
+                let facs = wodMpAllFactionSlotsForScoreboard();
+                let sessionAccMp = gameData._sessionIncomeAcc || { byOwner: {} };
+                let byOMp = sessionAccMp.byOwner || {};
+                let rowHtml = '';
+                for(let o of facs) {
+                    let rk = String(o);
+                    let resRaw = ocEnd[rk];
+                    let resCell = resRaw === 'won' ? '<span class="cs-mp-res-won">Victory</span>'
+                        : (resRaw === 'lost' ? '<span class="cs-mp-res-lost">Defeat</span>'
+                        : (resRaw === 'ongoing' ? '—' : (resRaw ? String(resRaw) : '—')));
+                    let label = o === lo ? 'You'
+                        : (wodMpIsHumanOwner(o) ? ('Player ' + o) : ('AI seat ' + o));
+                    let col = factionColors[o] || '#999999';
+                    let inc = Math.max(0, Math.floor(byOMp[o] || 0));
+                    rowHtml += '<tr>' +
+                        '<td><div class="cs-mp-fname"><span class="cs-mp-swatch" style="background:' + col + '"></span>' + label + '</div></td>' +
+                        '<td>' + resCell + '</td>' +
+                        '<td>' + countCitiesForOwner(o) + '</td>' +
+                        '<td>' + countFriendlyCombatExcludingConvoys(o) + '</td>' +
+                        '<td>$' + inc.toLocaleString('en-US') + '</td>' +
+                        '<td>' + formatFullCount(getOwnerCasualties(o)) + '</td>' +
+                        '<td>' + formatTanks(getOwnerTankCasualties(o)) + '</td>' +
+                        '<td>' + formatTanks(getOwnerShipCasualties(o)) + '</td>' +
+                        '<td>$' + Math.floor(wodPlayerTreasury(o)).toLocaleString('en-US') + '</td>' +
+                        '</tr>';
+                }
+                mpFactionSection =
+                    '<section class="cs-card">' +
+                    '<p class="cs-card-title">Faction results (multiplayer)</p>' +
+                    '<p style="margin:0 0 10px;color:#95a5a6;font-size:0.88rem;line-height:1.45;">Per-faction snapshot at match end: cities, armies on the field, gross city revenue this session, casualties, and treasuries.</p>' +
+                    '<div class="cs-mp-table-wrap"><table class="cs-mp-table">' +
+                    '<thead><tr><th>Faction</th><th>Result</th><th>Cities</th><th>Armies</th><th>Income</th><th>MP losses</th><th>Tanks lost</th><th>Ships lost</th><th>Cash</th></tr></thead>' +
+                    '<tbody>' + rowHtml + '</tbody></table></div>' +
+                    '</section>';
+            }
 
             statsEl.innerHTML =
                 '<section class="cs-card">' +
@@ -7972,7 +8190,8 @@
                             '<span><span class="cs-dot ai" role="presentation"></span> ' + rivalLossLegend + '</span>' +
                         '</div>' +
                     '</div>' +
-                '</section>';
+                '</section>' +
+                mpFactionSection;
 
             overlay.classList.remove('hidden');
         }
@@ -8817,6 +9036,11 @@
             if(!canUseHexForMovement(unit, startHex) || !canUseHexForMovement(unit, targetHex)) return [];
             if(startHex === targetHex) return [startHex];
 
+            if((unit.type === 'marine' || unit.type === 'ship') && isWaterHex(startHex) && isWaterHex(targetHex)) {
+                let g = buildGreedyWaterHexChain(unit, startHex, targetHex, unit.type === 'ship' ? 170 : 120);
+                if(g.length > 1) return smoothGridPath(g);
+            }
+
             /** Land-only vs land+water for army: use water only if total path cost is ≤ half the land-only cost (~50%+ faster). */
             const WOD_WATER_SHORTCUT_VS_LAND = 2;
             let landArmyDual = (unit.type === 'light' || unit.type === 'heavy')
@@ -8959,6 +9183,8 @@
                 if(unit.type === 'convoy') maxVisits = Math.floor(maxVisits * 1.35);
                 let heavy = (gameData.hexList.length > 9000 ? 5800 / gameData.hexList.length : 1) * (gameData.entities.length > 380 ? 320 / gameData.entities.length : 1);
                 maxVisits = Math.max(900, Math.floor(maxVisits * heavy));
+                if((unit.type === 'light' || unit.type === 'heavy') && !forbidWater) maxVisits = Math.min(maxVisits, 2400);
+                if(unit.type === 'marine' && !forbidWater) maxVisits = Math.min(maxVisits, 3800);
 
                 while(open.length > 0 && maxVisits-- > 0) {
                     let current = heapPop(open, fScore);
@@ -9000,8 +9226,9 @@
             return runPathAst(false).path;
         }
 
-        function findGreedyWaterStep(unit, targetHex) {
-            let cur = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+        function findGreedyWaterStep(unit, targetHex, opt) {
+            opt = opt || {};
+            let cur = opt.fromHex || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             if(!cur || !isWaterHex(cur) || !targetHex) return null;
             let best = null;
             let bestScore = Infinity;
@@ -9010,13 +9237,30 @@
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
                 let d = dx * dx + dy * dy;
-                let score = d + Math.random() * 80;
+                let jitter = opt.deterministic ? ((((nHex.q * 73856093) ^ (nHex.r * 19349663)) & 2047) * 0.02) : Math.random() * 80;
+                let score = d + jitter;
                 if(score < bestScore) {
                     bestScore = score;
                     best = nHex;
                 }
             }
             return best;
+        }
+
+        function buildGreedyWaterHexChain(unit, startHex, targetHex, maxSteps) {
+            if(!startHex || !targetHex || !isWaterHex(startHex)) return [];
+            let chain = [startHex];
+            let cur = startHex;
+            let tk = getHexKey(targetHex);
+            for(let s = 0; s < maxSteps; s++) {
+                if(getHexKey(cur) === tk) break;
+                let next = findGreedyWaterStep(unit, targetHex, { fromHex: cur, deterministic: true });
+                if(!next || getHexKey(next) === getHexKey(cur)) break;
+                if(chain.length > 1 && getHexKey(next) === getHexKey(chain[chain.length - 2])) break;
+                chain.push(next);
+                cur = next;
+            }
+            return chain;
         }
 
         function findGreedyLandStep(unit, targetHex) {
@@ -9118,6 +9362,14 @@
 
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let path = findPathAroundTerrain(unit, reachNext.hex, startHex);
+            if(path.length <= 1 && unit.type === 'marine' && reachNext.hex && startHex && isWaterHex(startHex) && isWaterHex(reachNext.hex)) {
+                let hop = findGreedyWaterStep(unit, reachNext.hex, { fromHex: startHex });
+                if(hop) {
+                    unit.path = null;
+                    unit.target = {x: hop.x, y: hop.y, pathPrepared: true, marineGreedy: true};
+                    return true;
+                }
+            }
             if(path.length <= 1 && unit.type === 'ship' && reachNext.hex) {
                 let hop = findGreedyWaterStep(unit, reachNext.hex);
                 if(hop) {
@@ -9934,6 +10186,12 @@
         }
 
         function replanUnitOrder(unit) {
+            let shThrottle = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+            if(shThrottle && isWaterHex(shThrottle) && (unit.type === 'marine' || unit.type === 'ship')) {
+                let nowPf = performance.now();
+                if(unit._wodReplanPfUntil && nowPf < unit._wodReplanPfUntil) return false;
+                unit._wodReplanPfUntil = nowPf + 120;
+            }
             if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
                 return assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true});
             }
@@ -10635,6 +10893,23 @@
             softenMountainHexBetweenOwners(ownersList);
             ensureOwnersReachableByLand(ownersList);
             ensureOwnedTilesReachFactionCities(ownersList);
+
+            for(let city of gameData.cities) {
+                let ch0 = gameData.hexes[`${city.q},${city.r}`];
+                if(ch0 && isClaimableLand(ch0)) city.owner = ch0.owner;
+            }
+            wodBalanceCityCountsAmongOwners(ownersList);
+            for(let city of gameData.cities) {
+                let ch = gameData.hexes[`${city.q},${city.r}`];
+                if(ch && isClaimableLand(ch)) {
+                    setHexOwner(ch, city.owner);
+                    let cityArea = getHexesInRadius(city.q, city.r, 2);
+                    for(let pt of cityArea) {
+                        let hx = gameData.hexes[`${pt.q},${pt.r}`];
+                        if(isClaimableLand(hx)) setHexOwner(hx, city.owner);
+                    }
+                }
+            }
 
             gameData.tradeTimer = 0;
 
@@ -14494,6 +14769,7 @@
                 type: document.getElementById('infoType'),
                 hp: document.getElementById('infoHP'),
                 action: document.getElementById('infoAction'),
+                tanks: document.getElementById('infoStatTanks'),
                 rename: document.getElementById('infoRename')
             };
         }
@@ -14502,6 +14778,7 @@
             let els = getInfoCardDom();
             if(!els.card) return;
             let infoMorale = els.morale;
+            let infoTanks = els.tanks;
             let lo = wodLocalPlayerOwner();
             if(gameData.selection.length === 1) {
                 let sel = gameData.selection[0];
@@ -14517,9 +14794,10 @@
                     else if(sel.hasFactory) type = "Industrial City";
                     else if(sel.hasHarbor) type = "Port City";
                     els.type.innerText = type;
-                    els.hp.innerText = `Income: +${getCityIncome(sel)}/s MP: +${getCityManpowerIncome(sel)}/s`;
+                    els.hp.innerText = `Income: +${getCityIncome(sel)}/s`;
+                    if(infoMorale) infoMorale.innerText = `Manpower: +${getCityManpowerIncome(sel)}/s`;
                     els.action.innerText = sel.owner === lo ? "Player Controlled" : (sel.owner > 0 ? "Enemy Controlled" : "Neutral");
-                    if(infoMorale) infoMorale.innerText = "";
+                    if(infoTanks) { infoTanks.innerText = ''; infoTanks.style.display = 'none'; infoTanks.setAttribute('aria-hidden', 'true'); }
                 } else {
                     let emblem = sel.type === 'heavy' ? '■' : (sel.type === 'ship' ? '▲'
                         : (sel.type === 'marine' ? '⊙'
@@ -14534,10 +14812,20 @@
                                 : (sel.type === 'marine' ? 'Marine regiment (amphibious)'
                                     : (sel.type === 'convoy' ? (sel.convoySeaRoute ? 'Sea trade convoy' : 'Land trade convoy') : sel.type + ' unit'))));
                     let maxMp = sel.maxManpower || 1000;
-                    let tankText = sel.type === 'heavy' ? ` Tanks: ${Math.round(sel.tanks || 0)}/${sel.maxTanks || 500}` : '';
                     els.hp.innerText = sel.type === 'convoy'
                         ? `Trade value: $${sel.tradeValue || 150}`
-                        : `MP: ${formatPeople(sel.manpower !== undefined ? sel.manpower : maxMp)} / ${formatPeople(maxMp)}${tankText}`;
+                        : `Manpower: ${formatPeople(sel.manpower !== undefined ? sel.manpower : maxMp)} / ${formatPeople(maxMp)}`;
+                    if(infoTanks) {
+                        if(sel.type === 'heavy') {
+                            infoTanks.innerText = `Tanks: ${Math.round(sel.tanks || 0)} / ${sel.maxTanks || 500}`;
+                            infoTanks.style.display = '';
+                            infoTanks.setAttribute('aria-hidden', 'false');
+                        } else {
+                            infoTanks.innerText = '';
+                            infoTanks.style.display = 'none';
+                            infoTanks.setAttribute('aria-hidden', 'true');
+                        }
+                    }
                     let fighting = sel.damage > 0 && !sel.moraleBroken && !sel.retreating && (sel.shake && sel.shake > 0);
                     els.action.innerText = sel.type === 'convoy'
                         ? (sel.owner === lo ? "Your trade convoy (cannot command)" : "Enemy trade convoy (view only)")
@@ -14577,10 +14865,12 @@
                 els.hp.innerText = "";
                 els.action.innerText = "";
                 if(infoMorale) infoMorale.innerText = "";
+                if(infoTanks) { infoTanks.innerText = ''; infoTanks.style.display = 'none'; infoTanks.setAttribute('aria-hidden', 'true'); }
                 if(els.rename) els.rename.style.display = 'none';
             } else {
                 els.card.classList.remove('visible');
                 if(infoMorale) infoMorale.innerText = "";
+                if(infoTanks) { infoTanks.innerText = ''; infoTanks.style.display = 'none'; infoTanks.setAttribute('aria-hidden', 'true'); }
                 if(els.rename) els.rename.style.display = 'none';
                 els.card.classList.remove('info-card--mobile-orders');
             }
@@ -14595,7 +14885,7 @@
                 sig = '1|' + (s.id || '') + '|' + (s.uid || '') + '|' + (s.name || '') + '|' + (s.type || '') + '|' + Math.floor((s.hp || 0) / 3)
                     + '|' + Math.floor((s.morale || 0) / 2) + '|' + Math.floor((s.manpower || 0) / 35) + '|' + ((s.shake || 0) > 0.04 ? 1 : 0)
                     + '|' + (s.convoySeaRoute ? 1 : 0) + '|' + ((s.encircledFlash || 0) > 0 ? 1 : 0)
-                    + '|' + ((s.healingFlash || 0) > 0 ? 1 : 0);
+                    + '|' + ((s.healingFlash || 0) > 0 ? 1 : 0) + '|' + (s.type === 'heavy' ? Math.floor((s.tanks || 0) / 3) : '');
             } else sig = 'n|' + sel.length;
             if(sig === _infoCardUiThrottle.s && now - _infoCardUiThrottle.t < (wodUsesVisualViewportLayout() ? 165 : 95)) return;
             _infoCardUiThrottle.s = sig;
@@ -15197,11 +15487,7 @@
             if(units.length === 0) return;
             let worldPos = getWorldPosFromClientXY(clientX, clientY);
             if(mobileOrderMode === 'waypoint') {
-                let onCity = gameData.cities.some(c => {
-                    let dx = worldPos.x - c.x, dy = worldPos.y - c.y;
-                    return dx * dx + dy * dy < 400;
-                });
-                if(!onCity && !pickAnyUnitAt(worldPos)) {
+                if(!pickAnyUnitAt(worldPos)) {
                     let allIdle = units.every(u => !u.target && (!u.path || u.path.length === 0));
                     if(allIdle) gameData.playerShiftWaypoints = [];
                     if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
@@ -15212,11 +15498,7 @@
                 return;
             }
             if(mobileOrderMode === 'move') {
-                let onCity = gameData.cities.some(c => {
-                    let dx = worldPos.x - c.x, dy = worldPos.y - c.y;
-                    return dx * dx + dy * dy < 400;
-                });
-                if(!onCity && !pickAnyUnitAt(worldPos))
+                if(!pickAnyUnitAt(worldPos))
                     issueMoveOrder(worldPos);
             }
         }
@@ -15270,6 +15552,13 @@
         function getMovableSelectedUnits() {
             let o = wodLocalPlayerOwner();
             return gameData.selection.filter(s => s.hp !== undefined && !s.id && s.type !== 'convoy' && s.owner === o);
+        }
+
+        function wodMovableSelectionHasActiveMarch() {
+            let u = getMovableSelectedUnits();
+            if(!u.length) return false;
+            return u.some(x => x.target || (x.path && x.path.length) || x.orderTarget
+                || (x.fullMarchWaypoints && x.fullMarchWaypoints.length));
         }
 
         function assignUnitMoveTarget(unit, x, y) {
@@ -15556,6 +15845,10 @@
                         if(city) tryApplyBuildPlacementAtCity(city);
                         return;
                     }
+                    if(wodMovableSelectionHasActiveMarch() && getMovableSelectedUnits().length > 0) {
+                        issueMoveOrder(worldPos);
+                        return;
+                    }
                     for(let city of gameData.cities) {
                         let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
                         if(dx*dx + dy*dy < 400) {
@@ -15620,12 +15913,18 @@
 
         let gameTouchTrackId = null;
         let wodMobileOrderGesture = null;
+        let wodMobileNavTouch = null;
+        function wodCancelMobileNavTouch() {
+            if(wodMobileNavTouch && wodMobileNavTouch.timer) clearTimeout(wodMobileNavTouch.timer);
+            wodMobileNavTouch = null;
+        }
 
         canvas.addEventListener('touchstart', (e) => {
             if(gameState !== 'PLAYING') return;
             if(e.touches.length === 2) {
                 e.preventDefault();
                 wodNoteCanvasTouchInteraction();
+                wodCancelMobileNavTouch();
                 wodMobileOrderGesture = null;
                 let t0 = e.touches[0], t1 = e.touches[1];
                 let midX = (t0.clientX + t1.clientX) / 2, midY = (t0.clientY + t1.clientY) / 2;
@@ -15661,6 +15960,7 @@
             let cy = touch.clientY - wodInputRect.top;
 
             if(mobileOrderMode === 'formation' && getMovableSelectedUnits().length > 0) {
+                wodCancelMobileNavTouch();
                 formationDrag.active = true;
                 formationDrag.startWorld = worldPos;
                 formationDrag.endWorld = worldPos;
@@ -15679,6 +15979,7 @@
                 }
             }
             if(strokeHit && strokeHit.selected && getMovableSelectedUnits().length > 0) {
+                wodCancelMobileNavTouch();
                 pathOrderStroke.active = true;
                 pathOrderStroke.pts = [{x: worldPos.x, y: worldPos.y}];
                 pathOrderStroke.moved = false;
@@ -15686,26 +15987,26 @@
                 return;
             }
 
-            let onCityTap = gameData.cities.some(c => {
-                let dx = worldPos.x - c.x, dy = worldPos.y - c.y;
-                return dx * dx + dy * dy < 400;
-            });
-            if(wodUsesVisualViewportLayout() && (mobileOrderMode === 'move' || mobileOrderMode === 'waypoint') && getMovableSelectedUnits().length > 0 && !onCityTap && !pickAnyUnitAt(worldPos)) {
+            if(wodUsesVisualViewportLayout() && (mobileOrderMode === 'move' || mobileOrderMode === 'waypoint') && getMovableSelectedUnits().length > 0 && !pickAnyUnitAt(worldPos)) {
+                wodCancelMobileNavTouch();
                 wodMobileOrderGesture = { startClientX: touch.clientX, startClientY: touch.clientY };
                 return;
             }
 
-            isDragging = true;
-            dragStart = {x: cx, y: cy};
-            dragStartClient = { x: touch.clientX, y: touch.clientY };
-            UI.selectionBox.style.display = 'block';
-            UI.selectionBox.style.left = touch.clientX + 'px';
-            UI.selectionBox.style.top = touch.clientY + 'px';
-            UI.selectionBox.style.width = '0px';
-            UI.selectionBox.style.height = '0px';
-
-            gameData.selection.forEach(s => s.selected = false);
-            gameData.selection = [];
+            wodCancelMobileNavTouch();
+            wodMobileNavTouch = {
+                startClientX: touch.clientX,
+                startClientY: touch.clientY,
+                startCx: cx,
+                startCy: cy,
+                phase: 'pending',
+                armedSelect: false,
+                timer: null
+            };
+            wodMobileNavTouch.timer = setTimeout(() => {
+                if(!wodMobileNavTouch || wodMobileNavTouch.phase !== 'pending') return;
+                wodMobileNavTouch.armedSelect = true;
+            }, 400);
         }, {passive: false});
 
         canvas.addEventListener('touchmove', (e) => {
@@ -15736,42 +16037,108 @@
                 }
             } else if(formationDrag.active) {
                 formationDrag.endWorld = getWorldPosFromClientXY(touch.clientX, touch.clientY);
-            } else if(wodMobileOrderGesture || isDragging) {
-                if(wodMobileOrderGesture) {
-                    let g = wodMobileOrderGesture;
-                    let mdx = touch.clientX - g.startClientX;
-                    let mdy = touch.clientY - g.startClientY;
-                    if(Math.hypot(mdx, mdy) > 24) {
-                        wodRefreshInputRect();
-                        gameData.selection.forEach(s => { s.selected = false; });
-                        gameData.selection = [];
-                        wodMobileOrderGesture = null;
-                        isDragging = true;
-                        dragStart = { x: g.startClientX - wodInputRect.left, y: g.startClientY - wodInputRect.top };
-                        dragStartClient = { x: g.startClientX, y: g.startClientY };
-                        UI.selectionBox.style.display = 'block';
-                    }
+            } else if(isPanning && wodUsesVisualViewportLayout()) {
+                wodBumpCamInteract(220);
+                let dx = touch.clientX - panStart.x;
+                let dy = touch.clientY - panStart.y;
+                gameData.camera.x = cameraStart.x - dx;
+                gameData.camera.y = cameraStart.y - dy;
+            } else if(wodMobileOrderGesture) {
+                let g = wodMobileOrderGesture;
+                let mdx = touch.clientX - g.startClientX;
+                let mdy = touch.clientY - g.startClientY;
+                if(Math.hypot(mdx, mdy) > 24) {
+                    wodMobileOrderGesture = null;
+                    isPanning = true;
+                    panStart = { x: touch.clientX, y: touch.clientY };
+                    cameraStart = { x: gameData.camera.x, y: gameData.camera.y };
+                    wodBumpCamInteract(140);
                 }
-                if(isDragging) {
-                    const width = Math.abs(touch.clientX - dragStartClient.x);
-                    const height = Math.abs(touch.clientY - dragStartClient.y);
-                    const left = Math.min(touch.clientX, dragStartClient.x);
-                    const top = Math.min(touch.clientY, dragStartClient.y);
-                    UI.selectionBox.style.left = left + 'px';
-                    UI.selectionBox.style.top = top + 'px';
-                    UI.selectionBox.style.width = width + 'px';
-                    UI.selectionBox.style.height = height + 'px';
+            } else if(wodMobileNavTouch && wodUsesVisualViewportLayout()) {
+                let g = wodMobileNavTouch;
+                let mdx = touch.clientX - g.startClientX;
+                let mdy = touch.clientY - g.startClientY;
+                let dist = Math.hypot(mdx, mdy);
+                if(g.phase === 'pending' && !g.armedSelect && dist > 14) {
+                    if(g.timer) { clearTimeout(g.timer); g.timer = null; }
+                    wodCancelMobileNavTouch();
+                    isPanning = true;
+                    panStart = { x: touch.clientX, y: touch.clientY };
+                    cameraStart = { x: gameData.camera.x, y: gameData.camera.y };
+                    wodBumpCamInteract(140);
+                } else if(g.phase === 'pending' && g.armedSelect && dist > 8) {
+                    if(g.timer) { clearTimeout(g.timer); g.timer = null; }
+                    wodMobileNavTouch = null;
+                    gameData.selection.forEach(s => { s.selected = false; });
+                    gameData.selection = [];
+                    isDragging = true;
+                    dragStart = { x: g.startCx, y: g.startCy };
+                    dragStartClient = { x: g.startClientX, y: g.startClientY };
+                    UI.selectionBox.style.display = 'block';
+                    UI.selectionBox.style.left = Math.min(g.startClientX, touch.clientX) + 'px';
+                    UI.selectionBox.style.top = Math.min(g.startClientY, touch.clientY) + 'px';
+                    UI.selectionBox.style.width = Math.abs(touch.clientX - g.startClientX) + 'px';
+                    UI.selectionBox.style.height = Math.abs(touch.clientY - g.startClientY) + 'px';
                 }
+            } else if(isDragging) {
+                const width = Math.abs(touch.clientX - dragStartClient.x);
+                const height = Math.abs(touch.clientY - dragStartClient.y);
+                const left = Math.min(touch.clientX, dragStartClient.x);
+                const top = Math.min(touch.clientY, dragStartClient.y);
+                UI.selectionBox.style.left = left + 'px';
+                UI.selectionBox.style.top = top + 'px';
+                UI.selectionBox.style.width = width + 'px';
+                UI.selectionBox.style.height = height + 'px';
             }
         }, {passive: false});
 
         function finishGameTouchEnd(touch) {
             if(gameTouchTrackId !== null && touch.identifier !== gameTouchTrackId) return;
             gameTouchTrackId = null;
+            if(isPanning) {
+                isPanning = false;
+                wodCancelMobileNavTouch();
+                return;
+            }
             if(wodMobileOrderGesture) {
                 wodRefreshInputRect();
                 tryMobileMapOrderTap(touch.clientX, touch.clientY);
                 wodMobileOrderGesture = null;
+                return;
+            }
+            if(wodMobileNavTouch) {
+                let g = wodMobileNavTouch;
+                if(g.timer) { clearTimeout(g.timer); g.timer = null; }
+                wodMobileNavTouch = null;
+                wodRefreshInputRect();
+                let cx = touch.clientX - wodInputRect.left;
+                let cy = touch.clientY - wodInputRect.top;
+                if(Math.abs(cx - g.startCx) < 5 && Math.abs(cy - g.startCy) < 5) {
+                    let worldPos = getWorldPosFromClientXY(touch.clientX, touch.clientY);
+                    if(gameData.buildMode) {
+                        let city = pickPlayerCityAtWorld(worldPos);
+                        if(city) tryApplyBuildPlacementAtCity(city);
+                        return;
+                    }
+                    if(wodMovableSelectionHasActiveMarch() && getMovableSelectedUnits().length > 0) {
+                        issueMoveOrder(worldPos);
+                        return;
+                    }
+                    for(let city of gameData.cities) {
+                        let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
+                        if(dx * dx + dy * dy < 400) {
+                            city.selected = true; gameData.selection.push(city);
+                            return;
+                        }
+                    }
+                    let picked = pickInspectableUnitAt(worldPos);
+                    if(picked) {
+                        picked.selected = true;
+                        gameData.selection.push(picked);
+                        return;
+                    }
+                    tryMobileMapOrderTap(touch.clientX, touch.clientY);
+                }
                 return;
             }
             if(pathOrderStroke.active) {
@@ -15794,6 +16161,10 @@
                     if(gameData.buildMode) {
                         let city = pickPlayerCityAtWorld(worldPos);
                         if(city) tryApplyBuildPlacementAtCity(city);
+                        return;
+                    }
+                    if(wodMovableSelectionHasActiveMarch() && getMovableSelectedUnits().length > 0) {
+                        issueMoveOrder(worldPos);
                         return;
                     }
                     for(let city of gameData.cities) {
@@ -15886,6 +16257,8 @@
             touchCamGesture = null;
             gameTouchTrackId = null;
             wodMobileOrderGesture = null;
+            wodCancelMobileNavTouch();
+            isPanning = false;
             if(pathOrderStroke.active) {
                 pathOrderStroke.active = false;
                 pathOrderStroke.pts = [];
