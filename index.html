@@ -3962,32 +3962,50 @@
                     <button class="build-btn" onclick="document.getElementById('loadMapFile').click()">Load Map</button>
                 </div>
                 <canvas id="mapPreview"></canvas>
-                <button class="menu-btn" onclick="startGame('ai')">Start Game</button>
+                <button class="menu-btn" id="setupBtnStartAi" onclick="startGame('ai')">Start Game</button>
+                <button class="menu-btn" id="setupBtnMpReturn" type="button" style="display:none" onclick="wodMpFinishSetupFromHost()">Return to lobby</button>
                 <button class="menu-btn" onclick="hidePanels()">Back</button>
             </div>
         </div>
 
         <div id="multiplayerPanel" class="overlay hidden">
-            <div class="panel">
-                <h2>Multiplayer (beta)</h2>
-                <p style="font-size:13px;opacity:0.9;max-width:460px;line-height:1.45">Host runs the full simulation (smooth for everyone). Other players receive ~3 updates/sec and send move orders. Up to <strong>6</strong> humans per room — same cap as factions. Configure the WebSocket URL in the page (<code>WOD_MP_WS_URL</code>) for Render; see README.</p>
+            <div class="panel panel-wide" style="max-width:900px">
+                <h2>Multiplayer</h2>
+                <p style="font-size:13px;opacity:0.9;max-width:640px;line-height:1.45">Host runs the simulation; other players get snapshots and send orders. Up to <strong>6</strong> humans. Browse open lobbies or host your own — optional password. Use the same <strong>map &amp; rules</strong> screen as solo (below) after hosting.</p>
+                <p style="font-size:14px;margin:10px 0"><strong>Players online:</strong> <span id="mpOnlineCount">—</span></p>
                 <div class="setup-row">
                     <label>Server</label>
                     <input type="text" id="mpServerUrl" placeholder="wss://your-mp.onrender.com" style="flex:1;min-width:0">
                 </div>
-                <div class="setup-row">
-                    <button type="button" class="build-btn" id="mpBtnCreate">Create room</button>
-                    <button type="button" class="build-btn" id="mpBtnJoin">Join room</button>
+                <div class="setup-row" style="flex-wrap:wrap;gap:8px">
+                    <button type="button" class="build-btn" id="mpBtnConnect">Connect</button>
+                    <button type="button" class="build-btn" id="mpBtnRefresh" title="Refresh lobby list">Refresh games</button>
                     <button type="button" class="build-btn" id="mpBtnDisconnect" style="display:none">Disconnect</button>
                 </div>
-                <div class="setup-row">
-                    <label>Room code</label>
-                    <input type="text" id="mpRoomCode" maxlength="8" style="letter-spacing:0.12em;font-weight:800">
+                <p id="mpStatus" style="font-size:13px;min-height:1.5em;opacity:0.95">Not connected to server.</p>
+                <div id="mpBrowseHostWrap" style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;align-items:flex-start">
+                    <div style="flex:1;min-width:260px">
+                        <h3 style="margin:0 0 8px 0;font-size:1.05rem">Open games</h3>
+                        <div id="mpLobbyList" style="max-height:340px;overflow:auto;border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:8px;background:rgba(0,0,0,0.2)"></div>
+                    </div>
+                    <div style="flex:1;min-width:260px">
+                        <h3 style="margin:0 0 8px 0;font-size:1.05rem">Host a game</h3>
+                        <div class="setup-row"><label>Lobby name</label><input type="text" id="mpHostName" placeholder="My battle" style="flex:1" maxlength="40"></div>
+                        <div class="setup-row"><label>Password</label><input type="password" id="mpHostPassword" placeholder="Optional — open if empty" style="flex:1" maxlength="80" autocomplete="new-password"></div>
+                        <button type="button" class="menu-btn" id="mpBtnHostCreate" style="margin-top:10px">Create lobby</button>
+                        <div id="mpHostAfterCreate" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.12)">
+                            <p id="mpHostLobbyLabel" style="font-size:13px;font-weight:700;margin:0 0 8px 0"></p>
+                            <p id="mpHostPlayerCount" style="font-size:13px;opacity:0.9;margin:0 0 10px 0"></p>
+                            <button type="button" class="menu-btn" id="mpBtnHostSetup">Map &amp; rules (same as vs AI)</button>
+                            <button type="button" class="menu-btn" id="mpBtnLaunch" style="display:none;margin-top:8px">Launch match</button>
+                        </div>
+                    </div>
                 </div>
-                <p id="mpStatus" style="font-size:13px;min-height:1.5em">Not connected.</p>
-                <p style="font-size:12px;opacity:0.85">Use <strong>Play vs AI</strong> map settings, then host clicks <strong>Launch match</strong> (host only).</p>
-                <button type="button" class="menu-btn" id="mpBtnLaunch" style="display:none">Launch match (host)</button>
-                <button class="menu-btn" onclick="hidePanels()">Back</button>
+                <div id="mpGuestLobbyBar" style="display:none;margin-top:16px;padding:12px;border-radius:10px;background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.12)">
+                    <p id="mpGuestLobbyLabel" style="margin:0 0 8px 0;font-size:13px"></p>
+                    <button type="button" class="build-btn" id="mpBtnLeaveLobby">Leave lobby</button>
+                </div>
+                <button class="menu-btn" onclick="hidePanels()" style="margin-top:18px">Back</button>
             </div>
         </div>
 
@@ -4793,7 +4811,8 @@
             syncSetupVictoryDetail();
         }
 
-        function showPanel(panelId) {
+        function showPanel(panelId, opts) {
+            opts = opts || {};
             pauseMenuBackgroundBattle();
             UI.mainMenu.classList.add('hidden');
             document.getElementById(panelId + 'Panel').classList.remove('hidden');
@@ -4808,9 +4827,20 @@
                 syncSetupPlayerColorRow();
                 initSetupPanelBindings();
                 syncSetupVictoryDetail();
-                let shapeEl = document.getElementById('setupMapShape');
-                if(shapeEl) shapeEl.value = 'island';
-                gameData.loadedCustomMap = false;
+                let sb = document.getElementById('setupBtnStartAi');
+                let rb = document.getElementById('setupBtnMpReturn');
+                if(opts.fromMpHost) {
+                    if(rb) rb.style.display = '';
+                    if(sb) sb.style.display = 'none';
+                } else {
+                    if(rb) rb.style.display = 'none';
+                    if(sb) sb.style.display = '';
+                }
+                if(!opts.fromMpHost) {
+                    let shapeEl = document.getElementById('setupMapShape');
+                    if(shapeEl) shapeEl.value = 'island';
+                    gameData.loadedCustomMap = false;
+                }
                 let aiEl = document.getElementById('setupAI');
                 if(aiEl) gameData.aiCount = Math.max(1, Math.min(5, parseInt(aiEl.value, 10) || 1));
                 let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
@@ -5296,17 +5326,147 @@
             wodMpSnapSeq = 0;
             wodMpLobbyCount = 1;
         }
+
+        function wodMpEscapeHtml(s) {
+            if(s == null) return '';
+            return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        }
+        function wodMpBuildLobbyMetaFromSetup() {
+            let mapSize = document.getElementById('setupMapSize');
+            let shape = document.getElementById('setupMapShape');
+            let ai = document.getElementById('setupAI');
+            let vic = document.getElementById('setupVictoryMode');
+            let msLab = mapSize && mapSize.options[mapSize.selectedIndex];
+            let shLab = shape && shape.options[shape.selectedIndex];
+            let vLab = vic && vic.options[vic.selectedIndex];
+            return {
+                mapSizeLabel: msLab ? msLab.text : '',
+                mapShapeLabel: shLab ? shLab.text : '',
+                aiCount: ai ? (parseInt(ai.value, 10) || 1) : 1,
+                victoryLabel: vLab ? vLab.text : ''
+            };
+        }
+        function wodMpFinishSetupFromHost() {
+            previewMap();
+            if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyMeta)
+                WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+            showPanel('multiplayer');
+        }
+        function wodMpUpdateOnline(n) {
+            let el = document.getElementById('mpOnlineCount');
+            if(el) el.textContent = (n != null && n >= 0) ? String(n) : '—';
+        }
+        function wodMpRenderLobbyList(lobbies) {
+            let el = document.getElementById('mpLobbyList');
+            if(!el) return;
+            let myId = (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.code) ? WodMultiplayer.api.code : '';
+            if(!lobbies || lobbies.length === 0) {
+                el.innerHTML = '<p style="opacity:0.85;font-size:13px;margin:0">No open lobbies. Host one on the right.</p>';
+                return;
+            }
+            el.innerHTML = lobbies.map(l => {
+                let meta = l.meta || {};
+                let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel]
+                    .filter(Boolean).join(' · ');
+                if(!detail) detail = 'Host still configuring map';
+                let name = wodMpEscapeHtml(l.name || 'Game');
+                let joinPart = myId === l.id
+                    ? '<span style="font-size:12px;opacity:0.85">You are here</span>'
+                    : '<button type="button" class="build-btn mp-join-btn" data-id="' + wodMpEscapeHtml(l.id) + '" data-locked="' + (l.locked ? '1' : '0') + '">Join</button>';
+                return '<div class="mp-lobby-row" style="border:1px solid rgba(255,255,255,0.12);padding:10px;margin-bottom:8px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
+                    '<div style="min-width:0;flex:1">' +
+                    '<div style="font-weight:700">' + name + (l.locked ? ' <span title="Password required">🔒</span>' : '') + '</div>' +
+                    '<div style="font-size:12px;opacity:0.85">' + wodMpEscapeHtml(detail) + '</div>' +
+                    '<div style="font-size:12px;opacity:0.75">' + (l.players | 0) + ' / ' + (l.max || 6) + ' players</div>' +
+                    '</div>' + joinPart + '</div>';
+            }).join('');
+            el.querySelectorAll('.mp-join-btn').forEach(btn => {
+                btn.onclick = () => wodMpJoinLobbyFromList(btn.getAttribute('data-id'), btn.getAttribute('data-locked') === '1');
+            });
+        }
+        async function wodMpJoinLobbyFromList(id, locked) {
+            let st = document.getElementById('mpStatus');
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
+                if(st) st.textContent = 'Connect to the server first.';
+                return;
+            }
+            if(WodMultiplayer.api.code && WodMultiplayer.api.code !== id) {
+                showNotification('Leave your current lobby first, then join another.');
+                return;
+            }
+            if(WodMultiplayer.api.code === id) return;
+            let pw = '';
+            if(locked) {
+                pw = prompt('This lobby requires a password:') || '';
+                if(!pw) { if(st) st.textContent = 'Password required.'; return; }
+            }
+            try {
+                if(st) st.textContent = 'Joining…';
+                await WodMultiplayer.joinLobby(id, pw);
+                wodMpLobbyCount = Math.max(wodMpLobbyCount, WodMultiplayer.api.slot | 0, 1);
+                if(st) st.textContent = 'Joined — waiting for host to launch.';
+                wodMpRefreshMpPanelState();
+                wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
+            } catch(e) {
+                let m = e && e.message ? String(e.message) : 'Join failed';
+                if(st) st.textContent = m;
+                showNotification(m);
+            }
+        }
+        function wodMpRefreshMpPanelState() {
+            let api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : {};
+            let inLobby = !!(api.code);
+            let browse = document.getElementById('mpBrowseHostWrap');
+            let guestBar = document.getElementById('mpGuestLobbyBar');
+            let hostAfter = document.getElementById('mpHostAfterCreate');
+            let btnLaunch = document.getElementById('mpBtnLaunch');
+            let mpHostCreate = document.getElementById('mpBtnHostCreate');
+            wodMpUpdateOnline(api.online);
+            if(inLobby) {
+                if(api.isHost) {
+                    if(browse) browse.style.display = '';
+                    if(guestBar) guestBar.style.display = 'none';
+                    if(hostAfter) hostAfter.style.display = '';
+                    if(btnLaunch) btnLaunch.style.display = '';
+                    let hl = document.getElementById('mpHostLobbyLabel');
+                    let hc = document.getElementById('mpHostPlayerCount');
+                    if(hl) hl.textContent = 'Hosting: ' + (api.lobbyName || 'Lobby');
+                    if(hc) hc.textContent = 'Players in lobby: ' + (wodMpLobbyCount | 0) + ' / ' + (api.max || 6);
+                    if(mpHostCreate) mpHostCreate.disabled = true;
+                } else {
+                    if(browse) browse.style.display = '';
+                    if(guestBar) guestBar.style.display = '';
+                    if(hostAfter) hostAfter.style.display = 'none';
+                    if(btnLaunch) btnLaunch.style.display = 'none';
+                    let gl = document.getElementById('mpGuestLobbyLabel');
+                    if(gl) gl.textContent = 'In "' + (api.lobbyName || 'lobby') + '" — waiting for host (you are slot ' + (api.slot | 0) + '). Leave to join a different game.';
+                    if(mpHostCreate) mpHostCreate.disabled = true;
+                }
+            } else {
+                if(browse) browse.style.display = '';
+                if(guestBar) guestBar.style.display = 'none';
+                if(hostAfter) hostAfter.style.display = 'none';
+                if(btnLaunch) btnLaunch.style.display = 'none';
+                if(mpHostCreate) mpHostCreate.disabled = !api.socketOpen;
+            }
+            let btnDisc = document.getElementById('mpBtnDisconnect');
+            if(btnDisc) btnDisc.style.display = api.socketOpen ? '' : 'none';
+        }
+
         function wodMpWireLobbyUi() {
             if(window._wodMpUiWired) {
-                let urlEl = document.getElementById('mpServerUrl');
-                if(urlEl) urlEl.value = localStorage.getItem('wod_mp_ws') || urlEl.value || '';
+                let urlEl0 = document.getElementById('mpServerUrl');
+                if(urlEl0) urlEl0.value = localStorage.getItem('wod_mp_ws') || urlEl0.value || '';
+                wodMpRefreshMpPanelState();
+                if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.lobbies)
+                    wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
                 return;
             }
             window._wodMpUiWired = true;
-            let codeEl = document.getElementById('mpRoomCode');
             let st = document.getElementById('mpStatus');
             let btnDisc = document.getElementById('mpBtnDisconnect');
             let btnLaunch = document.getElementById('mpBtnLaunch');
+            let urlEl = document.getElementById('mpServerUrl');
             if(urlEl && !urlEl._wodBound) {
                 urlEl._wodBound = true;
                 urlEl.value = localStorage.getItem('wod_mp_ws') || '';
@@ -5316,43 +5476,69 @@
             } else if(urlEl && urlEl.value) {
                 window.WOD_MP_WS_URL = urlEl.value.trim();
             }
-            document.getElementById('mpBtnCreate').onclick = async () => {
+
+            document.getElementById('mpBtnConnect').onclick = async () => {
                 try {
                     if(urlEl && urlEl.value.trim()) window.WOD_MP_WS_URL = urlEl.value.trim();
-                    st.textContent = 'Connecting…';
-                    await WodMultiplayer.createRoom();
-                    codeEl.value = WodMultiplayer.api.code;
-                    st.textContent = 'Room ' + WodMultiplayer.api.code + ' — you are host (slot 1).';
-                    btnDisc.style.display = '';
-                    btnLaunch.style.display = '';
-                    wodMpLobbyCount = 1;
-                } catch (e) {
-                    st.textContent = 'Failed: ' + (e && e.message);
+                    if(st) st.textContent = 'Connecting…';
+                    await WodMultiplayer.connect();
+                    if(st) st.textContent = 'Connected. Browse games or create a lobby.';
+                    wodMpRefreshMpPanelState();
+                    wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
+                } catch(e) {
+                    if(st) st.textContent = 'Failed: ' + (e && e.message);
                 }
             };
-            document.getElementById('mpBtnJoin').onclick = async () => {
+            document.getElementById('mpBtnRefresh').onclick = () => {
+                if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.socketOpen)
+                    WodMultiplayer.requestLobbyList();
+                else if(st) st.textContent = 'Connect first to refresh the list.';
+            };
+            document.getElementById('mpBtnHostCreate').onclick = async () => {
                 try {
-                    if(urlEl && urlEl.value.trim()) window.WOD_MP_WS_URL = urlEl.value.trim();
-                    let c = codeEl.value.trim().toUpperCase();
-                    if(!c) { st.textContent = 'Enter a room code.'; return; }
-                    st.textContent = 'Joining…';
-                    await WodMultiplayer.joinRoom(c);
-                    st.textContent = 'Joined ' + WodMultiplayer.api.code + ' as slot ' + WodMultiplayer.api.slot + '. Wait for host.';
-                    btnDisc.style.display = '';
-                    btnLaunch.style.display = 'none';
-                } catch (e) {
-                    st.textContent = 'Failed: ' + (e && e.message);
+                    if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
+                        if(st) st.textContent = 'Connect to the server first.';
+                        return;
+                    }
+                    let nameEl = document.getElementById('mpHostName');
+                    let pwEl = document.getElementById('mpHostPassword');
+                    let name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : 'Game';
+                    let password = pwEl ? String(pwEl.value) : '';
+                    if(st) st.textContent = 'Creating lobby…';
+                    await WodMultiplayer.createLobby({ name, password });
+                    wodMpLobbyCount = 1;
+                    wodMpRefreshMpPanelState();
+                    if(WodMultiplayer.sendLobbyMeta) WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+                    if(st) st.textContent = 'Lobby created. Use Map & rules, then Launch match.';
+                    wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
+                } catch(e) {
+                    if(st) st.textContent = 'Failed: ' + (e && e.message);
                 }
+            };
+            document.getElementById('mpBtnHostSetup').onclick = () => {
+                showPanel('setup', { fromMpHost: true });
+            };
+            document.getElementById('mpBtnLeaveLobby').onclick = () => {
+                if(typeof WodMultiplayer !== 'undefined') {
+                    WodMultiplayer.leaveLobby();
+                    WodMultiplayer.requestLobbyList();
+                }
+                wodMpLobbyCount = 1;
+                wodMpRefreshMpPanelState();
+                if(st) st.textContent = 'Left lobby.';
+                wodMpRenderLobbyList(typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api.lobbies : []);
             };
             btnDisc.onclick = () => {
-                WodMultiplayer.disconnect();
-                st.textContent = 'Disconnected.';
-                btnDisc.style.display = 'none';
-                btnLaunch.style.display = 'none';
+                if(typeof WodMultiplayer !== 'undefined') WodMultiplayer.disconnect();
+                if(st) st.textContent = 'Disconnected from server.';
+                wodMpLobbyCount = 1;
+                wodMpRefreshMpPanelState();
+                wodMpRenderLobbyList([]);
+                wodMpUpdateOnline(0);
             };
             btnLaunch.onclick = () => {
-                if(!WodMultiplayer.api.isHost) return;
-                wodMpLobbyCount = Math.max(wodMpLobbyCount, WodMultiplayer.api.slot);
+                if(!WodMultiplayer.api || !WodMultiplayer.api.isHost) return;
+                wodMpLobbyCount = Math.max(wodMpLobbyCount | 0, 1);
                 let humans = [];
                 for(let i = 1; i <= wodMpLobbyCount; i++) humans.push(i);
                 if(humans.length > WOD_MP_MAX_PLAYERS) humans = humans.slice(0, WOD_MP_MAX_PLAYERS);
@@ -5377,7 +5563,7 @@
                 wodMpSnapSeq = 0;
                 try {
                     WodMultiplayer.hostSendMatchStart(wodMpBuildInitPayload());
-                } catch (err) {
+                } catch(err) {
                     console.error(err);
                     showNotification('Failed to send map to players (too large?)');
                 }
@@ -5385,10 +5571,41 @@
                 syncInGameLayerToolbar();
                 wodApplyPlayViewportLock(true);
             };
+
+            addEventListener('wod-mp-LobbyList', (ev) => {
+                let d = ev.detail || {};
+                wodMpUpdateOnline(d.online);
+                wodMpRenderLobbyList(d.lobbies);
+                wodMpRefreshMpPanelState();
+            });
+            addEventListener('wod-mp-Joined', () => {
+                wodMpLobbyCount = Math.max(wodMpLobbyCount | 0, WodMultiplayer.api.slot | 0, 1);
+                wodMpRefreshMpPanelState();
+                wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
+            });
+            addEventListener('wod-mp-LeftLobby', () => {
+                wodMpRefreshMpPanelState();
+                if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.socketOpen)
+                    WodMultiplayer.requestLobbyList();
+            });
+            addEventListener('wod-mp-Close', () => {
+                wodMpRefreshMpPanelState();
+                wodMpRenderLobbyList([]);
+                wodMpUpdateOnline(0);
+            });
             addEventListener('wod-mp-Peers', (ev) => {
                 if(ev.detail && ev.detail.count) wodMpLobbyCount = ev.detail.count;
-                if(st && WodMultiplayer.api.connected)
-                    st.textContent = 'Room ' + WodMultiplayer.api.code + ' — players: ' + wodMpLobbyCount + (WodMultiplayer.api.isHost ? ' (host)' : '');
+                wodMpRefreshMpPanelState();
+                if(st && WodMultiplayer.api && WodMultiplayer.api.code)
+                    st.textContent = 'Lobby: ' + (wodMpLobbyCount | 0) + ' player(s)' + (WodMultiplayer.api.isHost ? ' — you host' : ' — waiting for host');
+            });
+            addEventListener('wod-mp-SlotSync', () => {
+                if(typeof WodMultiplayer === 'undefined') return;
+                if(gameData && gameData.mp && gameData.mp.enabled && gameState === 'PLAYING') {
+                    gameData.mp.localSlot = WodMultiplayer.api.slot;
+                    gameData.mp.isHost = WodMultiplayer.api.isHost;
+                }
+                wodMpRefreshMpPanelState();
             });
             addEventListener('wod-mp-HostMigrated', () => {
                 if(typeof WodMultiplayer === 'undefined') return;
@@ -5396,6 +5613,7 @@
                     gameData.mp.isHost = true;
                     gameData.mp.localSlot = WodMultiplayer.api.slot;
                 }
+                wodMpRefreshMpPanelState();
             });
             addEventListener('wod-mp-MatchStart', (ev) => {
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.isHost) return;

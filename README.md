@@ -16,7 +16,7 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
    Default WebSocket URL: `ws://localhost:8080`. The in-game Multiplayer panel can override this (stored in `localStorage` as `wod_mp_ws`).
 
-3. **Flow:** one player creates a room and shares the code; others join. The host configures the match and clicks **Launch match**; clients load the same map/state and stay in sync via periodic snapshots.
+3. **Flow:** open **Multiplayer** → **Connect** → browse **Open games** or **Create lobby**. Optional lobby password; host sets **Map & rules** (same screen as **Play vs AI**), then **Launch match**. Clients stay in sync via snapshots.
 
 ## Production on Render
 
@@ -49,7 +49,9 @@ Typical settings:
 
 ### 3. Point the game at the relay
 
-Set **`WOD_MP_WS_URL`** to **`wss://<your-node-service-name>.onrender.com`** (no path). You can put this in `index.html` before `multiplayer-client.js` or enter it in the Multiplayer panel.
+Set **`WOD_MP_WS_URL`** to **`wss://<your-node-service-name>.onrender.com`** (no path), or type it in the Multiplayer **Server** field and click **Connect**.
+
+**Lobby list:** the server broadcasts open lobbies and **player count** to everyone connected. Join from the list (password prompt when locked). No room codes.
 
 ### Optional Blueprint
 
