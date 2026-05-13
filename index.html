@@ -5515,6 +5515,60 @@
                 }
             }
         }
+
+        /** Remove faction land that cannot reach any of that faction's cities using only that faction's own tiles (prevents weird encircled enclaves). */
+        function wodRemoveUnconnectedFactionHexPockets(ownerIds) {
+            if(!ownerIds || ownerIds.length === 0) return;
+            for(let owner of ownerIds) {
+                let seeds = [];
+                for(let city of gameData.cities) {
+                    if(city.owner !== owner) continue;
+                    let urbanList = getCityUrbanTerrainHexes(city);
+                    for(let uh of urbanList) {
+                        let hx = gameData.hexes[`${uh.q},${uh.r}`];
+                        if(hx && !isWaterHex(hx) && hx.type !== 'mountain' && hx.owner === owner) seeds.push(hx);
+                    }
+                    let ctr = gameData.hexes[`${city.q},${city.r}`];
+                    if(ctr && !isWaterHex(ctr) && ctr.type !== 'mountain' && ctr.owner === owner) seeds.push(ctr);
+                }
+                if(seeds.length === 0) continue;
+                let seen = new Set();
+                let q = [];
+                for(let h of seeds) {
+                    let k = `${h.q},${h.r}`;
+                    if(seen.has(k)) continue;
+                    seen.add(k);
+                    q.push(h);
+                }
+                while(q.length) {
+                    let cur = q.shift();
+                    for(let nb of getNeighborHexes(cur)) {
+                        if(!nb || isWaterHex(nb) || nb.type === 'mountain') continue;
+                        if(nb.owner !== owner) continue;
+                        let k = `${nb.q},${nb.r}`;
+                        if(seen.has(k)) continue;
+                        seen.add(k);
+                        q.push(nb);
+                    }
+                }
+                for(let hex of gameData.hexList) {
+                    if(hex.owner !== owner || isWaterHex(hex) || hex.type === 'mountain') continue;
+                    let k = `${hex.q},${hex.r}`;
+                    if(seen.has(k)) continue;
+                    let votes = {};
+                    for(let nb of getNeighborHexes(hex)) {
+                        if(!nb || nb.owner <= 0 || nb.owner === owner) continue;
+                        votes[nb.owner] = (votes[nb.owner] || 0) + 1;
+                    }
+                    let bo = 0, bv = -1;
+                    for(let ok in votes) {
+                        if(votes[ok] > bv) { bv = votes[ok]; bo = parseInt(ok, 10); }
+                    }
+                    if(bo > 0) setHexOwner(hex, bo);
+                    else setHexOwner(hex, 0);
+                }
+            }
+        }
         function wodMpAllFactionSlotsForScoreboard() {
             let set = new Set();
             let act = (gameData.mp && gameData.mp.enabled) ? wodGetActiveFactionSlotsForMap() : null;
@@ -9041,6 +9095,22 @@
                 if(g.length > 1) return smoothGridPath(g);
             }
 
+            if((unit.type === 'light' || unit.type === 'heavy') && !isWaterHex(startHex) && isWaterHex(targetHex)) {
+                let borders = getNeighborHexes(targetHex).filter(h => h && !isWaterHex(h) && canUseHexForMovement(unit, h));
+                if(borders.length > 0) {
+                    let best = [];
+                    for(let b of borders) {
+                        let landSeg = findPathAroundTerrain(unit, b, startHex);
+                        if(landSeg.length === 0) continue;
+                        let merged = landSeg.slice();
+                        if(getHexKey(merged[merged.length - 1]) !== getHexKey(b)) merged.push(b);
+                        merged.push(targetHex);
+                        if(!best.length || merged.length < best.length) best = merged;
+                    }
+                    if(best.length > 0) return smoothGridPath(best);
+                }
+            }
+
             /** Land-only vs land+water for army: use water only if total path cost is ≤ half the land-only cost (~50%+ faster). */
             const WOD_WATER_SHORTCUT_VS_LAND = 2;
             let landArmyDual = (unit.type === 'light' || unit.type === 'heavy')
@@ -10643,7 +10713,8 @@
                 }
             }
 
-            if(prevCanvas.id === 'mpLobbyMapPreview') {
+            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview';
+            if(wodPreviewDrawPolitical) {
                 for(let hex of gameData.hexList) {
                     if(isWaterHex(hex) || !hex.owner) continue;
                     for(let dir of hexDirections) {
@@ -10729,15 +10800,27 @@
 
             if(!gameData.mp || !gameData.mp.enabled) applyPlayerFactionColorFromSetup();
             
-            // Generate map only if we didn't just load one or preview one matching this setup.
-            let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
-            if(gameData.hexList.length === 0 || gameData.mapRadius !== newRadius || shapeChanged) {
+            if(gameData.mp && gameData.mp.enabled) {
                 gameData.mapRadius = newRadius;
+                gameData.mapShape = requestedShape;
                 gameData.loadedCustomMap = false;
-                generateMap();
+                let meta = window.wodMpRoomMeta || {};
+                let mpSeed = wodMpLobbyPreviewSeed(meta);
+                wodPushSeededRandom(mpSeed);
+                try {
+                    generateMap();
+                } finally {
+                    wodPopRandom();
+                }
             } else {
-                // If loaded or generated via preview, we still need to set up starting positions
-                assignStartingCities();
+                let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
+                if(gameData.hexList.length === 0 || gameData.mapRadius !== newRadius || shapeChanged) {
+                    gameData.mapRadius = newRadius;
+                    gameData.loadedCustomMap = false;
+                    generateMap();
+                } else {
+                    assignStartingCities();
+                }
             }
             updateTerrainKey();
             
@@ -10909,6 +10992,12 @@
                         if(isClaimableLand(hx)) setHexOwner(hx, city.owner);
                     }
                 }
+            }
+
+            wodRemoveUnconnectedFactionHexPockets(ownersList);
+            for(let city of gameData.cities) {
+                let chx = gameData.hexes[`${city.q},${city.r}`];
+                if(chx && isClaimableLand(chx)) city.owner = chx.owner;
             }
 
             gameData.tradeTimer = 0;
@@ -11154,10 +11243,11 @@
 
             limitRectangleMountainDensity(mapShape, seedOffset);
 
-            // Generate Cities
-            let numCities = Math.floor((mapR * mapR) / 600) + 5; // Far fewer cities
+            // Generate Cities — scale with player count; extra towns per faction for large maps
+            let numCities = Math.floor((mapR * mapR) / 600) + 5;
             let neededStarts = wodGetMapPlayerCount();
-            numCities = Math.max(numCities, neededStarts + 3);
+            let citiesPerPlayer = Math.max(2, Math.min(6, 2 + Math.floor(mapR / 50)));
+            numCities = Math.max(numCities, neededStarts + 3, neededStarts * citiesPerPlayer);
             let citySpacing = Math.max(hr * 14, Math.min(hr * 38, mapR * hr * 0.35));
             for(let i=0; i<numCities; i++) {
                 let valid = false; let attempts = 0;
@@ -12250,7 +12340,7 @@
                 let u = gameData.entities[ui];
                 if(!u || u.hp <= 0 || u.type === 'ship') continue;
                 let hh = getNearestHexToPoint(u.x, u.y);
-                if(!hh || !canUnitEnterHex(u, hh)) ensureUnitPixelOnWalkableHex(u, 16);
+                if(!hh || !canUnitEnterHex(u, hh)) ensureUnitPixelOnWalkableHex(u, 28);
             }
             gameData.unitSpatialGrid = buildUnitSpatialGrid(wodMob ? 120 : 96);
             gameData.citySpatialGrid = buildCitySpatialGrid(wodMob ? 280 : 260);
@@ -16567,11 +16657,11 @@
                 }
                 if(!moved) break;
             }
-            ensureUnitPixelOnWalkableHex(unit, 16);
+            ensureUnitPixelOnWalkableHex(unit, 24);
         }
 
         function snapUnitOffMountain(unit) {
-            ensureUnitPixelOnWalkableHex(unit, 18);
+            ensureUnitPixelOnWalkableHex(unit, 28);
         }
 
         function createUnitAt(type, x, y, owner) {
