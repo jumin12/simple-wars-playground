@@ -671,6 +671,49 @@
             color: #07130b;
         }
 
+        #inGameUI.wod-mp-match .speed-controls,
+        #inGameUI.wod-mp-match .speed-controls .speed-btn,
+        #inGameUI.wod-mp-match .wod-m-speed-dd,
+        #inGameUI.wod-mp-match .wod-m-speed-trigger,
+        #inGameUI.wod-mp-match #wodSpeedTrigger,
+        #inGameUI.wod-mp-match #wodSpeedPop,
+        #inGameUI.wod-mp-match .wod-m-speed-pop {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+
+        .mp-host-dlg {
+            position: fixed;
+            inset: 0;
+            z-index: 12050;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.55);
+            padding: 16px;
+            box-sizing: border-box;
+        }
+        .mp-host-dlg:not(.hidden) {
+            display: flex;
+        }
+        .mp-host-dlg .panel {
+            max-width: 420px;
+            width: 100%;
+            margin: 0;
+            padding: 28px 32px;
+            text-align: left;
+        }
+        .mp-host-dlg .panel h3 {
+            margin-top: 0;
+            color: #2ecc71;
+        }
+        .mp-host-dlg-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
         /* Generic Panels */
         .panel {
             background: linear-gradient(135deg, #1e272e, #2c3e50);
@@ -3971,7 +4014,7 @@
         <div id="multiplayerPanel" class="overlay hidden">
             <div class="panel panel-wide" style="max-width:900px">
                 <h2>Multiplayer</h2>
-                <p style="font-size:13px;opacity:0.9;max-width:640px;line-height:1.45">Host runs the simulation; other players get snapshots and send orders. Up to <strong>6</strong> humans. Browse open lobbies or host your own — optional password. Use the same <strong>map &amp; rules</strong> screen as solo (below) after hosting.</p>
+                <p style="font-size:13px;opacity:0.9;max-width:640px;line-height:1.45">Host runs the simulation; other players receive snapshots and send orders. Up to <strong>6</strong> humans. Browse open lobbies or host your own — optional password. Open games update live as players join or leave.</p>
                 <p style="font-size:14px;margin:10px 0"><strong>Players online:</strong> <span id="mpOnlineCount">—</span></p>
                 <div class="setup-row" style="flex-wrap:wrap;gap:8px">
                     <button type="button" class="build-btn" id="mpBtnRefresh" title="Refresh lobby list">Refresh games</button>
@@ -3991,7 +4034,11 @@
                         <div id="mpHostAfterCreate" style="display:none;margin-top:14px;padding-top:12px;border-top:1px solid rgba(255,255,255,0.12)">
                             <p id="mpHostLobbyLabel" style="font-size:13px;font-weight:700;margin:0 0 8px 0"></p>
                             <p id="mpHostPlayerCount" style="font-size:13px;opacity:0.9;margin:0 0 10px 0"></p>
-                            <button type="button" class="menu-btn" id="mpBtnHostSetup">Map &amp; rules (same as vs AI)</button>
+                            <div style="display:flex;flex-wrap:wrap;gap:8px">
+                                <button type="button" class="menu-btn" id="mpBtnHostMap">Map</button>
+                                <button type="button" class="menu-btn" id="mpBtnHostRules">Match rules</button>
+                            </div>
+                            <p style="font-size:12px;opacity:0.8;margin:10px 0 0 0">Configure the map and rules before launch. In-match speed is fixed at <strong>1×</strong> for host and clients.</p>
                             <button type="button" class="menu-btn" id="mpBtnLaunch" style="display:none;margin-top:8px">Launch match</button>
                         </div>
                     </div>
@@ -4001,6 +4048,73 @@
                     <button type="button" class="build-btn" id="mpBtnLeaveLobby">Leave lobby</button>
                 </div>
                 <button class="menu-btn" onclick="hidePanels()" style="margin-top:18px">Back</button>
+            </div>
+        </div>
+
+        <div id="mpHostMapDlg" class="mp-host-dlg hidden" aria-hidden="true">
+            <div class="panel">
+                <h3>Map</h3>
+                <p style="font-size:14px;opacity:0.9;margin-top:0">Size and land shape apply to the next generated battle. Preview updates the hidden setup preview (used when you launch).</p>
+                <div class="setup-row"><label>Map size</label>
+                    <select id="mpCfgMapSize" style="flex:1">
+                        <option value="40">Small</option>
+                        <option value="60" selected>Medium</option>
+                        <option value="80">Large</option>
+                    </select>
+                </div>
+                <div class="setup-row"><label>Map shape</label>
+                    <select id="mpCfgMapShape" style="flex:1">
+                        <option value="island" selected>Island</option>
+                        <option value="rectangle">Rectangle</option>
+                    </select>
+                </div>
+                <div class="mp-host-dlg-actions">
+                    <button type="button" class="menu-btn" id="mpCfgMapApply">Apply &amp; regenerate preview</button>
+                    <button type="button" class="build-btn" id="mpCfgMapAdvanced">Full setup (load/save map)…</button>
+                    <button type="button" class="build-btn" id="mpCfgMapClose">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="mpHostRulesDlg" class="mp-host-dlg hidden" aria-hidden="true">
+            <div class="panel">
+                <h3>Match rules</h3>
+                <p style="font-size:14px;opacity:0.9;margin-top:0">These mirror solo setup and are shown in the lobby browser for other players.</p>
+                <div class="setup-row"><label>AI opponents</label>
+                    <select id="mpCfgAI" style="flex:1">
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
+                <div class="setup-row"><label>Victory</label>
+                    <select id="mpCfgVictoryMode" style="flex:1">
+                        <option value="domination" selected>Domination</option>
+                        <option value="annihilation">Annihilation</option>
+                    </select>
+                </div>
+                <p class="setup-victory-hint" id="mpCfgVictoryDetail" style="text-align:left;font-size:13px"></p>
+                <div class="setup-row"><label>Starting money</label>
+                    <input type="number" id="mpCfgMoney" value="1000" step="100" style="flex:1">
+                </div>
+                <div class="setup-row"><label>Your faction color</label>
+                    <select id="mpCfgPlayerColor" style="flex:1">
+                        <option value="#2ecc71" selected>Green</option>
+                        <option value="#3498db">Blue</option>
+                        <option value="#e74c3c">Red</option>
+                        <option value="#9b59b6">Purple</option>
+                        <option value="#e67e22">Orange</option>
+                        <option value="#f1c40f">Yellow</option>
+                        <option value="#1abc9c">Teal</option>
+                        <option value="#ecf0f1">Light gray</option>
+                    </select>
+                </div>
+                <div class="mp-host-dlg-actions">
+                    <button type="button" class="menu-btn" id="mpCfgRulesApply">Apply</button>
+                    <button type="button" class="build-btn" id="mpCfgRulesClose">Close</button>
+                </div>
             </div>
         </div>
 
@@ -4855,6 +4969,8 @@
         }
 
         function hidePanels(resumeMenuDemo) {
+            wodMpCloseHostMapDlg();
+            wodMpCloseHostRulesDlg();
             UI.panels.forEach(p => p.classList.add('hidden'));
             UI.mainMenu.classList.remove('hidden');
             if(resumeMenuDemo !== false) resumeMenuBackgroundBattle();
@@ -4895,9 +5011,11 @@
             returnToMenu();
         }
 
-        function setGameSpeed(speed) {
+        function setGameSpeed(speed, allowNonRealtime) {
             if(speed < 0) speed = 0;
             if(speed > 3) speed = 3;
+            if(gameData && gameData.mp && gameData.mp.enabled && !allowNonRealtime && speed !== 1)
+                speed = 1;
             gameData.speed = speed;
             for(let btn of document.querySelectorAll('.speed-btn')) btn.classList.remove('active');
             let activeId = speed === 0 ? 'speedPause' : (speed === 3 ? 'speed3' : (speed === 2 ? 'speed2' : 'speed1'));
@@ -5053,6 +5171,9 @@
             casualties: 0,
             enemyCasualties: 0,
             casualtiesByOwner: {},
+            killsByOwner: {},
+            tankKillsByOwner: {},
+            shipKillsByOwner: {},
             casualtyReplacementCostByOwner: {},
             aiMoneyByOwner: {},
             aiManpowerByOwner: {},
@@ -5099,6 +5220,30 @@
         function wodLocalPlayerOwner() {
             if(gameData.mp && gameData.mp.enabled && gameData.mp.localSlot) return gameData.mp.localSlot;
             return 1;
+        }
+        function wodPlayerTreasury(owner) {
+            if(owner === 1) return gameData.money || 0;
+            return (gameData.aiMoneyByOwner && gameData.aiMoneyByOwner[owner]) || 0;
+        }
+        function wodPlayerMpPool(owner) {
+            if(owner === 1) return gameData.manpower || 0;
+            return (gameData.aiManpowerByOwner && gameData.aiManpowerByOwner[owner]) || 0;
+        }
+        function wodDeductPlayerMoney(owner, amt) {
+            amt = Math.max(0, amt | 0);
+            if(owner === 1) gameData.money = Math.max(0, (gameData.money || 0) - amt);
+            else {
+                if(!gameData.aiMoneyByOwner) gameData.aiMoneyByOwner = {};
+                gameData.aiMoneyByOwner[owner] = Math.max(0, wodPlayerTreasury(owner) - amt);
+            }
+        }
+        function wodSetMpMatchUiFlag(on) {
+            let root = document.getElementById('inGameUI');
+            if(!root) return;
+            if(on) {
+                root.classList.add('wod-mp-match');
+                setGameSpeed(1);
+            } else root.classList.remove('wod-mp-match');
         }
         function wodMpIsHumanOwner(owner) {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.humanSlots) return owner === 1;
@@ -5239,6 +5384,99 @@
             wodMarkTerrainFullDirty();
             updateTerrainKey();
         }
+        function wodMpClientApplyMatchEnd(me) {
+            if(!me || !me.outcomes || gameData._campaignEnded) return;
+            if(!gameData.mp || !gameData.mp.enabled) return;
+            let slot = gameData.mp.localSlot;
+            if(slot == null) return;
+            let oc = me.outcomes[String(slot)];
+            if(!oc || oc === 'ongoing') return;
+            if(oc === 'won') triggerCampaignVictory(me.message || 'Victory', me.countAsBattleWon !== false);
+            else if(oc === 'lost') triggerCampaignDefeat(me.message || 'Defeat');
+        }
+
+        function wodMpIsSlotEliminated(slot) {
+            let es = gameData.mp && gameData.mp.eliminatedSlots;
+            return Array.isArray(es) && es.indexOf(slot) >= 0;
+        }
+        function wodMpMarkSlotEliminated(slot) {
+            if(!gameData.mp) return;
+            if(!gameData.mp.eliminatedSlots) gameData.mp.eliminatedSlots = [];
+            if(gameData.mp.eliminatedSlots.indexOf(slot) < 0) gameData.mp.eliminatedSlots.push(slot);
+        }
+        function wodMpHostBroadcastFullEnd(winnerSlot, message) {
+            if(!gameData.mp || !gameData.mp.humanSlots) return;
+            let outcomes = {};
+            for(let s of gameData.mp.humanSlots) outcomes[String(s)] = (s === winnerSlot) ? 'won' : 'lost';
+            wodMpHostBroadcastMatchEnd({ outcomes, message, countAsBattleWon: false });
+        }
+        /** Host-only: MP win/elimination (FFA humans + AI). Clients apply results via snapshots / wodMpClientApplyMatchEnd. */
+        function wodMpCheckEndConditionsHost(dt) {
+            if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
+            if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost) return;
+            let hs = gameData.mp.humanSlots;
+            if(!hs || !hs.length) return;
+            let mode = gameData.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
+
+            if(mode === 'domination') {
+                for(let s of hs) {
+                    if(wodMpIsSlotEliminated(s)) continue;
+                    if(!factionControlsAnyCity(s)) continue;
+                    if(!anyEnemyOwnedCityRemainsFor(s)) {
+                        wodMpHostBroadcastFullEnd(s, 'Victory — domination: all enemy cities captured.');
+                        return;
+                    }
+                }
+            } else {
+                gameData._mpAnnihilationWinAcc = (gameData._mpAnnihilationWinAcc || 0) + (dt || 0);
+                if(gameData._mpAnnihilationWinAcc >= 0.14) {
+                    gameData._mpAnnihilationWinAcc = 0;
+                    for(let s of hs) {
+                        if(wodMpIsSlotEliminated(s)) continue;
+                        if(!factionControlsAnyCity(s)) continue;
+                        let myMil = countFriendlyCombatExcludingConvoys(s);
+                        let enMil = countEnemyCombatExcludingConvoysFor(s);
+                        if(enMil === 0 && myMil > 0) {
+                            wodMpHostBroadcastFullEnd(s, 'Victory — annihilation: all enemy combat forces destroyed.');
+                            return;
+                        }
+                    }
+                }
+            }
+
+            let newCityElim = [];
+            for(let s of hs) {
+                if(wodMpIsSlotEliminated(s)) continue;
+                if(!factionControlsAnyCity(s)) newCityElim.push(s);
+            }
+            if(newCityElim.length) {
+                for(let s of newCityElim) wodMpMarkSlotEliminated(s);
+                let outcomes = {};
+                for(let s of hs) outcomes[String(s)] = wodMpIsSlotEliminated(s) ? 'lost' : 'ongoing';
+                wodMpHostBroadcastMatchEnd({ outcomes, message: 'Defeat — all cities lost.', countAsBattleWon: false });
+            }
+
+            if(mode === 'annihilation') {
+                let newAnnih = [];
+                for(let s of hs) {
+                    if(wodMpIsSlotEliminated(s)) continue;
+                    if(!factionControlsAnyCity(s)) continue;
+                    if(countFriendlyCombatExcludingConvoys(s) === 0 && countEnemyCombatExcludingConvoysFor(s) > 0) newAnnih.push(s);
+                }
+                if(newAnnih.length) {
+                    for(let s of newAnnih) wodMpMarkSlotEliminated(s);
+                    let outcomes = {};
+                    for(let s of hs) outcomes[String(s)] = wodMpIsSlotEliminated(s) ? 'lost' : 'ongoing';
+                    wodMpHostBroadcastMatchEnd({ outcomes, message: 'Defeat — annihilation: all your combat forces were destroyed.', countAsBattleWon: false });
+                }
+            }
+        }
+        function wodMpHostBroadcastMatchEnd(spec) {
+            gameData._mpMatchEnd = spec;
+            wodMpHostEmitSnapshot();
+            wodMpClientApplyMatchEnd(spec);
+            gameData._mpMatchEnd = null;
+        }
         function wodMpApplySnapPayload(s) {
             let lo = wodLocalPlayerOwner();
             if(s.money !== undefined && (!gameData.mp || !gameData.mp.enabled || lo === 1)) gameData.money = s.money;
@@ -5297,6 +5535,40 @@
                     gameData.manpowerIncome = hb.manpowerIncome;
                 }
             }
+            if(s.casualtiesByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData.casualtiesByOwner) gameData.casualtiesByOwner = {};
+                Object.assign(gameData.casualtiesByOwner, s.casualtiesByOwner);
+            }
+            if(s.tankCasualtiesByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData.tankCasualtiesByOwner) gameData.tankCasualtiesByOwner = {};
+                Object.assign(gameData.tankCasualtiesByOwner, s.tankCasualtiesByOwner);
+            }
+            if(s.shipCasualtiesByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData.shipCasualtiesByOwner) gameData.shipCasualtiesByOwner = {};
+                Object.assign(gameData.shipCasualtiesByOwner, s.shipCasualtiesByOwner);
+            }
+            if(s.killsByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData.killsByOwner) gameData.killsByOwner = {};
+                Object.assign(gameData.killsByOwner, s.killsByOwner);
+            }
+            if(s.tankKillsByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData.tankKillsByOwner) gameData.tankKillsByOwner = {};
+                Object.assign(gameData.tankKillsByOwner, s.tankKillsByOwner);
+            }
+            if(s.shipKillsByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData.shipKillsByOwner) gameData.shipKillsByOwner = {};
+                Object.assign(gameData.shipKillsByOwner, s.shipKillsByOwner);
+            }
+            if(s.sessionIncomeByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData._sessionIncomeAcc) gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
+                if(!gameData._sessionIncomeAcc.byOwner) gameData._sessionIncomeAcc.byOwner = {};
+                Object.assign(gameData._sessionIncomeAcc.byOwner, s.sessionIncomeByOwner);
+            }
+            if(s.sessionCitiesCapturedByOwner && gameData.mp && gameData.mp.enabled) {
+                if(!gameData.sessionCitiesCapturedByOwner) gameData.sessionCitiesCapturedByOwner = {};
+                Object.assign(gameData.sessionCitiesCapturedByOwner, s.sessionCitiesCapturedByOwner);
+            }
+            if(s.matchEnd) wodMpClientApplyMatchEnd(s.matchEnd);
         }
 
         let wodMpSnapSeq = 0;
@@ -5319,9 +5591,18 @@
                 aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner),
                 aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner),
                 hudByOwner,
+                casualtiesByOwner: Object.assign({}, gameData.casualtiesByOwner || {}),
+                tankCasualtiesByOwner: Object.assign({}, gameData.tankCasualtiesByOwner || {}),
+                shipCasualtiesByOwner: Object.assign({}, gameData.shipCasualtiesByOwner || {}),
+                killsByOwner: Object.assign({}, gameData.killsByOwner || {}),
+                tankKillsByOwner: Object.assign({}, gameData.tankKillsByOwner || {}),
+                shipKillsByOwner: Object.assign({}, gameData.shipKillsByOwner || {}),
+                sessionIncomeByOwner: Object.assign({}, (gameData._sessionIncomeAcc && gameData._sessionIncomeAcc.byOwner) || {}),
+                sessionCitiesCapturedByOwner: Object.assign({}, gameData.sessionCitiesCapturedByOwner || {}),
                 entities: gameData.entities.filter(e => e.hp > 0).map(wodStripEntityForNet),
                 hexOwners: owners,
-                cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp }))
+                cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp })),
+                matchEnd: gameData._mpMatchEnd || undefined
             });
         }
         function wodMpDisconnectAndReset() {
@@ -5444,7 +5725,7 @@
                     if(hostAfter) hostAfter.style.display = 'none';
                     if(btnLaunch) btnLaunch.style.display = 'none';
                     let gl = document.getElementById('mpGuestLobbyLabel');
-                    if(gl) gl.textContent = 'In "' + (api.lobbyName || 'lobby') + '" — waiting for host (you are slot ' + (api.slot | 0) + '). Leave to join a different game.';
+                    if(gl) gl.textContent = 'In "' + (api.lobbyName || 'lobby') + '" — ' + (wodMpLobbyCount | 0) + ' player(s). Your slot: ' + (api.slot | 0) + '. Leave to switch lobbies.';
                     if(mpHostCreate) mpHostCreate.disabled = true;
                 }
             } else {
@@ -5456,6 +5737,41 @@
             }
             let btnDisc = document.getElementById('mpBtnDisconnect');
             if(btnDisc) btnDisc.style.display = api.socketOpen ? '' : 'none';
+        }
+
+        function wodMpCopyFieldToField(srcId, dstId) {
+            let s = document.getElementById(srcId), d = document.getElementById(dstId);
+            if(s && d) d.value = s.value;
+        }
+        function wodMpSyncMpCfgVictoryDetail() {
+            let sel = document.getElementById('mpCfgVictoryMode');
+            let span = document.getElementById('mpCfgVictoryDetail');
+            if(!sel || !span) return;
+            let mode = sel.value === 'annihilation' ? 'annihilation' : 'domination';
+            span.textContent = WOD_VICTORY_MODE_DETAIL_TEXT[mode] || '';
+        }
+        function wodMpOpenHostMapDlg() {
+            wodMpCopyFieldToField('setupMapSize', 'mpCfgMapSize');
+            wodMpCopyFieldToField('setupMapShape', 'mpCfgMapShape');
+            let d = document.getElementById('mpHostMapDlg');
+            if(d) { d.classList.remove('hidden'); d.setAttribute('aria-hidden', 'false'); }
+        }
+        function wodMpCloseHostMapDlg() {
+            let d = document.getElementById('mpHostMapDlg');
+            if(d) { d.classList.add('hidden'); d.setAttribute('aria-hidden', 'true'); }
+        }
+        function wodMpOpenHostRulesDlg() {
+            wodMpCopyFieldToField('setupAI', 'mpCfgAI');
+            wodMpCopyFieldToField('setupVictoryMode', 'mpCfgVictoryMode');
+            wodMpCopyFieldToField('setupMoney', 'mpCfgMoney');
+            wodMpCopyFieldToField('setupPlayerColor', 'mpCfgPlayerColor');
+            wodMpSyncMpCfgVictoryDetail();
+            let d = document.getElementById('mpHostRulesDlg');
+            if(d) { d.classList.remove('hidden'); d.setAttribute('aria-hidden', 'false'); }
+        }
+        function wodMpCloseHostRulesDlg() {
+            let d = document.getElementById('mpHostRulesDlg');
+            if(d) { d.classList.add('hidden'); d.setAttribute('aria-hidden', 'true'); }
         }
 
         let _wodMpConnecting = null;
@@ -5516,15 +5832,52 @@
                     wodMpLobbyCount = 1;
                     wodMpRefreshMpPanelState();
                     if(WodMultiplayer.sendLobbyMeta) WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
-                    if(st) st.textContent = 'Lobby created. Use Map & rules, then Launch match.';
+                    if(st) st.textContent = 'Lobby created. Configure map and rules, then Launch match.';
                     wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
                 } catch(e) {
                     if(st) st.textContent = 'Failed: ' + (e && e.message);
                 }
             };
-            document.getElementById('mpBtnHostSetup').onclick = () => {
+            let mpMap = document.getElementById('mpBtnHostMap');
+            let mpRules = document.getElementById('mpBtnHostRules');
+            if(mpMap) mpMap.onclick = () => wodMpOpenHostMapDlg();
+            if(mpRules) mpRules.onclick = () => wodMpOpenHostRulesDlg();
+            let mpCfgMapApply = document.getElementById('mpCfgMapApply');
+            let mpCfgMapClose = document.getElementById('mpCfgMapClose');
+            let mpCfgMapAdvanced = document.getElementById('mpCfgMapAdvanced');
+            if(mpCfgMapApply) mpCfgMapApply.onclick = () => {
+                wodMpCopyFieldToField('mpCfgMapSize', 'setupMapSize');
+                wodMpCopyFieldToField('mpCfgMapShape', 'setupMapShape');
+                previewMap();
+                if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyMeta)
+                    WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+                wodMpCloseHostMapDlg();
+                showNotification('Map settings updated.');
+            };
+            if(mpCfgMapClose) mpCfgMapClose.onclick = () => wodMpCloseHostMapDlg();
+            if(mpCfgMapAdvanced) mpCfgMapAdvanced.onclick = () => {
+                wodMpCloseHostMapDlg();
                 showPanel('setup', { fromMpHost: true });
             };
+            let mpCfgRulesApply = document.getElementById('mpCfgRulesApply');
+            let mpCfgRulesClose = document.getElementById('mpCfgRulesClose');
+            let mpCfgVictoryModeEl = document.getElementById('mpCfgVictoryMode');
+            if(mpCfgVictoryModeEl && !mpCfgVictoryModeEl._wodMpBound) {
+                mpCfgVictoryModeEl._wodMpBound = true;
+                mpCfgVictoryModeEl.addEventListener('change', wodMpSyncMpCfgVictoryDetail);
+            }
+            if(mpCfgRulesApply) mpCfgRulesApply.onclick = () => {
+                wodMpCopyFieldToField('mpCfgAI', 'setupAI');
+                wodMpCopyFieldToField('mpCfgVictoryMode', 'setupVictoryMode');
+                wodMpCopyFieldToField('mpCfgMoney', 'setupMoney');
+                wodMpCopyFieldToField('mpCfgPlayerColor', 'setupPlayerColor');
+                syncSetupVictoryDetail();
+                if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyMeta)
+                    WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+                wodMpCloseHostRulesDlg();
+                showNotification('Match rules updated.');
+            };
+            if(mpCfgRulesClose) mpCfgRulesClose.onclick = () => wodMpCloseHostRulesDlg();
             document.getElementById('mpBtnLeaveLobby').onclick = () => {
                 if(typeof WodMultiplayer !== 'undefined') {
                     WodMultiplayer.leaveLobby();
@@ -5551,7 +5904,7 @@
                 if(humans.length > WOD_MP_MAX_PLAYERS) humans = humans.slice(0, WOD_MP_MAX_PLAYERS);
                 gameData.mp = {
                     enabled: true, isHost: true, localSlot: WodMultiplayer.api.slot, humanSlots: humans,
-                    lobbyCount: wodMpLobbyCount
+                    lobbyCount: wodMpLobbyCount, eliminatedSlots: []
                 };
                 hidePanels();
                 gameState = 'PLAYING';
@@ -5562,7 +5915,7 @@
                 UI.escMenu.classList.add('hidden');
                 UI.inGameUI.style.display = 'block';
                 UI.canvas.style.display = 'block';
-                setGameSpeed(1);
+                wodSetMpMatchUiFlag(true);
                 wodResetMobileHud();
                 if(!gameData.layers) gameData.layers = {};
                 gameData.layers.territory = false;
@@ -5585,8 +5938,10 @@
                 wodMpRenderLobbyList(d.lobbies);
                 wodMpRefreshMpPanelState();
             });
-            addEventListener('wod-mp-Joined', () => {
-                wodMpLobbyCount = Math.max(wodMpLobbyCount | 0, WodMultiplayer.api.slot | 0, 1);
+            addEventListener('wod-mp-Joined', (ev) => {
+                let pl = ev.detail && ev.detail.players;
+                if(pl != null) wodMpLobbyCount = pl;
+                else wodMpLobbyCount = Math.max(1, (WodMultiplayer.api && WodMultiplayer.api.slot) | 0);
                 wodMpRefreshMpPanelState();
                 wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
             });
@@ -5601,7 +5956,7 @@
                 wodMpUpdateOnline(0);
             });
             addEventListener('wod-mp-Peers', (ev) => {
-                if(ev.detail && ev.detail.count) wodMpLobbyCount = ev.detail.count;
+                if(ev.detail && ev.detail.count != null) wodMpLobbyCount = ev.detail.count;
                 wodMpRefreshMpPanelState();
                 if(st && WodMultiplayer.api && WodMultiplayer.api.code)
                     st.textContent = 'Lobby: ' + (wodMpLobbyCount | 0) + ' player(s)' + (WodMultiplayer.api.isHost ? ' — you host' : ' — waiting for host');
@@ -5627,7 +5982,7 @@
                 if(!ev.detail || !ev.detail.payload) return;
                 gameData.mp = {
                     enabled: true, isHost: false, localSlot: WodMultiplayer.api.slot,
-                    humanSlots: ev.detail.payload.humanSlots || [1]
+                    humanSlots: ev.detail.payload.humanSlots || [1], eliminatedSlots: []
                 };
                 hidePanels();
                 gameState = 'PLAYING';
@@ -5637,7 +5992,7 @@
                 UI.escMenu.classList.add('hidden');
                 UI.inGameUI.style.display = 'block';
                 UI.canvas.style.display = 'block';
-                setGameSpeed(1);
+                wodSetMpMatchUiFlag(true);
                 wodResetMobileHud();
                 if(!gameData.layers) gameData.layers = {};
                 gameData.layers.territory = false;
@@ -5779,6 +6134,12 @@
                         }
                         assignUnitMoveAlongWaypoints(unit, pathPts);
                     });
+                } else if(d.cmd.kind === 'build') {
+                    let city = gameData.cities.find(c => c.q === d.cmd.cq && c.r === d.cmd.cr);
+                    if(!city || city.owner !== d.fromSlot) return;
+                    let mode = d.cmd.mode;
+                    if(!cityEligibleForBuildPlacementForOwner(city, mode, d.fromSlot)) return;
+                    wodApplyBuildAtCityForOwner(city, mode, d.fromSlot);
                 }
             });
         }
@@ -6865,30 +7226,42 @@
             return n;
         }
 
+        function factionControlsAnyCity(owner) {
+            return gameData.cities.some(c => c.owner === owner);
+        }
+        function anyEnemyOwnedCityRemainsFor(owner) {
+            return gameData.cities.some(c => c.owner > 0 && c.owner !== owner);
+        }
+        function countFriendlyCombatExcludingConvoys(owner) {
+            let n = 0;
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.owner !== owner || u.type === 'convoy') continue;
+                n++;
+            }
+            return n;
+        }
+        function countEnemyCombatExcludingConvoysFor(owner) {
+            let n = 0;
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.type === 'convoy') continue;
+                if(u.owner !== owner) n++;
+            }
+            return n;
+        }
         function playerControlsAnyCity() {
-            return gameData.cities.some(c => c.owner === 1);
+            return factionControlsAnyCity(1);
         }
 
         function anyEnemyOwnedCityRemains() {
-            return gameData.cities.some(c => c.owner > 1);
+            return anyEnemyOwnedCityRemainsFor(1);
         }
 
         function countEnemyCombatUnitsExcludingConvoys() {
-            let n = 0;
-            for(let u of gameData.entities) {
-                if(u.hp <= 0 || u.owner <= 1 || u.type === 'convoy') continue;
-                n++;
-            }
-            return n;
+            return countEnemyCombatExcludingConvoysFor(1);
         }
 
         function countPlayerCombatUnitsExcludingConvoys() {
-            let n = 0;
-            for(let u of gameData.entities) {
-                if(u.hp <= 0 || u.owner !== 1 || u.type === 'convoy') continue;
-                n++;
-            }
-            return n;
+            return countFriendlyCombatExcludingConvoys(1);
         }
 
         function formatGameDurationForSummary(seconds) {
@@ -6904,6 +7277,16 @@
             for(let k of Object.keys(byOwnerObj)) {
                 let o = parseInt(k, 10);
                 if(o > 1) sum += byOwnerObj[k] || 0;
+            }
+            return sum;
+        }
+
+        function wodSumByOwnerMapExcluding(excludeOwner, byOwnerObj) {
+            let sum = 0;
+            if(!byOwnerObj || typeof byOwnerObj !== 'object') return 0;
+            for(let k of Object.keys(byOwnerObj)) {
+                let o = parseInt(k, 10);
+                if(o > 0 && o !== excludeOwner) sum += byOwnerObj[k] || 0;
             }
             return sum;
         }
@@ -6934,22 +7317,61 @@
             let victoryLabel = modeKey === 'annihilation' ? 'Annihilation' : 'Domination';
             let victoryRule = WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || '';
 
-            let plyCities = countCitiesForOwner(1);
-            let enCities = 0;
-            for(let c of gameData.cities) if(c.owner > 1) enCities++;
-            let enArmies = countEnemyCombatUnitsExcludingConvoys();
-            let plyArmies = countPlayerCombatUnitsExcludingConvoys();
+            let lo = wodLocalPlayerOwner();
+            let isMp = !!(gameData.mp && gameData.mp.enabled);
+            let plyCities, enCities, enArmies, plyArmies, plyIncomeAcc, aiIncomeAcc;
+            let plyMpLoss, aiMpLoss, plyTkLoss, aiTkLoss, plyShLoss, aiShLoss;
+            let endCashVal, endMpVal;
+            let rivalIncomeTitle, rivalIncomeSub, shareRivalLabel, lossCardTitle, rivalLossShort, rivalLossLegend;
 
-            let sessionAcc = gameData._sessionIncomeAcc || { player: 0, ai: 0 };
-            let plyIncomeAcc = Math.max(0, Math.floor(sessionAcc.player || 0));
-            let aiIncomeAcc = Math.max(0, Math.floor(sessionAcc.ai || 0));
-
-            let plyMpLoss = getOwnerCasualties(1);
-            let aiMpLoss = wodSumNumericOwnedByAi(gameData.casualtiesByOwner);
-            let plyTkLoss = getOwnerTankCasualties(1);
-            let aiTkLoss = wodSumNumericOwnedByAi(gameData.tankCasualtiesByOwner);
-            let plyShLoss = getOwnerShipCasualties(1);
-            let aiShLoss = wodSumNumericOwnedByAi(gameData.shipCasualtiesByOwner);
+            if(isMp) {
+                plyCities = countCitiesForOwner(lo);
+                enCities = 0;
+                for(let c of gameData.cities) if(c.owner > 0 && c.owner !== lo) enCities++;
+                enArmies = countEnemyCombatExcludingConvoysFor(lo);
+                plyArmies = countFriendlyCombatExcludingConvoys(lo);
+                let sessionAcc = gameData._sessionIncomeAcc || { player: 0, ai: 0, byOwner: {} };
+                let byO = sessionAcc.byOwner || {};
+                plyIncomeAcc = Math.max(0, Math.floor(byO[lo] || 0));
+                aiIncomeAcc = Math.max(0, Math.floor(wodSumByOwnerMapExcluding(lo, byO)));
+                plyMpLoss = getOwnerCasualties(lo);
+                aiMpLoss = wodSumByOwnerMapExcluding(lo, gameData.casualtiesByOwner);
+                plyTkLoss = getOwnerTankCasualties(lo);
+                aiTkLoss = wodSumByOwnerMapExcluding(lo, gameData.tankCasualtiesByOwner);
+                plyShLoss = getOwnerShipCasualties(lo);
+                aiShLoss = wodSumByOwnerMapExcluding(lo, gameData.shipCasualtiesByOwner);
+                endCashVal = Math.floor(wodPlayerTreasury(lo));
+                endMpVal = Math.floor(wodPlayerMpPool(lo));
+                rivalIncomeTitle = 'All rivals (combined)';
+                rivalIncomeSub = 'Sum of every other faction\'s city revenue this match';
+                shareRivalLabel = 'Rivals combined';
+                lossCardTitle = 'Total losses (you vs rivals)';
+                rivalLossShort = 'Rivals';
+                rivalLossLegend = 'Combined rival losses';
+            } else {
+                plyCities = countCitiesForOwner(1);
+                enCities = 0;
+                for(let c of gameData.cities) if(c.owner > 1) enCities++;
+                enArmies = countEnemyCombatUnitsExcludingConvoys();
+                plyArmies = countPlayerCombatUnitsExcludingConvoys();
+                let sessionAcc = gameData._sessionIncomeAcc || { player: 0, ai: 0 };
+                plyIncomeAcc = Math.max(0, Math.floor(sessionAcc.player || 0));
+                aiIncomeAcc = Math.max(0, Math.floor(sessionAcc.ai || 0));
+                plyMpLoss = getOwnerCasualties(1);
+                aiMpLoss = wodSumNumericOwnedByAi(gameData.casualtiesByOwner);
+                plyTkLoss = getOwnerTankCasualties(1);
+                aiTkLoss = wodSumNumericOwnedByAi(gameData.tankCasualtiesByOwner);
+                plyShLoss = getOwnerShipCasualties(1);
+                aiShLoss = wodSumNumericOwnedByAi(gameData.shipCasualtiesByOwner);
+                endCashVal = Math.floor(gameData.money || 0);
+                endMpVal = Math.floor(gameData.manpower || 0);
+                rivalIncomeTitle = 'All AI (combined)';
+                rivalIncomeSub = 'Sum of all AI factions\' city revenue';
+                shareRivalLabel = 'AI combined';
+                lossCardTitle = 'Total losses (you vs AI)';
+                rivalLossShort = 'AI';
+                rivalLossLegend = 'Combined AI losses';
+            }
 
             let barMp = wodDualLossBarWidths(plyMpLoss, aiMpLoss);
             let barTk = wodDualLossBarWidths(plyTkLoss, aiTkLoss);
@@ -6958,6 +7380,9 @@
             let grossSum = plyIncomeAcc + aiIncomeAcc;
             let pctYouUsd = grossSum > 0 ? Math.round((100 * plyIncomeAcc) / grossSum) : 50;
             let pctAiUsd = grossSum > 0 ? Math.round((100 * aiIncomeAcc) / grossSum) : 50;
+            let townsCapSummary = isMp
+                ? ((gameData.sessionCitiesCapturedByOwner && gameData.sessionCitiesCapturedByOwner[lo]) || 0)
+                : (gameData.sessionCitiesCaptured || 0);
 
             statsEl.innerHTML =
                 '<section class="cs-card">' +
@@ -6971,11 +7396,11 @@
                         '<span>Duration</span><span>' + formatGameDurationForSummary(elapsedSec) + '</span>' +
                         '<span>Your cities</span><span>' + plyCities + '</span>' +
                         '<span>Enemy cities</span><span>' + enCities + '</span>' +
-                        '<span>Towns captured</span><span>' + (gameData.sessionCitiesCaptured || 0) + '</span>' +
+                        '<span>Towns captured</span><span>' + townsCapSummary + '</span>' +
                         '<span>Your field armies</span><span>' + plyArmies + '</span>' +
                         '<span>Enemy field armies</span><span>' + enArmies + '</span>' +
-                        '<span>Ending cash</span><span>$' + Math.floor(gameData.money || 0).toLocaleString('en-US') + '</span>' +
-                        '<span>Manpower pool</span><span>' + formatFullCount(Math.floor(gameData.manpower || 0)) + '</span>' +
+                        '<span>Ending cash</span><span>$' + endCashVal.toLocaleString('en-US') + '</span>' +
+                        '<span>Manpower pool</span><span>' + formatFullCount(endMpVal) + '</span>' +
                     '</div>' +
                 '</section>' +
                 '<section class="cs-card">' +
@@ -6987,48 +7412,48 @@
                             '<div class="cs-sub">Gross revenue from your cities this match</div>' +
                         '</div>' +
                         '<div class="cs-pillar">' +
-                            '<h5>All AI (combined)</h5>' +
+                            '<h5>' + rivalIncomeTitle + '</h5>' +
                             '<div class="cs-big">$' + aiIncomeAcc.toLocaleString('en-US') + '</div>' +
-                            '<div class="cs-sub">Sum of all AI factions\' city revenue</div>' +
+                            '<div class="cs-sub">' + rivalIncomeSub + '</div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="cs-bar-row" aria-hidden="true">' +
-                        '<div class="cs-bar-head"><span>Share of total gross income</span><span>You ' + pctYouUsd + '% · AI ' + pctAiUsd + '%</span></div>' +
+                        '<div class="cs-bar-head"><span>Share of total gross income</span><span>You ' + pctYouUsd + '% · ' + shareRivalLabel + ' ' + pctAiUsd + '%</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barUsd.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barUsd.wAi + '"></div>' +
                         '</div>' +
                         '<div class="cs-legend-inline">' +
                             '<span><span class="cs-dot you" role="presentation"></span> You</span>' +
-                            '<span><span class="cs-dot ai" role="presentation"></span> AI combined</span>' +
+                            '<span><span class="cs-dot ai" role="presentation"></span> ' + shareRivalLabel + '</span>' +
                         '</div>' +
                     '</div>' +
                 '</section>' +
                 '<section class="cs-card">' +
-                    '<p class="cs-card-title">Total losses (you vs AI)</p>' +
+                    '<p class="cs-card-title">' + lossCardTitle + '</p>' +
                     '<div class="cs-bar-row">' +
-                        '<div class="cs-bar-head"><span>Soldiers lost (manpower)</span><span>You ' + formatFullCount(plyMpLoss) + ' · AI ' + formatFullCount(aiMpLoss) + '</span></div>' +
+                        '<div class="cs-bar-head"><span>Soldiers lost (manpower)</span><span>You ' + formatFullCount(plyMpLoss) + ' · ' + rivalLossShort + ' ' + formatFullCount(aiMpLoss) + '</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barMp.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barMp.wAi + '"></div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="cs-bar-row">' +
-                        '<div class="cs-bar-head"><span>Armor destroyed</span><span>You ' + formatTanks(plyTkLoss) + ' · AI ' + formatTanks(aiTkLoss) + '</span></div>' +
+                        '<div class="cs-bar-head"><span>Armor destroyed</span><span>You ' + formatTanks(plyTkLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiTkLoss) + '</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barTk.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barTk.wAi + '"></div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="cs-bar-row">' +
-                        '<div class="cs-bar-head"><span>Ships lost</span><span>You ' + formatTanks(plyShLoss) + ' · AI ' + formatTanks(aiShLoss) + '</span></div>' +
+                        '<div class="cs-bar-head"><span>Ships lost</span><span>You ' + formatTanks(plyShLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiShLoss) + '</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barSh.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barSh.wAi + '"></div>' +
                         '</div>' +
                         '<div class="cs-legend-inline">' +
                             '<span><span class="cs-dot you" role="presentation"></span> Your losses</span>' +
-                            '<span><span class="cs-dot ai" role="presentation"></span> Combined AI losses</span>' +
+                            '<span><span class="cs-dot ai" role="presentation"></span> ' + rivalLossLegend + '</span>' +
                         '</div>' +
                     '</div>' +
                 '</section>';
@@ -7039,7 +7464,7 @@
         function triggerCampaignVictory(message, countAsBattleWon) {
             if(gameData._campaignEnded) return;
             gameData._campaignEnded = true;
-            setGameSpeed(0);
+            setGameSpeed(0, true);
             openCampaignBattleSummary('victory', message, message);
             if(countAsBattleWon && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                 wodProgress.lifetime.battlesWon = (wodProgress.lifetime.battlesWon || 0) + 1;
@@ -7051,13 +7476,17 @@
         function triggerCampaignDefeat(message) {
             if(gameData._campaignEnded) return;
             gameData._campaignEnded = true;
-            setGameSpeed(0);
+            setGameSpeed(0, true);
             openCampaignBattleSummary('defeat', message, message);
         }
 
-        /** Ends solo vs AI matches: domination (default) or annihilation; also handles defeat when the player has no cities. */
+        /** Ends solo vs AI matches: domination (default) or annihilation; also handles defeat when the player has no cities. In multiplayer, only the host evaluates end conditions and broadcasts outcomes. */
         function checkCampaignEndConditions(dt) {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
+            if(gameData.mp && gameData.mp.enabled) {
+                if(gameData.mp.isHost) wodMpCheckEndConditionsHost(dt);
+                return;
+            }
             if(!playerControlsAnyCity()) {
                 triggerCampaignDefeat('Defeat — all cities lost.');
                 return;
@@ -7087,8 +7516,16 @@
 
         /** Tracks lifetime stats when a town changes hands; counts eliminations when prevOwner has zero cities left. */
         function handleWodTownCaptureAndElimination(prevOwner, newOwner) {
-            if(gameState !== 'PLAYING' || gameData.menuAttractMode || !wodProgress) return;
+            if(gameState !== 'PLAYING' || gameData.menuAttractMode) return;
             if(prevOwner === newOwner) return;
+            if(gameData.mp && gameData.mp.enabled) {
+                if(gameData.mp.isHost && newOwner > 0 && prevOwner > 0 && prevOwner !== newOwner) {
+                    if(!gameData.sessionCitiesCapturedByOwner) gameData.sessionCitiesCapturedByOwner = {};
+                    gameData.sessionCitiesCapturedByOwner[newOwner] = (gameData.sessionCitiesCapturedByOwner[newOwner] || 0) + 1;
+                }
+                return;
+            }
+            if(!wodProgress) return;
             if(newOwner === 1 && prevOwner > 1) {
                 wodProgress.lifetime.citiesCaptured = (wodProgress.lifetime.citiesCaptured || 0) + 1;
                 gameData.sessionCitiesCaptured = (gameData.sessionCitiesCaptured || 0) + 1;
@@ -7380,8 +7817,27 @@
             return 0;
         }
 
+        function getOwnerTroopKills(owner) {
+            if(gameData.killsByOwner && gameData.killsByOwner[owner]) return gameData.killsByOwner[owner];
+            if(owner === 1) return gameData.playerKills || 0;
+            return 0;
+        }
+        function getOwnerTankKills(owner) {
+            if(gameData.tankKillsByOwner && gameData.tankKillsByOwner[owner]) return gameData.tankKillsByOwner[owner];
+            if(owner === 1) return gameData.playerTankKills || 0;
+            return 0;
+        }
+        function getOwnerShipKills(owner) {
+            if(gameData.shipKillsByOwner && gameData.shipKillsByOwner[owner]) return gameData.shipKillsByOwner[owner];
+            if(owner === 1) return gameData.playerShipKills || 0;
+            return 0;
+        }
+
         function getOwnerTankCasualties(owner) {
-            return (gameData.tankCasualtiesByOwner && gameData.tankCasualtiesByOwner[owner]) || 0;
+            let v = (gameData.tankCasualtiesByOwner && gameData.tankCasualtiesByOwner[owner]) || 0;
+            if(v) return v;
+            if(owner === 1) return gameData.tankCasualties || 0;
+            return 0;
         }
 
         function getOwnerCasualtyReplacementCost(owner) {
@@ -7409,6 +7865,10 @@
             if(amount <= 0) return;
             if(!gameData.casualtiesByOwner) gameData.casualtiesByOwner = {};
             gameData.casualtiesByOwner[owner] = (gameData.casualtiesByOwner[owner] || 0) + amount;
+            if(sourceOwner > 0 && owner > 0 && owner !== sourceOwner) {
+                if(!gameData.killsByOwner) gameData.killsByOwner = {};
+                gameData.killsByOwner[sourceOwner] = (gameData.killsByOwner[sourceOwner] || 0) + amount;
+            }
             if(owner === 1) gameData.casualties = (gameData.casualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerKills = (gameData.playerKills || 0) + amount;
             if(wodProgress) {
@@ -7428,6 +7888,10 @@
             if(amount <= 0) return;
             if(!gameData.tankCasualtiesByOwner) gameData.tankCasualtiesByOwner = {};
             gameData.tankCasualtiesByOwner[owner] = (gameData.tankCasualtiesByOwner[owner] || 0) + amount;
+            if(sourceOwner > 0 && owner > 0 && owner !== sourceOwner) {
+                if(!gameData.tankKillsByOwner) gameData.tankKillsByOwner = {};
+                gameData.tankKillsByOwner[sourceOwner] = (gameData.tankKillsByOwner[sourceOwner] || 0) + amount;
+            }
             if(owner === 1) gameData.tankCasualties = (gameData.tankCasualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerTankKills = (gameData.playerTankKills || 0) + amount;
             if(wodProgress) {
@@ -7442,7 +7906,10 @@
         }
 
         function getOwnerShipCasualties(owner) {
-            return (gameData.shipCasualtiesByOwner && gameData.shipCasualtiesByOwner[owner]) || 0;
+            let v = (gameData.shipCasualtiesByOwner && gameData.shipCasualtiesByOwner[owner]) || 0;
+            if(v) return v;
+            if(owner === 1) return gameData.shipCasualties || 0;
+            return 0;
         }
 
         function addShipCasualties(owner, amount, sourceOwner = 0) {
@@ -7450,6 +7917,10 @@
             if(amount <= 0) return;
             if(!gameData.shipCasualtiesByOwner) gameData.shipCasualtiesByOwner = {};
             gameData.shipCasualtiesByOwner[owner] = (gameData.shipCasualtiesByOwner[owner] || 0) + amount;
+            if(sourceOwner > 0 && owner > 0 && owner !== sourceOwner) {
+                if(!gameData.shipKillsByOwner) gameData.shipKillsByOwner = {};
+                gameData.shipKillsByOwner[sourceOwner] = (gameData.shipKillsByOwner[sourceOwner] || 0) + amount;
+            }
             if(owner === 1) gameData.shipCasualties = (gameData.shipCasualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerShipKills = (gameData.playerShipKills || 0) + amount;
             if(wodProgress && sourceOwner === 1 && owner !== 1) {
@@ -9417,7 +9888,7 @@
 
             let victorySel = document.getElementById('setupVictoryMode');
             gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
-            gameData._sessionIncomeAcc = { player: 0, ai: 0 };
+            gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
             let startMoney = document.getElementById('setupMoney');
             if(startMoney) gameData.money = parseInt(startMoney.value);
@@ -9482,6 +9953,7 @@
             touchCamGesture = null;
             if(gameData) gameData._encircWork = null;
             wodTerminatePowWorkers();
+            wodSetMpMatchUiFlag(false);
         }
 
         function assignStartingCities() {
@@ -9502,13 +9974,17 @@
             gameData.shipCasualties = 0;
             gameData.playerShipKills = 0;
             gameData.casualtiesByOwner = {};
+            gameData.killsByOwner = {};
+            gameData.tankKillsByOwner = {};
+            gameData.shipKillsByOwner = {};
             gameData.casualtyReplacementCostByOwner = {};
             gameData.tankCasualtiesByOwner = {};
             gameData.shipCasualtiesByOwner = {};
             gameData.gameSessionStartedPerfMs = performance.now();
             gameData.sessionCitiesCaptured = 0;
+            gameData.sessionCitiesCapturedByOwner = {};
             gameData._annihilationCheckAcc = 0;
-            gameData._sessionIncomeAcc = { player: 0, ai: 0 };
+            gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
             wodMarkTerrainPoliticalDirty();
             
             let landHexes = gameData.hexList.filter(h => isClaimableLand(h));
@@ -10837,11 +11313,22 @@
             }
 
             if(gameState === 'PLAYING' && !gameData.menuAttractMode && !gameData._campaignEnded) {
-                if(!gameData._sessionIncomeAcc) gameData._sessionIncomeAcc = { player: 0, ai: 0 };
-                gameData._sessionIncomeAcc.player += incomeTick * dt;
-                let aiGross = 0;
-                for(let k in aiIncomeByOwner) aiGross += aiIncomeByOwner[k] || 0;
-                gameData._sessionIncomeAcc.ai += aiGross * dt;
+                if(!gameData._sessionIncomeAcc) gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
+                if(!gameData._sessionIncomeAcc.byOwner) gameData._sessionIncomeAcc.byOwner = {};
+                if(gameData.mp && gameData.mp.enabled) {
+                    for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                        let city = gameData.cities[ci];
+                        let ow = city.owner;
+                        if(ow <= 0) continue;
+                        let inc = getCityIncome(city) * dt;
+                        gameData._sessionIncomeAcc.byOwner[ow] = (gameData._sessionIncomeAcc.byOwner[ow] || 0) + inc;
+                    }
+                } else {
+                    gameData._sessionIncomeAcc.player += incomeTick * dt;
+                    let aiGross = 0;
+                    for(let k in aiIncomeByOwner) aiGross += aiIncomeByOwner[k] || 0;
+                    gameData._sessionIncomeAcc.ai += aiGross * dt;
+                }
             }
 
             if(!gameData.aiTimer) gameData.aiTimer = 0;
@@ -13958,12 +14445,12 @@
             setUiText('ui-tanks', formatTanks(tk));
             let shipCt = formatTanks(sc);
             setUiText('ui-ships', shipCt);
-            setUiText('ui-ship-casualties', formatTanks(gameData.shipCasualties || 0));
-            setUiText('ui-ship-kills', formatTanks(gameData.playerShipKills || 0));
-            setUiText('ui-casualties', formatFullCount(gameData.casualties || 0));
-            setUiText('ui-tank-casualties', formatTanks(gameData.tankCasualties || 0));
-            setUiText('ui-enemy-casualties', formatFullCount(gameData.playerKills || 0));
-            setUiText('ui-tank-kills', formatTanks(gameData.playerTankKills || 0));
+            setUiText('ui-ship-casualties', formatTanks(getOwnerShipCasualties(loHud)));
+            setUiText('ui-ship-kills', formatTanks(getOwnerShipKills(loHud)));
+            setUiText('ui-casualties', formatFullCount(getOwnerCasualties(loHud)));
+            setUiText('ui-tank-casualties', formatTanks(getOwnerTankCasualties(loHud)));
+            setUiText('ui-enemy-casualties', formatFullCount(getOwnerTroopKills(loHud)));
+            setUiText('ui-tank-kills', formatTanks(getOwnerTankKills(loHud)));
             let nowSm = performance.now();
             let entN = gameData.entities.length;
             let smInt = wodUsesVisualViewportLayout()
@@ -14492,7 +14979,8 @@
                     const worldB = (Math.max(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
 
                     for(let unit of gameData.entities) {
-                        if(unit.owner === 1 && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB) {
+                        let lo = wodLocalPlayerOwner();
+                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB) {
                             unit.selected = true; gameData.selection.push(unit);
                         }
                     }
@@ -14584,8 +15072,9 @@
             }
 
             let strokeHit = null;
+            let loStroke = wodLocalPlayerOwner();
             for(let u of gameData.entities) {
-                if(u.owner !== 1 || u.hp <= 0 || u.type === 'convoy') continue;
+                if(u.owner !== loStroke || u.hp <= 0 || u.type === 'convoy') continue;
                 let dx = worldPos.x - u.x;
                 let dy = worldPos.y - u.y;
                 if(dx * dx + dy * dy < Math.pow((u.radius || 10) * 1.68, 2)) {
@@ -14731,7 +15220,8 @@
                     const worldT = (Math.min(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
                     const worldB = (Math.max(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
                     for(let unit of gameData.entities) {
-                        if(unit.owner === 1 && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB) {
+                        let lo = wodLocalPlayerOwner();
+                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB) {
                             unit.selected = true; gameData.selection.push(unit);
                         }
                     }
@@ -14894,7 +15384,7 @@
         function renameSelected() {
             if(gameData.selection.length !== 1) { showNotification("Select one unit or town to rename."); return; }
             let sel = gameData.selection[0];
-            if(sel.owner !== 1) { showNotification("You can only rename your own units and towns."); return; }
+            if(sel.owner !== wodLocalPlayerOwner()) { showNotification("You can only rename your own units and towns."); return; }
             let currentName = sel.name || (sel.id ? "Town" : "Unit");
             let nextName = prompt("Enter a new name:", currentName);
             if(nextName === null) return;
@@ -14939,11 +15429,12 @@
         }
 
         function pickPlayerCityAtWorld(worldPos) {
+            let lo = wodLocalPlayerOwner();
             let best = null;
             let bestD2 = 400;
             for(let i = 0, cl = gameData.cities.length; i < cl; i++) {
                 let city = gameData.cities[i];
-                if(city.owner !== 1 || !city.id) continue;
+                if(city.owner !== lo || !city.id) continue;
                 let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
                 let d2 = dx * dx + dy * dy;
                 if(d2 < bestD2) {
@@ -14954,30 +15445,62 @@
             return best;
         }
 
-        function cityEligibleForBuildPlacement(city, mode) {
-            if(!city || city.owner !== 1 || !city.id || !mode) return false;
+        function cityEligibleForBuildPlacementForOwner(city, mode, owner) {
+            if(!city || city.owner !== owner || !city.id || !mode) return false;
             if(mode === 'factory') {
                 if(city.hasFactory) return false;
-                return gameData.money >= 500;
+                return wodPlayerTreasury(owner) >= 500;
             }
             if(mode === 'harbor') {
                 if(city.hasHarbor) return false;
-                if(gameData.money < 400) return false;
+                if(wodPlayerTreasury(owner) < 400) return false;
                 return cityHasWaterNeighbor(city);
             }
             let cost = getUnitCost(mode);
-            if(gameData.money < cost.money || (gameData.manpower || 0) < cost.manpower) return false;
+            if(wodPlayerTreasury(owner) < cost.money || wodPlayerMpPool(owner) < cost.manpower) return false;
             if(isCitySiegeBlockedForProduction(city) && (mode === 'light' || mode === 'marine' || mode === 'heavy' || mode === 'ship'))
                 return false;
             if(mode === 'light')
-                return !!findSpawnHex('light', city, 1);
+                return !!findSpawnHex('light', city, owner);
             if(mode === 'marine')
-                return !!(cityHasWaterNeighbor(city) && !!findSpawnHex('marine', city, 1));
+                return !!(cityHasWaterNeighbor(city) && !!findSpawnHex('marine', city, owner));
             if(mode === 'heavy')
-                return !!city.hasFactory && !!findSpawnHex('heavy', city, 1);
+                return !!city.hasFactory && !!findSpawnHex('heavy', city, owner);
             if(mode === 'ship')
-                return !!city.hasHarbor && !!findSpawnHex('ship', city, 1);
+                return !!city.hasHarbor && !!findSpawnHex('ship', city, owner);
             return false;
+        }
+        function cityEligibleForBuildPlacement(city, mode) {
+            return cityEligibleForBuildPlacementForOwner(city, mode, wodLocalPlayerOwner());
+        }
+
+        function wodApplyBuildAtCityForOwner(city, mode, owner) {
+            if(mode === 'factory') {
+                wodDeductPlayerMoney(owner, 500);
+                city.hasFactory = true;
+                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+                    wodProgress.lifetime.factoriesBuilt = (wodProgress.lifetime.factoriesBuilt || 0) + 1;
+                    checkWodAchievements();
+                    scheduleSaveWodProgress();
+                }
+            } else if(mode === 'harbor') {
+                wodDeductPlayerMoney(owner, 400);
+                city.hasHarbor = true;
+                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+                    wodProgress.lifetime.harborsBuilt = (wodProgress.lifetime.harborsBuilt || 0) + 1;
+                    checkWodAchievements();
+                    scheduleSaveWodProgress();
+                }
+            } else {
+                let ut = mode === 'heavy' ? 'heavy' : mode === 'ship' ? 'ship' : mode === 'marine' ? 'marine' : 'light';
+                if(!findSpawnHex(ut, city, owner)) {
+                    showNotification(ut === 'ship' ? 'No water nearby!' : 'No clear spawn area near this town!');
+                    return false;
+                }
+                if(!spendForUnit(owner, ut)) return false;
+                spawnUnit(ut, city, owner);
+            }
+            return true;
         }
 
         function enterBuildPlacementMode(mode) {
@@ -14986,11 +15509,12 @@
                 exitBuildPlacementMode();
                 return;
             }
+            let lo = wodLocalPlayerOwner();
             let any = false;
             for(let i = 0, cl = gameData.cities.length; i < cl; i++) {
                 let c = gameData.cities[i];
-                if(c.owner !== 1 || !c.id) continue;
-                if(cityEligibleForBuildPlacement(c, mode)) {
+                if(c.owner !== lo || !c.id) continue;
+                if(cityEligibleForBuildPlacementForOwner(c, mode, lo)) {
                     any = true;
                     break;
                 }
@@ -15007,22 +15531,23 @@
         function tryApplyBuildPlacementAtCity(city) {
             let mode = gameData.buildMode;
             if(!mode || gameState !== 'PLAYING') return false;
-            if(!city || city.owner !== 1 || !city.id) {
+            let lo = wodLocalPlayerOwner();
+            if(!city || city.owner !== lo || !city.id) {
                 showNotification('Choose one of your towns on the map.');
                 return true;
             }
-            if(!cityEligibleForBuildPlacement(city, mode)) {
+            if(!cityEligibleForBuildPlacementForOwner(city, mode, lo)) {
                 if(mode === 'factory') {
                     if(city.hasFactory) showNotification('This town already has a factory.');
                     else showNotification('Not enough money!');
                 } else if(mode === 'harbor') {
                     if(city.hasHarbor) showNotification('This town already has a harbor.');
-                    else if(gameData.money < 400) showNotification('Not enough money!');
+                    else if(wodPlayerTreasury(lo) < 400) showNotification('Not enough money!');
                     else showNotification('Harbors require water next to the town.');
                 } else {
                     let cost = getUnitCost(mode);
-                    if(gameData.money < cost.money) showNotification('Not enough money!');
-                    else if((gameData.manpower || 0) < cost.manpower) showNotification('Not enough manpower!');
+                    if(wodPlayerTreasury(lo) < cost.money) showNotification('Not enough money!');
+                    else if(wodPlayerMpPool(lo) < cost.manpower) showNotification('Not enough manpower!');
                     else if(mode === 'heavy' && !city.hasFactory) showNotification('Requires factory!');
                     else if(mode === 'ship' && !city.hasHarbor) showNotification('Requires harbor!');
                     else if(mode === 'marine' && !cityHasWaterNeighbor(city)) showNotification('Marines train only at coastal towns (water adjacent).');
@@ -15031,32 +15556,13 @@
                 }
                 return true;
             }
-
-            if(mode === 'factory') {
-                gameData.money -= 500;
-                city.hasFactory = true;
-                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodProgress.lifetime.factoriesBuilt = (wodProgress.lifetime.factoriesBuilt || 0) + 1;
-                    checkWodAchievements();
-                    scheduleSaveWodProgress();
-                }
-            } else if(mode === 'harbor') {
-                gameData.money -= 400;
-                city.hasHarbor = true;
-                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodProgress.lifetime.harborsBuilt = (wodProgress.lifetime.harborsBuilt || 0) + 1;
-                    checkWodAchievements();
-                    scheduleSaveWodProgress();
-                }
-            } else {
-                let ut = mode === 'heavy' ? 'heavy' : mode === 'ship' ? 'ship' : mode === 'marine' ? 'marine' : 'light';
-                if(!findSpawnHex(ut, city, 1)) {
-                    showNotification(ut === 'ship' ? 'No water nearby!' : 'No clear spawn area near this town!');
-                    return true;
-                }
-                if(!spendForUnit(1, ut)) return true;
-                spawnUnit(ut, city, 1);
+            if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
+                if(typeof WodMultiplayer !== 'undefined')
+                    WodMultiplayer.sendCmd({ kind: 'build', mode, cq: city.q, cr: city.r });
+                exitBuildPlacementMode();
+                return true;
             }
+            if(!wodApplyBuildAtCityForOwner(city, mode, lo)) return true;
             exitBuildPlacementMode();
             return true;
         }

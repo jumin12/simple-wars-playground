@@ -109,7 +109,7 @@
               joinReject = null;
             }
           }
-          emit('Joined', { ...api, lobbyName: msg.lobbyName });
+          emit('Joined', { ...api, lobbyName: msg.lobbyName, players: msg.players });
           break;
         case 'peer_joined':
         case 'peer_left':

@@ -149,6 +149,7 @@ wss.on('connection', (ws) => {
       }),
     );
   } catch (_) {}
+  broadcastLobbyList();
 
   ws.on('message', (raw) => {
     let msg;
@@ -195,6 +196,7 @@ wss.on('connection', (ws) => {
           isHost: true,
           max: MAX_PLAYERS,
           lobbyName: room.name,
+          players: room.clients.length,
         }),
       );
       broadcastAll(room, { t: 'peer_joined', slot: client.slot, count: room.clients.length });
@@ -233,6 +235,7 @@ wss.on('connection', (ws) => {
           isHost: client.isHost,
           max: MAX_PLAYERS,
           lobbyName: room.name,
+          players: room.clients.length,
         }),
       );
       broadcastAll(room, { t: 'peer_joined', slot: client.slot, count: room.clients.length });
