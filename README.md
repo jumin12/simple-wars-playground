@@ -14,9 +14,10 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
    npm start
    ```
 
-   Default WebSocket URL: `ws://localhost:8080`. The in-game Multiplayer panel can override this (stored in `localStorage` as `wod_mp_ws`).
+   Default WebSocket URL: `ws://localhost:8080` (or set `window.WOD_MP_WS_URL` before `multiplayer-client.js` loads).  
+   On **`simple-wars-live.onrender.com`**, the game injects **`wss://simple-wars.onrender.com`** and connects when you open **Multiplayer** — no manual URL.
 
-3. **Flow:** open **Multiplayer** → **Connect** → browse **Open games** or **Create lobby**. Optional lobby password; host sets **Map & rules** (same screen as **Play vs AI**), then **Launch match**. Clients stay in sync via snapshots.
+3. **Flow:** open **Multiplayer** (wait until status shows connected) → browse **Open games** or **Create lobby**. Optional lobby password; host sets **Map & rules** (same screen as **Play vs AI**), then **Launch match**. Clients stay in sync via snapshots.
 
 ## Production on Render
 
@@ -24,8 +25,8 @@ You need **two** services. They get **two different URLs**:
 
 | Service | Example URL | Used for |
 |--------|-------------|----------|
-| **Static Site** | `https://simple-wars.onrender.com` | Opening the game in the browser |
-| **Web Service (Node)** | `https://simple-wars-mp.onrender.com` | WebSocket relay — use **`wss://simple-wars-mp.onrender.com`** in the game |
+| **Static Site** | `https://simple-wars-live.onrender.com` | Opening the game in the browser |
+| **Web Service (Node)** | `https://simple-wars.onrender.com` | WebSocket relay — game uses **`wss://simple-wars.onrender.com`** (wired automatically on the live static host) |
 
 Do **not** set `WOD_MP_WS_URL` to your static `https://` link. Browsers need **`wss://`** to the **Node** service (same host as the Web Service, scheme `wss`).
 
@@ -49,7 +50,7 @@ Typical settings:
 
 ### 3. Point the game at the relay
 
-Set **`WOD_MP_WS_URL`** to **`wss://<your-node-service-name>.onrender.com`** (no path), or type it in the Multiplayer **Server** field and click **Connect**.
+For a **custom domain or fork**, set `window.WOD_MP_WS_URL = 'wss://<your-node-service>.onrender.com'` in a small inline script in `index.html` **before** `multiplayer-client.js` (same pattern as the `simple-wars-live` block). Use **`wss://`** and no path — not the static site’s `https://` URL.
 
 **Lobby list:** the server broadcasts open lobbies and **player count** to everyone connected. Join from the list (password prompt when locked). No room codes.
 

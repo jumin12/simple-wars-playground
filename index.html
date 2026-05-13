@@ -3973,16 +3973,11 @@
                 <h2>Multiplayer</h2>
                 <p style="font-size:13px;opacity:0.9;max-width:640px;line-height:1.45">Host runs the simulation; other players get snapshots and send orders. Up to <strong>6</strong> humans. Browse open lobbies or host your own — optional password. Use the same <strong>map &amp; rules</strong> screen as solo (below) after hosting.</p>
                 <p style="font-size:14px;margin:10px 0"><strong>Players online:</strong> <span id="mpOnlineCount">—</span></p>
-                <div class="setup-row">
-                    <label>Server</label>
-                    <input type="text" id="mpServerUrl" placeholder="wss://your-mp.onrender.com" style="flex:1;min-width:0">
-                </div>
                 <div class="setup-row" style="flex-wrap:wrap;gap:8px">
-                    <button type="button" class="build-btn" id="mpBtnConnect">Connect</button>
                     <button type="button" class="build-btn" id="mpBtnRefresh" title="Refresh lobby list">Refresh games</button>
                     <button type="button" class="build-btn" id="mpBtnDisconnect" style="display:none">Disconnect</button>
                 </div>
-                <p id="mpStatus" style="font-size:13px;min-height:1.5em;opacity:0.95">Not connected to server.</p>
+                <p id="mpStatus" style="font-size:13px;min-height:1.5em;opacity:0.95">Connecting…</p>
                 <div id="mpBrowseHostWrap" style="display:flex;gap:20px;flex-wrap:wrap;margin-top:14px;align-items:flex-start">
                     <div style="flex:1;min-width:260px">
                         <h3 style="margin:0 0 8px 0;font-size:1.05rem">Open games</h3>
@@ -4501,10 +4496,16 @@
         </div>
     </div>
 
-    <!-- Set your Render Web Service WebSocket URL in production (wss://…). Local dev uses ws://localhost:8080 when unset. -->
-    <!-- Multiplayer: set WOD_MP_WS_URL to your **Node Web Service** (wss://), NOT this static page (https://). -->
-    <!-- Example static: https://simple-wars.onrender.com  |  relay: wss://simple-wars-mp.onrender.com -->
-    <script>window.WOD_MP_WS_URL = window.WOD_MP_WS_URL || '';</script>
+    <!-- Production: static site simple-wars-live.onrender.com talks to Node relay simple-wars.onrender.com (wss). -->
+    <script>
+    (function () {
+        if (typeof window === 'undefined' || !window.location) return;
+        var h = window.location.hostname || '';
+        // Override with a full URL if you fork deploy (must be wss:// on https pages)
+        if (h === 'simple-wars-live.onrender.com' || /(^|\.)simple-wars-live\.onrender\.com$/i.test(h))
+            window.WOD_MP_WS_URL = 'wss://simple-wars.onrender.com';
+    })();
+    </script>
     <script src="multiplayer-client.js"></script>
     <script>
         // --- Core UI & State ---
@@ -4822,7 +4823,10 @@
                 syncShowOrdersCheckbox();
                 syncOrderArrowsPathfindingCheckbox();
             }
-            if(panelId === 'multiplayer') wodMpWireLobbyUi();
+            if(panelId === 'multiplayer') {
+                wodMpWireLobbyUi();
+                wodMpEnsureConnected();
+            }
             if(panelId === 'setup') {
                 syncSetupPlayerColorRow();
                 initSetupPanelBindings();
@@ -5386,8 +5390,9 @@
         }
         async function wodMpJoinLobbyFromList(id, locked) {
             let st = document.getElementById('mpStatus');
+            await wodMpEnsureConnected();
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
-                if(st) st.textContent = 'Connect to the server first.';
+                if(st) st.textContent = 'Could not reach multiplayer server.';
                 return;
             }
             if(WodMultiplayer.api.code && WodMultiplayer.api.code !== id) {
@@ -5453,51 +5458,53 @@
             if(btnDisc) btnDisc.style.display = api.socketOpen ? '' : 'none';
         }
 
+        let _wodMpConnecting = null;
+        function wodMpEnsureConnected() {
+            if(typeof WodMultiplayer === 'undefined') return Promise.resolve();
+            if(WodMultiplayer.api.socketOpen) {
+                wodMpRefreshMpPanelState();
+                return Promise.resolve();
+            }
+            if(_wodMpConnecting) return _wodMpConnecting;
+            let st = document.getElementById('mpStatus');
+            if(st) st.textContent = 'Connecting to multiplayer server…';
+            _wodMpConnecting = WodMultiplayer.connect()
+                .then(() => {
+                    if(st) st.textContent = 'Connected. Browse open games or create a lobby.';
+                    wodMpRefreshMpPanelState();
+                    wodMpRenderLobbyList(WodMultiplayer.api.lobbies || []);
+                })
+                .catch((e) => {
+                    let m = e && e.message ? e.message : String(e);
+                    if(st) st.textContent = 'Could not connect: ' + m + ' — check that the relay is running.';
+                })
+                .finally(() => { _wodMpConnecting = null; });
+            return _wodMpConnecting;
+        }
+
         function wodMpWireLobbyUi() {
             if(window._wodMpUiWired) {
-                let urlEl0 = document.getElementById('mpServerUrl');
-                if(urlEl0) urlEl0.value = localStorage.getItem('wod_mp_ws') || urlEl0.value || '';
                 wodMpRefreshMpPanelState();
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.lobbies)
                     wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
+                wodMpEnsureConnected();
                 return;
             }
             window._wodMpUiWired = true;
             let st = document.getElementById('mpStatus');
             let btnDisc = document.getElementById('mpBtnDisconnect');
             let btnLaunch = document.getElementById('mpBtnLaunch');
-            let urlEl = document.getElementById('mpServerUrl');
-            if(urlEl && !urlEl._wodBound) {
-                urlEl._wodBound = true;
-                urlEl.value = localStorage.getItem('wod_mp_ws') || '';
-                urlEl.addEventListener('change', () => localStorage.setItem('wod_mp_ws', urlEl.value));
-            }
-            if(window.WOD_MP_WS_URL) {
-            } else if(urlEl && urlEl.value) {
-                window.WOD_MP_WS_URL = urlEl.value.trim();
-            }
 
-            document.getElementById('mpBtnConnect').onclick = async () => {
-                try {
-                    if(urlEl && urlEl.value.trim()) window.WOD_MP_WS_URL = urlEl.value.trim();
-                    if(st) st.textContent = 'Connecting…';
-                    await WodMultiplayer.connect();
-                    if(st) st.textContent = 'Connected. Browse games or create a lobby.';
-                    wodMpRefreshMpPanelState();
-                    wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
-                } catch(e) {
-                    if(st) st.textContent = 'Failed: ' + (e && e.message);
-                }
-            };
-            document.getElementById('mpBtnRefresh').onclick = () => {
+            document.getElementById('mpBtnRefresh').onclick = async () => {
+                await wodMpEnsureConnected();
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.socketOpen)
                     WodMultiplayer.requestLobbyList();
-                else if(st) st.textContent = 'Connect first to refresh the list.';
             };
             document.getElementById('mpBtnHostCreate').onclick = async () => {
                 try {
+                    await wodMpEnsureConnected();
                     if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
-                        if(st) st.textContent = 'Connect to the server first.';
+                        if(st) st.textContent = 'Could not reach multiplayer server.';
                         return;
                     }
                     let nameEl = document.getElementById('mpHostName');
