@@ -109,7 +109,10 @@
               joinReject = null;
             }
           }
-          emit('Joined', { ...api, lobbyName: msg.lobbyName, players: msg.players });
+          emit('Joined', { ...api, lobbyName: msg.lobbyName, players: msg.players, meta: msg.meta || {} });
+          break;
+        case 'room_meta':
+          emit('RoomMeta', { meta: msg.meta || {} });
           break;
         case 'peer_joined':
         case 'peer_left':
@@ -252,6 +255,9 @@
     },
     sendLobbyMeta(meta) {
       send({ t: 'lobby_meta', meta: meta || {} });
+    },
+    sendLobbyColor(slot, color) {
+      send({ t: 'lobby_color', slot: slot | 0, color: String(color || '').trim() });
     },
     leaveLobby() {
       if (ws && ws.readyState === 1) send({ t: 'leave' });

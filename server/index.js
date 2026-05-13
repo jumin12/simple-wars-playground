@@ -45,11 +45,14 @@ function getLobbyListPublic() {
   const out = [];
   for (const room of rooms.values()) {
     if (room.matchStarted) continue;
+    let mh = room.meta && room.meta.maxHumans != null ? parseInt(room.meta.maxHumans, 10) : MAX_PLAYERS;
+    if (!Number.isFinite(mh)) mh = MAX_PLAYERS;
+    const cap = Math.min(MAX_PLAYERS, Math.max(2, mh));
     out.push({
       id: room.id,
       name: room.name,
       players: room.clients.length,
-      max: MAX_PLAYERS,
+      max: cap,
       locked: !!room.password,
       meta: room.meta || {},
     });
@@ -80,29 +83,46 @@ function addClientToRoom(client, room) {
     client.isHost = false;
     client.slot = room.clients.length;
   }
+  if (!room.meta.playerColors || typeof room.meta.playerColors !== 'object')
+    room.meta.playerColors = {};
+  const sk = String(client.slot);
+  if (!room.meta.playerColors[sk]) {
+    const defs = ['#2ecc71', '#3498db', '#e74c3c', '#9b59b6', '#e67e22', '#f1c40f'];
+    room.meta.playerColors[sk] = defs[(client.slot - 1) % defs.length];
+  }
 }
 
 function leaveRoom(client) {
   const room = client.room;
   if (!room) return;
+  const leftSlot = client.slot;
+  const colorByClient = new Map();
+  if (room.meta && typeof room.meta === 'object' && room.meta.playerColors) {
+    for (const c of room.clients) {
+      const col = room.meta.playerColors[String(c.slot)];
+      if (col) colorByClient.set(c, col);
+    }
+  }
   const idx = room.clients.indexOf(client);
   if (idx >= 0) room.clients.splice(idx, 1);
-  if (room.host === client) {
-    room.host = room.clients[0] || null;
-    if (room.host) {
-      for (let i = 0; i < room.clients.length; i++) {
-        room.clients[i].slot = i + 1;
-        room.clients[i].isHost = i === 0;
-      }
-      try {
-        if (room.host.ws.readyState === 1)
-          room.host.ws.send(JSON.stringify({ t: 'host_migrated', slot: room.host.slot }));
-      } catch (_) {}
-    }
-  } else {
-    for (let i = 0; i < room.clients.length; i++) {
-      room.clients[i].slot = i + 1;
-    }
+  const wasHost = room.host === client;
+  if (wasHost) room.host = room.clients[0] || null;
+
+  const newPc = {};
+  for (let i = 0; i < room.clients.length; i++) {
+    const c = room.clients[i];
+    c.slot = i + 1;
+    c.isHost = room.host === c;
+    const col = colorByClient.get(c);
+    if (col) newPc[String(i + 1)] = col;
+  }
+  if (room.meta && typeof room.meta === 'object') room.meta.playerColors = newPc;
+
+  if (wasHost && room.host) {
+    try {
+      if (room.host.ws.readyState === 1)
+        room.host.ws.send(JSON.stringify({ t: 'host_migrated', slot: room.host.slot }));
+    } catch (_) {}
   }
   for (const c of room.clients) {
     try {
@@ -116,7 +136,8 @@ function leaveRoom(client) {
         );
     } catch (_) {}
   }
-  broadcastAll(room, { t: 'peer_left', slot: client.slot, count: room.clients.length });
+  broadcastAll(room, { t: 'peer_left', slot: leftSlot, count: room.clients.length });
+  if (room.clients.length > 0) broadcastAll(room, { t: 'room_meta', meta: room.meta });
   if (room.clients.length === 0) rooms.delete(room.id);
   client.room = null;
   client.slot = 0;
@@ -181,7 +202,19 @@ wss.on('connection', (ws) => {
         id,
         name,
         password: password || null,
-        meta: typeof msg.meta === 'object' && msg.meta ? msg.meta : {},
+        meta: {
+          mapSize: 60,
+          mapShape: 'island',
+          aiCount: 1,
+          victoryMode: 'domination',
+          money: 1000,
+          maxHumans: MAX_PLAYERS,
+          playerColors: {},
+          mapSizeLabel: 'Medium',
+          mapShapeLabel: 'Island',
+          victoryLabel: 'Domination',
+          ...(typeof msg.meta === 'object' && msg.meta ? msg.meta : {}),
+        },
         clients: [],
         host: null,
         matchStarted: false,
@@ -197,9 +230,11 @@ wss.on('connection', (ws) => {
           max: MAX_PLAYERS,
           lobbyName: room.name,
           players: room.clients.length,
+          meta: room.meta,
         }),
       );
       broadcastAll(room, { t: 'peer_joined', slot: client.slot, count: room.clients.length });
+      broadcastAll(room, { t: 'room_meta', meta: room.meta });
       broadcastLobbyList();
       return;
     }
@@ -216,7 +251,10 @@ wss.on('connection', (ws) => {
         );
         return;
       }
-      if (room.clients.length >= MAX_PLAYERS) {
+      let mh = room.meta && room.meta.maxHumans != null ? parseInt(room.meta.maxHumans, 10) : MAX_PLAYERS;
+      if (!Number.isFinite(mh)) mh = MAX_PLAYERS;
+      const cap = Math.min(MAX_PLAYERS, Math.max(2, mh));
+      if (room.clients.length >= cap) {
         ws.send(JSON.stringify({ t: 'error', msg: 'Lobby full' }));
         return;
       }
@@ -236,9 +274,11 @@ wss.on('connection', (ws) => {
           max: MAX_PLAYERS,
           lobbyName: room.name,
           players: room.clients.length,
+          meta: room.meta,
         }),
       );
       broadcastAll(room, { t: 'peer_joined', slot: client.slot, count: room.clients.length });
+      broadcastAll(room, { t: 'room_meta', meta: room.meta });
       broadcastLobbyList();
       return;
     }
@@ -246,7 +286,40 @@ wss.on('connection', (ws) => {
     if (t === 'lobby_meta') {
       if (!client.room || !client.isHost || client.room.matchStarted) return;
       const m = msg.meta;
-      if (m && typeof m === 'object') client.room.meta = { ...client.room.meta, ...m };
+      if (m && typeof m === 'object') {
+        const prevPc = (client.room.meta && client.room.meta.playerColors) || {};
+        client.room.meta = { ...client.room.meta, ...m };
+        if (!client.room.meta.playerColors || typeof client.room.meta.playerColors !== 'object')
+          client.room.meta.playerColors = {};
+        Object.assign(client.room.meta.playerColors, prevPc);
+        const mh = parseInt(client.room.meta.maxHumans, 10);
+        if (!Number.isFinite(mh)) client.room.meta.maxHumans = MAX_PLAYERS;
+        else client.room.meta.maxHumans = Math.min(MAX_PLAYERS, Math.max(2, mh));
+      }
+      broadcastAll(client.room, { t: 'room_meta', meta: client.room.meta });
+      broadcastLobbyList();
+      return;
+    }
+
+    if (t === 'lobby_color') {
+      if (!client.room || client.room.matchStarted) return;
+      const slot = parseInt(msg.slot, 10) || 0;
+      if (slot !== client.slot) return;
+      const hex = String(msg.color || '').trim();
+      if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
+      if (!client.room.meta.playerColors || typeof client.room.meta.playerColors !== 'object')
+        client.room.meta.playerColors = {};
+      const taken = Object.entries(client.room.meta.playerColors).some(
+        ([k, v]) => parseInt(k, 10) !== slot && String(v).toLowerCase() === hex.toLowerCase(),
+      );
+      if (taken) {
+        try {
+          ws.send(JSON.stringify({ t: 'error', msg: 'Color already taken' }));
+        } catch (_) {}
+        return;
+      }
+      client.room.meta.playerColors[String(slot)] = hex;
+      broadcastAll(client.room, { t: 'room_meta', meta: client.room.meta });
       broadcastLobbyList();
       return;
     }
