@@ -4483,7 +4483,7 @@
 
                 <div class="esc-help-block">
                     <h4>Borders and the setup preview</h4>
-                    <p class="esc-help-prose">When you generate a procedural map, each faction’s capital seeds a <strong>distance-based territory</strong>; the game then <strong>balances land area</strong> between factions (± one tile when the map does not divide evenly) so borders stay smooth instead of jagged. Towns are placed <strong>after</strong> reading your AI / lobby player count, spread around the island so every wedge has candidates. Setup and lobby previews draw <strong>exact political ownership</strong> from the same hex data the match uses (cardinal neighbor edges, same faction colors).</p>
+                    <p class="esc-help-prose">When you generate a procedural map, each faction’s capital seeds a <strong>distance-based territory</strong>; the game then <strong>balances land area</strong> between factions (± one tile when the map does not divide evenly) so borders stay smooth instead of jagged. Town count scales with <strong>buildable land</strong> so small maps are not carpeted in settlements. New towns are prioritized <strong>inside each faction’s compass wedge</strong> (same rotation as the first political pass) so they sit naturally in that side of the island instead of skewing into a neighbour’s heartland. Setup and lobby previews draw <strong>exact political ownership</strong> from the same hex data the match uses (cardinal neighbor edges, same faction colors).</p>
                     <p class="esc-help-prose">In solo play, click <strong>Generate New</strong> when you want to lock in a layout: your last preview shares the same random seed as the very next <strong>Start</strong> provided you do not change map size, shape, or AI count before launching. If you skip preview entirely, each start still generates a full procedural map — it just will not match an older thumbnail sitting in the UI. Multiplayer reuses the lobby seed for both the lobby minimap and the host launch so every seat sees the same geography.</p>
                 </div>
 
@@ -6006,10 +6006,15 @@
                 for(let i = 0; i < f; i++) tgt[sorted[i]] = base + (i < rem ? 1 : 0);
                 let err = 0;
                 for(let o of sorted) err = Math.max(err, Math.abs(cts[o] - tgt[o]));
-                let gain = 0.09 + Math.min(0.55, it * 0.028);
+                let gain = 0.097 + Math.min(0.6, it * 0.03);
                 for(let o of sorted) bias[o] += gain * stepScale * (cts[o] - tgt[o]);
-                if(err <= 1 && it > 12) break;
+                if(err <= 1 && it > 16) break;
             }
+        }
+        function wodDeterministicCitySplitPhase01(seedMixed) {
+            let s = seedMixed >>> 0;
+            s = Math.imul(s ^ (s >>> 17), 0xed558ccd);
+            return (s >>> 0) / 4294967296;
         }
         function wodSyncUrbanFootprintOwners() {
             for(let city of gameData.cities) {
@@ -6066,10 +6071,15 @@
             }
             cx /= landHexes.length;
             cy /= landHexes.length;
-            let angleOffset = Math.random() * Math.PI * 2;
+            let angleOffset = (gameData._wodCitySplitAnglePhase != null && typeof gameData._wodCitySplitAnglePhase === 'number' && !Number.isNaN(gameData._wodCitySplitAnglePhase))
+                ? gameData._wodCitySplitAnglePhase
+                : Math.random() * Math.PI * 2;
             function splitScore(pt) {
-                let noiseValue = (fbm(pt.x * 0.0025 + 123, pt.y * 0.0025 + 456, 4) - 0.5) * 0.38;
-                return (Math.atan2(pt.y - cy, pt.x - cx) - angleOffset + noiseValue + Math.PI * 4) % (Math.PI * 2);
+                let noiseValue = (fbm(pt.x * 0.0025 + 123, pt.y * 0.0025 + 456, 4) - 0.5) * 0.12;
+                let twoPi = Math.PI * 2;
+                let v = Math.atan2(pt.y - cy, pt.x - cx) - angleOffset + noiseValue + twoPi * 4;
+                v = ((v % twoPi) + twoPi) % twoPi;
+                return v;
             }
             let sorted = [...gameData.cities].sort((a, b) => splitScore(a) - splitScore(b));
             if(sorted.length === 0) return;
@@ -11623,27 +11633,44 @@
             }
             return { cx, cy, maxR };
         }
-        /** Round-robin wedges from map centroid so city sites exist in every player's future arc once faction count is known. */
-        function wodStratifiedLandOrderForCityPlacement(landHexes, wedgeCount, lcm) {
+        /** Round-robin wedges from centroid; same rotation as Political splitPhase; favors hexes nearer each wedge’s focal arc (fewer stray towns deep in hostile cores). */
+        function wodWedgeFocusedCityCandidateOrder(landHexes, wedgeCount, lcm, anglePhase) {
             if(!landHexes || landHexes.length === 0) return [];
             let w = Math.max(1, wedgeCount | 0);
-            let buckets = Array.from({ length: w }, () => []);
             let cx = lcm.cx, cy = lcm.cy;
             let twoPi = Math.PI * 2;
+            let phase = typeof anglePhase === 'number' && !Number.isNaN(anglePhase) ? anglePhase : 0;
+            let focalR = lcm.maxR * Math.min(0.52, Math.max(0.22, 0.42 - (w - 2) * 0.038));
+            let focals = [];
+            for(let k = 0; k < w; k++) {
+                let ang = ((k + 0.5) / w) * twoPi + phase;
+                focals.push({ x: cx + Math.cos(ang) * focalR, y: cy + Math.sin(ang) * focalR });
+            }
+            let buckets = Array.from({ length: w }, () => []);
             for(let h of landHexes) {
-                let ang = Math.atan2(h.y - cy, h.x - cx);
-                let t = ((ang % twoPi) + twoPi) % twoPi;
-                let b = Math.min(w - 1, Math.floor(t / twoPi * w));
+                let raw = Math.atan2(h.y - cy, h.x - cx) - phase;
+                raw = raw + twoPi * 4;
+                raw = raw % twoPi;
+                if(raw < 0) raw += twoPi;
+                let b = Math.min(w - 1, Math.floor(raw / twoPi * w));
                 buckets[b].push(h);
             }
-            for(let b of buckets) b.sort(() => Math.random() - 0.5);
+            for(let b = 0; b < w; b++) {
+                let fx = focals[b].x, fy = focals[b].y;
+                buckets[b].sort((a, b2) => {
+                    let da = (a.x - fx) * (a.x - fx) + (a.y - fy) * (a.y - fy);
+                    let db = (b2.x - fx) * (b2.x - fx) + (b2.y - fy) * (b2.y - fy);
+                    if(da !== db) return da - db;
+                    return Math.random() - 0.5;
+                });
+            }
             let order = [];
             let qi = Array(w).fill(0);
             for(;;) {
                 let any = false;
-                for(let f = 0; f < w; f++) {
-                    if(qi[f] < buckets[f].length) {
-                        order.push(buckets[f][qi[f]++]);
+                for(let fidx = 0; fidx < w; fidx++) {
+                    if(qi[fidx] < buckets[fidx].length) {
+                        order.push(buckets[fidx][qi[fidx]++]);
                         any = true;
                     }
                 }
@@ -12440,7 +12467,7 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             smoothStartingTerritory(ownersList, 5, 2);
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, 34);
+            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, 44);
 
             wodSyncUrbanFootprintOwners();
             wodSyncCityOwnersFromCenterHex();
@@ -12505,6 +12532,7 @@
             try {
             gameData.hexes = {}; gameData.hexList = [];
             gameData.cities = []; gameData.roads = []; gameData.entities = [];
+            gameData._wodCitySplitAnglePhase = null;
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 1000;
             gameData.income = 10;             gameData.selection = [];
@@ -12687,15 +12715,21 @@
                 if(aiSync) gameData.aiCount = Math.max(1, Math.min(5, parseInt(aiSync.value, 10) || 1));
             }
             let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
-            let numCities = Math.floor((mapR * mapR) / 600) + 5;
-            let neededStarts = factionSlots;
-            let citiesPerPlayer = Math.max(2, Math.min(6, 2 + Math.floor(mapR / 50)));
-            numCities = Math.max(numCities, neededStarts + 3, neededStarts * citiesPerPlayer);
-            numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
-            let citySpacing = Math.max(hr * 14, Math.min(hr * 38, mapR * hr * 0.35));
             let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
+            let landNC = Math.max(1, landForCities.length);
+
+            gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
+
+            let citiesPerPlayer = Math.min(4, Math.max(2, 1 + Math.floor(mapR / 72)));
+            let numCities = factionSlots * citiesPerPlayer;
+            let spacingDen = Math.max(62, Math.floor(76 - factionSlots * 3.8 - Math.min(18, Math.floor(mapR / 55))));
+            let maxFromLand = Math.max(factionSlots * 2, Math.floor(landNC / spacingDen));
+            numCities = Math.min(numCities, maxFromLand);
+            numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
+
+            let citySpacing = Math.max(hr * 17, Math.min(hr * 41, mapR * hr * 0.395));
             let lcm = wodLandCentroidMaxRadius(landForCities);
-            let cityPickOrder = wodStratifiedLandOrderForCityPlacement(landForCities, factionSlots, lcm);
+            let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase);
             let cityPickCursor = 0;
             let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
             let innerRSq = innerRad * innerRad;
