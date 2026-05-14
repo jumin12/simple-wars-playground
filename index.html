@@ -6249,80 +6249,6 @@
             }
         }
 
-        /** Nudge claimable border tiles so active factions hold similar land area (skips urban and city centers). */
-        function wodBalanceLandTilesAtBorder(ownerIds, maxIter) {
-            if(!ownerIds || ownerIds.length < 2 || !gameData.hexList) return;
-            let f = ownerIds.length;
-            let sortedSlots = [...ownerIds].sort((a, b) => a - b);
-            let cityCtr = new Set();
-            for(let c of gameData.cities) {
-                if(c) cityCtr.add(`${c.q},${c.r}`);
-            }
-            function isProtected(h) {
-                if(!h || !isClaimableLand(h)) return true;
-                if(h.type === 'urban') return true;
-                if(cityCtr.has(`${h.q},${h.r}`)) return true;
-                return false;
-            }
-            function countTiles(o) {
-                let n = 0;
-                for(let h of gameData.hexList) {
-                    if(isClaimableLand(h) && h.owner === o) n++;
-                }
-                return n;
-            }
-            let total = 0;
-            for(let o of ownerIds) total += countTiles(o);
-            if(total < f) return;
-            let base = Math.floor(total / f);
-            let rem = total % f;
-            let target = {};
-            for(let i = 0; i < f; i++) target[sortedSlots[i]] = base + (i < rem ? 1 : 0);
-            function allMatch() {
-                for(let o of ownerIds) {
-                    if(countTiles(o) !== target[o]) return false;
-                }
-                return true;
-            }
-            maxIter = maxIter || 2500;
-            for(let pass = 0; pass < maxIter; pass++) {
-                if(allMatch()) return;
-                let rich = null, poor = null;
-                let bestOver = -1, bestUnder = Infinity;
-                for(let o of ownerIds) {
-                    let c = countTiles(o);
-                    let t = target[o];
-                    if(c > t && c - t > bestOver) {
-                        bestOver = c - t;
-                        rich = o;
-                    }
-                    if(c < t && t - c < bestUnder) {
-                        bestUnder = t - c;
-                        poor = o;
-                    }
-                }
-                if(rich == null || poor == null || rich === poor) return;
-                let cands = [];
-                for(let h of gameData.hexList) {
-                    if(h.owner !== rich || isProtected(h)) continue;
-                    for(let nh of getNeighborHexes(h)) {
-                        if(nh && isClaimableLand(nh) && nh.owner === poor) {
-                            cands.push(h);
-                            break;
-                        }
-                    }
-                }
-                if(cands.length === 0) continue;
-                for(let i = cands.length - 1; i > 0; i--) {
-                    let j = Math.floor(Math.random() * (i + 1));
-                    let t = cands[i];
-                    cands[i] = cands[j];
-                    cands[j] = t;
-                }
-                setHexOwner(cands[0], poor);
-            }
-        }
-
         /** Remove faction land that cannot reach any of that faction's cities using only that faction's own tiles (prevents weird encircled enclaves). */
         function wodRemoveUnconnectedFactionHexPockets(ownerIds) {
             if(!ownerIds || ownerIds.length === 0) return;
@@ -12699,8 +12625,13 @@
             wodFinalizeStartingCitiesVsTerritory(startCities);
             wodSyncUrbanFootprintOwners();
             wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
+            wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
             wodSyncUrbanFootprintOwners();
-            wodBalanceLandTilesAtBorder(ownersList, 3200);
+            smoothStartingTerritory(ownersList, 4, 4);
+            wodRemoveUnconnectedFactionHexPockets(ownersList);
+            wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
+            wodSyncUrbanFootprintOwners();
+            wodFinalizeStartingCitiesVsTerritory(startCities);
             wodSyncUrbanFootprintOwners();
 
             spawnInitialFrontlineUnits(ownersList);
