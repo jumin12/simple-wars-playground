@@ -255,11 +255,9 @@
             <button type="button" class="editor-btn" id="editorBlank">New blank</button>
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
             <button type="button" class="editor-btn" id="editorGenConfig" title="Biome balance for procedural maps">Generation config…</button>
-            <button type="button" class="editor-btn" id="editorSave">Save to library + export</button>
+            <button type="button" class="editor-btn" id="editorSave">Save to library</button>
             <button type="button" class="editor-btn" id="editorBrowseLib">Browse library…</button>
-            <button type="button" class="editor-btn" id="editorLoadBtn">Load JSON file</button>
           </div>
-          <input id="editorLoad" type="file" accept=".json,application/json" style="display:none">
         </section>
         <section class="editor-card">
           <h3>Terrain paint</h3>
@@ -394,8 +392,6 @@
     if(browseLib) browseLib.addEventListener("click", () => {
       if (typeof showPanel === "function") showPanel("mapLibrary", { libContext: "editor", returnTo: "editor" });
     });
-    app.querySelector("#editorLoadBtn").addEventListener("click", () => app.querySelector("#editorLoad").click());
-    app.querySelector("#editorLoad").addEventListener("change", loadEditorMap);
     app.querySelector("#editorExitBtn").addEventListener("click", closeMapEditor);
 
     const canvas = app.querySelector("#editorCanvas");
@@ -942,6 +938,13 @@
   }
 
   function saveEditorMap() {
+    if (typeof window.wodOpenSaveMapToLibraryDialog === "function") {
+      window.wodOpenSaveMapToLibraryDialog({
+        fromEditor: true,
+        suggestedName: "Custom map " + new Date().toLocaleTimeString(),
+      });
+      return;
+    }
     const name = prompt("Map name:", "Custom Map " + new Date().toLocaleTimeString()) || "Custom Map";
     const mapData = WOD.exportMapData();
     const thumbnail = makeThumbnail();
@@ -949,11 +952,6 @@
       window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
     }
     renderMapBrowser();
-    const data = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(mapData));
-    const a = document.createElement("a");
-    a.href = data;
-    a.download = name.replace(/[^a-z0-9_-]/gi, "_") + ".json";
-    a.click();
   }
 
   function makeThumbnail() {
@@ -968,7 +966,7 @@
       typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
     browser.textContent = "";
     if (saved.length === 0) {
-      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library + export</strong> or open <strong>Browse library…</strong> from the toolbar.</div>`;
+      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library</strong> or open <strong>Browse library…</strong>.</div>`;
       return;
     }
     for (const m of saved) {
@@ -1024,23 +1022,6 @@
 
       browser.appendChild(card);
     }
-  }
-
-  function loadEditorMap(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = e => {
-      WOD.loadMapData(JSON.parse(e.target.result));
-      state.selected = null;
-      state.viewPanX = 0;
-      state.viewPanY = 0;
-      state.viewZoom = 1;
-      renderSelection();
-      scheduleEditorRender();
-    };
-    reader.readAsText(file);
-    event.target.value = "";
   }
 
   window.wodNotifyEditorMapChanged = function () {

@@ -4384,12 +4384,27 @@
         <div id="wodGenConfigPanel" class="mp-host-dlg hidden" aria-hidden="true">
             <div class="panel" style="max-width:520px;max-height:92vh;overflow:auto">
                 <h3>Generation configuration</h3>
-                <p style="font-size:14px;opacity:0.9;margin-top:0;line-height:1.45">Sliders are neutral at <strong>50</strong> (normal random map for the shape). Adjust to push coastlines, dry vs wet biomes, forest cover, swampiness, and how rugged peaks are.</p>
+                <p style="font-size:14px;opacity:0.9;margin-top:0;line-height:1.45">Each slider is an approximate <strong>share of the map</strong> (0–100%). After <strong>Generate New</strong>, values default to the last map&rsquo;s terrain mix (or an estimate for the next random seed). Adjust to push water, biomes, and rugged terrain; <strong>Apply</strong> regenerates.</p>
                 <div id="wodGenCfgSliderMount"></div>
                 <div class="mp-host-dlg-actions" style="margin-top:14px">
-                    <button type="button" class="menu-btn" id="wodGenCfgReset">Reset (50)</button>
+                    <button type="button" class="menu-btn" id="wodGenCfgReset">Match baseline %</button>
                     <button type="button" class="build-btn" id="wodGenCfgApply">Apply</button>
                     <button type="button" class="build-btn" id="wodGenCfgClose">Close</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="wodSaveMapDlg" class="mp-host-dlg hidden" aria-hidden="true">
+            <div class="panel" style="max-width:440px">
+                <h3 style="margin-top:0">Save map to library</h3>
+                <p style="font-size:14px;opacity:0.9;margin-top:0;line-height:1.45">Maps are stored in this browser. Choose a name you&rsquo;ll recognize in the library.</p>
+                <div class="setup-row" style="margin-top:12px">
+                    <label for="wodSaveMapNameInput" style="min-width:3.5rem">Name</label>
+                    <input type="text" id="wodSaveMapNameInput" maxlength="80" placeholder="My campaign map" style="flex:1;padding:10px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.2);background:rgba(0,0,0,0.35);color:inherit;font-size:15px">
+                </div>
+                <div class="mp-host-dlg-actions" style="margin-top:18px">
+                    <button type="button" class="build-btn" id="wodSaveMapSaveBtn">Save</button>
+                    <button type="button" class="menu-btn" id="wodSaveMapCancelBtn">Cancel</button>
                 </div>
             </div>
         </div>
@@ -5877,57 +5892,40 @@
         }
 
         const WOD_GEN_BIOME_KEYS = ['water', 'sand', 'grass', 'forest', 'swamp', 'mountain', 'hills'];
-        function wodNormalizeGenBiomeSliders(obj) {
-            let out = {};
-            for(let k of WOD_GEN_BIOME_KEYS) {
-                let v = obj && obj[k];
-                let n = typeof v === 'number' ? v : parseInt(v, 10);
-                if(isNaN(n)) n = 50;
-                out[k] = Math.max(0, Math.min(100, n));
-            }
-            return out;
-        }
-        function wodActiveGenBiomeSliders() {
-            if(gameData.mp && gameData.mp.enabled) {
-                let m = window.wodMpRoomMeta;
-                if(m && m.genBiomeSliders) return wodNormalizeGenBiomeSliders(m.genBiomeSliders);
-                return wodNormalizeGenBiomeSliders({});
-            }
-            return wodNormalizeGenBiomeSliders(gameData._genBiomeSliders);
-        }
-        function wodApplyBiomeSlidersToProfile(profile, mapShape, slidersIn) {
-            let s = wodNormalizeGenBiomeSliders(slidersIn);
-            let w = s.water - 50, sd = s.sand - 50, gr = s.grass - 50, fo = s.forest - 50;
-            let sw = s.swamp - 50, mt = s.mountain - 50, hi = s.hills - 50;
+        function wodApplyBiomeSlidersToProfile(profile, mapShape, userPct, basePct) {
+            let u = wodClampBiomePctSliders(userPct);
+            let b = wodClampBiomePctSliders(basePct || u);
+            let dW = u.water - b.water, dSd = u.sand - b.sand, dGr = u.grass - b.grass, dFo = u.forest - b.forest;
+            let dSw = u.swamp - b.swamp, dMt = u.mountain - b.mountain, dHi = u.hills - b.hills;
             if(mapShape === 'island') {
-                profile.waterElevThresh += w * 0.00135;
-                profile.sandThresh += sd * 0.0019;
-                profile.grassThresh += gr * 0.002;
-                profile.forestThresh += fo * 0.002;
-                profile.moistShift += sw * 0.0028;
+                profile.waterElevThresh += dW * 0.00115;
+                profile.sandThresh += dSd * 0.00175;
+                profile.grassThresh += dGr * 0.00185;
+                profile.forestThresh += dFo * 0.00185;
+                profile.moistShift += dSw * 0.00238;
                 if(profile.forestMoistBoost == null) profile.forestMoistBoost = 0;
-                profile.forestMoistBoost += fo * 0.0015;
-                profile.mountElevThresh += mt * 0.00135;
-                profile.mountainThin = Math.max(0, Math.min(0.55, (profile.mountainThin || 0) + hi * 0.0065));
+                profile.forestMoistBoost += dFo * 0.00125;
+                profile.mountElevThresh += dMt * 0.00115;
+                profile.mountainThin = Math.max(0, Math.min(0.55, (profile.mountainThin || 0) + dHi * 0.0058 - dMt * 0.0028));
             } else {
-                profile.waterElevThresh += w * 0.001;
-                profile.sandThresh += sd * 0.0016;
-                profile.grassThresh += gr * 0.0016;
-                profile.forestThresh += fo * 0.0016;
-                profile.moistShift += sw * 0.0025;
+                profile.waterElevThresh += dW * 0.00085;
+                profile.sandThresh += dSd * 0.00145;
+                profile.grassThresh += dGr * 0.00145;
+                profile.forestThresh += dFo * 0.00145;
+                profile.moistShift += dSw * 0.00215;
                 if(profile.forestMoistBoost == null) profile.forestMoistBoost = 0;
-                profile.forestMoistBoost += fo * 0.0012;
-                profile.mountElevThresh += mt * 0.0012;
-                profile.mountainThin = Math.max(0, Math.min(0.45, (profile.mountainThin || 0) + hi * 0.005));
+                profile.forestMoistBoost += dFo * 0.00105;
+                profile.mountElevThresh += dMt * 0.00105;
+                profile.mountainThin = Math.max(0, Math.min(0.45, (profile.mountainThin || 0) + dHi * 0.0045));
                 if(profile.rectMoistSand == null) profile.rectMoistSand = 0.285;
                 if(profile.rectMoistGrass == null) profile.rectMoistGrass = 0.585;
                 if(profile.rectMoistForest == null) profile.rectMoistForest = 0.795;
                 if(profile.rectRidgeMountain == null) profile.rectRidgeMountain = 0.54;
-                profile.rectMoistSand += sd * 0.003 + sw * 0.002;
-                profile.rectMoistGrass += gr * 0.003 + sw * 0.001;
-                profile.rectMoistForest += fo * 0.0028 + sw * 0.0005;
+                profile.rectMoistSand += dSd * 0.0026 + dSw * 0.00175;
+                profile.rectMoistGrass += dGr * 0.0026 + dSw * 0.0009;
+                profile.rectMoistForest += dFo * 0.0024 + dSw * 0.00045;
                 profile.rectRidgeMountain = Math.max(0.42, Math.min(0.68,
-                    profile.rectRidgeMountain + hi * 0.0022 - mt * 0.003));
+                    profile.rectRidgeMountain + dHi * 0.002 - dMt * 0.0026));
                 profile.rectMoistSand = Math.max(0.08, Math.min(0.45, profile.rectMoistSand));
                 profile.rectMoistGrass = Math.max(profile.rectMoistSand + 0.07, Math.min(0.72, profile.rectMoistGrass));
                 profile.rectMoistForest = Math.max(profile.rectMoistGrass + 0.07, Math.min(0.92, profile.rectMoistForest));
@@ -6009,11 +6007,11 @@
                 }
                 if(!donor) return;
                 donor.owner = poor;
-                wodAssignPoliticalVoronoiFromCities(ownersList);
+                wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
                 wodFinalizeStartingCitiesVsTerritory(startCities);
             }
             wodRemoveUnconnectedFactionHexPockets(ownersList);
-            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
             wodFinalizeStartingCitiesVsTerritory(startCities);
             wodSyncUrbanFootprintOwners();
             ensureOwnersReachableByLand(ownersList);
@@ -6040,14 +6038,23 @@
             }
         }
         /** One seed per faction (capital with factory when available) keeps continents simply connected like classic wedge maps. */
-        function wodAssignPoliticalVoronoiFromCities(ownerIds) {
+        function wodAssignPoliticalVoronoiFromCities(ownerIds, opts) {
+            opts = opts || {};
             if(!ownerIds || ownerIds.length === 0) return;
             let valid = new Set(ownerIds);
             let seeds = [];
-            for(let o of ownerIds) {
-                let cap = gameData.cities.find(c => c && c.owner === o && c.hasFactory);
-                if(!cap) cap = gameData.cities.find(c => c && c.owner === o);
-                if(cap) seeds.push(cap);
+            if(opts.allCities) {
+                for(let c of gameData.cities) {
+                    if(c && c.owner > 0 && valid.has(c.owner)) seeds.push(c);
+                }
+            }
+            if(!opts.allCities || seeds.length === 0) {
+                seeds = [];
+                for(let o of ownerIds) {
+                    let cap = gameData.cities.find(c => c && c.owner === o && c.hasFactory);
+                    if(!cap) cap = gameData.cities.find(c => c && c.owner === o);
+                    if(cap) seeds.push(cap);
+                }
             }
             if(seeds.length === 0) return;
             for(let h of gameData.hexList) {
@@ -7195,8 +7202,8 @@
                 mapSizeLabel: msLab ? msLab.text : '',
                 mapShapeLabel: shLab ? shLab.text : '',
                 victoryLabel: vLab ? vLab.text : '',
-                genBiomeSliders: wodNormalizeGenBiomeSliders(
-                    (window.wodMpRoomMeta.genBiomeSliders) || gameData._genBiomeSliders || {}
+                genBiomeSliders: wodClampBiomePctSliders(
+                    (window.wodMpRoomMeta.genBiomeSliders) || gameData._genBiomeUserPct || gameData._genBiomeSliders || {}
                 )
             };
         }
@@ -7321,8 +7328,9 @@
 
         function wodEnsureGenCfgSlidersBuilt() {
             let mount = document.getElementById('wodGenCfgSliderMount');
-            if(!mount || mount.dataset.wodBuilt === '1') return;
-            mount.dataset.wodBuilt = '1';
+            if(!mount) return;
+            if(mount.dataset.wodGenVer === '2') return;
+            mount.dataset.wodGenVer = '2';
             let defs = [
                 ['water', 'Water / coast (island size)'],
                 ['sand', 'Sand / arid'],
@@ -7335,13 +7343,13 @@
             mount.innerHTML = defs.map(([key, label]) =>
                 '<div class="setup-row wod-gen-cfg-row" style="align-items:center;gap:10px">' +
                 '<label style="min-width:10rem;font-size:13px;flex-shrink:0">' + label + '</label>' +
-                '<input type="range" min="0" max="100" value="50" id="wodGenSld_' + key + '" style="flex:1">' +
-                '<span id="wodGenVal_' + key + '" style="min-width:2rem;text-align:right;font-size:13px">50</span></div>'
+                '<input type="range" min="0" max="100" value="0" id="wodGenSld_' + key + '" style="flex:1">' +
+                '<span id="wodGenVal_' + key + '" style="min-width:2.85rem;text-align:right;font-size:13px">0%</span></div>'
             ).join('');
             for(let k of WOD_GEN_BIOME_KEYS) {
                 let el = document.getElementById('wodGenSld_' + k);
                 let sp = document.getElementById('wodGenVal_' + k);
-                if(el && sp) el.addEventListener('input', () => { sp.textContent = el.value; });
+                if(el && sp) el.addEventListener('input', () => { sp.textContent = el.value + '%'; });
             }
             let ap = document.getElementById('wodGenCfgApply');
             let cl = document.getElementById('wodGenCfgClose');
@@ -7357,12 +7365,8 @@
             if(rs && !rs._wodBound) {
                 rs._wodBound = true;
                 rs.onclick = () => {
-                    for(let k of WOD_GEN_BIOME_KEYS) {
-                        let el = document.getElementById('wodGenSld_' + k);
-                        let sp = document.getElementById('wodGenVal_' + k);
-                        if(el) el.value = '50';
-                        if(sp) sp.textContent = '50';
-                    }
+                    let base = gameData._genBiomeLastBaselinePct || gameData._genBiomeLastActual || {};
+                    wodFillGenBiomeInputs(base);
                 };
             }
         }
@@ -7370,17 +7374,17 @@
             let o = {};
             for(let k of WOD_GEN_BIOME_KEYS) {
                 let el = document.getElementById('wodGenSld_' + k);
-                o[k] = el ? parseInt(el.value, 10) : 50;
+                o[k] = el ? parseInt(el.value, 10) : 0;
             }
-            return wodNormalizeGenBiomeSliders(o);
+            return wodClampBiomePctSliders(o);
         }
         function wodFillGenBiomeInputs(slidersObj) {
-            let n = wodNormalizeGenBiomeSliders(slidersObj);
+            let n = wodClampBiomePctSliders(slidersObj);
             for(let k of WOD_GEN_BIOME_KEYS) {
                 let el = document.getElementById('wodGenSld_' + k);
                 let sp = document.getElementById('wodGenVal_' + k);
                 if(el) el.value = String(n[k]);
-                if(sp) sp.textContent = String(n[k]);
+                if(sp) sp.textContent = String(n[k]) + '%';
             }
         }
         function wodCloseGenConfigPanel() {
@@ -7392,6 +7396,8 @@
         }
         function wodApplyGenConfigPanel() {
             let vals = wodReadGenBiomeInputs();
+            gameData._genBiomeUserPct = vals;
+            gameData._genBiomeSliders = vals;
             let ctx = window.wodGenCfgContext || 'setup';
             if(ctx === 'mp') {
                 if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
@@ -7406,7 +7412,6 @@
                 wodCloseGenConfigPanel();
                 showNotification('Generation settings updated for the lobby.');
             } else if(ctx === 'editor') {
-                gameData._genBiomeSliders = vals;
                 let edSize = document.getElementById('editorSize');
                 let suSize = document.getElementById('setupMapSize');
                 if(edSize && suSize) suSize.value = edSize.value;
@@ -7415,7 +7420,6 @@
                 if(typeof window.wodScheduleEditorRender === 'function') window.wodScheduleEditorRender();
                 wodCloseGenConfigPanel();
             } else {
-                gameData._genBiomeSliders = vals;
                 previewMap();
                 wodCloseGenConfigPanel();
             }
@@ -7426,10 +7430,12 @@
             let src = {};
             if(window.wodGenCfgContext === 'mp') {
                 let m = window.wodMpRoomMeta;
-                src = (m && m.genBiomeSliders) || gameData._genBiomeSliders || {};
+                src = (m && m.genBiomeSliders) || gameData._genBiomeUserPct || gameData._genBiomeSliders || {};
             } else {
-                src = gameData._genBiomeSliders || {};
+                src = gameData._genBiomeUserPct || gameData._genBiomeSliders || {};
             }
+            if(wodIsLegacyGenBiomeSlidersNeutral(src))
+                src = gameData._genBiomeLastActual || gameData._genBiomeLastBaselinePct || {};
             wodFillGenBiomeInputs(src);
             let p = document.getElementById('wodGenConfigPanel');
             if(p) {
@@ -12063,17 +12069,80 @@
                 c.classList.toggle('active', c.dataset.id === _wodMapLib.selectedId);
             });
         }
-        function wodPromptSaveMapToLibrary() {
+        function wodWireSaveMapDialogOnce() {
+            if(window._wodSaveMapDlgWired) return;
+            window._wodSaveMapDlgWired = true;
+            let inp = document.getElementById('wodSaveMapNameInput');
+            let saveB = document.getElementById('wodSaveMapSaveBtn');
+            let canB = document.getElementById('wodSaveMapCancelBtn');
+            let dlg = document.getElementById('wodSaveMapDlg');
+            if(canB) canB.onclick = () => {
+                if(dlg) {
+                    dlg.classList.add('hidden');
+                    dlg.setAttribute('aria-hidden', 'true');
+                }
+                window._wodSaveMapDialogOpts = null;
+            };
+            if(saveB) saveB.onclick = () => {
+                let name = inp && inp.value ? inp.value.trim() : '';
+                if(!name) {
+                    showNotification('Enter a map name.');
+                    return;
+                }
+                let opts = window._wodSaveMapDialogOpts || {};
+                if(opts.fromEditor && window.WOD && typeof WOD.exportMapData === 'function') {
+                    let mapData = WOD.exportMapData();
+                    let thumb = '';
+                    try {
+                        let c = document.getElementById('editorCanvas');
+                        if(c) thumb = c.toDataURL('image/png');
+                    } catch(e) {}
+                    wodSaveMapToLibraryWithName(name, { mapData, thumb: thumb || undefined });
+                } else {
+                    wodSaveMapToLibraryWithName(name);
+                }
+                if(dlg) {
+                    dlg.classList.add('hidden');
+                    dlg.setAttribute('aria-hidden', 'true');
+                }
+                window._wodSaveMapDialogOpts = null;
+                showNotification('Map saved to library.');
+                if(typeof window.renderMapBrowser === 'function') window.renderMapBrowser();
+            };
+            if(inp) inp.addEventListener('keydown', (ev) => {
+                if(ev.key === 'Enter') {
+                    ev.preventDefault();
+                    if(saveB) saveB.click();
+                }
+            });
+        }
+        function wodOpenSaveMapToLibraryDialog(opts) {
+            opts = opts || {};
+            wodWireSaveMapDialogOnce();
             if(!gameData.hexList || gameData.hexList.length === 0) {
                 alert('Generate or load a map first.');
                 return;
             }
-            let name = prompt('Name for this map:', 'My map ' + new Date().toLocaleDateString());
-            if(name === null) return;
-            wodSaveMapToLibraryWithName(name);
-            showNotification('Map saved to library.');
-            if(typeof window.renderMapBrowser === 'function') window.renderMapBrowser();
+            window._wodSaveMapDialogOpts = opts;
+            let inp = document.getElementById('wodSaveMapNameInput');
+            let dlg = document.getElementById('wodSaveMapDlg');
+            if(inp) {
+                let sug = opts.suggestedName || ('My map ' + new Date().toLocaleDateString());
+                inp.value = sug;
+            }
+            if(dlg) {
+                dlg.classList.remove('hidden');
+                dlg.setAttribute('aria-hidden', 'false');
+                if(inp) setTimeout(() => {
+                    inp.focus();
+                    inp.select();
+                }, 30);
+            }
         }
+        function wodPromptSaveMapToLibrary() {
+            wodOpenSaveMapToLibraryDialog({});
+        }
+        window.wodOpenSaveMapToLibraryDialog = wodOpenSaveMapToLibraryDialog;
         window.wodGetSavedMapsList = wodGetSavedMapsList;
         window.wodSaveMapToLibraryWithName = wodSaveMapToLibraryWithName;
         window.wodDeleteSavedMapById = wodDeleteSavedMapById;
@@ -12524,8 +12593,9 @@
             }
 
             wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
+            wodStrictDistributeNonCapitalsRoundRobin(ownersList, startCities);
 
-            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
             wodSyncCityOwnersFromCenterHex();
             wodSyncUrbanFootprintOwners();
             softenMountainHexBetweenOwners(ownersList);
@@ -12533,17 +12603,21 @@
             ensureOwnedTilesReachFactionCities(ownersList);
             wodSyncCityOwnersFromCenterHex();
             wodRemoveUnconnectedFactionHexPockets(ownersList);
-            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
             wodSyncCityOwnersFromCenterHex();
             wodSyncUrbanFootprintOwners();
             smoothStartingTerritory(ownersList, 4, 4);
             wodRoughEqualizeStartingLandShares(ownersList, 220);
             wodRemoveUnconnectedFactionHexPockets(ownersList);
-            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
             wodSyncCityOwnersFromCenterHex();
             wodSyncUrbanFootprintOwners();
             wodFinalizeStartingCitiesVsTerritory(startCities);
             wodEnforceEqualCityCountsAndRepair(ownersList, startCities);
+            wodStrictDistributeNonCapitalsRoundRobin(ownersList, startCities);
+            wodAssignPoliticalVoronoiFromCities(ownersList, { allCities: true });
+            wodFinalizeStartingCitiesVsTerritory(startCities);
+            wodSyncUrbanFootprintOwners();
 
             spawnInitialFrontlineUnits(ownersList);
 
@@ -12583,6 +12657,243 @@
             }
         }
 
+        /** Single source of truth for procedural terrain classification (used by generateMap and baseline % estimates). */
+        function wodGenClassifyTerrainCell(q, r, mapR, rows, cols, spacing, hr, seedOffset, mapShape, profile) {
+            let gp = profile;
+            let gp2 = profile;
+            let x = q * spacing;
+            let y = r * spacing;
+            let islandRadialDist = 0;
+            let scale = 0.004;
+            let warpX = fbm(x * scale + seedOffset, y * scale + seedOffset, 3) * 260;
+            let warpY = fbm(x * scale + seedOffset + 100, y * scale + seedOffset + 100, 3) * 260;
+            let mask = 1.0;
+            if(mapShape === 'island') {
+                let normX = x / (mapR * spacing * 0.95);
+                let normY = y / (rows * spacing * 0.95);
+                let sx = normX * (gp.stretchX != null ? gp.stretchX : 1);
+                let sy = normY * (gp.stretchY != null ? gp.stretchY : 1);
+                let dist = Math.sqrt(sx * sx + sy * sy);
+                islandRadialDist = dist;
+                let angle = Math.atan2(y, x);
+                let radialWarp = (fbm(Math.cos(angle) * 2.4 + seedOffset, Math.sin(angle) * 2.4 + seedOffset, 4) - 0.5) * (gp.coastNoiseAmp != null ? gp.coastNoiseAmp : 0.45);
+                mask = 1.12 - dist + radialWarp;
+                if(gp.islandMode === 'elongated') {
+                    mask += Math.cos(angle * 2.05 + seedOffset * 0.02) * 0.07;
+                }
+                if(gp.islandMode === 'archipelago') {
+                    let cells = fbm(x * scale * 1.35 + seedOffset + 444, y * scale * 1.35 + seedOffset + 444, 4);
+                    mask -= Math.max(0, cells - 0.36) * 0.62;
+                }
+                if(gp.islandMode === 'crescent') {
+                    mask -= Math.max(0, 0.38 - Math.abs(dist - 0.56)) * 0.72;
+                }
+                if(gp.islandMode === 'atoll') {
+                    let ring = gp.atollRing != null ? gp.atollRing : 0.48;
+                    let band = Math.abs(dist - ring);
+                    mask -= Math.max(0, 0.22 - band) * 1.05;
+                    mask += (fbm(x * scale * 1.1 + seedOffset + 2100, y * scale * 1.1 + seedOffset + 2100, 3) - 0.5) * 0.08;
+                }
+                if(gp.islandMode === 'chain') {
+                    let ax = gp.chainAX != null ? gp.chainAX : -0.46;
+                    let ay = gp.chainAY != null ? gp.chainAY : 0.28;
+                    let bx = gp.chainBX != null ? gp.chainBX : 0.52;
+                    let by = gp.chainBY != null ? gp.chainBY : -0.12;
+                    let d2 = Math.sqrt((normX - ax) * (normX - ax) + (normY + ay) * (normY + ay));
+                    let d3 = Math.sqrt((normX + bx) * (normX + bx) + (normY - by) * (normY - by));
+                    dist = Math.min(dist, d2 * 0.9, d3 * 0.88);
+                    mask = 1.1 - dist + radialWarp * 0.92;
+                }
+                if(gp.islandMode === 'wide') {
+                    mask += 0.055 - Math.abs(sy) * 0.11;
+                }
+                let boxFrac = Math.max(Math.abs(q) / Math.max(cols, 1), Math.abs(r) / Math.max(rows, 1));
+                mask -= Math.pow(Math.max(0, boxFrac - 0.74), 1.45) * 0.92;
+            } else {
+                mask = 1.0;
+            }
+            let continent = fbm((x + warpX) * scale + seedOffset, (y + warpY) * scale + seedOffset, 6);
+            let detail = fbm(x * scale * 3 + seedOffset + 2000, y * scale * 3 + seedOffset + 2000, 4);
+            let elev = (continent * 0.8 + detail * 0.2) + (mask - 0.55);
+            let moist = fbm((x + warpX) * scale + seedOffset + 5000, (y + warpY) * scale + seedOffset + 5000, 4);
+            let mo = moist + (gp2.moistShift != null ? gp2.moistShift : 0);
+            let fb = gp2.forestMoistBoost != null ? gp2.forestMoistBoost : 0;
+            let type = 'water';
+            if(mapShape === 'rectangle') {
+                let wx = x + warpX;
+                let wy = y + warpY;
+                let u = wx * scale;
+                let v = wy * scale;
+                let macro = continent;
+                let meso = fbm(wx * scale * 1.42 + seedOffset + 6110, wy * scale * 1.42 + seedOffset + 6110, 5);
+                let heightCore = macro * 0.44 + meso * 0.40 + detail * 0.16;
+                let valleySoft = macro * meso + (1 - macro) * 0.05;
+                let heightLand = Math.max(0.02, Math.min(0.93, heightCore - valleySoft * 0.14));
+                let ridge = fbm(wx * scale * 2.5 + seedOffset + 6500, wy * scale * 2.5 + seedOffset + 6500, 5);
+                let edgePad = Math.max(Math.abs(q) / Math.max(mapR, 1), Math.abs(r) / Math.max(rows, 1));
+                let coastalEdge = edgePad > 0.88;
+                let innerClear = edgePad > 0.07;
+                let mainSpine = Math.sin(u * 1.93 + v * 2.72 + ridge * 0.88 + meso * 0.92 + seedOffset * 0.41);
+                let tributary = Math.sin(u * -2.18 + v * 1.86 + meso * 1.08 + seedOffset * 0.53);
+                let braided = Math.cos(u * 2.72 - v * 1.94 + detail * 5.25 + seedOffset * 1.71);
+                let riverField = Math.min(Math.abs(mainSpine + tributary * 0.52), Math.abs(mainSpine * 0.55 + braided * 0.65 + tributary * 0.28));
+                let riverWidth = 0.045 + moist * 0.055 + (1 - heightLand) * 0.07;
+                let isRiverCorridor = innerClear && !coastalEdge && riverField < riverWidth && heightLand > 0.11 && heightLand < 0.58 && ridge < 0.68;
+                let lakeBlob = !coastalEdge && macro < 0.335 && ridge < 0.47 && moist > 0.5 && moist < 0.88 && heightCore < 0.41;
+                let ridgeTh = gp2.rectRidgeMountain != null ? gp2.rectRidgeMountain : 0.54;
+                let isMountain = ridge > ridgeTh && heightLand > 0.55 && !(isRiverCorridor || lakeBlob);
+                if(isRiverCorridor || lakeBlob) {
+                    type = 'water';
+                } else if(isMountain) {
+                    let passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 4);
+                    let valleyBreak = heightLand < 0.66 && Math.abs(tributary) < 0.22;
+                    if(valleyBreak && passNoise > 0.36) type = 'hill';
+                    else if(ridge < 0.64 && passNoise > 0.40) type = 'hill';
+                    else type = heightLand > 0.74 ? 'hill' : 'mountain';
+                } else if(heightLand > 0.51 && ridge > 0.61) type = 'hill';
+                else if(heightLand < 0.36 && ridge < 0.5 && macro < 0.48) type = 'swamp';
+                else {
+                    let moR = moist + (gp2.moistShift != null ? gp2.moistShift : 0);
+                    let fbR = gp2.forestMoistBoost != null ? gp2.forestMoistBoost : 0;
+                    let rs = gp2.rectMoistSand != null ? gp2.rectMoistSand : 0.285;
+                    let rg = gp2.rectMoistGrass != null ? gp2.rectMoistGrass : 0.585;
+                    let rf = gp2.rectMoistForest != null ? gp2.rectMoistForest : 0.795;
+                    if(moR < rs + fbR * 0.02) type = 'sand';
+                    else if(moR < rg + fbR) type = 'grass';
+                    else if(moR < rf + fbR * 0.5) type = 'forest';
+                    else type = 'swamp';
+                }
+            } else if(elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43)) type = 'water';
+            else if(elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43) + 0.05) type = 'sand';
+            else {
+                let mTh0 = gp2.mountElevThresh != null ? gp2.mountElevThresh : 0.86;
+                if(mapShape === 'island') {
+                    let pk = fbm(x * scale * 2.55 + seedOffset + 7711, y * scale * 2.55 + seedOffset + 7711, 5);
+                    let pk2 = fbm(x * scale * 5.1 + seedOffset + 3322, y * scale * 5.1 + seedOffset + 3322, 4);
+                    let j = (gp2.mountainPeakJitter != null ? gp2.mountainPeakJitter : 0.09) * (pk - 0.5) * 2.2;
+                    let st = gp2.mountainStyle || 'default';
+                    if(st === 'scattered') j += (pk2 - 0.5) * 0.13;
+                    else if(st === 'ring') {
+                        let rr = gp2.mountainRingR != null ? gp2.mountainRingR : 0.48;
+                        j += Math.abs(islandRadialDist - rr) < 0.14 ? -0.1 : 0.038;
+                    } else if(st === 'low') j += 0.095;
+                    else if(st === 'mixed') j += (pk * pk2 - 0.28) * 0.11;
+                    mTh0 += j;
+                }
+                if(elev > mTh0) {
+                    let passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 3);
+                    if(passNoise > 0.6) type = 'hill';
+                    else type = 'mountain';
+                } else if(elev > mTh0 - 0.08 && mo < 0.5) type = 'hill';
+                else {
+                    let st = gp2.sandThresh != null ? gp2.sandThresh : 0.35;
+                    let gt = gp2.grassThresh != null ? gp2.grassThresh : 0.60;
+                    let ft = gp2.forestThresh != null ? gp2.forestThresh : 0.80;
+                    if(mo < st + fb * 0.02) type = 'sand';
+                    else if(mo < gt + fb) type = 'grass';
+                    else if(mo < ft + fb * 0.5) type = 'forest';
+                    else type = 'swamp';
+                }
+            }
+            return type;
+        }
+        function wodTerrainCountMapToPct(cMap, total) {
+            let u = (t) => Math.max(0, Math.min(100, Math.round(((cMap[t] || 0) / Math.max(1, total)) * 100)));
+            return {
+                water: u('water'),
+                sand: u('sand'),
+                grass: u('grass'),
+                forest: u('forest'),
+                swamp: u('swamp'),
+                mountain: u('mountain'),
+                hills: u('hill')
+            };
+        }
+        function wodEstimateBiomePercentagesFromProfile(mapR, mapShape, profile, seedOffset, step, hr) {
+            let cols = mapR;
+            let rows = Math.floor(mapR * 0.8);
+            let spacing = hr * 1.35;
+            step = Math.max(1, step | 0);
+            let cMap = {};
+            let total = 0;
+            for(let r0 = -rows; r0 <= rows; r0 += step) {
+                for(let q0 = -cols; q0 <= cols; q0 += step) {
+                    let t = wodGenClassifyTerrainCell(q0, r0, mapR, rows, cols, spacing, hr, seedOffset, mapShape, profile);
+                    cMap[t] = (cMap[t] || 0) + 1;
+                    total++;
+                }
+            }
+            return wodTerrainCountMapToPct(cMap, total);
+        }
+        function wodHexListToBiomePct(hexList) {
+            let cMap = {};
+            let total = 0;
+            for(let h of hexList) {
+                if(!h) continue;
+                let t = h.type;
+                if(t === 'urban') t = 'grass';
+                cMap[t] = (cMap[t] || 0) + 1;
+                total++;
+            }
+            return wodTerrainCountMapToPct(cMap, total);
+        }
+        function wodIsLegacyGenBiomeSlidersNeutral(obj) {
+            if(!obj || typeof obj !== 'object') return true;
+            for(let k of WOD_GEN_BIOME_KEYS) {
+                let v = obj[k];
+                let n = typeof v === 'number' ? v : parseInt(v, 10);
+                if(!isNaN(n) && n !== 50) return false;
+            }
+            return true;
+        }
+        function wodClampBiomePctSliders(obj) {
+            let out = {};
+            for(let k of WOD_GEN_BIOME_KEYS) {
+                let v = obj && obj[k];
+                let n = typeof v === 'number' ? v : parseInt(v, 10);
+                if(isNaN(n)) n = 0;
+                out[k] = Math.max(0, Math.min(100, n));
+            }
+            return out;
+        }
+        function wodMergeUserBiomeTargetsWithBaseline(basePct) {
+            let stored = null;
+            if(gameData.mp && gameData.mp.enabled && window.wodMpRoomMeta && window.wodMpRoomMeta.genBiomeSliders) {
+                stored = window.wodMpRoomMeta.genBiomeSliders;
+            } else if(gameData._genBiomeUserPct && typeof gameData._genBiomeUserPct === 'object') {
+                stored = gameData._genBiomeUserPct;
+            } else if(gameData._genBiomeSliders && typeof gameData._genBiomeSliders === 'object' && !wodIsLegacyGenBiomeSlidersNeutral(gameData._genBiomeSliders)) {
+                stored = gameData._genBiomeSliders;
+            }
+            if(!stored || wodIsLegacyGenBiomeSlidersNeutral(stored)) return wodClampBiomePctSliders(basePct);
+            return wodClampBiomePctSliders(stored);
+        }
+        function wodStrictDistributeNonCapitalsRoundRobin(ownersList, startCities) {
+            if(!ownersList || ownersList.length < 2) return;
+            let f = ownersList.length, n = gameData.cities.length, per = Math.floor(n / f);
+            if(per * f !== n) return;
+            let capSet = new Set(startCities);
+            let nonCaps = gameData.cities.filter(c => c && !capSet.has(c));
+            if(nonCaps.length !== n - f) return;
+            let cx = 0, cy = 0;
+            let land = gameData.hexList.filter(h => isClaimableLand(h));
+            for(let h of land) {
+                cx += h.x;
+                cy += h.y;
+            }
+            if(land.length) {
+                cx /= land.length;
+                cy /= land.length;
+            }
+            nonCaps.sort((a, b) => {
+                let da = Math.atan2(a.y - cy, a.x - cx);
+                let db = Math.atan2(b.y - cy, b.x - cx);
+                if(da !== db) return da - db;
+                return (a.x - b.x) || (a.y - b.y);
+            });
+            for(let i = 0; i < nonCaps.length; i++) nonCaps[i].owner = ownersList[i % f];
+        }
+
         function generateMap() {
             let ownsInnerRng = !_wodSavedMathRandom;
             if(ownsInnerRng) {
@@ -12614,8 +12925,12 @@
             let mapShape = shapeInput ? shapeInput.value : 'island';
             gameData.mapShape = mapShape;
             gameData.loadedCustomMap = false;
-            gameData._genProfile = wodSampleMapGenProfile(mapShape);
-            wodApplyBiomeSlidersToProfile(gameData._genProfile, mapShape, wodActiveGenBiomeSliders());
+            let rawProfile = wodSampleMapGenProfile(mapShape);
+            let basePct = wodEstimateBiomePercentagesFromProfile(mapR, mapShape, rawProfile, seedOffset, 2, hr);
+            gameData._genBiomeLastBaselinePct = basePct;
+            gameData._genProfile = rawProfile;
+            let userPct = wodMergeUserBiomeTargetsWithBaseline(basePct);
+            wodApplyBiomeSlidersToProfile(gameData._genProfile, mapShape, userPct, basePct);
             
             // Generate dense cell grid on the map. The old variable names remain,
             // but these are square-neighbor dots, not hex tiles.
@@ -12627,155 +12942,10 @@
                 for(let q = -cols; q <= cols; q++) {
                     let x = q * spacing;
                     let y = r * spacing;
-                    let islandRadialDist = 0;
-                    
-                    let scale = 0.004; 
-                    let warpX = fbm(x * scale + seedOffset, y * scale + seedOffset, 3) * 260;
-                    let warpY = fbm(x * scale + seedOffset + 100, y * scale + seedOffset + 100, 3) * 260;
-                    
-                    let mask = 1.0;
-                    let gp = gameData._genProfile || {};
-                    if (mapShape === 'island') {
-                        let normX = x / (mapR * spacing * 0.95);
-                        let normY = y / (rows * spacing * 0.95);
-                        let sx = normX * (gp.stretchX != null ? gp.stretchX : 1);
-                        let sy = normY * (gp.stretchY != null ? gp.stretchY : 1);
-                        let dist = Math.sqrt(sx * sx + sy * sy);
-                        islandRadialDist = dist;
-                        let angle = Math.atan2(y, x);
-                        let radialWarp = (fbm(Math.cos(angle) * 2.4 + seedOffset, Math.sin(angle) * 2.4 + seedOffset, 4) - 0.5) * (gp.coastNoiseAmp != null ? gp.coastNoiseAmp : 0.45);
-                        mask = 1.12 - dist + radialWarp;
-                        if(gp.islandMode === 'elongated') {
-                            mask += Math.cos(angle * 2.05 + seedOffset * 0.02) * 0.07;
-                        }
-                        if(gp.islandMode === 'archipelago') {
-                            let cells = fbm(x * scale * 1.35 + seedOffset + 444, y * scale * 1.35 + seedOffset + 444, 4);
-                            mask -= Math.max(0, cells - 0.36) * 0.62;
-                        }
-                        if(gp.islandMode === 'crescent') {
-                            mask -= Math.max(0, 0.38 - Math.abs(dist - 0.56)) * 0.72;
-                        }
-                        if(gp.islandMode === 'atoll') {
-                            let ring = gp.atollRing != null ? gp.atollRing : 0.48;
-                            let band = Math.abs(dist - ring);
-                            mask -= Math.max(0, 0.22 - band) * 1.05;
-                            mask += (fbm(x * scale * 1.1 + seedOffset + 2100, y * scale * 1.1 + seedOffset + 2100, 3) - 0.5) * 0.08;
-                        }
-                        if(gp.islandMode === 'chain') {
-                            let ax = gp.chainAX != null ? gp.chainAX : -0.46;
-                            let ay = gp.chainAY != null ? gp.chainAY : 0.28;
-                            let bx = gp.chainBX != null ? gp.chainBX : 0.52;
-                            let by = gp.chainBY != null ? gp.chainBY : -0.12;
-                            let d2 = Math.sqrt((normX - ax) * (normX - ax) + (normY + ay) * (normY + ay));
-                            let d3 = Math.sqrt((normX + bx) * (normX + bx) + (normY - by) * (normY - by));
-                            dist = Math.min(dist, d2 * 0.9, d3 * 0.88);
-                            mask = 1.1 - dist + radialWarp * 0.92;
-                        }
-                        if(gp.islandMode === 'wide') {
-                            mask += 0.055 - Math.abs(sy) * 0.11;
-                        }
-                        let boxFrac = Math.max(Math.abs(q) / Math.max(cols, 1), Math.abs(r) / Math.max(rows, 1));
-                        mask -= Math.pow(Math.max(0, boxFrac - 0.74), 1.45) * 0.92;
-                    } else {
-                        mask = 1.0;
-                    }
-                    
-                    let continent = fbm((x + warpX) * scale + seedOffset, (y + warpY) * scale + seedOffset, 6);
-                    let detail = fbm(x * scale * 3 + seedOffset + 2000, y * scale * 3 + seedOffset + 2000, 4);
-                    let elev = (continent * 0.8 + detail * 0.2) + (mask - 0.55);
-                    let moist = fbm((x + warpX) * scale + seedOffset + 5000, (y + warpY) * scale + seedOffset + 5000, 4);
-                    let gp2 = gameData._genProfile || {};
-                    let mo = moist + (gp2.moistShift != null ? gp2.moistShift : 0);
-                    let fb = gp2.forestMoistBoost != null ? gp2.forestMoistBoost : 0;
-                    
-                    let type = 'water';
-                    if (mapShape === 'rectangle') {
-                        let wx = x + warpX;
-                        let wy = y + warpY;
-                        let u = wx * scale;
-                        let v = wy * scale;
-                        let macro = continent;
-                        let meso = fbm(wx * scale * 1.42 + seedOffset + 6110, wy * scale * 1.42 + seedOffset + 6110, 5);
-                        let heightCore = macro * 0.44 + meso * 0.40 + detail * 0.16;
-                        let valleySoft = macro * meso + (1 - macro) * 0.05;
-                        let heightLand = Math.max(0.02, Math.min(0.93, heightCore - valleySoft * 0.14));
-                        let ridge = fbm(wx * scale * 2.5 + seedOffset + 6500, wy * scale * 2.5 + seedOffset + 6500, 5);
-
-                        let edgePad = Math.max(Math.abs(q) / Math.max(mapR, 1), Math.abs(r) / Math.max(rows, 1));
-                        let coastalEdge = edgePad > 0.88;
-                        let innerClear = edgePad > 0.07;
-
-                        let mainSpine = Math.sin(u * 1.93 + v * 2.72 + ridge * 0.88 + meso * 0.92 + seedOffset * 0.41);
-                        let tributary = Math.sin(u * -2.18 + v * 1.86 + meso * 1.08 + seedOffset * 0.53);
-                        let braided = Math.cos(u * 2.72 - v * 1.94 + detail * 5.25 + seedOffset * 1.71);
-                        let riverField = Math.min(Math.abs(mainSpine + tributary * 0.52), Math.abs(mainSpine * 0.55 + braided * 0.65 + tributary * 0.28));
-                        let riverWidth = 0.045 + moist * 0.055 + (1 - heightLand) * 0.07;
-                        let isRiverCorridor = innerClear && !coastalEdge && riverField < riverWidth && heightLand > 0.11 && heightLand < 0.58 && ridge < 0.68;
-
-                        let lakeBlob = !coastalEdge && macro < 0.335 && ridge < 0.47 && moist > 0.5 && moist < 0.88 && heightCore < 0.41;
-
-                        let ridgeTh = gp2.rectRidgeMountain != null ? gp2.rectRidgeMountain : 0.54;
-                        let isMountain = ridge > ridgeTh && heightLand > 0.55 && !(isRiverCorridor || lakeBlob);
-
-                        if (isRiverCorridor || lakeBlob) {
-                            type = 'water';
-                        } else if (isMountain) {
-                            let passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 4);
-                            let valleyBreak = heightLand < 0.66 && Math.abs(tributary) < 0.22;
-                            if (valleyBreak && passNoise > 0.36) type = 'hill';
-                            else if (ridge < 0.64 && passNoise > 0.40) type = 'hill';
-                            else type = heightLand > 0.74 ? 'hill' : 'mountain';
-                        } else if (heightLand > 0.51 && ridge > 0.61) type = 'hill';
-                        else if (heightLand < 0.36 && ridge < 0.5 && macro < 0.48) type = 'swamp';
-                        else {
-                            let moR = moist + (gp2.moistShift != null ? gp2.moistShift : 0);
-                            let fbR = gp2.forestMoistBoost != null ? gp2.forestMoistBoost : 0;
-                            let rs = gp2.rectMoistSand != null ? gp2.rectMoistSand : 0.285;
-                            let rg = gp2.rectMoistGrass != null ? gp2.rectMoistGrass : 0.585;
-                            let rf = gp2.rectMoistForest != null ? gp2.rectMoistForest : 0.795;
-                            if (moR < rs + fbR * 0.02) type = 'sand';
-                            else if (moR < rg + fbR) type = 'grass';
-                            else if (moR < rf + fbR * 0.5) type = 'forest';
-                            else type = 'swamp';
-                        }
-                    }
-                    else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43)) type = 'water';
-                    else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43) + 0.05) type = 'sand';
-                    else {
-                        let mTh0 = gp2.mountElevThresh != null ? gp2.mountElevThresh : 0.86;
-                        if(mapShape === 'island') {
-                            let pk = fbm(x * scale * 2.55 + seedOffset + 7711, y * scale * 2.55 + seedOffset + 7711, 5);
-                            let pk2 = fbm(x * scale * 5.1 + seedOffset + 3322, y * scale * 5.1 + seedOffset + 3322, 4);
-                            let j = (gp2.mountainPeakJitter != null ? gp2.mountainPeakJitter : 0.09) * (pk - 0.5) * 2.2;
-                            let st = gp2.mountainStyle || 'default';
-                            if(st === 'scattered') j += (pk2 - 0.5) * 0.13;
-                            else if(st === 'ring') {
-                                let rr = gp2.mountainRingR != null ? gp2.mountainRingR : 0.48;
-                                j += Math.abs(islandRadialDist - rr) < 0.14 ? -0.1 : 0.038;
-                            } else if(st === 'low') j += 0.095;
-                            else if(st === 'mixed') j += (pk * pk2 - 0.28) * 0.11;
-                            mTh0 += j;
-                        }
-                        if(elev > mTh0) {
-                            let passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 3);
-                            if (passNoise > 0.6) type = 'hill';
-                            else type = 'mountain';
-                        } else if(elev > mTh0 - 0.08 && mo < 0.5) type = 'hill';
-                        else {
-                            let st = gp2.sandThresh != null ? gp2.sandThresh : 0.35;
-                            let gt = gp2.grassThresh != null ? gp2.grassThresh : 0.60;
-                            let ft = gp2.forestThresh != null ? gp2.forestThresh : 0.80;
-                            if (mo < st + fb * 0.02) type = 'sand';
-                            else if (mo < gt + fb) type = 'grass';
-                            else if (mo < ft + fb * 0.5) type = 'forest';
-                            else type = 'swamp';
-                        }
-                    }
-                    
+                    let type = wodGenClassifyTerrainCell(q, r, mapR, rows, cols, spacing, hr, seedOffset, mapShape, gameData._genProfile);
                     let hex = {q, r, x, y, type, owner: 0, baseColor: '', renderColor: ''};
                     hex.baseColor = getTerrainColor(type);
                     setHexOwner(hex, 0); 
-                    
                     gameData.hexes[`${q},${r}`] = hex;
                     gameData.hexList.push(hex);
                 }
@@ -12783,6 +12953,7 @@
 
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
+            gameData._genBiomeLastActual = wodHexListToBiomePct(gameData.hexList);
 
             // Generate Cities — scale with player count; total count divisible by faction slots (even per player)
             let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
