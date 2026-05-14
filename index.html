@@ -5400,51 +5400,24 @@
             let sizeSel = document.getElementById('setupMapSize');
             let aiSel = document.getElementById('setupAI');
             let victorySel = document.getElementById('setupVictoryMode');
-            function regenerateSetupPreviewFromShapeOrSize() {
+            function regenerateSetupPreview() {
                 let setupPanel = document.getElementById('setupPanel');
                 if(!setupPanel || setupPanel.classList.contains('hidden')) return;
-                let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
-                gameData.mapRadius = mapSize;
-                let aiEl = document.getElementById('setupAI');
-                if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
-                gameData.loadedCustomMap = false;
-                generateMap();
-                previewLoadedMap();
-                gameData._soloMapPreviewMatchesStart = false;
-            }
-            function regenerateSetupPreviewFromPlayerCountOnly() {
-                let setupPanel = document.getElementById('setupPanel');
-                if(!setupPanel || setupPanel.classList.contains('hidden')) return;
-                let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
-                gameData.mapRadius = mapSize;
-                let aiEl = document.getElementById('setupAI');
-                if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
-                if(gameData.loadedCustomMap) {
-                    previewLoadedMap();
-                    gameData._soloMapPreviewMatchesStart = false;
-                    return;
-                }
-                if(!(gameData.mp && gameData.mp.enabled) && wodSoloRebuildPoliticsAndTownsFromBareSnapshot()) {
-                    previewLoadedMap();
-                    gameData._soloMapPreviewMatchesStart = true;
-                    return;
-                }
-                gameData.loadedCustomMap = false;
-                generateMap();
-                previewLoadedMap();
-                gameData._soloMapPreviewMatchesStart = false;
+                /** Same path as "Generate New" so AI / shape / size all get a committed preview + spinner. */
+                previewMap();
             }
             if(shapeSel && !shapeSel._wodBound) {
                 shapeSel._wodBound = true;
-                shapeSel.addEventListener('change', regenerateSetupPreviewFromShapeOrSize);
+                shapeSel.addEventListener('change', regenerateSetupPreview);
             }
             if(sizeSel && !sizeSel._wodBound) {
                 sizeSel._wodBound = true;
-                sizeSel.addEventListener('change', regenerateSetupPreviewFromShapeOrSize);
+                sizeSel.addEventListener('change', regenerateSetupPreview);
             }
             if(aiSel && !aiSel._wodBound) {
                 aiSel._wodBound = true;
-                aiSel.addEventListener('change', regenerateSetupPreviewFromPlayerCountOnly);
+                aiSel.addEventListener('change', regenerateSetupPreview);
+                aiSel.addEventListener('input', regenerateSetupPreview);
             }
             if(victorySel && !victorySel._wodVictoryDetailBound) {
                 victorySel._wodVictoryDetailBound = true;
@@ -5746,9 +5719,6 @@
             uiSettings: { showOrdersWhenDeselected: true, orderArrowsUsePathfinding: true },
             mp: null,
             _wodSkipMapGenLoader: false,
-            _wodBareTerrainSnap: null,
-            _wodBareTerrainReuseKey: null,
-            _lastTerrainLayoutFingerprint: null,
         };
 
         const SL_UI_SETTINGS_KEY = 'simplewars_ui_settings.v1';
@@ -5898,210 +5868,6 @@
                 shape: mapShape != null ? mapShape : gameData.mapShape,
                 ai: aiCount != null ? aiCount : gameData.aiCount
             });
-        }
-        /** Fingerprint coasts / landmass only (solo preview reuse across AI-count changes). */
-        function wodComputeTerrainLayoutFingerprint(mapRadius, mapShape) {
-            return JSON.stringify({
-                r: mapRadius != null ? mapRadius : gameData.mapRadius,
-                shape: mapShape || gameData.mapShape || 'island'
-            });
-        }
-        function wodExportBareTerrainSnapshot() {
-            let o = {};
-            for(let h of gameData.hexList) {
-                if(!h) continue;
-                o[`${h.q},${h.r}`] = { type: h.type };
-            }
-            return o;
-        }
-        function wodRestoreBareTerrainFromSnapshot(snap) {
-            if(!snap || !gameData.hexList) return;
-            for(let h of gameData.hexList) {
-                let row = snap[`${h.q},${h.r}`];
-                if(row && row.type) {
-                    h.type = row.type;
-                    delete h.cityId;
-                    delete h.urbanVariant;
-                    h.baseColor = getTerrainColor(h.type);
-                    h.renderColor = h.baseColor;
-                }
-                setHexOwner(h, 0);
-            }
-            wodMarkTerrainPoliticalDirty();
-        }
-        function wodSoloBareTerrainReuseKeyFromUi() {
-            let sh = document.getElementById('setupMapShape');
-            let ms = document.getElementById('setupMapSize');
-            let mapShape = sh ? sh.value : (gameData.mapShape || 'island');
-            let mapR = ms ? parseInt(ms.value, 10) || gameData.mapRadius : gameData.mapRadius;
-            return `${mapR}|${mapShape}|${(gameData._mapGenSeed || 0) >>> 0}`;
-        }
-        /**
-         * Same landmass/coasts: rerun Voronoi + equal-city packing + starter economy for a new faction count (solo setup / preview).
-         * Returns false if no snapshot, custom map, MP, or key mismatch → caller should full generateMap().
-         */
-        function wodSoloRebuildPoliticsAndTownsFromBareSnapshot() {
-            if(gameData.mp && gameData.mp.enabled) return false;
-            if(gameData.loadedCustomMap) return false;
-            if(!gameData._wodBareTerrainSnap) return false;
-            if(gameData._wodBareTerrainReuseKey !== wodSoloBareTerrainReuseKeyFromUi()) return false;
-            let aiSync = document.getElementById('setupAI');
-            if(aiSync) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiSync.value, 10) || 1));
-
-            let mapR = gameData.mapRadius;
-            let hr = gameData.hexRadius;
-            let cols = mapR;
-            let rows = Math.floor(mapR * 0.8);
-            let shapeEl = document.getElementById('setupMapShape');
-            let mapShape = shapeEl ? shapeEl.value : (gameData.mapShape || 'island');
-
-            wodRestoreBareTerrainFromSnapshot(gameData._wodBareTerrainSnap);
-            gameData.cities = []; gameData.roads = []; gameData.entities = [];
-            gameData.loadedCustomMap = false;
-            gameData._encircWork = null;
-            gameData.encircledHexes = new Set();
-            gameData.encirclementTimer = 0;
-
-            let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
-            let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
-            let landNC = Math.max(1, landForCities.length);
-
-            gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
-
-            gameData._wodProcgenBorderFirstApplied = false;
-            const PROC_POLY_TRIES = Math.min(48, Math.max(14, 20 + Math.floor(mapR / 12)));
-            let procSucceeded = false;
-            let ownsNest = !_wodSavedMathRandom;
-
-            outerPoly: for(let pt = 0; pt < PROC_POLY_TRIES; pt++) {
-                if(ownsNest) {
-                    if(pt > 0) wodPopRandom();
-                    let seedMix = pt === 0 ? (gameData._mapGenSeed >>> 0) : ((gameData._mapGenSeed ^ (pt * 0x9e3779b9)) >>> 0) || 0x6ced329a;
-                    wodPushSeededRandom(seedMix);
-                }
-                try {
-                    wodRestoreBareTerrainFromSnapshot(gameData._wodBareTerrainSnap);
-                    let procOk = wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
-                    if(procOk) {
-                        procSucceeded = true;
-                        break outerPoly;
-                    }
-                } finally {
-                    if(ownsNest) wodPopRandom();
-                }
-            }
-
-            if(!procSucceeded) {
-                wodRestoreBareTerrainFromSnapshot(gameData._wodBareTerrainSnap);
-
-                let citiesPerPlayer = Math.min(4, Math.max(2, 1 + Math.floor(mapR / 72)));
-                let numCities = factionSlots * citiesPerPlayer;
-                let spacingDen = Math.max(62, Math.floor(76 - factionSlots * 3.8 - Math.min(18, Math.floor(mapR / 55))));
-                let maxFromLand = Math.max(factionSlots * 2, Math.floor(landNC / spacingDen));
-                numCities = Math.min(numCities, maxFromLand);
-                numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
-
-                let citySpacing = Math.max(hr * 17, Math.min(hr * 41, mapR * hr * 0.395));
-                let lcm = wodLandCentroidMaxRadius(landForCities);
-                let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase);
-                let cityPickCursor = 0;
-                let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
-                let innerRSq = innerRad * innerRad;
-                let minWaterSteps = mapShape === 'island' ? 3 : 2;
-                let maxAttemptsPerCity = Math.min(980, Math.max(160, (cityPickOrder.length || mapR * mapR) * 4));
-                for(let i = 0; i < numCities; i++) {
-                    let valid = false,
-                        attempts = 0;
-                    while(!valid && attempts < maxAttemptsPerCity) {
-                        let h = null;
-                        if(cityPickOrder.length > 0) {
-                            h = cityPickOrder[cityPickCursor % cityPickOrder.length];
-                            cityPickCursor++;
-                        } else h = gameData.hexList[(Math.floor(Math.random() * gameData.hexList.length)) | 0];
-                        attempts++;
-                        if(!h || isWaterHex(h) || h.type === 'mountain') continue;
-                        let dxC = h.x - lcm.cx,
-                            dyC = h.y - lcm.cy;
-                        if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) continue;
-                        if(mapShape === 'rectangle') {
-                            let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
-                            if(bf > 0.86 && attempts < 480) continue;
-                        }
-                        if(wodBfsStepsToWater(h, 14) < minWaterSteps && attempts < 460) continue;
-                        let tooClose = gameData.cities.some(c => {
-                            let dx = c.x - h.x,
-                                dy = c.y - h.y;
-                            return Math.sqrt(dx * dx + dy * dy) < citySpacing;
-                        });
-                        if(tooClose && attempts <= 450) continue;
-                        gameData.cities.push({
-                            id: 'city_' + i,
-                            name: generateCityName(),
-                            x: h.x, y: h.y, q: h.q, r: h.r,
-                            owner: 0,
-                            hasFactory: false,
-                            hasHarbor: false,
-                            hp: 1000,
-                            maxHp: 1000,
-                            urbanStyle: Math.floor(Math.random() * 4),
-                            incomeBonus: 0,
-                            manpowerBonus: 0
-                        });
-
-                        let urbanHexes = [];
-                        let shapeType = Math.floor(Math.random() * 4);
-                        let R = 2;
-                        for(let dq = -3; dq <= 3; dq++) {
-                            for(let dr = -3; dr <= 3; dr++) {
-                                let distSq = dq * dq + dr * dr;
-                                let add = false;
-                                if(shapeType === 0) add = distSq <= R * R;
-                                else if(shapeType === 1) add = Math.abs(dq) <= 1 && Math.abs(dr) <= 1;
-                                else if(shapeType === 2) add = Math.abs(dq) <= 2 && Math.abs(dr) <= 1;
-                                else if(shapeType === 3) add = Math.abs(dq) <= 1 && Math.abs(dr) <= 2;
-                                if(add && Math.random() > 0.15) urbanHexes.push({ q: h.q + dq, r: h.r + dr });
-                                else if(!add && distSq <= (R + 1) * (R + 1) && Math.random() > 0.85) urbanHexes.push({ q: h.q + dq, r: h.r + dr });
-                            }
-                        }
-                        urbanHexes.push({ q: h.q, r: h.r });
-
-                        for(let uh of urbanHexes) {
-                            let targetH = gameData.hexes[`${uh.q},${uh.r}`];
-                            if(targetH && !isWaterHex(targetH)) {
-                                targetH.type = 'urban';
-                                targetH.cityId = 'city_' + i;
-                                targetH.urbanVariant = Math.floor(Math.random() * 5);
-                                targetH.baseColor = getTerrainColor('urban');
-                                targetH.renderColor = targetH.baseColor;
-                            }
-                        }
-
-                        valid = true;
-                    }
-                }
-                gameData._wodProcgenBorderFirstApplied = false;
-            }
-
-            for(let i = 0; i < gameData.cities.length; i++) {
-                let c1 = gameData.cities[i];
-                let nearest = null,
-                    minDist = Infinity;
-                for(let j = 0; j < gameData.cities.length; j++) {
-                    if(i === j) continue;
-                    let c2 = gameData.cities[j];
-                    let d = Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
-                    if(d < minDist) {
-                        minDist = d;
-                        nearest = c2;
-                    }
-                }
-                if(nearest) gameData.roads.push({ from: c1, to: nearest });
-            }
-
-            assignStartingCities();
-            updateTerrainKey();
-            wodMarkTerrainFullDirty();
-            return true;
         }
         function wodSampleMapGenProfile(mapShape) {
             if(mapShape !== 'island') {
@@ -7265,6 +7031,8 @@
         function wodMpPushLobbyMetaFromCurrentUi() {
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.sendLobbyMeta) return;
             WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+            /** Host refreshes lobby map preview locally (relay may not echo room_meta back to sender). */
+            if(gameState !== 'PLAYING') requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
         }
         function wodMpValidateLaunchReady(meta) {
             if(!meta || typeof meta !== 'object') return false;
@@ -7809,8 +7577,10 @@
             if(mpGlMaxHumans && !mpGlMaxHumans._wodMpBound) {
                 mpGlMaxHumans._wodMpBound = true;
                 mpGlMaxHumans.addEventListener('change', () => {
-                    if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost && WodMultiplayer.sendLobbyMeta)
+                    if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost && WodMultiplayer.sendLobbyMeta) {
                         WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+                        if(gameState !== 'PLAYING') requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
+                    }
                 });
             }
 
@@ -11125,13 +10895,6 @@
                             hasOwnerCity = true;
                             break;
                         }
-                        for(let uh of getCityUrbanTerrainHexes(city)) {
-                            if(uh && regionKeys.has(getHexKey(uh))) {
-                                hasOwnerCity = true;
-                                break;
-                            }
-                        }
-                        if(hasOwnerCity) break;
                     }
                     let hasOwnerCombatUnit = false;
                     for(let u of gameData.entities) {
@@ -12668,26 +12431,14 @@
                 } else {
                     let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
                     gameData._soloMapPreviewMatchesStart = false;
-
-                    let terrainFpDom = wodComputeTerrainLayoutFingerprint(newRadius, requestedShape);
-                    let rkDom = `${newRadius}|${requestedShape}|${(gameData._mapGenSeed || 0) >>> 0}`;
-                    let skipFullTerrainRegen = previewCommitted && gameData.hexList.length > 0 &&
-                        gameData.mapRadius === newRadius && gameData.mapShape === requestedShape &&
-                        gameData._wodBareTerrainSnap && gameData._mapGenSeed != null &&
-                        terrainFpDom === gameData._lastTerrainLayoutFingerprint &&
-                        rkDom === gameData._wodBareTerrainReuseKey;
-
+                    if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape) {
+                        let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
+                        if(fp === gameData._lastMapFingerprint && gameData._mapGenSeed)
+                            gameData._wodReuseMapGenSeed = true;
+                    }
                     gameData.mapRadius = newRadius;
                     gameData.mapShape = requestedShape;
-
-                    if(skipFullTerrainRegen) {
-                        syncBuildPlacementMobileUi();
-                        wodMarkTerrainFullDirty();
-                        assignStartingCities();
-                        updateTerrainKey();
-                    } else {
-                        generateMap();
-                    }
+                    generateMap();
                 }
             }
             updateTerrainKey();
@@ -12715,9 +12466,6 @@
                 gameData._mapGenSeed = null;
                 gameData._wodReuseMapGenSeed = false;
                 gameData._soloMapPreviewMatchesStart = false;
-                gameData._wodBareTerrainSnap = null;
-                gameData._wodBareTerrainReuseKey = null;
-                gameData._lastTerrainLayoutFingerprint = null;
             }
             gameData._uiTroopCache = undefined;
             gameData._uiTankCache = undefined;
@@ -12862,7 +12610,7 @@
         /**
          * Terrain + accessibility must already be finalized. Clears neutral cities then:
          * political Voronoi from terrain seeds → equalize borders → equal city count inside each territory, non-touching urban footprints.
-         * Sets gameData._wodProcgenBorderFirstApplied on success only. assignStartingCities then runs further legacy polish passes.
+         * Sets gameData._wodProcgenBorderFirstApplied on success only. Does not call assignStartingCities.
          */
         function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
             gameData._wodProcgenBorderFirstApplied = false;
@@ -13070,59 +12818,11 @@
             return true;
         }
 
-        /** Voronoi + smoothing + carve/pocket reconciliation used after capitals exist (matches legacy assignStartingCities polish). */
-        function wodPolishStartingPoliticsFromCapitals(ownersList, startCities) {
-            if(!ownersList || !ownersList.length || !startCities || !startCities.length) return;
-            wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
-
-            wodAssignPoliticalVoronoiFromCities(ownersList);
-            wodSyncCityOwnersFromCenterHex();
-            wodSyncUrbanFootprintOwners();
-            softenMountainHexBetweenOwners(ownersList);
-            ensureOwnersReachableByLand(ownersList);
-            ensureOwnedTilesReachFactionCities(ownersList);
-            wodSyncCityOwnersFromCenterHex();
-            wodRemoveUnconnectedFactionHexPockets(ownersList);
-            wodAssignPoliticalVoronoiFromCities(ownersList);
-            wodSyncCityOwnersFromCenterHex();
-            wodSyncUrbanFootprintOwners();
-            smoothStartingTerritory(ownersList, 4, 4);
-            wodFinalizeStartingCitiesVsTerritory(startCities);
-            let capitalsSetForBalance = new Set(startCities);
-            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
-            wodReconcileCityTerrainToSettlementOwners(ownersList);
-            wodPaintCapitalUrbanToDeclaredOwner(startCities);
-
-            smoothStartingTerritory(ownersList, 5, 2);
-            let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
-
-            if(ownersList.length >= 3) {
-                wodAssignWaterAndNonclaimablePoliticalVotes();
-                wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
-                smoothStartingTerritory(ownersList, 5, 1);
-                wodAssignWaterAndNonclaimablePoliticalVotes();
-            }
-
-            wodSyncUrbanFootprintOwners();
-            wodSyncCityOwnersFromCenterHex();
-            wodFinalizeStartingCitiesVsTerritory(startCities);
-            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
-            wodReconcileCityTerrainToSettlementOwners(ownersList);
-            wodPaintCapitalUrbanToDeclaredOwner(startCities);
-
-            smoothStartingTerritory(ownersList, 6, 1);
-        }
-
         function assignStartingCities() {
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
             // Clear entities & money just in case
             gameData.entities = [];
-            // Invalidate encirclement after territory/city reshuffle so setup preview does not keep old overlays.
-            gameData._encircWork = null;
-            gameData.encircledHexes = new Set();
-            gameData.encirclementTimer = 0;
             gameData.money = parseInt(document.getElementById('setupMoney').value) || 1000;
             gameData.aiMoneyByOwner = {};
             gameData.aiManpowerByOwner = {};
@@ -13161,7 +12861,7 @@
             }
             if(landHexes.length === 0) return;
 
-            // Procedural borders + towns in place — run same political polish passes as legacy setup, then units/camera.
+            // Terrain → borders → cities pipeline already partitioned and stamped towns — only wire economy/units/camera.
             if(gameData._wodProcgenBorderFirstApplied && gameData.cities && gameData.cities.length >= ownersList.length &&
                 ownersList.every(o => gameData.cities.some(c => c && c.owner === o))) {
 
@@ -13173,24 +12873,11 @@
                     gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
                 }
 
-                let startCitiesFast = [];
-                for(let ow of ownersList) {
-                    let cap = gameData.cities.find(c => c && c.owner === ow && c.hasFactory);
-                    if(!cap) cap = gameData.cities.find(c => c && c.owner === ow);
-                    if(cap) startCitiesFast.push(cap);
-                }
-                if(startCitiesFast.length === ownersList.length)
-                    wodPolishStartingPoliticsFromCapitals(ownersList, startCitiesFast);
-
                 spawnInitialFrontlineUnits(ownersList);
 
                 wodMarkTerrainPoliticalDirty();
 
-                let startMe =
-                    startCitiesFast.length === ownersList.length
-                        ? startCitiesFast.find(c => c.owner === locO)
-                        : null;
-                if(!startMe) startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
+                let startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
                 if(startMe) {
                     let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
                     let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
@@ -13328,7 +13015,45 @@
                 gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
             }
 
-            wodPolishStartingPoliticsFromCapitals(ownersList, startCities);
+            wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
+
+            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
+            wodSyncUrbanFootprintOwners();
+            softenMountainHexBetweenOwners(ownersList);
+            ensureOwnersReachableByLand(ownersList);
+            ensureOwnedTilesReachFactionCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
+            wodRemoveUnconnectedFactionHexPockets(ownersList);
+            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
+            wodSyncUrbanFootprintOwners();
+            smoothStartingTerritory(ownersList, 4, 4);
+            wodFinalizeStartingCitiesVsTerritory(startCities);
+            let capitalsSetForBalance = new Set(startCities);
+            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
+            wodReconcileCityTerrainToSettlementOwners(ownersList);
+            wodPaintCapitalUrbanToDeclaredOwner(startCities);
+
+            smoothStartingTerritory(ownersList, 5, 2);
+            let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
+            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
+
+            if(ownersList.length >= 3) {
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+                wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
+                smoothStartingTerritory(ownersList, 5, 1);
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+            }
+
+            wodSyncUrbanFootprintOwners();
+            wodSyncCityOwnersFromCenterHex();
+            wodFinalizeStartingCitiesVsTerritory(startCities);
+            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
+            wodReconcileCityTerrainToSettlementOwners(ownersList);
+            wodPaintCapitalUrbanToDeclaredOwner(startCities);
+
+            smoothStartingTerritory(ownersList, 6, 1);
 
             spawnInitialFrontlineUnits(ownersList);
 
@@ -13393,7 +13118,6 @@
             let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed);
             const PROCMAP_ACCEPT_TRIES_MAX = wodFingerReuseMapSeed ? 1 : Math.min(55, Math.max(18, 28 + Math.floor(mapR / 12)));
             let procSucceeded = false;
-            let bareSnapLast = null;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < PROCMAP_ACCEPT_TRIES_MAX; procAttempt++) {
                 if(ownsInnerRng) {
@@ -13590,9 +13314,6 @@
             softenLandFullyBlockedByMountainRing();
             ensureMountainPasses();
 
-            let bareSnapThisTry = wodExportBareTerrainSnapshot();
-            bareSnapLast = bareSnapThisTry;
-
             // Generate Cities — uses live faction count from solo setup or lobby before placing towns.
             if(!(gameData.mp && gameData.mp.enabled)) {
                 let aiSync = document.getElementById('setupAI');
@@ -13608,15 +13329,8 @@
             let procOk = wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
             if(procOk) {
                 procSucceeded = true;
-                gameData._wodBareTerrainSnap = bareSnapThisTry;
-                gameData._wodBareTerrainReuseKey = `${mapR}|${mapShape}|${(gameData._mapGenSeed || 0) >>> 0}`;
                 break outerProcTerrain;
             }
-            }
-
-            if(!procSucceeded && bareSnapLast) {
-                gameData._wodBareTerrainSnap = bareSnapLast;
-                gameData._wodBareTerrainReuseKey = `${mapR}|${mapShape}|${(gameData._mapGenSeed || 0) >>> 0}`;
             }
 
             if(!procSucceeded) {
@@ -13729,7 +13443,6 @@
             
             assignStartingCities();
             updateTerrainKey();
-            gameData._lastTerrainLayoutFingerprint = wodComputeTerrainLayoutFingerprint();
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
