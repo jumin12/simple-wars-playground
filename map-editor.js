@@ -13,6 +13,7 @@
     viewPanX: 0,
     viewPanY: 0,
     viewZoom: 1,
+    viewPanDrag: null,
   };
 
   const editorPtrs = new Map();
@@ -218,6 +219,12 @@
       .unit-chip-sub { font-size:10px;font-weight:600;color:#8aa4b8;text-transform:uppercase;letter-spacing:.04em; }
       .editor-btn-main { background:linear-gradient(180deg,#5b4320,#3d2b12);border-color:#d4af37;color:#fff6d4;font-weight:800; }
       .editor-btn-main:hover { filter:brightness(1.12); }
+      .editor-toolbar-hint-touch, .editor-overlay-hint-touch { display: none; }
+      @media (pointer: coarse) {
+        .editor-toolbar-hint-desktop, .editor-overlay-hint-desktop { display: none; }
+        .editor-toolbar-hint-touch { display: block; }
+        .editor-overlay-hint-touch { display: block; }
+      }
       @media (max-width:1100px) {
         #mapEditorApp.visible { grid-template-columns:1fr; grid-template-rows:auto minmax(200px,32vh) minmax(280px,1fr) minmax(200px,30vh); }
         .editor-panel { max-height:none; border-right:none;border-bottom:1px solid rgba(201,162,39,.25); }
@@ -232,7 +239,8 @@
     app.innerHTML = `
       <header class="editor-toolbar">
         <h1>Map editor</h1>
-        <p class="editor-toolbar-hint">Paint terrain and ownership, place towns and units. Drag unit chips onto the map — ships need water. Use <strong>Select</strong> to move things. <strong>Two fingers</strong> on the map pan and pinch-zoom.</p>
+        <p class="editor-toolbar-hint editor-toolbar-hint-desktop">Paint terrain and ownership, place towns and units. <strong>Left-drag</strong> on the canvas to paint or move the selection. <strong>Mouse wheel</strong> zooms. <strong>Middle-click drag</strong> pans the view. Drag unit chips from the palette onto the map (ships need water).</p>
+        <p class="editor-toolbar-hint editor-toolbar-hint-touch">Paint terrain and ownership, place towns and units. Drag unit chips onto the map — ships need water. Use <strong>Select / move</strong> to reposition. <strong>Two fingers</strong> on the canvas pan and pinch-zoom.</p>
         <button type="button" class="editor-btn editor-btn-main" id="editorExitBtn">← Main menu</button>
       </header>
       <div class="editor-panel editor-left">
@@ -296,7 +304,8 @@
       </div>
       <div id="editorCanvasWrap">
         <canvas id="editorCanvas"></canvas>
-        <div class="editor-drop-overlay-hint">Drop unit chips · 2 fingers = pan / zoom</div>
+        <div class="editor-drop-overlay-hint editor-overlay-hint-desktop">Drop unit chips · wheel = zoom · middle-drag = pan</div>
+        <div class="editor-drop-overlay-hint editor-overlay-hint-touch">Drop unit chips · 2 fingers = pan / zoom</div>
       </div>
       <div class="editor-panel editor-right">
         <section class="editor-card">
@@ -382,6 +391,20 @@
     canvas.addEventListener("pointercancel", editorPointerUp);
     wrap.addEventListener("dragover", e => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; });
     wrap.addEventListener("drop", onCanvasDrop);
+    wrap.addEventListener(
+      "wheel",
+      (e) => {
+        if (!state.open) return;
+        e.preventDefault();
+        const canvas = document.getElementById("editorCanvas");
+        if (!canvas) return;
+        const z = Math.exp(-e.deltaY * 0.0012);
+        state.viewZoom = Math.max(0.35, Math.min(3.2, state.viewZoom * z));
+        clampEditorView();
+        scheduleEditorRender();
+      },
+      { passive: false },
+    );
 
     window.addEventListener("resize", resizeEditorCanvas);
 
@@ -400,6 +423,7 @@
     state.viewPanX = 0;
     state.viewPanY = 0;
     state.viewZoom = 1;
+    state.viewPanDrag = null;
     editorPtrs.clear();
     editorPinch = null;
     WOD.makeBlankMap(parseInt(document.getElementById("editorSize").value, 10));
@@ -417,6 +441,7 @@
     if (app) app.classList.remove("visible");
     state.open = false;
     state.territoryPainting = false;
+    state.viewPanDrag = null;
     editorPtrs.clear();
     editorPinch = null;
     document.getElementById("mainMenu").classList.remove("hidden");
@@ -688,6 +713,15 @@
 
   function onEditorDown(event) {
     if (!state.open) return;
+    if (event.button === 1) {
+      state.viewPanDrag = { lx: event.clientX, ly: event.clientY };
+      state.dragging = true;
+      try {
+        event.preventDefault();
+      } catch (_) {}
+      return;
+    }
+    state.viewPanDrag = null;
     const pos = editorWorldPos(event);
     state.dragging = true;
     if (state.tool === "territory" && !state.territoryPainting) {
@@ -709,6 +743,20 @@
 
   function onEditorMove(event) {
     if (!state.open || !state.dragging) return;
+    if (state.viewPanDrag) {
+      const dx = event.clientX - state.viewPanDrag.lx;
+      const dy = event.clientY - state.viewPanDrag.ly;
+      state.viewPanDrag.lx = event.clientX;
+      state.viewPanDrag.ly = event.clientY;
+      const canvas = document.getElementById("editorCanvas");
+      if (!canvas) return;
+      const scale = getEditorBaseScale(canvas) * state.viewZoom;
+      state.viewPanX -= dx / scale;
+      state.viewPanY -= dy / scale;
+      clampEditorView();
+      scheduleEditorRender();
+      return;
+    }
     const pos = editorWorldPos(event);
     if (state.tool === "select" && state.selected) {
       const hex = nearestHex(pos);
@@ -737,6 +785,7 @@
       WOD.endHexOwnerBatch();
       state.territoryPainting = false;
     }
+    state.viewPanDrag = null;
     state.dragging = false;
     state.dragKind = null;
   }
