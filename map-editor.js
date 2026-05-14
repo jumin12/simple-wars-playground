@@ -253,7 +253,7 @@
           <div class="editor-grid-2">
             <button type="button" class="editor-btn" id="editorBlank">New blank</button>
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
-            <button type="button" class="editor-btn" id="editorSave">Save to library</button>
+            <button type="button" class="editor-btn" id="editorSave">Save to library…</button>
             <button type="button" class="editor-btn" id="editorBrowseLib">Browse library…</button>
           </div>
         </section>
@@ -932,18 +932,27 @@
   }
 
   function saveEditorMap() {
-    const def = "Custom Map " + new Date().toLocaleTimeString();
-    if (typeof window.wodOpenSaveMapToLibraryDialog === "function") {
-      window.wodOpenSaveMapToLibraryDialog({ fromEditor: true, suggestedName: def });
-      return;
+    const doSave = name => {
+      const mapData = WOD.exportMapData();
+      const thumbnail = makeThumbnail();
+      if (typeof window.wodSaveMapToLibraryWithName === "function") {
+        window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
+      }
+      renderMapBrowser();
+      if (typeof window.showNotification === "function") {
+        window.showNotification("Map saved to library.");
+      }
+    };
+    const defName = "Custom Map " + new Date().toLocaleTimeString();
+    if (typeof window.wodOpenSaveNameDialog === "function") {
+      window.wodOpenSaveNameDialog(
+        { title: "Save map to library", defaultName: defName, confirmLabel: "Save" },
+        doSave,
+      );
+    } else {
+      const name = prompt("Map name:", defName);
+      if (name !== null && String(name).trim()) doSave(String(name).trim());
     }
-    const name = prompt("Map name:", def) || "Custom Map";
-    const mapData = WOD.exportMapData();
-    const thumbnail = makeThumbnail();
-    if (typeof window.wodSaveMapToLibraryWithName === "function") {
-      window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
-    }
-    renderMapBrowser();
   }
 
   function makeThumbnail() {
@@ -958,7 +967,7 @@
       typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
     browser.textContent = "";
     if (saved.length === 0) {
-      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library</strong> or open <strong>Browse library…</strong> from the toolbar.</div>`;
+      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library…</strong> or open <strong>Browse library…</strong> from the toolbar.</div>`;
       return;
     }
     for (const m of saved) {
@@ -1015,6 +1024,8 @@
       browser.appendChild(card);
     }
   }
+
+
 
   window.wodNotifyEditorMapChanged = function () {
     if (!state.open) return;
