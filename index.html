@@ -12862,7 +12862,7 @@
         /**
          * Terrain + accessibility must already be finalized. Clears neutral cities then:
          * political Voronoi from terrain seeds → equalize borders → equal city count inside each territory, non-touching urban footprints.
-         * Sets gameData._wodProcgenBorderFirstApplied on success only. Does not call assignStartingCities.
+         * Sets gameData._wodProcgenBorderFirstApplied on success only. assignStartingCities then runs further legacy polish passes.
          */
         function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
             gameData._wodProcgenBorderFirstApplied = false;
@@ -13070,6 +13070,50 @@
             return true;
         }
 
+        /** Voronoi + smoothing + carve/pocket reconciliation used after capitals exist (matches legacy assignStartingCities polish). */
+        function wodPolishStartingPoliticsFromCapitals(ownersList, startCities) {
+            if(!ownersList || !ownersList.length || !startCities || !startCities.length) return;
+            wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
+
+            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
+            wodSyncUrbanFootprintOwners();
+            softenMountainHexBetweenOwners(ownersList);
+            ensureOwnersReachableByLand(ownersList);
+            ensureOwnedTilesReachFactionCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
+            wodRemoveUnconnectedFactionHexPockets(ownersList);
+            wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
+            wodSyncUrbanFootprintOwners();
+            smoothStartingTerritory(ownersList, 4, 4);
+            wodFinalizeStartingCitiesVsTerritory(startCities);
+            let capitalsSetForBalance = new Set(startCities);
+            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
+            wodReconcileCityTerrainToSettlementOwners(ownersList);
+            wodPaintCapitalUrbanToDeclaredOwner(startCities);
+
+            smoothStartingTerritory(ownersList, 5, 2);
+            let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
+            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
+
+            if(ownersList.length >= 3) {
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+                wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
+                smoothStartingTerritory(ownersList, 5, 1);
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+            }
+
+            wodSyncUrbanFootprintOwners();
+            wodSyncCityOwnersFromCenterHex();
+            wodFinalizeStartingCitiesVsTerritory(startCities);
+            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
+            wodReconcileCityTerrainToSettlementOwners(ownersList);
+            wodPaintCapitalUrbanToDeclaredOwner(startCities);
+
+            smoothStartingTerritory(ownersList, 6, 1);
+        }
+
         function assignStartingCities() {
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
@@ -13117,7 +13161,7 @@
             }
             if(landHexes.length === 0) return;
 
-            // Terrain → borders → cities pipeline already partitioned and stamped towns — only wire economy/units/camera.
+            // Procedural borders + towns in place — run same political polish passes as legacy setup, then units/camera.
             if(gameData._wodProcgenBorderFirstApplied && gameData.cities && gameData.cities.length >= ownersList.length &&
                 ownersList.every(o => gameData.cities.some(c => c && c.owner === o))) {
 
@@ -13129,11 +13173,24 @@
                     gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
                 }
 
+                let startCitiesFast = [];
+                for(let ow of ownersList) {
+                    let cap = gameData.cities.find(c => c && c.owner === ow && c.hasFactory);
+                    if(!cap) cap = gameData.cities.find(c => c && c.owner === ow);
+                    if(cap) startCitiesFast.push(cap);
+                }
+                if(startCitiesFast.length === ownersList.length)
+                    wodPolishStartingPoliticsFromCapitals(ownersList, startCitiesFast);
+
                 spawnInitialFrontlineUnits(ownersList);
 
                 wodMarkTerrainPoliticalDirty();
 
-                let startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
+                let startMe =
+                    startCitiesFast.length === ownersList.length
+                        ? startCitiesFast.find(c => c.owner === locO)
+                        : null;
+                if(!startMe) startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
                 if(startMe) {
                     let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
                     let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
@@ -13271,45 +13328,7 @@
                 gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
             }
 
-            wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
-
-            wodAssignPoliticalVoronoiFromCities(ownersList);
-            wodSyncCityOwnersFromCenterHex();
-            wodSyncUrbanFootprintOwners();
-            softenMountainHexBetweenOwners(ownersList);
-            ensureOwnersReachableByLand(ownersList);
-            ensureOwnedTilesReachFactionCities(ownersList);
-            wodSyncCityOwnersFromCenterHex();
-            wodRemoveUnconnectedFactionHexPockets(ownersList);
-            wodAssignPoliticalVoronoiFromCities(ownersList);
-            wodSyncCityOwnersFromCenterHex();
-            wodSyncUrbanFootprintOwners();
-            smoothStartingTerritory(ownersList, 4, 4);
-            wodFinalizeStartingCitiesVsTerritory(startCities);
-            let capitalsSetForBalance = new Set(startCities);
-            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
-            wodReconcileCityTerrainToSettlementOwners(ownersList);
-            wodPaintCapitalUrbanToDeclaredOwner(startCities);
-
-            smoothStartingTerritory(ownersList, 5, 2);
-            let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
-
-            if(ownersList.length >= 3) {
-                wodAssignWaterAndNonclaimablePoliticalVotes();
-                wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
-                smoothStartingTerritory(ownersList, 5, 1);
-                wodAssignWaterAndNonclaimablePoliticalVotes();
-            }
-
-            wodSyncUrbanFootprintOwners();
-            wodSyncCityOwnersFromCenterHex();
-            wodFinalizeStartingCitiesVsTerritory(startCities);
-            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
-            wodReconcileCityTerrainToSettlementOwners(ownersList);
-            wodPaintCapitalUrbanToDeclaredOwner(startCities);
-
-            smoothStartingTerritory(ownersList, 6, 1);
+            wodPolishStartingPoliticsFromCapitals(ownersList, startCities);
 
             spawnInitialFrontlineUnits(ownersList);
 
