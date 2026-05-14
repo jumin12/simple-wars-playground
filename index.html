@@ -98,6 +98,64 @@
             display: none !important;
         }
 
+        .wod-load-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100002;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #000;
+            flex-direction: column;
+            gap: 20px;
+            pointer-events: auto;
+        }
+        .wod-load-overlay.hidden {
+            display: none !important;
+        }
+        #wodMapGenOverlay {
+            z-index: 100001;
+        }
+        .wod-load-panel {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+            width: min(420px, 86vw);
+        }
+        .wod-load-spinner {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 3px solid rgba(255,255,255,0.12);
+            border-top-color: rgba(200, 220, 255, 0.95);
+            animation: wod-spin 0.85s linear infinite;
+        }
+        @keyframes wod-spin {
+            to { transform: rotate(360deg); }
+        }
+        .wod-load-bar {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.1);
+            overflow: hidden;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.45);
+        }
+        .wod-load-bar-inner {
+            height: 100%;
+            width: 100%;
+            transform-origin: 0 50%;
+            transform: scaleX(0);
+            background: linear-gradient(90deg, #2e6b8f, #5ab0d8, #8fd4f0);
+            transition: transform 0.35s ease-out;
+        }
+        .wod-load-caption {
+            font-size: 14px;
+            letter-spacing: 0.04em;
+            color: rgba(255,255,255,0.72);
+        }
+
         #campaignSummaryOverlay {
             z-index: 42;
             background: radial-gradient(circle at 50% 20%, rgba(26, 48, 64, 0.96), rgba(5, 10, 16, 0.96));
@@ -4208,6 +4266,21 @@
 <body>
 
     <div id="gameWrapper">
+        <div id="wodBootOverlay" class="wod-load-overlay" aria-busy="true" aria-label="Loading game">
+            <div class="wod-load-panel">
+                <div class="wod-load-spinner" aria-hidden="true"></div>
+                <div class="wod-load-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="wodBootBarTrack">
+                    <div id="wodBootBarInner" class="wod-load-bar-inner"></div>
+                </div>
+                <div class="wod-load-caption" id="wodBootCaption">Preparing menu…</div>
+            </div>
+        </div>
+        <div id="wodMapGenOverlay" class="wod-load-overlay hidden" aria-busy="true" aria-label="Generating map">
+            <div class="wod-load-panel">
+                <div class="wod-load-spinner" aria-hidden="true"></div>
+                <div class="wod-load-caption">Generating map…</div>
+            </div>
+        </div>
         <!-- Game Canvas -->
         <canvas id="gameCanvas"></canvas>
         
@@ -5643,7 +5716,8 @@
             playerShiftWaypoints: [],
             pathStrokePreview: null,
             uiSettings: { showOrdersWhenDeselected: true, orderArrowsUsePathfinding: true },
-            mp: null
+            mp: null,
+            _wodSkipMapGenLoader: false,
         };
 
         const SL_UI_SETTINGS_KEY = 'simplewars_ui_settings.v1';
@@ -9393,6 +9467,44 @@
             }
         }
 
+        /** Random size/shape urban like stampUrbanTerrainAroundCity, but only paints hexes owned by `owner` (procgen / fair borders). */
+        function stampOwnedRandomUrbanTerrainAroundCity(centerHex, city, owner) {
+            if(!centerHex || !city || !owner) return;
+            city.q = centerHex.q;
+            city.r = centerHex.r;
+            city.x = centerHex.x;
+            city.y = centerHex.y;
+            city.urbanStyle = city.urbanStyle != null ? city.urbanStyle : Math.floor(Math.random() * 4);
+            let shapeType = Math.floor(Math.random() * 4);
+            let R = 2;
+            let urbanCoords = [];
+            for(let dq = -3; dq <= 3; dq++) {
+                for(let dr = -3; dr <= 3; dr++) {
+                    let distSq = dq * dq + dr * dr;
+                    let add = false;
+                    if(shapeType === 0) add = distSq <= R * R;
+                    else if(shapeType === 1) add = Math.abs(dq) <= 1 && Math.abs(dr) <= 1;
+                    else if(shapeType === 2) add = Math.abs(dq) <= 2 && Math.abs(dr) <= 1;
+                    else add = Math.abs(dq) <= 1 && Math.abs(dr) <= 2;
+                    if(add && Math.random() > 0.15) urbanCoords.push({ q: centerHex.q + dq, r: centerHex.r + dr });
+                    else if(!add && distSq <= (R + 1) * (R + 1) && Math.random() > 0.85)
+                        urbanCoords.push({ q: centerHex.q + dq, r: centerHex.r + dr });
+                }
+            }
+            urbanCoords.push({ q: centerHex.q, r: centerHex.r });
+            let cid = city.id;
+            for(let uh of urbanCoords) {
+                let targetH = gameData.hexes[`${uh.q},${uh.r}`];
+                if(!targetH || isWaterHex(targetH) || targetH.type === 'mountain') continue;
+                if(targetH.owner !== owner) continue;
+                targetH.type = 'urban';
+                targetH.cityId = cid;
+                targetH.urbanVariant = Math.floor(Math.random() * 5);
+                targetH.baseColor = getTerrainColor('urban');
+                targetH.renderColor = targetH.baseColor;
+            }
+        }
+
         function findBestCoastalLandHexForOwner(owner, centroid, landHexes) {
             let cx = centroid.x;
             let cy = centroid.y;
@@ -12333,12 +12445,12 @@
             }
             return seeds;
         }
-        /** Axial footprint used for clearance checks; must stay inside owning faction territory. */
+        /** Max stamp footprint matches stampUrbanTerrainAroundCity fringe: dq²+dr² ≤ (R+1)², R=2 → ≤9. */
         function wodProceduralUrbanFootprintKeys(q, r, owner) {
             let keys = [];
-            for(let dq = -2; dq <= 2; dq++) {
-                for(let dr = -2; dr <= 2; dr++) {
-                    if(Math.max(Math.abs(dq), Math.abs(dr)) > 2) continue;
+            for(let dq = -3; dq <= 3; dq++) {
+                for(let dr = -3; dr <= 3; dr++) {
+                    if(dq * dq + dr * dr > 9) continue;
                     let qq = q + dq,
                         rr = r + dr;
                     let hk = `${qq},${rr}`;
@@ -12349,31 +12461,6 @@
                 }
             }
             return keys;
-        }
-        /** Deterministic dense urban footprint (L∞ axial radius 2) on faction-owned tiles only — matches footprint key layout. */
-        function wodStampDeterministicOwnedUrban(centerHex, city, owner) {
-            if(!centerHex || !city) return;
-            city.q = centerHex.q;
-            city.r = centerHex.r;
-            city.x = centerHex.x;
-            city.y = centerHex.y;
-            if(city.urbanStyle == null) city.urbanStyle = Math.floor(Math.random() * 4);
-            let cid = city.id;
-            for(let dq = -2; dq <= 2; dq++) {
-                for(let dr = -2; dr <= 2; dr++) {
-                    if(Math.max(Math.abs(dq), Math.abs(dr)) > 2) continue;
-                    let qq = centerHex.q + dq,
-                        rr = centerHex.r + dr;
-                    let targetH = gameData.hexes[`${qq},${rr}`];
-                    if(!targetH || isWaterHex(targetH) || targetH.type === 'mountain') continue;
-                    if(targetH.owner !== owner) continue;
-                    targetH.type = 'urban';
-                    targetH.cityId = cid;
-                    targetH.urbanVariant = Math.floor(Math.random() * 5);
-                    targetH.baseColor = getTerrainColor('urban');
-                    targetH.renderColor = targetH.baseColor;
-                }
-            }
         }
         function wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows) {
             let innerRSq = Infinity;
@@ -12485,7 +12572,7 @@
             for(let ow of ownersSorted) minTiles = Math.min(minTiles, perTile[ow] || 0);
             let landBudget = Math.max(1, landForCities.length);
 
-            let kUpper = Math.min(4, Math.max(2, Math.floor(Math.min(minTiles / (38 + f * 14), landBudget / (f * (42 + f * 22))))));
+            let kUpper = Math.min(4, Math.max(2, Math.floor(Math.min(minTiles / (52 + f * 16), landBudget / (f * (58 + f * 26))))));
 
             let anchorChebSep = 6;
 
@@ -12569,7 +12656,7 @@
             let winnerPlan = null;
             let kpf = 0;
             outerFind: for(let kk = kUpper; kk >= 2; kk--) {
-                for(let sepTry = 10; sepTry >= 6; sepTry--) {
+                for(let sepTry = 12; sepTry >= 7; sepTry--) {
                     anchorChebSep = sepTry;
                     let plan = tryPlan(kk);
                     if(plan) {
@@ -12610,7 +12697,7 @@
                         incomeBonus: 0,
                         manpowerBonus: 0,
                     };
-                    wodStampDeterministicOwnedUrban(hx, cy, ow);
+                    stampOwnedRandomUrbanTerrainAroundCity(hx, cy, ow);
                     gameData.cities.push(cy);
                     hx.owner = ow;
                     let near = getHexesInRadius(site.q, site.r, 2);
@@ -12906,6 +12993,16 @@
                     if(!s) s = 0x6a09e667;
                     gameData._mapGenSeed = s;
                     wodPushSeededRandom(s);
+                }
+            }
+            let showMapGenOverlay = !gameData._wodSkipMapGenLoader;
+            gameData._wodSkipMapGenLoader = false;
+            let mapGenOverlayEl = null;
+            if(showMapGenOverlay) {
+                mapGenOverlayEl = document.getElementById('wodMapGenOverlay');
+                if(mapGenOverlayEl) {
+                    mapGenOverlayEl.classList.remove('hidden');
+                    mapGenOverlayEl.setAttribute('aria-busy', 'true');
                 }
             }
             try {
@@ -13219,6 +13316,10 @@
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
+                if(showMapGenOverlay && mapGenOverlayEl) {
+                    mapGenOverlayEl.classList.add('hidden');
+                    mapGenOverlayEl.setAttribute('aria-busy', 'false');
+                }
                 if(ownsInnerRng) wodPopRandom();
             }
         }
@@ -13547,6 +13648,61 @@
             if(UI.escMenu.classList.contains('hidden') && gameData.speed > 0) update(dt * gameData.speed);
             draw();
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
+        }
+
+        function wodSetBootSplashProgress(pct) {
+            let inner = document.getElementById('wodBootBarInner');
+            let tr = document.getElementById('wodBootBarTrack');
+            let p = Math.min(100, Math.max(0, +pct || 0));
+            if(inner) inner.style.transform = `scaleX(${p / 100})`;
+            if(tr) tr.setAttribute('aria-valuenow', String(Math.round(p)));
+        }
+
+        /** Black splash + loading bar fills only after menu background (`bootstrapMenuBackgroundBattle`) is ready. */
+        function wodRunInitialBootToMenu() {
+            let ov = document.getElementById('wodBootOverlay');
+            let caption = document.getElementById('wodBootCaption');
+            let bootErr = false;
+            gameData._wodSkipMapGenLoader = true;
+            if(UI.mainMenu) UI.mainMenu.classList.add('hidden');
+            let stopFake = false;
+            let fake = 6;
+            wodSetBootSplashProgress(fake);
+            function fakeTick() {
+                if(stopFake) return;
+                fake = Math.min(91, fake + (91 - fake) * 0.032 + Math.random() * 1.2);
+                wodSetBootSplashProgress(fake);
+                requestAnimationFrame(fakeTick);
+            }
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    if(caption) caption.textContent = 'Building map…';
+                    requestAnimationFrame(fakeTick);
+                    try {
+                        bootstrapMenuBackgroundBattle();
+                    } catch(err) {
+                        bootErr = true;
+                        console.error(err);
+                        if(caption) caption.textContent = 'Could not load. Try refreshing.';
+                    } finally {
+                        stopFake = true;
+                        if(!bootErr) {
+                            wodSetBootSplashProgress(100);
+                            if(caption) caption.textContent = 'Ready.';
+                        }
+                    }
+                    requestAnimationFrame(() => {
+                        if(!bootErr) {
+                            if(ov) {
+                                ov.classList.add('hidden');
+                                ov.setAttribute('aria-busy', 'false');
+                            }
+                            if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                        }
+                        gameData._wodSkipMapGenLoader = false;
+                    });
+                });
+            });
         }
 
         function bootstrapMenuBackgroundBattle() {
@@ -18813,9 +18969,14 @@
         wodSyncViewportAndCanvas();
 
         if (new URLSearchParams(window.location.search).get('autostart') === '1') {
+            let bo = document.getElementById('wodBootOverlay');
+            if(bo) {
+                bo.classList.add('hidden');
+                bo.setAttribute('aria-busy', 'false');
+            }
             startGame('ai');
         } else {
-            bootstrapMenuBackgroundBattle();
+            wodRunInitialBootToMenu();
         }
     </script>
     <script src="map-editor.js"></script>
