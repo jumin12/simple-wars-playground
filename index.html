@@ -5981,13 +5981,11 @@
                 h.renderColor = h.baseColor;
             }
         }
+        /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
         function wodAssignWaterAndNonclaimablePoliticalVotes() {
             for(let h of gameData.hexList) {
                 if(isClaimableLand(h)) continue;
-                if(isWaterHex(h)) {
-                    setHexOwner(h, 0);
-                    continue;
-                }
+                if(isWaterHex(h)) continue;
                 let votes = {};
                 for(let nb of getNeighborHexes(h)) {
                     if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
@@ -6014,13 +6012,12 @@
             }
             return seedsByO;
         }
-        /** Weighted nearest-capital partition on dry land; bias shifts adjust relative region size. */
+        /** Weighted nearest-seed partition on the full hex grid (land, water, mountains) so diplomacy borders extend through sea like War of Dots. */
         function wodAssignClaimableLandWeightedVoronoiFromSeeds(ownerIds, seedsByOwner, biasByOwner) {
             if(!ownerIds || ownerIds.length === 0) return;
             let valid = new Set(ownerIds);
             let bias = biasByOwner || {};
             for(let h of gameData.hexList) {
-                if(!isClaimableLand(h) || isWaterHex(h)) continue;
                 let bestO = 0, bestScore = Infinity;
                 for(let o of ownerIds) {
                     let s = seedsByOwner[o];
@@ -6047,7 +6044,11 @@
             wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, zeroBias);
             wodAssignWaterAndNonclaimablePoliticalVotes();
         }
-        /** Iteratively adjust additive weights so each faction's dry-land tile count matches an even split (±1). Keeps smooth macro borders. */
+        /** True for playable land tiles used to balance wedge sizes (excludes ocean and mountains — closer to usable territory in War of Dots). */
+        function wodHexCountsTowardLandPoliticsBalance(h) {
+            return !!(h && isClaimableLand(h) && !isWaterHex(h) && h.type !== 'mountain');
+        }
+        /** Iteratively adjust additive weights so buildable-ish land tiles match an even split (±1). Sea/mountain shading follows Voronoi. */
         function wodEqualizePoliticsBiasedVoronoi(ownerIds, capitalCities, iterations) {
             if(!ownerIds || ownerIds.length < 2) return;
             let valid = new Set(ownerIds);
@@ -6060,14 +6061,17 @@
             let bias = {};
             for(let o of sorted) bias[o] = 0;
             let stepScale = Math.max((gameData.hexRadius || 10) ** 2 * 0.055, 24);
-            for(let it = 0; it < iterations; it++) {
+            let mpBoost = !!(gameData.mp && gameData.mp.enabled);
+            let effIter = iterations + (mpBoost ? Math.round(iterations * 0.52) : 0) + ((sorted.length >= 4) ? 14 : 0);
+            effIter = Math.min(140, Math.max(iterations, effIter));
+            for(let it = 0; it < effIter; it++) {
                 wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
                 wodAssignWaterAndNonclaimablePoliticalVotes();
                 let cts = {};
                 let total = 0;
                 for(let o of sorted) cts[o] = 0;
                 for(let h of gameData.hexList) {
-                    if(!isClaimableLand(h) || isWaterHex(h)) continue;
+                    if(!wodHexCountsTowardLandPoliticsBalance(h)) continue;
                     if(valid.has(h.owner)) {
                         cts[h.owner]++;
                         total++;
@@ -6081,9 +6085,9 @@
                 for(let i = 0; i < f; i++) tgt[sorted[i]] = base + (i < rem ? 1 : 0);
                 let err = 0;
                 for(let o of sorted) err = Math.max(err, Math.abs(cts[o] - tgt[o]));
-                let gain = 0.097 + Math.min(0.6, it * 0.03);
+                let gain = (mpBoost ? 0.108 : 0.097) + Math.min(0.72, it * (mpBoost ? 0.034 : 0.03));
                 for(let o of sorted) bias[o] += gain * stepScale * (cts[o] - tgt[o]);
-                if(err <= 1 && it > 16) break;
+                if(err <= 1 && it > Math.max(20, mpBoost ? 22 : 16)) break;
             }
         }
         function wodDeterministicCitySplitPhase01(seedMixed) {
@@ -8677,7 +8681,7 @@
             if (unit.type === 'convoy') {
                 if (unit.convoySeaRoute) {
                     if (!isWaterHex(hex)) return false;
-                    return hex.owner === 0 || hex.owner === unit.owner;
+                    return true;
                 }
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
