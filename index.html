@@ -5958,6 +5958,9 @@
             wodRestoreBareTerrainFromSnapshot(gameData._wodBareTerrainSnap);
             gameData.cities = []; gameData.roads = []; gameData.entities = [];
             gameData.loadedCustomMap = false;
+            gameData._encircWork = null;
+            gameData.encircledHexes = new Set();
+            gameData.encirclementTimer = 0;
 
             let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
             let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
@@ -11122,6 +11125,13 @@
                             hasOwnerCity = true;
                             break;
                         }
+                        for(let uh of getCityUrbanTerrainHexes(city)) {
+                            if(uh && regionKeys.has(getHexKey(uh))) {
+                                hasOwnerCity = true;
+                                break;
+                            }
+                        }
+                        if(hasOwnerCity) break;
                     }
                     let hasOwnerCombatUnit = false;
                     for(let u of gameData.entities) {
@@ -13065,6 +13075,10 @@
             gameData._campaignEnded = false;
             // Clear entities & money just in case
             gameData.entities = [];
+            // Invalidate encirclement after territory/city reshuffle so setup preview does not keep old overlays.
+            gameData._encircWork = null;
+            gameData.encircledHexes = new Set();
+            gameData.encirclementTimer = 0;
             gameData.money = parseInt(document.getElementById('setupMoney').value) || 1000;
             gameData.aiMoneyByOwner = {};
             gameData.aiManpowerByOwner = {};
