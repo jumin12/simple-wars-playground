@@ -6113,7 +6113,7 @@
             cy /= tiles.length;
             let angleOffset = Math.random() * Math.PI * 2;
             function wedgeKey(h) {
-                let noiseValue = (fbm(h.x * 0.0025 + 123, h.y * 0.0025 + 456, 4) - 0.5) * 0.28;
+                let noiseValue = (fbm(h.x * 0.0025 + 123, h.y * 0.0025 + 456, 4) - 0.5) * 0.11;
                 return (Math.atan2(h.y - cy, h.x - cx) - angleOffset + noiseValue + Math.PI * 4) % (Math.PI * 2);
             }
             tiles.sort((a, b) => wedgeKey(a) - wedgeKey(b) || (a.q !== b.q ? a.q - b.q : a.r - b.r));
@@ -6170,6 +6170,21 @@
             let targets = {};
             for(let ow of sortedOwners) targets[ow] = townsPerFaction;
 
+            function countEligibleSitesForOwner(o) {
+                let n = 0;
+                for(let h of landHexes) {
+                    if(h.owner !== o) continue;
+                    if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'urban' || h.type === 'mountain') continue;
+                    n++;
+                }
+                return n;
+            }
+            let globalSiteCap = sortedOwners.length ? Math.min(...sortedOwners.map(countEligibleSitesForOwner)) : 0;
+            if(globalSiteCap > 0) {
+                for(let ow of sortedOwners)
+                    targets[ow] = Math.min(targets[ow], globalSiteCap);
+            }
+
             let startCities = [];
             let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
 
@@ -6195,7 +6210,9 @@
 
             function stampsOceanAdjacent(h) {
                 for(let n of getNeighborHexes(h)) {
-                    if(n && isOceanWater(n)) return true;
+                    if(!n) continue;
+                    if(isOceanWater(n)) return true;
+                    if(n.type === 'sand' && getNeighborHexes(n).some(nn => nn && isOceanWater(nn))) return true;
                 }
                 return false;
             }
@@ -6232,7 +6249,7 @@
                         let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
                         if(!relaxInner && bf > 0.86) continue;
                     }
-                    if(mapShape !== 'rectangle' && !relaxInner && wodBfsStepsToWater(h, 14) < minWaterSteps) continue;
+                    if(mapShape !== 'rectangle' && !relaxInner && wodBfsStepsToOcean(h, 14) < minWaterSteps) continue;
                     if(requireOceanCoast && !stampsOceanAdjacent(h)) continue;
                     if(cityTooClosePx(h.x, h.y, spacingSq)) continue;
 
@@ -6291,9 +6308,9 @@
                 if(c.hasFactory || !capByOwner[c.owner]) capByOwner[c.owner] = c;
             }
 
-            let mineGrouped = sortedOwners.slice();
-            for(let owner of mineGrouped) {
+            for(let owner of sortedOwners) {
                 let mine = gameData.cities.filter(c => c.owner === owner);
+                if(mine.length === 0) continue;
                 let capital = capByOwner[owner] || mine.find(c => c.id && String(c.id).indexOf('capital') >= 0) || mine[0];
                 for(let mt of mine) mt.hasFactory = mt === capital;
                 for(let c of mine) {
@@ -9603,7 +9620,7 @@
         }
 
         function cityHasWaterNeighbor(city) {
-            return cityUrbanClusterEligibleForHarbor(city);
+            return cityUrbanClusterTouchesNavigableWater(city);
         }
 
         /** Marines / adjacency checks that allow inland lakes (still need a water tile touching the town). */
@@ -9728,6 +9745,10 @@
                 for(let n of getNeighborHexes(h)) {
                     if(!n) continue;
                     if(isOceanWater(n)) {
+                        touchesSea = true;
+                        break;
+                    }
+                    if(n.type === 'sand' && getNeighborHexes(n).some(nn => nn && isOceanWater(nn))) {
                         touchesSea = true;
                         break;
                     }
@@ -11933,9 +11954,33 @@
                 if(s >= maxSteps) continue;
                 for(let nb of getNeighborHexes(h)) {
                     if(!nb) continue;
+                    if(isWaterHex(nb)) return s + 1;
+                    let k = wodHexKeyFromQR(nb.q, nb.r);
+                    if(seen.has(k)) continue;
+                    seen.add(k);
+                    q.push({ h: nb, s: s + 1 });
+                }
+            }
+            return maxSteps + 1;
+        }
+
+        /** Land-only hops until stepping onto a tile bordering open ocean (lakes excluded from the walk). */
+        function wodBfsStepsToOcean(startHex, maxSteps) {
+            if(!startHex || isOceanWater(startHex)) return 0;
+            let q = [{ h: startHex, s: 0 }];
+            let seen = new Set([wodHexKeyFromQR(startHex.q, startHex.r)]);
+            while(q.length) {
+                let cur = q.shift();
+                let h = cur.h, s = cur.s;
+                if(s >= maxSteps) continue;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb) continue;
                     if(isOceanWater(nb)) return s + 1;
                     let k = wodHexKeyFromQR(nb.q, nb.r);
                     if(seen.has(k)) continue;
+                    if(nb.type === 'mountain') continue;
+                    if(isWaterHex(nb)) continue;
+                    if(!isClaimableLand(nb)) continue;
                     seen.add(k);
                     q.push({ h: nb, s: s + 1 });
                 }
@@ -13631,7 +13676,7 @@
                 }
             }
             if(aiMoney >= 800 && Math.random() < 0.25) {
-                let cityNoHarbor = aiCities.find(c => !c.hasHarbor && cityHasWaterNeighbor(c));
+                let cityNoHarbor = aiCities.find(c => !c.hasHarbor && cityUrbanClusterEligibleForHarbor(c));
                 if(cityNoHarbor && (gameData.aiMoneyByOwner[ownerKey] || 0) >= 400) {
                     cityNoHarbor.hasHarbor = true;
                     gameData.aiMoneyByOwner[ownerKey] -= 400;
@@ -18192,7 +18237,7 @@
             if(mode === 'harbor') {
                 if(city.hasHarbor) return false;
                 if(wodPlayerTreasury(owner) < 400) return false;
-                return cityHasWaterNeighbor(city);
+                return cityUrbanClusterEligibleForHarbor(city);
             }
             let cost = getUnitCost(mode);
             if(wodPlayerTreasury(owner) < cost.money || wodPlayerMpPool(owner) < cost.manpower) return false;
@@ -18451,6 +18496,8 @@
             createUnitAt,
             terrainHelp,
             isWaterHex,
+            isOceanWater,
+            isLakeWater,
             isClaimableLand,
             beginHexOwnerBatch() { batchHexOwner = true; },
             endHexOwnerBatch() {
