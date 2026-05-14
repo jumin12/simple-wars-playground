@@ -150,6 +150,9 @@
             background: linear-gradient(90deg, #2e6b8f, #5ab0d8, #8fd4f0);
             transition: transform 0.35s ease-out;
         }
+        .wod-load-bar-inner.wod-boot-tween-suppress {
+            transition: none;
+        }
         .wod-load-caption {
             font-size: 14px;
             letter-spacing: 0.04em;
@@ -6062,8 +6065,12 @@
             for(let o of sorted) bias[o] = 0;
             let stepScale = Math.max((gameData.hexRadius || 10) ** 2 * 0.055, 24);
             let mpBoost = !!(gameData.mp && gameData.mp.enabled);
-            let effIter = iterations + (mpBoost ? Math.round(iterations * 0.52) : 0) + ((sorted.length >= 4) ? 14 : 0);
-            effIter = Math.min(140, Math.max(iterations, effIter));
+            let fCount = sorted.length;
+            /** More factions need more adjustment passes for an even playable-land wedge (solo 3-player too). */
+            let multiFaction = fCount >= 3;
+            let effIter = iterations + (mpBoost ? Math.round(iterations * 0.52) : 0) + (fCount >= 4 ? 18 : (multiFaction ? 22 : 0));
+            effIter = Math.min(165, Math.max(iterations + (multiFaction && !mpBoost ? 18 : 0), effIter));
+            let minRelaxIter = Math.max(24, mpBoost ? 26 : 20, multiFaction ? 32 : 0);
             for(let it = 0; it < effIter; it++) {
                 wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
                 wodAssignWaterAndNonclaimablePoliticalVotes();
@@ -6085,9 +6092,10 @@
                 for(let i = 0; i < f; i++) tgt[sorted[i]] = base + (i < rem ? 1 : 0);
                 let err = 0;
                 for(let o of sorted) err = Math.max(err, Math.abs(cts[o] - tgt[o]));
-                let gain = (mpBoost ? 0.108 : 0.097) + Math.min(0.72, it * (mpBoost ? 0.034 : 0.03));
+                let gainBump = multiFaction ? 0.012 + (fCount >= 4 ? 0.006 : 0) : 0;
+                let gain = (mpBoost ? 0.108 : 0.097) + gainBump + Math.min(0.78, it * ((mpBoost ? 0.034 : 0.03) + (multiFaction ? 0.004 : 0)));
                 for(let o of sorted) bias[o] += gain * stepScale * (cts[o] - tgt[o]);
-                if(err <= 1 && it > Math.max(20, mpBoost ? 22 : 16)) break;
+                if(err <= 1 && it > Math.max(minRelaxIter, mpBoost ? 26 : minRelaxIter - 6)) break;
             }
         }
         function wodDeterministicCitySplitPhase01(seedMixed) {
@@ -6942,45 +6950,51 @@
             if(!meta || gameState === 'PLAYING') return;
             let shapeEl = document.getElementById('setupMapShape');
             let snap = wodMpSnapshotLobbyGenBackup();
-            try {
-                let r = parseInt(meta.mapSize, 10) || 60;
-                gameData.mapRadius = r;
-                if(shapeEl) shapeEl.value = meta.mapShape || 'island';
-                gameData.loadedCustomMap = false;
-                wodMpEnsureDefaultSeatTypes(meta);
-                let maxH = wodMpClampLobbyCap(meta.maxHumans);
-                let st = (meta.seatTypes && meta.seatTypes.length) ? meta.seatTypes.slice(0, maxH) : [];
-                while(st.length < maxH) st.push('human');
-                let hs = [];
-                for(let s = 1; s <= maxH; s++) {
-                    if((st[s - 1] || 'human') === 'human') hs.push(s);
-                }
-                gameData.mp = {
-                    enabled: true,
-                    isHost: true,
-                    localSlot: (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.slot) ? WodMultiplayer.api.slot : 1,
-                    humanSlots: hs,
-                    seatTypes: st,
-                    maxLobbySlots: maxH,
-                    eliminatedSlots: []
-                };
-                gameData.aiCount = st.filter(t => t === 'bot').length;
-                let previewSeed = wodMpLobbyPreviewSeed(meta);
-                wodPushSeededRandom(previewSeed);
-                try {
-                    generateMap();
-                } finally {
-                    wodPopRandom();
-                }
-                previewLoadedMap('mpLobbyMapPreview');
-            } catch(err) {
-                console.warn('Lobby preview', err);
-            } finally {
-                wodMpRestoreLobbyGenBackup(snap);
-                let msRestore = document.getElementById('setupMapSize');
-                if(msRestore && meta.mapSize != null) msRestore.value = String(meta.mapSize);
-                if(shapeEl && meta.mapShape) shapeEl.value = meta.mapShape;
-            }
+            wodArmMapPreviewSpinner('mpLobbyMapPreview');
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    try {
+                        let r = parseInt(meta.mapSize, 10) || 60;
+                        gameData.mapRadius = r;
+                        if(shapeEl) shapeEl.value = meta.mapShape || 'island';
+                        gameData.loadedCustomMap = false;
+                        wodMpEnsureDefaultSeatTypes(meta);
+                        let maxH = wodMpClampLobbyCap(meta.maxHumans);
+                        let st = (meta.seatTypes && meta.seatTypes.length) ? meta.seatTypes.slice(0, maxH) : [];
+                        while(st.length < maxH) st.push('human');
+                        let hs = [];
+                        for(let s = 1; s <= maxH; s++) {
+                            if((st[s - 1] || 'human') === 'human') hs.push(s);
+                        }
+                        gameData.mp = {
+                            enabled: true,
+                            isHost: true,
+                            localSlot: (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.slot) ? WodMultiplayer.api.slot : 1,
+                            humanSlots: hs,
+                            seatTypes: st,
+                            maxLobbySlots: maxH,
+                            eliminatedSlots: []
+                        };
+                        gameData.aiCount = st.filter(t => t === 'bot').length;
+                        let previewSeed = wodMpLobbyPreviewSeed(meta);
+                        wodPushSeededRandom(previewSeed);
+                        try {
+                            generateMap();
+                        } finally {
+                            wodPopRandom();
+                        }
+                        previewLoadedMap('mpLobbyMapPreview');
+                    } catch(err) {
+                        console.warn('Lobby preview', err);
+                    } finally {
+                        wodMpRestoreLobbyGenBackup(snap);
+                        let msRestore = document.getElementById('setupMapSize');
+                        if(msRestore && meta.mapSize != null) msRestore.value = String(meta.mapSize);
+                        if(shapeEl && meta.mapShape) shapeEl.value = meta.mapShape;
+                        wodDisarmMapPreviewSpinner('mpLobbyMapPreview');
+                    }
+                });
+            });
         }
         function wodMpApplyMetaToSetupFields(meta) {
             if(!meta) return;
@@ -11795,30 +11809,33 @@
             }
             return order.length ? order : landHexes.slice().sort(() => Math.random() - 0.5);
         }
-        function wodPaintMapPreviewPolitical(pCtx, hexList, cities, ownerSmooth, cx, cy, scale, hr) {
+        /** Map preview diplomacy borders match in-game smoothing (same chain walk + quadratic hybrid stroke). */
+        function wodPaintMapPreviewPolitical(pCtx, hexList, cities, ownerSmooth, cx, cy, scale, hr, hexLookupOpt) {
             if(!pCtx || !hexList) return;
-            let hmap = {};
-            for(let h of hexList) hmap[wodHexKeyFromQR(h.q, h.r)] = h;
-            for(let hex of hexList) {
-                if(!hex.owner) continue;
-                let k = wodHexKeyFromQR(hex.q, hex.r);
-                let o0 = ownerSmooth && ownerSmooth[k] != null ? ownerSmooth[k] : hex.owner;
-                for(let dir of cardinalHexDirections) {
-                    let nHex = hmap[wodHexKeyFromQR(hex.q + dir.q, hex.r + dir.r)];
-                    if(!nHex) continue;
-                    if(nHex.q < hex.q || (nHex.q === hex.q && nHex.r < hex.r)) continue;
-                    let nk = wodHexKeyFromQR(nHex.q, nHex.r);
-                    let o1 = ownerSmooth && ownerSmooth[nk] != null ? ownerSmooth[nk] : nHex.owner;
-                    if(o1 === o0 || o0 <= 0 || o1 <= 0) continue;
-                    pCtx.strokeStyle = 'rgba(8,22,42,0.55)';
-                    pCtx.lineJoin = 'round';
-                    pCtx.lineWidth = Math.max(1.05, scale * 0.58);
-                    pCtx.lineCap = 'butt';
-                    pCtx.beginPath();
-                    pCtx.moveTo(cx + hex.x * scale, cy + hex.y * scale);
-                    pCtx.lineTo(cx + nHex.x * scale, cy + nHex.y * scale);
-                    pCtx.stroke();
-                }
+            let lk = hexLookupOpt;
+            if(!lk) {
+                lk = {};
+                for(let h of hexList) lk[`${h.q},${h.r}`] = h;
+            }
+            /* ownerSmooth retained for callers; chain builder uses hex.owner (smooth map not wired into politics). */
+            void ownerSmooth;
+            let spacingW = (hr || 10) * 1.35;
+            let chains = wodCollectDiplomacyBorderChains(hexList, lk, 0, 0, spacingW);
+            let spScreen = spacingW * scale;
+            pCtx.strokeStyle = 'rgba(7,14,26,0.9)';
+            pCtx.fillStyle = 'rgba(7,14,26,0.9)';
+            pCtx.lineJoin = 'round';
+            pCtx.lineCap = 'round';
+            pCtx.lineWidth = Math.max(1.2, spScreen * 0.62);
+            for(let ch of chains) {
+                let scr = [];
+                for(let p of ch.pts) scr.push({ x: cx + p.x * scale, y: cy + p.y * scale });
+                drawPaintStroke(pCtx, scr, spScreen, {
+                    closedLoop: ch.closed,
+                    suppressDegenerate: true,
+                    openLineCap: 'round',
+                    hybridBorder: true
+                });
             }
             if(cities && cities.length) {
                 for(let city of cities) {
@@ -11872,7 +11889,9 @@
                 }
             }
             let smooth = null;
-            wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, smooth, cx, cy, scale, hr);
+            let lk = {};
+            for(let h of hexList) lk[`${h.q},${h.r}`] = h;
+            wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, smooth, cx, cy, scale, hr, lk);
         }
         function wodMapDataToThumbnailDataUrl(mapData, tw, th) {
             let c = document.createElement('canvas');
@@ -12204,6 +12223,69 @@
             reader.readAsText(file);
         }
 
+        function wodDrawMapPreviewGeneratingOverlay(canvas) {
+            if(!canvas) return;
+            let ctx = canvas.getContext('2d');
+            let w = canvas.width, h = canvas.height;
+            ctx.fillStyle = '#154360';
+            ctx.fillRect(0, 0, w, h);
+            let fs = Math.max(11, Math.floor(Math.min(w, h) * 0.078));
+            ctx.fillStyle = 'rgba(237,243,249,0.92)';
+            ctx.font = `${fs}px system-ui,sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Generating map…', w / 2, h * (h < 140 ? 0.36 : 0.34));
+            let cx = w / 2, cy = h * 0.57, r = Math.min(w, h) * (h < 140 ? 0.11 : 0.098);
+            let a0 = (performance.now() / 400) % (Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = Math.max(1.8, r * 0.12);
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(229,239,247,0.92)';
+            ctx.lineWidth = Math.max(2, r * 0.13);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, a0, a0 + Math.PI * 1.48);
+            ctx.stroke();
+        }
+
+        function wodPreviewSpinnerLoop() {
+            if(!gameData._wodMapPreviewSpinnerActive) {
+                gameData._wodPreviewSpinnerRafId = 0;
+                return;
+            }
+            for(let id of gameData._wodPreviewSpinnerCanvasIds || []) {
+                let cv = typeof id === 'string' ? document.getElementById(id) : id;
+                if(cv && cv.dataset.wodMapGenerating === '1') wodDrawMapPreviewGeneratingOverlay(cv);
+            }
+            gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
+        }
+
+        function wodArmMapPreviewSpinner(canvasId) {
+            if(!canvasId) return;
+            if(!gameData._wodPreviewSpinnerCanvasIds) gameData._wodPreviewSpinnerCanvasIds = new Set();
+            let cv = document.getElementById(canvasId);
+            if(!cv) return;
+            cv.dataset.wodMapGenerating = '1';
+            gameData._wodPreviewSpinnerCanvasIds.add(canvasId);
+            gameData._wodMapPreviewSpinnerActive = true;
+            wodDrawMapPreviewGeneratingOverlay(cv);
+            if(!gameData._wodPreviewSpinnerRafId) gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
+        }
+
+        function wodDisarmMapPreviewSpinner(canvasId) {
+            if(!canvasId || !gameData._wodPreviewSpinnerCanvasIds) return;
+            gameData._wodPreviewSpinnerCanvasIds.delete(canvasId);
+            let cv = document.getElementById(canvasId);
+            if(cv) cv.dataset.wodMapGenerating = '0';
+            gameData._wodMapPreviewSpinnerActive = gameData._wodPreviewSpinnerCanvasIds.size > 0;
+            if(!gameData._wodMapPreviewSpinnerActive && gameData._wodPreviewSpinnerRafId) {
+                cancelAnimationFrame(gameData._wodPreviewSpinnerRafId);
+                gameData._wodPreviewSpinnerRafId = 0;
+            }
+        }
+
         function previewLoadedMap(canvasOrId) {
             let prevCanvas = canvasOrId;
             if(typeof canvasOrId === 'string') prevCanvas = document.getElementById(canvasOrId);
@@ -12253,7 +12335,8 @@
 
             let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview';
             if(wodPreviewDrawPolitical) {
-                wodPaintMapPreviewPolitical(pCtx, gameData.hexList, gameData.cities, null, cx, cy, scale, gameData.hexRadius);
+                let hxLookup = gameData.hexes || {};
+                wodPaintMapPreviewPolitical(pCtx, gameData.hexList, gameData.cities, null, cx, cy, scale, gameData.hexRadius, hxLookup);
                 for(let u of gameData.entities) {
                     if(!u.owner || u.hp <= 0 || u.type === 'convoy') continue;
                     let col = factionColors[u.owner] || '#bbb';
@@ -12272,14 +12355,24 @@
         }
 
         function previewMap() {
-            let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
-            gameData.mapRadius = mapSize;
-            let aiEl = document.getElementById('setupAI');
-            if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
-            gameData.loadedCustomMap = false;
-            generateMap();
-            previewLoadedMap();
-            gameData._soloMapPreviewMatchesStart = true;
+            wodArmMapPreviewSpinner('mapPreview');
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
+                    gameData.mapRadius = mapSize;
+                    let aiEl = document.getElementById('setupAI');
+                    if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
+                    gameData.loadedCustomMap = false;
+                    try {
+                        generateMap();
+                    } catch(e) {
+                        console.warn(e);
+                    }
+                    previewLoadedMap('mapPreview');
+                    wodDisarmMapPreviewSpinner('mapPreview');
+                    gameData._soloMapPreviewMatchesStart = true;
+                });
+            });
         }
 
         function initGame() {
@@ -12564,8 +12657,13 @@
             softenMountainHexBetweenOwners(ownersSorted);
             ensureOwnersReachableByLand(ownersSorted);
             smoothStartingTerritory(ownersSorted, 4, 4);
-            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, 48);
+            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 56 : 48);
             smoothStartingTerritory(ownersSorted, 5, 2);
+            if(ownersSorted.length >= 3) {
+                wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(52, f * 7));
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+                smoothStartingTerritory(ownersSorted, 5, 1);
+            }
 
             let perTile = {};
             for(let ow of ownersSorted) perTile[ow] = 0;
@@ -12938,7 +13036,15 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             smoothStartingTerritory(ownersList, 5, 2);
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, 44);
+            let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
+            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
+
+            if(ownersList.length >= 3) {
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+                wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
+                smoothStartingTerritory(ownersList, 5, 1);
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+            }
 
             wodSyncUrbanFootprintOwners();
             wodSyncCityOwnersFromCenterHex();
@@ -13663,49 +13769,79 @@
             if(tr) tr.setAttribute('aria-valuenow', String(Math.round(p)));
         }
 
-        /** Black splash + loading bar fills only after menu background (`bootstrapMenuBackgroundBattle`) is ready. */
+        /** Black splash: creep bar during work, clamp minimum time, animate to 100% before main menu (visible fill). */
         function wodRunInitialBootToMenu() {
             let ov = document.getElementById('wodBootOverlay');
             let caption = document.getElementById('wodBootCaption');
+            let inner = document.getElementById('wodBootBarInner');
             let bootErr = false;
             gameData._wodSkipMapGenLoader = true;
             if(UI.mainMenu) UI.mainMenu.classList.add('hidden');
-            let stopFake = false;
-            let fake = 6;
-            wodSetBootSplashProgress(fake);
-            function fakeTick() {
-                if(stopFake) return;
-                fake = Math.min(91, fake + (91 - fake) * 0.032 + Math.random() * 1.2);
-                wodSetBootSplashProgress(fake);
-                requestAnimationFrame(fakeTick);
+
+            let splashT0 = performance.now();
+            let displayed = 4;
+            wodSetBootSplashProgress(displayed);
+            if(inner) inner.classList.add('wod-boot-tween-suppress');
+
+            let creepTimer = setInterval(() => {
+                let t = (performance.now() - splashT0) / 1500;
+                let cap = bootErr ? 100 : Math.min(78, 42 + t * 36);
+                displayed = Math.min(cap, displayed + 2.1 + Math.random());
+                if(!bootErr) wodSetBootSplashProgress(displayed);
+            }, 52);
+
+            function revealMenu() {
+                if(inner) inner.classList.remove('wod-boot-tween-suppress');
+                if(!bootErr) {
+                    if(caption) caption.textContent = 'Ready.';
+                    wodSetBootSplashProgress(100);
+                }
+                requestAnimationFrame(() => {
+                    if(!bootErr) {
+                        if(ov) {
+                            ov.classList.add('hidden');
+                            ov.setAttribute('aria-busy', 'false');
+                        }
+                        if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                    }
+                    gameData._wodSkipMapGenLoader = false;
+                });
             }
+
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
                     if(caption) caption.textContent = 'Building map…';
-                    requestAnimationFrame(fakeTick);
                     try {
                         bootstrapMenuBackgroundBattle();
                     } catch(err) {
                         bootErr = true;
                         console.error(err);
+                        clearInterval(creepTimer);
                         if(caption) caption.textContent = 'Could not load. Try refreshing.';
-                    } finally {
-                        stopFake = true;
-                        if(!bootErr) {
-                            wodSetBootSplashProgress(100);
-                            if(caption) caption.textContent = 'Ready.';
-                        }
+                        if(inner) inner.classList.remove('wod-boot-tween-suppress');
+                        return;
                     }
-                    requestAnimationFrame(() => {
-                        if(!bootErr) {
-                            if(ov) {
-                                ov.classList.add('hidden');
-                                ov.setAttribute('aria-busy', 'false');
-                            }
-                            if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                    clearInterval(creepTimer);
+                    displayed = Math.max(displayed, 62);
+
+                    let finishFillAndReveal = () => {
+                        displayed = Math.max(displayed, 88);
+                        let fillStart = performance.now();
+                        const fillMs = Math.max(620, Math.min(1100, 1650 - (fillStart - splashT0)));
+
+                        function fillTick(now) {
+                            let u = Math.min(1, (now - fillStart) / fillMs);
+                            let eased = 1 - Math.pow(1 - u, 2.2);
+                            wodSetBootSplashProgress(displayed + (100 - displayed) * eased);
+                            if(u < 1) requestAnimationFrame(fillTick);
+                            else setTimeout(revealMenu, bootErr ? 0 : 90);
                         }
-                        gameData._wodSkipMapGenLoader = false;
-                    });
+                        requestAnimationFrame(fillTick);
+                    };
+
+                    let elapsed = performance.now() - splashT0;
+                    let waitRemain = Math.max(0, 1180 - elapsed);
+                    setTimeout(finishFillAndReveal, waitRemain);
                 });
             });
         }
@@ -15323,15 +15459,17 @@
             return out.length ? out : chains;
         }
 
-        function drawPaintedTerritoryBorders(ctx, offsetX, offsetY) {
-            if(!gameData.layers.diplomacy) return;
-            let spacing = gameData.hexRadius * 1.35;
+        /**
+         * World-space midpoints of faction–faction diplomacy edges (shared by main map renderer and lobby/setup previews).
+         * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
+         */
+        function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
             let bordersByPair = {};
 
-            for(let hex of gameData.hexList) {
+            for(let hex of hexList) {
                 if(hex.owner === 0) continue;
                 for(let dir of cardinalHexDirections) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
                     let owners = [hex.owner, nHex.owner].sort((a, b) => a - b);
                     let pairKey = owners.join(':');
@@ -15344,12 +15482,7 @@
                 }
             }
 
-            ctx.strokeStyle = '#050505';
-            ctx.fillStyle = '#050505';
-            ctx.lineWidth = 8;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-
+            let out = [];
             for(let pairKey in bordersByPair) {
                 let edgeMap = bordersByPair[pairKey];
                 let midpointByEdge = new Map();
@@ -15368,13 +15501,30 @@
                 for(let { keys, closed } of chains) {
                     let pts = keys.map(k => midpointByEdge.get(k)).filter(Boolean);
                     if(pts.length < 2) continue;
-                    drawPaintStroke(ctx, pts, spacing, {
-                        closedLoop: closed,
-                        suppressDegenerate: true,
-                        openLineCap: 'round',
-                        hybridBorder: true
-                    });
+                    out.push({ closed, pts });
                 }
+            }
+            return out;
+        }
+
+        function drawPaintedTerritoryBorders(ctx, offsetX, offsetY) {
+            if(!gameData.layers.diplomacy) return;
+            let spacing = gameData.hexRadius * 1.35;
+            let paintChains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
+
+            ctx.strokeStyle = '#050505';
+            ctx.fillStyle = '#050505';
+            ctx.lineWidth = 8;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            for(let { closed, pts } of paintChains) {
+                drawPaintStroke(ctx, pts, spacing, {
+                    closedLoop: closed,
+                    suppressDegenerate: true,
+                    openLineCap: 'round',
+                    hybridBorder: true
+                });
             }
         }
 
