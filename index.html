@@ -4428,7 +4428,7 @@
         <div id="mapLibraryPanel" class="overlay hidden">
             <div class="panel panel-wide wod-map-lib-panel">
                 <h2 style="margin-top:0">Saved maps</h2>
-                <p class="wod-map-lib-sub">Maps are stored locally in your browser (like WorldBox). Use them in solo setup, multiplayer, or the editor. Names and previews help you pick the right battlefield.</p>
+                <p class="wod-map-lib-sub">Maps are stored locally in your browser. Use them in solo setup, multiplayer, or the map editor. Previews match the setup view: terrain, faction borders, and town markers.</p>
                 <div class="wod-map-lib-layout">
                     <div class="wod-map-lib-list" id="wodMapLibList" aria-label="Saved map list"></div>
                     <div class="wod-map-lib-detail">
@@ -4447,12 +4447,12 @@
         <div id="helpGuidePanel" class="overlay hidden">
             <div class="panel panel-wide" style="max-width:900px;max-height:92vh;overflow:auto">
                 <h2 style="margin-top:0">Game guide</h2>
-                <p class="esc-help-intro">This guide matches what you actually see in-game: economy, orders, terrain, and win conditions. The live <strong>terrain key</strong> (pause menu or setup) always lists the exact tile types on <strong>your current map</strong> — generate or load a map first if you want swatches to match what you are playing.</p>
+                <p class="esc-help-intro">Economy, combat, movement, setup previews, and the live map. The terrain list at the end reflects <strong>the last map the game generated or loaded</strong> — use <strong>Generate New</strong> in solo setup, run a skirmish, or open the multiplayer lobby preview so those swatches match what you are playing on.</p>
 
                 <div class="esc-help-block">
-                    <h4>Borders, cities, and previews</h4>
-                    <p class="esc-help-prose">On random maps, starting borders are drawn from each faction’s <strong>capital</strong> outward (Voronoi-style), then smoothed so lines are easier to read than raw hex stairsteps. The match tries to give every active faction the <strong>same number of towns</strong>, and new towns are biased <strong>inland</strong> so they are less likely to sit on a one-hex coastal spit.</p>
-                    <p class="esc-help-prose">Setup and lobby <strong>previews</strong> paint terrain, faint political edges, and capitals in faction colors so you can judge fairness before you commit. In solo play, use <strong>Generate New</strong> when you want to lock a layout: the next <strong>Start</strong> reuses that seed if you do not change map size, shape, or AI count. Multiplayer reuses the lobby seed for the minimap and the launched match.</p>
+                    <h4>Borders and the setup preview</h4>
+                    <p class="esc-help-prose">When you generate a procedural map, each faction’s starting land is grown from a <strong>single seed town</strong> (the capital when one exists), not from every city at once. That keeps early territory in one connected blob instead of checkerboarding. A smoothing pass then softens borders so they read cleanly on the map and in <strong>setup / lobby previews</strong> (previews use the same colors and border lines as the minimap).</p>
+                    <p class="esc-help-prose">In solo play, click <strong>Generate New</strong> when you want to lock in a layout: your last preview shares the same random seed as the very next <strong>Start</strong> provided you do not change map size, shape, or AI count before launching. If you skip preview entirely, each start still generates a full procedural map — it just will not match an older thumbnail sitting in the UI. Multiplayer reuses the lobby seed for both the lobby minimap and the host launch so every seat sees the same geography.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -4475,8 +4475,8 @@
 
                 <div class="esc-help-block">
                     <h4>Terrain and movement</h4>
-                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. Pathfinding finds routes around them (including narrow “pass” hexes that read as hills).</p>
-                    <p class="esc-help-prose"><strong>Light infantry</strong> and <strong>heavies</strong> can cross <strong>shallow coastal water</strong> tiles slowly, but stall in deep open water. <strong>Marines</strong> move and fight at full efficiency on <strong>water</strong> and stay strong on adjacent beach-style tiles, with a damage penalty on dry inland ground. <strong>Ships</strong> stay on water only. Morale breaks, being in combat, and difficult terrain all reduce effective march speed.</p>
+                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. Armies route around them through passes and open ground; the game won’t path straight through rock you cannot enter.</p>
+                    <p class="esc-help-prose"><strong>Light infantry</strong> and <strong>heavies</strong> can use shallow <strong>sand</strong> along the coast but are very slow on open <strong>water</strong> tiles. <strong>Marines</strong> keep full speed on water and fight well there; they are weaker on dry inland terrain. <strong>Ships</strong> only move on water. Morale, being wet, and combat all reduce effective march speed on top of terrain.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -4530,7 +4530,7 @@
                         <canvas id="menuHelpCanvasUnitMarine" width="76" height="76" aria-hidden="true"></canvas>
                         <div class="help-unit-body">
                             <h5>Marines</h5>
-                            <p>Amphibious specialists: strong on <strong>water</strong> and coastal transitions, weaker when pushed deep into dry inland tiles. Use them for landings and shore fighting where regular infantry would pay heavy water penalties.</p>
+                            <p>Amphibious specialists. They fight and move at full strength on <strong>water</strong> tiles and cope well on coastal <strong>sand</strong>, but take a damage penalty on drier inland terrain. Use them for beach landings and fighting on the water grid where regular infantry are heavily slowed.</p>
                         </div>
                     </div>
                     <div class="help-unit-card">
@@ -5827,12 +5827,14 @@
                 sandThresh -= 0.035 + Math.random() * 0.035;
                 moistShift -= 0.06 + Math.random() * 0.06;
                 waterElevThresh += 0.02 + Math.random() * 0.02;
-            } else             if(biomeRoll < 0.68) {
+            } else if(biomeRoll < 0.68) {
                 mountElevThresh -= 0.04 + Math.random() * 0.045;
                 moistShift += 0.05 + Math.random() * 0.05;
             }
-            let mountPatterns = ['mixed', 'mixed', 'scattered', 'rift', 'rim', 'barren'];
-            let mountPattern = mountPatterns[Math.floor(Math.random() * mountPatterns.length)];
+            let mStyles = ['default', 'scattered', 'scattered', 'ring', 'low', 'mixed'];
+            let mountainStyle = mStyles[Math.floor(Math.random() * mStyles.length)];
+            let mountainPeakJitter = 0.055 + Math.random() * 0.14;
+            let mountainRingR = 0.36 + Math.random() * 0.22;
             return {
                 islandMode,
                 stretchX,
@@ -5848,7 +5850,9 @@
                 moistShift,
                 forestMoistBoost,
                 mountainThin,
-                mountPattern
+                mountainStyle,
+                mountainPeakJitter,
+                mountainRingR
             };
         }
         function wodThinMountainsForProfile(gp, seedOffset) {
@@ -11428,113 +11432,128 @@
                 localStorage.setItem(WOD_SAVED_MAPS_V2_KEY, JSON.stringify(arr.slice(0, 56)));
             } catch(e) {}
         }
-        function wodHexQuickWater(h) {
-            return h && h.type === 'water';
+        function wodHexKeyFromQR(q, r) {
+            return q + ',' + r;
         }
-        function wodBuildLandDistanceToWater(hexList) {
-            let dist = new Map();
-            let frontier = [];
-            for(let hex of hexList || []) {
-                if(!hex || wodHexQuickWater(hex)) {
-                    if(hex) {
-                        let k = `${hex.q},${hex.r}`;
-                        if(!dist.has(k)) {
-                            dist.set(k, 0);
-                            frontier.push(hex);
+        function wodBfsStepsToWater(startHex, maxSteps) {
+            if(!startHex || isWaterHex(startHex)) return 0;
+            let q = [{ h: startHex, s: 0 }];
+            let seen = new Set([wodHexKeyFromQR(startHex.q, startHex.r)]);
+            while(q.length) {
+                let cur = q.shift();
+                let h = cur.h, s = cur.s;
+                if(s >= maxSteps) continue;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb) continue;
+                    if(isWaterHex(nb)) return s + 1;
+                    let k = wodHexKeyFromQR(nb.q, nb.r);
+                    if(seen.has(k)) continue;
+                    seen.add(k);
+                    q.push({ h: nb, s: s + 1 });
+                }
+            }
+            return maxSteps + 1;
+        }
+        function wodLandCentroidMaxRadius(landHexes) {
+            let cx = 0, cy = 0, n = landHexes.length;
+            if(!n) return { cx: 0, cy: 0, maxR: 1 };
+            for(let h of landHexes) {
+                cx += h.x;
+                cy += h.y;
+            }
+            cx /= n;
+            cy /= n;
+            let maxR = 1;
+            for(let h of landHexes) {
+                let dx = h.x - cx, dy = h.y - cy;
+                maxR = Math.max(maxR, Math.sqrt(dx * dx + dy * dy));
+            }
+            return { cx, cy, maxR };
+        }
+        function wodSmoothOwnersForPreview(hexList, passes) {
+            let dict = {};
+            for(let h of hexList) {
+                if(isWaterHex(h)) continue;
+                dict[wodHexKeyFromQR(h.q, h.r)] = h.owner || 0;
+            }
+            for(let p = 0; p < passes; p++) {
+                let next = Object.assign({}, dict);
+                for(let h of hexList) {
+                    if(isWaterHex(h)) continue;
+                    let k = wodHexKeyFromQR(h.q, h.r);
+                    let votes = {};
+                    for(let dir of hexDirections) {
+                        let nk = wodHexKeyFromQR(h.q + dir.q, h.r + dir.r);
+                        let o = dict[nk];
+                        if(o > 0) votes[o] = (votes[o] || 0) + 1;
+                    }
+                    let bo = 0, bv = -1;
+                    for(let ok in votes) {
+                        if(votes[ok] > bv) {
+                            bv = votes[ok];
+                            bo = parseInt(ok, 10);
                         }
                     }
+                    if(bo > 0 && bv >= 4 && bo !== dict[k]) next[k] = bo;
                 }
+                dict = next;
             }
-            while(frontier.length) {
-                let h = frontier.shift();
-                let d = dist.get(`${h.q},${h.r}`);
-                for(let nb of getNeighborHexes(h)) {
-                    if(!nb || wodHexQuickWater(nb)) continue;
-                    let k = `${nb.q},${nb.r}`;
-                    if(dist.has(k)) continue;
-                    dist.set(k, d + 1);
-                    frontier.push(nb);
-                }
-            }
-            return dist;
+            return dict;
         }
-        function wodDrawPreviewPoliticalOverlay(pCtx, cx, cy, scale, hr, hexList, hexByKey, cities, entities) {
-            if(!pCtx || !hexList || !hexByKey) return;
-            let edgeSeen = new Set();
-            pCtx.lineJoin = 'round';
-            pCtx.lineCap = 'round';
+        function wodPaintMapPreviewPolitical(pCtx, hexList, cities, ownerSmooth, cx, cy, scale, hr) {
+            if(!pCtx || !hexList) return;
+            let hmap = {};
+            for(let h of hexList) hmap[wodHexKeyFromQR(h.q, h.r)] = h;
             for(let hex of hexList) {
-                if(wodHexQuickWater(hex) || !hex.owner) continue;
-                for(let dir of hexDirections) {
-                    let nHex = hexByKey[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(!nHex || wodHexQuickWater(nHex) || nHex.owner === hex.owner) continue;
-                    let k1 = `${hex.q},${hex.r}`;
-                    let k2 = `${nHex.q},${nHex.r}`;
-                    let ek = k1 < k2 ? k1 + '|' + k2 : k2 + '|' + k1;
-                    if(edgeSeen.has(ek)) continue;
-                    edgeSeen.add(ek);
-                    let lw = Math.max(1.05, scale * 0.58);
-                    pCtx.strokeStyle = 'rgba(255,255,255,0.42)';
-                    pCtx.lineWidth = lw + 0.75;
-                    pCtx.beginPath();
-                    pCtx.moveTo(cx + hex.x * scale, cy + hex.y * scale);
-                    pCtx.lineTo(cx + nHex.x * scale, cy + nHex.y * scale);
-                    pCtx.stroke();
-                    pCtx.strokeStyle = 'rgba(0,0,0,0.3)';
-                    pCtx.lineWidth = lw;
+                if(isWaterHex(hex) || !hex.owner) continue;
+                let k = wodHexKeyFromQR(hex.q, hex.r);
+                let o0 = ownerSmooth && ownerSmooth[k] != null ? ownerSmooth[k] : hex.owner;
+                for(let dir of cardinalHexDirections) {
+                    let nHex = hmap[wodHexKeyFromQR(hex.q + dir.q, hex.r + dir.r)];
+                    if(!nHex || isWaterHex(nHex)) continue;
+                    let nk = wodHexKeyFromQR(nHex.q, nHex.r);
+                    let o1 = ownerSmooth && ownerSmooth[nk] != null ? ownerSmooth[nk] : nHex.owner;
+                    if(o1 === o0 || o0 <= 0 || o1 <= 0) continue;
+                    pCtx.strokeStyle = 'rgba(0,0,0,0.38)';
+                    pCtx.lineWidth = Math.max(0.75, scale * 0.48);
+                    pCtx.lineCap = 'round';
                     pCtx.beginPath();
                     pCtx.moveTo(cx + hex.x * scale, cy + hex.y * scale);
                     pCtx.lineTo(cx + nHex.x * scale, cy + nHex.y * scale);
                     pCtx.stroke();
                 }
             }
-            if(cities) {
+            if(cities && cities.length) {
                 for(let city of cities) {
-                    if(!city.owner) continue;
+                    if(!city || !city.owner) continue;
                     let col = (typeof city.owner === 'number' && factionColors[city.owner]) ? factionColors[city.owner] : '#ecf0f1';
                     let px = cx + city.x * scale;
                     let py = cy + city.y * scale;
-                    let rad = Math.max(2.4, scale * 3.35);
+                    let rad = Math.max(2.1, scale * 3.0);
                     pCtx.fillStyle = col;
-                    pCtx.strokeStyle = 'rgba(0,0,0,0.5)';
-                    pCtx.lineWidth = 1.05;
+                    pCtx.strokeStyle = 'rgba(0,0,0,0.52)';
+                    pCtx.lineWidth = 1;
                     pCtx.beginPath();
                     pCtx.arc(px, py, rad, 0, Math.PI * 2);
                     pCtx.fill();
                     pCtx.stroke();
                 }
             }
-            if(entities && entities.length) {
-                for(let u of entities) {
-                    if(!u.owner || u.hp <= 0 || u.type === 'convoy') continue;
-                    let col = factionColors[u.owner] || '#bbb';
-                    let px = cx + u.x * scale;
-                    let py = cy + u.y * scale;
-                    let sz = Math.max(1.2, scale * 1.55);
-                    pCtx.fillStyle = col;
-                    pCtx.strokeStyle = 'rgba(0,0,0,0.32)';
-                    pCtx.lineWidth = 0.8;
-                    pCtx.beginPath();
-                    pCtx.rect(px - sz / 2, py - sz / 2, sz, sz);
-                    pCtx.fill();
-                    pCtx.stroke();
-                }
-            }
         }
-        function wodPaintMapDataOnCanvas(cnv, mapData, opts) {
+        function wodHexQuickWater(h) {
+            return h && h.type === 'water';
+        }
+        function wodPaintMapDataOnCanvas(cnv, mapData) {
             if(!cnv || !cnv.getContext || !mapData) return;
-            opts = opts || {};
             let hexList = mapData.hexList || [];
             if(hexList.length === 0) return;
-            let hexByKey = {};
-            for(let hx of hexList) hexByKey[`${hx.q},${hx.r}`] = hx;
             let pCtx = cnv.getContext('2d');
             let w = cnv.width, h = cnv.height;
             pCtx.fillStyle = '#154360';
             pCtx.fillRect(0, 0, w, h);
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, hasLand = false;
             for(let hex of hexList) {
-                if(!wodHexQuickWater(hex)) {
+                if(!isWaterHex(hex)) {
                     if(hex.x < minX) minX = hex.x;
                     if(hex.x > maxX) maxX = hex.x;
                     if(hex.y < minY) minY = hex.y;
@@ -11544,27 +11563,32 @@
             }
             if(!hasLand) return;
             let landW = maxX - minX, landH = maxY - minY;
-            let pad = opts.padding != null ? opts.padding : 16;
-            let scale = Math.min((w - pad * 2) / landW, (h - pad * 2) / landH);
+            let scale = Math.min((w - 16) / landW, (h - 16) / landH);
             let cx = w / 2 - ((minX + maxX) / 2) * scale;
             let cy = h / 2 - ((minY + maxY) / 2) * scale;
             let hr = gameData.hexRadius || 10;
             for(let hex of hexList) {
-                if(!wodHexQuickWater(hex)) {
+                if(!isWaterHex(hex)) {
                     pCtx.fillStyle = getTerrainColor(hex.type);
                     let pSize = Math.max(1, hr * scale * 1.45);
                     pCtx.fillRect(cx + hex.x * scale - pSize / 2, cy + hex.y * scale - pSize / 2, pSize + 1, pSize + 1);
                 }
             }
-            let drawPol = opts.political !== false;
-            if(drawPol)
-                wodDrawPreviewPoliticalOverlay(pCtx, cx, cy, scale, hr, hexList, hexByKey, mapData.cities, opts.units ? mapData.entities : null);
+            let hasOwn = false;
+            for(let hx of hexList) {
+                if(hx.owner > 0) {
+                    hasOwn = true;
+                    break;
+                }
+            }
+            let smooth = hasOwn ? wodSmoothOwnersForPreview(hexList, 2) : null;
+            wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, smooth, cx, cy, scale, hr);
         }
-        function wodMapDataToThumbnailDataUrl(mapData, tw, th, paintOpts) {
+        function wodMapDataToThumbnailDataUrl(mapData, tw, th) {
             let c = document.createElement('canvas');
             c.width = tw || 280;
             c.height = th || 168;
-            wodPaintMapDataOnCanvas(c, mapData, paintOpts);
+            wodPaintMapDataOnCanvas(c, mapData);
             try { return c.toDataURL('image/png'); } catch(e) { return ''; }
         }
         function wodBuildMapPayloadFromGame() {
@@ -11579,7 +11603,7 @@
         function wodSaveMapToLibraryWithName(name, custom) {
             custom = custom || {};
             let mapData = custom.mapData || wodBuildMapPayloadFromGame();
-            let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapData, 280, 168, { units: false, padding: 14 });
+            let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapData, 280, 168);
             let list = wodGetSavedMapsList();
             let entry = {
                 id: 'wmap_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9),
@@ -11674,7 +11698,7 @@
             }
             if(!listEl) return;
             if(_wodMapLib.list.length === 0) {
-                listEl.innerHTML = '<div class="wod-map-lib-sub" style="padding:12px">No saves yet. Generate or load a map and press <strong>Save Map</strong>, then open this library again.</div>';
+                listEl.innerHTML = '<div class="wod-map-lib-sub" style="padding:12px">No saves yet. Generate a map and press <strong>Save Map</strong>, or create one in the map editor.</div>';
                 if(meta) meta.textContent = '';
                 if(prev && prev.getContext) {
                     let gx = prev.getContext('2d');
@@ -11688,25 +11712,17 @@
                 let card = document.createElement('div');
                 card.className = 'wod-map-lib-card' + (e.id === _wodMapLib.selectedId ? ' active' : '');
                 card.dataset.id = e.id;
-                let img = document.createElement('img');
-                img.alt = '';
-                try {
-                    img.src = wodMapDataToThumbnailDataUrl(e.data, 168, 102, { units: false, padding: 12 });
-                } catch(err) {
-                    img.src = e.thumb || '';
-                }
-                let textWrap = document.createElement('div');
-                textWrap.className = 'wod-map-lib-card-text';
-                let titleEl = document.createElement('div');
-                titleEl.className = 'wod-map-lib-card-name';
-                titleEl.textContent = e.name || 'Map';
-                let dateEl = document.createElement('div');
-                dateEl.className = 'wod-map-lib-card-date';
-                dateEl.textContent = (e.mapSize ? 'Size ' + e.mapSize + ' — ' : '') + new Date(e.savedAt || Date.now()).toLocaleString();
-                textWrap.appendChild(titleEl);
-                textWrap.appendChild(dateEl);
-                card.appendChild(img);
-                card.appendChild(textWrap);
+                card.innerHTML = `<img alt="" class="wod-map-lib-card-thumb"><div class="wod-map-lib-card-text"><div class="wod-map-lib-card-name"></div><div class="wod-map-lib-card-date"></div></div>`;
+                card.querySelector('.wod-map-lib-card-name').textContent = e.name || 'Map';
+                card.querySelector('.wod-map-lib-card-date').textContent = (e.mapSize ? 'Size ' + e.mapSize + ' — ' : '') + new Date(e.savedAt || Date.now()).toLocaleString();
+                let imgEl = card.querySelector('img');
+                if(e.data) {
+                    try {
+                        imgEl.src = wodMapDataToThumbnailDataUrl(e.data, 148, 90);
+                    } catch(err) {
+                        imgEl.src = e.thumb || '';
+                    }
+                } else imgEl.src = e.thumb || '';
                 card.onclick = () => {
                     _wodMapLib.selectedId = e.id;
                     wodRefreshMapLibraryPanel();
@@ -11718,7 +11734,7 @@
             if(meta) {
                 meta.innerHTML = '<strong>' + (sel.name || '').replace(/</g, '') + '</strong><br>Towns: ' + ((sel.data && sel.data.cities) ? sel.data.cities.length : 0) + ' — saved ' + new Date(sel.savedAt || Date.now()).toLocaleString();
             }
-            if(prev) wodPaintMapDataOnCanvas(prev, sel.data || {}, { padding: 20, units: false });
+            if(prev) wodPaintMapDataOnCanvas(prev, sel.data || {});
             listEl.querySelectorAll('.wod-map-lib-card').forEach(c => {
                 c.classList.toggle('active', c.dataset.id === _wodMapLib.selectedId);
             });
@@ -11838,8 +11854,57 @@
             }
 
             let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview';
-            if(wodPreviewDrawPolitical)
-                wodDrawPreviewPoliticalOverlay(pCtx, cx, cy, scale, gameData.hexRadius, gameData.hexList, gameData.hexes, gameData.cities, gameData.entities);
+            let ownerSmooth = null;
+            if(wodPreviewDrawPolitical) ownerSmooth = wodSmoothOwnersForPreview(gameData.hexList, 2);
+            if(wodPreviewDrawPolitical) {
+                for(let hex of gameData.hexList) {
+                    if(isWaterHex(hex) || !hex.owner) continue;
+                    let k = `${hex.q},${hex.r}`;
+                    let o0 = ownerSmooth && ownerSmooth[k] != null ? ownerSmooth[k] : hex.owner;
+                    for(let dir of cardinalHexDirections) {
+                        let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                        if(!nHex || isWaterHex(nHex)) continue;
+                        let nk = `${nHex.q},${nHex.r}`;
+                        let o1 = ownerSmooth && ownerSmooth[nk] != null ? ownerSmooth[nk] : nHex.owner;
+                        if(o1 === o0 || o0 <= 0 || o1 <= 0) continue;
+                        pCtx.strokeStyle = 'rgba(0,0,0,0.38)';
+                        pCtx.lineWidth = Math.max(0.85, scale * 0.52);
+                        pCtx.lineCap = 'round';
+                        pCtx.beginPath();
+                        pCtx.moveTo(cx + hex.x * scale, cy + hex.y * scale);
+                        pCtx.lineTo(cx + nHex.x * scale, cy + nHex.y * scale);
+                        pCtx.stroke();
+                    }
+                }
+                for(let city of gameData.cities) {
+                    if(!city.owner) continue;
+                    let col = (typeof city.owner === 'number' && factionColors[city.owner]) ? factionColors[city.owner] : '#ecf0f1';
+                    let px = cx + city.x * scale;
+                    let py = cy + city.y * scale;
+                    let rad = Math.max(2.2, scale * 3.1);
+                    pCtx.fillStyle = col;
+                    pCtx.strokeStyle = 'rgba(0,0,0,0.55)';
+                    pCtx.lineWidth = 1;
+                    pCtx.beginPath();
+                    pCtx.arc(px, py, rad, 0, Math.PI * 2);
+                    pCtx.fill();
+                    pCtx.stroke();
+                }
+                for(let u of gameData.entities) {
+                    if(!u.owner || u.hp <= 0 || u.type === 'convoy') continue;
+                    let col = factionColors[u.owner] || '#bbb';
+                    let px = cx + u.x * scale;
+                    let py = cy + u.y * scale;
+                    let sz = Math.max(1.25, scale * 1.65);
+                    pCtx.fillStyle = col;
+                    pCtx.strokeStyle = 'rgba(0,0,0,0.35)';
+                    pCtx.lineWidth = 0.75;
+                    pCtx.beginPath();
+                    pCtx.rect(px - sz / 2, py - sz / 2, sz, sz);
+                    pCtx.fill();
+                    pCtx.stroke();
+                }
+            }
         }
 
         function previewMap() {
@@ -12148,7 +12213,7 @@
             wodRemoveUnconnectedFactionHexPockets(ownersList);
             wodAssignPoliticalVoronoiFromCities(ownersList);
             wodSyncUrbanFootprintOwners();
-            smoothStartingTerritory(ownersList, 3, 4);
+            smoothStartingTerritory(ownersList, 4, 4);
 
             spawnInitialFrontlineUnits(ownersList);
 
@@ -12229,9 +12294,9 @@
             
             for(let r = -rows; r <= rows; r++) {
                 for(let q = -cols; q <= cols; q++) {
-                    let islandInland01 = 0.5;
                     let x = q * spacing;
                     let y = r * spacing;
+                    let islandRadialDist = 0;
                     
                     let scale = 0.004; 
                     let warpX = fbm(x * scale + seedOffset, y * scale + seedOffset, 3) * 260;
@@ -12245,6 +12310,7 @@
                         let sx = normX * (gp.stretchX != null ? gp.stretchX : 1);
                         let sy = normY * (gp.stretchY != null ? gp.stretchY : 1);
                         let dist = Math.sqrt(sx * sx + sy * sy);
+                        islandRadialDist = dist;
                         let angle = Math.atan2(y, x);
                         let radialWarp = (fbm(Math.cos(angle) * 2.4 + seedOffset, Math.sin(angle) * 2.4 + seedOffset, 4) - 0.5) * (gp.coastNoiseAmp != null ? gp.coastNoiseAmp : 0.45);
                         mask = 1.12 - dist + radialWarp;
@@ -12277,9 +12343,8 @@
                         if(gp.islandMode === 'wide') {
                             mask += 0.055 - Math.abs(sy) * 0.11;
                         }
-                        let rimFrac = Math.max(Math.abs(q) / Math.max(cols, 1), Math.abs(r) / Math.max(rows, 1));
-                        mask -= Math.max(0, rimFrac - 0.74) * 1.32;
-                        islandInland01 = dist;
+                        let boxFrac = Math.max(Math.abs(q) / Math.max(cols, 1), Math.abs(r) / Math.max(rows, 1));
+                        mask -= Math.pow(Math.max(0, boxFrac - 0.74), 1.45) * 0.92;
                     } else {
                         mask = 1.0;
                     }
@@ -12338,38 +12403,32 @@
                     else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43)) type = 'water';
                     else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43) + 0.05) type = 'sand';
                     else {
-                        let mt = gp2.mountElevThresh != null ? gp2.mountElevThresh : 0.86;
-                        let passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 3);
-                        let isMount = false;
+                        let mTh0 = gp2.mountElevThresh != null ? gp2.mountElevThresh : 0.86;
                         if(mapShape === 'island') {
-                            let mountPat = gp2.mountPattern || 'mixed';
-                            let peakNoise = fbm(x * scale * 1.85 + seedOffset + 3311, y * scale * 1.85 + seedOffset + 3311, 4);
-                            let riftR = Math.abs(fbm(x * scale * 2.35 + seedOffset + 7711, y * scale * 2.35 + seedOffset + 7711, 3) - 0.5);
-                            if(mountPat === 'scattered') {
-                                isMount = elev > mt - 0.11 && peakNoise > 0.53;
-                            } else if(mountPat === 'rift') {
-                                isMount = elev > mt - 0.16 && riftR < 0.102;
-                            } else if(mountPat === 'rim') {
-                                isMount = elev > mt - 0.06 && islandInland01 > 0.3 && islandInland01 < 0.82;
-                            } else if(mountPat === 'barren') {
-                                isMount = elev > mt + 0.052;
-                            } else {
-                                isMount = elev > mt;
-                            }
-                        } else {
-                            isMount = elev > mt;
+                            let pk = fbm(x * scale * 2.55 + seedOffset + 7711, y * scale * 2.55 + seedOffset + 7711, 5);
+                            let pk2 = fbm(x * scale * 5.1 + seedOffset + 3322, y * scale * 5.1 + seedOffset + 3322, 4);
+                            let j = (gp2.mountainPeakJitter != null ? gp2.mountainPeakJitter : 0.09) * (pk - 0.5) * 2.2;
+                            let st = gp2.mountainStyle || 'default';
+                            if(st === 'scattered') j += (pk2 - 0.5) * 0.13;
+                            else if(st === 'ring') {
+                                let rr = gp2.mountainRingR != null ? gp2.mountainRingR : 0.48;
+                                j += Math.abs(islandRadialDist - rr) < 0.14 ? -0.1 : 0.038;
+                            } else if(st === 'low') j += 0.095;
+                            else if(st === 'mixed') j += (pk * pk2 - 0.28) * 0.11;
+                            mTh0 += j;
                         }
-                        if(isMount) {
-                            if(passNoise > 0.6) type = 'hill';
+                        if(elev > mTh0) {
+                            let passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 3);
+                            if (passNoise > 0.6) type = 'hill';
                             else type = 'mountain';
-                        } else if(elev > mt - 0.08 && mo < 0.5) type = 'hill';
+                        } else if(elev > mTh0 - 0.08 && mo < 0.5) type = 'hill';
                         else {
                             let st = gp2.sandThresh != null ? gp2.sandThresh : 0.35;
                             let gt = gp2.grassThresh != null ? gp2.grassThresh : 0.60;
                             let ft = gp2.forestThresh != null ? gp2.forestThresh : 0.80;
-                            if(mo < st + fb * 0.02) type = 'sand';
-                            else if(mo < gt + fb) type = 'grass';
-                            else if(mo < ft + fb * 0.5) type = 'forest';
+                            if (mo < st + fb * 0.02) type = 'sand';
+                            else if (mo < gt + fb) type = 'grass';
+                            else if (mo < ft + fb * 0.5) type = 'forest';
                             else type = 'swamp';
                         }
                     }
@@ -12386,32 +12445,37 @@
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
 
-            let landToWaterSteps = wodBuildLandDistanceToWater(gameData.hexList);
-
-            // Generate Cities — scale with player count; extra towns per faction for large maps
+            // Generate Cities — scale with player count; total count divisible by faction slots (even per player)
+            let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
             let numCities = Math.floor((mapR * mapR) / 600) + 5;
-            let neededStarts = wodGetDesiredFactionCountForMapGen();
+            let neededStarts = factionSlots;
             let citiesPerPlayer = Math.max(2, Math.min(6, 2 + Math.floor(mapR / 50)));
             numCities = Math.max(numCities, neededStarts + 3, neededStarts * citiesPerPlayer);
+            numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
             let citySpacing = Math.max(hr * 14, Math.min(hr * 38, mapR * hr * 0.35));
-            let minInlandFromCoast = Math.max(4, Math.min(9, Math.floor(mapR / 11)));
-            let minGridInset = Math.max(3, Math.floor(mapR / 16));
+            let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
+            let lcm = wodLandCentroidMaxRadius(landForCities);
+            let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
+            let innerRSq = innerRad * innerRad;
+            let minWaterSteps = mapShape === 'island' ? 3 : 2;
             for(let i=0; i<numCities; i++) {
                 let valid = false; let attempts = 0;
                 while(!valid && attempts < 500) {
                     let h = gameData.hexList[Math.floor(Math.random() * gameData.hexList.length)];
                     if(!isWaterHex(h) && h.type !== 'mountain') {
-                        let stCoast = landToWaterSteps.get(`${h.q},${h.r}`);
-                        if(mapShape === 'island' && (stCoast == null || stCoast < minInlandFromCoast)) {
+                        let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
+                        if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) {
                             attempts++;
                             continue;
                         }
-                        let edgeIn = Math.min(cols - Math.abs(h.q), rows - Math.abs(h.r));
-                        if(mapShape === 'island' && edgeIn < minGridInset) {
-                            attempts++;
-                            continue;
+                        if(mapShape === 'rectangle') {
+                            let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
+                            if(bf > 0.86 && attempts < 480) {
+                                attempts++;
+                                continue;
+                            }
                         }
-                        if(mapShape === 'rectangle' && edgeIn < Math.max(2, minGridInset - 1)) {
+                        if(wodBfsStepsToWater(h, 14) < minWaterSteps && attempts < 460) {
                             attempts++;
                             continue;
                         }

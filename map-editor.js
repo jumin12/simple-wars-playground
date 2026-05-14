@@ -962,7 +962,7 @@
       typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
     browser.textContent = "";
     if (saved.length === 0) {
-      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library + export</strong> or import from the main map library.</div>`;
+      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library + export</strong> or open <strong>Browse library…</strong> from the toolbar.</div>`;
       return;
     }
     for (const m of saved) {
