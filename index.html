@@ -5934,6 +5934,40 @@
                 if(ctr && !isWaterHex(ctr)) setHexOwner(ctr, city.owner);
             }
         }
+        /** Match each town's political owner to the faction that owns its center land (Voronoi / territory). */
+        function wodSyncCityOwnersFromCenterHex() {
+            for(let city of gameData.cities) {
+                if(!city) continue;
+                let ch0 = gameData.hexes[`${city.q},${city.r}`];
+                if(ch0 && isClaimableLand(ch0) && ch0.owner > 0) city.owner = ch0.owner;
+            }
+        }
+        /** Reclaim capital urban tiles for each slot's declared owner (after border smoothing). */
+        function wodPaintCapitalUrbanToDeclaredOwner(startCities) {
+            if(!startCities) return;
+            for(let cap of startCities) {
+                if(!cap || cap.owner <= 0) continue;
+                let o = cap.owner;
+                let urbanList = getCityUrbanTerrainHexes(cap);
+                for(let uh of urbanList) {
+                    let hx = gameData.hexes[`${uh.q},${uh.r}`];
+                    if(hx && !isWaterHex(hx)) setHexOwner(hx, o);
+                }
+                let ctr = gameData.hexes[`${cap.q},${cap.r}`];
+                if(ctr && !isWaterHex(ctr)) setHexOwner(ctr, o);
+            }
+        }
+        /** Capitals stay on their owners; other towns follow map ownership so no settlement sits in a foreign polity. */
+        function wodFinalizeStartingCitiesVsTerritory(startCities) {
+            wodPaintCapitalUrbanToDeclaredOwner(startCities);
+            let capSet = new Set(startCities);
+            for(let city of gameData.cities) {
+                if(!city || capSet.has(city)) continue;
+                let ch0 = gameData.hexes[`${city.q},${city.r}`];
+                if(ch0 && isClaimableLand(ch0) && ch0.owner > 0) city.owner = ch0.owner;
+            }
+            wodSyncUrbanFootprintOwners();
+        }
         function wodPreliminaryCityOwnersFromAngleSplit(ownersList, landHexes) {
             if(!ownersList || ownersList.length === 0 || !gameData.cities || gameData.cities.length === 0) return;
             let cx = 0, cy = 0;
@@ -12202,18 +12236,18 @@
             wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
 
             wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
             wodSyncUrbanFootprintOwners();
             softenMountainHexBetweenOwners(ownersList);
             ensureOwnersReachableByLand(ownersList);
             ensureOwnedTilesReachFactionCities(ownersList);
-            for(let city of gameData.cities) {
-                let ch0 = gameData.hexes[`${city.q},${city.r}`];
-                if(ch0 && isClaimableLand(ch0)) city.owner = ch0.owner;
-            }
+            wodSyncCityOwnersFromCenterHex();
             wodRemoveUnconnectedFactionHexPockets(ownersList);
             wodAssignPoliticalVoronoiFromCities(ownersList);
+            wodSyncCityOwnersFromCenterHex();
             wodSyncUrbanFootprintOwners();
             smoothStartingTerritory(ownersList, 4, 4);
+            wodFinalizeStartingCitiesVsTerritory(startCities);
 
             spawnInitialFrontlineUnits(ownersList);
 
