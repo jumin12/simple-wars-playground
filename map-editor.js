@@ -28,7 +28,7 @@
     });
   }
 
-  const terrainTypes = ["grass", "sand", "forest", "swamp", "hill", "mountain", "water", "urban"];
+  const terrainTypes = ["grass", "sand", "forest", "swamp", "hill", "mountain", "water", "lake_water", "urban"];
 
   function factionPalette() {
     return window.WOD && WOD.factionColors ? WOD.factionColors : ["#000000", "#2ecc71", "#e74c3c", "#9b59b6", "#e67e22", "#3498db", "#f1c40f"];
@@ -703,7 +703,7 @@
     WOD.gameData.cities.push(city);
     for (const pt of WOD.getHexesInRadius(hex.q, hex.r, 2)) {
       const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
-      if (h && h.type !== "water" && h.type !== "deep_water") {
+      if (h && h.type !== "water" && h.type !== "deep_water" && h.type !== "lake_water") {
         h.type = "urban";
         h.baseColor = WOD.getTerrainColor("urban");
         h.cityId = city.id;
@@ -771,7 +771,7 @@
       if (state.selected.type === "city") {
         for (const pt of WOD.getHexesInRadius(hex.q, hex.r, 2)) {
           const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
-          if (h && h.type !== "water" && h.type !== "deep_water") {
+          if (h && h.type !== "water" && h.type !== "deep_water" && h.type !== "lake_water") {
             h.type = "urban";
             h.baseColor = WOD.getTerrainColor("urban");
             h.cityId = obj.id;
