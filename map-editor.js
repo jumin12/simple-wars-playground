@@ -195,8 +195,11 @@
       .editor-swatch { width:16px;height:16px;border:1px solid #061018;border-radius:4px;display:inline-block;flex-shrink:0; }
       .editor-hint { color:#93a8b9; font-size:12px; line-height:1.45;margin:6px 0 0;font-weight:400; }
       .map-browser { display:grid; gap:8px; max-height:200px; overflow:auto; padding-right:2px;}
-      .map-card { display:grid; grid-template-columns:72px 1fr; gap:8px; align-items:center;
+      .map-card { display:grid; grid-template-columns:72px 1fr auto; gap:8px; align-items:center;
         padding:8px;border:1px solid rgba(201,162,39,.4);border-radius:8px;background:rgba(255,255,255,.04);cursor:pointer; }
+      .map-card-del { font-size:10px;padding:4px 8px;min-width:0;line-height:1.2;flex-shrink:0;
+        background:rgba(120,40,40,.85);border:1px solid rgba(255,120,120,.5);color:#ffecec;border-radius:6px;cursor:pointer;font-weight:700; }
+      .map-card-del:hover { filter:brightness(1.12); }
       .map-card:hover { border-color:#4be396; background:rgba(75,227,150,.08); }
       .map-thumb { width:72px;height:48px;background:#154360;border-radius:5px;border:1px solid #000;object-fit:cover; }
       .map-name { font-weight:800;color:#fff;font-size:13px;}
@@ -250,8 +253,9 @@
           <div class="editor-grid-2">
             <button type="button" class="editor-btn" id="editorBlank">New blank</button>
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
-            <button type="button" class="editor-btn" id="editorSave">Save + export</button>
-            <button type="button" class="editor-btn" id="editorLoadBtn">Load JSON</button>
+            <button type="button" class="editor-btn" id="editorSave">Save to library + export</button>
+            <button type="button" class="editor-btn" id="editorBrowseLib">Browse library…</button>
+            <button type="button" class="editor-btn" id="editorLoadBtn">Load JSON file</button>
           </div>
           <input id="editorLoad" type="file" accept=".json,application/json" style="display:none">
         </section>
@@ -298,7 +302,8 @@
           <div id="editorMapKey"></div>
         </section>
         <section class="editor-card">
-          <h3>Saved in browser</h3>
+          <h3>Saved maps (browser)</h3>
+          <p class="editor-hint" style="margin-top:0">Same collection as solo / multiplayer / map library. Click a row to load; Delete removes it everywhere.</p>
           <div id="mapBrowser" class="map-browser"></div>
         </section>
       </div>
@@ -379,6 +384,10 @@
       renderMapBrowser();
     });
     app.querySelector("#editorSave").addEventListener("click", saveEditorMap);
+    let browseLib = app.querySelector("#editorBrowseLib");
+    if(browseLib) browseLib.addEventListener("click", () => {
+      if (typeof showPanel === "function") showPanel("mapLibrary", { libContext: "editor", returnTo: "editor" });
+    });
     app.querySelector("#editorLoadBtn").addEventListener("click", () => app.querySelector("#editorLoad").click());
     app.querySelector("#editorLoad").addEventListener("change", loadEditorMap);
     app.querySelector("#editorExitBtn").addEventListener("click", closeMapEditor);
@@ -930,9 +939,9 @@
     const name = prompt("Map name:", "Custom Map " + new Date().toLocaleTimeString()) || "Custom Map";
     const mapData = WOD.exportMapData();
     const thumbnail = makeThumbnail();
-    const saved = JSON.parse(localStorage.getItem("wodEditorMaps") || "[]");
-    saved.unshift({ name, date: new Date().toISOString(), thumbnail, data: mapData });
-    localStorage.setItem("wodEditorMaps", JSON.stringify(saved.slice(0, 20)));
+    if (typeof window.wodSaveMapToLibraryWithName === "function") {
+      window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
+    }
     renderMapBrowser();
     const data = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(mapData));
     const a = document.createElement("a");
@@ -949,19 +958,48 @@
   function renderMapBrowser() {
     const browser = document.getElementById("mapBrowser");
     if (!browser) return;
-    const saved = JSON.parse(localStorage.getItem("wodEditorMaps") || "[]");
+    const saved =
+      typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
+    browser.textContent = "";
     if (saved.length === 0) {
-      browser.innerHTML = `<div class="editor-hint">No saves yet. Use Save + export to store a snapshot here.</div>`;
+      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library + export</strong> or import from the main map library.</div>`;
       return;
     }
-    browser.innerHTML = saved.map((m, idx) => `
-      <div class="map-card" data-map-index="${idx}">
-        <img class="map-thumb" src="${m.thumbnail || ""}" alt="">
-        <div><div class="map-name">${m.name}</div><div class="map-meta">${new Date(m.date).toLocaleString()}</div></div>
-      </div>`).join("");
-    browser.querySelectorAll(".map-card").forEach(card => {
-      card.onclick = () => {
-        const map = saved[parseInt(card.dataset.mapIndex, 10)];
+    for (const m of saved) {
+      const card = document.createElement("div");
+      card.className = "map-card";
+      card.dataset.mapId = m.id || "";
+
+      const img = document.createElement("img");
+      img.className = "map-thumb";
+      img.alt = "";
+      if (m.thumb || m.thumbnail) img.src = m.thumb || m.thumbnail;
+
+      const mid = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "map-name";
+      title.textContent = m.name || "Map";
+      const meta = document.createElement("div");
+      meta.className = "map-meta";
+      meta.textContent = new Date(m.savedAt || m.date || Date.now()).toLocaleString();
+      mid.appendChild(title);
+      mid.appendChild(meta);
+
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "map-card-del";
+      del.title = "Remove from library";
+      del.textContent = "Del";
+
+      card.appendChild(img);
+      card.appendChild(mid);
+      card.appendChild(del);
+
+      card.addEventListener("click", (ev) => {
+        if (ev.target.closest(".map-card-del")) return;
+        const id = card.dataset.mapId;
+        const map = saved.find((x) => String(x.id) === String(id));
+        if (!map || !map.data) return;
         WOD.loadMapData(map.data);
         state.selected = null;
         state.viewPanX = 0;
@@ -969,8 +1007,17 @@
         state.viewZoom = 1;
         renderSelection();
         scheduleEditorRender();
-      };
-    });
+      });
+      del.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const id = card.dataset.mapId;
+        if (!id || !confirm("Delete this map from your library?")) return;
+        if (typeof window.wodDeleteSavedMapById === "function") window.wodDeleteSavedMapById(id);
+        renderMapBrowser();
+      });
+
+      browser.appendChild(card);
+    }
   }
 
   function loadEditorMap(event) {
@@ -990,6 +1037,15 @@
     event.target.value = "";
   }
 
+  window.wodNotifyEditorMapChanged = function () {
+    if (!state.open) return;
+    state.selected = null;
+    scheduleEditorRender();
+    renderSelection();
+    renderMapBrowser();
+  };
+
   window.openMapEditor = openMapEditor;
   window.closeMapEditor = closeMapEditor;
+  window.renderMapBrowser = renderMapBrowser;
 })();
