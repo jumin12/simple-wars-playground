@@ -27,7 +27,6 @@
       renderEditor();
     });
   }
-  window.wodScheduleEditorRender = scheduleEditorRender;
 
   const terrainTypes = ["grass", "sand", "forest", "swamp", "hill", "mountain", "water", "urban"];
 
@@ -254,7 +253,6 @@
           <div class="editor-grid-2">
             <button type="button" class="editor-btn" id="editorBlank">New blank</button>
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
-            <button type="button" class="editor-btn" id="editorGenConfig" title="Biome balance for procedural maps">Generation config…</button>
             <button type="button" class="editor-btn" id="editorSave">Save to library</button>
             <button type="button" class="editor-btn" id="editorBrowseLib">Browse library…</button>
           </div>
@@ -382,10 +380,6 @@
       scheduleEditorRender();
       renderSelection();
       renderMapBrowser();
-    });
-    let editorGenConfig = app.querySelector("#editorGenConfig");
-    if(editorGenConfig) editorGenConfig.addEventListener("click", () => {
-      if(typeof window.wodOpenGenConfigPanel === "function") window.wodOpenGenConfigPanel("editor");
     });
     app.querySelector("#editorSave").addEventListener("click", saveEditorMap);
     let browseLib = app.querySelector("#editorBrowseLib");
@@ -938,16 +932,20 @@
   }
 
   function saveEditorMap() {
-    if (typeof window.wodOpenSaveMapToLibraryDialog === "function") {
-      window.wodOpenSaveMapToLibraryDialog({
-        fromEditor: true,
-        suggestedName: "Custom map " + new Date().toLocaleTimeString(),
+    const mapData = WOD.exportMapData();
+    const thumbnail = makeThumbnail();
+    const def = "Custom Map " + new Date().toLocaleTimeString();
+    if (typeof window.wodOpenSaveMapNameModal === "function") {
+      window.wodOpenSaveMapNameModal({ defaultName: def }).then((name) => {
+        if (name == null) return;
+        if (typeof window.wodSaveMapToLibraryWithName === "function") {
+          window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
+        }
+        renderMapBrowser();
       });
       return;
     }
-    const name = prompt("Map name:", "Custom Map " + new Date().toLocaleTimeString()) || "Custom Map";
-    const mapData = WOD.exportMapData();
-    const thumbnail = makeThumbnail();
+    const name = prompt("Map name:", def) || "Custom Map";
     if (typeof window.wodSaveMapToLibraryWithName === "function") {
       window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
     }
@@ -966,7 +964,7 @@
       typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
     browser.textContent = "";
     if (saved.length === 0) {
-      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library</strong> or open <strong>Browse library…</strong>.</div>`;
+      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library</strong> or open <strong>Browse library…</strong> from the toolbar.</div>`;
       return;
     }
     for (const m of saved) {
