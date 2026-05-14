@@ -12277,6 +12277,357 @@
             wodSetMpMatchUiFlag(false);
         }
 
+        function wodOwnersListActiveForProcgen() {
+            let basePlayerCount = wodGetMapPlayerCount();
+            let activeOwners = gameData.mp && gameData.mp.enabled ? wodGetLobbyLayoutFactionSlots() : null;
+            let ownersList = [];
+            if(activeOwners && activeOwners.length > 0) ownersList = activeOwners.slice();
+            else for(let o = 1; o <= basePlayerCount; o++) ownersList.push(o);
+            return ownersList;
+        }
+        function wodFactionPoliticalCentroid(owner) {
+            let sx = 0,
+                sy = 0,
+                n = 0;
+            for(let h of gameData.hexList) {
+                if(!isClaimableLand(h) || isWaterHex(h)) continue;
+                if(h.owner !== owner) continue;
+                sx += h.x;
+                sy += h.y;
+                n++;
+            }
+            if(!n) return null;
+            return { x: sx / n, y: sy / n };
+        }
+        /** Target ring for Voronoi seed hex picking (terrain only). */
+        function wodTerrainSeedsForVoronoiOwners(ownersList, landCandidates, lcm, phase, mapShape) {
+            let sorted = [...ownersList].sort((a, b) => a - b);
+            let seeds = {};
+            let taken = new Set();
+            let f = sorted.length;
+            let frac = lcm.maxR * (mapShape === 'island' ? 0.38 : 0.42);
+            let twoPi = Math.PI * 2;
+            for(let i = 0; i < f; i++) {
+                let ow = sorted[i];
+                let ang = phase + ((i + 0.5) / f) * twoPi;
+                let tx = lcm.cx + Math.cos(ang) * frac;
+                let ty = lcm.cy + Math.sin(ang) * frac;
+                let best = null;
+                let bestD = Infinity;
+                for(let h of landCandidates) {
+                    if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
+                    let k = `${h.q},${h.r}`;
+                    if(taken.has(k)) continue;
+                    let dx = h.x - tx,
+                        dy = h.y - ty;
+                    let ds = dx * dx + dy * dy;
+                    if(ds < bestD) {
+                        bestD = ds;
+                        best = h;
+                    }
+                }
+                if(best) {
+                    taken.add(`${best.q},${best.r}`);
+                    seeds[ow] = best;
+                }
+            }
+            return seeds;
+        }
+        /** Axial footprint used for clearance checks; must stay inside owning faction territory. */
+        function wodProceduralUrbanFootprintKeys(q, r, owner) {
+            let keys = [];
+            for(let dq = -2; dq <= 2; dq++) {
+                for(let dr = -2; dr <= 2; dr++) {
+                    if(Math.max(Math.abs(dq), Math.abs(dr)) > 2) continue;
+                    let qq = q + dq,
+                        rr = r + dr;
+                    let hk = `${qq},${rr}`;
+                    let hx = gameData.hexes[hk];
+                    if(!hx || isWaterHex(hx) || hx.type === 'mountain') return null;
+                    if(hx.owner !== owner) return null;
+                    keys.push(hk);
+                }
+            }
+            return keys;
+        }
+        /** Deterministic dense urban footprint (L∞ axial radius 2) on faction-owned tiles only — matches footprint key layout. */
+        function wodStampDeterministicOwnedUrban(centerHex, city, owner) {
+            if(!centerHex || !city) return;
+            city.q = centerHex.q;
+            city.r = centerHex.r;
+            city.x = centerHex.x;
+            city.y = centerHex.y;
+            if(city.urbanStyle == null) city.urbanStyle = Math.floor(Math.random() * 4);
+            let cid = city.id;
+            for(let dq = -2; dq <= 2; dq++) {
+                for(let dr = -2; dr <= 2; dr++) {
+                    if(Math.max(Math.abs(dq), Math.abs(dr)) > 2) continue;
+                    let qq = centerHex.q + dq,
+                        rr = centerHex.r + dr;
+                    let targetH = gameData.hexes[`${qq},${rr}`];
+                    if(!targetH || isWaterHex(targetH) || targetH.type === 'mountain') continue;
+                    if(targetH.owner !== owner) continue;
+                    targetH.type = 'urban';
+                    targetH.cityId = cid;
+                    targetH.urbanVariant = Math.floor(Math.random() * 5);
+                    targetH.baseColor = getTerrainColor('urban');
+                    targetH.renderColor = targetH.baseColor;
+                }
+            }
+        }
+        function wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows) {
+            let innerRSq = Infinity;
+            if(mapShape === 'island') {
+                let innerRad = Math.max(lcm.maxR * 0.8, (gameData.hexRadius || 10) * Math.max(gameData.mapRadius || 40, 8) * 0.12);
+                innerRSq = innerRad * innerRad;
+            }
+            let out = [];
+            for(let h of gameData.hexList) {
+                if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
+                if(h.owner !== owner) continue;
+                if(mapShape === 'island') {
+                    let dxC = h.x - lcm.cx,
+                        dyC = h.y - lcm.cy;
+                    if(dxC * dxC + dyC * dyC > innerRSq) continue;
+                }
+                if(mapShape === 'rectangle') {
+                    let rowCount = Math.floor(rows) || 1;
+                    let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rowCount, 1));
+                    if(bf > 0.88) continue;
+                }
+                if(wodBfsStepsToWater(h, 14) < (mapShape === 'island' ? 3 : 2)) continue;
+                out.push(h);
+            }
+            return out;
+        }
+        function wodBestCoastalTerrainHexAmongOwned(owner, centroid) {
+            if(!centroid) return null;
+            let best = null,
+                bestD = Infinity;
+            let probe = { type: 'light', owner };
+            for(let h of gameData.hexList) {
+                if(!h || h.owner !== owner) continue;
+                if(!isClaimableLand(h) || isWaterHex(h) || !canUnitEnterHex(probe, h)) continue;
+                let sea = false;
+                for(let n of getNeighborHexes(h))
+                    if(n && isWaterHex(n)) sea = true;
+                if(!sea) continue;
+                let dx = h.x - centroid.x,
+                    dy = h.y - centroid.y;
+                let d = dx * dx + dy * dy;
+                if(d < bestD) {
+                    bestD = d;
+                    best = h;
+                }
+            }
+            return best;
+        }
+        /**
+         * Terrain + accessibility must already be finalized. Clears neutral cities then:
+         * political Voronoi from terrain seeds → equalize borders → equal city count inside each territory, non-touching urban footprints.
+         * Sets gameData._wodProcgenBorderFirstApplied on success only. Does not call assignStartingCities.
+         */
+        function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
+            gameData._wodProcgenBorderFirstApplied = false;
+            if(!(gameData.mp && gameData.mp.enabled)) {
+                let aiSync = document.getElementById('setupAI');
+                if(aiSync) gameData.aiCount = Math.max(1, Math.min(5, parseInt(aiSync.value, 10) || 1));
+            }
+            let ownersListRaw = wodOwnersListActiveForProcgen();
+            let ownersSorted = [...ownersListRaw].sort((a, b) => a - b);
+            if(ownersSorted.length === 0) return false;
+
+            let valid = new Set(ownersSorted);
+            let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
+            let lcm = wodLandCentroidMaxRadius(landForCities);
+            let phase = typeof gameData._wodCitySplitAnglePhase === 'number' ? gameData._wodCitySplitAnglePhase : 0;
+            let f = ownersSorted.length;
+
+            gameData.cities = [];
+            for(let h of gameData.hexList) setHexOwner(h, 0);
+
+            let seedHexByOwner = wodTerrainSeedsForVoronoiOwners(ownersSorted, landForCities, lcm, phase, mapShape);
+            let seedsByOwner = {};
+            let seedObjs = [];
+            for(let ow of ownersSorted) {
+                let hx = seedHexByOwner[ow];
+                if(!hx) return false;
+                let o = {
+                    owner: ow,
+                    q: hx.q,
+                    r: hx.r,
+                    x: hx.x,
+                    y: hx.y,
+                    hasFactory: true,
+                    id: '_vor_seed_' + ow,
+                };
+                seedsByOwner[ow] = o;
+                seedObjs.push(o);
+            }
+            let zeroBias = {};
+            for(let ow of ownersSorted) zeroBias[ow] = 0;
+
+            wodAssignClaimableLandWeightedVoronoiFromSeeds(ownersSorted, seedsByOwner, zeroBias);
+            wodAssignWaterAndNonclaimablePoliticalVotes();
+            softenMountainHexBetweenOwners(ownersSorted);
+            ensureOwnersReachableByLand(ownersSorted);
+            smoothStartingTerritory(ownersSorted, 4, 4);
+            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, 48);
+            smoothStartingTerritory(ownersSorted, 5, 2);
+
+            let perTile = {};
+            for(let ow of ownersSorted) perTile[ow] = 0;
+            for(let h of gameData.hexList) {
+                if(!isClaimableLand(h) || isWaterHex(h)) continue;
+                if(valid.has(h.owner)) perTile[h.owner]++;
+            }
+            let minTiles = Infinity;
+            for(let ow of ownersSorted) minTiles = Math.min(minTiles, perTile[ow] || 0);
+            let landBudget = Math.max(1, landForCities.length);
+
+            let kUpper = Math.min(4, Math.max(2, Math.floor(Math.min(minTiles / (38 + f * 14), landBudget / (f * (42 + f * 22))))));
+
+            let anchorChebSep = 6;
+
+            function buildCandidateList(owner, level) {
+                let cent = wodFactionPoliticalCentroid(owner);
+                let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows);
+                pool.sort((a, b) => {
+                    let ca = Math.atan2(a.y - (cent ? cent.y : lcm.cy), a.x - (cent ? cent.x : lcm.cx));
+                    let cb = Math.atan2(b.y - (cent ? cent.y : lcm.cy), b.x - (cent ? cent.x : lcm.cx));
+                    let caOff = ca + level * (0.18 + owner * 0.011),
+                        cbOff = cb + level * (0.18 + owner * 0.011);
+                    if(caOff !== cbOff) return caOff - cbOff;
+                    if(a.q !== b.q) return a.q - b.q;
+                    return a.r - b.r;
+                });
+                let list = [];
+                let seen = new Set();
+                if(mapShape === 'island' && level === 0 && cent) {
+                    let pch = wodBestCoastalTerrainHexAmongOwned(owner, cent);
+                    if(pch) {
+                        seen.add(`${pch.q},${pch.r}`);
+                        list.push(pch);
+                    }
+                }
+                for(let hx of pool) {
+                    let k = `${hx.q},${hx.r}`;
+                    if(seen.has(k)) continue;
+                    seen.add(k);
+                    list.push(hx);
+                }
+                return list;
+            }
+
+            function tryPlan(kpf) {
+                let plan = {};
+                let occCells = new Set();
+                let anchors = {};
+                for(let ow of ownersSorted) {
+                    plan[String(ow)] = [];
+                    anchors[String(ow)] = [];
+                }
+                for(let lv = 0; lv < kpf; lv++) {
+                    let ord = ownersSorted.slice();
+                    if(lv % 2 === 1) ord.reverse();
+                    for(let ow of ord) {
+                        let cand = buildCandidateList(ow, lv);
+                        let tried = cand.length > 960 ? cand.slice(0, 960) : cand;
+                        let placedHere = false;
+                        tries: for(let hTry of tried) {
+                            let qc = hTry.q,
+                                rc = hTry.r;
+                            for(let o2 of ownersSorted)
+                                for(let aq of anchors[String(o2)]) {
+                                    let ddx = Math.abs(qc - aq.q),
+                                        ddr = Math.abs(rc - aq.r);
+                                    if(Math.max(ddx, ddr) < anchorChebSep) continue tries;
+                                }
+
+                            let uKeys = wodProceduralUrbanFootprintKeys(qc, rc, ow);
+                            if(!uKeys) continue;
+                            let clash = false;
+                            for(let uk of uKeys)
+                                if(occCells.has(uk)) {
+                                    clash = true;
+                                    break;
+                                }
+                            if(clash) continue;
+
+                            plan[String(ow)].push({ q: qc, r: rc });
+                            anchors[String(ow)].push({ q: qc, r: rc });
+                            for(let uk of uKeys) occCells.add(uk);
+                            placedHere = true;
+                            break;
+                        }
+                        if(!placedHere) return null;
+                    }
+                }
+                return plan;
+            }
+
+            let winnerPlan = null;
+            let kpf = 0;
+            outerFind: for(let kk = kUpper; kk >= 2; kk--) {
+                for(let sepTry = 10; sepTry >= 6; sepTry--) {
+                    anchorChebSep = sepTry;
+                    let plan = tryPlan(kk);
+                    if(plan) {
+                        winnerPlan = plan;
+                        kpf = kk;
+                        break outerFind;
+                    }
+                }
+            }
+
+            if(!winnerPlan || kpf < 2) return false;
+
+            for(let ow of ownersSorted)
+                if(!winnerPlan[String(ow)] || winnerPlan[String(ow)].length !== kpf) return false;
+
+            let cityIx = 0;
+            for(let ow of ownersSorted) {
+                let plist = winnerPlan[String(ow)];
+                for(let ti = 0; ti < plist.length; ti++) {
+                    let site = plist[ti];
+                    let hx = gameData.hexes[`${site.q},${site.r}`];
+                    if(!hx) continue;
+                    cityIx++;
+                    let cid = 'city_' + cityIx;
+                    let cy = {
+                        id: cid,
+                        name: generateCityName(),
+                        x: hx.x,
+                        y: hx.y,
+                        q: hx.q,
+                        r: hx.r,
+                        owner: ow,
+                        hasFactory: ti === 0,
+                        hasHarbor: false,
+                        hp: 1000,
+                        maxHp: 1000,
+                        urbanStyle: Math.floor(Math.random() * 4),
+                        incomeBonus: 0,
+                        manpowerBonus: 0,
+                    };
+                    wodStampDeterministicOwnedUrban(hx, cy, ow);
+                    gameData.cities.push(cy);
+                    hx.owner = ow;
+                    let near = getHexesInRadius(site.q, site.r, 2);
+                    for(let pt of near) {
+                        let gh = gameData.hexes[`${pt.q},${pt.r}`];
+                        if(gh && gh.owner === ow && isClaimableLand(gh)) setHexOwner(gh, ow);
+                    }
+                }
+            }
+
+            wodSyncUrbanFootprintOwners();
+            wodRemoveUnconnectedFactionHexPockets(ownersSorted);
+
+            gameData._wodProcgenBorderFirstApplied = true;
+            return true;
+        }
+
         function assignStartingCities() {
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
@@ -12319,7 +12670,35 @@
                 for(let o = 1; o <= basePlayerCount; o++) ownersList.push(o);
             }
             if(landHexes.length === 0) return;
-            
+
+            // Terrain → borders → cities pipeline already partitioned and stamped towns — only wire economy/units/camera.
+            if(gameData._wodProcgenBorderFirstApplied && gameData.cities && gameData.cities.length >= ownersList.length &&
+                ownersList.every(o => gameData.cities.some(c => c && c.owner === o))) {
+
+                gameData.tradeTimer = 0;
+
+                let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
+                for(let owner of ownersList) {
+                    gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
+                    gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
+                }
+
+                spawnInitialFrontlineUnits(ownersList);
+
+                wodMarkTerrainPoliticalDirty();
+
+                let startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
+                if(startMe) {
+                    let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+                    let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+                    gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
+                    gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
+                }
+
+                gameData._wodProcgenBorderFirstApplied = false;
+                return;
+            }
+
             // Reset owners first
             for(let c of gameData.cities) { c.owner = 0; c.hasFactory = false; c.hasHarbor = false; }
             for(let h of gameData.hexList) { setHexOwner(h, 0); }
@@ -12709,6 +13088,11 @@
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
 
+            // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
+            ensureMountainPasses();
+            softenLandFullyBlockedByMountainRing();
+            ensureMountainPasses();
+
             // Generate Cities — uses live faction count from solo setup or lobby before placing towns.
             if(!(gameData.mp && gameData.mp.enabled)) {
                 let aiSync = document.getElementById('setupAI');
@@ -12720,100 +13104,102 @@
 
             gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
 
-            let citiesPerPlayer = Math.min(4, Math.max(2, 1 + Math.floor(mapR / 72)));
-            let numCities = factionSlots * citiesPerPlayer;
-            let spacingDen = Math.max(62, Math.floor(76 - factionSlots * 3.8 - Math.min(18, Math.floor(mapR / 55))));
-            let maxFromLand = Math.max(factionSlots * 2, Math.floor(landNC / spacingDen));
-            numCities = Math.min(numCities, maxFromLand);
-            numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
+            gameData._wodProcgenBorderFirstApplied = false;
+            let procOk = wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+            if(!procOk) {
+                for(let hx of gameData.hexList) setHexOwner(hx, 0);
+                gameData.cities = [];
 
-            let citySpacing = Math.max(hr * 17, Math.min(hr * 41, mapR * hr * 0.395));
-            let lcm = wodLandCentroidMaxRadius(landForCities);
-            let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase);
-            let cityPickCursor = 0;
-            let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
-            let innerRSq = innerRad * innerRad;
-            let minWaterSteps = mapShape === 'island' ? 3 : 2;
-            let maxAttemptsPerCity = Math.min(980, Math.max(160, (cityPickOrder.length || mapR * mapR) * 4));
-            for(let i=0; i<numCities; i++) {
-                let valid = false; let attempts = 0;
-                while(!valid && attempts < maxAttemptsPerCity) {
-                    let h = null;
-                    if(cityPickOrder.length > 0) {
-                        h = cityPickOrder[cityPickCursor % cityPickOrder.length];
-                        cityPickCursor++;
-                    } else {
-                        h = gameData.hexList[(Math.floor(Math.random() * gameData.hexList.length)) | 0];
-                    }
-                    attempts++;
-                    if(!h || isWaterHex(h) || h.type === 'mountain') continue;
-                    let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
-                    if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) continue;
-                    if(mapShape === 'rectangle') {
-                        let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
-                        if(bf > 0.86 && attempts < 480) continue;
-                    }
-                    if(wodBfsStepsToWater(h, 14) < minWaterSteps && attempts < 460) continue;
-                    let tooClose = gameData.cities.some(c => {
-                        let dx = c.x - h.x; let dy = c.y - h.y;
-                        return Math.sqrt(dx * dx + dy * dy) < citySpacing;
-                    });
-                    if(tooClose && attempts <= 450) continue;
-                    gameData.cities.push({
-                        id: 'city_' + i,
-                        name: generateCityName(),
-                        x: h.x, y: h.y, q: h.q, r: h.r,
-                        owner: 0, hasFactory: false, hasHarbor: false,
-                        hp: 1000, maxHp: 1000,
-                        urbanStyle: Math.floor(Math.random() * 4),
-                        incomeBonus: 0,
-                        manpowerBonus: 0
-                    });
+                let citiesPerPlayer = Math.min(4, Math.max(2, 1 + Math.floor(mapR / 72)));
+                let numCities = factionSlots * citiesPerPlayer;
+                let spacingDen = Math.max(62, Math.floor(76 - factionSlots * 3.8 - Math.min(18, Math.floor(mapR / 55))));
+                let maxFromLand = Math.max(factionSlots * 2, Math.floor(landNC / spacingDen));
+                numCities = Math.min(numCities, maxFromLand);
+                numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
 
-                    let urbanHexes = [];
-                    let shapeType = Math.floor(Math.random() * 4);
-                    let R = 2;
-                    for(let dq = -3; dq <= 3; dq++) {
-                        for(let dr = -3; dr <= 3; dr++) {
-                            let distSq = dq * dq + dr * dr;
-                            let add = false;
-                            if(shapeType === 0) {
-                                add = distSq <= R * R;
-                            } else if(shapeType === 1) {
-                                add = Math.abs(dq) <= 1 && Math.abs(dr) <= 1;
-                            } else if(shapeType === 2) {
-                                add = Math.abs(dq) <= 2 && Math.abs(dr) <= 1;
-                            } else if(shapeType === 3) {
-                                add = Math.abs(dq) <= 1 && Math.abs(dr) <= 2;
-                            }
-                            if(add && Math.random() > 0.15) {
-                                urbanHexes.push({q: h.q + dq, r: h.r + dr});
-                            } else if(!add && distSq <= (R + 1) * (R + 1) && Math.random() > 0.85) {
-                                urbanHexes.push({q: h.q + dq, r: h.r + dr});
+                let citySpacing = Math.max(hr * 17, Math.min(hr * 41, mapR * hr * 0.395));
+                let lcm = wodLandCentroidMaxRadius(landForCities);
+                let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase);
+                let cityPickCursor = 0;
+                let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
+                let innerRSq = innerRad * innerRad;
+                let minWaterSteps = mapShape === 'island' ? 3 : 2;
+                let maxAttemptsPerCity = Math.min(980, Math.max(160, (cityPickOrder.length || mapR * mapR) * 4));
+                for(let i=0; i<numCities; i++) {
+                    let valid = false; let attempts = 0;
+                    while(!valid && attempts < maxAttemptsPerCity) {
+                        let h = null;
+                        if(cityPickOrder.length > 0) {
+                            h = cityPickOrder[cityPickCursor % cityPickOrder.length];
+                            cityPickCursor++;
+                        } else {
+                            h = gameData.hexList[(Math.floor(Math.random() * gameData.hexList.length)) | 0];
+                        }
+                        attempts++;
+                        if(!h || isWaterHex(h) || h.type === 'mountain') continue;
+                        let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
+                        if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) continue;
+                        if(mapShape === 'rectangle') {
+                            let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
+                            if(bf > 0.86 && attempts < 480) continue;
+                        }
+                        if(wodBfsStepsToWater(h, 14) < minWaterSteps && attempts < 460) continue;
+                        let tooClose = gameData.cities.some(c => {
+                            let dx = c.x - h.x; let dy = c.y - h.y;
+                            return Math.sqrt(dx * dx + dy * dy) < citySpacing;
+                        });
+                        if(tooClose && attempts <= 450) continue;
+                        gameData.cities.push({
+                            id: 'city_' + i,
+                            name: generateCityName(),
+                            x: h.x, y: h.y, q: h.q, r: h.r,
+                            owner: 0, hasFactory: false, hasHarbor: false,
+                            hp: 1000, maxHp: 1000,
+                            urbanStyle: Math.floor(Math.random() * 4),
+                            incomeBonus: 0,
+                            manpowerBonus: 0
+                        });
+
+                        let urbanHexes = [];
+                        let shapeType = Math.floor(Math.random() * 4);
+                        let R = 2;
+                        for(let dq = -3; dq <= 3; dq++) {
+                            for(let dr = -3; dr <= 3; dr++) {
+                                let distSq = dq * dq + dr * dr;
+                                let add = false;
+                                if(shapeType === 0) {
+                                    add = distSq <= R * R;
+                                } else if(shapeType === 1) {
+                                    add = Math.abs(dq) <= 1 && Math.abs(dr) <= 1;
+                                } else if(shapeType === 2) {
+                                    add = Math.abs(dq) <= 2 && Math.abs(dr) <= 1;
+                                } else if(shapeType === 3) {
+                                    add = Math.abs(dq) <= 1 && Math.abs(dr) <= 2;
+                                }
+                                if(add && Math.random() > 0.15) {
+                                    urbanHexes.push({q: h.q + dq, r: h.r + dr});
+                                } else if(!add && distSq <= (R + 1) * (R + 1) && Math.random() > 0.85) {
+                                    urbanHexes.push({q: h.q + dq, r: h.r + dr});
+                                }
                             }
                         }
-                    }
-                    urbanHexes.push({q: h.q, r: h.r});
+                        urbanHexes.push({q: h.q, r: h.r});
 
-                    for(let uh of urbanHexes) {
-                        let targetH = gameData.hexes[`${uh.q},${uh.r}`];
-                        if(targetH && !isWaterHex(targetH)) {
-                            targetH.type = 'urban';
-                            targetH.cityId = 'city_' + i;
-                            targetH.urbanVariant = Math.floor(Math.random() * 5);
-                            targetH.baseColor = getTerrainColor('urban');
-                            targetH.renderColor = targetH.baseColor;
+                        for(let uh of urbanHexes) {
+                            let targetH = gameData.hexes[`${uh.q},${uh.r}`];
+                            if(targetH && !isWaterHex(targetH)) {
+                                targetH.type = 'urban';
+                                targetH.cityId = 'city_' + i;
+                                targetH.urbanVariant = Math.floor(Math.random() * 5);
+                                targetH.baseColor = getTerrainColor('urban');
+                                targetH.renderColor = targetH.baseColor;
+                            }
                         }
-                    }
 
-                    valid = true;
+                        valid = true;
+                    }
                 }
             }
-
-            // Ensure no land is inaccessible due to mountains
-            ensureMountainPasses();
-            softenLandFullyBlockedByMountainRing();
-            ensureMountainPasses();
 
             // Generate Roads (MST style connecting nearest)
             for(let i=0; i<gameData.cities.length; i++){
