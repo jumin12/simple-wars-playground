@@ -6228,10 +6228,10 @@
                 if(ctr && !isWaterHex(ctr)) setHexOwner(ctr, city.owner);
             }
         }
-        /** Match each town's political owner to the faction that owns its center land (Voronoi / territory). */
+        /** Match settlement owner to wedge under center — never re-home capitals (would lose slot identity and strand multi-player territory). */
         function wodSyncCityOwnersFromCenterHex() {
             for(let city of gameData.cities) {
-                if(!city) continue;
+                if(!city || city.hasFactory) continue;
                 let ch0 = gameData.hexes[`${city.q},${city.r}`];
                 if(ch0 && isClaimableLand(ch0) && ch0.owner > 0) city.owner = ch0.owner;
             }
@@ -6410,10 +6410,11 @@
                     let urbanList = getCityUrbanTerrainHexes(city);
                     for(let uh of urbanList) {
                         let hx = gameData.hexes[`${uh.q},${uh.r}`];
-                        if(hx && !isWaterHex(hx) && hx.type !== 'mountain' && hx.owner === owner) seeds.push(hx);
+                        /** Seed must exist even when Voronoi temporarily owned the footprint to another wedge — otherwise BFS never starts and all that faction's non-mountain land is vote-gifted away. */
+                        if(hx && !isWaterHex(hx) && hx.type !== 'mountain') seeds.push(hx);
                     }
                     let ctr = gameData.hexes[`${city.q},${city.r}`];
-                    if(ctr && !isWaterHex(ctr) && ctr.type !== 'mountain' && ctr.owner === owner) seeds.push(ctr);
+                    if(ctr && !isWaterHex(ctr) && ctr.type !== 'mountain') seeds.push(ctr);
                 }
                 if(seeds.length === 0) continue;
                 let seen = new Set();
@@ -12924,21 +12925,21 @@
                 }
             }
 
+            let capAnchorsProc = [];
+            for(let ow of ownersSorted) {
+                let fc = gameData.cities.find(c => c && c.owner === ow && c.hasFactory);
+                if(fc) capAnchorsProc.push(fc);
+            }
+            wodPaintCapitalUrbanToDeclaredOwner(capAnchorsProc);
             wodSyncUrbanFootprintOwners();
             wodRemoveUnconnectedFactionHexPockets(ownersSorted);
 
             if(ownersSorted.length >= 3) {
-                let capObjs = [];
-                for(let ow of ownersSorted) {
-                    let fc = gameData.cities.find(c => c && c.owner === ow && c.hasFactory);
-                    if(fc) capObjs.push(fc);
-                }
-                if(capObjs.length === ownersSorted.length) {
-                    wodAssignWaterAndNonclaimablePoliticalVotes();
-                    wodEqualizePoliticsBiasedVoronoi(ownersSorted, capObjs, Math.max(90, ownersSorted.length * 16));
-                    wodEqualizeRoughBorderShimmy(ownersSorted, capObjs, 7600);
-                    wodSyncUrbanFootprintOwners();
-                }
+                let eqTargets = capAnchorsProc.length === ownersSorted.length ? capAnchorsProc : seedObjs;
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+                wodEqualizePoliticsBiasedVoronoi(ownersSorted, eqTargets, Math.max(90, ownersSorted.length * 16));
+                wodEqualizeRoughBorderShimmy(ownersSorted, eqTargets, 7600);
+                wodSyncUrbanFootprintOwners();
             }
 
             gameData._wodProcgenBorderFirstApplied = true;
@@ -13145,8 +13146,9 @@
             wodBalanceCityCountsAmongOwners(ownersList, new Set(startCities));
 
             wodAssignPoliticalVoronoiFromCities(ownersList);
-            wodSyncCityOwnersFromCenterHex();
+            wodPaintCapitalUrbanToDeclaredOwner(startCities);
             wodSyncUrbanFootprintOwners();
+            wodSyncCityOwnersFromCenterHex();
             softenMountainHexBetweenOwners(ownersList);
             ensureOwnersReachableByLand(ownersList);
             ensureOwnedTilesReachFactionCities(ownersList);
