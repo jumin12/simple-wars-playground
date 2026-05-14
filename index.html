@@ -13095,17 +13095,6 @@
 
         function generateMap() {
             let ownsInnerRng = !_wodSavedMathRandom;
-            if(ownsInnerRng) {
-                if(gameData._wodReuseMapGenSeed) {
-                    gameData._wodReuseMapGenSeed = false;
-                    wodPushSeededRandom(gameData._mapGenSeed);
-                } else {
-                    let s = (Math.floor(Math.random() * 4294967296) >>> 0) || 0;
-                    if(!s) s = 0x6a09e667;
-                    gameData._mapGenSeed = s;
-                    wodPushSeededRandom(s);
-                }
-            }
             let showMapGenOverlay = !gameData._wodSkipMapGenLoader;
             gameData._wodSkipMapGenLoader = false;
             let mapGenOverlayEl = null;
@@ -13117,9 +13106,6 @@
                 }
             }
             try {
-            gameData.hexes = {}; gameData.hexList = [];
-            gameData.cities = []; gameData.roads = []; gameData.entities = [];
-            gameData._wodCitySplitAnglePhase = null;
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 1000;
             gameData.income = 10;             gameData.selection = [];
@@ -13129,6 +13115,33 @@
 
             let mapR = gameData.mapRadius;
             let hr = gameData.hexRadius;
+            let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed);
+            const PROCMAP_ACCEPT_TRIES_MAX = wodFingerReuseMapSeed ? 1 : Math.min(55, Math.max(18, 28 + Math.floor(mapR / 12)));
+            let procSucceeded = false;
+
+            outerProcTerrain: for(let procAttempt = 0; procAttempt < PROCMAP_ACCEPT_TRIES_MAX; procAttempt++) {
+                if(ownsInnerRng) {
+                    if(procAttempt > 0) wodPopRandom();
+                    if(procAttempt === 0) {
+                        if(gameData._wodReuseMapGenSeed) {
+                            gameData._wodReuseMapGenSeed = false;
+                        } else {
+                            let ss = (Math.floor(Math.random() * 4294967296) >>> 0) || 0;
+                            if(!ss) ss = 0x6a09e667;
+                            gameData._mapGenSeed = ss >>> 0;
+                        }
+                    } else {
+                        let ss = (Math.floor(Math.random() * 4294967296) >>> 0) || 0;
+                        if(!ss) ss = 0xbada55e;
+                        gameData._mapGenSeed = (ss ^ (procAttempt * 0x9e3779b9)) >>> 0;
+                    }
+                    wodPushSeededRandom(gameData._mapGenSeed);
+                }
+
+            gameData.hexes = {}; gameData.hexList = [];
+            gameData.cities = []; gameData.roads = []; gameData.entities = [];
+            gameData._wodCitySplitAnglePhase = null;
+
             let seedOffset = Math.random() * 10000;
             
             let shapeInput = document.getElementById('setupMapShape');
@@ -13314,7 +13327,13 @@
 
             gameData._wodProcgenBorderFirstApplied = false;
             let procOk = wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
-            if(!procOk) {
+            if(procOk) {
+                procSucceeded = true;
+                break outerProcTerrain;
+            }
+            }
+
+            if(!procSucceeded) {
                 for(let hx of gameData.hexList) setHexOwner(hx, 0);
                 gameData.cities = [];
 
