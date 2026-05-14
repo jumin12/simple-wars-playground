@@ -5403,7 +5403,7 @@
             function regenerateSetupPreview() {
                 let setupPanel = document.getElementById('setupPanel');
                 if(!setupPanel || setupPanel.classList.contains('hidden')) return;
-                /** Same path as "Generate New" so AI / shape / size all get a committed preview + spinner. */
+                /** Same pipeline as Generate New (spinner + full regen); keeps preview in sync when AI/player count changes. */
                 previewMap();
             }
             if(shapeSel && !shapeSel._wodBound) {
@@ -5417,7 +5417,6 @@
             if(aiSel && !aiSel._wodBound) {
                 aiSel._wodBound = true;
                 aiSel.addEventListener('change', regenerateSetupPreview);
-                aiSel.addEventListener('input', regenerateSetupPreview);
             }
             if(victorySel && !victorySel._wodVictoryDetailBound) {
                 victorySel._wodVictoryDetailBound = true;
@@ -7031,8 +7030,6 @@
         function wodMpPushLobbyMetaFromCurrentUi() {
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.sendLobbyMeta) return;
             WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
-            /** Host refreshes lobby map preview locally (relay may not echo room_meta back to sender). */
-            if(gameState !== 'PLAYING') requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
         }
         function wodMpValidateLaunchReady(meta) {
             if(!meta || typeof meta !== 'object') return false;
@@ -7182,6 +7179,7 @@
                             window.wodMpRoomMeta.seatTypes[slot - 1] = v;
                         }
                         wodMpPushLobbyMetaFromCurrentUi();
+                        requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
                     };
                 });
                 slotsEl.querySelectorAll('.mp-gl-color-select').forEach(sel => {
@@ -7577,10 +7575,10 @@
             if(mpGlMaxHumans && !mpGlMaxHumans._wodMpBound) {
                 mpGlMaxHumans._wodMpBound = true;
                 mpGlMaxHumans.addEventListener('change', () => {
-                    if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost && WodMultiplayer.sendLobbyMeta) {
+                    if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost && WodMultiplayer.sendLobbyMeta)
                         WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
-                        if(gameState !== 'PLAYING') requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
-                    }
+                    /** Rebuilds seats + RAF map preview (`wodMpRenderGameLobbyScreen` ends with lobby preview refresh). */
+                    wodMpRenderGameLobbyScreen();
                 });
             }
 
