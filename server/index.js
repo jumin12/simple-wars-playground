@@ -37,6 +37,27 @@ function normalizeSeatTypes(meta) {
   meta.aiCount = bots;
 }
 
+const DEFAULT_SLOT_COLORS = ['#2ecc71', '#e74c3c', '#9b59b6', '#e67e22', '#3498db', '#f1c40f'];
+
+function slotEffectiveColor(room, slot) {
+  const pc = (room.meta && room.meta.playerColors) || {};
+  const explicit = pc[String(slot)];
+  if (explicit && /^#[0-9A-Fa-f]{6}$/.test(String(explicit))) return String(explicit).toLowerCase();
+  if (slot >= 1 && slot <= DEFAULT_SLOT_COLORS.length) return DEFAULT_SLOT_COLORS[slot - 1].toLowerCase();
+  return '';
+}
+
+function lobbyActiveSeats(room) {
+  normalizeSeatTypes(room.meta);
+  const cap = lobbyCap(room);
+  const st = room.meta.seatTypes || [];
+  const out = [];
+  for (let s = 1; s <= cap; s++) {
+    if ((st[s - 1] || 'human') !== 'closed') out.push(s);
+  }
+  return out;
+}
+
 /** First slot 1..cap that is `human` in seatTypes and not taken by a connected client. */
 function firstFreeHumanSlot(room) {
   normalizeSeatTypes(room.meta);
@@ -149,8 +170,7 @@ function addClientToRoom(client, room) {
     room.meta.playerColors = {};
   const sk = String(client.slot);
   if (!room.meta.playerColors[sk]) {
-    const defs = ['#2ecc71', '#3498db', '#e74c3c', '#9b59b6', '#e67e22', '#f1c40f'];
-    room.meta.playerColors[sk] = defs[(client.slot - 1) % defs.length];
+    room.meta.playerColors[sk] = DEFAULT_SLOT_COLORS[(client.slot - 1) % DEFAULT_SLOT_COLORS.length];
   }
 }
 
@@ -176,6 +196,8 @@ function leaveRoom(client) {
     } catch (_) {}
   }
   broadcastAll(room, { t: 'peer_left', slot: leftSlot, count: room.clients.length });
+  if (room.meta.playerPublic && typeof room.meta.playerPublic === 'object')
+    delete room.meta.playerPublic[String(leftSlot)];
   if (room.clients.length > 0) broadcastAll(room, { t: 'room_meta', meta: metaWire(room) });
   if (room.clients.length === 0) rooms.delete(room.id);
   client.room = null;
@@ -249,6 +271,7 @@ wss.on('connection', (ws) => {
           money: 1000,
           maxHumans: MAX_PLAYERS,
           playerColors: {},
+          playerPublic: {},
           mapSizeLabel: 'Medium',
           mapShapeLabel: 'Island',
           victoryLabel: 'Domination',
@@ -326,6 +349,7 @@ wss.on('connection', (ws) => {
       if (m) {
         delete m.occupiedSlots;
         const prevPc = (client.room.meta && client.room.meta.playerColors) || {};
+        const prevPub = (client.room.meta && client.room.meta.playerPublic) || {};
         const trial = { ...client.room.meta, ...m };
         normalizeSeatTypes(trial);
         const bad = assertMetaCompatibleWithRoom(client.room, trial);
@@ -339,6 +363,9 @@ wss.on('connection', (ws) => {
         if (!client.room.meta.playerColors || typeof client.room.meta.playerColors !== 'object')
           client.room.meta.playerColors = {};
         Object.assign(client.room.meta.playerColors, prevPc);
+        if (!client.room.meta.playerPublic || typeof client.room.meta.playerPublic !== 'object')
+          client.room.meta.playerPublic = {};
+        Object.assign(client.room.meta.playerPublic, prevPub);
         normalizeSeatTypes(client.room.meta);
       }
       broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
@@ -372,9 +399,10 @@ wss.on('connection', (ws) => {
       if (!/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
       if (!client.room.meta.playerColors || typeof client.room.meta.playerColors !== 'object')
         client.room.meta.playerColors = {};
-      const taken = Object.entries(client.room.meta.playerColors).some(
-        ([k, v]) => parseInt(k, 10) !== slot && String(v).toLowerCase() === hex.toLowerCase(),
-      );
+      const taken = lobbyActiveSeats(client.room).some((other) => {
+        if (other === slot) return false;
+        return slotEffectiveColor(client.room, other) === hex.toLowerCase();
+      });
       if (taken) {
         try {
           ws.send(JSON.stringify({ t: 'error', msg: 'Color already taken' }));
@@ -382,6 +410,29 @@ wss.on('connection', (ws) => {
         return;
       }
       client.room.meta.playerColors[String(slot)] = hex;
+      broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
+      broadcastLobbyList();
+      return;
+    }
+
+    if (t === 'lobby_profile') {
+      if (!client.room || client.room.matchStarted) return;
+      const rawName = msg.displayName != null ? String(msg.displayName) : '';
+      const displayName = rawName.trim().slice(0, 24) || `Player ${client.slot}`;
+      let mpStats = null;
+      if (msg.mpStats && typeof msg.mpStats === 'object') {
+        const g = parseInt(msg.mpStats.gamesPlayed, 10);
+        const w = parseInt(msg.mpStats.wins, 10);
+        const l = parseInt(msg.mpStats.losses, 10);
+        mpStats = {
+          gamesPlayed: Number.isFinite(g) ? Math.max(0, Math.min(99999, g)) : 0,
+          wins: Number.isFinite(w) ? Math.max(0, Math.min(99999, w)) : 0,
+          losses: Number.isFinite(l) ? Math.max(0, Math.min(99999, l)) : 0,
+        };
+      }
+      if (!client.room.meta.playerPublic || typeof client.room.meta.playerPublic !== 'object')
+        client.room.meta.playerPublic = {};
+      client.room.meta.playerPublic[String(client.slot)] = { displayName, mpStats };
       broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
       broadcastLobbyList();
       return;

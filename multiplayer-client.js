@@ -265,6 +265,14 @@
     sendLobbyColor(slot, color) {
       send({ t: 'lobby_color', slot: slot | 0, color: String(color || '').trim() });
     },
+    sendLobbyProfile(payload) {
+      const p = payload && typeof payload === 'object' ? payload : {};
+      send({
+        t: 'lobby_profile',
+        displayName: p.displayName != null ? String(p.displayName) : '',
+        mpStats: p.mpStats && typeof p.mpStats === 'object' ? p.mpStats : null,
+      });
+    },
     kickPlayer(slot) {
       send({ t: 'kick_player', slot: slot | 0 });
     },
