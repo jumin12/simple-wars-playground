@@ -66,7 +66,7 @@
 
   function unitStub(type, owner) {
     const o = Math.max(0, parseInt(owner, 10));
-    const cap = Math.max(1, state.maxFactionSlots || 6);
+    const cap = Math.max(1, state.maxFactionSlots || 4);
     const base = {
       type,
       owner: o <= 0 ? 1 : Math.min(o, cap),
@@ -351,7 +351,7 @@
     rebuildOwnerSelect();
 
     document.getElementById("editorAddFaction").addEventListener("click", () => {
-      if (state.maxFactionSlots < 6) {
+      if (state.maxFactionSlots < 4) {
         state.maxFactionSlots++;
         rebuildOwnerSelect();
         rebuildUnitPalette();
@@ -877,7 +877,7 @@
     if (state.selected.type === "city") {
       panel.innerHTML = `
         <div class="editor-row"><label>Name</label><input id="selName" value="${obj.name || ""}"></div>
-        <div class="editor-row"><label>Owner</label><input id="selOwner" type="number" min="0" max="6" value="${obj.owner || 0}"></div>
+        <div class="editor-row"><label>Owner</label><input id="selOwner" type="number" min="0" max="4" value="${obj.owner || 0}"></div>
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 1000}"></div>
         <div class="editor-row"><label>Income bonus</label><input id="selIncome" type="number" value="${obj.incomeBonus || 0}"></div>
         <div class="editor-row"><label>MP bonus</label><input id="selMp" type="number" value="${obj.manpowerBonus || 0}"></div>
@@ -898,7 +898,7 @@
     } else {
       panel.innerHTML = `
         <div class="editor-row"><label>Name</label><input id="selName" value="${obj.name || ""}"></div>
-        <div class="editor-row"><label>Owner</label><input id="selOwner" type="number" min="0" max="6" value="${obj.owner || 1}"></div>
+        <div class="editor-row"><label>Owner</label><input id="selOwner" type="number" min="0" max="4" value="${obj.owner || 1}"></div>
         <div class="editor-row"><label>Type</label><select id="selType"><option value="light">Infantry</option><option value="marine">Marines</option><option value="heavy">Armor</option><option value="ship">Ship</option></select></div>
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 100}"></div>
         <div class="editor-row"><label>Speed</label><input id="selSpeed" type="number" value="${obj.speed || 10}"></div>

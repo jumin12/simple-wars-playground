@@ -7,7 +7,7 @@ const http = require('http');
 const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
-const MAX_PLAYERS = 6;
+const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
 
 const rooms = new Map();
