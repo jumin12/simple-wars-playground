@@ -932,20 +932,14 @@
   }
 
   function saveEditorMap() {
-    const mapData = WOD.exportMapData();
-    const thumbnail = makeThumbnail();
     const def = "Custom Map " + new Date().toLocaleTimeString();
-    if (typeof window.wodOpenSaveMapNameModal === "function") {
-      window.wodOpenSaveMapNameModal({ defaultName: def }).then((name) => {
-        if (name == null) return;
-        if (typeof window.wodSaveMapToLibraryWithName === "function") {
-          window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
-        }
-        renderMapBrowser();
-      });
+    if (typeof window.wodOpenSaveMapToLibraryDialog === "function") {
+      window.wodOpenSaveMapToLibraryDialog({ fromEditor: true, suggestedName: def });
       return;
     }
     const name = prompt("Map name:", def) || "Custom Map";
+    const mapData = WOD.exportMapData();
+    const thumbnail = makeThumbnail();
     if (typeof window.wodSaveMapToLibraryWithName === "function") {
       window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
     }
