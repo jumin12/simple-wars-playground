@@ -6047,11 +6047,10 @@
             wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, zeroBias);
             wodAssignWaterAndNonclaimablePoliticalVotes();
         }
-        /** True for playable land tiles used to balance wedge sizes (excludes ocean and mountains — closer to usable territory in War of Dots). */
-        function wodHexCountsTowardLandPoliticsBalance(h) {
-            return !!(h && isClaimableLand(h) && !isWaterHex(h) && h.type !== 'mountain');
-        }
-        /** Iteratively adjust additive weights so buildable-ish land tiles match an even split (±1). Sea/mountain shading follows Voronoi. */
+        /**
+         * Biased Voronoi from faction capitals/seeds until each faction holds ~the same tile count across the whole map grid
+         * (dry land + mountains + their Voronoi sea zones — War of Dots style “equal ink”).
+         */
         function wodEqualizePoliticsBiasedVoronoi(ownerIds, capitalCities, iterations) {
             if(!ownerIds || ownerIds.length < 2) return;
             let valid = new Set(ownerIds);
@@ -6078,11 +6077,9 @@
                 let total = 0;
                 for(let o of sorted) cts[o] = 0;
                 for(let h of gameData.hexList) {
-                    if(!wodHexCountsTowardLandPoliticsBalance(h)) continue;
-                    if(valid.has(h.owner)) {
-                        cts[h.owner]++;
-                        total++;
-                    }
+                    if(!valid.has(h.owner)) continue;
+                    cts[h.owner]++;
+                    total++;
                 }
                 if(total === 0) return;
                 let f = sorted.length;
@@ -12813,6 +12810,18 @@
 
             wodSyncUrbanFootprintOwners();
             wodRemoveUnconnectedFactionHexPockets(ownersSorted);
+
+            let capitalSeeds = [];
+            for(let ow of ownersSorted) {
+                let capCity = gameData.cities.find(c => c && c.owner === ow && c.hasFactory) || gameData.cities.find(c => c && c.owner === ow);
+                if(capCity) capitalSeeds.push(capCity);
+            }
+            /** Pocket fixes can donate tiles across borders; rebalance toward capitals like War of Dots. */
+            if(capitalSeeds.length === ownersSorted.length && ownersSorted.length >= 2) {
+                let postEq = ownersSorted.length >= 4 ? 58 : ownersSorted.length >= 3 ? 54 : 38;
+                wodEqualizePoliticsBiasedVoronoi(ownersSorted, capitalSeeds, postEq);
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+            }
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
