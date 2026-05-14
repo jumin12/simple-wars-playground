@@ -28,7 +28,7 @@
     });
   }
 
-  const terrainTypes = ["grass", "sand", "forest", "swamp", "hill", "mountain", "water", "lake_water", "urban"];
+  const terrainTypes = ["grass", "sand", "forest", "swamp", "hill", "mountain", "water", "urban"];
 
   function factionPalette() {
     return window.WOD && WOD.factionColors ? WOD.factionColors : ["#000000", "#2ecc71", "#e74c3c", "#9b59b6", "#e67e22", "#3498db", "#f1c40f"];
@@ -253,7 +253,7 @@
           <div class="editor-grid-2">
             <button type="button" class="editor-btn" id="editorBlank">New blank</button>
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
-            <button type="button" class="editor-btn" id="editorSave">Save to library</button>
+            <button type="button" class="editor-btn" id="editorSave">Save to library…</button>
             <button type="button" class="editor-btn" id="editorBrowseLib">Browse library…</button>
           </div>
         </section>
@@ -703,7 +703,7 @@
     WOD.gameData.cities.push(city);
     for (const pt of WOD.getHexesInRadius(hex.q, hex.r, 2)) {
       const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
-      if (h && h.type !== "water" && h.type !== "deep_water" && h.type !== "lake_water") {
+      if (h && h.type !== "water" && h.type !== "deep_water") {
         h.type = "urban";
         h.baseColor = WOD.getTerrainColor("urban");
         h.cityId = city.id;
@@ -771,7 +771,7 @@
       if (state.selected.type === "city") {
         for (const pt of WOD.getHexesInRadius(hex.q, hex.r, 2)) {
           const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
-          if (h && h.type !== "water" && h.type !== "deep_water" && h.type !== "lake_water") {
+          if (h && h.type !== "water" && h.type !== "deep_water") {
             h.type = "urban";
             h.baseColor = WOD.getTerrainColor("urban");
             h.cityId = obj.id;
@@ -932,31 +932,37 @@
   }
 
   function saveEditorMap() {
-    const defaultName = "Custom Map " + new Date().toLocaleTimeString();
-    function finalize(nameRaw) {
-      const name = (nameRaw && String(nameRaw).trim()) || defaultName;
+    const fallback = () => {
+      const name = "Custom Map " + new Date().toLocaleTimeString();
+      pushEditorMap(name);
+    };
+    function pushEditorMap(trimmedName) {
       const mapData = WOD.exportMapData();
       const thumbnail = makeThumbnail();
       if (typeof window.wodSaveMapToLibraryWithName === "function") {
-        window.wodSaveMapToLibraryWithName(String(name).trim(), { mapData, thumb: thumbnail || undefined });
+        window.wodSaveMapToLibraryWithName(String(trimmedName).trim(), { mapData, thumb: thumbnail || undefined });
       }
       renderMapBrowser();
       if (typeof window.showNotification === "function") window.showNotification("Map saved to library.");
     }
-    if (typeof window.wodPromptSaveNameModal === "function") {
-      window.wodPromptSaveNameModal({
-        title: "Save map to library",
-        defaultValue: defaultName,
-        placeholderIfEmpty: "Custom Map"
-      }).then((name) => {
-        if (name === null) return;
-        finalize(name);
-      });
-    } else {
-      const name = window.prompt("Map name:", defaultName);
-      if (name === null) return;
-      finalize(name);
+
+    const defTitle = "Custom Map " + new Date().toLocaleTimeString();
+    if (typeof window.wodShowNameInputDialog === "function") {
+      window
+        .wodShowNameInputDialog({
+          title: "Save map to library",
+          hint: "Your map is saved in this browser — same library as solo and multiplayer.",
+          defaultValue: defTitle,
+          confirmLabel: "Save",
+          maxLength: 96,
+        })
+        .then((name) => {
+          if (name == null || !String(name).trim()) return;
+          pushEditorMap(name);
+        });
+      return;
     }
+    fallback();
   }
 
   function makeThumbnail() {
@@ -971,7 +977,7 @@
       typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
     browser.textContent = "";
     if (saved.length === 0) {
-      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Use <strong>Save to library</strong> or choose <strong>Browse library…</strong>.</div>`;
+      browser.innerHTML = `<div class="editor-hint">No maps saved yet. Press <strong>Save to library…</strong> or open <strong>Browse library…</strong>.</div>`;
       return;
     }
     for (const m of saved) {

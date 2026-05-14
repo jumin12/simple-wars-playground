@@ -105,55 +105,6 @@
         .campaign-summary-overlay-wrap {
             pointer-events: auto;
         }
-        #wodNameSaveBackdrop {
-            z-index: 60;
-            background: rgba(4, 10, 18, 0.72);
-            backdrop-filter: blur(6px);
-        }
-        #wodNameSaveBackdrop .wod-name-save-panel {
-            width: min(92vw, 400px);
-            box-sizing: border-box;
-            padding: 22px 22px 18px;
-            border-radius: 10px;
-            background: linear-gradient(165deg, rgba(26, 40, 56, 0.98), rgba(14, 24, 36, 0.99));
-            border: 1px solid rgba(212, 175, 55, 0.45);
-            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
-        }
-        #wodNameSaveBackdrop .wod-name-save-panel h3 {
-            margin: 0 0 12px;
-            font-size: 1.15rem;
-            color: #ecf0f1;
-            letter-spacing: 0.02em;
-        }
-        #wodNameSaveBackdrop .wod-name-save-panel label {
-            display: block;
-            margin-bottom: 6px;
-            font-size: 0.82rem;
-            color: #95a5a6;
-        }
-        #wodNameSaveBackdrop .wod-name-save-input {
-            width: 100%;
-            box-sizing: border-box;
-            padding: 10px 12px;
-            font-size: 15px;
-            border-radius: 6px;
-            border: 1px solid rgba(127, 140, 141, 0.6);
-            background: rgba(8, 14, 22, 0.9);
-            color: #ecf0f1;
-            outline: none;
-            margin-bottom: 16px;
-        }
-        #wodNameSaveBackdrop .wod-name-save-input:focus {
-            border-color: #3498db;
-            box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.25);
-        }
-        #wodNameSaveBackdrop .wod-name-save-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: flex-end;
-        }
-
         .campaign-summary-panel {
             max-width: 640px;
             width: 92vw;
@@ -800,6 +751,25 @@
             flex-wrap: wrap;
             gap: 10px;
             margin-top: 16px;
+        }
+
+        #wodNameInputDlg .wod-name-input-dlg-field {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(189,195,199,0.45);
+            background: rgba(15,31,52,0.95);
+            color: #ecf0f1;
+            font-size: 15px;
+        }
+        #wodNameInputDlg .wod-name-input-dlg-field:focus {
+            outline: none;
+            border-color: rgba(93,173,226,0.9);
+            box-shadow: 0 0 0 2px rgba(93,173,226,0.25);
+        }
+        #wodNameInputDlg #wodNameInputDlgHint:empty {
+            display: none;
         }
 
         #mpGameLobbyScreen.hidden {
@@ -4493,6 +4463,19 @@
             </div>
         </div>
 
+        <div id="wodNameInputDlg" class="mp-host-dlg hidden" role="dialog" aria-modal="true" aria-labelledby="wodNameInputDlgTitle">
+            <div class="panel">
+                <h3 id="wodNameInputDlgTitle">Name this save</h3>
+                <p id="wodNameInputDlgHint" class="wod-map-lib-sub"></p>
+                <label id="wodNameInputLbl" for="wodNameInputFld" style="display:block;font-size:13px;color:#bdc3c7;margin:6px 0 8px 0">Name</label>
+                <input id="wodNameInputFld" type="text" autocomplete="off" maxlength="96" class="wod-name-input-dlg-field" />
+                <div class="mp-host-dlg-actions">
+                    <button type="button" class="menu-btn" id="wodNameInputOk">Save</button>
+                    <button type="button" class="build-btn" id="wodNameInputCancel">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <div id="helpGuidePanel" class="overlay hidden">
             <div class="panel panel-wide" style="max-width:900px;max-height:92vh;overflow:auto">
                 <h2 style="margin-top:0">Game guide</h2>
@@ -4500,7 +4483,7 @@
 
                 <div class="esc-help-block">
                     <h4>Borders and the setup preview</h4>
-                    <p class="esc-help-prose">On a <strong>newly generated</strong> map, playable land is sliced into equal <strong>angular wedges</strong> (same hex count per player, ±1 only when totals do not divide). <strong>Towns are placed after</strong> that split, strictly <strong>inside your wedge</strong>, so nobody starts with fewer settlements just because Voronoi capitals clustered badly. Imported / saved layouts keep their authored towns and use the classic capital-seed smoothing pass instead.</p>
+                    <p class="esc-help-prose">When you generate a procedural map, each faction’s starting land is grown from a <strong>single seed town</strong> (the capital when one exists), not from every city at once. That keeps early territory in one connected blob instead of checkerboarding. A smoothing pass then softens borders so they read cleanly on the map and in <strong>setup / lobby previews</strong> (previews use the same colors and border lines as the minimap).</p>
                     <p class="esc-help-prose">In solo play, click <strong>Generate New</strong> when you want to lock in a layout: your last preview shares the same random seed as the very next <strong>Start</strong> provided you do not change map size, shape, or AI count before launching. If you skip preview entirely, each start still generates a full procedural map — it just will not match an older thumbnail sitting in the UI. Multiplayer reuses the lobby seed for both the lobby minimap and the host launch so every seat sees the same geography.</p>
                 </div>
 
@@ -5061,18 +5044,6 @@
         </div>
     </div>
 
-    <div id="wodNameSaveBackdrop" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="wodNameSaveTitle" tabindex="-1">
-        <div class="wod-name-save-panel">
-            <h3 id="wodNameSaveTitle">Save map</h3>
-            <label for="wodNameSaveInput">Name</label>
-            <input id="wodNameSaveInput" class="wod-name-save-input" type="text" maxlength="80" autocomplete="off" spellcheck="false" />
-            <div class="wod-name-save-actions">
-                <button type="button" class="menu-btn" id="wodNameSaveCancel">Cancel</button>
-                <button type="button" class="menu-btn" id="wodNameSaveConfirm" style="background:linear-gradient(135deg,#1e5631,#27ae60);border-color:#2ecc71;color:#fff">Save</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Production: static site simple-wars-live.onrender.com talks to Node relay simple-wars.onrender.com (wss). -->
     <script>
     (function () {
@@ -5149,73 +5120,6 @@
                 apply(!panel.classList.contains('collapsed'));
             });
         }
-
-        let _wodNameSaveResolve = null;
-        /** @returns {Promise<string|null>} Resolved name trimmed, or null if cancelled */
-        function wodPromptSaveNameModal(opts) {
-            opts = opts || {};
-            let backdrop = document.getElementById('wodNameSaveBackdrop');
-            let titleEl = document.getElementById('wodNameSaveTitle');
-            let inp = document.getElementById('wodNameSaveInput');
-            let btnOk = document.getElementById('wodNameSaveConfirm');
-            let btnCancel = document.getElementById('wodNameSaveCancel');
-            if(!backdrop || !inp || !btnOk || !btnCancel)
-                return Promise.resolve(null);
-            if(_wodNameSaveResolve) {
-                try { _wodNameSaveResolve(null); } catch (e2) {}
-                _wodNameSaveResolve = null;
-            }
-            if(titleEl) titleEl.textContent = opts.title || 'Save map';
-            inp.value = opts.defaultValue || '';
-            backdrop.classList.remove('hidden');
-            backdrop.setAttribute('aria-hidden', 'false');
-            function cleanup() {
-                backdrop.classList.add('hidden');
-                backdrop.setAttribute('aria-hidden', 'true');
-                document.removeEventListener('keydown', onKey, true);
-            }
-            function finish(val) {
-                if(!_wodNameSaveResolve) return;
-                let fn = _wodNameSaveResolve;
-                _wodNameSaveResolve = null;
-                cleanup();
-                fn(val);
-            }
-            function onKey(ev) {
-                if(ev.key === 'Escape') {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    finish(null);
-                } else if(ev.key === 'Enter') {
-                    ev.preventDefault();
-                    commitNameSave();
-                }
-            }
-            function commitNameSave() {
-                let raw = inp.value.trim();
-                if(opts.allowEmptyTrimToNull && raw === '') {
-                    finish(null);
-                    return;
-                }
-                if(raw === '' && opts.placeholderIfEmpty != null && opts.placeholderIfEmpty !== '')
-                    raw = String(opts.placeholderIfEmpty).trim();
-                finish(raw === '' ? (opts.placeholderIfEmpty || '') : raw);
-            }
-            return new Promise(function(resolve) {
-                _wodNameSaveResolve = resolve;
-                setTimeout(() => {
-                    inp.focus();
-                    inp.select();
-                }, 40);
-                document.addEventListener('keydown', onKey, true);
-                btnOk.onclick = function() { commitNameSave(); };
-                btnCancel.onclick = function() { finish(null); };
-                backdrop.onclick = function(ev) {
-                    if(ev.target === backdrop) finish(null);
-                };
-            });
-        }
-
         function initWodMobileHud() {
             let root = document.getElementById('inGameUI');
             let backdrop = document.getElementById('wodMobileBackdrop');
@@ -5891,113 +5795,97 @@
                 ai: aiCount != null ? aiCount : gameData.aiCount
             });
         }
-        function wodDefaultMapGenProfile(mapShape) {
+        function wodSampleMapGenProfile(mapShape) {
             if(mapShape !== 'island') {
                 return {
                     islandMode: 'none',
                     waterElevThresh: 0.43,
                     sandThresh: 0.35,
-                    grassThresh: 0.60,
-                    forestThresh: 0.80,
+                    grassThresh: 0.6,
+                    forestThresh: 0.8,
                     mountElevThresh: 0.86,
-                    moistShift: 0,
-                    forestMoistBoost: 0,
-                    mountainThin: 0,
-                    mountainStyle: 'default',
-                    mountainPeakJitter: 0.09,
-                    mountainRingR: 0.48
+                    moistShift: (Math.random() - 0.5) * 0.08,
+                    mountainThin: 0
                 };
             }
-            return {
-                islandMode: null,
-                stretchX: 1,
-                stretchY: 1,
-                coastNoiseAmp: 0.45,
-                chainAX: -0.46,
-                chainAY: 0.28,
-                chainBX: 0.52,
-                chainBY: -0.12,
-                atollRing: 0.48,
-                ringInnerFrac: 0.29,
-                ringOuterFrac: 0.93,
-                waterElevThresh: 0.43,
-                sandThresh: 0.35,
-                grassThresh: 0.60,
-                forestThresh: 0.80,
-                mountElevThresh: 0.86,
-                moistShift: 0,
-                forestMoistBoost: 0,
-                mountainThin: 0,
-                mountainStyle: 'default',
-                mountainPeakJitter: 0.09,
-                mountainRingR: 0.48,
-                inlandLakeAggression: 0
-            };
-        }
-        /** Seeded RNG is active inside generateMap(). */
-        function wodRollIslandGenProfile(gp) {
-            if(!gp || gp.islandMode === 'none') return;
-            const modes = ['default', 'archipelago', 'atoll', 'chain', 'crescent', 'elongated', 'wide', 'ring', 'scatter_shoals'];
-            let wRoll = Math.random();
-            gp.islandMode = modes[(Math.floor((wRoll * modes.length)) % modes.length)];
-            gp.stretchX = 1 + (Math.random() - 0.5) * (gp.islandMode === 'elongated' ? 0.74 : 0.38);
-            gp.stretchY = 1 + (Math.random() - 0.5) * (gp.islandMode === 'wide' ? 0.5 : 0.34);
-            gp.coastNoiseAmp = Math.max(0.28, Math.min(0.62, 0.4 + Math.random() * 0.2 + (gp.islandMode === 'archipelago' ? 0.1 : gp.islandMode === 'scatter_shoals' ? 0.14 : gp.islandMode === 'atoll' ? -0.04 : 0)));
-            gp.chainAX = -0.5 + Math.random() * 0.32;
-            gp.chainAY = 0.12 + Math.random() * 0.36;
-            gp.chainBX = 0.38 + Math.random() * 0.3;
-            gp.chainBY = -0.32 + Math.random() * 0.42;
-            gp.atollRing = Math.max(0.36, Math.min(0.58, 0.43 + Math.random() * 0.1));
-            gp.ringInnerFrac = Math.max(0.17, Math.min(0.4, 0.27 + Math.random() * 0.08));
-            gp.ringOuterFrac = Math.max(0.74, Math.min(0.97, 0.88 + Math.random() * 0.08));
-            gp.waterElevThresh = Math.max(0.38, Math.min(0.48, (gp.waterElevThresh || 0.43) + (Math.random() - 0.5) * 0.065));
-            if(Math.random() < 0.2) gp.mountElevThresh = 2.05 + Math.random() * 0.45;
-            else gp.mountElevThresh = Math.max(0.78, Math.min(0.9, (gp.mountElevThresh || 0.86) + (Math.random() - 0.5) * 0.07));
-            if(Math.random() < 0.32) gp.mountainThin = Math.max(gp.mountainThin || 0, Math.random());
-            gp.mountainStyle = (Math.random() < 0.38) ? (['ring', 'scattered', 'low', 'mixed', 'default'][Math.floor(Math.random() * 5)]) : 'default';
-            gp.mountainRingR = Math.max(0.36, Math.min(0.58, (gp.mountainRingR || 0.48) + (Math.random() - 0.5) * 0.12));
-            if(Math.random() < 0.22) {
-                gp.forestThresh = Math.max(0.56, (gp.forestThresh || 0.8) - 0.12 - Math.random() * 0.12);
-                gp.grassThresh = Math.max(0.48, (gp.grassThresh || 0.6) - 0.05 - Math.random() * 0.08);
-                gp.moistShift = (gp.moistShift || 0) + 0.05 + Math.random() * 0.1;
-                gp.forestMoistBoost = (gp.forestMoistBoost || 0) + 0.04 + Math.random() * 0.08;
-            }
-            gp.inlandLakeAggression = (Math.random() < 0.42) ? (0.04 + Math.random() * 0.22) : (Math.random() * 0.07);
-        }
-        /** Water tiles that never touch the map rectangle edge become lake_water (inland / lagoons). */
-        function wodRetagInteriorLakeWater(rows, cols) {
-            if(!gameData.hexList || !gameData.hexList.length) return;
-            function onMapEdge(h) {
-                return Math.abs(h.q) >= cols || Math.abs(h.r) >= rows;
-            }
-            let queue = [];
-            let seen = new Set();
-            for(let h of gameData.hexList) {
-                if(!isOceanWater(h)) continue;
-                if(!onMapEdge(h)) continue;
-                let k = `${h.q},${h.r}`;
-                seen.add(k);
-                queue.push(h);
-            }
-            let head = 0;
-            while(head < queue.length) {
-                let cur = queue[head++];
-                for(let nb of getNeighborHexes(cur)) {
-                    if(!nb || !isOceanWater(nb)) continue;
-                    let nk = `${nb.q},${nb.r}`;
-                    if(seen.has(nk)) continue;
-                    seen.add(nk);
-                    queue.push(nb);
+            let modes = ['blob', 'blob', 'elongated', 'wide', 'archipelago', 'crescent', 'chain', 'atoll'];
+            let islandMode = modes[Math.floor(Math.random() * modes.length)];
+            let stretchX = 1, stretchY = 1;
+            let coastNoiseAmp = 0.38 + Math.random() * 0.22;
+            let chainAX = (Math.random() - 0.5) * 1.05;
+            let chainAY = (Math.random() - 0.5) * 0.95;
+            let chainBX = (Math.random() - 0.5) * 1.05 + 0.08;
+            let chainBY = (Math.random() - 0.5) * 0.85;
+            let atollRing = 0.42 + Math.random() * 0.14;
+            if(islandMode === 'elongated') {
+                if(Math.random() < 0.5) {
+                    stretchX = 0.62 + Math.random() * 0.12;
+                    stretchY = 1.05 + Math.random() * 0.35;
+                } else {
+                    stretchX = 1.05 + Math.random() * 0.35;
+                    stretchY = 0.62 + Math.random() * 0.12;
                 }
+                coastNoiseAmp = 0.42 + Math.random() * 0.18;
+            } else if(islandMode === 'wide') {
+                stretchX = 1.12 + Math.random() * 0.22;
+                stretchY = 0.78 + Math.random() * 0.18;
+            } else if(islandMode === 'archipelago') {
+                stretchX = 1;
+                stretchY = 1;
+                coastNoiseAmp = 0.48 + Math.random() * 0.24;
+            } else if(islandMode === 'atoll') {
+                stretchX = 1.02 + Math.random() * 0.16;
+                stretchY = 1.02 + Math.random() * 0.16;
+                coastNoiseAmp = 0.44 + Math.random() * 0.2;
             }
-            for(let h of gameData.hexList) {
-                if(!isOceanWater(h)) continue;
-                let k = `${h.q},${h.r}`;
-                if(seen.has(k)) continue;
-                h.type = 'lake_water';
-                h.baseColor = getTerrainColor('lake_water');
-                h.renderColor = h.baseColor;
+            let biomeRoll = Math.random();
+            let waterElevThresh = 0.395 + Math.random() * 0.065;
+            let sandThresh = 0.30 + Math.random() * 0.08;
+            let grassThresh = 0.52 + Math.random() * 0.14;
+            let forestThresh = 0.74 + Math.random() * 0.14;
+            let mountElevThresh = 0.805 + Math.random() * 0.095;
+            let moistShift = (Math.random() - 0.5) * 0.18;
+            let forestMoistBoost = (Math.random() - 0.5) * 0.12;
+            let mountainThin = Math.random() < 0.55 ? (0.1 + Math.random() * 0.38) : 0;
+            if(biomeRoll < 0.22) {
+                mountElevThresh += 0.055 + Math.random() * 0.05;
+                mountainThin = Math.min(0.52, mountainThin + 0.12 + Math.random() * 0.14);
+                forestMoistBoost += 0.05 + Math.random() * 0.08;
+            } else if(biomeRoll < 0.4) {
+                forestMoistBoost += 0.08 + Math.random() * 0.1;
+                forestThresh -= 0.035 + Math.random() * 0.04;
+                grassThresh -= 0.02;
+            } else if(biomeRoll < 0.55) {
+                sandThresh -= 0.035 + Math.random() * 0.035;
+                moistShift -= 0.06 + Math.random() * 0.06;
+                waterElevThresh += 0.02 + Math.random() * 0.02;
+            } else if(biomeRoll < 0.68) {
+                mountElevThresh -= 0.04 + Math.random() * 0.045;
+                moistShift += 0.05 + Math.random() * 0.05;
             }
+            let mStyles = ['default', 'scattered', 'scattered', 'ring', 'low', 'mixed'];
+            let mountainStyle = mStyles[Math.floor(Math.random() * mStyles.length)];
+            let mountainPeakJitter = 0.055 + Math.random() * 0.14;
+            let mountainRingR = 0.36 + Math.random() * 0.22;
+            return {
+                islandMode,
+                stretchX,
+                stretchY,
+                coastNoiseAmp,
+                chainAX, chainAY, chainBX, chainBY,
+                atollRing,
+                waterElevThresh,
+                sandThresh,
+                grassThresh,
+                forestThresh,
+                mountElevThresh,
+                moistShift,
+                forestMoistBoost,
+                mountainThin,
+                mountainStyle,
+                mountainPeakJitter,
+                mountainRingR
+            };
         }
         function wodThinMountainsForProfile(gp, seedOffset) {
             if(!gp || !gp.mountainThin || gameData.mapShape !== 'island') return;
@@ -6066,296 +5954,6 @@
             }
             wodMarkTerrainPoliticalDirty();
         }
-        /** Mountains and other non-assignable terrain pick a political owner from neighboring land tiles. */
-        function wodRefreshNonClaimablePoliticalOwners() {
-            if(!gameData.hexList || !gameData.hexList.length) return;
-            for(let h of gameData.hexList) {
-                if(isClaimableLand(h)) continue;
-                if(isWaterHex(h)) {
-                    setHexOwner(h, 0);
-                    continue;
-                }
-                let votes = {};
-                for(let nb of getNeighborHexes(h)) {
-                    if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
-                }
-                let bo = 0, bv = 0;
-                for(let ok in votes) {
-                    if(votes[ok] > bv) {
-                        bv = votes[ok];
-                        bo = parseInt(ok, 10);
-                    }
-                }
-                if(bo > 0) setHexOwner(h, bo);
-                else setHexOwner(h, 0);
-            }
-            wodMarkTerrainPoliticalDirty();
-        }
-        /** Sort all land tiles by wedge angle around the centroid, then parcel into equal contiguous count per faction */
-        function wodAssignTerrainByEqualAngleSlices(ownersList, landHexesIn) {
-            if(!ownersList || ownersList.length === 0 || !gameData.hexList.length) return;
-            let tiles = [];
-            if(landHexesIn && landHexesIn.length) {
-                tiles = landHexesIn.slice();
-            } else {
-                for(let h of gameData.hexList) {
-                    if(!isClaimableLand(h)) continue;
-                    tiles.push(h);
-                }
-            }
-            if(tiles.length === 0) return;
-            let cx = 0, cy = 0;
-            for(let h of tiles) {
-                cx += h.x;
-                cy += h.y;
-            }
-            cx /= tiles.length;
-            cy /= tiles.length;
-            let angleOffset = Math.random() * Math.PI * 2;
-            function wedgeKey(h) {
-                let noiseValue = (fbm(h.x * 0.0025 + 123, h.y * 0.0025 + 456, 4) - 0.5) * 0.11;
-                return (Math.atan2(h.y - cy, h.x - cx) - angleOffset + noiseValue + Math.PI * 4) % (Math.PI * 2);
-            }
-            tiles.sort((a, b) => wedgeKey(a) - wedgeKey(b) || (a.q !== b.q ? a.q - b.q : a.r - b.r));
-
-            let f = ownersList.length;
-            let sortedOwners = [...ownersList].sort((a, b) => a - b);
-            let N = tiles.length;
-
-            let idx = 0;
-            for(let oi = 0; oi < f; oi++) {
-                let ownerId = sortedOwners[oi];
-                let cnt = Math.floor(N / f) + (oi < N % f ? 1 : 0);
-                for(let k = 0; k < cnt && idx < N; k++) {
-                    let h = tiles[idx++];
-                    setHexOwner(h, ownerId);
-                }
-            }
-
-            while(idx < N) {
-                let h = tiles[idx++];
-                setHexOwner(h, sortedOwners[f - 1]);
-            }
-
-            for(let h of gameData.hexList) {
-                if(!isClaimableLand(h)) setHexOwner(h, 0);
-            }
-            wodRefreshNonClaimablePoliticalOwners();
-            wodMarkTerrainPoliticalDirty();
-        }
-        /** Procedural-only: equal town counts per faction inside each wedge; spacing relaxes until quotas are met. */
-        function wodProceduralSeedCitiesInOwnedTerrain(ownersList, landHexes, cx, cy) {
-            gameData.cities = [];
-            let mapR = gameData.mapRadius;
-            let hr = gameData.hexRadius;
-            let mapShape = gameData.mapShape || 'island';
-
-            let sortedOwners = [...ownersList].sort((a, b) => a - b);
-            let factionSlots = Math.max(1, sortedOwners.length);
-
-            let numCitiesBase = Math.floor((mapR * mapR) / 600) + 5;
-            let citiesPerPlayer = Math.max(2, Math.min(6, 2 + Math.floor(mapR / 50)));
-            let numCities = Math.max(numCitiesBase, factionSlots + 3, factionSlots * citiesPerPlayer);
-            numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
-            let townsPerFaction = Math.floor(numCities / factionSlots);
-            let citySpacingSq = Math.max(hr * hr * 14 * 14, Math.min(hr * hr * 38 * 38, Math.pow(mapR * hr * 0.35, 2)));
-
-            let lcm = wodLandCentroidMaxRadius(landHexes);
-            let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
-            let innerRSq = innerRad * innerRad;
-            let minWaterSteps = mapShape === 'island' ? 3 : 2;
-            let cols = mapR;
-            let rows = Math.floor(mapR * 0.8);
-
-            let targets = {};
-            for(let ow of sortedOwners) targets[ow] = townsPerFaction;
-
-            function countEligibleSitesForOwner(o) {
-                let n = 0;
-                for(let h of landHexes) {
-                    if(h.owner !== o) continue;
-                    if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'urban' || h.type === 'mountain') continue;
-                    n++;
-                }
-                return n;
-            }
-            let globalSiteCap = sortedOwners.length ? Math.min(...sortedOwners.map(countEligibleSitesForOwner)) : 0;
-            if(globalSiteCap > 0) {
-                for(let ow of sortedOwners)
-                    targets[ow] = Math.min(targets[ow], globalSiteCap);
-            }
-
-            let startCities = [];
-            let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
-
-            function ownerTerrainCentroid(owner) {
-                let sx = 0, sy = 0, n = 0;
-                for(let h of gameData.hexList) {
-                    if(h.owner !== owner || !isClaimableLand(h) || isWaterHex(h)) continue;
-                    sx += h.x;
-                    sy += h.y;
-                    n++;
-                }
-                if(!n) return { x: cx, y: cy };
-                return { x: sx / n, y: sy / n };
-            }
-
-            function cityTooClosePx(px, py, spacingSq) {
-                for(let c of gameData.cities) {
-                    let dx = c.x - px, dy = c.y - py;
-                    if(dx * dx + dy * dy < spacingSq) return true;
-                }
-                return false;
-            }
-
-            function stampsOceanAdjacent(h) {
-                for(let n of getNeighborHexes(h)) {
-                    if(!n) continue;
-                    if(isOceanWater(n)) return true;
-                    if(n.type === 'sand' && getNeighborHexes(n).some(nn => nn && isOceanWater(nn))) return true;
-                }
-                return false;
-            }
-
-            function stampTownOnHex(hex, owner, cityId, isCapital) {
-                let city = {
-                    id: cityId,
-                    name: generateCityName(),
-                    owner,
-                    hasFactory: !!isCapital,
-                    hasHarbor: false,
-                    hp: 1000, maxHp: 1000,
-                    urbanStyle: Math.floor(Math.random() * 4),
-                    incomeBonus: 0,
-                    manpowerBonus: 0,
-                    q: hex.q,
-                    r: hex.r,
-                    x: hex.x,
-                    y: hex.y
-                };
-                stampUrbanTerrainAroundCity(hex, city, cityId);
-                gameData.cities.push(city);
-                return city;
-            }
-
-            function rankedTownCandidates(owner, oc, spacingSq, requireOceanCoast, relaxInner) {
-                let pool = [];
-                for(let h of landHexes) {
-                    if(h.owner !== owner || !isClaimableLand(h) || isWaterHex(h)) continue;
-                    if(h.type === 'urban' || h.type === 'mountain') continue;
-                    let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
-                    if(!relaxInner && dxC * dxC + dyC * dyC > innerRSq) continue;
-                    if(mapShape === 'rectangle') {
-                        let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
-                        if(!relaxInner && bf > 0.86) continue;
-                    }
-                    if(mapShape !== 'rectangle' && !relaxInner && wodBfsStepsToOcean(h, 14) < minWaterSteps) continue;
-                    if(requireOceanCoast && !stampsOceanAdjacent(h)) continue;
-                    if(cityTooClosePx(h.x, h.y, spacingSq)) continue;
-
-                    let dCent = Math.hypot(h.x - oc.x, h.y - oc.y);
-                    let tie = (((h.q * 374761393) ^ (h.r * 668265263) ^ (owner * 2654435761)) >>> 0) * 1e-6;
-                    pool.push({ h, score: dCent + tie });
-                }
-                pool.sort((a, b) => a.score - b.score || (a.h.q !== b.h.q ? a.h.q - b.h.q : a.h.r - b.h.r));
-                return pool.map(p => p.h);
-            }
-
-            function countMine(owner) {
-                return gameData.cities.filter(c => c.owner === owner).length;
-            }
-
-            for(let owner of sortedOwners) {
-                gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
-                gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
-            }
-
-            let spacingSq = citySpacingSq;
-            for(let sweep = 0; sweep < 38; sweep++) {
-                let order = sortedOwners.slice();
-                for(let i = order.length - 1; i > 0; i--) {
-                    let j = Math.floor(Math.random() * (i + 1));
-                    let t = order[i];
-                    order[i] = order[j];
-                    order[j] = t;
-                }
-                let innerRelax = spacingSq <= citySpacingSq * 0.31;
-                for(let owner of order) {
-                    while(countMine(owner) < targets[owner]) {
-                        let oc = ownerTerrainCentroid(owner);
-                        let isFirst = countMine(owner) === 0;
-                        let wantCoast = isFirst && mapShape === 'island';
-                        let cand = rankedTownCandidates(owner, oc, spacingSq, wantCoast, innerRelax || sweep > 22);
-                        if(cand.length === 0 && isFirst && mapShape === 'island') {
-                            cand = rankedTownCandidates(owner, oc, spacingSq, false, true);
-                        }
-                        let hexPick = cand[0] || null;
-                        if(!hexPick) break;
-                        let isCap = isFirst && !gameData.cities.some(c => c.owner === owner);
-                        let id = isCap ? ('city_capital_' + owner) : ('city_' + owner + '_' + gameData.cities.length);
-                        let cityObj = stampTownOnHex(hexPick, owner, id, isCap);
-                        if(isCap) startCities.push(cityObj);
-                        if(countMine(owner) >= targets[owner]) break;
-                    }
-                }
-                if(sortedOwners.every(ow => countMine(ow) >= targets[ow])) break;
-                spacingSq = Math.max(hr * hr * 5 * 5, spacingSq * 0.74);
-            }
-
-            let capByOwner = {};
-            for(let c of gameData.cities) {
-                if(!c || c.owner <= 0) continue;
-                if(c.hasFactory || !capByOwner[c.owner]) capByOwner[c.owner] = c;
-            }
-
-            for(let owner of sortedOwners) {
-                let mine = gameData.cities.filter(c => c.owner === owner);
-                if(mine.length === 0) continue;
-                let capital = capByOwner[owner] || mine.find(c => c.id && String(c.id).indexOf('capital') >= 0) || mine[0];
-                for(let mt of mine) mt.hasFactory = mt === capital;
-                for(let c of mine) {
-                    let cityArea = getHexesInRadius(c.q, c.r, 2);
-                    for(let pt of cityArea) {
-                        let gh = gameData.hexes[`${pt.q},${pt.r}`];
-                        if(isClaimableLand(gh)) setHexOwner(gh, owner);
-                    }
-                }
-            }
-
-            gameData.tradeTimer = 0;
-            gameData.roads = [];
-            for(let i = 0; i < gameData.cities.length; i++) {
-                let c1 = gameData.cities[i];
-                let nearest = null, minDist = Infinity;
-                for(let j = 0; j < gameData.cities.length; j++) {
-                    if(i === j) continue;
-                    let c2 = gameData.cities[j];
-                    let d = Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2);
-                    if(d < minDist) {
-                        minDist = d;
-                        nearest = c2;
-                    }
-                }
-                if(nearest) gameData.roads.push({ from: c1, to: nearest });
-            }
-
-            softenMountainHexBetweenOwners(sortedOwners);
-            ensureOwnersReachableByLand(sortedOwners);
-            ensureOwnedTilesReachFactionCities(sortedOwners);
-            wodFinalizeStartingCitiesVsTerritory(startCities);
-
-            spawnInitialFrontlineUnits(sortedOwners);
-            wodMarkTerrainPoliticalDirty();
-
-            let startMe = startCities.find(c => c.owner === locO);
-            if(startMe) {
-                let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
-                let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
-                gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
-                gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
-            }
-        }
-
         function wodSyncUrbanFootprintOwners() {
             for(let city of gameData.cities) {
                 if(!city || city.owner <= 0) continue;
@@ -6461,10 +6059,43 @@
             }
             if(allMatch()) return;
 
-            for(let pass = 0; pass < 520; pass++) {
+            function findBorderDonor(rich, poor) {
+                for(let c of gameData.cities) {
+                    if(c.owner !== rich || isFixed(c)) continue;
+                    let ch = gameData.hexes[`${c.q},${c.r}`];
+                    if(!ch) continue;
+                    for(let nh of getNeighborHexes(ch)) {
+                        if(nh && nh.owner === poor) return c;
+                    }
+                }
+                return null;
+            }
+
+            function pickRandomDonor(rich) {
+                let flex = [];
+                for(let c of gameData.cities) {
+                    if(c.owner !== rich || isFixed(c)) continue;
+                    flex.push(c);
+                }
+                if(flex.length === 0) return null;
+                flex.sort(() => Math.random() - 0.5);
+                return flex[0];
+            }
+
+            function firstDonorSkippingFixed(rich) {
+                for(let c of gameData.cities) {
+                    if(c.owner !== rich || isFixed(c)) continue;
+                    return c;
+                }
+                return null;
+            }
+
+            for(let pass = 0; pass < 780; pass++) {
                 if(allMatch()) return;
-                let rich = null, poor = null;
-                let bestOver = -1, bestUnder = Infinity;
+                let rich = null,
+                    poor = null;
+                let bestOver = -1,
+                    bestUnder = Infinity;
                 for(let o of ownerIds) {
                     let c = countFor(o);
                     let t = target[o];
@@ -6479,30 +6110,128 @@
                 }
                 if(rich == null || poor == null || rich === poor) return;
 
-                let donor = null;
-                for(let c of gameData.cities) {
-                    if(c.owner !== rich || isFixed(c)) continue;
-                    let ch = gameData.hexes[`${c.q},${c.r}`];
-                    if(!ch) continue;
-                    for(let nh of getNeighborHexes(ch)) {
-                        if(nh && nh.owner === poor) {
-                            donor = c;
-                            break;
-                        }
-                    }
-                    if(donor) break;
-                }
+                let donor = findBorderDonor(rich, poor);
+                if(!donor) donor = pickRandomDonor(rich);
+                /* Last resort — avoid freezing imbalanced counts when geography blocks border swaps */
+                if(!donor) donor = firstDonorSkippingFixed(rich);
                 if(!donor) {
-                    for(let c of gameData.cities) {
-                        if(c.owner === rich && !isFixed(c)) {
-                            donor = c;
-                            break;
-                        }
-                    }
+                    if(pass > 620) return;
+                    continue;
                 }
-                if(!donor) return;
                 donor.owner = poor;
             }
+        }
+
+        /** Equalize faction shares of politically owned claimable land (capital center tiles are not peeled away). */
+        function wodBalanceClaimablePoliticsAmongOwners(ownerIds, maxPasses) {
+            if(!ownerIds || ownerIds.length < 2) return;
+            let valid = new Set(ownerIds);
+            let sorted = [...ownerIds].sort((a, b) => a - b);
+            let caps = [];
+            for(let ci of gameData.cities)
+                if(ci && ci.owner > 0 && valid.has(ci.owner) && ci.hasFactory) caps.push(ci);
+
+            function isCapitalAnchorHex(hx) {
+                if(!caps.length) return false;
+                for(let cap of caps) {
+                    if(hx.q === cap.q && hx.r === cap.r) return true;
+                }
+                return false;
+            }
+
+            function recount() {
+                let cts = {};
+                for(let o of sorted) cts[o] = 0;
+                for(let hx of gameData.hexList) {
+                    if(!isClaimableLand(hx)) continue;
+                    if(valid.has(hx.owner)) cts[hx.owner]++;
+                }
+                return cts;
+            }
+            function buildTargets(total) {
+                let f = sorted.length;
+                let base = Math.floor(total / f);
+                let rem = total % f;
+                let t = {};
+                for(let i = 0; i < f; i++) t[sorted[i]] = base + (i < rem ? 1 : 0);
+                return t;
+            }
+
+            function findTransferHex(have, poor) {
+                let direct = [];
+                for(let hx of gameData.hexList) {
+                    if(hx.owner !== have || !isClaimableLand(hx)) continue;
+                    if(isCapitalAnchorHex(hx)) continue;
+                    for(let nb of getNeighborHexes(hx)) {
+                        if(nb && nb.owner === poor && isClaimableLand(nb)) {
+                            direct.push(hx);
+                            break;
+                        }
+                    }
+                }
+                if(direct.length) return direct[(Math.floor(Math.random() * direct.length)) | 0];
+                let bridge = [];
+                for(let hx of gameData.hexList) {
+                    if(hx.owner !== have || !isClaimableLand(hx)) continue;
+                    if(isCapitalAnchorHex(hx)) continue;
+                    outer: for(let nb of getNeighborHexes(hx)) {
+                        if(!nb || !isClaimableLand(nb)) continue;
+                        if(nb.owner !== poor && nb.owner !== 0) continue;
+                        if(nb.owner === poor) {
+                            bridge.push(hx);
+                            break outer;
+                        }
+                        for(let nb2 of getNeighborHexes(nb))
+                            if(nb2 && nb2.owner === poor && isClaimableLand(nb2)) {
+                                bridge.push(hx);
+                                break outer;
+                            }
+                    }
+                }
+                return bridge.length ? bridge[(Math.floor(Math.random() * bridge.length)) | 0] : null;
+            }
+
+            for(let pass = 0; pass < maxPasses; pass++) {
+                let counts = recount();
+                let total = 0;
+                for(let o of sorted) total += counts[o];
+                if(total === 0) return;
+                let tgt = buildTargets(total);
+                if(sorted.every(o => counts[o] === tgt[o])) return;
+
+                let rich = null,
+                    poor = null,
+                    bo = -1,
+                    bu = Infinity;
+                for(let o of sorted) {
+                    let ex = counts[o] - tgt[o];
+                    if(ex > bo) {
+                        bo = ex;
+                        rich = o;
+                    }
+                    let sh = tgt[o] - counts[o];
+                    if(sh >= 0 && sh < bu) {
+                        bu = sh;
+                        poor = o;
+                    }
+                }
+                if(!rich || !poor || rich === poor || bo <= 0 || bu <= 0) return;
+                let h = findTransferHex(rich, poor);
+                if(!h) return;
+                setHexOwner(h, poor);
+                wodMarkTerrainPoliticalDirty();
+            }
+        }
+
+        function wodReconcileCityTerrainToSettlementOwners(ownerIds) {
+            if(!ownerIds || !ownerIds.length || !gameData.cities || !gameData.cities.length) return;
+            let valid = new Set(ownerIds);
+            for(let city of gameData.cities) {
+                if(!city || city.owner <= 0 || !valid.has(city.owner)) continue;
+                let ch = gameData.hexes[`${city.q},${city.r}`];
+                if(ch && isClaimableLand(ch)) setHexOwner(ch, city.owner);
+            }
+            wodSyncUrbanFootprintOwners();
         }
 
         /** Remove faction land that cannot reach any of that faction's cities using only that faction's own tiles (prevents weird encircled enclaves). */
@@ -8387,33 +8116,12 @@
             {type: 'hill', label: 'hill', note: 'rough highland'},
             {type: 'mountain', label: 'mountain', note: 'blocks land units'},
             {type: 'urban', label: 'town', note: 'city/town area'},
-            {type: 'lake_water', label: 'lake', note: 'inland water — no harbors or sea trade'},
             {type: 'water', label: 'ocean', note: 'naval tiles'}
         ];
-
-        /** Open sea / shoreline (ships, sea trade convoys, harbor eligibility). */
-        function isOceanWater(hex) {
-            return hex && (hex.type === 'water' || hex.type === 'deep_water');
-        }
-        /** Landlocked water — blocks factories on “coast” logic; no ship/harbor routes. */
-        function isLakeWater(hex) {
-            return hex && hex.type === 'lake_water';
-        }
-        /** Any water tile (ocean, deep, or inland lake). */
-        function isWaterHex(hex) {
-            return !!(hex && (isOceanWater(hex) || isLakeWater(hex)));
-        }
-        function wodGreedyWaterUsesOceanOnly(unit) {
-            return !!(unit && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)));
-        }
-        function wodGreedyWaterHexOk(unit, hex) {
-            return !!hex && (wodGreedyWaterUsesOceanOnly(unit) ? isOceanWater(hex) : isWaterHex(hex));
-        }
 
         function getTerrainColor(type) {
             if(type === 'deep_water') return '#2980b9';
             if(type === 'water') return '#2980b9';
-            if(type === 'lake_water') return '#1abc9c';
             if(type === 'sand') return '#f39c12';
             if(type === 'grass') return '#2ecc71';
             if(type === 'forest') return '#27ae60';
@@ -8901,6 +8609,10 @@
             showNotification('Progress reset.');
         }
 
+        function isWaterHex(hex) {
+            return hex && (hex.type === 'water' || hex.type === 'deep_water');
+        }
+
         function isClaimableLand(hex) {
             return hex && !isWaterHex(hex);
         }
@@ -8920,10 +8632,10 @@
                 if (hex.type === 'mountain') return false;
                 return isWaterHex(hex) || isClaimableLand(hex);
             }
-            if (unit.type === 'ship') return isOceanWater(hex);
+            if (unit.type === 'ship') return isWaterHex(hex);
             if (unit.type === 'convoy') {
                 if (unit.convoySeaRoute) {
-                    if (!isOceanWater(hex)) return false;
+                    if (!isWaterHex(hex)) return false;
                     return hex.owner === 0 || hex.owner === unit.owner;
                 }
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
@@ -9612,32 +9324,15 @@
             for(let h of getCityUrbanTerrainHexes(city)) {
                 for(let n of getNeighborHexes(h)) {
                     if(!n) continue;
-                    if(isOceanWater(n)) return true;
-                    if(n.type === 'sand' && getNeighborHexes(n).some(nn => nn && isOceanWater(nn))) return true;
+                    if(isWaterHex(n)) return true;
+                    if(n.type === 'sand' && getNeighborHexes(n).some(nn => nn && isWaterHex(nn))) return true;
                 }
             }
             return false;
         }
 
         function cityHasWaterNeighbor(city) {
-            return cityUrbanClusterTouchesNavigableWater(city);
-        }
-
-        /** Marines / adjacency checks that allow inland lakes (still need a water tile touching the town). */
-        function cityUrbanClusterTouchesNavigableWater(city) {
-            for(let h of getCityUrbanTerrainHexes(city)) {
-                for(let n of getNeighborHexes(h)) {
-                    if(n && isWaterHex(n)) return true;
-                    if(n && n.type === 'sand' && getNeighborHexes(n).some(nn => nn && isWaterHex(nn))) return true;
-                }
-            }
-            let ch = gameData.hexes[`${city.q},${city.r}`];
-            if(ch) {
-                for(let n of getNeighborHexes(ch)) {
-                    if(n && isWaterHex(n)) return true;
-                }
-            }
-            return false;
+            return cityUrbanClusterEligibleForHarbor(city);
         }
 
         function convoyCityKey(city) {
@@ -9744,11 +9439,7 @@
                 let touchesSea = false;
                 for(let n of getNeighborHexes(h)) {
                     if(!n) continue;
-                    if(isOceanWater(n)) {
-                        touchesSea = true;
-                        break;
-                    }
-                    if(n.type === 'sand' && getNeighborHexes(n).some(nn => nn && isOceanWater(nn))) {
+                    if(isWaterHex(n)) {
                         touchesSea = true;
                         break;
                     }
@@ -10219,7 +9910,7 @@
                 if(!canUnitEnterHex(fakeUnit, hex)) continue;
                 if(type !== 'ship' && hex.type === 'mountain') continue;
                 if(type !== 'ship' && isWaterHex(hex)) continue;
-                if(type === 'ship' && !isOceanWater(hex)) continue;
+                if(type === 'ship' && !isWaterHex(hex)) continue;
                 let dx = city.x - hex.x;
                 let dy = city.y - hex.y;
                 let terrainPenalty = hex.type === 'urban' ? -100 : 0;
@@ -10240,7 +9931,7 @@
             let extra = {};
             function addHex(h, amt) {
                 if(!h || amt <= 0) return;
-                if(sea && !isOceanWater(h)) return;
+                if(sea && !isWaterHex(h)) return;
                 if(!sea && (isWaterHex(h) || h.type === 'mountain')) return;
                 if(!canUnitEnterHex(unit, h)) return;
                 let k = `${h.q},${h.r}`;
@@ -10256,7 +9947,7 @@
                 let center = getNearestHexToPoint(e.x, e.y);
                 if(!center) continue;
                 if(!sea && isWaterHex(center)) continue;
-                if(sea && !isOceanWater(center)) continue;
+                if(sea && !isWaterHex(center)) continue;
 
                 let stack = [{h: center, d: 0}];
                 let seen = new Set();
@@ -10288,7 +9979,7 @@
                     }
                 } else {
                     for(let nn of getNeighborHexes(h)) {
-                        if(nn && isOceanWater(nn) && nn.owner > 0 && nn.owner !== owner) {
+                        if(nn && isWaterHex(nn) && nn.owner > 0 && nn.owner !== owner) {
                             extra[k] = (extra[k] || 0) + 7.5;
                             break;
                         }
@@ -10305,12 +9996,8 @@
             if(!canUseHexForMovement(unit, startHex) || !canUseHexForMovement(unit, targetHex)) return [];
             if(startHex === targetHex) return [startHex];
 
-            if(unit.type === 'marine' && isWaterHex(startHex) && isWaterHex(targetHex)) {
-                let g = buildGreedyWaterHexChain(unit, startHex, targetHex, 120);
-                if(g.length > 1) return smoothGridPath(g);
-            }
-            if(unit.type === 'ship' && isOceanWater(startHex) && isOceanWater(targetHex)) {
-                let g = buildGreedyWaterHexChain(unit, startHex, targetHex, 170);
+            if((unit.type === 'marine' || unit.type === 'ship') && isWaterHex(startHex) && isWaterHex(targetHex)) {
+                let g = buildGreedyWaterHexChain(unit, startHex, targetHex, unit.type === 'ship' ? 170 : 120);
                 if(g.length > 1) return smoothGridPath(g);
             }
 
@@ -10367,10 +10054,11 @@
                     else if(b.type === 'grass') terrain = 0;
                     else if(b.type === 'mountain') terrain += 140;
                     let seaConvoy = unit.type === 'convoy' && unit.convoySeaRoute;
-                    let seaMove = unit.type === 'ship' || seaConvoy;
-                    if(seaMove && isOceanWater(b)) terrain -= 0.35;
+                    if(unit.type === 'ship' || seaConvoy) {
+                        if(isWaterHex(b)) terrain -= 0.35;
+                    }
                     if(unit.type !== 'ship' && !pathSeaConvoy && isWaterHex(b)) terrain += pathMarine ? 2.65 : 62;
-                    if(seaMove && !isOceanWater(b)) terrain += 80;
+                    if((unit.type === 'ship' || seaConvoy) && !isWaterHex(b)) terrain += 80;
                     // Route land units away from mountain edges and one-tile mountain moats.
                     if(unit.type !== 'ship' && !seaConvoy && b.type !== 'mountain') {
                         let bk = key(b);
@@ -10517,11 +10205,11 @@
         function findGreedyWaterStep(unit, targetHex, opt) {
             opt = opt || {};
             let cur = opt.fromHex || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
-            if(!cur || !wodGreedyWaterHexOk(unit, cur) || !targetHex) return null;
+            if(!cur || !isWaterHex(cur) || !targetHex) return null;
             let best = null;
             let bestScore = Infinity;
             for(let nHex of getNeighborHexes(cur)) {
-                if(!wodGreedyWaterHexOk(unit, nHex) || !canUseHexForMovement(unit, nHex)) continue;
+                if(!isWaterHex(nHex) || !canUseHexForMovement(unit, nHex)) continue;
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
                 let d = dx * dx + dy * dy;
@@ -10536,7 +10224,7 @@
         }
 
         function buildGreedyWaterHexChain(unit, startHex, targetHex, maxSteps) {
-            if(!startHex || !targetHex || !wodGreedyWaterHexOk(unit, startHex)) return [];
+            if(!startHex || !targetHex || !isWaterHex(startHex)) return [];
             let chain = [startHex];
             let cur = startHex;
             let tk = getHexKey(targetHex);
@@ -11963,30 +11651,6 @@
             }
             return maxSteps + 1;
         }
-
-        /** Land-only hops until stepping onto a tile bordering open ocean (lakes excluded from the walk). */
-        function wodBfsStepsToOcean(startHex, maxSteps) {
-            if(!startHex || isOceanWater(startHex)) return 0;
-            let q = [{ h: startHex, s: 0 }];
-            let seen = new Set([wodHexKeyFromQR(startHex.q, startHex.r)]);
-            while(q.length) {
-                let cur = q.shift();
-                let h = cur.h, s = cur.s;
-                if(s >= maxSteps) continue;
-                for(let nb of getNeighborHexes(h)) {
-                    if(!nb) continue;
-                    if(isOceanWater(nb)) return s + 1;
-                    let k = wodHexKeyFromQR(nb.q, nb.r);
-                    if(seen.has(k)) continue;
-                    if(nb.type === 'mountain') continue;
-                    if(isWaterHex(nb)) continue;
-                    if(!isClaimableLand(nb)) continue;
-                    seen.add(k);
-                    q.push({ h: nb, s: s + 1 });
-                }
-            }
-            return maxSteps + 1;
-        }
         function wodLandCentroidMaxRadius(landHexes) {
             let cx = 0, cy = 0, n = landHexes.length;
             if(!n) return { cx: 0, cy: 0, maxR: 1 };
@@ -12272,17 +11936,120 @@
                 c.classList.toggle('active', c.dataset.id === _wodMapLib.selectedId);
             });
         }
+        (function wireWodNameInputDialogAndExports() {
+            let dlg = document.getElementById('wodNameInputDlg');
+            let fld = document.getElementById('wodNameInputFld');
+            let ttl = document.getElementById('wodNameInputDlgTitle');
+            let hint = document.getElementById('wodNameInputDlgHint');
+            let lbl = document.getElementById('wodNameInputLbl');
+            let okBtn = document.getElementById('wodNameInputOk');
+            let cancelBtn = document.getElementById('wodNameInputCancel');
+            let resolveFn = null;
+
+            function finish(val) {
+                let r = resolveFn;
+                resolveFn = null;
+                if(!dlg || !fld) return;
+                dlg.classList.add('hidden');
+                dlg.setAttribute('aria-hidden', 'true');
+                document.removeEventListener('keydown', onKey, true);
+                if(r) r(val);
+            }
+
+            function onKey(e) {
+                if(resolveFn === null || !dlg || dlg.classList.contains('hidden')) return;
+                if(e.key === 'Escape') {
+                    e.preventDefault();
+                    finish(null);
+                    return;
+                }
+                if(e.key !== 'Enter') return;
+                if(e.target === cancelBtn && !e.ctrlKey) return;
+                e.preventDefault();
+                confirmDialog();
+            }
+
+            let lastRequireNonEmpty = false;
+
+            function confirmDialog() {
+                if(!resolveFn || !fld) return;
+                let v = String(fld.value || '').trim();
+                let maxLen = parseInt(fld.getAttribute('maxlength'), 10) || 96;
+                if(v.length > maxLen) v = v.slice(0, maxLen);
+                if(lastRequireNonEmpty && !v.length) {
+                    showNotification(typeof lastRequireNonEmpty === 'string' ? lastRequireNonEmpty : 'Enter a name first.');
+                    return;
+                }
+                finish(v.length ? v : null);
+            }
+
+            function wire() {
+                if(!dlg || !fld || !ttl) return false;
+                if(okBtn && !okBtn._wodWiredNameDlg) {
+                    okBtn._wodWiredNameDlg = true;
+                    okBtn.addEventListener('click', confirmDialog);
+                }
+                if(cancelBtn && !cancelBtn._wodWiredNameDlg) {
+                    cancelBtn._wodWiredNameDlg = true;
+                    cancelBtn.addEventListener('click', () => finish(null));
+                }
+                if(!dlg._wodWiredBackdrop) {
+                    dlg._wodWiredBackdrop = true;
+                    dlg.addEventListener('click', (ev) => {
+                        if(ev.target === dlg) finish(null);
+                    });
+                }
+                return true;
+            }
+
+            window.wodShowNameInputDialog = function (opts) {
+                opts = opts || {};
+                return new Promise(resolve => {
+                    if(!wire() || !dlg || !fld) {
+                        resolve(null);
+                        return;
+                    }
+                    resolveFn = resolve;
+                    lastRequireNonEmpty = opts.requireNonEmpty === true ? true : opts.requireNonEmpty || false;
+                    ttl.textContent = opts.title || 'Name this save';
+                    if(hint) {
+                        let htxt = opts.hint != null ? String(opts.hint) : '';
+                        hint.textContent = htxt;
+                        hint.style.display = htxt ? '' : 'none';
+                    }
+                    if(lbl) lbl.textContent = opts.label || 'Name';
+                    if(okBtn) okBtn.textContent = opts.confirmLabel || 'Save';
+                    let maxLen = opts.maxLength != null ? opts.maxLength : 96;
+                    fld.setAttribute('maxlength', String(Math.max(1, Math.min(200, maxLen))));
+                    fld.value = opts.defaultValue != null ? String(opts.defaultValue) : '';
+                    dlg.classList.remove('hidden');
+                    dlg.setAttribute('aria-hidden', 'false');
+                    document.addEventListener('keydown', onKey, true);
+                    setTimeout(() => {
+                        try {
+                            fld.focus();
+                            fld.select();
+                        } catch (e2) {}
+                    }, 48);
+                });
+            };
+
+            wire();
+        })();
+
         function wodPromptSaveMapToLibrary() {
             if(!gameData.hexList || gameData.hexList.length === 0) {
                 alert('Generate or load a map first.');
                 return;
             }
-            wodPromptSaveNameModal({
+            window.wodShowNameInputDialog({
                 title: 'Save map to library',
+                hint: 'Stored only on this browser. Load it anytime from solo setup, multiplayer lobby, or the editor Saved maps.',
                 defaultValue: 'My map ' + new Date().toLocaleDateString(),
-                placeholderIfEmpty: 'My map'
+                confirmLabel: 'Save',
+                maxLength: 96
             }).then(name => {
-                if(name === null) return;
+                if(!name || !String(name).trim()) return;
                 wodSaveMapToLibraryWithName(name);
                 showNotification('Map saved to library.');
                 if(typeof window.renderMapBrowser === 'function') window.renderMapBrowser();
@@ -12291,7 +12058,6 @@
         window.wodGetSavedMapsList = wodGetSavedMapsList;
         window.wodSaveMapToLibraryWithName = wodSaveMapToLibraryWithName;
         window.wodDeleteSavedMapById = wodDeleteSavedMapById;
-        window.wodPromptSaveNameModal = wodPromptSaveNameModal;
 
         // --- Generation ---
         function saveMap() {
@@ -12621,15 +12387,6 @@
             cx /= landHexes.length;
             cy /= landHexes.length;
 
-            /** Procedural maps: split land evenly first, then seed towns inside each wedge. */
-            if(!gameData.loadedCustomMap) {
-                gameData.cities = [];
-                gameData.roads = [];
-                wodAssignTerrainByEqualAngleSlices(ownersList, landHexes);
-                wodProceduralSeedCitiesInOwnedTerrain(ownersList, landHexes, cx, cy);
-                return;
-            }
-
             wodPreliminaryCityOwnersFromAngleSplit(ownersList, landHexes);
             wodBalanceCityCountsAmongOwners(ownersList);
 
@@ -12762,6 +12519,13 @@
             wodSyncUrbanFootprintOwners();
             smoothStartingTerritory(ownersList, 4, 4);
             wodFinalizeStartingCitiesVsTerritory(startCities);
+            let capitalsSetForBalance = new Set(startCities);
+            wodBalanceCityCountsAmongOwners(ownersList, capitalsSetForBalance);
+            wodReconcileCityTerrainToSettlementOwners(ownersList);
+            wodPaintCapitalUrbanToDeclaredOwner(startCities);
+
+            smoothStartingTerritory(ownersList, 4, 2);
+            wodBalanceClaimablePoliticsAmongOwners(ownersList, 4200);
 
             spawnInitialFrontlineUnits(ownersList);
 
@@ -12832,9 +12596,8 @@
             let mapShape = shapeInput ? shapeInput.value : 'island';
             gameData.mapShape = mapShape;
             gameData.loadedCustomMap = false;
-            gameData._genProfile = wodDefaultMapGenProfile(mapShape);
-            if(mapShape === 'island') wodRollIslandGenProfile(gameData._genProfile);
-
+            gameData._genProfile = wodSampleMapGenProfile(mapShape);
+            
             // Generate dense cell grid on the map. The old variable names remain,
             // but these are square-neighbor dots, not hex tiles.
             let cols = mapR;
@@ -12888,24 +12651,6 @@
                             let d3 = Math.sqrt((normX + bx) * (normX + bx) + (normY - by) * (normY - by));
                             dist = Math.min(dist, d2 * 0.9, d3 * 0.88);
                             mask = 1.1 - dist + radialWarp * 0.92;
-                        }
-                        if(gp.islandMode === 'ring') {
-                            let ri = gp.ringInnerFrac != null ? gp.ringInnerFrac : 0.29;
-                            let ro = gp.ringOuterFrac != null ? gp.ringOuterFrac : 0.93;
-                            let band = Math.abs(dist - (ri + ro) * 0.52);
-                            if(dist < ri - radialWarp * 0.06) mask -= 1.15;
-                            else if(dist > ro + radialWarp * 0.05) mask -= 1.08;
-                            else mask += (0.2 - band) * 0.045;
-                            mask -= Math.max(0, dist - (ro + 0.06)) * 2.05;
-                            mask -= Math.max(0, ri - 0.06 - dist) * 2.05;
-                        }
-                        if(gp.islandMode === 'scatter_shoals') {
-                            let cells = fbm(x * scale * 1.92 + seedOffset + 512, y * scale * 1.92 + seedOffset + 512, 4);
-                            let spots = fbm(x * scale * 2.6 + seedOffset + 913, y * scale * 2.6 + seedOffset + 913, 3);
-                            mask -= Math.max(0, cells - 0.3) * 0.74;
-                            mask -= Math.max(0, spots - 0.55) * 0.52;
-                            mask -= Math.abs(Math.sin(normX * 5.9 + spots * 4.8)) * 0.06;
-                            mask += radialWarp * 0.085;
                         }
                         if(gp.islandMode === 'wide') {
                             mask += 0.055 - Math.abs(sy) * 0.11;
@@ -12999,13 +12744,6 @@
                             else type = 'swamp';
                         }
                     }
-                    if(mapShape === 'island' && type !== 'water') {
-                        let lkAg = gp2.inlandLakeAggression != null ? gp2.inlandLakeAggression : 0;
-                        if(lkAg > 0.02 && islandRadialDist > 0.11 && islandRadialDist < 0.84 && type !== 'mountain') {
-                            let hole = fbm(x * scale * 2.12 + seedOffset + 6611, y * scale * 2.12 + seedOffset + 6611, 4);
-                            if(hole > 1 - lkAg * 0.76) type = 'water';
-                        }
-                    }
                     
                     let hex = {q, r, x, y, type, owner: 0, baseColor: '', renderColor: ''};
                     hex.baseColor = getTerrainColor(type);
@@ -13016,18 +12754,122 @@
                 }
             }
 
-            wodRetagInteriorLakeWater(rows, cols);
-
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
 
-            // Towns and roads are created in assignStartingCities (land split first on procedural maps).
+            // Generate Cities — scale with player count; total count divisible by faction slots (even per player)
+            let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
+            let numCities = Math.floor((mapR * mapR) / 600) + 5;
+            let neededStarts = factionSlots;
+            let citiesPerPlayer = Math.max(2, Math.min(6, 2 + Math.floor(mapR / 50)));
+            numCities = Math.max(numCities, neededStarts + 3, neededStarts * citiesPerPlayer);
+            numCities = Math.max(factionSlots * 2, Math.ceil(numCities / factionSlots) * factionSlots);
+            let citySpacing = Math.max(hr * 14, Math.min(hr * 38, mapR * hr * 0.35));
+            let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
+            let lcm = wodLandCentroidMaxRadius(landForCities);
+            let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
+            let innerRSq = innerRad * innerRad;
+            let minWaterSteps = mapShape === 'island' ? 3 : 2;
+            for(let i=0; i<numCities; i++) {
+                let valid = false; let attempts = 0;
+                while(!valid && attempts < 500) {
+                    let h = gameData.hexList[Math.floor(Math.random() * gameData.hexList.length)];
+                    if(!isWaterHex(h) && h.type !== 'mountain') {
+                        let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
+                        if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) {
+                            attempts++;
+                            continue;
+                        }
+                        if(mapShape === 'rectangle') {
+                            let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
+                            if(bf > 0.86 && attempts < 480) {
+                                attempts++;
+                                continue;
+                            }
+                        }
+                        if(wodBfsStepsToWater(h, 14) < minWaterSteps && attempts < 460) {
+                            attempts++;
+                            continue;
+                        }
+                        let tooClose = gameData.cities.some(c => {
+                            let dx = c.x - h.x; let dy = c.y - h.y;
+                            return Math.sqrt(dx*dx + dy*dy) < citySpacing;
+                        });
+                        if(!tooClose || attempts > 450) {
+                            gameData.cities.push({
+                                id: 'city_' + i,
+                                name: generateCityName(),
+                                x: h.x, y: h.y, q: h.q, r: h.r,
+                                owner: 0, hasFactory: false, hasHarbor: false,
+                                hp: 1000, maxHp: 1000,
+                                urbanStyle: Math.floor(Math.random() * 4),
+                                incomeBonus: 0,
+                                manpowerBonus: 0
+                            });
+                            
+                            // Convert to urban
+                            let urbanHexes = [];
+                            let shapeType = Math.floor(Math.random() * 4);
+                            let R = 2;
+                            for(let dq = -3; dq <= 3; dq++) {
+                                for(let dr = -3; dr <= 3; dr++) {
+                                    let distSq = dq * dq + dr * dr;
+                                    let add = false;
+                                    if(shapeType === 0) { // Diamond/Circle
+                                        add = distSq <= R * R;
+                                    } else if(shapeType === 1) { // Square-ish
+                                        add = Math.abs(dq) <= 1 && Math.abs(dr) <= 1;
+                                    } else if(shapeType === 2) { // Horizontal rectangle
+                                        add = Math.abs(dq) <= 2 && Math.abs(dr) <= 1;
+                                    } else if(shapeType === 3) { // Vertical rectangle
+                                        add = Math.abs(dq) <= 1 && Math.abs(dr) <= 2;
+                                    }
+                                    if(add && Math.random() > 0.15) {
+                                        urbanHexes.push({q: h.q + dq, r: h.r + dr});
+                                    } else if(!add && distSq <= (R+1)*(R+1) && Math.random() > 0.85) {
+                                        urbanHexes.push({q: h.q + dq, r: h.r + dr});
+                                    }
+                                }
+                            }
+                            // Always ensure the center is urban
+                            urbanHexes.push({q: h.q, r: h.r});
+
+                            for(let uh of urbanHexes) {
+                                let targetH = gameData.hexes[`${uh.q},${uh.r}`];
+                                if(targetH && !isWaterHex(targetH)) {
+                                    targetH.type = 'urban';
+                                    targetH.cityId = 'city_' + i;
+                                    targetH.urbanVariant = Math.floor(Math.random() * 5);
+                                    targetH.baseColor = getTerrainColor('urban');
+                                    targetH.renderColor = targetH.baseColor;
+                                }
+                            }
+                            
+                            valid = true;
+                        }
+                    }
+                    attempts++;
+                }
+            }
 
             // Ensure no land is inaccessible due to mountains
             ensureMountainPasses();
             softenLandFullyBlockedByMountainRing();
             ensureMountainPasses();
 
+            // Generate Roads (MST style connecting nearest)
+            for(let i=0; i<gameData.cities.length; i++){
+                let c1 = gameData.cities[i];
+                let nearest = null; let minDist = Infinity;
+                for(let j=0; j<gameData.cities.length; j++){
+                    if(i === j) continue;
+                    let c2 = gameData.cities[j];
+                    let d = Math.sqrt(Math.pow(c1.x - c2.x, 2) + Math.pow(c1.y - c2.y, 2));
+                    if(d < minDist) { minDist = d; nearest = c2; }
+                }
+                if(nearest) gameData.roads.push({from: c1, to: nearest});
+            }
+            
             assignStartingCities();
             updateTerrainKey();
             if(ownsInnerRng)
@@ -13676,7 +13518,7 @@
                 }
             }
             if(aiMoney >= 800 && Math.random() < 0.25) {
-                let cityNoHarbor = aiCities.find(c => !c.hasHarbor && cityUrbanClusterEligibleForHarbor(c));
+                let cityNoHarbor = aiCities.find(c => !c.hasHarbor && cityHasWaterNeighbor(c));
                 if(cityNoHarbor && (gameData.aiMoneyByOwner[ownerKey] || 0) >= 400) {
                     cityNoHarbor.hasHarbor = true;
                     gameData.aiMoneyByOwner[ownerKey] -= 400;
@@ -14378,7 +14220,7 @@
                 if(gameData.terrainViewMode === 'schematic') {
                     drawTerrainSchematicMap(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                 } else {
-                    let paintOrder = ['lake_water', 'water', 'sand', 'grass', 'forest', 'swamp', 'hill', 'mountain', 'urban'];
+                    let paintOrder = ['water', 'sand', 'grass', 'forest', 'swamp', 'hill', 'mountain', 'urban'];
                     for(let type of paintOrder) {
                         drawTerrainBlobLayer(terrainBaseCtx, type, -terrainBounds.minX, -terrainBounds.minY);
                     }
@@ -14424,19 +14266,11 @@
             ctx.fillStyle = '#1f588f';
             ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
             for(let hex of gameData.hexList) {
-                if(!isOceanWater(hex)) continue;
+                if(!isWaterHex(hex)) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
                 ctx.beginPath();
                 ctx.arc(px, py, discR, 0, Math.PI * 2);
                 ctx.fillStyle = '#2980b9';
-                ctx.fill();
-            }
-            for(let hex of gameData.hexList) {
-                if(!isLakeWater(hex)) continue;
-                let px = hex.x + offsetX, py = hex.y + offsetY;
-                ctx.beginPath();
-                ctx.arc(px, py, discR, 0, Math.PI * 2);
-                ctx.fillStyle = '#1abc9c';
                 ctx.fill();
             }
             for(let hex of gameData.hexList) {
@@ -18169,11 +18003,20 @@
             let sel = gameData.selection[0];
             if(sel.owner !== wodLocalPlayerOwner()) { showNotification("You can only rename your own units and towns."); return; }
             let currentName = sel.name || (sel.id ? "Town" : "Unit");
-            let nextName = prompt("Enter a new name:", currentName);
-            if(nextName === null) return;
-            nextName = nextName.trim();
-            if(nextName.length === 0) { showNotification("Name cannot be empty."); return; }
-            sel.name = nextName.slice(0, 32);
+            if(typeof window.wodShowNameInputDialog !== 'function') return;
+            window.wodShowNameInputDialog({
+                title: 'Rename',
+                label: 'New name',
+                defaultValue: currentName,
+                confirmLabel: 'Apply',
+                maxLength: 32,
+                requireNonEmpty: 'Name cannot be empty.'
+            }).then(nextName => {
+                if(nextName == null) return;
+                nextName = String(nextName).trim();
+                if(nextName.length === 0) { showNotification('Name cannot be empty.'); return; }
+                sel.name = nextName.slice(0, 32);
+            });
         }
 
         // --- Production / map placement ---
@@ -18237,7 +18080,7 @@
             if(mode === 'harbor') {
                 if(city.hasHarbor) return false;
                 if(wodPlayerTreasury(owner) < 400) return false;
-                return cityUrbanClusterEligibleForHarbor(city);
+                return cityHasWaterNeighbor(city);
             }
             let cost = getUnitCost(mode);
             if(wodPlayerTreasury(owner) < cost.money || wodPlayerMpPool(owner) < cost.manpower) return false;
@@ -18246,7 +18089,7 @@
             if(mode === 'light')
                 return !!findSpawnHex('light', city, owner);
             if(mode === 'marine')
-                return !!(cityUrbanClusterTouchesNavigableWater(city) && !!findSpawnHex('marine', city, owner));
+                return !!(cityHasWaterNeighbor(city) && !!findSpawnHex('marine', city, owner));
             if(mode === 'heavy')
                 return !!city.hasFactory && !!findSpawnHex('heavy', city, owner);
             if(mode === 'ship')
@@ -18333,7 +18176,7 @@
                     else if(wodPlayerMpPool(lo) < cost.manpower) showNotification('Not enough manpower!');
                     else if(mode === 'heavy' && !city.hasFactory) showNotification('Requires factory!');
                     else if(mode === 'ship' && !city.hasHarbor) showNotification('Requires harbor!');
-                    else if(mode === 'marine' && !cityUrbanClusterTouchesNavigableWater(city)) showNotification('Marines train only at towns next to water (sea or lake).');
+                    else if(mode === 'marine' && !cityHasWaterNeighbor(city)) showNotification('Marines train only at coastal towns (water adjacent).');
                     else if(isCitySiegeBlockedForProduction(city)) showNotification('Urban combat at this town — training and shipbuilding are paused until the battle clears.');
                     else showNotification(mode === 'ship' ? 'No water nearby!' : 'No clear spawn area near this town!');
                 }
@@ -18496,8 +18339,6 @@
             createUnitAt,
             terrainHelp,
             isWaterHex,
-            isOceanWater,
-            isLakeWater,
             isClaimableLand,
             beginHexOwnerBatch() { batchHexOwner = true; },
             endHexOwnerBatch() {
