@@ -27,6 +27,7 @@
       renderEditor();
     });
   }
+  window.wodScheduleEditorRender = scheduleEditorRender;
 
   const terrainTypes = ["grass", "sand", "forest", "swamp", "hill", "mountain", "water", "urban"];
 
@@ -253,6 +254,7 @@
           <div class="editor-grid-2">
             <button type="button" class="editor-btn" id="editorBlank">New blank</button>
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
+            <button type="button" class="editor-btn" id="editorGenConfig" title="Biome balance for procedural maps">Generation config…</button>
             <button type="button" class="editor-btn" id="editorSave">Save to library + export</button>
             <button type="button" class="editor-btn" id="editorBrowseLib">Browse library…</button>
             <button type="button" class="editor-btn" id="editorLoadBtn">Load JSON file</button>
@@ -382,6 +384,10 @@
       scheduleEditorRender();
       renderSelection();
       renderMapBrowser();
+    });
+    let editorGenConfig = app.querySelector("#editorGenConfig");
+    if(editorGenConfig) editorGenConfig.addEventListener("click", () => {
+      if(typeof window.wodOpenGenConfigPanel === "function") window.wodOpenGenConfigPanel("editor");
     });
     app.querySelector("#editorSave").addEventListener("click", saveEditorMap);
     let browseLib = app.querySelector("#editorBrowseLib");
