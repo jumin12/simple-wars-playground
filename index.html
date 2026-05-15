@@ -2383,6 +2383,10 @@
             display: block;
         }
 
+        .esc-full-help-guide h2 {
+            margin-top: 0;
+        }
+
         .esc-help-intro {
             color: #ecf0f1;
             line-height: 1.55;
@@ -5070,14 +5074,7 @@
                     <button class="menu-btn danger-btn" onclick="showEscSection('surrenderSection')">Surrender</button>
                 </div>
                 <div id="helpSection" class="esc-section esc-help-panel">
-                    <h3>Help — quick tips</h3>
-                    <p class="esc-help-intro" style="margin-bottom:12px">While paused you can still open the <strong>full game guide</strong> (economy, units, terrain, encirclement, healing) from the main menu — or use the button below. The in-game <strong>Map Key</strong> panel lists terrain on your current map.</p>
-                    <ul style="margin:0 0 14px 1rem;line-height:1.5;font-size:14px">
-                        <li><strong>Select</strong> — click / box-drag; <strong>Shift</strong> adds to selection.</li>
-                        <li><strong>Move</strong> — right-click. <strong>Shift+right-click</strong> adds waypoints.</li>
-                        <li><strong>Victory</strong> — Domination: capture all enemy <em>cities</em>. Annihilation: destroy all enemy <em>combat</em> units.</li>
-                    </ul>
-                    <button type="button" class="menu-btn" onclick="toggleEscMenu(false); showPanel('helpGuide');">Open complete guide</button>
+                    <div id="escFullHelpGuide" class="esc-full-help-guide"></div>
                 </div>
                 <div id="settingsSection" class="esc-section">
                     <h3>Settings</h3>
@@ -5343,6 +5340,7 @@
 
         /** Applies to per-city income & manpower (/s); global economic slowdown multiplier. */
         const WOD_CITY_ECON_TICK_MULT = 2 / 3;
+        const WOD_LAND_INCOME_PER_HEX = 0.004;
 
         function hideCampaignSummaryOverlay() {
             let el = document.getElementById('campaignSummaryOverlay');
@@ -5515,11 +5513,26 @@
             UI.escMenu.classList.toggle('hidden', !shouldOpen);
         }
 
+        function populateEscHelpGuide() {
+            let mount = document.getElementById('escFullHelpGuide');
+            if(!mount || mount.dataset.ready === '1') return;
+            let guide = document.querySelector('#helpGuidePanel .panel');
+            if(!guide) return;
+            mount.innerHTML = guide.innerHTML
+                .replaceAll('menuHelpCanvas', 'escHelpCanvas')
+                .replaceAll('menuCompactTerrainKey', 'escCompactTerrainKey');
+            mount.dataset.ready = '1';
+        }
+
         function showEscSection(sectionId) {
             for(let section of document.querySelectorAll('.esc-section')) section.classList.remove('visible');
             let section = document.getElementById(sectionId);
             if(section) section.classList.add('visible');
-            if(sectionId === 'helpSection') renderHelpMiniDiagrams();
+            if(sectionId === 'helpSection') {
+                populateEscHelpGuide();
+                updateTerrainKey();
+                renderHelpMiniDiagrams();
+            }
             if(sectionId === 'settingsSection') {
                 syncShowOrdersCheckbox();
                 syncOrderArrowsPathfindingCheckbox();
@@ -6111,12 +6124,21 @@
             hex.baseColor = getTerrainColor(type);
             hex.renderColor = hex.baseColor;
         }
-        function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles) {
+        function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
             if(gameData.mapShape !== 'island') return;
             let pad = Math.max(1, bufferTiles || 5);
+            let feather = pad + 9;
             for(let h of gameData.hexList) {
-                if(cols - Math.abs(h.q) < pad || rows - Math.abs(h.r) < pad)
+                let edgeDist = Math.min(cols - Math.abs(h.q), rows - Math.abs(h.r));
+                if(edgeDist < pad) {
                     wodSetGeneratedTerrainType(h, 'water');
+                    continue;
+                }
+                if(edgeDist < feather) {
+                    let t = (feather - edgeDist) / Math.max(1, feather - pad);
+                    let n = fbm(h.x * 0.018 + seedOffset + 8120, h.y * 0.018 + seedOffset + 8120, 4);
+                    if(n < 0.35 + t * 0.42) wodSetGeneratedTerrainType(h, 'water');
+                }
             }
         }
         function wodNormalizeRectangleWaterFeatures(seedOffset) {
@@ -6557,6 +6579,26 @@
             }
         }
 
+        function wodNormalizeStartingCityEconomy(ownerIds) {
+            if(!ownerIds || ownerIds.length === 0 || !gameData.cities) return;
+            let sortedOwners = [...ownerIds].sort((a, b) => a - b);
+            for(let owner of sortedOwners) {
+                let cities = gameData.cities
+                    .filter(c => c && c.owner === owner)
+                    .sort((a, b) => {
+                        if(!!b.hasFactory !== !!a.hasFactory) return (b.hasFactory ? 1 : 0) - (a.hasFactory ? 1 : 0);
+                        if(a.q !== b.q) return a.q - b.q;
+                        return a.r - b.r;
+                    });
+                for(let i = 0; i < cities.length; i++) {
+                    cities[i].hasFactory = i === 0;
+                    cities[i].hasHarbor = false;
+                    cities[i].incomeBonus = 0;
+                    cities[i].manpowerBonus = 0;
+                }
+            }
+        }
+
         function wodReconcileCityTerrainToSettlementOwners(ownerIds) {
             if(!ownerIds || !ownerIds.length || !gameData.cities || !gameData.cities.length) return;
             let valid = new Set(ownerIds);
@@ -6645,11 +6687,10 @@
             return (gameData.aiManpowerByOwner && gameData.aiManpowerByOwner[o]) || 0;
         }
         function wodMpEconomyHudForOwner(owner) {
-            let incomeTick = 0, manpowerTick = 0;
+            let incomeTick = getOwnerIncome(owner), manpowerTick = 0;
             for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
                 let city = gameData.cities[ci];
                 if(city.owner !== owner) continue;
-                incomeTick += getCityIncome(city);
                 manpowerTick += getCityManpowerIncome(city);
             }
             let upkeep = 0;
@@ -9578,7 +9619,21 @@
                 if(city.owner !== owner) continue;
                 total += getCityIncome(city);
             }
-            return total;
+            return Math.round((total + getOwnerLandIncome(owner)) * 1000) / 1000;
+        }
+
+        function getOwnerLandIncome(owner) {
+            if(!gameData._landIncomeCache || gameData._landIncomeCacheDirty) {
+                let counts = {};
+                for(let h of gameData.hexList) {
+                    if(!wodHexCountsTowardLandPoliticsBalance(h) || h.owner <= 0) continue;
+                    counts[h.owner] = (counts[h.owner] || 0) + 1;
+                }
+                gameData._landIncomeCache = counts;
+                gameData._landIncomeCacheDirty = false;
+            }
+            let tiles = (gameData._landIncomeCache && gameData._landIncomeCache[owner]) || 0;
+            return Math.round(tiles * WOD_LAND_INCOME_PER_HEX * 1000) / 1000;
         }
 
         function getOwnerManpowerIncome(owner) {
@@ -11371,17 +11426,49 @@
                     .filter(h => h.type !== 'mountain' && canUnitEnterHex({type: 'light', owner}, h))
                     .sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
             }
+            function pickFallbackStartingHex(owner, type, usedPositions, enemyFrontHexes) {
+                let probe = { type, owner };
+                let best = null;
+                let bestScore = Infinity;
+                let minSepSqFallback = Math.pow(gameData.hexRadius * (type === 'heavy' ? 2.4 : 2.0), 2);
+                for(let relaxed = 0; relaxed < 3; relaxed++) {
+                    best = null;
+                    bestScore = Infinity;
+                    for(let hex of gameData.hexList) {
+                        if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain' || !canUnitEnterHex(probe, hex)) continue;
+                        if(relaxed === 0 && isFrontlineHex(hex, owner)) continue;
+                        if(relaxed < 2 && !worldPositionClearOfUnits(hex.x, hex.y, gameData.hexRadius * 1.65, null)) continue;
+                        let blockedByUsed = usedPositions.some(pos => {
+                            let dx = pos.x - hex.x;
+                            let dy = pos.y - hex.y;
+                            return dx * dx + dy * dy < minSepSqFallback * (relaxed ? 0.55 : 1);
+                        });
+                        if(blockedByUsed) continue;
+                        let enemyDistSq = enemyFrontHexes.length ? nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes) : 0;
+                        let score = -Math.min(enemyDistSq, Math.pow(gameData.hexRadius * 24, 2));
+                        score += isFrontlineHex(hex, owner) ? 250000 : 0;
+                        score += hexMountainProximityScore(hex) * 820;
+                        if(score < bestScore) {
+                            bestScore = score;
+                            best = hex;
+                        }
+                    }
+                    if(best) return best;
+                }
+                return null;
+            }
             let usedAll = [];
             for(let owner of ownerIds) {
                 let frontHexes = frontHexesByOwner[owner];
-                if(frontHexes.length === 0) continue;
                 let enemyFrontHexes = [];
                 for(let other of ownerIds) {
                     if(other !== owner) enemyFrontHexes.push(...(frontHexesByOwner[other] || []));
                 }
 
                 let used = [];
+                let placedLights = 0;
                 for(let i = 0; i < unitsPerOwner; i++) {
+                    if(frontHexes.length === 0) break;
                     let startIdx;
                     if(frontHexes.length <= 1) startIdx = 0;
                     else startIdx = Math.min(frontHexes.length - 1, Math.floor(((i + 0.5) / unitsPerOwner) * frontHexes.length));
@@ -11415,10 +11502,21 @@
                     used.push(chosen);
                     let unit = createUnitAt('light', chosen.x, chosen.y, owner);
                     usedAll.push({x: unit.x, y: unit.y});
+                    placedLights++;
+                }
+                while(placedLights < unitsPerOwner) {
+                    let spawnHex = pickFallbackStartingHex(owner, 'light', usedAll, enemyFrontHexes);
+                    if(!spawnHex) break;
+                    let unit = createUnitAt('light', spawnHex.x, spawnHex.y, owner);
+                    used.push(spawnHex);
+                    usedAll.push({x: unit.x, y: unit.y});
+                    placedLights++;
                 }
 
                 let numHeavies = 2;
+                let placedHeavies = 0;
                 for(let h = 0; h < numHeavies; h++) {
+                    if(frontHexes.length === 0) break;
                     let placed = false;
                     let hAnchor = frontHexes.length <= 1 ? 0 : Math.min(frontHexes.length - 1, Math.round(((h + 1) / (numHeavies + 1)) * (frontHexes.length - 1)));
                     for(let attempt = 0; attempt < Math.min(80, frontHexes.length * 4); attempt++) {
@@ -11429,6 +11527,7 @@
                             let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner);
                             usedAll.push({x: unit.x, y: unit.y});
                             placed = true;
+                            placedHeavies++;
                             break;
                         }
                     }
@@ -11438,8 +11537,16 @@
                         if(spawnHex) {
                             let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner);
                             usedAll.push({x: unit.x, y: unit.y});
+                            placedHeavies++;
                         }
                     }
+                }
+                while(placedHeavies < numHeavies) {
+                    let spawnHex = pickFallbackStartingHex(owner, 'heavy', usedAll, enemyFrontHexes);
+                    if(!spawnHex) break;
+                    let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner);
+                    usedAll.push({x: unit.x, y: unit.y});
+                    placedHeavies++;
                 }
             }
         }
@@ -11947,6 +12054,7 @@
             if (hex.owner === owner) return;
             hex.owner = owner;
             hex.renderColor = hex.baseColor;
+            gameData._landIncomeCacheDirty = true;
             if (!batchHexOwner) wodMarkTerrainPoliticalDirty();
         }
 
@@ -13086,7 +13194,7 @@
                     };
                     stampOwnedRandomUrbanTerrainAroundCity(hx, cy, ow);
                     gameData.cities.push(cy);
-                    hx.owner = ow;
+                    setHexOwner(hx, ow);
                     let near = getHexesInRadius(site.q, site.r, 2);
                     for(let pt of near) {
                         let gh = gameData.hexes[`${pt.q},${pt.r}`];
@@ -13100,6 +13208,7 @@
             wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
             wodSyncUrbanFootprintOwners();
             wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
+            wodNormalizeStartingCityEconomy(ownersSorted);
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
@@ -13134,6 +13243,7 @@
             gameData.sessionCitiesCapturedByOwner = {};
             gameData._annihilationCheckAcc = 0;
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
+            gameData._landIncomeCacheDirty = true;
             wodMarkTerrainPoliticalDirty();
             
             let landHexes = gameData.hexList.filter(h => isClaimableLand(h));
@@ -13160,6 +13270,8 @@
                     gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
                 }
 
+                wodNormalizeStartingCityEconomy(ownersList);
+                gameData._landIncomeCacheDirty = true;
                 spawnInitialFrontlineUnits(ownersList);
 
                 wodMarkTerrainPoliticalDirty();
@@ -13252,7 +13364,7 @@
                         stampUrbanTerrainAroundCity(coastalHex, startCity, owner);
                         let cityHex = gameData.hexes[`${startCity.q},${startCity.r}`];
                         if(cityHex) {
-                            cityHex.owner = owner;
+                            setHexOwner(cityHex, owner);
                             let cityArea = getHexesInRadius(startCity.q, startCity.r, 2);
                             for(let pt of cityArea) {
                                 let gh = gameData.hexes[`${pt.q},${pt.r}`];
@@ -13342,6 +13454,8 @@
 
             smoothStartingTerritory(ownersList, 6, 1);
             wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
+            wodNormalizeStartingCityEconomy(ownersList);
+            gameData._landIncomeCacheDirty = true;
 
             spawnInitialFrontlineUnits(ownersList);
 
@@ -13616,7 +13730,7 @@
                 }
             }
 
-            wodForceIslandEdgeWaterBuffer(cols, rows, 5);
+            wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
             wodNormalizeRectangleWaterFeatures(seedOffset);
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
@@ -14042,6 +14156,7 @@
             gameData.manpower = 0;
             gameData.casualtiesByOwner = {};
             gameData.casualtyReplacementCostByOwner = {};
+            gameData._landIncomeCacheDirty = true;
         }
 
         function pauseMenuBackgroundBattle() {
@@ -14731,12 +14846,11 @@
             gameData._cityCombatStagingKeys = new Set();
 
             // Economy (one pass over cities + one over units — avoids triple city scans)
-            let incomeTick = 0;
+            let incomeTick = getOwnerIncome(1);
             let manpowerTick = 0;
             for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
                 let city = gameData.cities[ci];
                 if(city.owner !== 1) continue;
-                incomeTick += getCityIncome(city);
                 manpowerTick += getCityManpowerIncome(city);
             }
             let upkeepByOwner = {};
@@ -14786,11 +14900,11 @@
                         aiIncomeByOwner[city.owner] = 0;
                         aiManpowerIncomeByOwner[city.owner] = 0;
                     }
-                    aiIncomeByOwner[city.owner] += getCityIncome(city);
                     aiManpowerIncomeByOwner[city.owner] += getCityManpowerIncome(city);
                     aiCitiesByOwner[city.owner].push(city);
                 }
             }
+            for(let owner in aiCitiesByOwner) aiIncomeByOwner[owner] = getOwnerIncome(parseInt(owner, 10));
             for(let owner in aiCitiesByOwner) {
                 if(gameData.aiMoneyByOwner[owner] === undefined) gameData.aiMoneyByOwner[owner] = 1000;
                 if(gameData.aiManpowerByOwner[owner] === undefined) gameData.aiManpowerByOwner[owner] = 5000;
@@ -14814,11 +14928,14 @@
                 if(!gameData._sessionIncomeAcc) gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
                 if(!gameData._sessionIncomeAcc.byOwner) gameData._sessionIncomeAcc.byOwner = {};
                 if(gameData.mp && gameData.mp.enabled) {
+                    let ownersSeen = new Set();
                     for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
-                        let city = gameData.cities[ci];
-                        let ow = city.owner;
-                        if(ow <= 0) continue;
-                        let inc = getCityIncome(city) * dt;
+                        let ow = gameData.cities[ci].owner;
+                        if(ow > 0) ownersSeen.add(ow);
+                    }
+                    for(let h of gameData.hexList) if(h.owner > 0) ownersSeen.add(h.owner);
+                    for(let ow of ownersSeen) {
+                        let inc = getOwnerIncome(ow) * dt;
                         gameData._sessionIncomeAcc.byOwner[ow] = (gameData._sessionIncomeAcc.byOwner[ow] || 0) + inc;
                     }
                 } else {
@@ -16783,14 +16900,9 @@
                 drawClassicUnitShape(ctx, type, 13, col, extra || {});
                 ctx.restore();
             }
-            fillHelpUnitCanvas('menuHelpCanvasUnitLight', 'light');
-            fillHelpUnitCanvas('menuHelpCanvasUnitMarine', 'marine');
-            fillHelpUnitCanvas('menuHelpCanvasUnitHeavy', 'heavy');
-            fillHelpUnitCanvas('menuHelpCanvasUnitShip', 'ship', { x: 0, y: 0, target: { x: 28, y: -9 } });
-            fillHelpUnitCanvas('menuHelpCanvasUnitConvoyLand', 'convoy', { convoySeaRoute: false });
-            fillHelpUnitCanvas('menuHelpCanvasUnitConvoySea', 'convoy', { convoySeaRoute: true, target: { x: 30, y: 5 } });
-            let c = document.getElementById('menuHelpCanvasMove');
-            if(c && c.getContext) {
+            function fillMoveCanvas(id) {
+                let c = document.getElementById(id);
+                if(!c || !c.getContext) return;
                 let ctx = c.getContext('2d');
                 ctx.fillStyle = '#0f1823';
                 ctx.fillRect(0, 0, c.width, c.height);
@@ -16812,8 +16924,9 @@
                 ctx.lineTo(ex - 11 * Math.cos(ang + Math.PI / 6), ey - 11 * Math.sin(ang + Math.PI / 6));
                 ctx.stroke();
             }
-            c = document.getElementById('menuHelpCanvasFormation');
-            if(c && c.getContext) {
+            function fillFormationCanvas(id) {
+                let c = document.getElementById(id);
+                if(!c || !c.getContext) return;
                 let ctx = c.getContext('2d');
                 ctx.fillStyle = '#0f1823';
                 ctx.fillRect(0, 0, c.width, c.height);
@@ -16836,6 +16949,16 @@
                     ctx.lineWidth = 1.2;
                     ctx.stroke();
                 }
+            }
+            for(let prefix of ['menuHelpCanvas', 'escHelpCanvas']) {
+                fillHelpUnitCanvas(prefix + 'UnitLight', 'light');
+                fillHelpUnitCanvas(prefix + 'UnitMarine', 'marine');
+                fillHelpUnitCanvas(prefix + 'UnitHeavy', 'heavy');
+                fillHelpUnitCanvas(prefix + 'UnitShip', 'ship', { x: 0, y: 0, target: { x: 28, y: -9 } });
+                fillHelpUnitCanvas(prefix + 'UnitConvoyLand', 'convoy', { convoySeaRoute: false });
+                fillHelpUnitCanvas(prefix + 'UnitConvoySea', 'convoy', { convoySeaRoute: true, target: { x: 30, y: 5 } });
+                fillMoveCanvas(prefix + 'Move');
+                fillFormationCanvas(prefix + 'Formation');
             }
         }
 
