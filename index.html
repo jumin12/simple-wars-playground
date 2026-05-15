@@ -4629,8 +4629,8 @@
 
                 <div class="esc-help-block">
                     <h4>Structures and income</h4>
-                    <p class="esc-help-prose">A <strong>factory</strong> is a major investment: it lifts both money and manpower income and is required to train <strong>heavy infantry</strong>. A <strong>harbor</strong> raises cash a bit, and it is needed where the urban footprint touches open water so you can build <strong>ships</strong> from that port.</p>
-                    <p class="esc-help-prose">Cities provide the larger economy: each town adds base cash and manpower growth, factories increase both, and harbors add extra cash. Manpower growth is separate from cash income and is spent on training infantry, marines, ships, and heavy units.</p>
+                    <p class="esc-help-prose">A <strong>factory</strong> is a major investment: it lifts both money and manpower income and is required to train <strong>armor</strong>. A <strong>harbor</strong> raises cash a bit, and it is needed where the urban footprint touches open water so you can build <strong>ships</strong> from that port.</p>
+                    <p class="esc-help-prose">Cities provide the larger economy: each town adds base cash and manpower growth, factories increase both, and harbors add extra cash. Manpower growth is separate from cash income and is spent on training infantry, marines, ships, and armor.</p>
                     <p class="esc-help-prose"><strong>Trade convoys</strong> spawn between linked cities and pay a <strong>one-time</strong> bonus when they dock. If your budget stays underwater, <strong>unpaid upkeep</strong> will start chewing down army health until you recover — watch the treasury before you max out every regiment.</p>
                 </div>
 
@@ -4683,8 +4683,8 @@
                     <div class="help-unit-card">
                         <canvas id="menuHelpCanvasUnitHeavy" width="76" height="76" aria-hidden="true"></canvas>
                         <div class="help-unit-body">
-                            <h5>Heavy infantry (factory)</h5>
-                            <p>Armored teams unlocked once the city builds a factory. They hit harder and absorb more, but they are deliberately clumsy assaulting woods, hills, swamps, towns, mountains, or water — use them as breakthrough wedges on open ground instead of forcing frontal pushes into dense terrain.</p>
+                            <h5>Armor (factory)</h5>
+                            <p>Armored formations unlocked once the city builds a factory. They cost far more cash but only use 1k manpower, hit harder, and absorb more; they are deliberately clumsy assaulting woods, hills, swamps, towns, mountains, or water — use them as breakthrough wedges on open ground instead of forcing frontal pushes into dense terrain.</p>
                         </div>
                     </div>
                     <div class="help-unit-card">
@@ -5074,11 +5074,11 @@
                         <span class="wod-m-sheet-sub">Structures &amp; training</span>
                     </div>
                     <div class="bottom-bar" id="buildMenu">
-                        <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $500. Requires City. Enables Heavy Infantry.">Build Factory ($500)</button>
+                        <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $500. Requires City. Enables Armor.">Build Factory ($500)</button>
                         <button class="build-btn" onclick="beginHarborBuild()" title="Costs $400. Requires City near water. Enables Ships.">Build Harbor ($400)</button>
                         <button class="build-btn" onclick="buyUnit('light')" title="Costs $50, 1000 MP. Requires City.">Train Light Infantry ($50, 1k MP)</button>
                         <button class="build-btn" onclick="buyUnit('marine')" title="Costs $50, 1000 MP. Coastal city only. Amphibious infantry.">Train Marines ($50, 1k MP)</button>
-                        <button class="build-btn" onclick="buyUnit('heavy')" title="Costs $150, 5000 MP. Requires City + Factory.">Train Heavy Infantry ($150, 5k MP)</button>
+                        <button class="build-btn" onclick="buyUnit('heavy')" title="Costs $650, 1000 MP. Requires City + Factory.">Train Armor ($650, 1k MP)</button>
                         <button class="build-btn" onclick="buyUnit('ship')" title="Costs $265, 5000 MP. Requires City + Harbor.">Build Ship ($265, 5k MP)</button>
                     </div>
                 </div>
@@ -6253,6 +6253,157 @@
                     wodSetGeneratedTerrainType(h, wet > 0.58 ? 'swamp' : 'grass');
                 }
                 totalWater -= c.size;
+            }
+        }
+        function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
+            for(let pass = 0; pass < 2; pass++) {
+                let changes = [];
+                for(let h of gameData.hexList) {
+                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                    let counts = {};
+                    let waterAdj = 0;
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!nb) continue;
+                        if(isWaterHex(nb)) {
+                            waterAdj++;
+                            continue;
+                        }
+                        if(nb.type === 'mountain' || nb.type === 'urban') continue;
+                        counts[nb.type] = (counts[nb.type] || 0) + 1;
+                    }
+                    let bestType = h.type, bestCount = 0;
+                    for(let type in counts) {
+                        if(counts[type] > bestCount) {
+                            bestType = type;
+                            bestCount = counts[type];
+                        }
+                    }
+                    if(waterAdj >= 2 && h.type !== 'sand' && h.type !== 'swamp') {
+                        let wet = fbm(h.x * 0.011 + seedOffset + 4410, h.y * 0.011 + seedOffset + 4410, 4);
+                        changes.push({ h, type: wet > 0.58 ? 'swamp' : 'sand' });
+                    } else if(bestType !== h.type && bestCount >= (pass === 0 ? 5 : 4)) {
+                        changes.push({ h, type: bestType });
+                    }
+                }
+                for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
+            }
+
+            for(let h of gameData.hexList) {
+                if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                let wet = fbm(h.x * 0.0065 + seedOffset + 4700, h.y * 0.0065 + seedOffset + 4700, 5);
+                let heat = fbm(h.x * 0.0042 + seedOffset + 4800, h.y * 0.0042 + seedOffset + 4800, 3);
+                let coast = getNeighborHexes(h).some(nb => nb && isWaterHex(nb));
+                if(coast) continue;
+                if(wet > 0.78 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'forest');
+                else if(wet > 0.68 && heat < 0.42 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'swamp');
+                else if(wet < 0.22 && (h.type === 'grass' || h.type === 'hill')) wodSetGeneratedTerrainType(h, 'sand');
+                else if(wet > 0.36 && wet < 0.62 && h.type === 'sand' && mapShape !== 'island') wodSetGeneratedTerrainType(h, 'grass');
+            }
+        }
+        function wodCarveNaturalRivers(mapShape, seedOffset, cols, rows) {
+            let chance = mapShape === 'island' ? 0.48 : 0.64;
+            if(Math.random() > chance) return;
+            let land = gameData.hexList.filter(h => h && !isWaterHex(h) && h.type !== 'mountain');
+            if(land.length < 80) return;
+            let lcm = wodLandCentroidMaxRadius(land);
+            let riverCount = mapShape === 'rectangle'
+                ? (Math.random() < 0.32 ? 2 : 1)
+                : (Math.random() < 0.22 ? 2 : 1);
+
+            function waterStepsFast(start, maxSteps) {
+                if(!start || isWaterHex(start)) return 0;
+                let q = [{ h: start, s: 0 }];
+                let seen = new Set([getHexKey(start)]);
+                let qi = 0;
+                while(qi < q.length) {
+                    let cur = q[qi++];
+                    if(cur.s >= maxSteps) continue;
+                    for(let nb of getNeighborHexes(cur.h)) {
+                        if(!nb) return cur.s + 1;
+                        if(isWaterHex(nb)) return cur.s + 1;
+                        let k = getHexKey(nb);
+                        if(seen.has(k)) continue;
+                        seen.add(k);
+                        q.push({ h: nb, s: cur.s + 1 });
+                    }
+                }
+                return maxSteps + 1;
+            }
+
+            function pickRiverStart(ix) {
+                let best = null;
+                let bestScore = -Infinity;
+                for(let h of land) {
+                    let dx = h.x - lcm.cx, dy = h.y - lcm.cy;
+                    let dist = Math.hypot(dx, dy);
+                    if(mapShape === 'island' && dist > lcm.maxR * 0.62) continue;
+                    if(mapShape === 'rectangle') {
+                        let edge = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
+                        if(edge > 0.7 || edge < 0.12) continue;
+                    }
+                    let waterAway = waterStepsFast(h, 10);
+                    if(waterAway < (mapShape === 'island' ? 4 : 3)) continue;
+                    let ridge = fbm(h.x * 0.012 + seedOffset + 5100 + ix * 91, h.y * 0.012 + seedOffset + 5100 + ix * 91, 4);
+                    let score = ridge * 120 + waterAway * 12 - Math.abs(dist - lcm.maxR * 0.35) * 0.02 + Math.random() * 10;
+                    if(score > bestScore) {
+                        bestScore = score;
+                        best = h;
+                    }
+                }
+                return best;
+            }
+
+            function paintRiverCell(h, ix, step) {
+                if(!h || h.type === 'urban') return;
+                wodSetGeneratedTerrainType(h, 'water');
+                let wide = (step % 5 === 0) || fbm(h.x * 0.021 + seedOffset + 5300 + ix, h.y * 0.021 + seedOffset + 5300 + ix, 3) > 0.72;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
+                    if(wide && Math.random() < 0.2) wodSetGeneratedTerrainType(nb, 'water');
+                    else if(!isWaterHex(nb)) {
+                        let wet = fbm(nb.x * 0.018 + seedOffset + 5400, nb.y * 0.018 + seedOffset + 5400, 3);
+                        wodSetGeneratedTerrainType(nb, wet > 0.55 ? 'swamp' : 'sand');
+                    }
+                }
+            }
+
+            for(let ri = 0; ri < riverCount; ri++) {
+                let cur = pickRiverStart(ri);
+                if(!cur) continue;
+                let angle = mapShape === 'rectangle'
+                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.8
+                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 0.9;
+                let maxSteps = Math.max(24, Math.floor((mapShape === 'island' ? rows : cols) * 1.35));
+                let seen = new Set();
+                for(let step = 0; step < maxSteps && cur; step++) {
+                    let ck = getHexKey(cur);
+                    if(seen.has(ck)) break;
+                    seen.add(ck);
+                    let reachedExistingWater = waterStepsFast(cur, 2) <= 1;
+                    paintRiverCell(cur, ri, step);
+                    if(reachedExistingWater && step > 5) break;
+
+                    let best = null, bestScore = Infinity;
+                    for(let dir of cardinalHexDirections) {
+                        let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
+                        if(!nb || nb.type === 'urban') continue;
+                        if(seen.has(getHexKey(nb))) continue;
+                        let dx = nb.x - cur.x, dy = nb.y - cur.y;
+                        let forward = -(Math.cos(angle) * dx + Math.sin(angle) * dy);
+                        let edgePull = mapShape === 'island'
+                            ? -Math.hypot(nb.x - lcm.cx, nb.y - lcm.cy) * 0.03
+                            : -Math.max(Math.abs(nb.q) / Math.max(cols, 1), Math.abs(nb.r) / Math.max(rows, 1)) * 18;
+                        let carveCost = nb.type === 'mountain' ? 140 : 0;
+                        let meander = fbm(nb.x * 0.017 + seedOffset + 5500 + ri * 77, nb.y * 0.017 + seedOffset + 5500 + ri * 77, 3) * 18;
+                        let score = forward + edgePull + carveCost + meander;
+                        if(score < bestScore) {
+                            bestScore = score;
+                            best = nb;
+                        }
+                    }
+                    cur = best;
+                    angle += (fbm((cur ? cur.x : 0) * 0.01 + seedOffset + 5600, (cur ? cur.y : 0) * 0.01 + seedOffset + 5600, 2) - 0.5) * 0.45;
+                }
             }
         }
         /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
@@ -9957,7 +10108,7 @@
         }
 
         function getUnitCost(type) {
-            if(type === 'heavy') return {money: 150, manpower: 5000};
+            if(type === 'heavy') return {money: 650, manpower: 1000};
             if(type === 'ship') return {money: 265, manpower: 5000};
             return {money: 50, manpower: 1000};
         }
@@ -13891,6 +14042,8 @@
             }
 
             wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
+            wodCarveNaturalRivers(mapShape, seedOffset, cols, rows);
+            wodNaturalizeBiomeBlends(seedOffset, mapShape);
             wodNormalizeRectangleWaterFeatures(seedOffset);
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
@@ -14814,7 +14967,7 @@
                 });
                 let city = candidates[0];
                 let type = 'light';
-                if(gameData.aiMoneyByOwner[ownerKey] >= 180 && gameData.aiManpowerByOwner[ownerKey] >= 5000 && city.hasFactory && Math.random() > 0.45) {
+                if(gameData.aiMoneyByOwner[ownerKey] >= 650 && gameData.aiManpowerByOwner[ownerKey] >= 1000 && city.hasFactory && Math.random() > 0.68) {
                     type = 'heavy';
                 } else if(city.hasHarbor && gameData.aiMoneyByOwner[ownerKey] >= 265 && gameData.aiManpowerByOwner[ownerKey] >= 5000 && Math.random() > 0.72) {
                     type = 'ship';
@@ -17440,7 +17593,7 @@
                     target: ut === 'ship' ? { x: 48, y: -8 } : undefined,
                     hp: ut === 'heavy' ? 300 : (ut === 'ship' ? 200 : 100),
                     maxHp: ut === 'heavy' ? 300 : (ut === 'ship' ? 200 : 100),
-                    manpower: ut === 'heavy' ? 5000 : 1000, tanks: ut === 'heavy' ? 500 : 0, radius: 22,
+                    manpower: 1000, tanks: ut === 'heavy' ? 500 : 0, radius: 22,
                     skinOverride: skinOv
                 };
                 ctx2.translate(w / 2, h / 2);
@@ -17791,7 +17944,7 @@
                     els.name.innerText = sel.name || "Unit";
                     els.type.innerText = sel.type === 'ship'
                         ? 'Naval vessel'
-                        : (sel.type === 'heavy' ? 'Heavy unit'
+                        : (sel.type === 'heavy' ? 'Armor'
                             : (sel.type === 'light' ? 'Infantry unit'
                                 : (sel.type === 'marine' ? 'Marine regiment (amphibious)'
                                     : (sel.type === 'convoy' ? (sel.convoySeaRoute ? 'Sea trade convoy' : 'Land trade convoy') : sel.type + ' unit'))));
@@ -19501,7 +19654,7 @@
                     let cost = getUnitCost(mode);
                     if(wodPlayerTreasury(lo) < cost.money) showNotification('Not enough money!');
                     else if(wodPlayerMpPool(lo) < cost.manpower) showNotification('Not enough manpower!');
-                    else if(mode === 'heavy' && !city.hasFactory) showNotification('Requires factory!');
+                    else if(mode === 'heavy' && !city.hasFactory) showNotification('Armor requires a factory!');
                     else if(mode === 'ship' && !city.hasHarbor) showNotification('Requires harbor!');
                     else if(mode === 'marine' && !cityHasWaterNeighbor(city)) showNotification('Marines train only at coastal towns (water adjacent).');
                     else if(isCitySiegeBlockedForProduction(city)) showNotification('Urban combat at this town — training and shipbuilding are paused until the battle clears.');
@@ -19572,7 +19725,7 @@
                 unit.speed = 15; unit.damage = 8; unit.range = 50; unit.attackCooldown = 2.0; unit.radius = 12;
             } else if(type === 'heavy') {
                 unit.hp = 300; unit.maxHp = 300; unit.speed = 10; unit.damage = 18; unit.range = 60; unit.attackCooldown = 2.8; unit.radius = 16;
-                unit.manpower = 5000; unit.maxManpower = 5000; unit.tanks = 500; unit.maxTanks = 500;
+                unit.manpower = 1000; unit.maxManpower = 1000; unit.tanks = 500; unit.maxTanks = 500;
             } else if(type === 'ship') {
                 unit.hp = 200; unit.maxHp = 200; unit.speed = 25; unit.damage = 14; unit.range = 80; unit.attackCooldown = 2.4; unit.radius = 20;
                 unit.manpower = 5000; unit.maxManpower = 5000;
