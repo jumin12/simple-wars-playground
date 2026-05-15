@@ -5885,8 +5885,8 @@
                     biomeAccent: Math.random() < 0.32 ? 'marsh' : 'balanced'
                 };
             }
-            /** Equal pick — atoll / chain / archipelago show up as often as classic blobs */
-            let modePool = ['blob', 'elongated', 'wide', 'archipelago', 'crescent', 'chain', 'atoll'];
+            /** Equal-ish pick — include split/broken silhouettes so islands do not all read as the same blob. */
+            let modePool = ['blob', 'elongated', 'wide', 'archipelago', 'crescent', 'chain', 'atoll', 'double', 'hook', 'broken'];
             let islandMode = modePool[(Math.floor(Math.random() * modePool.length)) | 0];
             let stretchX = 1,
                 stretchY = 1;
@@ -5922,6 +5922,16 @@
                 stretchY = 1.02 + Math.random() * 0.16;
                 coastNoiseAmp = 0.44 + Math.random() * 0.22;
                 atollRing = 0.4 + Math.random() * 0.16;
+            } else if(islandMode === 'double') {
+                stretchX = 0.94 + Math.random() * 0.18;
+                stretchY = 0.94 + Math.random() * 0.18;
+                coastNoiseAmp = 0.42 + Math.random() * 0.22;
+            } else if(islandMode === 'hook') {
+                stretchX = 0.88 + Math.random() * 0.24;
+                stretchY = 1.04 + Math.random() * 0.28;
+                coastNoiseAmp = 0.46 + Math.random() * 0.2;
+            } else if(islandMode === 'broken') {
+                coastNoiseAmp = 0.55 + Math.random() * 0.24;
             } else if(crescentSweep) {
                 coastNoiseAmp = 0.4 + Math.random() * 0.2;
             } else if(islandMode === 'chain') {
@@ -5959,6 +5969,7 @@
             let mountainThin = 0.12 + Math.random() * 0.42;
             let minMountainHexReserve = 2 + (Math.random() < 0.5 ? 0 : 1);
             let maxMountainLandFrac = 0.055 + Math.random() * 0.095;
+            if(islandMode === 'broken') waterElevThresh += 0.018 + Math.random() * 0.018;
 
             if(biomeAccent === 'marsh') {
                 moistShift += 0.085 + Math.random() * 0.12;
@@ -6092,6 +6103,74 @@
                 } else h.type = wet > 0.55 ? 'forest' : 'hill';
                 h.baseColor = getTerrainColor(h.type);
                 h.renderColor = h.baseColor;
+            }
+        }
+        function wodSetGeneratedTerrainType(hex, type) {
+            if(!hex || hex.type === type) return;
+            hex.type = type;
+            hex.baseColor = getTerrainColor(type);
+            hex.renderColor = hex.baseColor;
+        }
+        function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles) {
+            if(gameData.mapShape !== 'island') return;
+            let pad = Math.max(1, bufferTiles || 5);
+            for(let h of gameData.hexList) {
+                if(cols - Math.abs(h.q) < pad || rows - Math.abs(h.r) < pad)
+                    wodSetGeneratedTerrainType(h, 'water');
+            }
+        }
+        function wodNormalizeRectangleWaterFeatures(seedOffset) {
+            if(gameData.mapShape !== 'rectangle') return;
+            let water = gameData.hexList.filter(h => isWaterHex(h));
+            if(!water.length) return;
+            let seen = new Set();
+            let comps = [];
+            for(let start of water) {
+                let sk = getHexKey(start);
+                if(seen.has(sk)) continue;
+                let queue = [start];
+                let qi = 0;
+                let comp = [];
+                seen.add(sk);
+                let minQ = start.q, maxQ = start.q, minR = start.r, maxR = start.r;
+                while(qi < queue.length) {
+                    let cur = queue[qi++];
+                    comp.push(cur);
+                    minQ = Math.min(minQ, cur.q); maxQ = Math.max(maxQ, cur.q);
+                    minR = Math.min(minR, cur.r); maxR = Math.max(maxR, cur.r);
+                    for(let nb of getNeighborHexes(cur)) {
+                        if(!nb || !isWaterHex(nb)) continue;
+                        let nk = getHexKey(nb);
+                        if(seen.has(nk)) continue;
+                        seen.add(nk);
+                        queue.push(nb);
+                    }
+                }
+                let span = Math.max(maxQ - minQ, maxR - minR);
+                comps.push({ cells: comp, size: comp.length, span });
+            }
+
+            let totalWater = water.length;
+            for(let c of comps) {
+                if(c.size >= 4) continue;
+                for(let h of c.cells) {
+                    let wet = fbm(h.x * 0.012 + seedOffset + 7210, h.y * 0.012 + seedOffset + 7210, 3);
+                    wodSetGeneratedTerrainType(h, wet > 0.62 ? 'swamp' : 'grass');
+                    totalWater--;
+                }
+                c.removed = true;
+            }
+
+            let maxWater = Math.max(26, Math.floor(gameData.hexList.length * 0.055));
+            let keepers = comps.filter(c => !c.removed).sort((a, b) => (a.size + a.span * 2.2) - (b.size + b.span * 2.2));
+            for(let c of keepers) {
+                if(totalWater <= maxWater) break;
+                if(c.size > maxWater * 0.72 && c.span > Math.sqrt(c.size) * 2.2) continue;
+                for(let h of c.cells) {
+                    let wet = fbm(h.x * 0.012 + seedOffset + 7330, h.y * 0.012 + seedOffset + 7330, 3);
+                    wodSetGeneratedTerrainType(h, wet > 0.58 ? 'swamp' : 'grass');
+                }
+                totalWater -= c.size;
             }
         }
         /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
@@ -13394,6 +13473,11 @@
                             let cells = fbm(x * scale * 1.35 + seedOffset + 444, y * scale * 1.35 + seedOffset + 444, 4);
                             mask -= Math.max(0, cells - 0.36) * 0.62;
                         }
+                        if(gp.islandMode === 'broken') {
+                            let cuts = fbm(x * scale * 1.85 + seedOffset + 1444, y * scale * 1.85 + seedOffset + 1444, 5);
+                            mask -= Math.max(0, cuts - 0.31) * 0.78;
+                            mask += (fbm(x * scale * 0.72 + seedOffset + 1888, y * scale * 0.72 + seedOffset + 1888, 3) - 0.5) * 0.12;
+                        }
                         if(gp.islandMode === 'crescent') {
                             mask -= Math.max(0, 0.38 - Math.abs(dist - 0.56)) * 0.72;
                         }
@@ -13412,6 +13496,22 @@
                             let d3 = Math.sqrt((normX + bx) * (normX + bx) + (normY - by) * (normY - by));
                             dist = Math.min(dist, d2 * 0.9, d3 * 0.88);
                             mask = 1.1 - dist + radialWarp * 0.92;
+                        }
+                        if(gp.islandMode === 'double') {
+                            let ax = gp.chainAX != null ? gp.chainAX * 0.58 : -0.32;
+                            let ay = gp.chainAY != null ? gp.chainAY * 0.42 : 0.12;
+                            let bx = gp.chainBX != null ? gp.chainBX * 0.58 : 0.34;
+                            let by = gp.chainBY != null ? gp.chainBY * 0.42 : -0.1;
+                            let d2 = Math.sqrt((normX - ax) * (normX - ax) + (normY - ay) * (normY - ay));
+                            let d3 = Math.sqrt((normX - bx) * (normX - bx) + (normY - by) * (normY - by));
+                            let neck = Math.abs(normY - (ay + by) * 0.5) + Math.abs(normX - (ax + bx) * 0.5) * 0.25;
+                            mask = 1.08 - Math.min(d2 * 0.92, d3 * 0.92, dist * 1.08) + radialWarp * 0.86 - Math.max(0, 0.18 - neck) * 0.18;
+                        }
+                        if(gp.islandMode === 'hook') {
+                            let hookBite = Math.max(0, 0.42 - Math.abs(dist - 0.58));
+                            let openSide = Math.sin(angle + seedOffset * 0.017);
+                            mask -= hookBite * Math.max(0, openSide) * 0.78;
+                            mask += Math.cos(angle - seedOffset * 0.011) * 0.055;
                         }
                         if(gp.islandMode === 'wide') {
                             mask += 0.055 - Math.abs(sy) * 0.11;
@@ -13447,14 +13547,15 @@
                         let coastalEdge = edgePad > 0.88;
                         let innerClear = edgePad > 0.07;
 
-                        let mainSpine = Math.sin(u * 1.93 + v * 2.72 + ridge * 0.88 + meso * 0.92 + seedOffset * 0.41);
-                        let tributary = Math.sin(u * -2.18 + v * 1.86 + meso * 1.08 + seedOffset * 0.53);
-                        let braided = Math.cos(u * 2.72 - v * 1.94 + detail * 5.25 + seedOffset * 1.71);
-                        let riverField = Math.min(Math.abs(mainSpine + tributary * 0.52), Math.abs(mainSpine * 0.55 + braided * 0.65 + tributary * 0.28));
-                        let riverWidth = 0.045 + moist * 0.055 + (1 - heightLand) * 0.07;
-                        let isRiverCorridor = innerClear && !coastalEdge && riverField < riverWidth && heightLand > 0.11 && heightLand < 0.58 && ridge < 0.68;
+                        let mainSpine = Math.sin(u * 1.55 + v * 2.18 + ridge * 0.48 + meso * 0.42 + seedOffset * 0.31);
+                        let tributary = Math.sin(u * -2.05 + v * 1.5 + meso * 0.55 + seedOffset * 0.47);
+                        let riverField = Math.abs(mainSpine + tributary * 0.18);
+                        let riverWidth = 0.018 + moist * 0.016 + Math.max(0, 0.42 - heightLand) * 0.045;
+                        let riverGate = fbm(wx * scale * 0.58 + seedOffset + 6910, wy * scale * 0.58 + seedOffset + 6910, 3) > 0.42;
+                        let isRiverCorridor = innerClear && !coastalEdge && riverGate && riverField < riverWidth && heightLand > 0.14 && heightLand < 0.46 && ridge < 0.58;
 
-                        let lakeBlob = !coastalEdge && macro < 0.335 && ridge < 0.47 && moist > 0.5 && moist < 0.88 && heightCore < 0.41;
+                        let lakeNoise = fbm(wx * scale * 1.85 + seedOffset + 7010, wy * scale * 1.85 + seedOffset + 7010, 4);
+                        let lakeBlob = !coastalEdge && macro < 0.245 && ridge < 0.34 && moist > 0.62 && moist < 0.82 && heightCore < 0.31 && lakeNoise > 0.58;
 
                         let isMountain = ridge > 0.54 && heightLand > 0.55 && !(isRiverCorridor || lakeBlob);
 
@@ -13515,6 +13616,8 @@
                 }
             }
 
+            wodForceIslandEdgeWaterBuffer(cols, rows, 5);
+            wodNormalizeRectangleWaterFeatures(seedOffset);
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
 
@@ -14432,18 +14535,16 @@
             let w = gameData._aiStratWork;
             if(!w) return;
             let keys = w.formationKeys;
+            let t0 = performance.now();
+            let budgetMs = wodUsesVisualViewportLayout() ? 1.15 : 2.35;
+            function overBudget() {
+                return performance.now() - t0 >= budgetMs;
+            }
             if(w.phase === 'form') {
-                if(wodUsesVisualViewportLayout()) {
-                    if(w.fi < keys.length) {
-                        let k = keys[w.fi++];
-                        assignAiFormationOrders(parseInt(k, 10), w.aiGroups[k], w.serial);
-                        return;
-                    }
-                } else {
-                    while(w.fi < keys.length) {
-                        let k = keys[w.fi++];
-                        assignAiFormationOrders(parseInt(k, 10), w.aiGroups[k], w.serial);
-                    }
+                while(w.fi < keys.length) {
+                    let k = keys[w.fi++];
+                    assignAiFormationOrders(parseInt(k, 10), w.aiGroups[k], w.serial);
+                    if(overBudget()) return;
                 }
                 w.phase = 'units';
                 w.ei = 0;
@@ -14452,12 +14553,13 @@
                 let ents = gameData.entities;
                 let mobMemo = w.mobMemo;
                 let assignByOwner = w.assignByOwner;
-                // Mobile: small batch per frame keeps UI responsive. Desktop: finish unit phase in one drain (more CPU per frame, same decisions).
-                let BATCH = wodUsesVisualViewportLayout() ? 22 : Number.MAX_SAFE_INTEGER;
+                // Keep AI pulses incremental on every platform; a full-faction pulse was the source of periodic hitches.
+                let BATCH = wodUsesVisualViewportLayout() ? 22 : 74;
                 let nExamined = 0;
                 while(w.ei < ents.length && nExamined < BATCH) {
                     let unit = ents[w.ei++];
                     nExamined++;
+                    if((nExamined & 7) === 0 && overBudget()) break;
                     if(unit.type === 'convoy' || unit.hp <= 0) continue;
                     if(wodMpIsHumanOwner(unit.owner)) continue;
                     if(unit.moraleBroken) continue;
@@ -14817,7 +14919,7 @@
             updateAiStrategy(dt);
             if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) updateEncirclements(dt);
 
-            let wodMobHexClaimBatch = wodUsesVisualViewportLayout() && !batchHexOwner;
+            let wodMobHexClaimBatch = !batchHexOwner;
             let wodSavedBatchHexOwner = batchHexOwner;
             if(wodMobHexClaimBatch) batchHexOwner = true;
 
@@ -15035,6 +15137,7 @@
         let wodTerrainPoliticalDirty = true;
         let wodTerrainNeedFullRebuild = true;
         let wodTerrainBaseBuilt = false;
+        let wodTerrainLastBakeCostMs = 0;
 
         function wodMarkTerrainPoliticalDirty() {
             wodTerrainPoliticalDirty = true;
@@ -15048,6 +15151,7 @@
         }
 
         function updateTerrainCache() {
+            let bakeStartMs = performance.now();
             let minX, maxX, minY, maxY;
             let pad = gameData.hexRadius * 2;
             let needBoundsScan = wodTerrainNeedFullRebuild || !wodTerrainBaseBuilt || terrainCanvas.width <= 0;
@@ -15112,6 +15216,7 @@
             wodTerrainPoliticalDirty = false;
             wodTerrainNeedFullRebuild = false;
             terrainNeedsUpdate = false;
+            wodTerrainLastBakeCostMs = performance.now() - bakeStartMs;
         }
 
         function drawTerrainCell(ctx, hex, offsetX, offsetY) {
@@ -16009,10 +16114,13 @@
                 let now = performance.now();
                 let forceImmediate = wodTerrainNeedFullRebuild || !wodTerrainBaseBuilt;
                 let ownersChanging = !!(gameData.layers && (gameData.layers.diplomacy || gameData.layers.territory));
+                let livePlay = gameState === 'PLAYING' && !gameData.menuAttractMode;
                 let gap;
                 if(forceImmediate) gap = 0;
-                else if(ownersChanging) gap = wodUsesVisualViewportLayout() ? 72 : 48;
-                else gap = wodUsesVisualViewportLayout() ? 92 : 72;
+                else if(ownersChanging) gap = livePlay ? (wodUsesVisualViewportLayout() ? 260 : 180) : (wodUsesVisualViewportLayout() ? 72 : 48);
+                else gap = livePlay ? (wodUsesVisualViewportLayout() ? 240 : 160) : (wodUsesVisualViewportLayout() ? 92 : 72);
+                if(livePlay && !forceImmediate && wodTerrainLastBakeCostMs > 14)
+                    gap = Math.max(gap, Math.min(420, wodTerrainLastBakeCostMs * 9));
                 if(now >= wodTerrainBakeNextMs) {
                     wodTerrainBakeNextMs = now + gap;
                     updateTerrainCache();
