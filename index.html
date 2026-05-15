@@ -6205,10 +6205,100 @@
                 let exactDivide = total % f === 0;
                 let gainBump = multiFaction ? 0.014 + (fCount >= 4 ? 0.007 : 0) : (fCount === 2 ? 0.009 : 0.006);
                 let gain = (mpBoost ? 0.114 : 0.104) + gainBump + Math.min(0.82, it * ((mpBoost ? 0.035 : 0.032) + (multiFaction ? 0.0045 : (f === 2 ? 0.004 : 0))));
-                for(let o of sorted) bias[o] += gain * stepScale * (cts[o] - tgt[o]);
+                for(let o of sorted) bias[o] += gain * stepScale * (tgt[o] - cts[o]);
                 let acceptErr = exactDivide ? 0 : 1;
                 if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 27 : minRelaxIter - 4)) break;
             }
+            wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
+            wodAssignWaterAndNonclaimablePoliticalVotes();
+        }
+        function wodBuildLandBalanceTargets(ownerIds) {
+            let sorted = [...ownerIds].sort((a, b) => a - b);
+            let total = 0;
+            for(let h of gameData.hexList) {
+                if(wodHexCountsTowardLandPoliticsBalance(h)) total++;
+            }
+            let base = Math.floor(total / Math.max(1, sorted.length));
+            let rem = total % Math.max(1, sorted.length);
+            let target = {};
+            for(let i = 0; i < sorted.length; i++) target[sorted[i]] = base + (i < rem ? 1 : 0);
+            return target;
+        }
+        function wodCountBalancedLandByOwner(ownerIds) {
+            let valid = new Set(ownerIds);
+            let counts = {};
+            for(let o of ownerIds) counts[o] = 0;
+            for(let h of gameData.hexList) {
+                if(!wodHexCountsTowardLandPoliticsBalance(h)) continue;
+                if(valid.has(h.owner)) counts[h.owner]++;
+            }
+            return counts;
+        }
+        function wodProtectedLandBalanceKeys(protectedCities) {
+            let keys = new Set();
+            if(!protectedCities) return keys;
+            for(let city of protectedCities) {
+                if(!city) continue;
+                keys.add(`${city.q},${city.r}`);
+                for(let uh of getCityUrbanTerrainHexes(city)) keys.add(`${uh.q},${uh.r}`);
+            }
+            return keys;
+        }
+        /** Final border trim: move only adjacent dry frontier cells until each faction has the target non-water count. */
+        function wodExactEqualizePoliticalLandCounts(ownerIds, protectedCities, maxMovesOpt) {
+            if(!ownerIds || ownerIds.length < 2) return;
+            let sorted = [...ownerIds].sort((a, b) => a - b);
+            let valid = new Set(sorted);
+            let target = wodBuildLandBalanceTargets(sorted);
+            let counts = wodCountBalancedLandByOwner(sorted);
+            let protectedKeys = wodProtectedLandBalanceKeys(protectedCities);
+            let maxMoves = maxMovesOpt != null ? maxMovesOpt : Math.max(600, gameData.hexList.length * 2);
+
+            function countDeltaDone() {
+                let total = 0;
+                for(let o of sorted) total += Math.abs((counts[o] || 0) - target[o]);
+                return total === 0;
+            }
+
+            for(let move = 0; move < maxMoves && !countDeltaDone(); move++) {
+                let best = null;
+                let bestScore = -Infinity;
+                for(let hex of gameData.hexList) {
+                    if(!wodHexCountsTowardLandPoliticsBalance(hex)) continue;
+                    if(!valid.has(hex.owner)) continue;
+                    let donor = hex.owner;
+                    if((counts[donor] || 0) <= target[donor]) continue;
+                    let key = `${hex.q},${hex.r}`;
+                    if(protectedKeys.has(key)) continue;
+
+                    let neighborCounts = {};
+                    let donorVotes = 0;
+                    for(let nb of getNeighborHexes(hex)) {
+                        if(!nb || !valid.has(nb.owner)) continue;
+                        if(nb.owner === donor) donorVotes++;
+                        else neighborCounts[nb.owner] = (neighborCounts[nb.owner] || 0) + 1;
+                    }
+                    for(let receiver of sorted) {
+                        let receiverVotes = neighborCounts[receiver] || 0;
+                        if(receiverVotes <= 0) continue;
+                        if((counts[receiver] || 0) >= target[receiver]) continue;
+                        let receiverNeed = target[receiver] - (counts[receiver] || 0);
+                        let donorExcess = (counts[donor] || 0) - target[donor];
+                        let shorePenalty = isWaterHex(hex) ? 5 : 0;
+                        let score = receiverVotes * 120 + Math.min(receiverNeed, donorExcess) * 22 - donorVotes * 18 - shorePenalty;
+                        if(hex.type === 'mountain') score -= 12;
+                        if(score > bestScore) {
+                            bestScore = score;
+                            best = { hex, donor, receiver };
+                        }
+                    }
+                }
+                if(!best) break;
+                setHexOwner(best.hex, best.receiver);
+                counts[best.donor]--;
+                counts[best.receiver]++;
+            }
+            wodMarkTerrainPoliticalDirty();
         }
         function wodDeterministicCitySplitPhase01(seedMixed) {
             let s = seedMixed >>> 0;
@@ -12928,6 +13018,9 @@
 
             wodSyncUrbanFootprintOwners();
             wodRemoveUnconnectedFactionHexPockets(ownersSorted);
+            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
+            wodSyncUrbanFootprintOwners();
+            wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
@@ -13169,6 +13262,7 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             smoothStartingTerritory(ownersList, 6, 1);
+            wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
 
             spawnInitialFrontlineUnits(ownersList);
 
