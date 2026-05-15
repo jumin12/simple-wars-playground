@@ -4325,6 +4325,7 @@
             <div class="wod-load-panel">
                 <div class="wod-load-spinner" aria-hidden="true"></div>
                 <div class="wod-load-caption">Generating map…</div>
+                <div class="wod-load-caption" style="font-size:12px;opacity:0.65;margin-top:-6px">Large maps may take a moment — this is normal.</div>
             </div>
         </div>
         <!-- Game Canvas -->
@@ -5078,7 +5079,7 @@
                         <button class="build-btn" onclick="beginHarborBuild()" title="Costs $400. Requires City near water. Enables Ships.">Build Harbor ($400)</button>
                         <button class="build-btn" onclick="buyUnit('light')" title="Costs $50, 1000 MP. Requires City.">Train Light Infantry ($50, 1k MP)</button>
                         <button class="build-btn" onclick="buyUnit('marine')" title="Costs $50, 1000 MP. Coastal city only. Amphibious infantry.">Train Marines ($50, 1k MP)</button>
-                        <button class="build-btn" onclick="buyUnit('heavy')" title="Costs $650, 1000 MP. Requires City + Factory.">Train Armor ($650, 1k MP)</button>
+                        <button class="build-btn" onclick="buyUnit('heavy')" title="Costs $1000, 1000 MP. Requires City + Factory.">Train Armor ($1k, 1k MP)</button>
                         <button class="build-btn" onclick="buyUnit('ship')" title="Costs $265, 5000 MP. Requires City + Harbor.">Build Ship ($265, 5k MP)</button>
                     </div>
                 </div>
@@ -5478,7 +5479,7 @@
             syncSetupVictoryDetail();
         }
 
-        function showPanel(panelId, opts) {
+        async function showPanel(panelId, opts) {
             opts = opts || {};
             pauseMenuBackgroundBattle();
             UI.mainMenu.classList.add('hidden');
@@ -5526,7 +5527,7 @@
                 if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
                 let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
                 gameData.mapRadius = mapSize;
-                if(!opts.preserveMap) generateMap();
+                if(!opts.preserveMap) await generateMap();
                 previewLoadedMap();
             }
         }
@@ -5650,10 +5651,14 @@
             wodResetMobileHud();
             if(!gameData.layers) gameData.layers = {};
             gameData.layers.territory = false;
-            initGame();
-            wodSyncDesktopLayersPanelExpanded();
-            syncInGameLayerToolbar();
-            wodApplyPlayViewportLock(true);
+            void initGame().then(function() {
+                wodSyncDesktopLayersPanelExpanded();
+                syncInGameLayerToolbar();
+                wodApplyPlayViewportLock(true);
+            }).catch(function(e) {
+                console.error(e);
+                showNotification('Could not finish loading the map. Try again.');
+            });
         }
 
         function returnToMenu() {
@@ -5667,7 +5672,7 @@
             UI.panels.forEach(p => p.classList.add('hidden'));
             stopGame();
             menuDemoSeeded = false;
-            bootstrapMenuBackgroundBattle();
+            void bootstrapMenuBackgroundBattle().catch(function(e) { console.error(e); });
         }
 
         // --- Game Setup ---
@@ -6203,7 +6208,7 @@
         }
         function wodNormalizeRectangleWaterFeatures(seedOffset) {
             if(gameData.mapShape !== 'rectangle') return;
-            let water = gameData.hexList.filter(h => isWaterHex(h));
+            let water = gameData.hexList.filter(h => wodIsNaturalWaterHex(h));
             if(!water.length) return;
             let seen = new Set();
             let comps = [];
@@ -6221,7 +6226,7 @@
                     minQ = Math.min(minQ, cur.q); maxQ = Math.max(maxQ, cur.q);
                     minR = Math.min(minR, cur.r); maxR = Math.max(maxR, cur.r);
                     for(let nb of getNeighborHexes(cur)) {
-                        if(!nb || !isWaterHex(nb)) continue;
+                        if(!nb || !wodIsNaturalWaterHex(nb)) continue;
                         let nk = getHexKey(nb);
                         if(seen.has(nk)) continue;
                         seen.add(nk);
@@ -6301,17 +6306,15 @@
             }
         }
         function wodCarveNaturalRivers(mapShape, seedOffset, cols, rows) {
-            let chance = mapShape === 'island' ? 0.48 : 0.64;
-            if(Math.random() > chance) return;
             let land = gameData.hexList.filter(h => h && !isWaterHex(h) && h.type !== 'mountain');
             if(land.length < 80) return;
             let lcm = wodLandCentroidMaxRadius(land);
             let riverCount = mapShape === 'rectangle'
-                ? (Math.random() < 0.32 ? 2 : 1)
-                : (Math.random() < 0.22 ? 2 : 1);
+                ? 2 + (Math.random() < 0.62 ? 1 : 0) + (Math.random() < 0.28 ? 1 : 0)
+                : 1 + (Math.random() < 0.72 ? 1 : 0) + (Math.random() < 0.38 ? 1 : 0);
 
-            function waterStepsFast(start, maxSteps) {
-                if(!start || isWaterHex(start)) return 0;
+            function waterStepsToNaturalWater(start, maxSteps) {
+                if(!start || wodIsNaturalWaterHex(start)) return 0;
                 let q = [{ h: start, s: 0 }];
                 let seen = new Set([getHexKey(start)]);
                 let qi = 0;
@@ -6320,7 +6323,7 @@
                     if(cur.s >= maxSteps) continue;
                     for(let nb of getNeighborHexes(cur.h)) {
                         if(!nb) return cur.s + 1;
-                        if(isWaterHex(nb)) return cur.s + 1;
+                        if(wodIsNaturalWaterHex(nb)) return cur.s + 1;
                         let k = getHexKey(nb);
                         if(seen.has(k)) continue;
                         seen.add(k);
@@ -6330,21 +6333,28 @@
                 return maxSteps + 1;
             }
 
+            function riverTouchesNaturalWater(h) {
+                for(let nb of getNeighborHexes(h)) {
+                    if(nb && wodIsNaturalWaterHex(nb)) return true;
+                }
+                return false;
+            }
+
             function pickRiverStart(ix) {
                 let best = null;
                 let bestScore = -Infinity;
                 for(let h of land) {
                     let dx = h.x - lcm.cx, dy = h.y - lcm.cy;
                     let dist = Math.hypot(dx, dy);
-                    if(mapShape === 'island' && dist > lcm.maxR * 0.62) continue;
+                    if(mapShape === 'island' && dist > lcm.maxR * 0.72) continue;
                     if(mapShape === 'rectangle') {
                         let edge = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
-                        if(edge > 0.7 || edge < 0.12) continue;
+                        if(edge > 0.78 || edge < 0.08) continue;
                     }
-                    let waterAway = waterStepsFast(h, 10);
-                    if(waterAway < (mapShape === 'island' ? 4 : 3)) continue;
+                    let waterAway = waterStepsToNaturalWater(h, 14);
+                    if(waterAway < (mapShape === 'island' ? 3 : 2)) continue;
                     let ridge = fbm(h.x * 0.012 + seedOffset + 5100 + ix * 91, h.y * 0.012 + seedOffset + 5100 + ix * 91, 4);
-                    let score = ridge * 120 + waterAway * 12 - Math.abs(dist - lcm.maxR * 0.35) * 0.02 + Math.random() * 10;
+                    let score = ridge * 120 + waterAway * 12 - Math.abs(dist - lcm.maxR * 0.38) * 0.02 + Math.random() * 10;
                     if(score > bestScore) {
                         bestScore = score;
                         best = h;
@@ -6355,14 +6365,15 @@
 
             function paintRiverCell(h, ix, step) {
                 if(!h || h.type === 'urban') return;
-                wodSetGeneratedTerrainType(h, 'water');
-                let wide = (step % 5 === 0) || fbm(h.x * 0.021 + seedOffset + 5300 + ix, h.y * 0.021 + seedOffset + 5300 + ix, 3) > 0.72;
+                wodSetGeneratedTerrainType(h, 'river');
+                let wide = (step % 4 === 0) || fbm(h.x * 0.021 + seedOffset + 5300 + ix, h.y * 0.021 + seedOffset + 5300 + ix, 3) > 0.52;
                 for(let nb of getNeighborHexes(h)) {
                     if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                    if(wide && Math.random() < 0.2) wodSetGeneratedTerrainType(nb, 'water');
+                    if(wodIsNaturalWaterHex(nb)) continue;
+                    if(wide && Math.random() < 0.42) wodSetGeneratedTerrainType(nb, 'river');
                     else if(!isWaterHex(nb)) {
                         let wet = fbm(nb.x * 0.018 + seedOffset + 5400, nb.y * 0.018 + seedOffset + 5400, 3);
-                        wodSetGeneratedTerrainType(nb, wet > 0.55 ? 'swamp' : 'sand');
+                        wodSetGeneratedTerrainType(nb, wet > 0.52 ? 'swamp' : 'sand');
                     }
                 }
             }
@@ -6371,17 +6382,16 @@
                 let cur = pickRiverStart(ri);
                 if(!cur) continue;
                 let angle = mapShape === 'rectangle'
-                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.8
-                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 0.9;
-                let maxSteps = Math.max(24, Math.floor((mapShape === 'island' ? rows : cols) * 1.35));
+                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.95
+                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 1.05;
+                let maxSteps = Math.max(34, Math.floor((mapShape === 'island' ? rows : cols) * 1.75));
                 let seen = new Set();
                 for(let step = 0; step < maxSteps && cur; step++) {
                     let ck = getHexKey(cur);
                     if(seen.has(ck)) break;
                     seen.add(ck);
-                    let reachedExistingWater = waterStepsFast(cur, 2) <= 1;
                     paintRiverCell(cur, ri, step);
-                    if(reachedExistingWater && step > 5) break;
+                    if(riverTouchesNaturalWater(cur) && step > 6) break;
 
                     let best = null, bestScore = Infinity;
                     for(let dir of cardinalHexDirections) {
@@ -7485,7 +7495,7 @@
             let snap = wodMpSnapshotLobbyGenBackup();
             wodArmMapPreviewSpinner('mpLobbyMapPreview');
             requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
+                requestAnimationFrame(async () => {
                     try {
                         let r = parseInt(meta.mapSize, 10) || 60;
                         gameData.mapRadius = r;
@@ -7512,7 +7522,7 @@
                         let previewSeed = wodMpLobbyPreviewSeed(meta);
                         wodPushSeededRandom(previewSeed);
                         try {
-                            generateMap();
+                            await generateMap();
                         } finally {
                             wodPopRandom();
                         }
@@ -8096,17 +8106,21 @@
                 wodResetMobileHud();
                 if(!gameData.layers) gameData.layers = {};
                 gameData.layers.territory = false;
-                initGame();
-                wodMpSnapSeq = 0;
-                try {
-                    WodMultiplayer.hostSendMatchStart(wodMpBuildInitPayload());
-                } catch(err) {
-                    console.error(err);
-                    showNotification('Failed to send map to players (too large?)');
-                }
-                wodSyncDesktopLayersPanelExpanded();
-                syncInGameLayerToolbar();
-                wodApplyPlayViewportLock(true);
+                void initGame().then(function() {
+                    wodMpSnapSeq = 0;
+                    try {
+                        WodMultiplayer.hostSendMatchStart(wodMpBuildInitPayload());
+                    } catch(err) {
+                        console.error(err);
+                        showNotification('Failed to send map to players (too large?)');
+                    }
+                    wodSyncDesktopLayersPanelExpanded();
+                    syncInGameLayerToolbar();
+                    wodApplyPlayViewportLock(true);
+                }).catch(function(e) {
+                    console.error(e);
+                    showNotification('Could not finish loading the map. Try again.');
+                });
             };
 
             let mpGlMaxHumans = document.getElementById('mpGlMaxHumans');
@@ -8711,12 +8725,14 @@
             {type: 'hill', label: 'hill', note: 'rough highland'},
             {type: 'mountain', label: 'mountain', note: 'blocks land units'},
             {type: 'urban', label: 'town', note: 'city/town area'},
-            {type: 'water', label: 'ocean', note: 'naval tiles'}
+            {type: 'water', label: 'ocean', note: 'naval tiles'},
+            {type: 'river', label: 'river', note: 'navigable; blocks land armies'}
         ];
 
         function getTerrainColor(type) {
             if(type === 'deep_water') return '#2980b9';
             if(type === 'water') return '#2980b9';
+            if(type === 'river') return '#5dcee6';
             if(type === 'sand') return '#f39c12';
             if(type === 'grass') return '#2ecc71';
             if(type === 'forest') return '#27ae60';
@@ -9205,6 +9221,10 @@
         }
 
         function isWaterHex(hex) {
+            return hex && (hex.type === 'water' || hex.type === 'deep_water' || hex.type === 'river');
+        }
+
+        function wodIsNaturalWaterHex(hex) {
             return hex && (hex.type === 'water' || hex.type === 'deep_water');
         }
 
@@ -10108,7 +10128,7 @@
         }
 
         function getUnitCost(type) {
-            if(type === 'heavy') return {money: 650, manpower: 1000};
+            if(type === 'heavy') return {money: 1000, manpower: 1000};
             if(type === 'ship') return {money: 265, manpower: 5000};
             return {money: 50, manpower: 1000};
         }
@@ -10179,7 +10199,11 @@
         function replacementMoneyFromLosses(unit, manpowerCasualties, tankLosses) {
             let mp = Math.max(0, manpowerCasualties || 0);
             let tk = Math.max(0, tankLosses || 0);
-            if(unit.type === 'heavy') return mp * (150 / 5000) + tk * (150 / 500);
+            if(unit.type === 'heavy') {
+                let c = getUnitCost('heavy');
+                let maxTk = Math.max(1, unit.maxTanks || 500);
+                return mp * (c.money / Math.max(1, c.manpower)) + tk * (c.money / maxTk);
+            }
             if(unit.type === 'ship') return mp * (265 / 5000);
             if(unit.type === 'convoy') return 0;
             return mp * (50 / 1000);
@@ -12868,18 +12892,6 @@
             ctx.stroke();
         }
 
-        function wodPreviewSpinnerLoop() {
-            if(!gameData._wodMapPreviewSpinnerActive) {
-                gameData._wodPreviewSpinnerRafId = 0;
-                return;
-            }
-            for(let id of gameData._wodPreviewSpinnerCanvasIds || []) {
-                let cv = typeof id === 'string' ? document.getElementById(id) : id;
-                if(cv && cv.dataset.wodMapGenerating === '1') wodDrawMapPreviewGeneratingOverlay(cv);
-            }
-            gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
-        }
-
         function wodArmMapPreviewSpinner(canvasId) {
             if(!canvasId) return;
             if(!gameData._wodPreviewSpinnerCanvasIds) gameData._wodPreviewSpinnerCanvasIds = new Set();
@@ -12893,8 +12905,6 @@
             }
             gameData._wodPreviewSpinnerCanvasIds.add(canvasId);
             gameData._wodMapPreviewSpinnerActive = true;
-            wodDrawMapPreviewGeneratingOverlay(cv);
-            if(!gameData._wodPreviewSpinnerRafId) gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
         }
 
         function wodDisarmMapPreviewSpinner(canvasId) {
@@ -12908,10 +12918,6 @@
                 busy.setAttribute('aria-hidden', 'true');
             }
             gameData._wodMapPreviewSpinnerActive = gameData._wodPreviewSpinnerCanvasIds.size > 0;
-            if(!gameData._wodMapPreviewSpinnerActive && gameData._wodPreviewSpinnerRafId) {
-                cancelAnimationFrame(gameData._wodPreviewSpinnerRafId);
-                gameData._wodPreviewSpinnerRafId = 0;
-            }
         }
 
         function previewLoadedMap(canvasOrId) {
@@ -13046,32 +13052,31 @@
             gameData._soloPreviewSnapshot = null;
             let startBtn = document.getElementById('setupBtnStartAi');
             if(startBtn) startBtn.disabled = true;
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    let ok = true;
-                    try {
-                        let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
-                        gameData.mapRadius = mapSize;
-                        let aiEl = document.getElementById('setupAI');
-                        if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
-                        gameData.loadedCustomMap = false;
-                        generateMap();
-                        previewLoadedMap('mapPreview');
-                    } catch(e) {
-                        ok = false;
-                        console.warn(e);
-                    } finally {
-                        wodDisarmMapPreviewSpinner('mapPreview');
-                        gameData._soloMapPreviewMatchesStart = ok;
-                        if(ok) wodCaptureSoloPreviewSnapshot();
-                        gameData._soloPreviewGenerating = false;
-                        if(startBtn) startBtn.disabled = false;
-                    }
-                });
-            });
+            void (async function() {
+                await wodMapGenPaintYield();
+                let ok = true;
+                try {
+                    let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
+                    gameData.mapRadius = mapSize;
+                    let aiEl = document.getElementById('setupAI');
+                    if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
+                    gameData.loadedCustomMap = false;
+                    await generateMap();
+                    previewLoadedMap('mapPreview');
+                } catch(e) {
+                    ok = false;
+                    console.warn(e);
+                } finally {
+                    wodDisarmMapPreviewSpinner('mapPreview');
+                    gameData._soloMapPreviewMatchesStart = ok;
+                    if(ok) wodCaptureSoloPreviewSnapshot();
+                    gameData._soloPreviewGenerating = false;
+                    if(startBtn) startBtn.disabled = false;
+                }
+            })();
         }
 
-        function initGame() {
+        async function initGame() {
             gameData._encircWork = null;
             gameData._aiSpawnBurst = null;
             gameData._aiStratWork = null;
@@ -13110,7 +13115,7 @@
                 let mpSeed = wodMpLobbyPreviewSeed(meta);
                 wodPushSeededRandom(mpSeed);
                 try {
-                    generateMap();
+                    await generateMap();
                 } finally {
                     wodPopRandom();
                 }
@@ -13120,7 +13125,7 @@
                     if(gameData.hexList.length === 0 || gameData.mapRadius !== newRadius || shapeChanged) {
                         gameData.mapRadius = newRadius;
                         gameData.loadedCustomMap = false;
-                        generateMap();
+                        await generateMap();
                     } else {
                         assignStartingCities();
                     }
@@ -13136,11 +13141,11 @@
                             gameData._wodReuseMapGenSeed = true;
                         gameData.mapRadius = newRadius;
                         gameData.mapShape = requestedShape;
-                        generateMap();
+                        await generateMap();
                     } else {
                         gameData.mapRadius = newRadius;
                         gameData.mapShape = requestedShape;
-                        generateMap();
+                        await generateMap();
                     }
                 }
             }
@@ -13806,7 +13811,19 @@
             }
         }
 
-        function generateMap() {
+        /** Lets the browser paint map-gen / preview overlays and avoids "page unresponsive" during heavy procgen. */
+        function wodMapGenPaintYield() {
+            return new Promise(function(resolve) {
+                requestAnimationFrame(function() {
+                    requestAnimationFrame(resolve);
+                });
+            });
+        }
+        function wodMapGenYieldTick() {
+            return new Promise(function(resolve) { setTimeout(resolve, 0); });
+        }
+
+        async function generateMap() {
             let ownsInnerRng = !_wodSavedMathRandom;
             let showMapGenOverlay = !gameData._wodSkipMapGenLoader;
             gameData._wodSkipMapGenLoader = false;
@@ -13819,6 +13836,7 @@
                 }
             }
             try {
+            await wodMapGenPaintYield();
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 1000;
             gameData.income = 10;             gameData.selection = [];
@@ -13833,6 +13851,7 @@
             let procSucceeded = false;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < PROCMAP_ACCEPT_TRIES_MAX; procAttempt++) {
+                await wodMapGenYieldTick();
                 if(ownsInnerRng) {
                     if(procAttempt > 0) wodPopRandom();
                     if(procAttempt === 0) {
@@ -13870,6 +13889,7 @@
             let spacing = hr * 1.35;
             
             for(let r = -rows; r <= rows; r++) {
+                if((r + rows) % 10 === 0) await wodMapGenYieldTick();
                 for(let q = -cols; q <= cols; q++) {
                     let x = q * spacing;
                     let y = r * spacing;
@@ -14483,7 +14503,7 @@
         function resumeMenuBackgroundBattle() {
             if(gameState === 'PLAYING') return;
             if(!menuDemoSeeded) {
-                bootstrapMenuBackgroundBattle();
+                void bootstrapMenuBackgroundBattle().catch(function(e) { console.error(e); });
                 return;
             }
             gameData.menuAttractMode = true;
@@ -14555,7 +14575,7 @@
                 wodSetBootSplashProgress(displayed);
                 await nextFrame();
                 if(holdMs) await sleep(holdMs);
-                if(work) work();
+                if(work) await Promise.resolve(work());
                 await nextFrame();
             }
 
@@ -14587,8 +14607,8 @@
                         normalizeTerrainHexes();
                         updateTerrainKey();
                     }, 120);
-                    await bootStage('Building menu battlefield…', 38, () => {
-                        bootstrapMenuBackgroundBattle();
+                    await bootStage('Building menu battlefield…', 38, async () => {
+                        await bootstrapMenuBackgroundBattle();
                     }, 60);
                     await bootStage('Baking terrain and borders…', 62, () => {
                         updateTerrainCache();
@@ -14632,7 +14652,7 @@
             })();
         }
 
-        function bootstrapMenuBackgroundBattle() {
+        async function bootstrapMenuBackgroundBattle() {
             pauseMenuBackgroundBattle();
             wodSyncViewportAndCanvas();
             gameData.selection = [];
@@ -14646,7 +14666,7 @@
             let shapeEl = document.getElementById('setupMapShape');
             if(shapeEl) shapeEl.value = 'island';
             gameData.aiCount = 1;
-            generateMap();
+            await generateMap();
             remapAttractBattleFromPlayerSlotsToAis();
             gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, units: true };
             syncInGameLayerToolbar();
@@ -14967,7 +14987,7 @@
                 });
                 let city = candidates[0];
                 let type = 'light';
-                if(gameData.aiMoneyByOwner[ownerKey] >= 650 && gameData.aiManpowerByOwner[ownerKey] >= 1000 && city.hasFactory && Math.random() > 0.68) {
+                if(gameData.aiMoneyByOwner[ownerKey] >= 1000 && gameData.aiManpowerByOwner[ownerKey] >= 1000 && city.hasFactory && Math.random() > 0.68) {
                     type = 'heavy';
                 } else if(city.hasHarbor && gameData.aiMoneyByOwner[ownerKey] >= 265 && gameData.aiManpowerByOwner[ownerKey] >= 5000 && Math.random() > 0.72) {
                     type = 'ship';
@@ -15658,7 +15678,7 @@
                 if(gameData.terrainViewMode === 'schematic') {
                     drawTerrainSchematicMap(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                 } else {
-                    let paintOrder = ['water', 'sand', 'grass', 'forest', 'swamp', 'hill', 'mountain', 'urban'];
+                    let paintOrder = ['water', 'river', 'sand', 'grass', 'forest', 'swamp', 'hill', 'mountain', 'urban'];
                     for(let type of paintOrder) {
                         drawTerrainBlobLayer(terrainBaseCtx, type, -terrainBounds.minX, -terrainBounds.minY);
                     }
@@ -15709,7 +15729,7 @@
                 let px = hex.x + offsetX, py = hex.y + offsetY;
                 ctx.beginPath();
                 ctx.arc(px, py, discR, 0, Math.PI * 2);
-                ctx.fillStyle = '#2980b9';
+                ctx.fillStyle = hex.type === 'river' ? '#5dcee6' : '#2980b9';
                 ctx.fill();
             }
             for(let hex of gameData.hexList) {
