@@ -5634,6 +5634,10 @@
         }
 
         function startGame(mode) {
+            if(mode === 'ai' && gameData._soloPreviewGenerating) {
+                showNotification('Map is still generating...');
+                return;
+            }
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             menuDemoSeeded = false;
@@ -12849,7 +12853,7 @@
 
         function wodRestoreSoloPreviewSnapshot(newRadius, requestedShape) {
             let snap = gameData._soloPreviewSnapshot;
-            if(!snap || !gameData._soloMapPreviewMatchesStart) return false;
+            if(!snap) return false;
             if(snap.mapRadius !== newRadius || snap.mapShape !== requestedShape) return false;
             let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
             if(snap.fingerprint !== fp) return false;
@@ -12886,24 +12890,32 @@
 
         function previewMap() {
             wodArmMapPreviewSpinner('mapPreview');
+            gameData._soloPreviewGenerating = true;
+            gameData._soloMapPreviewMatchesStart = false;
+            gameData._soloPreviewSnapshot = null;
+            let startBtn = document.getElementById('setupBtnStartAi');
+            if(startBtn) startBtn.disabled = true;
             requestAnimationFrame(() => {
                 requestAnimationFrame(() => {
-                    let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
-                    gameData.mapRadius = mapSize;
-                    let aiEl = document.getElementById('setupAI');
-                    if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
-                    gameData.loadedCustomMap = false;
                     let ok = true;
                     try {
+                        let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
+                        gameData.mapRadius = mapSize;
+                        let aiEl = document.getElementById('setupAI');
+                        if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
+                        gameData.loadedCustomMap = false;
                         generateMap();
+                        previewLoadedMap('mapPreview');
                     } catch(e) {
                         ok = false;
                         console.warn(e);
+                    } finally {
+                        wodDisarmMapPreviewSpinner('mapPreview');
+                        gameData._soloMapPreviewMatchesStart = ok;
+                        if(ok) wodCaptureSoloPreviewSnapshot();
+                        gameData._soloPreviewGenerating = false;
+                        if(startBtn) startBtn.disabled = false;
                     }
-                    previewLoadedMap('mapPreview');
-                    wodDisarmMapPreviewSpinner('mapPreview');
-                    gameData._soloMapPreviewMatchesStart = ok;
-                    if(ok) wodCaptureSoloPreviewSnapshot();
                 });
             });
         }
@@ -12963,7 +12975,7 @@
                     }
                 } else {
                     let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
-                    let restoredPreviewMap = previewCommitted && wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
+                    let restoredPreviewMap = wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
                     gameData._soloMapPreviewMatchesStart = false;
                     if(restoredPreviewMap) {
                         // Exact preview map restored; do not regenerate terrain or borders.
