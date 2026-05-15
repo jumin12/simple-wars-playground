@@ -3284,6 +3284,7 @@
                 font-feature-settings: "tnum" 1;
             }
             #inGameUI #ui-income.chip-value,
+            #inGameUI #ui-land-income.chip-value,
             #inGameUI #ui-expenses.chip-value,
             #inGameUI #ui-manpower-income.chip-value {
                 width: 12ch;
@@ -4867,6 +4868,7 @@
                         <div class="wod-m-kpi"><span class="wod-m-kpi-lbl">Cash</span><span class="wod-m-kpi-val" data-ui-sync="ui-money">0</span></div>
                         <div class="wod-m-kpi"><span class="wod-m-kpi-lbl">MP</span><span class="wod-m-kpi-val" data-ui-sync="ui-manpower">0</span></div>
                         <div class="wod-m-kpi wod-m-kpi--wide"><span class="wod-m-kpi-lbl">Inc</span><span class="wod-m-kpi-val" data-ui-sync="ui-income">+0/s</span></div>
+                        <div class="wod-m-kpi wod-m-kpi--wide"><span class="wod-m-kpi-lbl">Land</span><span class="wod-m-kpi-val" data-ui-sync="ui-land-income">+0/s</span></div>
                         <div class="wod-m-kpi wod-m-kpi--grow"><span class="wod-m-kpi-lbl">Army</span><span class="wod-m-kpi-val" data-ui-sync="ui-troops">0</span></div>
                     </div>
                     <div class="wod-m-objective-hud" id="hudObjectiveMobileBlock">
@@ -4921,6 +4923,7 @@
                                 <div class="resource-section-chips">
                                     <div class="resource-chip">Cash <span class="chip-value" id="ui-money">0</span></div>
                                     <div class="resource-chip">Income <span class="chip-value" id="ui-income">+0/s</span></div>
+                                    <div class="resource-chip">Land <span class="chip-value" id="ui-land-income">+0/s</span></div>
                                     <div class="resource-chip expense">Upkeep <span class="chip-value" id="ui-expenses">-0/s</span></div>
                                 </div>
                             </div>
@@ -9025,10 +9028,14 @@
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
             }
-            // Light / heavy: may enter water for shortcuts (pathfinder picks land unless water is ≥50% cheaper).
+            // Light / heavy: no mountains; route-level movement below keeps them off water.
             if (hex.type === 'mountain') return false;
             if (isWaterHex(hex)) return true;
             return isClaimableLand(hex);
+        }
+
+        function isLandArmyUnit(unit) {
+            return !!unit && (unit.type === 'light' || unit.type === 'heavy');
         }
 
         function canCaptureFromFrontline(unit, hex) {
@@ -10102,9 +10109,8 @@
         }
 
         function canUseHexForMovement(unit, hex) {
-            // A unit can pass through any hex it's allowed to physically enter
-            // (land for ground units, water for ships, no mountains for ground).
-            // Pathfinding uses cost penalties to prefer friendly land instead of blocking.
+            // Route planning is stricter than terrain damage: normal armies stay on cardinal land paths.
+            if(isLandArmyUnit(unit) && isWaterHex(hex)) return false;
             return canUnitEnterHex(unit, hex);
         }
 
@@ -10255,7 +10261,9 @@
             if(!currentHex) return null;
             let best = null;
             let bestScore = Infinity;
-            for(let nHex of getNeighborHexes(currentHex)) {
+            let detourDirs = cardinalHexDirections;
+            for(let dir of detourDirs) {
+                let nHex = gameData.hexes[`${currentHex.q + dir.q},${currentHex.r + dir.r}`];
                 if(!canUseHexForMovement(unit, nHex)) continue;
                 let dx = targetX - nHex.x;
                 let dy = targetY - nHex.y;
@@ -10274,7 +10282,8 @@
             while(queue.length > 0) {
                 let {hex, d} = queue.shift();
                 if(d >= 7) continue;
-                for(let nHex of getNeighborHexes(hex)) {
+                for(let dir of detourDirs) {
+                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || seen.has(getHexKey(nHex))) continue;
                     if(!canUseHexForMovement(unit, nHex)) continue;
                     seen.add(getHexKey(nHex));
@@ -10437,24 +10446,6 @@
                 if(g.length > 1) return smoothGridPath(g);
             }
 
-            if((unit.type === 'light' || unit.type === 'heavy') && !isWaterHex(startHex) && isWaterHex(targetHex)) {
-                let borders = getNeighborHexes(targetHex).filter(h => h && !isWaterHex(h) && canUseHexForMovement(unit, h));
-                if(borders.length > 0) {
-                    let best = [];
-                    for(let b of borders) {
-                        let landSeg = findPathAroundTerrain(unit, b, startHex);
-                        if(landSeg.length === 0) continue;
-                        let merged = landSeg.slice();
-                        if(getHexKey(merged[merged.length - 1]) !== getHexKey(b)) merged.push(b);
-                        merged.push(targetHex);
-                        if(!best.length || merged.length < best.length) best = merged;
-                    }
-                    if(best.length > 0) return smoothGridPath(best);
-                }
-            }
-
-            /** Land-only vs land+water for army: use water only if total path cost is ≤ half the land-only cost (~50%+ faster). */
-            const WOD_WATER_SHORTCUT_VS_LAND = 2;
             let landArmyDual = (unit.type === 'light' || unit.type === 'heavy')
                 && !isWaterHex(startHex) && !isWaterHex(targetHex);
 
@@ -10480,7 +10471,6 @@
                     return h0 + mp * 0.09;
                 }
                 function movementCost(a, b) {
-                    let diagonal = a.q !== b.q && a.r !== b.r;
                     let terrain = 0;
                     if(b.type === 'forest') terrain = 0.5;
                     else if(b.type === 'swamp') terrain = 1.2;
@@ -10530,7 +10520,7 @@
                         let ck = key(b);
                         if(convoyHexExtraCost[ck]) terrain += convoyHexExtraCost[ck];
                     }
-                    return (diagonal ? 1.35 : 1) + terrain;
+                    return 1 + terrain;
                 }
                 function heapScore(hex, fScoreLoc) {
                     return fScoreLoc[key(hex)] ?? Infinity;
@@ -10597,6 +10587,7 @@
                 maxVisits = Math.max(900, Math.floor(maxVisits * heavy));
                 if((unit.type === 'light' || unit.type === 'heavy') && !forbidWater) maxVisits = Math.min(maxVisits, 2400);
                 if(unit.type === 'marine' && !forbidWater) maxVisits = Math.min(maxVisits, 3800);
+                let pathDirs = cardinalHexDirections;
 
                 while(open.length > 0 && maxVisits-- > 0) {
                     let current = heapPop(open, fScore);
@@ -10608,8 +10599,8 @@
                     }
                     visited.add(currentKey);
 
-                    for(let di = 0; di < hexDirections.length; di++) {
-                        let dir = hexDirections[di];
+                    for(let di = 0; di < pathDirs.length; di++) {
+                        let dir = pathDirs[di];
                         let nHex = gameData.hexes[`${current.q + dir.q},${current.r + dir.r}`];
                         if(!nHex) continue;
                         let nKey = key(nHex);
@@ -10629,10 +10620,6 @@
 
             if(landArmyDual) {
                 let landR = runPathAst(true);
-                let fullR = runPathAst(false);
-                if(landR.path.length === 0) return fullR.path;
-                if(fullR.path.length === 0) return landR.path;
-                if(fullR.cost * WOD_WATER_SHORTCUT_VS_LAND <= landR.cost) return fullR.path;
                 return landR.path;
             }
             return runPathAst(false).path;
@@ -10644,7 +10631,8 @@
             if(!cur || !isWaterHex(cur) || !targetHex) return null;
             let best = null;
             let bestScore = Infinity;
-            for(let nHex of getNeighborHexes(cur)) {
+            for(let dir of cardinalHexDirections) {
+                let nHex = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
                 if(!isWaterHex(nHex) || !canUseHexForMovement(unit, nHex)) continue;
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
@@ -10682,7 +10670,8 @@
             let best = null;
             let bestScore = Infinity;
             let tb = ((targetHex.q * 2654435761) ^ (targetHex.r * 1597334677) ^ (curHex.q * 2246822519)) >>> 0;
-            for(let nHex of getNeighborHexes(curHex)) {
+            for(let dir of cardinalHexDirections) {
+                let nHex = gameData.hexes[`${curHex.q + dir.q},${curHex.r + dir.r}`];
                 if(!canUseHexForMovement(unit, nHex)) continue;
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
@@ -12049,13 +12038,15 @@
         }
 
         let batchHexOwner = false;
+        let batchHexOwnerDirty = false;
 
         function setHexOwner(hex, owner) {
             if (hex.owner === owner) return;
             hex.owner = owner;
             hex.renderColor = hex.baseColor;
             gameData._landIncomeCacheDirty = true;
-            if (!batchHexOwner) wodMarkTerrainPoliticalDirty();
+            if (batchHexOwner) batchHexOwnerDirty = true;
+            else wodMarkTerrainPoliticalDirty();
         }
 
         function getHexesInRadius(cq, cr, R) {
@@ -15000,6 +14991,8 @@
             for(let ui = 0; ui < gameData.entities.length; ui++) {
                 let u = gameData.entities[ui];
                 if(!u || u.hp <= 0 || u.type === 'ship') continue;
+                let terrainCheckStride = wodHeavyEnts ? 5 : 3;
+                if(((ui + gameData._wodSimTick) % terrainCheckStride) !== 0) continue;
                 let hh = getNearestHexToPoint(u.x, u.y);
                 if(!hh || !canUnitEnterHex(u, hh)) ensureUnitPixelOnWalkableHex(u, 28);
             }
@@ -15038,7 +15031,11 @@
 
             let wodMobHexClaimBatch = !batchHexOwner;
             let wodSavedBatchHexOwner = batchHexOwner;
-            if(wodMobHexClaimBatch) batchHexOwner = true;
+            let wodSavedBatchHexOwnerDirty = batchHexOwnerDirty;
+            if(wodMobHexClaimBatch) {
+                batchHexOwner = true;
+                batchHexOwnerDirty = false;
+            }
 
             for (let i = gameData.entities.length - 1; i >= 0; i--) {
                 let unit = gameData.entities[i];
@@ -15207,8 +15204,10 @@
             }
 
             if(wodMobHexClaimBatch) {
+                let changedOwners = batchHexOwnerDirty;
                 batchHexOwner = wodSavedBatchHexOwner;
-                if(!batchHexOwner) wodMarkTerrainPoliticalDirty();
+                batchHexOwnerDirty = wodSavedBatchHexOwnerDirty || (wodSavedBatchHexOwner && changedOwners);
+                if(changedOwners && !batchHexOwner) wodMarkTerrainPoliticalDirty();
             }
 
             if(gameData._uiTroopCache === undefined) {
@@ -18076,8 +18075,10 @@
             if(!wodPinchHudOff && !wodSheetOpen) {
             // UI (hidden while on main menu — skip DOM work for attract-mode performance)
             syncHudObjectiveDisplay();
+            let hudOwner = wodLocalPlayerOwner();
             setUiText('ui-money', Math.floor(wodHudMoney()));
             setUiText('ui-income', formatSigned(gameData.income || 0, '/s'));
+            setUiText('ui-land-income', formatSigned(getOwnerLandIncome(hudOwner), '/s'));
             setUiText('ui-expenses', '-' + (gameData.expenses || 0).toFixed(1) + '/s');
             setUiText('ui-manpower', formatFullCount(wodHudManpower()));
             setUiText('ui-manpower-income', formatSigned(gameData.manpowerIncome || 0, '/s'));
@@ -18086,7 +18087,7 @@
             let tc = gameData._uiTroopCache;
             let tk = gameData._uiTankCache;
             let sc = gameData._uiShipCache;
-            let loHud = wodLocalPlayerOwner();
+            let loHud = hudOwner;
             if(tc === undefined) tc = getOwnerTroopManpower(loHud);
             if(tk === undefined) tk = getOwnerTanks(loHud);
             if(sc === undefined) sc = getOwnerShipCount(loHud);
@@ -19457,10 +19458,11 @@
             terrainHelp,
             isWaterHex,
             isClaimableLand,
-            beginHexOwnerBatch() { batchHexOwner = true; },
+            beginHexOwnerBatch() { batchHexOwner = true; batchHexOwnerDirty = false; },
             endHexOwnerBatch() {
                 batchHexOwner = false;
-                wodMarkTerrainPoliticalDirty();
+                if(batchHexOwnerDirty) wodMarkTerrainPoliticalDirty();
+                batchHexOwnerDirty = false;
             },
             syncTerrainCacheForEditorView(over) {
                 let keys = ['terrain', 'territory', 'diplomacy'];
