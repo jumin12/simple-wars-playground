@@ -4566,7 +4566,8 @@
 
                 <div class="esc-help-block">
                     <h4>Core loop and victory</h4>
-                    <p class="esc-help-prose">Cities fund your war effort: each one adds steady <strong>cash</strong> and <strong>manpower</strong> (the pool used to train troops). Build orders unlock from the bottom bar when you control the right structures and can pay.</p>
+                    <p class="esc-help-prose">Your top-bar <strong>Income</strong> number is total cash per second after all controlled sources are counted. It includes city income plus the separate <strong>Land</strong> stat shown beside it, so the Land value is a breakdown, not extra money outside the total.</p>
+                    <p class="esc-help-prose">Every owned non-water territory tile contributes a small amount of cash. Capturing more ground therefore matters even before you take another town, while the map’s starting split is balanced so players begin with matching territory income.</p>
                     <p class="esc-help-prose"><strong>Domination</strong> ends the match once you have captured <strong>every enemy city</strong> — straggler armies no longer matter if they have nowhere left to drill or recruit. <strong>Annihilation</strong> ignores the scoreboard of towns: you must destroy every hostile <em>combat</em> unit, while unarmed trade convoys never count toward that tally.</p>
                 </div>
 
@@ -4579,13 +4580,14 @@
                 <div class="esc-help-block">
                     <h4>Structures and income</h4>
                     <p class="esc-help-prose">A <strong>factory</strong> is a major investment: it lifts both money and manpower income and is required to train <strong>heavy infantry</strong>. A <strong>harbor</strong> raises cash a bit, and it is needed where the urban footprint touches open water so you can build <strong>ships</strong> from that port.</p>
+                    <p class="esc-help-prose">Cities provide the larger economy: each town adds base cash and manpower growth, factories increase both, and harbors add extra cash. Manpower growth is separate from cash income and is spent on training infantry, marines, ships, and heavy units.</p>
                     <p class="esc-help-prose"><strong>Trade convoys</strong> spawn between linked cities and pay a <strong>one-time</strong> bonus when they dock. If your budget stays underwater, <strong>unpaid upkeep</strong> will start chewing down army health until you recover — watch the treasury before you max out every regiment.</p>
                 </div>
 
                 <div class="esc-help-block">
                     <h4>Terrain and movement</h4>
                     <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. Armies route around them through passes and open ground; the game won’t path straight through rock you cannot enter.</p>
-                    <p class="esc-help-prose"><strong>Light infantry</strong> and <strong>heavies</strong> can use shallow <strong>sand</strong> along the coast but are very slow on open <strong>water</strong> tiles. <strong>Marines</strong> keep full speed on water and fight well there; they are weaker on dry inland terrain. <strong>Ships</strong> only move on water. Morale, being wet, and combat all reduce effective march speed on top of terrain.</p>
+                    <p class="esc-help-prose"><strong>Light infantry</strong> and <strong>heavies</strong> now route on land-only, cardinal paths: they avoid water, mountains, and diagonal shortcuts. <strong>Marines</strong> keep full speed on water and fight well there; they are weaker on dry inland terrain. <strong>Ships</strong> only move on water. Morale, terrain effects, and combat all modify movement speed.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -5071,7 +5073,7 @@
             <div class="panel">
                 <h2>Paused</h2>
                 <div class="esc-actions">
-                    <button class="menu-btn" onclick="toggleEscMenu(false)">Resume</button>
+                    <button class="menu-btn" onclick="toggleEscMenu(false)">Back to game</button>
                     <button class="menu-btn" onclick="showEscSection('helpSection')">Help</button>
                     <button class="menu-btn" onclick="showEscSection('settingsSection')">Settings</button>
                     <button class="menu-btn danger-btn" onclick="showEscSection('surrenderSection')">Surrender</button>
@@ -5099,7 +5101,7 @@
                     <h3>Surrender Game?</h3>
                     <p>This will abandon the current war and return to the main menu.</p>
                     <button class="menu-btn danger-btn" onclick="confirmSurrender()">Surrender</button>
-                    <button class="menu-btn" onclick="showEscSection('helpSection')">Cancel</button>
+                    <button class="menu-btn" onclick="toggleEscMenu(false)">Back to game</button>
                 </div>
             </div>
         </div>
@@ -5523,7 +5525,8 @@
             if(!guide) return;
             mount.innerHTML = guide.innerHTML
                 .replaceAll('menuHelpCanvas', 'escHelpCanvas')
-                .replaceAll('menuCompactTerrainKey', 'escCompactTerrainKey');
+                .replaceAll('menuCompactTerrainKey', 'escCompactTerrainKey')
+                .replaceAll('hidePanels()', 'toggleEscMenu(false)');
             mount.dataset.ready = '1';
         }
 
@@ -10268,7 +10271,7 @@
                 let dx = targetX - nHex.x;
                 let dy = targetY - nHex.y;
                 let frontPenalty = isFrontlineHex(nHex, unit.owner) ? 0 : 2500;
-                let mtn = (unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute)) ? hexMountainProximityScore(nHex) * 260 : 0;
+                let mtn = (unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute)) ? hexMountainProximityScore(nHex) * 28 : 0;
                 let score = dx * dx + dy * dy + frontPenalty + mtn + Math.random() * 280;
                 if(score < bestScore) {
                     bestScore = score;
@@ -10289,7 +10292,7 @@
                     seen.add(getHexKey(nHex));
                     let dx = targetX - nHex.x;
                     let dy = targetY - nHex.y;
-                    let mtn = hexMountainProximityScore(nHex) * 520;
+                    let mtn = hexMountainProximityScore(nHex) * 48;
                     let score = dx * dx + dy * dy + d * 8500 + mtn + Math.random() * 220;
                     if(score < bestScore) {
                         bestScore = score;
@@ -10468,7 +10471,7 @@
                         mp = hexMountainProximityScore(a);
                         mtnProxHeuristicCache.set(ak, mp);
                     }
-                    return h0 + mp * 0.09;
+                    return h0 + mp * 0.012;
                 }
                 function movementCost(a, b) {
                     let terrain = 0;
@@ -10507,7 +10510,7 @@
                                     }
                                 }
                             }
-                            ringExtra = touchM ? 12 : ((nearM ? 6.2 : 0) + Math.min(5.5, ring2Mt * 0.75));
+                            ringExtra = touchM ? 1.4 : ((nearM ? 0.8 : 0) + Math.min(1.2, ring2Mt * 0.16));
                             landMountRingExtraCache.set(bk, ringExtra);
                         }
                         terrain += ringExtra;
@@ -11132,6 +11135,33 @@
 
         function getUnitEffects(unit) {
             let effects = [];
+            let hex = getNearestHexToPoint(unit.x, unit.y);
+            if(hex && unit.type !== 'convoy') {
+                let atk = getTerrainAttackModifier(unit, hex);
+                let def = getTerrainDefenseModifier(unit, hex);
+                let spd = getUnitSpeedMultiplier(unit);
+                let terrainName = terrainLabel(hex.type);
+                let atkPct = Math.round(atk * 100);
+                let defPct = Math.round(def * 100);
+                let spdPct = Math.round(spd * 100);
+                let atkKind = atk > 1.04 ? 'buff' : (atk < 0.96 ? 'debuff' : 'neutral');
+                let defKind = def < 0.96 ? 'buff' : (def > 1.04 ? 'debuff' : 'neutral');
+                let spdKind = spd > 1.04 ? 'buff' : (spd < 0.96 ? 'debuff' : 'neutral');
+                effects.push({
+                    label: `${terrainName} atk ${atkPct}%`,
+                    detail: atkKind === 'buff' ? 'Terrain improves attack' : (atkKind === 'debuff' ? 'Terrain reduces attack' : 'No attack change from terrain')
+                });
+                effects.push({
+                    label: `${terrainName} def ${defPct}%`,
+                    detail: defKind === 'buff' ? 'Terrain improves defense' : (defKind === 'debuff' ? 'Terrain worsens defense' : 'No defense change from terrain')
+                });
+                if(spdKind !== 'neutral') {
+                    effects.push({
+                        label: `Speed ${spdPct}%`,
+                        detail: spdKind === 'buff' ? 'Current terrain/morale improves movement' : 'Current terrain/morale slows movement'
+                    });
+                }
+            }
             if(unit.healingFlash && unit.healingFlash > 0) effects.push({label: '+ Healing', detail: 'Recovering in friendly territory'});
             if(unit.encircledFlash && unit.encircledFlash > 0) effects.push({label: '! Encircled', detail: 'Taking attrition'});
             if(unit.amphibInWater) effects.push({label: '∿ At sea', detail: 'Marine: no damage while in water'});
@@ -11139,7 +11169,7 @@
             if(unit.unpaidFlash && unit.unpaidFlash > 0) effects.push({label: '$ Unpaid', detail: 'No money for upkeep'});
             if(unit.retreating) effects.push({label: 'Retreating', detail: 'Falling back to safety'});
             if(unit.holding) effects.push({label: 'Holding', detail: 'Waiting for support'});
-            if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && unit.shake && unit.shake > 0)
+            if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && ((unit.shake || 0) > 0 || (unit.activeCombatVisual || 0) > 0.06))
                 effects.push({label: 'Fighting', detail: 'Engaged — firing while advancing or retreating'});
             if(unit.type !== 'convoy') {
                 let mp = Math.round(unit.morale != null ? unit.morale : WOD_MORALE_MAX);
@@ -11946,7 +11976,7 @@
                 let replanT = unit.type === 'convoy' ? 0.12 : (unit.type === 'ship' ? 0.18 : 0.25);
                 let curHx = getNearestHexToPoint(unit.x, unit.y);
                 if(curHx && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute) &&
-                    getNeighborHexes(curHx).some(n => n && n.type === 'mountain')) replanT *= 0.48;
+                    getNeighborHexes(curHx).some(n => n && n.type === 'mountain')) replanT *= 1.25;
                 if(unit.blockedTimer > replanT && replanUnitOrder(unit)) {
                     unit.blockedTimer = 0;
                     return;
@@ -11971,7 +12001,7 @@
                 unit.blockedTimer = (unit.blockedTimer || 0) + dt;
                 let blk = 0.35;
                 let curHx = getNearestHexToPoint(unit.x, unit.y);
-                if(curHx && getNeighborHexes(curHx).some(n => n && n.type === 'mountain')) blk *= 0.55;
+                if(curHx && getNeighborHexes(curHx).some(n => n && n.type === 'mountain')) blk *= 1.15;
                 if(unit.blockedTimer > blk && replanUnitOrder(unit)) {
                     unit.blockedTimer = 0;
                     return;
@@ -11996,7 +12026,7 @@
                 let stuckLimit = 0.8;
                 let ch = getNearestHexToPoint(unit.x, unit.y);
                 if(ch && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute) &&
-                    getNeighborHexes(ch).some(n => n && n.type === 'mountain')) stuckLimit = 0.42;
+                    getNeighborHexes(ch).some(n => n && n.type === 'mountain')) stuckLimit = 0.9;
                 if(unit.stuckTimer > stuckLimit) {
                     unit.stuckTimer = 0;
                     replanUnitOrder(unit);
@@ -17470,6 +17500,33 @@
             ctx.restore();
         }
 
+        function drawCombatBurstIcon(ctx, x, y, size) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            ctx.fillStyle = '#f1c40f';
+            ctx.strokeStyle = '#050505';
+            ctx.lineWidth = Math.max(2, size * 0.16);
+            ctx.beginPath();
+            for(let i = 0; i < 12; i++) {
+                let a = (Math.PI * 2 * i) / 12;
+                let r = (i % 2 === 0) ? size : size * 0.48;
+                let px = Math.cos(a) * r;
+                let py = Math.sin(a) * r;
+                if(i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.stroke();
+            ctx.fill();
+            ctx.fillStyle = '#fff3a3';
+            ctx.beginPath();
+            ctx.arc(-size * 0.18, -size * 0.18, size * 0.18, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
         let wodPlayerSummarySig = '';
         function updatePlayerSummary() {
             let body = document.getElementById('playerSummaryBody');
@@ -17648,6 +17705,10 @@
                     + '|' + Math.floor((s.morale || 0) / 2) + '|' + Math.floor((s.manpower || 0) / 35) + '|' + ((s.shake || 0) > 0.04 ? 1 : 0)
                     + '|' + (s.convoySeaRoute ? 1 : 0) + '|' + ((s.encircledFlash || 0) > 0 ? 1 : 0)
                     + '|' + ((s.healingFlash || 0) > 0 ? 1 : 0) + '|' + (s.type === 'heavy' ? Math.floor((s.tanks || 0) / 3) : '');
+                if(!s.id && s.hp !== undefined) {
+                    let hx = getNearestHexToPoint(s.x, s.y);
+                    sig += '|h:' + (hx ? `${hx.q},${hx.r},${hx.type}` : 'none') + '|w:' + (s.inWater ? 1 : 0) + '|a:' + (s.amphibInWater ? 1 : 0);
+                }
             } else sig = 'n|' + sel.length;
             if(sig === _infoCardUiThrottle.s && now - _infoCardUiThrottle.t < (wodUsesVisualViewportLayout() ? 165 : 95)) return;
             _infoCardUiThrottle.s = sig;
@@ -17756,14 +17817,7 @@
                         ctx.save();
                         let py = city.y - (!gfxLite ? 52 : 44);
                         if(gameData.layers.cityNames) py = city.y - (!gfxLite ? 58 : 50);
-                        ctx.font = gfxLite ? 'bold 11px Arial' : 'bold 13px Arial';
-                        ctx.fillStyle = 'rgba(231,76,60,0.97)';
-                        ctx.strokeStyle = 'rgba(0,0,0,0.75)';
-                        ctx.lineWidth = gfxLite ? 2.5 : 3.2;
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        ctx.strokeText('COMBAT', city.x, py);
-                        ctx.fillText('COMBAT', city.x, py);
+                        drawCombatBurstIcon(ctx, city.x, py, gfxLite ? 8 : 10);
                         ctx.restore();
                     }
 
@@ -18023,15 +18077,7 @@
 
                     let wodCombatLabel = unit.shake && unit.shake > 0 || (unit.activeCombatVisual || 0) > 0.06;
                     if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && wodCombatLabel) {
-                        ctx.font = gfxLite ? 'bold 10px Arial' : 'bold 11px Arial';
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'bottom';
-                        ctx.lineWidth = gfxLite ? 2 : 3;
-                        ctx.strokeStyle = '#050505';
-                        ctx.fillStyle = '#e67e22';
-                        let ly = -ur - 10;
-                        ctx.strokeText('Fighting', 0, ly);
-                        ctx.fillText('Fighting', 0, ly);
+                        drawCombatBurstIcon(ctx, 0, -ur - 12, gfxLite ? 7 : 9);
                     }
 
                     drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
