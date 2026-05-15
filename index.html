@@ -6210,6 +6210,138 @@
                 if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 27 : minRelaxIter - 4)) break;
             }
         }
+
+        /** City centers + full urban footprints must not flip during deterministic land swaps. */
+        function wodBuildProtectedHexKeysForPoliticalLandTransfer() {
+            let prot = new Set();
+            if(!gameData.cities) return prot;
+            for(let city of gameData.cities) {
+                if(!city) continue;
+                prot.add(`${city.q},${city.r}`);
+                let urbanList = getCityUrbanTerrainHexes(city);
+                if(urbanList) {
+                    for(let uh of urbanList) prot.add(`${uh.q},${uh.r}`);
+                }
+            }
+            return prot;
+        }
+
+        /**
+         * Nudge disputed land wedges so each faction owns the same count of balancing land tiles
+         * (matches wodHexCountsTowardLandPoliticsBalance — water never counted toward parity).
+         * Does not rerun Voronoi; call wodRelaxWaterPoliticsToNeighborMajority afterward to sync sea shading.
+         */
+        function wodBalancePoliticalLandByFringeTransfer(ownerIds, maxSteps) {
+            if(!ownerIds || ownerIds.length < 2) return;
+            let valid = new Set(ownerIds),
+                sorted = [...ownerIds].sort((a, b) => a - b),
+                prot = wodBuildProtectedHexKeysForPoliticalLandTransfer();
+            maxSteps =
+                maxSteps != null ? maxSteps : Math.max(5000, (gameData.hexList && gameData.hexList.length) ? gameData.hexList.length * 80 : 8000);
+
+            let savedBatch = batchHexOwner;
+            batchHexOwner = true;
+            let stepsDone = 0;
+            try {
+                while(stepsDone < maxSteps) {
+                    stepsDone++;
+                    let cts = {},
+                        total = 0;
+                    for(let o of sorted) cts[o] = 0;
+                    for(let h of gameData.hexList) {
+                        if(!wodHexCountsTowardLandPoliticsBalance(h)) continue;
+                        if(valid.has(h.owner)) {
+                            cts[h.owner]++;
+                            total++;
+                        }
+                    }
+                    if(total === 0) break;
+                    let f = sorted.length,
+                        base = Math.floor(total / f),
+                        rem = total % f,
+                        tgt = {};
+                    for(let i = 0; i < f; i++) tgt[sorted[i]] = base + (i < rem ? 1 : 0);
+                    let surplus = null,
+                        deficit = null;
+                    for(let o of sorted)
+                        if(cts[o] > tgt[o]) {
+                            surplus = o;
+                            break;
+                        }
+                    for(let o of sorted)
+                        if(cts[o] < tgt[o]) {
+                            deficit = o;
+                            break;
+                        }
+                    if(surplus == null || deficit == null) break;
+
+                    let candidates = [];
+                    for(let h of gameData.hexList) {
+                        if(!wodHexCountsTowardLandPoliticsBalance(h) || h.owner !== surplus) continue;
+                        let kk = `${h.q},${h.r}`;
+                        if(prot.has(kk)) continue;
+                        let touches = false;
+                        for(let nb of getNeighborHexes(h)) {
+                            if(
+                                nb &&
+                                nb.owner === deficit &&
+                                wodHexCountsTowardLandPoliticsBalance(nb)
+                            ) {
+                                touches = true;
+                                break;
+                            }
+                        }
+                        if(!touches) continue;
+                        candidates.push(h);
+                    }
+                    candidates.sort((a, b) => (a.q === b.q ? a.r - b.r : a.q - b.q));
+                    let pick = null;
+                    for(let h of candidates)
+                        if(h.type !== 'mountain') {
+                            pick = h;
+                            break;
+                        }
+                    if(!pick && candidates.length) pick = candidates[0];
+                    if(!pick) break;
+                    setHexOwner(pick, deficit);
+                }
+            } finally {
+                batchHexOwner = savedBatch;
+            }
+            wodMarkTerrainPoliticalDirty();
+        }
+
+        /** Keep maritime shading aligned with refreshed land fronts without changing land totals. */
+        function wodRelaxWaterPoliticsToNeighborMajority(ownerIds, passesOpt) {
+            if(!ownerIds || ownerIds.length === 0) return;
+            let valid = new Set(ownerIds);
+            let passes = passesOpt != null ? passesOpt : 8;
+            for(let pass = 0; pass < passes; pass++) {
+                let changes = [];
+                for(let hex of gameData.hexList) {
+                    if(!isWaterHex(hex)) continue;
+                    let counts = {};
+                    for(let nHex of getNeighborHexes(hex)) {
+                        if(!nHex || nHex.owner <= 0 || !valid.has(nHex.owner)) continue;
+                        counts[nHex.owner] = (counts[nHex.owner] || 0) + 1;
+                    }
+                    let bestOwner = hex.owner;
+                    let bestCount = counts[bestOwner] || 0;
+                    for(let owner of ownerIds) {
+                        if(!valid.has(owner)) continue;
+                        let c = counts[owner] || 0;
+                        if(c > bestCount) {
+                            bestOwner = owner;
+                            bestCount = c;
+                        }
+                    }
+                    if(bestOwner !== hex.owner && bestCount > 0) changes.push({hex, owner: bestOwner});
+                }
+                if(changes.length === 0) break;
+                for(let ch of changes) setHexOwner(ch.hex, ch.owner);
+            }
+        }
+
         function wodDeterministicCitySplitPhase01(seedMixed) {
             let s = seedMixed >>> 0;
             s = Math.imul(s ^ (s >>> 17), 0xed558ccd);
@@ -11171,9 +11303,13 @@
             for(let pass = 0; pass < passes; pass++) {
                 let changes = [];
                 for(let hex of gameData.hexList) {
+                    /** Sea tiles keep Voronoi owners; smoothing only dry land uses dry-neighbor votes (coasts were stealing parity). */
+                    if(isWaterHex(hex)) continue;
                     let counts = {};
                     for(let nHex of getNeighborHexes(hex)) {
-                        if(nHex.owner > 0) counts[nHex.owner] = (counts[nHex.owner] || 0) + 1;
+                        if(!nHex || nHex.owner <= 0) continue;
+                        if(isWaterHex(nHex)) continue;
+                        counts[nHex.owner] = (counts[nHex.owner] || 0) + 1;
                     }
                     let bestOwner = hex.owner;
                     let bestCount = counts[bestOwner] || 0;
@@ -12928,6 +13064,15 @@
 
             wodSyncUrbanFootprintOwners();
             wodRemoveUnconnectedFactionHexPockets(ownersSorted);
+            if(f >= 2) {
+                wodBalancePoliticalLandByFringeTransfer(
+                    ownersSorted,
+                    Math.max(4800, (gameData.hexList && gameData.hexList.length) ? gameData.hexList.length * 90 : 9000),
+                );
+                wodRelaxWaterPoliticsToNeighborMajority(ownersSorted, Math.max(10, f + 8));
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+            }
+            wodSyncUrbanFootprintOwners();
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
@@ -13169,6 +13314,18 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             smoothStartingTerritory(ownersList, 6, 1);
+
+            if(ownersList.length >= 2) {
+                wodBalancePoliticalLandByFringeTransfer(
+                    ownersList,
+                    Math.max(5200, (gameData.hexList && gameData.hexList.length) ? gameData.hexList.length * 90 : 9000),
+                );
+                wodRelaxWaterPoliticsToNeighborMajority(ownersList, Math.max(10, ownersList.length + 8));
+                wodAssignWaterAndNonclaimablePoliticalVotes();
+                wodSyncUrbanFootprintOwners();
+                wodSyncCityOwnersFromCenterHex();
+                wodFinalizeStartingCitiesVsTerritory(startCities);
+            }
 
             spawnInitialFrontlineUnits(ownersList);
 
