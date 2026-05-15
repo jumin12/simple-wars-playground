@@ -6210,20 +6210,6 @@
                 if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 27 : minRelaxIter - 4)) break;
             }
         }
-        /** Preferred Voronoi seed per faction (capital with factory first). Falls back where needed. */
-        function wodCapitalCitiesOnePerOwner(ownerIds) {
-            let sorted = ownerIds && ownerIds.length ? [...ownerIds].sort((a, b) => a - b) : [];
-            let valid = new Set(ownerIds || []);
-            let out = [];
-            if(!sorted.length || !gameData.cities) return out;
-            for(let ow of sorted) {
-                if(!valid.has(ow)) continue;
-                let cap = gameData.cities.find(c => c && c.owner === ow && c.hasFactory)
-                    || gameData.cities.find(c => c && c.owner === ow);
-                if(cap) out.push(cap);
-            }
-            return out;
-        }
         function wodDeterministicCitySplitPhase01(seedMixed) {
             let s = seedMixed >>> 0;
             s = Math.imul(s ^ (s >>> 17), 0xed558ccd);
@@ -12942,13 +12928,6 @@
 
             wodSyncUrbanFootprintOwners();
             wodRemoveUnconnectedFactionHexPockets(ownersSorted);
-            wodAssignWaterAndNonclaimablePoliticalVotes();
-            let capSeedsPg = wodCapitalCitiesOnePerOwner(ownersSorted);
-            if(capSeedsPg.length >= ownersSorted.length) {
-                wodEqualizePoliticsBiasedVoronoi(ownersSorted, capSeedsPg, Math.max(80, f * 12));
-                wodAssignWaterAndNonclaimablePoliticalVotes();
-            }
-            wodSyncUrbanFootprintOwners();
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
@@ -13190,15 +13169,6 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             smoothStartingTerritory(ownersList, 6, 1);
-
-            wodAssignWaterAndNonclaimablePoliticalVotes();
-            let finStrong = ownersList.length >= 4 ? 102 : ownersList.length >= 3 ? 90 : 78;
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, finStrong);
-            wodAssignWaterAndNonclaimablePoliticalVotes();
-            wodSyncUrbanFootprintOwners();
-            wodPaintCapitalUrbanToDeclaredOwner(startCities);
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 11));
-            wodAssignWaterAndNonclaimablePoliticalVotes();
 
             spawnInitialFrontlineUnits(ownersList);
 
