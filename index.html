@@ -1313,6 +1313,44 @@
             border-radius: 8px;
         }
 
+        .wod-preview-shell {
+            position: relative;
+            width: 100%;
+            margin: 0 auto 20px;
+        }
+
+        .wod-preview-shell #mapPreview,
+        .wod-preview-shell #mpLobbyMapPreview {
+            margin-bottom: 0;
+        }
+
+        .wod-preview-busy {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            border-radius: 8px;
+            background: rgba(9, 20, 34, 0.72);
+            color: rgba(237, 243, 249, 0.94);
+            font: 700 13px system-ui, sans-serif;
+            letter-spacing: 0.04em;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .wod-preview-busy.hidden {
+            display: none;
+        }
+
+        .wod-preview-busy .wod-load-spinner {
+            width: 34px;
+            height: 34px;
+            border-width: 4px;
+        }
+
         .skin-grid-scroll {
             max-height: min(46vh, 440px);
             overflow-y: auto;
@@ -4371,7 +4409,13 @@
                     <button class="build-btn" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
                     <button class="build-btn" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
                 </div>
-                <canvas id="mapPreview"></canvas>
+                <div class="wod-preview-shell">
+                    <canvas id="mapPreview"></canvas>
+                    <div id="mapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
+                        <div class="wod-load-spinner" aria-hidden="true"></div>
+                        <span>Generating map…</span>
+                    </div>
+                </div>
                 <button class="menu-btn" id="setupBtnStartAi" onclick="startGame('ai')">Start Game</button>
                 <button class="menu-btn" id="setupBtnMpReturn" type="button" style="display:none" onclick="wodMpFinishSetupFromHost()">Return to lobby</button>
                 <button class="menu-btn" onclick="hidePanels()">Back</button>
@@ -4433,7 +4477,13 @@
                         </div>
                         <div>
                             <h3 style="margin:0 0 6px 0;font-size:1.08rem">Map &amp; rules</h3>
-                            <canvas id="mpLobbyMapPreview" width="360" height="200"></canvas>
+                            <div class="wod-preview-shell" style="max-width:440px">
+                                <canvas id="mpLobbyMapPreview" width="360" height="200"></canvas>
+                                <div id="mpLobbyMapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
+                                    <div class="wod-load-spinner" aria-hidden="true"></div>
+                                    <span>Generating map…</span>
+                                </div>
+                            </div>
                             <div id="mpGlSettingsReadout" class="mp-gl-readout"></div>
                             <div id="mpGlHostActions" style="display:none;margin-top:12px">
                                 <button type="button" class="menu-btn" id="mpBtnGlMap">Map…</button>
@@ -12681,6 +12731,11 @@
             let cv = document.getElementById(canvasId);
             if(!cv) return;
             cv.dataset.wodMapGenerating = '1';
+            let busy = document.getElementById(canvasId + 'Busy');
+            if(busy) {
+                busy.classList.remove('hidden');
+                busy.setAttribute('aria-hidden', 'false');
+            }
             gameData._wodPreviewSpinnerCanvasIds.add(canvasId);
             gameData._wodMapPreviewSpinnerActive = true;
             wodDrawMapPreviewGeneratingOverlay(cv);
@@ -12692,6 +12747,11 @@
             gameData._wodPreviewSpinnerCanvasIds.delete(canvasId);
             let cv = document.getElementById(canvasId);
             if(cv) cv.dataset.wodMapGenerating = '0';
+            let busy = document.getElementById(canvasId + 'Busy');
+            if(busy) {
+                busy.classList.add('hidden');
+                busy.setAttribute('aria-hidden', 'true');
+            }
             gameData._wodMapPreviewSpinnerActive = gameData._wodPreviewSpinnerCanvasIds.size > 0;
             if(!gameData._wodMapPreviewSpinnerActive && gameData._wodPreviewSpinnerRafId) {
                 cancelAnimationFrame(gameData._wodPreviewSpinnerRafId);
@@ -12767,6 +12827,63 @@
             }
         }
 
+        function wodDeepClonePlain(obj) {
+            return JSON.parse(JSON.stringify(obj));
+        }
+
+        function wodCaptureSoloPreviewSnapshot() {
+            gameData._soloPreviewSnapshot = {
+                fingerprint: wodComputeMapFingerprint(),
+                mapRadius: gameData.mapRadius,
+                mapShape: gameData.mapShape,
+                aiCount: gameData.aiCount,
+                mapGenSeed: gameData._mapGenSeed || 0,
+                hexList: wodDeepClonePlain(gameData.hexList || []),
+                cities: wodDeepClonePlain(gameData.cities || []),
+                roads: wodDeepClonePlain(gameData.roads || []),
+                entities: wodDeepClonePlain(gameData.entities || []),
+                camera: wodDeepClonePlain(gameData.camera || { x: 0, y: 0, zoom: 0.5 }),
+                citySplitAnglePhase: gameData._wodCitySplitAnglePhase,
+            };
+        }
+
+        function wodRestoreSoloPreviewSnapshot(newRadius, requestedShape) {
+            let snap = gameData._soloPreviewSnapshot;
+            if(!snap || !gameData._soloMapPreviewMatchesStart) return false;
+            if(snap.mapRadius !== newRadius || snap.mapShape !== requestedShape) return false;
+            let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
+            if(snap.fingerprint !== fp) return false;
+
+            gameData.mapRadius = snap.mapRadius;
+            gameData.mapShape = snap.mapShape;
+            gameData.loadedCustomMap = false;
+            gameData._mapGenSeed = snap.mapGenSeed || gameData._mapGenSeed;
+            gameData._lastMapFingerprint = snap.fingerprint;
+            gameData._wodCitySplitAnglePhase = snap.citySplitAnglePhase;
+            gameData.hexList = wodDeepClonePlain(snap.hexList);
+            gameData.hexes = {};
+            for(let h of gameData.hexList) gameData.hexes[`${h.q},${h.r}`] = h;
+            gameData.cities = wodDeepClonePlain(snap.cities);
+            gameData.roads = wodDeepClonePlain(snap.roads);
+            gameData.entities = wodDeepClonePlain(snap.entities);
+            gameData.camera = wodDeepClonePlain(snap.camera);
+
+            let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 1000;
+            let owners = wodOwnersListActiveForProcgen();
+            let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
+            gameData.money = startMoney;
+            gameData.manpower = 5000;
+            gameData.aiMoneyByOwner = {};
+            gameData.aiManpowerByOwner = {};
+            for(let owner of owners) {
+                gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : startMoney;
+                gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
+            }
+            gameData._landIncomeCacheDirty = true;
+            wodMarkTerrainFullDirty();
+            return true;
+        }
+
         function previewMap() {
             wodArmMapPreviewSpinner('mapPreview');
             requestAnimationFrame(() => {
@@ -12776,14 +12893,17 @@
                     let aiEl = document.getElementById('setupAI');
                     if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
                     gameData.loadedCustomMap = false;
+                    let ok = true;
                     try {
                         generateMap();
                     } catch(e) {
+                        ok = false;
                         console.warn(e);
                     }
                     previewLoadedMap('mapPreview');
                     wodDisarmMapPreviewSpinner('mapPreview');
-                    gameData._soloMapPreviewMatchesStart = true;
+                    gameData._soloMapPreviewMatchesStart = ok;
+                    if(ok) wodCaptureSoloPreviewSnapshot();
                 });
             });
         }
@@ -12843,15 +12963,22 @@
                     }
                 } else {
                     let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
+                    let restoredPreviewMap = previewCommitted && wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
                     gameData._soloMapPreviewMatchesStart = false;
-                    if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape) {
+                    if(restoredPreviewMap) {
+                        // Exact preview map restored; do not regenerate terrain or borders.
+                    } else if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape) {
                         let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
                         if(fp === gameData._lastMapFingerprint && gameData._mapGenSeed)
                             gameData._wodReuseMapGenSeed = true;
+                        gameData.mapRadius = newRadius;
+                        gameData.mapShape = requestedShape;
+                        generateMap();
+                    } else {
+                        gameData.mapRadius = newRadius;
+                        gameData.mapShape = requestedShape;
+                        generateMap();
                     }
-                    gameData.mapRadius = newRadius;
-                    gameData.mapShape = requestedShape;
-                    generateMap();
                 }
             }
             updateTerrainKey();
@@ -14237,7 +14364,7 @@
             if(tr) tr.setAttribute('aria-valuenow', String(Math.round(p)));
         }
 
-        /** Black splash: creep bar during work, clamp minimum time, animate to 100% before main menu (visible fill). */
+        /** Black splash: staged boot so users see what is being warmed before the menu appears. */
         function wodRunInitialBootToMenu() {
             let ov = document.getElementById('wodBootOverlay');
             let caption = document.getElementById('wodBootCaption');
@@ -14247,16 +14374,25 @@
             if(UI.mainMenu) UI.mainMenu.classList.add('hidden');
 
             let splashT0 = performance.now();
-            let displayed = 4;
+            let displayed = 0;
+            if(inner) inner.classList.remove('wod-boot-tween-suppress');
             wodSetBootSplashProgress(displayed);
-            if(inner) inner.classList.add('wod-boot-tween-suppress');
 
-            let creepTimer = setInterval(() => {
-                let t = (performance.now() - splashT0) / 1500;
-                let cap = bootErr ? 100 : Math.min(78, 42 + t * 36);
-                displayed = Math.min(cap, displayed + 2.1 + Math.random());
-                if(!bootErr) wodSetBootSplashProgress(displayed);
-            }, 52);
+            function nextFrame() {
+                return new Promise(resolve => requestAnimationFrame(() => resolve()));
+            }
+            function sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+            async function bootStage(text, pct, work, holdMs) {
+                if(caption) caption.textContent = text;
+                displayed = Math.max(displayed, Math.min(99, pct));
+                wodSetBootSplashProgress(displayed);
+                await nextFrame();
+                if(holdMs) await sleep(holdMs);
+                if(work) work();
+                await nextFrame();
+            }
 
             function revealMenu() {
                 if(inner) inner.classList.remove('wod-boot-tween-suppress');
@@ -14276,42 +14412,59 @@
                 });
             }
 
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    if(caption) caption.textContent = 'Building map…';
-                    try {
+            (async () => {
+                try {
+                    await bootStage('Loading interface panels…', 8, null, 160);
+                    await bootStage('Reading profile and settings…', 16, () => {
+                        try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
+                    }, 130);
+                    await bootStage('Preparing terrain palettes…', 25, () => {
+                        normalizeTerrainHexes();
+                        updateTerrainKey();
+                    }, 120);
+                    await bootStage('Building menu battlefield…', 38, () => {
                         bootstrapMenuBackgroundBattle();
-                    } catch(err) {
-                        bootErr = true;
-                        console.error(err);
-                        clearInterval(creepTimer);
-                        if(caption) caption.textContent = 'Could not load. Try refreshing.';
-                        if(inner) inner.classList.remove('wod-boot-tween-suppress');
-                        return;
-                    }
-                    clearInterval(creepTimer);
-                    displayed = Math.max(displayed, 62);
-
-                    let finishFillAndReveal = () => {
-                        displayed = Math.max(displayed, 88);
-                        let fillStart = performance.now();
-                        const fillMs = Math.max(620, Math.min(1100, 1650 - (fillStart - splashT0)));
-
-                        function fillTick(now) {
-                            let u = Math.min(1, (now - fillStart) / fillMs);
-                            let eased = 1 - Math.pow(1 - u, 2.2);
-                            wodSetBootSplashProgress(displayed + (100 - displayed) * eased);
-                            if(u < 1) requestAnimationFrame(fillTick);
-                            else setTimeout(revealMenu, bootErr ? 0 : 90);
+                    }, 60);
+                    await bootStage('Baking terrain and borders…', 62, () => {
+                        updateTerrainCache();
+                        draw();
+                    }, 140);
+                    await bootStage('Warming AI planners…', 74, () => {
+                        let dtSim = 2 / 60;
+                        for(let i = 0; i < 12; i++) update(dtSim);
+                    }, 130);
+                    await bootStage('Priming path and selection caches…', 84, () => {
+                        let movable = gameData.entities.filter(u => u && u.hp > 0 && u.type !== 'convoy').slice(0, 8);
+                        for(let u of movable) {
+                            let h = getNearestWalkableHexForUnit(u, u.x, u.y, 8);
+                            if(h) findLocalDetourHex(u, h.x + gameData.hexRadius * 2, h.y);
                         }
-                        requestAnimationFrame(fillTick);
-                    };
+                        syncInfoCardPanelThrottled();
+                    }, 130);
+                    await bootStage('Drawing first frame…', 92, () => {
+                        draw();
+                    }, 120);
 
                     let elapsed = performance.now() - splashT0;
-                    let waitRemain = Math.max(0, 1180 - elapsed);
-                    setTimeout(finishFillAndReveal, waitRemain);
-                });
-            });
+                    if(elapsed < 2400) await sleep(2400 - elapsed);
+                    let fillStart = performance.now();
+                    let fillFrom = Math.max(displayed, 92);
+                    function fillTick(now) {
+                        let u = Math.min(1, (now - fillStart) / 560);
+                        let eased = 1 - Math.pow(1 - u, 2.2);
+                        wodSetBootSplashProgress(fillFrom + (100 - fillFrom) * eased);
+                        if(u < 1) requestAnimationFrame(fillTick);
+                        else setTimeout(revealMenu, 120);
+                    }
+                    requestAnimationFrame(fillTick);
+                } catch(err) {
+                    bootErr = true;
+                    console.error(err);
+                    if(caption) caption.textContent = 'Could not load. Try refreshing.';
+                    if(inner) inner.classList.remove('wod-boot-tween-suppress');
+                    gameData._wodSkipMapGenLoader = false;
+                }
+            })();
         }
 
         function bootstrapMenuBackgroundBattle() {
