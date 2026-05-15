@@ -6206,13 +6206,15 @@
                 }
             }
         }
-        function wodNormalizeRectangleWaterFeatures(seedOffset) {
+        async function wodNormalizeRectangleWaterFeatures(seedOffset) {
             if(gameData.mapShape !== 'rectangle') return;
             let water = gameData.hexList.filter(h => wodIsNaturalWaterHex(h));
             if(!water.length) return;
             let seen = new Set();
             let comps = [];
+            let compBuilt = 0;
             for(let start of water) {
+                if(++compBuilt % 6 === 0) await wodMapGenYieldTick();
                 let sk = getHexKey(start);
                 if(seen.has(sk)) continue;
                 let queue = [start];
@@ -6220,7 +6222,9 @@
                 let comp = [];
                 seen.add(sk);
                 let minQ = start.q, maxQ = start.q, minR = start.r, maxR = start.r;
+                let bfs = 0;
                 while(qi < queue.length) {
+                    if(++bfs % 500 === 0) await wodMapGenYieldTick();
                     let cur = queue[qi++];
                     comp.push(cur);
                     minQ = Math.min(minQ, cur.q); maxQ = Math.max(maxQ, cur.q);
@@ -6238,9 +6242,12 @@
             }
 
             let totalWater = water.length;
+            let ci = 0;
             for(let c of comps) {
                 if(c.size >= 4) continue;
+                let hi = 0;
                 for(let h of c.cells) {
+                    if(++hi % 40 === 0) await wodMapGenYieldTick();
                     let wet = fbm(h.x * 0.012 + seedOffset + 7210, h.y * 0.012 + seedOffset + 7210, 3);
                     wodSetGeneratedTerrainType(h, wet > 0.62 ? 'swamp' : 'grass');
                     totalWater--;
@@ -6253,65 +6260,22 @@
             for(let c of keepers) {
                 if(totalWater <= maxWater) break;
                 if(c.size > maxWater * 0.72 && c.span > Math.sqrt(c.size) * 2.2) continue;
+                let hi = 0;
                 for(let h of c.cells) {
+                    if(++hi % 50 === 0) await wodMapGenYieldTick();
                     let wet = fbm(h.x * 0.012 + seedOffset + 7330, h.y * 0.012 + seedOffset + 7330, 3);
                     wodSetGeneratedTerrainType(h, wet > 0.58 ? 'swamp' : 'grass');
                 }
                 totalWater -= c.size;
             }
         }
-        function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
-            for(let pass = 0; pass < 2; pass++) {
-                let changes = [];
-                for(let h of gameData.hexList) {
-                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
-                    let counts = {};
-                    let waterAdj = 0;
-                    for(let nb of getNeighborHexes(h)) {
-                        if(!nb) continue;
-                        if(isWaterHex(nb)) {
-                            waterAdj++;
-                            continue;
-                        }
-                        if(nb.type === 'mountain' || nb.type === 'urban') continue;
-                        counts[nb.type] = (counts[nb.type] || 0) + 1;
-                    }
-                    let bestType = h.type, bestCount = 0;
-                    for(let type in counts) {
-                        if(counts[type] > bestCount) {
-                            bestType = type;
-                            bestCount = counts[type];
-                        }
-                    }
-                    if(waterAdj >= 2 && h.type !== 'sand' && h.type !== 'swamp') {
-                        let wet = fbm(h.x * 0.011 + seedOffset + 4410, h.y * 0.011 + seedOffset + 4410, 4);
-                        changes.push({ h, type: wet > 0.58 ? 'swamp' : 'sand' });
-                    } else if(bestType !== h.type && bestCount >= (pass === 0 ? 5 : 4)) {
-                        changes.push({ h, type: bestType });
-                    }
-                }
-                for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
-            }
-
-            for(let h of gameData.hexList) {
-                if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
-                let wet = fbm(h.x * 0.0065 + seedOffset + 4700, h.y * 0.0065 + seedOffset + 4700, 5);
-                let heat = fbm(h.x * 0.0042 + seedOffset + 4800, h.y * 0.0042 + seedOffset + 4800, 3);
-                let coast = getNeighborHexes(h).some(nb => nb && isWaterHex(nb));
-                if(coast) continue;
-                if(wet > 0.78 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'forest');
-                else if(wet > 0.68 && heat < 0.42 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'swamp');
-                else if(wet < 0.22 && (h.type === 'grass' || h.type === 'hill')) wodSetGeneratedTerrainType(h, 'sand');
-                else if(wet > 0.36 && wet < 0.62 && h.type === 'sand' && mapShape !== 'island') wodSetGeneratedTerrainType(h, 'grass');
-            }
-        }
-        function wodCarveNaturalRivers(mapShape, seedOffset, cols, rows) {
+        async function wodCarveNaturalRivers(mapShape, seedOffset, cols, rows) {
             let land = gameData.hexList.filter(h => h && !isWaterHex(h) && h.type !== 'mountain');
             if(land.length < 80) return;
             let lcm = wodLandCentroidMaxRadius(land);
             let riverCount = mapShape === 'rectangle'
-                ? 2 + (Math.random() < 0.62 ? 1 : 0) + (Math.random() < 0.28 ? 1 : 0)
-                : 1 + (Math.random() < 0.72 ? 1 : 0) + (Math.random() < 0.38 ? 1 : 0);
+                ? 2 + (Math.random() < 0.55 ? 1 : 0) + (Math.random() < 0.22 ? 1 : 0)
+                : 1 + (Math.random() < 0.68 ? 1 : 0) + (Math.random() < 0.32 ? 1 : 0);
 
             function waterStepsToNaturalWater(start, maxSteps) {
                 if(!start || wodIsNaturalWaterHex(start)) return 0;
@@ -6340,22 +6304,25 @@
                 return false;
             }
 
-            function pickRiverStart(ix) {
+            async function pickRiverStart(ix) {
                 let best = null;
                 let bestScore = -Infinity;
+                let scan = 0;
                 for(let h of land) {
+                    if(++scan % 420 === 0) await wodMapGenYieldTick();
                     if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
                     let dx = h.x - lcm.cx, dy = h.y - lcm.cy;
                     let dist = Math.hypot(dx, dy);
-                    if(mapShape === 'island' && dist > lcm.maxR * 0.72) continue;
+                    if(mapShape === 'island' && dist > lcm.maxR * 0.74) continue;
                     if(mapShape === 'rectangle') {
                         let edge = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
-                        if(edge > 0.78 || edge < 0.08) continue;
+                        if(edge > 0.8 || edge < 0.07) continue;
                     }
-                    let waterAway = waterStepsToNaturalWater(h, 14);
+                    let waterAway = waterStepsToNaturalWater(h, 16);
                     if(waterAway < (mapShape === 'island' ? 3 : 2)) continue;
                     let ridge = fbm(h.x * 0.012 + seedOffset + 5100 + ix * 91, h.y * 0.012 + seedOffset + 5100 + ix * 91, 4);
-                    let score = ridge * 120 + waterAway * 12 - Math.abs(dist - lcm.maxR * 0.38) * 0.02 + Math.random() * 10;
+                    let valley = fbm(h.x * 0.008 + seedOffset + 5150 + ix * 17, h.y * 0.008 + seedOffset + 5150 + ix * 17, 3);
+                    let score = ridge * 88 + valley * 42 + waterAway * 11 - Math.abs(dist - lcm.maxR * 0.4) * 0.018 + Math.random() * 8;
                     if(score > bestScore) {
                         bestScore = score;
                         best = h;
@@ -6364,57 +6331,150 @@
                 return best;
             }
 
-            function paintRiverCell(h, ix, step) {
-                if(!h || h.type === 'urban') return;
+            function paintRiverCore(h) {
+                if(!h || h.type === 'urban' || h.type === 'mountain' || wodIsNaturalWaterHex(h)) return;
                 wodSetGeneratedTerrainType(h, 'river');
-                let wide = (step % 4 === 0) || fbm(h.x * 0.021 + seedOffset + 5300 + ix, h.y * 0.021 + seedOffset + 5300 + ix, 3) > 0.52;
-                for(let nb of getNeighborHexes(h)) {
-                    if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                    if(wodIsNaturalWaterHex(nb)) continue;
-                    if(wide && Math.random() < 0.42) wodSetGeneratedTerrainType(nb, 'river');
-                    else if(!isWaterHex(nb)) {
-                        let wet = fbm(nb.x * 0.018 + seedOffset + 5400, nb.y * 0.018 + seedOffset + 5400, 3);
-                        wodSetGeneratedTerrainType(nb, wet > 0.52 ? 'swamp' : 'sand');
-                    }
-                }
             }
 
             for(let ri = 0; ri < riverCount; ri++) {
-                let cur = pickRiverStart(ri);
+                let cur = await pickRiverStart(ri);
                 if(!cur) continue;
-                let angle = mapShape === 'rectangle'
-                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.95
-                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 1.05;
-                let maxSteps = Math.max(34, Math.floor((mapShape === 'island' ? rows : cols) * 1.75));
+                let flowAngle = mapShape === 'rectangle'
+                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.42
+                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 0.62;
+                let maxSteps = Math.max(44, Math.floor((mapShape === 'island' ? rows : cols) * (mapShape === 'rectangle' ? 2.05 : 1.92)));
                 let seen = new Set();
                 for(let step = 0; step < maxSteps && cur; step++) {
+                    if(step % 6 === 0) await wodMapGenYieldTick();
                     let ck = getHexKey(cur);
                     if(seen.has(ck)) break;
                     seen.add(ck);
-                    paintRiverCell(cur, ri, step);
-                    if(riverTouchesNaturalWater(cur) && step > 6) break;
+                    paintRiverCore(cur);
+                    if(riverTouchesNaturalWater(cur) && step > 8) break;
 
-                    let best = null, bestScore = Infinity;
+                    let wander = fbm(step * 0.19 + seedOffset + 5650 + ri * 97, cur.x * 0.0018 + cur.y * 0.0018, 4);
+                    let targetAngle = flowAngle + Math.sin(step * 0.38 + seedOffset * 0.09 + ri * 1.7) * (0.58 + wander * 0.42);
+                    flowAngle += (wander - 0.5) * 0.1;
+
+                    let cand = [];
                     for(let dir of cardinalHexDirections) {
                         let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
                         if(!nb || nb.type === 'urban') continue;
                         if(seen.has(getHexKey(nb))) continue;
                         let dx = nb.x - cur.x, dy = nb.y - cur.y;
-                        let forward = -(Math.cos(angle) * dx + Math.sin(angle) * dy);
+                        let forward = -(Math.cos(targetAngle) * dx + Math.sin(targetAngle) * dy);
+                        let lowVal = (nb.type === 'hill' ? -0.1 : 0) + (nb.type === 'forest' ? -0.05 : 0) + (nb.type === 'swamp' ? 0.05 : 0);
                         let edgePull = mapShape === 'island'
-                            ? -Math.hypot(nb.x - lcm.cx, nb.y - lcm.cy) * 0.03
-                            : -Math.max(Math.abs(nb.q) / Math.max(cols, 1), Math.abs(nb.r) / Math.max(rows, 1)) * 18;
-                        let carveCost = nb.type === 'mountain' ? 140 : 0;
-                        let meander = fbm(nb.x * 0.017 + seedOffset + 5500 + ri * 77, nb.y * 0.017 + seedOffset + 5500 + ri * 77, 3) * 18;
-                        let score = forward + edgePull + carveCost + meander;
-                        if(score < bestScore) {
-                            bestScore = score;
-                            best = nb;
+                            ? -Math.hypot(nb.x - lcm.cx, nb.y - lcm.cy) * 0.026
+                            : -Math.max(Math.abs(nb.q) / Math.max(cols, 1), Math.abs(nb.r) / Math.max(rows, 1)) * 15;
+                        let carveCost = nb.type === 'mountain' ? 220 : 0;
+                        let meander = fbm(nb.x * 0.014 + seedOffset + 5750 + ri * 83, nb.y * 0.014 + seedOffset + 5750 + ri * 83, 4) * 13;
+                        let score = forward * 1.08 + edgePull + carveCost + meander + lowVal;
+                        cand.push({ nb, score });
+                    }
+                    cand.sort((a, b) => a.score - b.score);
+                    if(!cand.length) break;
+                    let pick = cand[0];
+                    if(cand.length > 1 && Math.random() < 0.14) pick = cand[1];
+                    cur = pick.nb;
+                }
+            }
+        }
+
+        /** After river cores exist: grade banks (sand/grass/swamp) and rare gentle widening for a natural channel. */
+        function wodPolishRiverCorridor(seedOffset, mapShape) {
+            let bankKeys = new Set();
+            for(let h of gameData.hexList) {
+                if(!h || h.type !== 'river') continue;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb || nb.type === 'river' || wodIsNaturalWaterHex(nb) || nb.type === 'mountain' || nb.type === 'urban') continue;
+                    bankKeys.add(getHexKey(nb));
+                }
+            }
+            for(let key of bankKeys) {
+                let h = gameData.hexes[key];
+                if(!h) continue;
+                let rn = 0, wn = 0;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb) continue;
+                    if(nb.type === 'river') rn++;
+                    if(isWaterHex(nb)) wn++;
+                }
+                let wet = fbm(h.x * 0.019 + seedOffset + 6290, h.y * 0.019 + seedOffset + 6290, 4);
+                let slope = fbm(h.x * 0.011 + seedOffset + 6390, h.y * 0.011 + seedOffset + 6390, 3);
+
+                if(rn >= 2 && wet > 0.36) wodSetGeneratedTerrainType(h, 'swamp');
+                else if(rn >= 1 && wet > 0.84) wodSetGeneratedTerrainType(h, 'swamp');
+                else if(wn > 0 && wet < 0.42) wodSetGeneratedTerrainType(h, 'sand');
+                else if(wet < 0.3 && slope > 0.52) wodSetGeneratedTerrainType(h, 'sand');
+                else if(slope < 0.42 && wet > 0.52 && rn >= 1) wodSetGeneratedTerrainType(h, 'grass');
+                else wodSetGeneratedTerrainType(h, 'grass');
+            }
+
+            let riv = gameData.hexList.filter(h => h && h.type === 'river');
+            for(let h of riv) {
+                if(fbm(h.x * 0.026 + seedOffset + 6480, h.y * 0.026 + seedOffset + 6480, 3) < 0.74) continue;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb || nb.type === 'mountain' || nb.type === 'urban' || wodIsNaturalWaterHex(nb)) continue;
+                    if(nb.type === 'river') continue;
+                    if((nb.type === 'grass' || nb.type === 'sand') &&
+                        fbm(nb.x * 0.031 + seedOffset + 6490, nb.y * 0.031 + seedOffset + 6490, 3) > 0.6)
+                        wodSetGeneratedTerrainType(nb, 'river');
+                }
+            }
+        }
+
+        async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
+            for(let pass = 0; pass < 3; pass++) {
+                let changes = [];
+                let hi = 0;
+                for(let h of gameData.hexList) {
+                    if(++hi % 500 === 0) await wodMapGenYieldTick();
+                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                    let counts = {};
+                    let waterAdj = 0;
+                    let riverAdj = 0;
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!nb) continue;
+                        if(nb.type === 'river') riverAdj++;
+                        if(isWaterHex(nb)) {
+                            waterAdj++;
+                            continue;
+                        }
+                        if(nb.type === 'mountain' || nb.type === 'urban') continue;
+                        counts[nb.type] = (counts[nb.type] || 0) + 1;
+                    }
+                    let bestType = h.type, bestCount = 0;
+                    for(let type in counts) {
+                        if(counts[type] > bestCount) {
+                            bestType = type;
+                            bestCount = counts[type];
                         }
                     }
-                    cur = best;
-                    angle += (fbm((cur ? cur.x : 0) * 0.01 + seedOffset + 5600, (cur ? cur.y : 0) * 0.01 + seedOffset + 5600, 2) - 0.5) * 0.45;
+                    let wetN = fbm(h.x * 0.011 + seedOffset + 4410, h.y * 0.011 + seedOffset + 4410, 4);
+                    if((waterAdj >= 2 || riverAdj >= 2) && h.type !== 'sand' && h.type !== 'swamp') {
+                        changes.push({ h, type: wetN > 0.56 ? 'swamp' : 'sand' });
+                    } else if(riverAdj === 1 && waterAdj === 0 && h.type === 'forest' && wetN > 0.62) {
+                        changes.push({ h, type: 'grass' });
+                    } else if(bestType !== h.type && bestCount >= (pass === 0 ? 5 : (pass === 1 ? 4 : 3))) {
+                        changes.push({ h, type: bestType });
+                    }
                 }
+                for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
+            }
+
+            let hi2 = 0;
+            for(let h of gameData.hexList) {
+                if(++hi2 % 500 === 0) await wodMapGenYieldTick();
+                if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                let wet = fbm(h.x * 0.0065 + seedOffset + 4700, h.y * 0.0065 + seedOffset + 4700, 5);
+                let heat = fbm(h.x * 0.0042 + seedOffset + 4800, h.y * 0.0042 + seedOffset + 4800, 3);
+                let coast = getNeighborHexes(h).some(nb => nb && isWaterHex(nb));
+                if(coast) continue;
+                if(wet > 0.78 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'forest');
+                else if(wet > 0.68 && heat < 0.42 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'swamp');
+                else if(wet < 0.22 && (h.type === 'grass' || h.type === 'hill')) wodSetGeneratedTerrainType(h, 'sand');
+                else if(wet > 0.36 && wet < 0.62 && h.type === 'sand' && mapShape !== 'island') wodSetGeneratedTerrainType(h, 'grass');
             }
         }
         /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
@@ -6485,7 +6545,7 @@
             return !!(h && isClaimableLand(h) && !isWaterHex(h));
         }
         /** Iteratively adjust biased Voronoi so dry land totals (mountains counted) split evenly when possible (±1 if indivisible). */
-        function wodEqualizePoliticsBiasedVoronoi(ownerIds, capitalCities, iterations) {
+        async function wodEqualizePoliticsBiasedVoronoi(ownerIds, capitalCities, iterations) {
             if(!ownerIds || ownerIds.length < 2) return;
             let valid = new Set(ownerIds);
             let sorted = [...ownerIds].sort((a, b) => a - b);
@@ -6505,12 +6565,15 @@
             effIter = Math.min(198, Math.max(iterations + (multiFaction && !mpBoost ? 20 : 0), effIter));
             let minRelaxIter = Math.max(26, mpBoost ? 28 : 22, multiFaction ? 34 : (fCount === 2 ? 28 : 0));
             for(let it = 0; it < effIter; it++) {
+                if(it > 0 && it % 4 === 0) await wodMapGenYieldTick();
                 wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
                 wodAssignWaterAndNonclaimablePoliticalVotes();
                 let cts = {};
                 let total = 0;
                 for(let o of sorted) cts[o] = 0;
+                let hi = 0;
                 for(let h of gameData.hexList) {
+                    if(++hi % 800 === 0) await wodMapGenYieldTick();
                     if(!wodHexCountsTowardLandPoliticsBalance(h)) continue;
                     if(valid.has(h.owner)) {
                         cts[h.owner]++;
@@ -6568,7 +6631,7 @@
             return keys;
         }
         /** Final border trim: move only adjacent dry frontier cells until each faction has the target non-water count. */
-        function wodExactEqualizePoliticalLandCounts(ownerIds, protectedCities, maxMovesOpt) {
+        async function wodExactEqualizePoliticalLandCounts(ownerIds, protectedCities, maxMovesOpt) {
             if(!ownerIds || ownerIds.length < 2) return;
             let sorted = [...ownerIds].sort((a, b) => a - b);
             let valid = new Set(sorted);
@@ -6584,9 +6647,12 @@
             }
 
             for(let move = 0; move < maxMoves && !countDeltaDone(); move++) {
+                if(move > 0 && move % 90 === 0) await wodMapGenYieldTick();
                 let best = null;
                 let bestScore = -Infinity;
+                let hi = 0;
                 for(let hex of gameData.hexList) {
+                    if(++hi % 900 === 0) await wodMapGenYieldTick();
                     if(!wodHexCountsTowardLandPoliticsBalance(hex)) continue;
                     if(!valid.has(hex.owner)) continue;
                     let donor = hex.owner;
@@ -13128,7 +13194,7 @@
                         gameData.loadedCustomMap = false;
                         await generateMap();
                     } else {
-                        assignStartingCities();
+                        await assignStartingCities();
                     }
                 } else {
                     let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
@@ -13321,7 +13387,7 @@
          * political Voronoi from terrain seeds → equalize borders → equal city count inside each territory, non-touching urban footprints.
          * Sets gameData._wodProcgenBorderFirstApplied on success only. Does not call assignStartingCities.
          */
-        function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
+        async function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
             gameData._wodProcgenBorderFirstApplied = false;
             if(!(gameData.mp && gameData.mp.enabled)) {
                 let aiSync = document.getElementById('setupAI');
@@ -13366,10 +13432,10 @@
             softenMountainHexBetweenOwners(ownersSorted);
             ensureOwnersReachableByLand(ownersSorted);
             smoothStartingTerritory(ownersSorted, 4, 4);
-            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 56 : 48);
+            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 56 : 48);
             smoothStartingTerritory(ownersSorted, 5, 2);
             if(ownersSorted.length >= 3) {
-                wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(52, f * 7));
+                await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(52, f * 7));
                 wodAssignWaterAndNonclaimablePoliticalVotes();
                 smoothStartingTerritory(ownersSorted, 5, 1);
             }
@@ -13469,6 +13535,7 @@
             let kpf = 0;
             outerFind: for(let kk = kUpper; kk >= 2; kk--) {
                 for(let sepTry = 12; sepTry >= 7; sepTry--) {
+                    if(sepTry % 2 === 0) await wodMapGenYieldTick();
                     anchorChebSep = sepTry;
                     let plan = tryPlan(kk);
                     if(plan) {
@@ -13522,16 +13589,16 @@
 
             wodSyncUrbanFootprintOwners();
             wodRemoveUnconnectedFactionHexPockets(ownersSorted);
-            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
+            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
             wodSyncUrbanFootprintOwners();
-            wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
+            await wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
             wodNormalizeStartingCityEconomy(ownersSorted);
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
         }
 
-        function assignStartingCities() {
+        async function assignStartingCities() {
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
             // Clear entities & money just in case
@@ -13753,11 +13820,11 @@
 
             smoothStartingTerritory(ownersList, 5, 2);
             let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
+            await wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
 
             if(ownersList.length >= 3) {
                 wodAssignWaterAndNonclaimablePoliticalVotes();
-                wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
+                await wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
                 smoothStartingTerritory(ownersList, 5, 1);
                 wodAssignWaterAndNonclaimablePoliticalVotes();
             }
@@ -13770,7 +13837,7 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             smoothStartingTerritory(ownersList, 6, 1);
-            wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
+            await wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
 
@@ -13821,21 +13888,19 @@
             });
         }
         function wodMapGenYieldTick() {
-            return new Promise(function(resolve) { setTimeout(resolve, 0); });
+            return new Promise(function(resolve) {
+                if(typeof requestIdleCallback === 'function')
+                    requestIdleCallback(function() { setTimeout(resolve, 0); }, { timeout: 50 });
+                else setTimeout(resolve, 0);
+            });
         }
 
         async function generateMap() {
             let ownsInnerRng = !_wodSavedMathRandom;
-            let showMapGenOverlay = !gameData._wodSkipMapGenLoader;
+            /** Full-screen map overlay removed: preview/lobby use in-panel spinners only. */
+            let showMapGenOverlay = false;
             gameData._wodSkipMapGenLoader = false;
             let mapGenOverlayEl = null;
-            if(showMapGenOverlay) {
-                mapGenOverlayEl = document.getElementById('wodMapGenOverlay');
-                if(mapGenOverlayEl) {
-                    mapGenOverlayEl.classList.remove('hidden');
-                    mapGenOverlayEl.setAttribute('aria-busy', 'true');
-                }
-            }
             try {
             await wodMapGenPaintYield();
             let startMoneyInput = document.getElementById('setupMoney');
@@ -13890,7 +13955,7 @@
             let spacing = hr * 1.35;
             
             for(let r = -rows; r <= rows; r++) {
-                if((r + rows) % 10 === 0) await wodMapGenYieldTick();
+                if((r + rows) % 4 === 0) await wodMapGenYieldTick();
                 for(let q = -cols; q <= cols; q++) {
                     let x = q * spacing;
                     let y = r * spacing;
@@ -14063,17 +14128,25 @@
             }
 
             wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
-            wodCarveNaturalRivers(mapShape, seedOffset, cols, rows);
-            wodNaturalizeBiomeBlends(seedOffset, mapShape);
-            wodNormalizeRectangleWaterFeatures(seedOffset);
+            await wodMapGenYieldTick();
+            await wodCarveNaturalRivers(mapShape, seedOffset, cols, rows);
+            wodPolishRiverCorridor(seedOffset, mapShape);
+            await wodMapGenYieldTick();
+            await wodNaturalizeBiomeBlends(seedOffset, mapShape);
+            await wodMapGenYieldTick();
+            await wodNormalizeRectangleWaterFeatures(seedOffset);
+            await wodMapGenYieldTick();
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
+            await wodMapGenYieldTick();
 
+            await wodMapGenYieldTick();
             // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
             ensureMountainPasses();
             softenLandFullyBlockedByMountainRing();
             ensureMountainPasses();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
+            await wodMapGenYieldTick();
 
             // Generate Cities — uses live faction count from solo setup or lobby before placing towns.
             if(!(gameData.mp && gameData.mp.enabled)) {
@@ -14087,7 +14160,7 @@
             gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
 
             gameData._wodProcgenBorderFirstApplied = false;
-            let procOk = wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+            let procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
             if(procOk) {
                 procSucceeded = true;
                 break outerProcTerrain;
@@ -14114,6 +14187,7 @@
                 let minWaterSteps = mapShape === 'island' ? 3 : 2;
                 let maxAttemptsPerCity = Math.min(980, Math.max(160, (cityPickOrder.length || mapR * mapR) * 4));
                 for(let i=0; i<numCities; i++) {
+                    if((i & 1) === 0) await wodMapGenYieldTick();
                     let valid = false; let attempts = 0;
                     while(!valid && attempts < maxAttemptsPerCity) {
                         let h = null;
@@ -14202,7 +14276,7 @@
                 if(nearest) gameData.roads.push({from: c1, to: nearest});
             }
             
-            assignStartingCities();
+            await assignStartingCities();
             updateTerrainKey();
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
