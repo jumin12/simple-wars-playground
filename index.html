@@ -6411,193 +6411,86 @@
                 }
             }
 
-            let landDeep = [];
+            let maxCoast = 0;
             for(let h of gameData.hexList) {
                 if(!h || h.type === 'mountain' || h.type === 'urban' || isWaterHex(h)) continue;
                 let dk = dist.get(key(h));
-                if(dk == null || dk < 5) continue;
-                landDeep.push({ h, dk });
+                if(dk != null) maxCoast = Math.max(maxCoast, dk);
             }
-            if(!landDeep.length) {
-                for(let h of gameData.hexList) {
-                    if(!h || h.type === 'mountain' || h.type === 'urban' || isWaterHex(h)) continue;
-                    let dk = dist.get(key(h));
-                    if(dk == null || dk < 2) continue;
-                    landDeep.push({ h, dk });
-                }
-            }
-            if(!landDeep.length) return;
-            landDeep.sort((a, b) => b.dk - a.dk);
-            let maxLandDk = landDeep[0] ? landDeep[0].dk : 0;
-            let isIsland = mapShape === 'island';
-            let dkLow = isIsland ? Math.max(5, Math.floor(maxLandDk * 0.13)) : 5;
-            let dkHigh = isIsland ? Math.max(dkLow + 2, Math.floor(maxLandDk * 0.46)) : 999999;
-            let landStarts = landDeep.filter(e => e.dk >= dkLow && e.dk <= dkHigh);
-            if(!landStarts.length)
-                landStarts = landDeep.filter(e => e.dk >= dkLow);
-            if(!landStarts.length)
-                landStarts = landDeep;
-            landStarts.sort((a, b) => b.dk - a.dk);
+            let minRiverCd = mapShape === 'island' ? 3 : 2;
+            let maxRiverCd = mapShape === 'island'
+                ? Math.max(5, Math.floor(maxCoast * 0.26))
+                : Math.max(7, Math.floor(maxCoast * 0.34));
 
-            let riverCount = mapShape === 'rectangle' ? 4 : 2;
-            let usedStarts = new Set();
-            /** Centerline only — widen/fill must never expand from growing water blobs. */
-            let pathCoreKeys = new Set();
+            let landDry = gameData.hexList.filter(h => h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban');
+            let lcm = wodLandCentroidMaxRadius(landDry);
 
-            function islandRiverWouldBisect(pathKeys) {
-                if(!isIsland || pathKeys.length < 5) return false;
-                let block = new Set(pathKeys);
-                let total = 0;
-                for(let h of gameData.hexList) {
-                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
-                    if(block.has(key(h))) continue;
-                    total++;
-                }
-                if(total < 48) return false;
-                let seed = null;
-                for(let h of gameData.hexList) {
-                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
-                    if(block.has(key(h))) continue;
-                    seed = h;
-                    break;
-                }
-                if(!seed) return false;
-                let seen = new Set([key(seed)]);
-                let q = [seed];
-                while(q.length) {
-                    let h = q.pop();
-                    for(let nb of getNeighborHexes(h)) {
-                        if(!nb) continue;
-                        if(block.has(key(nb))) continue;
-                        if(isWaterHex(nb) || nb.type === 'mountain' || nb.type === 'urban') continue;
-                        let nk = key(nb);
-                        if(seen.has(nk)) continue;
-                        seen.add(nk);
-                        q.push(nb);
-                    }
-                }
-                return seen.size < total * 0.987;
-            }
-
-            function buildIslandRiverPath(start, ri, maxSteps, mouthD) {
-                let keys = [];
-                let seen = new Set();
-                let cur = start;
-                for(let step = 0; step < maxSteps && cur; step++) {
-                    let ck = key(cur);
-                    if(seen.has(ck)) return { keys: [], ok: false };
-                    seen.add(ck);
-                    let dcur = dist.get(ck);
-                    if(dcur == null) return { keys: [], ok: false };
-
-                    let reachedOutlet = (isWaterHex(cur) && isIslandOceanSink(cur));
-                    if(isIsland && step >= 12 && dcur <= mouthD)
-                        reachedOutlet = true;
-
-                    if(reachedOutlet) {
-                        if(!isWaterHex(cur)) keys.push(ck);
-                        return { keys, ok: true };
-                    }
-
-                    if(!isWaterHex(cur)) keys.push(ck);
-
-                    let bestDn = Infinity;
-                    for(let dir of hexDirections) {
-                        let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
-                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                        if(seen.has(key(nb))) continue;
-                        if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
-                        let dn = dist.get(key(nb));
-                        if(dn == null) continue;
-                        if(dn > dcur) continue;
-                        if(dn < bestDn) bestDn = dn;
-                    }
-                    if(bestDn === Infinity) return { keys: [], ok: false };
-
-                    let ties = [];
-                    for(let dir of hexDirections) {
-                        let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
-                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                        if(seen.has(key(nb))) continue;
-                        if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
-                        let dn = dist.get(key(nb));
-                        if(dn == null || dn !== bestDn) continue;
-                        let wob = fbm(nb.x * 0.019 + seedOffset + ri * 41 + step * 0.041, nb.y * 0.019 + seedOffset + ri * 41, 4) * 0.55;
-                        wob += Math.sin(step * 0.33 + seedOffset * 0.015 + ri * 1.9) * 0.18 * (dir.q - dir.r);
-                        if(isIsland) {
-                            wob += dn * 0.018;
+            let coastMouths = [];
+            for(let h of gameData.hexList) {
+                if(!h || h.type === 'mountain' || h.type === 'urban' || isWaterHex(h)) continue;
+                if(!passableForRiverField(h)) continue;
+                let touches = false;
+                if(mapShape === 'rectangle') {
+                    if(atRectEdge(h)) touches = true;
+                    else {
+                        for(let nb of getNeighborHexes(h)) {
+                            if(nb && isWaterHex(nb) && atRectEdge(nb)) {
+                                touches = true;
+                                break;
+                            }
                         }
-                        ties.push({ nb, wob });
                     }
-                    if(!ties.length) return { keys: [], ok: false };
-                    ties.sort((a, b) => b.wob - a.wob);
-                    let topN = Math.min(isIsland ? 3 : 5, ties.length);
-                    let pickI = Math.floor(fbm(cur.x * 0.024 + seedOffset + step * 0.071, cur.y * 0.024 + seedOffset + ri * 13, 3) * topN);
-                    cur = ties[Math.max(0, Math.min(topN - 1, pickI))].nb;
+                } else {
+                    for(let nb of getNeighborHexes(h)) {
+                        if(nb && isWaterHex(nb) && isIslandOceanSink(nb)) {
+                            touches = true;
+                            break;
+                        }
+                    }
                 }
-                return { keys: [], ok: false };
+                if(touches) coastMouths.push(h);
             }
 
-            function buildRectangleRiverPath(start, ri, maxSteps) {
-                let keys = [];
-                let seen = new Set();
-                let cur = start;
-                for(let step = 0; step < maxSteps && cur; step++) {
-                    let ck = key(cur);
-                    if(seen.has(ck)) return { keys: [], ok: false };
-                    seen.add(ck);
-                    let dcur = dist.get(ck);
-                    if(dcur == null) return { keys: [], ok: false };
-
-                    let reachedOutlet = atRectEdge(cur);
-                    if(reachedOutlet) {
-                        if(!isWaterHex(cur)) keys.push(ck);
-                        return { keys, ok: true };
-                    }
-
-                    if(!isWaterHex(cur)) keys.push(ck);
-
-                    let bestDn = Infinity;
-                    for(let dir of hexDirections) {
-                        let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
-                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                        if(seen.has(key(nb))) continue;
-                        let dn = dist.get(key(nb));
-                        if(dn == null) continue;
-                        if(dn > dcur) continue;
-                        if(dn < bestDn) bestDn = dn;
-                    }
-                    if(bestDn === Infinity) return { keys: [], ok: false };
-
-                    let ties = [];
-                    for(let dir of hexDirections) {
-                        let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
-                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                        if(seen.has(key(nb))) continue;
-                        let dn = dist.get(key(nb));
-                        if(dn == null || dn !== bestDn) continue;
-                        let wob = fbm(nb.x * 0.019 + seedOffset + ri * 41 + step * 0.041, nb.y * 0.019 + seedOffset + ri * 41, 4) * 0.55;
-                        wob += Math.sin(step * 0.33 + seedOffset * 0.015 + ri * 1.9) * 0.18 * (dir.q - dir.r);
-                        ties.push({ nb, wob });
-                    }
-                    if(!ties.length) return { keys: [], ok: false };
-                    ties.sort((a, b) => b.wob - a.wob);
-                    let topN = Math.min(5, ties.length);
-                    let pickI = Math.floor(fbm(cur.x * 0.024 + seedOffset + step * 0.071, cur.y * 0.024 + seedOffset + ri * 13, 3) * topN);
-                    cur = ties[Math.max(0, Math.min(topN - 1, pickI))].nb;
+            let numMouths = mapShape === 'island' ? 9 : 8;
+            let mouths = [];
+            let mouthSeen = new Set();
+            if(coastMouths.length) {
+                coastMouths.sort((a, b) => {
+                    let aa = Math.atan2(a.y - lcm.cy, a.x - lcm.cx);
+                    let bb = Math.atan2(b.y - lcm.cy, b.x - lcm.cx);
+                    return aa - bb;
+                });
+                let M = Math.min(numMouths, coastMouths.length);
+                let off = Math.floor(Math.abs(seedOffset) + coastMouths.length * 0.17) % coastMouths.length;
+                for(let j = 0; j < M; j++) {
+                    let ix = (off + Math.floor((j * coastMouths.length) / M)) % coastMouths.length;
+                    let mh = coastMouths[ix];
+                    let mk = key(mh);
+                    if(mouthSeen.has(mk)) continue;
+                    mouthSeen.add(mk);
+                    mouths.push(mh);
                 }
-                return { keys: [], ok: false };
+            }
+
+            let pathCoreKeys = new Set();
+            let riverPaintKeys = new Set();
+            let origTypes = new Map();
+
+            function rememberAndWater(h, isSpine) {
+                if(!h || h.type === 'urban' || h.type === 'mountain') return;
+                let k = key(h);
+                if(!isWaterHex(h) && !origTypes.has(k)) origTypes.set(k, h.type);
+                if(!isWaterHex(h)) wodSetGeneratedTerrainType(h, 'water');
+                riverPaintKeys.add(k);
+                if(isSpine) pathCoreKeys.add(k);
             }
 
             function markPathCore(h) {
-                if(!h || h.type === 'urban' || h.type === 'mountain') return;
-                if(!isWaterHex(h)) wodSetGeneratedTerrainType(h, 'water');
-                pathCoreKeys.add(key(h));
+                rememberAndWater(h, true);
             }
 
             function markRiverBankWater(h) {
-                if(!h || h.type === 'urban' || h.type === 'mountain') return;
-                if(!isWaterHex(h)) wodSetGeneratedTerrainType(h, 'water');
+                rememberAndWater(h, false);
             }
 
             function widenRiverChannel() {
@@ -6614,7 +6507,7 @@
                         if(nd == null) continue;
                         if(nd < dh || nd > dh + 1) continue;
                         let w = fbm(nb.x * 0.021 + seedOffset + 5188, nb.y * 0.021 + seedOffset + 5188, 5);
-                        if(w > (isIsland ? 0.86 : 0.82)) markRiverBankWater(nb);
+                        if(w > 0.84) markRiverBankWater(nb);
                     }
                 }
             }
@@ -6638,44 +6531,186 @@
                 }
             }
 
-            let mouthD = isIsland ? Math.max(8, Math.min(24, Math.floor(maxLandDk * 0.17))) : 0;
-            let maxIslandSteps = isIsland ? Math.min(400, 44 + Math.floor(maxLandDk * 0.5)) : 1650;
-            let maxRectSteps = 1650;
+            function wodDryLandComponentsForRivers() {
+                let probe = { type: 'light', owner: 1 };
+                let start = null;
+                for(let h of gameData.hexList) {
+                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                    if(!canUnitEnterHex(probe, h)) continue;
+                    start = h;
+                    break;
+                }
+                if(!start) return 0;
+                let seen = new Set();
+                let q = [start];
+                seen.add(key(start));
+                let qix = 0;
+                while(qix < q.length) {
+                    let h = q[qix++];
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!nb || isWaterHex(nb) || nb.type === 'mountain' || nb.type === 'urban') continue;
+                        if(!canUnitEnterHex(probe, nb)) continue;
+                        let nk = key(nb);
+                        if(seen.has(nk)) continue;
+                        seen.add(nk);
+                        q.push(nb);
+                    }
+                }
+                for(let h of gameData.hexList) {
+                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                    if(!canUnitEnterHex(probe, h)) continue;
+                    if(!seen.has(key(h))) return 2;
+                }
+                return 1;
+            }
 
-            for(let ri = 0; ri < riverCount; ri++) {
-                let stride = Math.max(5, Math.floor(landStarts.length / (riverCount + 2)));
-                let placed = false;
-                for(let attempt = 0; attempt < 130 && !placed; attempt++) {
-                    let idx = Math.min(landStarts.length - 1, (ri * stride + attempt * 3 + Math.floor(seedOffset + ri * 17)) % landStarts.length);
-                    let cand = landStarts[idx].h;
-                    let ck = key(cand);
-                    if(usedStarts.has(ck)) continue;
-                    let res = isIsland
-                        ? buildIslandRiverPath(cand, ri, maxIslandSteps, mouthD)
-                        : buildRectangleRiverPath(cand, ri, maxRectSteps);
-                    if(!res.ok || !res.keys || !res.keys.length) continue;
-                    if(isIsland && islandRiverWouldBisect(res.keys)) continue;
-                    usedStarts.add(ck);
-                    for(let pk of res.keys) {
-                        let hx = gameData.hexes[pk];
-                        if(hx) markPathCore(hx);
-                    }
-                    if(!isIsland && res.keys.length) {
-                        let lastK = res.keys[res.keys.length - 1];
-                        let lastH = gameData.hexes[lastK];
-                        if(lastH && atRectEdge(lastH)) {
-                            for(let nb of getNeighborHexes(lastH)) {
-                                if(nb && atRectEdge(nb) && !isWaterHex(nb) && nb.type !== 'urban' && nb.type !== 'mountain')
-                                    markRiverBankWater(nb);
-                            }
-                        }
-                    }
-                    placed = true;
+            function revertRiverKey(rk) {
+                let h = gameData.hexes[rk];
+                if(!h) return;
+                let t = origTypes.get(rk);
+                if(t) wodSetGeneratedTerrainType(h, t);
+                else wodSetGeneratedTerrainType(h, 'grass');
+                pathCoreKeys.delete(rk);
+                riverPaintKeys.delete(rk);
+            }
+
+            function repairRiverConnectivity(maxStrips) {
+                let strips = 0;
+                while(wodDryLandComponentsForRivers() > 1 && riverPaintKeys.size > 0 && strips < maxStrips) {
+                    strips++;
+                    let deepest = [...riverPaintKeys].map(rk => ({ rk, cd: dist.get(rk) || 0 }))
+                        .sort((a, b) => b.cd - a.cd);
+                    revertRiverKey(deepest[0].rk);
                 }
             }
 
-            widenRiverChannel();
-            fillRiverPinchGaps();
+            if(mouths.length >= 3) {
+                let vorSite = new Map();
+                let vorDist = new Map();
+                let vq = [];
+                let vqi = 0;
+                for(let i = 0; i < mouths.length; i++) {
+                    let mh = mouths[i];
+                    let mk = key(mh);
+                    if(vorSite.has(mk)) continue;
+                    vorSite.set(mk, i);
+                    vorDist.set(mk, 0);
+                    vq.push(mh);
+                }
+                while(vqi < vq.length) {
+                    let h = vq[vqi++];
+                    let d = vorDist.get(key(h));
+                    let sid = vorSite.get(key(h));
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!nb || isWaterHex(nb) || nb.type === 'mountain' || nb.type === 'urban') continue;
+                        let nk = key(nb);
+                        let nd = d + 1;
+                        if(!vorDist.has(nk) || nd < vorDist.get(nk) || (nd === vorDist.get(nk) && sid < (vorSite.get(nk) ?? 999))) {
+                            vorDist.set(nk, nd);
+                            vorSite.set(nk, sid);
+                            vq.push(nb);
+                        }
+                    }
+                }
+
+                let boundaryList = [];
+                for(let h of gameData.hexList) {
+                    if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                    let k = key(h);
+                    if(!vorSite.has(k)) continue;
+                    let cd = dist.get(k);
+                    if(cd == null || cd < minRiverCd || cd > maxRiverCd) continue;
+                    if((vorDist.get(k) || 0) < 4) continue;
+                    let siteSet = new Set();
+                    for(let d of cardinalHexDirections) {
+                        let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                        if(!nb || isWaterHex(nb) || nb.type === 'mountain' || nb.type === 'urban') continue;
+                        let s = vorSite.get(key(nb));
+                        if(s != null) siteSet.add(s);
+                    }
+                    if(siteSet.size < 2) continue;
+                    let wiggle = fbm(h.x * 0.014 + seedOffset + 5621, h.y * 0.014 + seedOffset + 5621, 3);
+                    if(wiggle < 0.12) continue;
+                    boundaryList.push({ h, k, cd });
+                }
+                boundaryList.sort((a, b) => a.cd - b.cd);
+                let mapR = gameData.mapRadius || 40;
+                let maxRiverHexes = Math.min(340 + mapR * 3, Math.floor(gameData.hexList.length * 0.022));
+                for(let i = 0; i < boundaryList.length && pathCoreKeys.size < maxRiverHexes; i++) {
+                    markPathCore(boundaryList[i].h);
+                }
+                repairRiverConnectivity(220);
+                widenRiverChannel();
+                repairRiverConnectivity(120);
+                fillRiverPinchGaps();
+                repairRiverConnectivity(80);
+            } else {
+                let landDeep = [];
+                for(let h of gameData.hexList) {
+                    if(!h || h.type === 'mountain' || h.type === 'urban' || isWaterHex(h)) continue;
+                    let dk = dist.get(key(h));
+                    if(dk == null || dk < 5) continue;
+                    landDeep.push({ h, dk });
+                }
+                if(!landDeep.length) {
+                    for(let h of gameData.hexList) {
+                        if(!h || h.type === 'mountain' || h.type === 'urban' || isWaterHex(h)) continue;
+                        let dk = dist.get(key(h));
+                        if(dk == null || dk < 2) continue;
+                        landDeep.push({ h, dk });
+                    }
+                }
+                if(!landDeep.length) return;
+                landDeep.sort((a, b) => b.dk - a.dk);
+                let start = landDeep[Math.min(landDeep.length - 1, Math.floor(landDeep.length * 0.12))].h;
+                let seen = new Set();
+                let cur = start;
+                for(let step = 0; step < 1200 && cur; step++) {
+                    let ck = key(cur);
+                    if(seen.has(ck)) break;
+                    seen.add(ck);
+                    let dcur = dist.get(ck);
+                    if(dcur == null) break;
+                    let reachedOutlet = mapShape === 'rectangle'
+                        ? atRectEdge(cur)
+                        : (isWaterHex(cur) && isIslandOceanSink(cur));
+                    if(reachedOutlet) {
+                        if(!isWaterHex(cur)) markPathCore(cur);
+                        break;
+                    }
+                    if(!isWaterHex(cur)) markPathCore(cur);
+                    let bestDn = Infinity;
+                    for(let dir of cardinalHexDirections) {
+                        let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
+                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
+                        if(seen.has(key(nb))) continue;
+                        if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
+                        let dn = dist.get(key(nb));
+                        if(dn == null) continue;
+                        if(dn > dcur) continue;
+                        if(dn < bestDn) bestDn = dn;
+                    }
+                    if(bestDn === Infinity) break;
+                    let next = null;
+                    for(let dir of cardinalHexDirections) {
+                        let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
+                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
+                        if(seen.has(key(nb))) continue;
+                        if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
+                        let dn = dist.get(key(nb));
+                        if(dn !== bestDn) continue;
+                        next = nb;
+                        break;
+                    }
+                    if(!next) break;
+                    cur = next;
+                }
+                repairRiverConnectivity(80);
+                widenRiverChannel();
+                repairRiverConnectivity(40);
+                fillRiverPinchGaps();
+                repairRiverConnectivity(40);
+            }
         }
 
         /** Smooth jagged sand/swamp speckles left along carved rivers back toward neighboring land biomes. */
