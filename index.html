@@ -6429,7 +6429,29 @@
             if(!landDeep.length) return;
             landDeep.sort((a, b) => b.dk - a.dk);
 
-            let riverCount = mapShape === 'rectangle' ? 4 : 3;
+            let islandLcm = null;
+            let islandDkCap = Infinity;
+            let islandPathStepCap = 1650;
+            if(mapShape === 'island') {
+                let lf = [];
+                for(let h of gameData.hexList) {
+                    if(h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') lf.push(h);
+                }
+                if(lf.length) islandLcm = wodLandCentroidMaxRadius(lf);
+                let maxD = landDeep[0].dk;
+                islandDkCap = Math.max(7, Math.floor(maxD * 0.44));
+                let shallow = landDeep.filter(o => o.dk <= islandDkCap && o.dk >= 5);
+                if(shallow.length >= 18) landDeep = shallow;
+                else {
+                    islandDkCap = Math.max(8, Math.floor(maxD * 0.56));
+                    landDeep = landDeep.filter(o => o.dk <= islandDkCap && o.dk >= 5);
+                }
+                landDeep.sort((a, b) => b.dk - a.dk);
+                if(!landDeep.length) return;
+                islandPathStepCap = Math.min(340, 72 + Math.floor((cols + rows) * 0.26));
+            }
+
+            let riverCount = mapShape === 'rectangle' ? 4 : 2;
             let usedStarts = new Set();
             /** Centerline only — widen/fill must never expand from growing water blobs. */
             let pathCoreKeys = new Set();
@@ -6483,6 +6505,7 @@
 
             /** Close single-hex pinches along the spine only (no flood into plains). */
             function fillRiverPinchGaps() {
+                let need = mapShape === 'island' ? 3 : 2;
                 for(let iter = 0; iter < 2; iter++) {
                     let added = false;
                     for(let h of gameData.hexList) {
@@ -6492,7 +6515,7 @@
                             let nn = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
                             if(nn && isWaterHex(nn) && pathCoreKeys.has(key(nn))) spine++;
                         }
-                        if(spine >= 2) {
+                        if(spine >= need) {
                             markRiverBankWater(h);
                             added = true;
                         }
@@ -6503,14 +6526,37 @@
 
             for(let ri = 0; ri < riverCount; ri++) {
                 let start = null;
-                let stride = Math.max(7, Math.floor(landDeep.length / (riverCount + 2)));
-                for(let attempt = 0; attempt < 140 && !start; attempt++) {
-                    let idx = Math.min(landDeep.length - 1, (ri * stride + attempt * 3 + Math.floor(seedOffset + ri * 17)) % landDeep.length);
-                    let cand = landDeep[idx].h;
-                    let ck = key(cand);
-                    if(usedStarts.has(ck)) continue;
-                    start = cand;
-                    usedStarts.add(ck);
+                if(mapShape === 'island' && islandLcm && landDeep.length) {
+                    let slotA = (ri / Math.max(riverCount, 1)) * Math.PI * 2 + seedOffset * 0.019 + ri * 0.73;
+                    let bestCand = null;
+                    let bestScore = Infinity;
+                    for(let o of landDeep) {
+                        let h = o.h;
+                        let ck = key(h);
+                        if(usedStarts.has(ck)) continue;
+                        let ang = Math.atan2(h.y - islandLcm.cy, h.x - islandLcm.cx);
+                        let dAng = Math.abs(Math.atan2(Math.sin(ang - slotA), Math.cos(ang - slotA)));
+                        let score = dAng * 14 + (islandDkCap - o.dk + 1) * 0.09 + fbm(h.x * 0.01 + ri, h.y * 0.01, 2) * 0.35;
+                        if(score < bestScore) {
+                            bestScore = score;
+                            bestCand = h;
+                        }
+                    }
+                    if(bestCand) {
+                        start = bestCand;
+                        usedStarts.add(key(start));
+                    }
+                }
+                if(!start) {
+                    let stride = Math.max(7, Math.floor(landDeep.length / (riverCount + 2)));
+                    for(let attempt = 0; attempt < 140 && !start; attempt++) {
+                        let idx = Math.min(landDeep.length - 1, (ri * stride + attempt * 3 + Math.floor(seedOffset + ri * 17)) % landDeep.length);
+                        let cand = landDeep[idx].h;
+                        let ck = key(cand);
+                        if(usedStarts.has(ck)) continue;
+                        start = cand;
+                        usedStarts.add(ck);
+                    }
                 }
                 if(!start) continue;
 
@@ -6518,7 +6564,8 @@
                 let cur = start;
                 let prevKey = null;
                 let plateauRun = 0;
-                for(let step = 0; step < 1650 && cur; step++) {
+                let pathStepCap = mapShape === 'island' ? islandPathStepCap : 1650;
+                for(let step = 0; step < pathStepCap && cur; step++) {
                     let ck = key(cur);
                     if(seen.has(ck)) break;
                     seen.add(ck);
@@ -6543,7 +6590,7 @@
 
                     let prev = prevKey ? gameData.hexes[prevKey] : null;
                     let bestDn = Infinity;
-                    let allowPlateau = plateauRun < 3 && fbm(cur.x * 0.014 + seedOffset + ri * 19 + step * 0.02, cur.y * 0.014 + seedOffset, 4) > 0.62;
+                    let allowPlateau = plateauRun < 2 && fbm(cur.x * 0.014 + seedOffset + ri * 19 + step * 0.02, cur.y * 0.014 + seedOffset, 4) > 0.68;
                     let maxDnStep = allowPlateau ? dcur + 1 : dcur;
 
                     for(let dir of hexDirections) {
@@ -6568,9 +6615,12 @@
                         if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
                         let dn = dist.get(key(nb));
                         if(dn == null || dn !== bestDn) continue;
-                        let wob = fbm(nb.x * 0.019 + seedOffset + ri * 41 + step * 0.041, nb.y * 0.019 + seedOffset + ri * 41, 4) * 0.42;
-                        wob += Math.sin(step * 0.29 + seedOffset * 0.015 + ri * 1.9) * 0.24 * (dir.q - dir.r);
-                        wob += Math.cos(step * 0.17 + ri * 2.3 + seedOffset * 0.008) * 0.16 * (dir.q + dir.r);
+                        let wob = fbm(nb.x * 0.019 + seedOffset + ri * 41 + step * 0.041, nb.y * 0.019 + seedOffset + ri * 41, 4) * 0.52;
+                        wob += Math.sin(step * 0.31 + seedOffset * 0.015 + ri * 1.9) * 0.34 * (dir.q - dir.r);
+                        wob += Math.cos(step * 0.19 + ri * 2.3 + seedOffset * 0.008) * 0.26 * (dir.q + dir.r);
+                        if(mapShape === 'island') {
+                            wob += Math.sin(step * 0.47 + nb.x * 0.0021 + nb.y * 0.0017) * 0.22;
+                        }
                         if(prev) {
                             let vx = cur.x - prev.x;
                             let vy = cur.y - prev.y;
@@ -6582,15 +6632,20 @@
                             if(ln > 1e-6) {
                                 let cosStraight = (vx * wx + vy * wy) / ln;
                                 let cross = (vx * wy - vy * wx) / (ln + 1e-6);
-                                wob += cosStraight * 0.28;
-                                wob += Math.sin(step * 0.37 + ri * 1.1) * 0.22 * Math.abs(cross);
+                                wob += Math.abs(cross) * 0.48;
+                                wob -= cosStraight * 0.1;
+                                let sdirQ = nb.q - cur.q;
+                                let sdirR = nb.r - cur.r;
+                                let pdirQ = cur.q - prev.q;
+                                let pdirR = cur.r - prev.r;
+                                if(sdirQ === pdirQ && sdirR === pdirR) wob -= 0.62;
                             }
                         }
                         ties.push({ nb, wob });
                     }
                     if(!ties.length) break;
                     ties.sort((a, b) => b.wob - a.wob);
-                    let topN = Math.min(6, ties.length);
+                    let topN = Math.min(mapShape === 'island' ? 7 : 6, ties.length);
                     let pickI = Math.floor(fbm(cur.x * 0.024 + seedOffset + step * 0.071, cur.y * 0.024 + seedOffset + ri * 13, 3) * topN);
                     let next = ties[Math.max(0, Math.min(topN - 1, pickI))].nb;
                     prevKey = ck;
