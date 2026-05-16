@@ -6431,56 +6431,53 @@
 
             let riverCount = mapShape === 'rectangle' ? 4 : 3;
             let usedStarts = new Set();
-            let riverCells = new Set();
+            /** Centerline only — widen/fill must never expand from growing water blobs. */
+            let pathCoreKeys = new Set();
 
-            function markRiverWater(h) {
+            function markPathCore(h) {
                 if(!h || h.type === 'urban' || h.type === 'mountain') return;
                 if(!isWaterHex(h)) wodSetGeneratedTerrainType(h, 'water');
-                riverCells.add(key(h));
+                pathCoreKeys.add(key(h));
+            }
+
+            function markRiverBankWater(h) {
+                if(!h || h.type === 'urban' || h.type === 'mountain') return;
+                if(!isWaterHex(h)) wodSetGeneratedTerrainType(h, 'water');
             }
 
             function widenRiverChannel() {
-                function widenPass(fbmThresh, maxDelta) {
-                    let keys = [...riverCells];
-                    for(let rk of keys) {
-                        let h = gameData.hexes[rk];
-                        if(!h) continue;
-                        let dh = dist.get(rk);
-                        for(let d of hexDirections) {
-                            let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
-                            if(!passableForRiverField(nb) || isWaterHex(nb)) continue;
-                            let nk = key(nb);
-                            let nd = dist.get(nk);
-                            if(dh == null || nd == null) continue;
-                            if(nd > dh + maxDelta || nd < dh - 1) continue;
-                            let w = fbm(nb.x * 0.021 + seedOffset + 5188, nb.y * 0.021 + seedOffset + 5188, 5);
-                            if(w > fbmThresh) markRiverWater(nb);
-                        }
+                let cores = [...pathCoreKeys];
+                for(let rk of cores) {
+                    let h = gameData.hexes[rk];
+                    if(!h) continue;
+                    let dh = dist.get(rk);
+                    if(dh == null) continue;
+                    for(let d of cardinalHexDirections) {
+                        let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                        if(!passableForRiverField(nb) || isWaterHex(nb)) continue;
+                        let nd = dist.get(key(nb));
+                        if(nd == null) continue;
+                        if(nd < dh || nd > dh + 1) continue;
+                        let w = fbm(nb.x * 0.021 + seedOffset + 5188, nb.y * 0.021 + seedOffset + 5188, 5);
+                        if(w > 0.82) markRiverBankWater(nb);
                     }
                 }
-                widenPass(0.58, 2);
-                widenPass(0.48, 2);
             }
 
-            function fillRiverCorridorGaps() {
-                for(let iter = 0; iter < 12; iter++) {
-                    let added = 0;
-                    let scan = [...riverCells];
-                    for(let rk of scan) {
-                        let h = gameData.hexes[rk];
-                        if(!h) continue;
+            /** Close single-hex pinches along the spine only (no flood into plains). */
+            function fillRiverPinchGaps() {
+                for(let iter = 0; iter < 2; iter++) {
+                    let added = false;
+                    for(let h of gameData.hexList) {
+                        if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                        let spine = 0;
                         for(let d of hexDirections) {
-                            let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
-                            if(!passableForRiverField(nb) || isWaterHex(nb)) continue;
-                            let riverAdj = 0;
-                            for(let d2 of hexDirections) {
-                                let nn = gameData.hexes[`${nb.q + d2.q},${nb.r + d2.r}`];
-                                if(nn && isWaterHex(nn) && riverCells.has(key(nn))) riverAdj++;
-                            }
-                            if(riverAdj >= 2) {
-                                markRiverWater(nb);
-                                added++;
-                            }
+                            let nn = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                            if(nn && isWaterHex(nn) && pathCoreKeys.has(key(nn))) spine++;
+                        }
+                        if(spine >= 2) {
+                            markRiverBankWater(h);
+                            added = true;
                         }
                     }
                     if(!added) break;
@@ -6513,17 +6510,17 @@
                         ? atRectEdge(cur)
                         : (isWaterHex(cur) && isIslandOceanSink(cur));
                     if(reachedOutlet) {
-                        if(!isWaterHex(cur)) markRiverWater(cur);
+                        if(!isWaterHex(cur)) markPathCore(cur);
                         if(mapShape === 'rectangle') {
                             for(let nb of getNeighborHexes(cur)) {
                                 if(nb && atRectEdge(nb) && !isWaterHex(nb) && nb.type !== 'urban' && nb.type !== 'mountain')
-                                    markRiverWater(nb);
+                                    markRiverBankWater(nb);
                             }
                         }
                         break;
                     }
 
-                    if(!isWaterHex(cur)) markRiverWater(cur);
+                    if(!isWaterHex(cur)) markPathCore(cur);
 
                     let bestDn = Infinity;
                     for(let dir of hexDirections) {
@@ -6559,7 +6556,7 @@
             }
 
             widenRiverChannel();
-            fillRiverCorridorGaps();
+            fillRiverPinchGaps();
         }
 
         /** Smooth jagged sand/swamp speckles left along carved rivers back toward neighboring land biomes. */
