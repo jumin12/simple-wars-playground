@@ -13767,11 +13767,10 @@
             }
         }
 
+        /** Yield one macrotask so long generation stays responsive. Do not chain on requestAnimationFrame alone — rAF can be paused (background tab / some boot timings), which would stall every await here forever. */
         function wodYieldToMainThread() {
             return new Promise(function(resolve) {
-                requestAnimationFrame(function() {
-                    setTimeout(resolve, 0);
-                });
+                setTimeout(resolve, 0);
             });
         }
 
@@ -14277,7 +14276,7 @@
 
         async function softenLandFullyBlockedByMountainRing() {
             let probeTpl = { type: 'light', owner: 1 };
-            let n = gameData.hexList.length;
+            let gridN = gameData.hexList.length;
             for(let sweep = 0; sweep < 220; sweep++) {
                 let hit = false;
                 let hi = 0;
@@ -14287,10 +14286,10 @@
                     if(!canUnitEnterHex(probeTpl, hex)) continue;
                     let neighbors = getNeighborHexes(hex);
                     let hasLandNeighbor = false;
-                    for(let n of neighbors) {
-                        if(!n || isWaterHex(n)) continue;
-                        if(n.type === 'mountain') continue;
-                        if(!canUnitEnterHex(probeTpl, n)) continue;
+                    for(let nbr of neighbors) {
+                        if(!nbr || isWaterHex(nbr)) continue;
+                        if(nbr.type === 'mountain') continue;
+                        if(!canUnitEnterHex(probeTpl, nbr)) continue;
                         hasLandNeighbor = true;
                         break;
                     }
@@ -14304,10 +14303,10 @@
                         break;
                     }
                     hi++;
-                    if(n > 3500 && (hi & 511) === 0) await wodYieldToMainThread();
+                    if(gridN > 3500 && (hi & 511) === 0) await wodYieldToMainThread();
                 }
                 if(!hit) break;
-                if(n > 4000) await wodYieldToMainThread();
+                if(gridN > 4000) await wodYieldToMainThread();
             }
         }
 
