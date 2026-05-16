@@ -6518,6 +6518,81 @@
                 }
             }
 
+            /** Land pinched between two spine-water cells — bridge without using bank widen (avoids huge floods). */
+            function bridgeRiverSpineMicroGaps() {
+                for(let iter = 0; iter < 5; iter++) {
+                    let added = false;
+                    for(let h of gameData.hexList) {
+                        if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                        let spine = 0;
+                        for(let d of hexDirections) {
+                            let nn = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                            if(nn && isWaterHex(nn) && pathCoreKeys.has(key(nn))) spine++;
+                        }
+                        if(spine >= 2) {
+                            markPathCore(h);
+                            added = true;
+                        }
+                    }
+                    if(!added) break;
+                }
+            }
+
+            function outletReached(hx) {
+                if(!hx) return false;
+                if(mapShape === 'rectangle') return atRectEdge(hx);
+                return isWaterHex(hx) && isIslandOceanSink(hx);
+            }
+
+            /** When the scenic walk gets stuck (seen / ties), greedily follow dist toward sea until outlet. */
+            function completeRiverDrainageFrom(head) {
+                if(!head || outletReached(head)) {
+                    if(head && !isWaterHex(head)) markPathCore(head);
+                    return;
+                }
+                let compSeen = new Set();
+                let h = head;
+                for(let s = 0; s < 2000 && h; s++) {
+                    let hk = key(h);
+                    if(compSeen.has(hk)) return;
+                    compSeen.add(hk);
+                    if(outletReached(h)) {
+                        if(!isWaterHex(h)) markPathCore(h);
+                        return;
+                    }
+                    if(!isWaterHex(h)) markPathCore(h);
+                    let dcur = dist.get(hk);
+                    if(dcur == null) return;
+                    let bestNb = null;
+                    let bestDn = Infinity;
+                    let bestLook = Infinity;
+                    for(let dir of hexDirections) {
+                        let nb = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
+                        if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
+                        let nk = key(nb);
+                        if(compSeen.has(nk)) continue;
+                        let dn = dist.get(nk);
+                        if(dn == null || dn > dcur) continue;
+                        let look = dn;
+                        for(let d2 of hexDirections) {
+                            let n2 = gameData.hexes[`${nb.q + d2.q},${nb.r + d2.r}`];
+                            if(!n2 || n2.type === 'urban' || n2.type === 'mountain') continue;
+                            if(mapShape === 'island' && isWaterHex(n2) && !isIslandOceanSink(n2)) continue;
+                            let d2v = dist.get(key(n2));
+                            if(d2v != null) look = Math.min(look, d2v);
+                        }
+                        if(dn < bestDn || (dn === bestDn && look < bestLook)) {
+                            bestDn = dn;
+                            bestLook = look;
+                            bestNb = nb;
+                        }
+                    }
+                    if(!bestNb) return;
+                    h = bestNb;
+                }
+            }
+
             let startPool = landDeep;
             if(mapShape === 'island' && islandLcm) {
                 let filtered = landDeep.filter((e) => {
@@ -6573,6 +6648,7 @@
                 let seen = new Set();
                 let prev = null;
                 let cur = start;
+                let reachedOutlet = false;
                 for(let step = 0; step < 2200 && cur; step++) {
                     let ck = key(cur);
                     if(seen.has(ck)) break;
@@ -6580,10 +6656,8 @@
                     let dcur = dist.get(ck);
                     if(dcur == null) break;
 
-                    let reachedOutlet = mapShape === 'rectangle'
-                        ? atRectEdge(cur)
-                        : (isWaterHex(cur) && isIslandOceanSink(cur));
-                    if(reachedOutlet) {
+                    if(outletReached(cur)) {
+                        reachedOutlet = true;
                         if(!isWaterHex(cur)) markPathCore(cur);
                         if(mapShape === 'rectangle') {
                             for(let nb of getNeighborHexes(cur)) {
@@ -6642,9 +6716,11 @@
                     prev = cur;
                     cur = next;
                 }
+                if(!reachedOutlet && cur) completeRiverDrainageFrom(cur);
             }
 
             widenRiverChannel();
+            bridgeRiverSpineMicroGaps();
             fillRiverPinchGaps();
         }
 
