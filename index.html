@@ -6218,10 +6218,11 @@
             hex.baseColor = getTerrainColor(type);
             hex.renderColor = hex.baseColor;
         }
-        function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
+        async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
             if(gameData.mapShape !== 'island') return;
             let pad = Math.max(1, bufferTiles || 5);
             let feather = pad + 9;
+            let hi = 0;
             for(let h of gameData.hexList) {
                 let edgeDist = Math.min(cols - Math.abs(h.q), rows - Math.abs(h.r));
                 if(edgeDist < pad) {
@@ -6233,14 +6234,16 @@
                     let n = fbm(h.x * 0.018 + seedOffset + 8120, h.y * 0.018 + seedOffset + 8120, 4);
                     if(n < 0.35 + t * 0.42) wodSetGeneratedTerrainType(h, 'water');
                 }
+                if((++hi & 255) === 0) await wodMapGenYieldSlice();
             }
         }
-        function wodNormalizeRectangleWaterFeatures(seedOffset) {
+        async function wodNormalizeRectangleWaterFeatures(seedOffset) {
             if(gameData.mapShape !== 'rectangle') return;
             let water = gameData.hexList.filter(h => isWaterHex(h));
             if(!water.length) return;
             let seen = new Set();
             let comps = [];
+            let floodTick = 0;
             for(let start of water) {
                 let sk = getHexKey(start);
                 if(seen.has(sk)) continue;
@@ -6261,6 +6264,7 @@
                         seen.add(nk);
                         queue.push(nb);
                     }
+                    if((++floodTick & 4095) === 0) await wodMapGenYieldSlice();
                 }
                 let span = Math.max(maxQ - minQ, maxR - minR);
                 comps.push({ cells: comp, size: comp.length, span });
@@ -6269,10 +6273,12 @@
             let totalWater = water.length;
             for(let c of comps) {
                 if(c.size >= 4) continue;
+                let ci = 0;
                 for(let h of c.cells) {
                     let wet = fbm(h.x * 0.012 + seedOffset + 7210, h.y * 0.012 + seedOffset + 7210, 3);
                     wodSetGeneratedTerrainType(h, wet > 0.62 ? 'swamp' : 'grass');
                     totalWater--;
+                    if((++ci & 255) === 0) await wodMapGenYieldSlice();
                 }
                 c.removed = true;
             }
@@ -6282,9 +6288,11 @@
             for(let c of keepers) {
                 if(totalWater <= maxWater) break;
                 if(c.size > maxWater * 0.72 && c.span > Math.sqrt(c.size) * 2.2) continue;
+                let ci = 0;
                 for(let h of c.cells) {
                     let wet = fbm(h.x * 0.012 + seedOffset + 7330, h.y * 0.012 + seedOffset + 7330, 3);
                     wodSetGeneratedTerrainType(h, wet > 0.58 ? 'swamp' : 'grass');
+                    if((++ci & 255) === 0) await wodMapGenYieldSlice();
                 }
                 totalWater -= c.size;
             }
@@ -6292,6 +6300,7 @@
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
             for(let pass = 0; pass < 2; pass++) {
                 let changes = [];
+                let hi = 0;
                 for(let h of gameData.hexList) {
                     if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
                     let counts = {};
@@ -6318,12 +6327,12 @@
                     } else if(bestType !== h.type && bestCount >= (pass === 0 ? 5 : 4)) {
                         changes.push({ h, type: bestType });
                     }
+                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
                 }
                 for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
-                if(pass === 0) await wodYieldToMainThread();
             }
 
-            await wodYieldToMainThread();
+            let hi2 = 0;
             for(let h of gameData.hexList) {
                 if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
                 let wet = fbm(h.x * 0.0065 + seedOffset + 4700, h.y * 0.0065 + seedOffset + 4700, 5);
@@ -6334,13 +6343,12 @@
                 else if(wet > 0.68 && heat < 0.42 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'swamp');
                 else if(wet < 0.22 && (h.type === 'grass' || h.type === 'hill')) wodSetGeneratedTerrainType(h, 'sand');
                 else if(wet > 0.36 && wet < 0.62 && h.type === 'sand' && mapShape !== 'island') wodSetGeneratedTerrainType(h, 'grass');
+                if((++hi2 & 255) === 0) await wodMapGenYieldSlice();
             }
         }
         /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
         async function wodAssignWaterAndNonclaimablePoliticalVotes() {
-            let n = gameData.hexList.length;
-            let chunk = n > 1800 ? Math.max(120, Math.min(520, Math.floor(n / 16))) : 0;
-            let c = 0;
+            let hi = 0;
             for(let h of gameData.hexList) {
                 if(isClaimableLand(h)) continue;
                 if(isWaterHex(h)) continue;
@@ -6357,8 +6365,7 @@
                 }
                 if(bo > 0) setHexOwner(h, bo);
                 else setHexOwner(h, 0);
-                c++;
-                if(chunk && c % chunk === 0) await wodYieldToMainThread();
+                if((++hi & 127) === 0) await wodMapGenYieldSlice();
             }
             wodMarkTerrainPoliticalDirty();
         }
@@ -6377,9 +6384,7 @@
             if(!ownerIds || ownerIds.length === 0) return;
             let valid = new Set(ownerIds);
             let bias = biasByOwner || {};
-            let n = gameData.hexList.length;
-            let chunk = n > 1800 ? Math.max(90, Math.min(480, Math.floor(n / 18))) : 0;
-            let c = 0;
+            let hi = 0;
             for(let h of gameData.hexList) {
                 let bestO = 0, bestScore = Infinity;
                 for(let o of ownerIds) {
@@ -6394,8 +6399,7 @@
                     }
                 }
                 setHexOwner(h, bestO || 0);
-                c++;
-                if(chunk && c % chunk === 0) await wodYieldToMainThread();
+                if((++hi & 127) === 0) await wodMapGenYieldSlice();
             }
         }
         /** One seed per faction (capital with factory when available) keeps continents simply connected like classic wedge maps. */
@@ -6434,10 +6438,8 @@
             effIter = Math.min(198, Math.max(iterations + (multiFaction && !mpBoost ? 20 : 0), effIter));
             let minRelaxIter = Math.max(26, mpBoost ? 28 : 22, multiFaction ? 34 : (fCount === 2 ? 28 : 0));
             for(let it = 0; it < effIter; it++) {
-                if((it & 1) === 0 && it > 0) await wodYieldToMainThread();
                 await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
                 await wodAssignWaterAndNonclaimablePoliticalVotes();
-                if(gameData.hexList.length > 2200) await wodYieldToMainThread();
                 let cts = {};
                 let total = 0;
                 for(let o of sorted) cts[o] = 0;
@@ -6462,6 +6464,7 @@
                 for(let o of sorted) bias[o] += gain * stepScale * (tgt[o] - cts[o]);
                 let acceptErr = exactDivide ? 0 : 1;
                 if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 27 : minRelaxIter - 4)) break;
+                if((it & 1) === 0) await wodMapGenYieldSlice();
             }
             await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
             await wodAssignWaterAndNonclaimablePoliticalVotes();
@@ -6514,13 +6517,10 @@
                 return total === 0;
             }
 
-            let hl = gameData.hexList.length;
-            let moveYield = hl > 6000 ? 2 : 3;
             for(let move = 0; move < maxMoves && !countDeltaDone(); move++) {
-                if((move % moveYield) === 0 && move > 0) await wodYieldToMainThread();
+                if((move & 7) === 0) await wodMapGenYieldSlice();
                 let best = null;
                 let bestScore = -Infinity;
-                let scanN = 0;
                 for(let hex of gameData.hexList) {
                     if(!wodHexCountsTowardLandPoliticsBalance(hex)) continue;
                     if(!valid.has(hex.owner)) continue;
@@ -6550,8 +6550,6 @@
                             best = { hex, donor, receiver };
                         }
                     }
-                    scanN++;
-                    if(hl > 3200 && (scanN & 1023) === 0) await wodYieldToMainThread();
                 }
                 if(!best) break;
                 setHexOwner(best.hex, best.receiver);
@@ -6770,8 +6768,9 @@
         }
 
         /** Remove faction land that cannot reach any of that faction's cities using only that faction's own tiles (prevents weird encircled enclaves). */
-        function wodRemoveUnconnectedFactionHexPockets(ownerIds) {
+        async function wodRemoveUnconnectedFactionHexPockets(ownerIds) {
             if(!ownerIds || ownerIds.length === 0) return;
+            let walkTick = 0;
             for(let owner of ownerIds) {
                 let seeds = [];
                 for(let city of gameData.cities) {
@@ -6787,14 +6786,15 @@
                 if(seeds.length === 0) continue;
                 let seen = new Set();
                 let q = [];
+                let qi = 0;
                 for(let h of seeds) {
                     let k = `${h.q},${h.r}`;
                     if(seen.has(k)) continue;
                     seen.add(k);
                     q.push(h);
                 }
-                while(q.length) {
-                    let cur = q.shift();
+                while(qi < q.length) {
+                    let cur = q[qi++];
                     for(let nb of getNeighborHexes(cur)) {
                         if(!nb || isWaterHex(nb) || nb.type === 'mountain') continue;
                         if(nb.owner !== owner) continue;
@@ -6803,7 +6803,9 @@
                         seen.add(k);
                         q.push(nb);
                     }
+                    if((++walkTick & 8191) === 0) await wodMapGenYieldSlice();
                 }
+                let hi = 0;
                 for(let hex of gameData.hexList) {
                     if(hex.owner !== owner || isWaterHex(hex) || hex.type === 'mountain') continue;
                     let k = `${hex.q},${hex.r}`;
@@ -6819,6 +6821,7 @@
                     }
                     if(bo > 0) setHexOwner(hex, bo);
                     else setHexOwner(hex, 0);
+                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
                 }
             }
         }
@@ -11596,9 +11599,8 @@
             let minVotes = minVotesOpt != null ? minVotesOpt : 6;
             let passes = passesOpt != null ? passesOpt : 2;
             let valid = new Set(ownerIds);
-            let n = gameData.hexList.length;
-            let chunk = n > 2000 ? Math.max(128, Math.min(640, Math.floor(n / 14))) : 0;
             for(let pass = 0; pass < passes; pass++) {
+                await wodMapGenYieldSlice();
                 let changes = [];
                 let hi = 0;
                 for(let hex of gameData.hexList) {
@@ -11616,11 +11618,9 @@
                         }
                     }
                     if(bestOwner !== hex.owner && bestCount >= minVotes) changes.push({hex, owner: bestOwner});
-                    hi++;
-                    if(chunk && hi % chunk === 0) await wodYieldToMainThread();
+                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
                 }
                 for(let change of changes) setHexOwner(change.hex, change.owner);
-                await wodYieldToMainThread();
             }
         }
 
@@ -13313,7 +13313,7 @@
             await wodAssignClaimableLandWeightedVoronoiFromSeeds(ownersSorted, seedsByOwner, zeroBias);
             await wodAssignWaterAndNonclaimablePoliticalVotes();
             softenMountainHexBetweenOwners(ownersSorted);
-            ensureOwnersReachableByLand(ownersSorted);
+            await ensureOwnersReachableByLand(ownersSorted);
             await smoothStartingTerritory(ownersSorted, 4, 4);
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 56 : 48);
             await smoothStartingTerritory(ownersSorted, 5, 2);
@@ -13367,7 +13367,7 @@
                 return list;
             }
 
-            function tryPlan(kpf) {
+            async function tryPlan(kpf) {
                 let plan = {};
                 let occCells = new Set();
                 let anchors = {};
@@ -13375,14 +13375,18 @@
                     plan[String(ow)] = [];
                     anchors[String(ow)] = [];
                 }
+                let tryTick = 0;
                 for(let lv = 0; lv < kpf; lv++) {
                     let ord = ownersSorted.slice();
                     if(lv % 2 === 1) ord.reverse();
                     for(let ow of ord) {
+                        if((++tryTick & 15) === 0) await wodMapGenYieldSlice();
                         let cand = buildCandidateList(ow, lv);
                         let tried = cand.length > 960 ? cand.slice(0, 960) : cand;
                         let placedHere = false;
+                        let hTick = 0;
                         tries: for(let hTry of tried) {
+                            if((++hTick & 63) === 0) await wodMapGenYieldSlice();
                             let qc = hTry.q,
                                 rc = hTry.r;
                             for(let o2 of ownersSorted)
@@ -13417,11 +13421,10 @@
             let winnerPlan = null;
             let kpf = 0;
             outerFind: for(let kk = kUpper; kk >= 2; kk--) {
-                await wodYieldToMainThread();
                 for(let sepTry = 12; sepTry >= 7; sepTry--) {
+                    await wodMapGenYieldSlice();
                     anchorChebSep = sepTry;
-                    let plan = tryPlan(kk);
-                    await wodYieldToMainThread();
+                    let plan = await tryPlan(kk);
                     if(plan) {
                         winnerPlan = plan;
                         kpf = kk;
@@ -13437,7 +13440,6 @@
 
             let cityIx = 0;
             for(let ow of ownersSorted) {
-                await wodYieldToMainThread();
                 let plist = winnerPlan[String(ow)];
                 for(let ti = 0; ti < plist.length; ti++) {
                     let site = plist[ti];
@@ -13473,10 +13475,9 @@
             }
 
             wodSyncUrbanFootprintOwners();
-            wodRemoveUnconnectedFactionHexPockets(ownersSorted);
+            await wodRemoveUnconnectedFactionHexPockets(ownersSorted);
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
             wodSyncUrbanFootprintOwners();
-            await wodYieldToMainThread();
             await wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
             wodNormalizeStartingCityEconomy(ownersSorted);
 
@@ -13542,7 +13543,6 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
-                await wodYieldToMainThread();
                 spawnInitialFrontlineUnits(ownersList);
 
                 wodMarkTerrainPoliticalDirty();
@@ -13691,10 +13691,10 @@
             wodSyncCityOwnersFromCenterHex();
             wodSyncUrbanFootprintOwners();
             softenMountainHexBetweenOwners(ownersList);
-            ensureOwnersReachableByLand(ownersList);
-            ensureOwnedTilesReachFactionCities(ownersList);
+            await ensureOwnersReachableByLand(ownersList);
+            await ensureOwnedTilesReachFactionCities(ownersList);
             wodSyncCityOwnersFromCenterHex();
-            wodRemoveUnconnectedFactionHexPockets(ownersList);
+            await wodRemoveUnconnectedFactionHexPockets(ownersList);
             await wodAssignPoliticalVoronoiFromCities(ownersList);
             wodSyncCityOwnersFromCenterHex();
             wodSyncUrbanFootprintOwners();
@@ -13728,7 +13728,6 @@
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
 
-            await wodYieldToMainThread();
             spawnInitialFrontlineUnits(ownersList);
 
             wodMarkTerrainPoliticalDirty();
@@ -13767,10 +13766,31 @@
             }
         }
 
-        /** Yield one macrotask so long generation stays responsive. Do not chain on requestAnimationFrame alone — rAF can be paused (background tab / some boot timings), which would stall every await here forever. */
+        let _wodMapGenYieldState = null;
+        function wodMapGenYieldingStart(msBudget) {
+            let b = Math.max(5, msBudget || 10);
+            _wodMapGenYieldState = { budget: b, due: performance.now() + b };
+        }
+        function wodMapGenYieldingStop() {
+            _wodMapGenYieldState = null;
+        }
+        async function wodMapGenYieldSlice() {
+            let st = _wodMapGenYieldState;
+            if(!st) return;
+            let now = performance.now();
+            if(now < st.due) return;
+            await wodYieldToMainThread();
+            st.due = performance.now() + st.budget;
+        }
+
         function wodYieldToMainThread() {
+            try {
+                let sch = globalThis.scheduler;
+                if(sch && typeof sch.yield === 'function') return sch.yield();
+            } catch(e) {}
             return new Promise(function(resolve) {
-                setTimeout(resolve, 0);
+                if(typeof requestAnimationFrame === 'function') requestAnimationFrame(function() { resolve(); });
+                else setTimeout(resolve, 0);
             });
         }
 
@@ -13788,6 +13808,7 @@
                 }
             }
             try {
+            wodMapGenYieldingStart(9);
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 1000;
             gameData.income = 10;             gameData.selection = [];
@@ -13842,9 +13863,8 @@
             // but these are square-neighbor dots, not hex tiles.
             let cols = mapR;
             let rows = Math.floor(mapR * 0.8);
-            let approxCells = (2 * cols + 1) * (2 * rows + 1);
-            let wodHexGenYieldStride = Math.max(22, Math.min(110, Math.ceil(approxCells / 40)));
             let spacing = hr * 1.35;
+            let terrainCellIx = 0;
             
             for(let r = -rows; r <= rows; r++) {
                 for(let q = -cols; q <= cols; q++) {
@@ -14008,31 +14028,30 @@
                     
                     gameData.hexes[`${q},${r}`] = hex;
                     gameData.hexList.push(hex);
-                    if((gameData.hexList.length % wodHexGenYieldStride) === 0) await wodYieldToMainThread();
+                    if((++terrainCellIx & 63) === 0) await wodMapGenYieldSlice();
                 }
-                if(approxCells > 3500 && ((r + rows) & 1) === 0) await wodYieldToMainThread();
             }
 
-            wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
-            await wodYieldToMainThread();
+            await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
+            await wodMapGenYieldSlice();
             await wodNaturalizeBiomeBlends(seedOffset, mapShape);
-            await wodYieldToMainThread();
-            wodNormalizeRectangleWaterFeatures(seedOffset);
-            await wodYieldToMainThread();
+            await wodMapGenYieldSlice();
+            await wodNormalizeRectangleWaterFeatures(seedOffset);
+            await wodMapGenYieldSlice();
             limitRectangleMountainDensity(mapShape, seedOffset);
-            await wodYieldToMainThread();
+            await wodMapGenYieldSlice();
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
-            await wodYieldToMainThread();
+            await wodMapGenYieldSlice();
             // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
             await ensureMountainPasses();
-            await wodYieldToMainThread();
+            await wodMapGenYieldSlice();
             await softenLandFullyBlockedByMountainRing();
-            await wodYieldToMainThread();
+            await wodMapGenYieldSlice();
             await ensureMountainPasses();
-            await wodYieldToMainThread();
+            await wodMapGenYieldSlice();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
 
-            await wodYieldToMainThread();
+            await wodMapGenYieldSlice();
 
             // Generate Cities — uses live faction count from solo setup or lobby before placing towns.
             if(!(gameData.mp && gameData.mp.enabled)) {
@@ -14054,11 +14073,7 @@
             }
 
             if(!procSucceeded) {
-                let wi = 0;
-                for(let hx of gameData.hexList) {
-                    setHexOwner(hx, 0);
-                    if((++wi & 2047) === 0) await wodYieldToMainThread();
-                }
+                for(let hx of gameData.hexList) setHexOwner(hx, 0);
                 gameData.cities = [];
 
                 let citiesPerPlayer = Math.min(4, Math.max(2, 1 + Math.floor(mapR / 72)));
@@ -14087,7 +14102,6 @@
                             h = gameData.hexList[(Math.floor(Math.random() * gameData.hexList.length)) | 0];
                         }
                         attempts++;
-                        if((attempts & 63) === 0) await wodYieldToMainThread();
                         if(!h || isWaterHex(h) || h.type === 'mountain') continue;
                         let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
                         if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) continue;
@@ -14150,7 +14164,6 @@
 
                         valid = true;
                     }
-                    if((i & 1) === 0) await wodYieldToMainThread();
                 }
             }
 
@@ -14172,6 +14185,7 @@
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
+                wodMapGenYieldingStop();
                 if(showMapGenOverlay && mapGenOverlayEl) {
                     mapGenOverlayEl.classList.add('hidden');
                     mapGenOverlayEl.setAttribute('aria-busy', 'false');
@@ -14187,16 +14201,16 @@
             let isPassable = (h) => h && !isWaterHex(h) && h.type !== 'mountain';
             let visited = new Set();
             let components = [];
-            let hl = gameData.hexList.length;
-            let bfsTick = 0;
+            let walkTick = 0;
 
             for(let hex of gameData.hexList) {
                 if(!isPassable(hex) || visited.has(landKey(hex))) continue;
                 let queue = [hex];
+                let qi = 0;
                 let comp = [];
                 visited.add(landKey(hex));
-                while(queue.length) {
-                    let cur = queue.shift();
+                while(qi < queue.length) {
+                    let cur = queue[qi++];
                     comp.push(cur);
                     for(let dir of hexDirections) {
                         let nKey = `${cur.q + dir.q},${cur.r + dir.r}`;
@@ -14205,7 +14219,7 @@
                         visited.add(nKey);
                         queue.push(nHex);
                     }
-                    if(hl > 5000 && (++bfsTick & 8191) === 0) await wodYieldToMainThread();
+                    if((++walkTick & 4095) === 0) await wodMapGenYieldSlice();
                 }
                 if(comp.length > 0) components.push(comp);
             }
@@ -14218,19 +14232,19 @@
             // and carve a pass through any mountains between them.
             let mainComponent = components[0];
             let mainSet = new Set(mainComponent.map(landKey));
-            let pairTick = 0;
 
             for(let i = 1; i < components.length; i++) {
                 let comp = components[i];
                 if(comp.length < 2) continue;
 
                 let bestA = null, bestB = null, bestDist = Infinity;
+                let pairTick = 0;
                 for(let a of comp) {
                     for(let b of mainComponent) {
                         let dx = a.x - b.x, dy = a.y - b.y;
                         let d = dx * dx + dy * dy;
                         if(d < bestDist) { bestDist = d; bestA = a; bestB = b; }
-                        if(hl > 4000 && (++pairTick & 12287) === 0) await wodYieldToMainThread();
+                        if((++pairTick & 2047) === 0) await wodMapGenYieldSlice();
                     }
                 }
                 if(!bestA || !bestB) continue;
@@ -14239,7 +14253,6 @@
                 // Add this component to mainSet
                 for(let h of comp) mainSet.add(landKey(h));
                 mainComponent = mainComponent.concat(comp);
-                await wodYieldToMainThread();
             }
 
             // For tiny pockets of land entirely surrounded by mountains, convert them to hills
@@ -14276,8 +14289,8 @@
 
         async function softenLandFullyBlockedByMountainRing() {
             let probeTpl = { type: 'light', owner: 1 };
-            let gridN = gameData.hexList.length;
             for(let sweep = 0; sweep < 220; sweep++) {
+                await wodMapGenYieldSlice();
                 let hit = false;
                 let hi = 0;
                 for(let hex of gameData.hexList) {
@@ -14286,10 +14299,10 @@
                     if(!canUnitEnterHex(probeTpl, hex)) continue;
                     let neighbors = getNeighborHexes(hex);
                     let hasLandNeighbor = false;
-                    for(let nbr of neighbors) {
-                        if(!nbr || isWaterHex(nbr)) continue;
-                        if(nbr.type === 'mountain') continue;
-                        if(!canUnitEnterHex(probeTpl, nbr)) continue;
+                    for(let n of neighbors) {
+                        if(!n || isWaterHex(n)) continue;
+                        if(n.type === 'mountain') continue;
+                        if(!canUnitEnterHex(probeTpl, n)) continue;
                         hasLandNeighbor = true;
                         break;
                     }
@@ -14302,19 +14315,19 @@
                         hit = true;
                         break;
                     }
-                    hi++;
-                    if(gridN > 3500 && (hi & 511) === 0) await wodYieldToMainThread();
+                    if((++hi & 511) === 0) await wodMapGenYieldSlice();
                 }
                 if(!hit) break;
-                if(gridN > 4000) await wodYieldToMainThread();
             }
         }
 
         /** BFS from each faction's towns so every owned infantry-passable tile can reach at least one friendly city footprint. */
-        function ensureOwnedTilesReachFactionCities(ownerIds) {
+        async function ensureOwnedTilesReachFactionCities(ownerIds) {
             if(!ownerIds || ownerIds.length === 0) return;
             let probeTpl = { type: 'light', owner: 1 };
+            let bfsTick = 0;
             for(let pass = 0; pass < 48; pass++) {
+                await wodMapGenYieldSlice();
                 let carved = false;
                 owLoop: for(let owner of ownerIds) {
                     probeTpl.owner = owner;
@@ -14333,9 +14346,10 @@
                     }
                     if(seeds.length === 0) continue;
                     let queue = [...seeds];
+                    let qi = 0;
                     let seen = new Set(seeds.map(getHexKey));
-                    while(queue.length) {
-                        let cur = queue.shift();
+                    while(qi < queue.length) {
+                        let cur = queue[qi++];
                         if(cur.owner !== owner || !canUnitEnterHex(probeTpl, cur)) continue;
                         for(let nb of getNeighborHexes(cur)) {
                             if(!nb || isWaterHex(nb) || nb.type === 'mountain') continue;
@@ -14345,8 +14359,11 @@
                             seen.add(k);
                             queue.push(nb);
                         }
+                        if((++bfsTick & 8191) === 0) await wodMapGenYieldSlice();
                     }
+                    let hi = 0;
                     for(let hex of gameData.hexList) {
+                        if((++hi & 255) === 0) await wodMapGenYieldSlice();
                         if(hex.owner !== owner || isWaterHex(hex) || hex.type === 'mountain') continue;
                         if(!canUnitEnterHex(probeTpl, hex)) continue;
                         if(seen.has(getHexKey(hex))) continue;
@@ -14390,29 +14407,33 @@
             }
         }
 
-        function ensureOwnersReachableByLand(ownerIds) {
+        async function ensureOwnersReachableByLand(ownerIds) {
             if(!ownerIds || ownerIds.length < 2) return;
             let fake = {type: 'light', owner: 1};
             function passable(h) {
                 return h && !isWaterHex(h) && canUnitEnterHex(fake, h);
             }
+            let bfsTick = 0;
             for(let i = 0; i < ownerIds.length; i++) {
                 let o1 = ownerIds[i];
                 for(let j = i + 1; j < ownerIds.length; j++) {
                     let o2 = ownerIds[j];
                     let starts = [];
                     let goalKeys = new Set();
+                    let hi0 = 0;
                     for(let h of gameData.hexList) {
+                        if((++hi0 & 255) === 0) await wodMapGenYieldSlice();
                         if(!passable(h)) continue;
                         if(h.owner === o1) starts.push(h);
                         if(h.owner === o2) goalKeys.add(getHexKey(h));
                     }
                     if(starts.length === 0 || goalKeys.size === 0) continue;
                     let queue = [...starts];
+                    let qi = 0;
                     let seen = new Set(starts.map(getHexKey));
                     let connected = false;
-                    while(queue.length) {
-                        let cur = queue.shift();
+                    while(qi < queue.length) {
+                        let cur = queue[qi++];
                         if(goalKeys.has(getHexKey(cur))) {
                             connected = true;
                             break;
@@ -14424,9 +14445,11 @@
                             seen.add(nk);
                             queue.push(nb);
                         }
+                        if((++bfsTick & 8191) === 0) await wodMapGenYieldSlice();
                     }
                     if(connected) continue;
                     let bestA = null, bestB = null, bestD = Infinity;
+                    let pairTick = 0;
                     for(let a of gameData.hexList) {
                         if(a.owner !== o1 || !passable(a)) continue;
                         for(let b of gameData.hexList) {
@@ -14438,6 +14461,7 @@
                                 bestA = a;
                                 bestB = b;
                             }
+                            if((++pairTick & 2047) === 0) await wodMapGenYieldSlice();
                         }
                     }
                     if(bestA && bestB) carveMountainLine(bestA, bestB);
