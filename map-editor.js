@@ -255,7 +255,6 @@
         grid-template-rows:auto auto 1fr;
         gap:0;
       }
-      .editor-toolbar { grid-column:1/-1; grid-row: 1; }
       .editor-gen-wrap {
         grid-column:1/-1; grid-row:2;
         background:linear-gradient(180deg,#0f1a28,#0c1520);
@@ -286,7 +285,7 @@
       .editor-gen-tgl { display:flex; align-items:center; gap:7px; font-size:12px; color:#cfdce8; cursor:pointer; user-select:none; }
       .editor-gen-tgl input { width:16px; height:16px; accent-color:#4be396; cursor:pointer; }
       .editor-toolbar {
-        grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 16px;
+        grid-column:1/-1;grid-row:1;display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 16px;
         background:linear-gradient(180deg,#122433,#0f1e2e);border-bottom:2px solid #c9a227;
         box-shadow:0 2px 14px rgba(0,0,0,.35);
       }
