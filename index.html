@@ -5519,11 +5519,30 @@
                 let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
                 gameData.mapRadius = mapSize;
                 if(!opts.preserveMap) {
-                    void generateMap().then(() => previewLoadedMap()).catch(e => {
-                        console.warn(e);
-                        previewLoadedMap();
-                    });
-                } else previewLoadedMap();
+                    void generateMap()
+                        .then(() => {
+                            previewLoadedMap();
+                            try {
+                                wodCaptureSoloPreviewSnapshot();
+                                gameData._soloMapPreviewMatchesStart = true;
+                            } catch(_) {
+                                gameData._soloMapPreviewMatchesStart = false;
+                            }
+                        })
+                        .catch(e => {
+                            console.warn(e);
+                            previewLoadedMap();
+                            gameData._soloMapPreviewMatchesStart = false;
+                        });
+                } else {
+                    previewLoadedMap();
+                    try {
+                        wodCaptureSoloPreviewSnapshot();
+                        gameData._soloMapPreviewMatchesStart = true;
+                    } catch(_) {
+                        gameData._soloMapPreviewMatchesStart = false;
+                    }
+                }
             }
         }
 
@@ -13125,14 +13144,13 @@
             let snap = gameData._soloPreviewSnapshot;
             if(!snap) return false;
             if(snap.mapRadius !== newRadius || snap.mapShape !== requestedShape) return false;
-            let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
-            if(snap.fingerprint !== fp) return false;
+            if(snap.aiCount != null && snap.aiCount !== gameData.aiCount) return false;
 
             gameData.mapRadius = snap.mapRadius;
             gameData.mapShape = snap.mapShape;
             gameData.loadedCustomMap = false;
             gameData._mapGenSeed = snap.mapGenSeed || gameData._mapGenSeed;
-            gameData._lastMapFingerprint = snap.fingerprint;
+            gameData._lastMapFingerprint = wodComputeMapFingerprint(snap.mapRadius, snap.mapShape, snap.aiCount);
             gameData._wodCitySplitAnglePhase = snap.citySplitAnglePhase;
             gameData.hexList = wodDeepClonePlain(snap.hexList);
             gameData.hexes = {};
