@@ -6440,21 +6440,50 @@
             }
 
             function widenRiverChannel() {
-                let keys = [...riverCells];
-                for(let rk of keys) {
-                    let h = gameData.hexes[rk];
-                    if(!h) continue;
-                    let dh = dist.get(rk);
-                    for(let d of hexDirections) {
-                        let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
-                        if(!passableForRiverField(nb) || isWaterHex(nb)) continue;
-                        let nk = key(nb);
-                        let nd = dist.get(nk);
-                        if(dh == null || nd == null) continue;
-                        if(nd > dh + 2) continue;
-                        let w = fbm(nb.x * 0.021 + seedOffset + 5188, nb.y * 0.021 + seedOffset + 5188, 5);
-                        if(w > 0.86) markRiverWater(nb);
+                function widenPass(fbmThresh, maxDelta) {
+                    let keys = [...riverCells];
+                    for(let rk of keys) {
+                        let h = gameData.hexes[rk];
+                        if(!h) continue;
+                        let dh = dist.get(rk);
+                        for(let d of hexDirections) {
+                            let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                            if(!passableForRiverField(nb) || isWaterHex(nb)) continue;
+                            let nk = key(nb);
+                            let nd = dist.get(nk);
+                            if(dh == null || nd == null) continue;
+                            if(nd > dh + maxDelta || nd < dh - 1) continue;
+                            let w = fbm(nb.x * 0.021 + seedOffset + 5188, nb.y * 0.021 + seedOffset + 5188, 5);
+                            if(w > fbmThresh) markRiverWater(nb);
+                        }
                     }
+                }
+                widenPass(0.58, 2);
+                widenPass(0.48, 2);
+            }
+
+            function fillRiverCorridorGaps() {
+                for(let iter = 0; iter < 12; iter++) {
+                    let added = 0;
+                    let scan = [...riverCells];
+                    for(let rk of scan) {
+                        let h = gameData.hexes[rk];
+                        if(!h) continue;
+                        for(let d of hexDirections) {
+                            let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                            if(!passableForRiverField(nb) || isWaterHex(nb)) continue;
+                            let riverAdj = 0;
+                            for(let d2 of hexDirections) {
+                                let nn = gameData.hexes[`${nb.q + d2.q},${nb.r + d2.r}`];
+                                if(nn && isWaterHex(nn) && riverCells.has(key(nn))) riverAdj++;
+                            }
+                            if(riverAdj >= 2) {
+                                markRiverWater(nb);
+                                added++;
+                            }
+                        }
+                    }
+                    if(!added) break;
                 }
             }
 
@@ -6530,6 +6559,7 @@
             }
 
             widenRiverChannel();
+            fillRiverCorridorGaps();
         }
 
         /** Smooth jagged sand/swamp speckles left along carved rivers back toward neighboring land biomes. */
@@ -6550,6 +6580,8 @@
                         tally[nb.type] = (tally[nb.type] || 0) + 1;
                     }
                     if(waterAdj === 0) continue;
+                    /* Only single-water-adjacent bank tiles — avoids painting speckles back into river channels. */
+                    if(waterAdj !== 1) continue;
                     let bestT = null, bestC = 0;
                     for(let t in tally) {
                         if(tally[t] > bestC) {
@@ -6561,14 +6593,13 @@
                     let need = pass === 0 ? 4 : 3;
                     if(bestC < need) continue;
                     if(bestT === h.type) continue;
-                    if(waterAdj >= 4) continue;
                     if(h.type === 'sand' && (bestT === 'grass' || bestT === 'forest')) {
                         changes.push({ h, type: bestT });
-                    } else if(h.type === 'swamp' && waterAdj === 1 && bestT === 'grass' && bestC >= 5) {
+                    } else if(h.type === 'swamp' && bestT === 'grass' && bestC >= 5) {
                         changes.push({ h, type: 'grass' });
                     } else if(bestC >= 5) {
                         changes.push({ h, type: bestT });
-                    } else if(waterAdj <= 2 && bestC >= 4) {
+                    } else if(bestC >= 4) {
                         let blend = fbm(h.x * 0.014 + seedOffset + 5520 + pass, h.y * 0.014 + seedOffset + 5520, 3);
                         if(blend > 0.38) changes.push({ h, type: bestT });
                     }
@@ -13050,46 +13081,6 @@
             reader.readAsText(file);
         }
 
-        function wodDrawMapPreviewGeneratingOverlay(canvas) {
-            if(!canvas) return;
-            let ctx = canvas.getContext('2d');
-            let w = canvas.width, h = canvas.height;
-            if(w < 2 || h < 2) return;
-            ctx.fillStyle = '#154360';
-            ctx.fillRect(0, 0, w, h);
-            let fs = Math.max(11, Math.floor(Math.min(w, h) * 0.078));
-            ctx.fillStyle = 'rgba(237,243,249,0.92)';
-            ctx.font = `${fs}px system-ui,sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('Generating map…', w / 2, h * (h < 140 ? 0.36 : 0.34));
-            let cx = w / 2, cy = h * 0.57, r = Math.min(w, h) * (h < 140 ? 0.11 : 0.098);
-            let a0 = (performance.now() / 400) % (Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-            ctx.lineWidth = Math.max(1.8, r * 0.12);
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.strokeStyle = 'rgba(229,239,247,0.92)';
-            ctx.lineWidth = Math.max(2, r * 0.13);
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.arc(cx, cy, r, a0, a0 + Math.PI * 1.48);
-            ctx.stroke();
-        }
-
-        function wodPreviewSpinnerLoop() {
-            if(!gameData._wodMapPreviewSpinnerActive) {
-                gameData._wodPreviewSpinnerRafId = 0;
-                return;
-            }
-            for(let id of gameData._wodPreviewSpinnerCanvasIds || []) {
-                let cv = typeof id === 'string' ? document.getElementById(id) : id;
-                if(cv && cv.dataset.wodMapGenerating === '1') wodDrawMapPreviewGeneratingOverlay(cv);
-            }
-            gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
-        }
-
         function wodArmMapPreviewSpinner(canvasId) {
             if(!canvasId) return;
             if(!gameData._wodPreviewSpinnerCanvasIds) gameData._wodPreviewSpinnerCanvasIds = new Set();
@@ -13107,10 +13098,6 @@
             cv.width = w;
             cv.height = h;
             gameData._wodPreviewSpinnerCanvasIds.add(canvasId);
-            gameData._wodMapPreviewSpinnerActive = true;
-            wodDrawMapPreviewGeneratingOverlay(cv);
-            if(!gameData._wodPreviewSpinnerRafId)
-                gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
         }
 
         function wodDisarmMapPreviewSpinner(canvasId) {
@@ -13122,11 +13109,6 @@
             if(busy) {
                 busy.classList.add('hidden');
                 busy.setAttribute('aria-hidden', 'true');
-            }
-            gameData._wodMapPreviewSpinnerActive = gameData._wodPreviewSpinnerCanvasIds.size > 0;
-            if(!gameData._wodMapPreviewSpinnerActive && gameData._wodPreviewSpinnerRafId) {
-                cancelAnimationFrame(gameData._wodPreviewSpinnerRafId);
-                gameData._wodPreviewSpinnerRafId = 0;
             }
         }
 
