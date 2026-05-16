@@ -6449,16 +6449,20 @@
             let usedStarts = new Set();
             /** Centerline only — widen/fill must never expand from growing water blobs. */
             let pathCoreKeys = new Set();
+            /** Island only: every land cell we turned into river water (spine + banks); used to heal cuts without draining natural ocean/lakes. */
+            let islandRiverPaintKeys = new Set();
 
             function markPathCore(h) {
                 if(!h || h.type === 'urban' || h.type === 'mountain') return;
                 if(!isWaterHex(h)) wodSetGeneratedTerrainType(h, 'water');
                 pathCoreKeys.add(key(h));
+                if(mapShape === 'island') islandRiverPaintKeys.add(key(h));
             }
 
             function markRiverBankWater(h) {
                 if(!h || h.type === 'urban' || h.type === 'mountain') return;
                 if(!isWaterHex(h)) wodSetGeneratedTerrainType(h, 'water');
+                if(mapShape === 'island') islandRiverPaintKeys.add(key(h));
             }
 
             function widenRiverChannel() {
@@ -6659,6 +6663,70 @@
                 }
             }
             featherRiverBanks();
+
+            /** If carved rivers split walkable land into multiple components, peel river water back inland first until one landmass remains. */
+            function wodHealIslandRiverDisconnections() {
+                if(mapShape !== 'island' || islandRiverPaintKeys.size === 0) return;
+                function isWalkLand(h) {
+                    return !!(h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban');
+                }
+                function countLandComponents() {
+                    let visited = new Set();
+                    let comps = 0;
+                    for(let h of gameData.hexList) {
+                        if(!isWalkLand(h) || visited.has(key(h))) continue;
+                        comps++;
+                        let q = [h];
+                        visited.add(key(h));
+                        for(let qi = 0; qi < q.length; qi++) {
+                            let u = q[qi];
+                            for(let nb of getNeighborHexes(u)) {
+                                if(!isWalkLand(nb)) continue;
+                                let nk = key(nb);
+                                if(visited.has(nk)) continue;
+                                visited.add(nk);
+                                q.push(nb);
+                            }
+                        }
+                    }
+                    return comps;
+                }
+                function dominantLandNeighborType(hx) {
+                    let tally = {};
+                    for(let nb of getNeighborHexes(hx)) {
+                        if(!nb || isWaterHex(nb) || nb.type === 'mountain' || nb.type === 'urban') continue;
+                        tally[nb.type] = (tally[nb.type] || 0) + 1;
+                    }
+                    let best = 'grass', bc = 0;
+                    for(let t in tally) {
+                        if(tally[t] > bc) {
+                            bc = tally[t];
+                            best = t;
+                        }
+                    }
+                    return best;
+                }
+                let guard = 0;
+                while(countLandComponents() > 1 && guard < 520) {
+                    guard++;
+                    let cands = [];
+                    for(let rk of islandRiverPaintKeys) {
+                        let h = gameData.hexes[rk];
+                        if(!h || !isWaterHex(h)) continue;
+                        if(isIslandOceanSink(h)) continue;
+                        let dk = dist.get(rk);
+                        cands.push({ h, rk, dk: dk == null ? 0 : dk });
+                    }
+                    if(!cands.length) break;
+                    cands.sort((a, b) => b.dk - a.dk);
+                    let victim = cands[0];
+                    let rev = dominantLandNeighborType(victim.h);
+                    wodSetGeneratedTerrainType(victim.h, rev);
+                    islandRiverPaintKeys.delete(victim.rk);
+                    pathCoreKeys.delete(victim.rk);
+                }
+            }
+            wodHealIslandRiverDisconnections();
         }
 
         /** Smooth jagged sand/swamp speckles left along carved rivers back toward neighboring land biomes. */
