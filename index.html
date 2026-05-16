@@ -1989,6 +1989,71 @@
             display: flex;
         }
 
+        .wod-map-editor-panel.panel-wide {
+            max-width: 640px;
+            display: flex;
+            flex-direction: column;
+            text-align: left;
+        }
+        .wod-map-editor-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .wod-map-editor-head h2 {
+            margin: 0;
+        }
+        .wod-map-editor-gen-row {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin: 12px 0 16px;
+        }
+        .wod-map-editor-tab-bar {
+            margin: 0 0 10px !important;
+        }
+        .wod-map-editor-tab-panel {
+            display: none;
+            flex-direction: column;
+            gap: 12px;
+            padding: 14px 16px;
+            border: 1px solid rgba(212, 175, 55, 0.45);
+            border-radius: 10px;
+            background: rgba(18, 26, 36, 0.55);
+        }
+        .wod-map-editor-tab-panel.active {
+            display: flex;
+        }
+        .wod-map-editor-preview-wrap {
+            border: 1px solid rgba(212, 175, 55, 0.4);
+            border-radius: 10px;
+            overflow: hidden;
+            background: #0b1520;
+        }
+        #wodMapEditorPreview {
+            display: block;
+            width: 100%;
+            height: 220px;
+        }
+        .wod-map-editor-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .wod-map-editor-toggle {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            cursor: pointer;
+            max-width: 100%;
+        }
+        .wod-map-editor-toggle input {
+            margin-top: 3px;
+        }
+
         .ach-panel-scroll {
             flex: 1 1 auto;
             min-height: 200px;
@@ -4346,7 +4411,7 @@
                     <button class="menu-btn" onclick="showPanel('setup')">Play vs AI</button>
                     <button class="menu-btn" onclick="showPanel('multiplayer')">Multiplayer</button>
                     <button class="menu-btn" onclick="showPanel('shop')">Skin Shop</button>
-                    <button class="menu-btn" onclick="openMapEditor()">Map Editor</button>
+                    <button class="menu-btn" onclick="showPanel('mapEditor')">Map Editor</button>
                     <button class="menu-btn" onclick="showPanel('achievements')">Achievements</button>
                     <button class="menu-btn" onclick="showPanel('helpGuide')">Help &amp; guide</button>
                     <button class="menu-btn" onclick="showPanel('settings')">Settings</button>
@@ -4840,10 +4905,57 @@
         </div>
 
         <div id="mapEditorPanel" class="overlay hidden">
-            <div class="panel">
-                <h2>Map Editor</h2>
-                <p>Design your own island battlegrounds. Feature in development.</p>
-                <button class="menu-btn" onclick="hidePanels()">Back</button>
+            <div class="panel panel-wide wod-map-editor-panel">
+                <div class="wod-map-editor-head">
+                    <h2>Map Editor</h2>
+                    <button type="button" class="menu-btn" onclick="hidePanels()">Back</button>
+                </div>
+                <p class="credits-intro" style="margin-top:0;">Generate procedural terrain for the <code>window.WOD</code> map API, or load maps from the library. Use the tabs to set shape and what to stamp onto the map, then generate.</p>
+                <div class="wod-map-editor-gen-row">
+                    <div class="ach-tab-bar wod-map-editor-tab-bar">
+                        <button type="button" class="ach-tab active" id="wodMapEdTabOpts" onclick="wodMapEditorSwitchTab('opts')">Options</button>
+                        <button type="button" class="ach-tab" id="wodMapEdTabRun" onclick="wodMapEditorSwitchTab('run')">Generate</button>
+                    </div>
+                    <div id="wodMapEdPanelOpts" class="wod-map-editor-tab-panel active">
+                        <div class="setup-row">
+                            <label for="wodEditorMapShape">Procedural shape</label>
+                            <select id="wodEditorMapShape">
+                                <option value="island" selected>Island</option>
+                                <option value="rectangle">Rectangle</option>
+                            </select>
+                        </div>
+                        <label class="wod-map-editor-toggle">
+                            <input type="checkbox" id="wodEditorGenUnits" checked />
+                            <span><strong>Units</strong> — spawn starting frontline armies after generation (needs cities and territory).</span>
+                        </label>
+                        <label class="wod-map-editor-toggle">
+                            <input type="checkbox" id="wodEditorGenTerritory" checked />
+                            <span><strong>Territory</strong> — faction borders and balanced land claims (Voronoi pass).</span>
+                        </label>
+                        <label class="wod-map-editor-toggle">
+                            <input type="checkbox" id="wodEditorGenCities" checked />
+                            <span><strong>Cities</strong> — capitals and towns (neutral towns if territory is off).</span>
+                        </label>
+                    </div>
+                    <div id="wodMapEdPanelRun" class="wod-map-editor-tab-panel">
+                        <div class="setup-row">
+                            <label for="wodEditorMapSize">Map size</label>
+                            <select id="wodEditorMapSize">
+                                <option value="40">Small (40)</option>
+                                <option value="60" selected>Medium (60)</option>
+                                <option value="80">Large (80)</option>
+                            </select>
+                        </div>
+                        <div class="wod-map-editor-actions">
+                            <button type="button" class="menu-btn" style="min-width:160px" id="wodEditorBtnGenerate" onclick="wodMapEditorRunGenerate()">Generate map</button>
+                            <button type="button" class="build-btn" onclick="showPanel('mapLibrary', { libContext: 'editor', returnTo: 'editor' })">Load from library…</button>
+                        </div>
+                        <p class="wod-map-lib-sub" id="wodEditorGenStatus" style="margin:0;">Ready.</p>
+                    </div>
+                </div>
+                <div class="wod-map-editor-preview-wrap">
+                    <canvas id="wodMapEditorPreview" width="560" height="220" aria-label="Map preview"></canvas>
+                </div>
             </div>
         </div>
 
@@ -5507,6 +5619,10 @@
                 wodWireMapLibraryPanelOnce();
                 wodRefreshMapLibraryPanel();
             }
+            if(panelId === 'mapEditor') {
+                wodMapEditorWireOnce();
+                wodMapEditorSwitchTab('opts');
+            }
             if(panelId === 'setup') {
                 syncSetupPlayerColorRow();
                 initSetupPanelBindings();
@@ -5565,7 +5681,14 @@
             window._wodMapLibFromMpHost = false;
             let ret = _wodMapLib.returnTo;
             _wodMapLib.returnTo = null;
-            if(ret === 'editor') return;
+            if(ret === 'editor') {
+                pauseMenuBackgroundBattle();
+                UI.mainMenu.classList.add('hidden');
+                let ed = document.getElementById('mapEditorPanel');
+                if(ed) ed.classList.remove('hidden');
+                wodMapEditorWireOnce();
+                return;
+            }
             if(ret === 'multiplayer') {
                 pauseMenuBackgroundBattle();
                 UI.mainMenu.classList.add('hidden');
@@ -5576,6 +5699,61 @@
             }
             if(ret === 'setup') return;
             hidePanels();
+        }
+
+        let _wodMapEditorUiWired = false;
+        function wodMapEditorWireOnce() {
+            if(_wodMapEditorUiWired) return;
+            _wodMapEditorUiWired = true;
+            let st = document.getElementById('wodEditorGenStatus');
+            if(st) st.textContent = 'Ready.';
+        }
+        function wodMapEditorSwitchTab(which) {
+            let tOpts = document.getElementById('wodMapEdTabOpts');
+            let tRun = document.getElementById('wodMapEdTabRun');
+            let pOpts = document.getElementById('wodMapEdPanelOpts');
+            let pRun = document.getElementById('wodMapEdPanelRun');
+            let onOpts = which === 'opts';
+            if(tOpts) tOpts.classList.toggle('active', onOpts);
+            if(tRun) tRun.classList.toggle('active', !onOpts);
+            if(pOpts) pOpts.classList.toggle('active', onOpts);
+            if(pRun) pRun.classList.toggle('active', !onOpts);
+        }
+        async function wodMapEditorRunGenerate() {
+            let st = document.getElementById('wodEditorGenStatus');
+            let btn = document.getElementById('wodEditorBtnGenerate');
+            let szEl = document.getElementById('wodEditorMapSize');
+            let shEl = document.getElementById('wodEditorMapShape');
+            let mapR = szEl ? parseInt(szEl.value, 10) || 60 : 60;
+            let shape = shEl && shEl.value === 'rectangle' ? 'rectangle' : 'island';
+            let elTerr = document.getElementById('wodEditorGenTerritory');
+            let elCity = document.getElementById('wodEditorGenCities');
+            let elUnit = document.getElementById('wodEditorGenUnits');
+            let territory = !!(elTerr && elTerr.checked);
+            let cities = !!(elCity && elCity.checked);
+            let units = !!(elUnit && elUnit.checked);
+            gameData.mapRadius = mapR;
+            gameData.loadedCustomMap = false;
+            if(btn) btn.disabled = true;
+            if(st) st.textContent = 'Generating…';
+            let prevSkip = gameData._wodSkipMapGenLoader;
+            gameData._wodSkipMapGenLoader = true;
+            try {
+                await generateMap({
+                    territory,
+                    cities,
+                    units,
+                    shape,
+                });
+                previewLoadedMap('wodMapEditorPreview');
+                if(st) st.textContent = 'Done. Hexes: ' + (gameData.hexList && gameData.hexList.length) + ', cities: ' + ((gameData.cities && gameData.cities.length) || 0);
+            } catch(e) {
+                console.warn(e);
+                if(st) st.textContent = 'Generation failed — see console.';
+            } finally {
+                gameData._wodSkipMapGenLoader = prevSkip;
+                if(btn) btn.disabled = false;
+            }
         }
 
         function hidePanels(resumeMenuDemo) {
@@ -12917,7 +13095,7 @@
                 }
             }
 
-            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview';
+            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview' || prevCanvas.id === 'wodMapEditorPreview';
             if(wodPreviewDrawPolitical) {
                 let hxLookup = gameData.hexes || {};
                 wodPaintMapPreviewPolitical(pCtx, gameData.hexList, gameData.cities, null, cx, cy, scale, gameData.hexRadius, hxLookup);
@@ -13529,6 +13707,58 @@
             }
             if(landHexes.length === 0) return;
 
+            let genInc = gameData._wodMapGenInclude || { units: true, territory: true, cities: true };
+
+            if(!gameData.cities || gameData.cities.length === 0) {
+                gameData.tradeTimer = 0;
+                let locO0 = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
+                for(let owner of ownersList) {
+                    gameData.aiMoneyByOwner[owner] = owner === locO0 ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
+                    gameData.aiManpowerByOwner[owner] = owner === locO0 ? 0 : 5000;
+                }
+                let sx0 = 0, sy0 = 0, nw0 = 0;
+                for(let h of landHexes) {
+                    sx0 += h.x;
+                    sy0 += h.y;
+                    nw0++;
+                }
+                if(nw0 > 0) {
+                    sx0 /= nw0;
+                    sy0 /= nw0;
+                    let vw0 = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+                    let vh0 = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+                    gameData.camera.x = sx0 * gameData.camera.zoom - vw0 / 2;
+                    gameData.camera.y = sy0 * gameData.camera.zoom - vh0 / 2;
+                }
+                wodMarkTerrainPoliticalDirty();
+                return;
+            }
+
+            if(!genInc.territory) {
+                gameData.tradeTimer = 0;
+                let locO1 = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
+                for(let owner of ownersList) {
+                    gameData.aiMoneyByOwner[owner] = owner === locO1 ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
+                    gameData.aiManpowerByOwner[owner] = owner === locO1 ? 0 : 5000;
+                }
+                let sx1 = 0, sy1 = 0, nw1 = 0;
+                for(let h of landHexes) {
+                    sx1 += h.x;
+                    sy1 += h.y;
+                    nw1++;
+                }
+                if(nw1 > 0) {
+                    sx1 /= nw1;
+                    sy1 /= nw1;
+                    let vw1 = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+                    let vh1 = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+                    gameData.camera.x = sx1 * gameData.camera.zoom - vw1 / 2;
+                    gameData.camera.y = sy1 * gameData.camera.zoom - vh1 / 2;
+                }
+                wodMarkTerrainPoliticalDirty();
+                return;
+            }
+
             // Terrain → borders → cities pipeline already partitioned and stamped towns — only wire economy/units/camera.
             if(gameData._wodProcgenBorderFirstApplied && gameData.cities && gameData.cities.length >= ownersList.length &&
                 ownersList.every(o => gameData.cities.some(c => c && c.owner === o))) {
@@ -13543,7 +13773,7 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
-                spawnInitialFrontlineUnits(ownersList);
+                if(genInc.units) spawnInitialFrontlineUnits(ownersList);
 
                 wodMarkTerrainPoliticalDirty();
 
@@ -13728,12 +13958,7 @@
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
 
-            spawnInitialFrontlineUnits(ownersList);
-
-            wodMarkTerrainPoliticalDirty();
-
-            // Center Camera on local player capital
-            let startMe = startCities.find(c => c.owner === locO);
+            if(genInc.units) spawnInitialFrontlineUnits(ownersList);
             if(startMe) {
                 let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
                 let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
@@ -13794,8 +14019,57 @@
             });
         }
 
-        async function generateMap() {
+        /** Neutral towns when the editor turns off territory but keeps cities (no faction paint). */
+        function wodScatterNeutralCitiesNoTerritory(mapShape, cols, rows, hr, mapR) {
+            let land = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
+            if(land.length === 0) return;
+            let n = Math.min(28, Math.max(6, Math.floor(land.length / 900)));
+            let spacing = Math.max(hr * 14, Math.min(hr * 36, mapR * hr * 0.28));
+            let spacingSq = spacing * spacing;
+            gameData.cities = [];
+            let picks = [];
+            let guard = 0;
+            while(picks.length < n && guard++ < land.length * 3) {
+                let h = land[(Math.floor(Math.random() * land.length)) | 0];
+                if(mapShape === 'rectangle') {
+                    let rowCount = Math.floor(rows) || 1;
+                    let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rowCount, 1));
+                    if(bf > 0.88) continue;
+                }
+                if(wodBfsStepsToWater(h, 12) < 2) continue;
+                if(picks.some(p => {
+                    let dx = p.x - h.x, dy = p.y - h.y;
+                    return dx * dx + dy * dy < spacingSq;
+                })) continue;
+                picks.push(h);
+            }
+            for(let i = 0; i < picks.length; i++) {
+                let h = picks[i];
+                let cy = {
+                    id: 'city_neu_' + i,
+                    name: generateCityName(),
+                    x: h.x, y: h.y, q: h.q, r: h.r,
+                    owner: 0, hasFactory: false, hasHarbor: false,
+                    hp: 1000, maxHp: 1000,
+                    urbanStyle: Math.floor(Math.random() * 4),
+                    incomeBonus: 0, manpowerBonus: 0,
+                };
+                gameData.cities.push(cy);
+                stampUrbanTerrainAroundCity(h, cy, 'n' + i);
+            }
+        }
+
+        async function generateMap(includeOpts) {
             let ownsInnerRng = !_wodSavedMathRandom;
+            let mapGenInc = { units: true, territory: true, cities: true };
+            let shapeOverride = null;
+            if(includeOpts && typeof includeOpts === 'object') {
+                if(typeof includeOpts.units === 'boolean') mapGenInc.units = includeOpts.units;
+                if(typeof includeOpts.territory === 'boolean') mapGenInc.territory = includeOpts.territory;
+                if(typeof includeOpts.cities === 'boolean') mapGenInc.cities = includeOpts.cities;
+                if(includeOpts.shape === 'island' || includeOpts.shape === 'rectangle') shapeOverride = includeOpts.shape;
+            }
+            gameData._wodMapGenInclude = mapGenInc;
             let previewSpinnerActive = !!(gameData._wodPreviewSpinnerCanvasIds && gameData._wodPreviewSpinnerCanvasIds.size > 0);
             let showMapGenOverlay = !gameData._wodSkipMapGenLoader && !previewSpinnerActive;
             gameData._wodSkipMapGenLoader = false;
@@ -13823,7 +14097,7 @@
             let procSucceeded = false;
 
             let shapePre = document.getElementById('setupMapShape');
-            let mapShapePre = shapePre ? shapePre.value : 'island';
+            let mapShapePre = shapeOverride || (shapePre ? shapePre.value : 'island');
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
             if(mapShapePre === 'rectangle') procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 22);
 
@@ -13854,7 +14128,7 @@
             let seedOffset = Math.random() * 10000;
             
             let shapeInput = document.getElementById('setupMapShape');
-            let mapShape = shapeInput ? shapeInput.value : 'island';
+            let mapShape = shapeOverride || (shapeInput ? shapeInput.value : 'island');
             gameData.mapShape = mapShape;
             gameData.loadedCustomMap = false;
             gameData._genProfile = wodSampleMapGenProfile(mapShape);
@@ -13959,35 +14233,36 @@
                         let u = wx * scale;
                         let v = wy * scale;
                         let macro = continent;
-                        let meso = fbm(wx * scale * 1.42 + seedOffset + 6110, wy * scale * 1.42 + seedOffset + 6110, 5);
-                        let heightCore = macro * 0.44 + meso * 0.40 + detail * 0.16;
-                        let valleySoft = macro * meso + (1 - macro) * 0.05;
-                        let heightLand = Math.max(0.02, Math.min(0.93, heightCore - valleySoft * 0.14));
-                        let ridge = fbm(wx * scale * 2.5 + seedOffset + 6500, wy * scale * 2.5 + seedOffset + 6500, 5);
+                        let meso = fbm(wx * scale * 1.05 + seedOffset + 6110, wy * scale * 1.05 + seedOffset + 6110, 5);
+                        let fine = fbm(wx * scale * 2.75 + seedOffset + 6300, wy * scale * 2.75 + seedOffset + 6300, 4);
+                        let province = fbm(wx * scale * 0.58 + seedOffset + 5200, wy * scale * 0.58 + seedOffset + 5200, 3);
+                        let heightField = macro * 0.5 + meso * 0.3 + fine * 0.12 + (province - 0.5) * 0.1;
+                        let valleyCarve = Math.max(0, 0.38 - macro) * Math.max(0, meso - 0.32);
+                        let heightLand = Math.max(0.05, Math.min(0.91, heightField - valleyCarve * 0.24));
+                        let ridge = fbm(wx * scale * 2.15 + seedOffset + 6500, wy * scale * 2.15 + seedOffset + 6500, 5);
+                        let inRangeBand = Math.abs(meso - 0.5) < 0.16;
+                        let isMountain = ridge > 0.56 && heightLand > 0.54 && (inRangeBand || ridge > 0.68);
 
                         let edgePad = Math.max(Math.abs(q) / Math.max(mapR, 1), Math.abs(r) / Math.max(rows, 1));
-                        let coastalEdge = edgePad > 0.88;
+                        let coastalEdge = edgePad > 0.86;
 
-                        let lakeNoise = fbm(wx * scale * 1.85 + seedOffset + 7010, wy * scale * 1.85 + seedOffset + 7010, 4);
-                        let lakeBlob = !coastalEdge && macro < 0.245 && ridge < 0.34 && moist > 0.62 && moist < 0.82 && heightCore < 0.31 && lakeNoise > 0.58;
-
-                        let isMountain = ridge > 0.54 && heightLand > 0.55 && !lakeBlob;
+                        let lakeNoise = fbm(wx * scale * 1.58 + seedOffset + 7010, wy * scale * 1.58 + seedOffset + 7010, 4);
+                        let lakeBlob = !coastalEdge && macro < 0.255 && heightLand < 0.38 && moist > 0.56 && moist < 0.84 && lakeNoise > 0.5;
 
                         if (lakeBlob) {
                             type = 'water';
                         } else if (isMountain) {
-                            let passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 4);
-                            let valleyWave = Math.sin(u * -2.05 + v * 1.5 + meso * 0.55 + seedOffset * 0.47);
-                            let valleyBreak = heightLand < 0.66 && Math.abs(valleyWave) < 0.22;
-                            if (valleyBreak && passNoise > 0.36) type = 'hill';
-                            else if (ridge < 0.64 && passNoise > 0.40) type = 'hill';
-                            else type = heightLand > 0.74 ? 'hill' : 'mountain';
-                        } else if (heightLand > 0.51 && ridge > 0.61) type = 'hill';
-                        else if (heightLand < 0.36 && ridge < 0.5 && macro < 0.48) type = 'swamp';
-                        else if (moist < 0.285) type = 'sand';
-                        else if (moist < 0.585) type = 'grass';
-                        else if (moist < 0.795) type = 'forest';
-                        else type = 'swamp';
+                            let passNoise = fbm(x * scale * 4.4 + seedOffset + 3000, y * scale * 4.4 + seedOffset + 3000, 4);
+                            let valleyWave = Math.sin(u * -1.82 + v * 1.32 + meso * 0.48 + seedOffset * 0.4);
+                            if (heightLand < 0.66 && Math.abs(valleyWave) < 0.23 && passNoise > 0.33) type = 'hill';
+                            else if (ridge < 0.63 && passNoise > 0.36) type = 'hill';
+                            else type = heightLand > 0.7 ? 'hill' : 'mountain';
+                        } else if (heightLand > 0.5 && ridge > 0.56) type = 'hill';
+                        else if (heightLand < 0.36 && moist > 0.5 && macro < 0.46) type = 'swamp';
+                        else if (moist < 0.28 && heightLand > 0.4) type = 'sand';
+                        else if (moist < 0.52) type = 'grass';
+                        else if (moist < 0.8) type = 'forest';
+                        else type = (heightLand < 0.42) ? 'swamp' : 'grass';
                     }
                     else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43)) type = 'water';
                     else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43) + 0.05) type = 'sand';
@@ -14065,7 +14340,17 @@
             gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
 
             gameData._wodProcgenBorderFirstApplied = false;
-            let procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+            let procOk = false;
+            if(mapGenInc.territory && mapGenInc.cities) {
+                procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+            } else {
+                gameData.cities = [];
+                for(let hx of gameData.hexList) setHexOwner(hx, 0);
+                if(mapGenInc.cities && !mapGenInc.territory) {
+                    wodScatterNeutralCitiesNoTerritory(mapShape, cols, rows, hr, mapR);
+                }
+                procOk = true;
+            }
             if(procOk) {
                 procSucceeded = true;
                 break outerProcTerrain;
@@ -14073,9 +14358,11 @@
             }
 
             if(!procSucceeded) {
+                let mgInc = gameData._wodMapGenInclude || { units: true, territory: true, cities: true };
                 for(let hx of gameData.hexList) setHexOwner(hx, 0);
                 gameData.cities = [];
 
+                if(mgInc.cities) {
                 let citiesPerPlayer = Math.min(4, Math.max(2, 1 + Math.floor(mapR / 72)));
                 let numCities = factionSlots * citiesPerPlayer;
                 let spacingDen = Math.max(62, Math.floor(76 - factionSlots * 3.8 - Math.min(18, Math.floor(mapR / 55))));
@@ -14165,8 +14452,11 @@
                         valid = true;
                     }
                 }
+                }
+
             }
 
+            gameData.roads = [];
             // Generate Roads (MST style connecting nearest)
             for(let i=0; i<gameData.cities.length; i++){
                 let c1 = gameData.cities[i];
@@ -14186,6 +14476,7 @@
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
                 wodMapGenYieldingStop();
+                delete gameData._wodMapGenInclude;
                 if(showMapGenOverlay && mapGenOverlayEl) {
                     mapGenOverlayEl.classList.add('hidden');
                     mapGenOverlayEl.setAttribute('aria-busy', 'false');
