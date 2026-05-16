@@ -1345,12 +1345,6 @@
             display: none;
         }
 
-        .wod-preview-busy .wod-load-spinner {
-            width: 34px;
-            height: 34px;
-            border-width: 4px;
-        }
-
         .skin-grid-scroll {
             max-height: min(46vh, 440px);
             overflow-y: auto;
@@ -4412,7 +4406,6 @@
                 <div class="wod-preview-shell">
                     <canvas id="mapPreview"></canvas>
                     <div id="mapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
-                        <div class="wod-load-spinner" aria-hidden="true"></div>
                         <span>Generating map…</span>
                     </div>
                 </div>
@@ -4480,7 +4473,6 @@
                             <div class="wod-preview-shell" style="max-width:440px">
                                 <canvas id="mpLobbyMapPreview" width="360" height="200"></canvas>
                                 <div id="mpLobbyMapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
-                                    <div class="wod-load-spinner" aria-hidden="true"></div>
                                     <span>Generating map…</span>
                                 </div>
                             </div>
@@ -6311,14 +6303,13 @@
             }
         }
         function wodCarveNaturalRivers(mapShape, seedOffset, cols, rows) {
-            let chance = mapShape === 'island' ? 0.48 : 0.64;
-            if(Math.random() > chance) return;
+            if(mapShape === 'island' && Math.random() > 0.88) return;
             let land = gameData.hexList.filter(h => h && !isWaterHex(h) && h.type !== 'mountain');
             if(land.length < 80) return;
             let lcm = wodLandCentroidMaxRadius(land);
             let riverCount = mapShape === 'rectangle'
-                ? (Math.random() < 0.32 ? 2 : 1)
-                : (Math.random() < 0.22 ? 2 : 1);
+                ? 2 + (Math.random() < 0.48 ? 1 : 0)
+                : 1 + (Math.random() < 0.55 ? 1 : 0) + (Math.random() > 0.82 ? 1 : 0);
 
             function waterStepsFast(start, maxSteps) {
                 if(!start || isWaterHex(start)) return 0;
@@ -6353,8 +6344,9 @@
                     }
                     let waterAway = waterStepsFast(h, 10);
                     if(waterAway < (mapShape === 'island' ? 4 : 3)) continue;
+                    let lowVal = fbm(h.x * 0.009 + seedOffset + 5100 + ix * 91, h.y * 0.009 + seedOffset + 5100 + ix * 91, 5);
                     let ridge = fbm(h.x * 0.012 + seedOffset + 5100 + ix * 91, h.y * 0.012 + seedOffset + 5100 + ix * 91, 4);
-                    let score = ridge * 120 + waterAway * 12 - Math.abs(dist - lcm.maxR * 0.35) * 0.02 + Math.random() * 10;
+                    let score = ridge * 95 + waterAway * 14 - lowVal * 28 - Math.abs(dist - lcm.maxR * 0.38) * 0.025 + Math.random() * 12;
                     if(score > bestScore) {
                         bestScore = score;
                         best = h;
@@ -6366,13 +6358,13 @@
             function paintRiverCell(h, ix, step) {
                 if(!h || h.type === 'urban') return;
                 wodSetGeneratedTerrainType(h, 'water');
-                let wide = (step % 5 === 0) || fbm(h.x * 0.021 + seedOffset + 5300 + ix, h.y * 0.021 + seedOffset + 5300 + ix, 3) > 0.72;
+                let wide = (step % 4 === 0) || fbm(h.x * 0.019 + seedOffset + 5300 + ix, h.y * 0.019 + seedOffset + 5300 + ix, 3) > 0.62;
                 for(let nb of getNeighborHexes(h)) {
                     if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                    if(wide && Math.random() < 0.2) wodSetGeneratedTerrainType(nb, 'water');
+                    if(wide && Math.random() < 0.38) wodSetGeneratedTerrainType(nb, 'water');
                     else if(!isWaterHex(nb)) {
-                        let wet = fbm(nb.x * 0.018 + seedOffset + 5400, nb.y * 0.018 + seedOffset + 5400, 3);
-                        wodSetGeneratedTerrainType(nb, wet > 0.55 ? 'swamp' : 'sand');
+                        let wet = fbm(nb.x * 0.016 + seedOffset + 5400, nb.y * 0.016 + seedOffset + 5400, 3);
+                        wodSetGeneratedTerrainType(nb, wet > 0.48 ? 'swamp' : 'sand');
                     }
                 }
             }
@@ -6381,9 +6373,9 @@
                 let cur = pickRiverStart(ri);
                 if(!cur) continue;
                 let angle = mapShape === 'rectangle'
-                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.8
-                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 0.9;
-                let maxSteps = Math.max(24, Math.floor((mapShape === 'island' ? rows : cols) * 1.35));
+                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 1.05
+                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 1.15;
+                let maxSteps = Math.max(36, Math.floor((mapShape === 'island' ? rows : cols) * 1.85));
                 let seen = new Set();
                 for(let step = 0; step < maxSteps && cur; step++) {
                     let ck = getHexKey(cur);
@@ -6391,7 +6383,7 @@
                     seen.add(ck);
                     let reachedExistingWater = waterStepsFast(cur, 2) <= 1;
                     paintRiverCell(cur, ri, step);
-                    if(reachedExistingWater && step > 5) break;
+                    if(reachedExistingWater && step > 6) break;
 
                     let best = null, bestScore = Infinity;
                     for(let dir of cardinalHexDirections) {
@@ -6401,10 +6393,10 @@
                         let dx = nb.x - cur.x, dy = nb.y - cur.y;
                         let forward = -(Math.cos(angle) * dx + Math.sin(angle) * dy);
                         let edgePull = mapShape === 'island'
-                            ? -Math.hypot(nb.x - lcm.cx, nb.y - lcm.cy) * 0.03
-                            : -Math.max(Math.abs(nb.q) / Math.max(cols, 1), Math.abs(nb.r) / Math.max(rows, 1)) * 18;
-                        let carveCost = nb.type === 'mountain' ? 140 : 0;
-                        let meander = fbm(nb.x * 0.017 + seedOffset + 5500 + ri * 77, nb.y * 0.017 + seedOffset + 5500 + ri * 77, 3) * 18;
+                            ? -Math.hypot(nb.x - lcm.cx, nb.y - lcm.cy) * 0.028
+                            : -Math.max(Math.abs(nb.q) / Math.max(cols, 1), Math.abs(nb.r) / Math.max(rows, 1)) * 16;
+                        let carveCost = nb.type === 'mountain' ? 42 : 0;
+                        let meander = fbm(nb.x * 0.014 + seedOffset + 5500 + ri * 77, nb.y * 0.014 + seedOffset + 5500 + ri * 77, 4) * 22;
                         let score = forward + edgePull + carveCost + meander;
                         if(score < bestScore) {
                             bestScore = score;
@@ -6412,7 +6404,7 @@
                         }
                     }
                     cur = best;
-                    angle += (fbm((cur ? cur.x : 0) * 0.01 + seedOffset + 5600, (cur ? cur.y : 0) * 0.01 + seedOffset + 5600, 2) - 0.5) * 0.45;
+                    angle += (fbm((cur ? cur.x : 0) * 0.009 + seedOffset + 5600, (cur ? cur.y : 0) * 0.009 + seedOffset + 5600, 3) - 0.5) * 0.62;
                 }
             }
         }
@@ -10551,9 +10543,27 @@
         }
 
         function findBestReachableHexToward(unit, x, y) {
+            let current = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+            let targetCoord = pixelToHex(x, y);
             let best = null;
             let bestScore = Infinity;
-            let current = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+            let maxR = Math.min(44, 14 + Math.floor((gameData.hexList && gameData.hexList.length ? gameData.hexList.length : 4000) / 520));
+            for(let pt of getHexesInRadius(targetCoord.q, targetCoord.r, maxR)) {
+                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                if(!canUseHexForMovement(unit, hex)) continue;
+                let targetDx = x - hex.x;
+                let targetDy = y - hex.y;
+                let selfDx = current ? current.x - hex.x : 0;
+                let selfDy = current ? current.y - hex.y : 0;
+                let frontBonus = isFrontlineHex(hex, unit.owner) ? -25000 : 0;
+                let mire = (unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute)) ? hexMountainProximityScore(hex) * 340 : 0;
+                let score = targetDx * targetDx + targetDy * targetDy + (selfDx * selfDx + selfDy * selfDy) * 0.08 + frontBonus + mire;
+                if(score < bestScore) {
+                    bestScore = score;
+                    best = hex;
+                }
+            }
+            if(best) return best;
             for(let hex of gameData.hexList) {
                 if(!canUseHexForMovement(unit, hex)) continue;
                 let targetDx = x - hex.x;
@@ -10807,12 +10817,18 @@
                 gScore[sk] = 0;
                 fScore[sk] = heuristic(startHex, targetHex);
                 heapPush(open, startHex, fScore);
-                let maxVisits = unit.type === 'ship' ? 16000 : ((unit.type === 'convoy' && unit.convoySeaRoute) ? 14000 : (unit.type === 'convoy' ? 12000 : 7000));
+                let mapCells = Math.max(400, gameData.hexList.length || 0);
+                let maxVisits = unit.type === 'ship' ? 20000 : ((unit.type === 'convoy' && unit.convoySeaRoute) ? 17000 : (unit.type === 'convoy' ? 15000 : 12000));
                 if(unit.type === 'convoy') maxVisits = Math.floor(maxVisits * 1.35);
-                let heavy = (gameData.hexList.length > 9000 ? 5800 / gameData.hexList.length : 1) * (gameData.entities.length > 380 ? 320 / gameData.entities.length : 1);
-                maxVisits = Math.max(900, Math.floor(maxVisits * heavy));
-                if((unit.type === 'light' || unit.type === 'heavy') && !forbidWater) maxVisits = Math.min(maxVisits, 2400);
-                if(unit.type === 'marine' && !forbidWater) maxVisits = Math.min(maxVisits, 3800);
+                if(forbidWater && (unit.type === 'light' || unit.type === 'heavy')) {
+                    maxVisits = Math.floor(16000 + mapCells * 0.52);
+                    maxVisits = Math.min(52000, Math.max(24000, maxVisits));
+                } else {
+                    let heavy = (gameData.hexList.length > 9000 ? 5800 / gameData.hexList.length : 1) * (gameData.entities.length > 380 ? 320 / gameData.entities.length : 1);
+                    maxVisits = Math.max(900, Math.floor(maxVisits * heavy));
+                    if((unit.type === 'light' || unit.type === 'heavy') && !forbidWater) maxVisits = Math.min(maxVisits, 2400);
+                    if(unit.type === 'marine' && !forbidWater) maxVisits = Math.min(maxVisits, 3800);
+                }
                 let pathDirs = cardinalHexDirections;
 
                 while(open.length > 0 && maxVisits-- > 0) {
@@ -11969,6 +11985,10 @@
                 if(unit._wodReplanPfUntil && nowPf < unit._wodReplanPfUntil) return false;
                 unit._wodReplanPfUntil = nowPf + 120;
             }
+            let nowLand = performance.now();
+            if((unit.type === 'light' || unit.type === 'heavy') &&
+                unit._wodReplanLandUntil && nowLand < unit._wodReplanLandUntil)
+                return false;
             if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
                 return assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true});
             }
@@ -12022,8 +12042,11 @@
                 unit.path[unit.path.length - 1] = endPt;
                 unit.target = unit.path.shift();
                 unit.target.pathPrepared = true;
+                unit._wodReplanLandUntil = 0;
                 return true;
             }
+            if((unit.type === 'light' || unit.type === 'heavy') && path.length <= 1)
+                unit._wodReplanLandUntil = performance.now() + 200;
             if(targetHex) {
                 unit.path = null;
                 let t = {x: finalTarget.x, y: finalTarget.y, pathPrepared: true};
@@ -12859,8 +12882,49 @@
             reader.readAsText(file);
         }
 
+        function wodDrawMapPreviewGeneratingOverlay(canvas) {
+            if(!canvas) return;
+            let ctx = canvas.getContext('2d');
+            let w = canvas.width, h = canvas.height;
+            if(w < 2 || h < 2) return;
+            ctx.fillStyle = '#154360';
+            ctx.fillRect(0, 0, w, h);
+            let fs = Math.max(11, Math.floor(Math.min(w, h) * 0.078));
+            ctx.fillStyle = 'rgba(237,243,249,0.92)';
+            ctx.font = `${fs}px system-ui,sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Generating map…', w / 2, h * (h < 140 ? 0.36 : 0.34));
+            let cx = w / 2, cy = h * 0.57, r = Math.min(w, h) * (h < 140 ? 0.11 : 0.098);
+            let a0 = (performance.now() / 400) % (Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = Math.max(1.8, r * 0.12);
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(229,239,247,0.92)';
+            ctx.lineWidth = Math.max(2, r * 0.13);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, a0, a0 + Math.PI * 1.48);
+            ctx.stroke();
+        }
+
+        function wodPreviewSpinnerLoop() {
+            if(!gameData._wodMapPreviewSpinnerActive) {
+                gameData._wodPreviewSpinnerRafId = 0;
+                return;
+            }
+            for(let id of gameData._wodPreviewSpinnerCanvasIds || []) {
+                let cv = typeof id === 'string' ? document.getElementById(id) : id;
+                if(cv && cv.dataset.wodMapGenerating === '1') wodDrawMapPreviewGeneratingOverlay(cv);
+            }
+            gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
+        }
+
         function wodArmMapPreviewSpinner(canvasId) {
             if(!canvasId) return;
+            if(!gameData._wodPreviewSpinnerCanvasIds) gameData._wodPreviewSpinnerCanvasIds = new Set();
             let cv = document.getElementById(canvasId);
             if(!cv) return;
             cv.dataset.wodMapGenerating = '1';
@@ -12869,16 +12933,32 @@
                 busy.classList.remove('hidden');
                 busy.setAttribute('aria-hidden', 'false');
             }
+            let rect = cv.getBoundingClientRect();
+            let w = Math.max(80, Math.floor(rect.width) || 320);
+            let h = Math.max(60, Math.floor(rect.height) || 220);
+            cv.width = w;
+            cv.height = h;
+            gameData._wodPreviewSpinnerCanvasIds.add(canvasId);
+            gameData._wodMapPreviewSpinnerActive = true;
+            wodDrawMapPreviewGeneratingOverlay(cv);
+            if(!gameData._wodPreviewSpinnerRafId)
+                gameData._wodPreviewSpinnerRafId = requestAnimationFrame(wodPreviewSpinnerLoop);
         }
 
         function wodDisarmMapPreviewSpinner(canvasId) {
-            if(!canvasId) return;
+            if(!canvasId || !gameData._wodPreviewSpinnerCanvasIds) return;
+            gameData._wodPreviewSpinnerCanvasIds.delete(canvasId);
             let cv = document.getElementById(canvasId);
             if(cv) cv.dataset.wodMapGenerating = '0';
             let busy = document.getElementById(canvasId + 'Busy');
             if(busy) {
                 busy.classList.add('hidden');
                 busy.setAttribute('aria-hidden', 'true');
+            }
+            gameData._wodMapPreviewSpinnerActive = gameData._wodPreviewSpinnerCanvasIds.size > 0;
+            if(!gameData._wodMapPreviewSpinnerActive && gameData._wodPreviewSpinnerRafId) {
+                cancelAnimationFrame(gameData._wodPreviewSpinnerRafId);
+                gameData._wodPreviewSpinnerRafId = 0;
             }
         }
 
@@ -14021,11 +14101,11 @@
             }
 
             wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
-            wodCarveNaturalRivers(mapShape, seedOffset, cols, rows);
             wodNaturalizeBiomeBlends(seedOffset, mapShape);
             wodNormalizeRectangleWaterFeatures(seedOffset);
             limitRectangleMountainDensity(mapShape, seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
+            wodCarveNaturalRivers(mapShape, seedOffset, cols, rows);
 
             // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
             ensureMountainPasses();

@@ -14,16 +14,22 @@
     viewPanY: 0,
     viewZoom: 1,
     viewPanDrag: null,
+    editorTerrainDirty: true,
   };
 
   const editorPtrs = new Map();
   let editorPinch = null;
 
   let editorFrame = null;
+  function markEditorMapChanged() {
+    state.editorTerrainDirty = true;
+    if (window.WOD && typeof WOD.invalidateTerrain === "function") WOD.invalidateTerrain();
+  }
   function scheduleEditorRender() {
     if (editorFrame != null) return;
     editorFrame = requestAnimationFrame(() => {
       editorFrame = null;
+      if (!state.open) return;
       renderEditor();
     });
   }
@@ -350,6 +356,7 @@
         if (!window.WOD || typeof WOD.toggleGameplayLayer !== "function") return;
         WOD.toggleGameplayLayer(btn.dataset.gl);
         refreshEditorGameplayLayerButtons();
+        state.editorTerrainDirty = true;
         scheduleEditorRender();
       });
     });
@@ -370,19 +377,25 @@
       state.viewPanX = 0;
       state.viewPanY = 0;
       state.viewZoom = 1;
+      markEditorMapChanged();
       scheduleEditorRender();
       renderSelection();
       renderMapBrowser();
     });
-    app.querySelector("#editorRandom").addEventListener("click", () => {
+    app.querySelector("#editorRandom").addEventListener("click", async () => {
       document.getElementById("setupMapSize").value = app.querySelector("#editorSize").value;
       WOD.gameData.mapRadius = parseInt(app.querySelector("#editorSize").value, 10);
       WOD.gameData.aiCount = Math.max(1, state.maxFactionSlots - 1);
-      WOD.generateMap();
+      try {
+        await WOD.generateMap();
+      } catch (e) {
+        console.warn(e);
+      }
       state.selected = null;
       state.viewPanX = 0;
       state.viewPanY = 0;
       state.viewZoom = 1;
+      markEditorMapChanged();
       scheduleEditorRender();
       renderSelection();
       renderMapBrowser();
@@ -440,6 +453,7 @@
     editorPinch = null;
     WOD.makeBlankMap(parseInt(document.getElementById("editorSize").value, 10));
     state.selected = null;
+    state.editorTerrainDirty = true;
     rebuildOwnerSelect();
     rebuildUnitPalette();
     refreshEditorGameplayLayerButtons();
@@ -449,6 +463,10 @@
   }
 
   function closeMapEditor() {
+    if (editorFrame != null) {
+      cancelAnimationFrame(editorFrame);
+      editorFrame = null;
+    }
     const app = document.getElementById("mapEditorApp");
     if (app) app.classList.remove("visible");
     state.open = false;
@@ -464,8 +482,10 @@
   function resizeEditorCanvas() {
     const canvas = document.getElementById("editorCanvas");
     if (!canvas) return;
+    if (!state.open) return;
     canvas.width = canvas.clientWidth || 800;
     canvas.height = canvas.clientHeight || 600;
+    state.editorTerrainDirty = true;
     renderEditor();
   }
 
@@ -641,7 +661,7 @@
     const unit = WOD.createUnitAt(type, hex.x, hex.y, faction);
     state.selected = { type: "unit", value: unit };
     renderSelection();
-    WOD.invalidateTerrain();
+    markEditorMapChanged();
     scheduleEditorRender();
   }
 
@@ -652,21 +672,21 @@
     if (state.tool === "territory") {
       let own = Math.max(0, Math.min(state.owner, state.maxFactionSlots));
       WOD.setHexOwner(hex, own);
-      WOD.invalidateTerrain();
+      markEditorMapChanged();
       return;
     }
     if (state.tool === "paint") {
       hex.type = state.terrain;
       hex.baseColor = WOD.getTerrainColor(hex.type);
       if (hex.type === "urban") attachUrbanHex(hex);
-      WOD.invalidateTerrain();
+      markEditorMapChanged();
       return;
     }
     if (state.tool === "erase") {
       hex.type = "grass";
       hex.baseColor = WOD.getTerrainColor("grass");
       hex.cityId = null;
-      WOD.invalidateTerrain();
+      markEditorMapChanged();
       return;
     }
     if (state.tool === "city") {
@@ -718,7 +738,7 @@
       }
     }
     state.selected = { type: "city", value: city };
-    WOD.invalidateTerrain();
+    markEditorMapChanged();
     renderSelection();
     return city;
   }
@@ -785,7 +805,7 @@
           }
         }
       }
-      WOD.invalidateTerrain();
+      markEditorMapChanged();
     } else {
       paintAt(pos);
     }
@@ -805,6 +825,10 @@
   function renderEditor() {
     const canvas = document.getElementById("editorCanvas");
     if (!canvas || !window.WOD || !WOD.gameData) return;
+    if (!state.open) {
+      editorFrame = null;
+      return;
+    }
     const ctx = canvas.getContext("2d");
     const b = bounds();
     const vc = { cx: b.cx + state.viewPanX, cy: b.cy + state.viewPanY };
@@ -815,7 +839,10 @@
     ctx.fillStyle = "#154360";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    if (typeof WOD.syncTerrainCacheForEditorView === "function") {
+    const needHeavyTerrainSync = state.editorTerrainDirty;
+    if (needHeavyTerrainSync) state.editorTerrainDirty = false;
+
+    if (needHeavyTerrainSync && typeof WOD.syncTerrainCacheForEditorView === "function") {
       try {
         WOD.syncTerrainCacheForEditorView({
           terrain: L.terrain,
@@ -823,13 +850,17 @@
           diplomacy: L.diplomacy,
           terrainViewMode: WOD.gameData.terrainViewMode,
         });
+      } catch (e) { /* ignore snapshot errors during init */ }
+    }
+    if (typeof WOD.getTerrainBitmap === "function") {
+      try {
         const tb = WOD.getTerrainBitmap();
         if (tb && tb.img && tb.width > 0) {
           const x0 = canvas.width / 2 + (tb.minX - vc.cx) * scale;
           const y0 = canvas.height / 2 + (tb.minY - vc.cy) * scale;
           ctx.drawImage(tb.img, x0, y0, tb.width * scale, tb.height * scale);
         }
-      } catch (e) { /* ignore snapshot errors during init */ }
+      } catch (e) { /* ignore */ }
     }
 
     if (L.cities) {
@@ -900,7 +931,7 @@
         obj.manpowerBonus = parseInt(document.getElementById("selMp").value, 10) || 0;
         obj.hasFactory = document.getElementById("selFactory").checked;
         obj.hasHarbor = document.getElementById("selHarbor").checked;
-        WOD.invalidateTerrain();
+        markEditorMapChanged();
         scheduleEditorRender();
       };
     } else {
@@ -932,7 +963,7 @@
         obj.tanks = parseInt(document.getElementById("selTanks").value, 10) || 0;
         obj.maxTanks = Math.max(obj.maxTanks || obj.tanks, obj.tanks);
         obj.colorOverride = document.getElementById("selColor").value;
-        WOD.invalidateTerrain();
+        markEditorMapChanged();
         rebuildUnitPalette();
         scheduleEditorRender();
       };
@@ -1028,6 +1059,7 @@
         state.viewPanX = 0;
         state.viewPanY = 0;
         state.viewZoom = 1;
+        markEditorMapChanged();
         renderSelection();
         scheduleEditorRender();
       });
@@ -1046,6 +1078,7 @@
   window.wodNotifyEditorMapChanged = function () {
     if (!state.open) return;
     state.selected = null;
+    state.editorTerrainDirty = true;
     scheduleEditorRender();
     renderSelection();
     renderMapBrowser();
