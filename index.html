@@ -6303,108 +6303,179 @@
             }
         }
         function wodCarveNaturalRivers(mapShape, seedOffset, cols, rows) {
-            if(mapShape === 'island' && Math.random() > 0.88) return;
-            let land = gameData.hexList.filter(h => h && !isWaterHex(h) && h.type !== 'mountain');
-            if(land.length < 80) return;
-            let lcm = wodLandCentroidMaxRadius(land);
-            let riverCount = mapShape === 'rectangle'
-                ? 2 + (Math.random() < 0.48 ? 1 : 0)
-                : 1 + (Math.random() < 0.55 ? 1 : 0) + (Math.random() > 0.82 ? 1 : 0);
-
-            function waterStepsFast(start, maxSteps) {
-                if(!start || isWaterHex(start)) return 0;
-                let q = [{ h: start, s: 0 }];
-                let seen = new Set([getHexKey(start)]);
-                let qi = 0;
-                while(qi < q.length) {
-                    let cur = q[qi++];
-                    if(cur.s >= maxSteps) continue;
-                    for(let nb of getNeighborHexes(cur.h)) {
-                        if(!nb) return cur.s + 1;
-                        if(isWaterHex(nb)) return cur.s + 1;
-                        let k = getHexKey(nb);
-                        if(seen.has(k)) continue;
-                        seen.add(k);
-                        q.push({ h: nb, s: cur.s + 1 });
-                    }
-                }
-                return maxSteps + 1;
+            let key = (h) => getHexKey(h);
+            function atRectEdge(h) {
+                return h && (Math.abs(h.q) >= cols || Math.abs(h.r) >= rows);
+            }
+            function isIslandOceanSink(h) {
+                if(!h || !isWaterHex(h)) return false;
+                let ed = Math.min(cols - Math.abs(h.q), rows - Math.abs(h.r));
+                return ed <= 13;
+            }
+            function passableForRiverField(h) {
+                return h && h.type !== 'mountain' && h.type !== 'urban';
             }
 
-            function pickRiverStart(ix) {
-                let best = null;
-                let bestScore = -Infinity;
-                for(let h of land) {
-                    let dx = h.x - lcm.cx, dy = h.y - lcm.cy;
-                    let dist = Math.hypot(dx, dy);
-                    if(mapShape === 'island' && dist > lcm.maxR * 0.62) continue;
-                    if(mapShape === 'rectangle') {
-                        let edge = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
-                        if(edge > 0.7 || edge < 0.12) continue;
-                    }
-                    let waterAway = waterStepsFast(h, 10);
-                    if(waterAway < (mapShape === 'island' ? 4 : 3)) continue;
-                    let lowVal = fbm(h.x * 0.009 + seedOffset + 5100 + ix * 91, h.y * 0.009 + seedOffset + 5100 + ix * 91, 5);
-                    let ridge = fbm(h.x * 0.012 + seedOffset + 5100 + ix * 91, h.y * 0.012 + seedOffset + 5100 + ix * 91, 4);
-                    let score = ridge * 95 + waterAway * 14 - lowVal * 28 - Math.abs(dist - lcm.maxR * 0.38) * 0.025 + Math.random() * 12;
-                    if(score > bestScore) {
-                        bestScore = score;
-                        best = h;
+            let dist = new Map();
+            let fifo = [];
+            let qi = 0;
+
+            if(mapShape === 'rectangle') {
+                for(let h of gameData.hexList) {
+                    if(!passableForRiverField(h)) continue;
+                    if(atRectEdge(h)) {
+                        dist.set(key(h), 0);
+                        fifo.push(h);
                     }
                 }
-                return best;
+                while(qi < fifo.length) {
+                    let h = fifo[qi++];
+                    let d = dist.get(key(h));
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!passableForRiverField(nb)) continue;
+                        let nd = d + 1;
+                        let k = key(nb);
+                        if(!dist.has(k) || nd < dist.get(k)) {
+                            dist.set(k, nd);
+                            fifo.push(nb);
+                        }
+                    }
+                }
+            } else {
+                let sinkK = new Set();
+                for(let h of gameData.hexList) {
+                    if(!isIslandOceanSink(h)) continue;
+                    sinkK.add(key(h));
+                    dist.set(key(h), 0);
+                    fifo.push(h);
+                }
+                if(!fifo.length) return;
+                while(qi < fifo.length) {
+                    let h = fifo[qi++];
+                    let d = dist.get(key(h));
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!passableForRiverField(nb)) continue;
+                        if(isWaterHex(h)) {
+                            if(!sinkK.has(key(h))) continue;
+                            if(!isWaterHex(nb)) {
+                                let k = key(nb), nd = d + 1;
+                                if(!dist.has(k) || nd < dist.get(k)) {
+                                    dist.set(k, nd);
+                                    fifo.push(nb);
+                                }
+                            }
+                            continue;
+                        }
+                        if(isWaterHex(nb)) {
+                            if(sinkK.has(key(nb))) continue;
+                            continue;
+                        }
+                        let k = key(nb), nd = d + 1;
+                        if(!dist.has(k) || nd < dist.get(k)) {
+                            dist.set(k, nd);
+                            fifo.push(nb);
+                        }
+                    }
+                }
             }
+
+            let landDeep = [];
+            for(let h of gameData.hexList) {
+                if(!h || h.type === 'mountain' || h.type === 'urban' || isWaterHex(h)) continue;
+                let dk = dist.get(key(h));
+                if(dk == null || dk < 4) continue;
+                landDeep.push({ h, dk });
+            }
+            if(!landDeep.length) {
+                for(let h of gameData.hexList) {
+                    if(!h || h.type === 'mountain' || h.type === 'urban' || isWaterHex(h)) continue;
+                    let dk = dist.get(key(h));
+                    if(dk == null || dk < 2) continue;
+                    landDeep.push({ h, dk });
+                }
+            }
+            if(!landDeep.length) return;
+            landDeep.sort((a, b) => b.dk - a.dk);
+
+            let riverCount = mapShape === 'rectangle' ? 3 : 2;
+            let usedStarts = new Set();
 
             function paintRiverCell(h, ix, step) {
                 if(!h || h.type === 'urban') return;
-                wodSetGeneratedTerrainType(h, 'water');
-                let wide = (step % 4 === 0) || fbm(h.x * 0.019 + seedOffset + 5300 + ix, h.y * 0.019 + seedOffset + 5300 + ix, 3) > 0.62;
+                if(h.type !== 'water') wodSetGeneratedTerrainType(h, 'water');
+                let wide = (step % 3 === 0) || fbm(h.x * 0.019 + seedOffset + 5300 + ix, h.y * 0.019 + seedOffset + 5300 + ix, 3) > 0.55;
                 for(let nb of getNeighborHexes(h)) {
                     if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
-                    if(wide && Math.random() < 0.38) wodSetGeneratedTerrainType(nb, 'water');
+                    if(wide && Math.random() < 0.5 && !isWaterHex(nb)) wodSetGeneratedTerrainType(nb, 'water');
                     else if(!isWaterHex(nb)) {
                         let wet = fbm(nb.x * 0.016 + seedOffset + 5400, nb.y * 0.016 + seedOffset + 5400, 3);
-                        wodSetGeneratedTerrainType(nb, wet > 0.48 ? 'swamp' : 'sand');
+                        wodSetGeneratedTerrainType(nb, wet > 0.45 ? 'swamp' : 'sand');
                     }
                 }
             }
 
             for(let ri = 0; ri < riverCount; ri++) {
-                let cur = pickRiverStart(ri);
-                if(!cur) continue;
-                let angle = mapShape === 'rectangle'
-                    ? (Math.random() < 0.5 ? 0 : Math.PI) + (Math.random() - 0.5) * 1.05
-                    : Math.atan2(cur.y - lcm.cy, cur.x - lcm.cx) + (Math.random() - 0.5) * 1.15;
-                let maxSteps = Math.max(36, Math.floor((mapShape === 'island' ? rows : cols) * 1.85));
+                let start = null;
+                let stride = Math.max(7, Math.floor(landDeep.length / (riverCount + 2)));
+                for(let attempt = 0; attempt < 120 && !start; attempt++) {
+                    let idx = Math.min(landDeep.length - 1, (ri * stride + attempt * 3 + Math.floor(seedOffset + ri * 17)) % landDeep.length);
+                    let cand = landDeep[idx].h;
+                    let ck = key(cand);
+                    if(usedStarts.has(ck)) continue;
+                    start = cand;
+                    usedStarts.add(ck);
+                }
+                if(!start) continue;
+
                 let seen = new Set();
-                for(let step = 0; step < maxSteps && cur; step++) {
-                    let ck = getHexKey(cur);
+                let cur = start;
+                for(let step = 0; step < 900 && cur; step++) {
+                    let ck = key(cur);
                     if(seen.has(ck)) break;
                     seen.add(ck);
-                    let reachedExistingWater = waterStepsFast(cur, 2) <= 1;
-                    paintRiverCell(cur, ri, step);
-                    if(reachedExistingWater && step > 6) break;
+                    let dcur = dist.get(ck);
+                    if(dcur == null) break;
 
-                    let best = null, bestScore = Infinity;
+                    let reachedOutlet = mapShape === 'rectangle'
+                        ? atRectEdge(cur)
+                        : (isWaterHex(cur) && isIslandOceanSink(cur));
+                    if(reachedOutlet) {
+                        if(!isWaterHex(cur) && mapShape === 'rectangle') wodSetGeneratedTerrainType(cur, 'water');
+                        paintRiverCell(cur, ri, step);
+                        if(mapShape === 'rectangle') {
+                            for(let nb of getNeighborHexes(cur)) {
+                                if(nb && atRectEdge(nb) && !isWaterHex(nb) && nb.type !== 'urban' && nb.type !== 'mountain')
+                                    wodSetGeneratedTerrainType(nb, 'water');
+                            }
+                        }
+                        break;
+                    }
+
+                    if(!isWaterHex(cur)) paintRiverCell(cur, ri, step);
+
+                    let best = null;
+                    let bestD = Infinity;
+                    let ties = [];
                     for(let dir of cardinalHexDirections) {
                         let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
-                        if(!nb || nb.type === 'urban') continue;
-                        if(seen.has(getHexKey(nb))) continue;
-                        let dx = nb.x - cur.x, dy = nb.y - cur.y;
-                        let forward = -(Math.cos(angle) * dx + Math.sin(angle) * dy);
-                        let edgePull = mapShape === 'island'
-                            ? -Math.hypot(nb.x - lcm.cx, nb.y - lcm.cy) * 0.028
-                            : -Math.max(Math.abs(nb.q) / Math.max(cols, 1), Math.abs(nb.r) / Math.max(rows, 1)) * 16;
-                        let carveCost = nb.type === 'mountain' ? 42 : 0;
-                        let meander = fbm(nb.x * 0.014 + seedOffset + 5500 + ri * 77, nb.y * 0.014 + seedOffset + 5500 + ri * 77, 4) * 22;
-                        let score = forward + edgePull + carveCost + meander;
-                        if(score < bestScore) {
-                            bestScore = score;
+                        if(!nb || nb.type === 'urban' || nb.type === 'mountain') continue;
+                        if(seen.has(key(nb))) continue;
+                        if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
+                        let dn = dist.get(key(nb));
+                        if(dn == null) continue;
+                        if(dn > dcur) continue;
+                        if(dn < bestD) {
+                            bestD = dn;
                             best = nb;
-                        }
+                            ties = [nb];
+                        } else if(dn === bestD) ties.push(nb);
                     }
+                    if(ties.length > 1) {
+                        let j = Math.floor(fbm(cur.x * 0.02 + seedOffset + ri * 31 + step, cur.y * 0.02 + seedOffset + ri * 31 + step, 2) * ties.length);
+                        best = ties[Math.max(0, Math.min(ties.length - 1, j))];
+                    }
+                    if(!best) break;
                     cur = best;
-                    angle += (fbm((cur ? cur.x : 0) * 0.009 + seedOffset + 5600, (cur ? cur.y : 0) * 0.009 + seedOffset + 5600, 3) - 0.5) * 0.62;
                 }
             }
         }
