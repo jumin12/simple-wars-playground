@@ -15,6 +15,11 @@
     viewZoom: 1,
     viewPanDrag: null,
     editorTerrainDirty: true,
+    /** Procedural random gen */
+    genShape: "island",
+    genCities: true,
+    genTerritory: true,
+    genUnits: true,
   };
 
   const editorPtrs = new Map();
@@ -153,6 +158,91 @@
     });
   }
 
+  function wireEditorGenerateStrip(root) {
+    const setTab = (name) => {
+      root.querySelectorAll("[data-gen-tab]").forEach(b => b.classList.toggle("active", b.dataset.genTab === name));
+      root.querySelectorAll("[data-gen-panel]").forEach(p => {
+        p.style.display = p.dataset.genPanel === name ? "flex" : "none";
+      });
+    };
+    root.querySelectorAll("[data-gen-tab]").forEach(btn => {
+      btn.addEventListener("click", () => setTab(btn.dataset.genTab));
+    });
+    root.querySelectorAll("[data-ed-shape]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.genShape = btn.dataset.edShape || "island";
+        root.querySelectorAll("[data-ed-shape]").forEach(b => b.classList.toggle("active", b === btn));
+      });
+    });
+    const cC = root.querySelector("#editorGenCities");
+    const cT = root.querySelector("#editorGenTerritory");
+    const cU = root.querySelector("#editorGenUnits");
+    const syncFromDom = () => {
+      const citiesOn = !!(cC && cC.checked);
+      if (cT) {
+        cT.disabled = !citiesOn;
+        if (!citiesOn) cT.checked = false;
+      }
+      if (cU) {
+        cU.disabled = !citiesOn;
+        if (!citiesOn) cU.checked = false;
+      }
+      state.genCities = citiesOn;
+      state.genTerritory = citiesOn && !!(cT && cT.checked);
+      state.genUnits = citiesOn && !!(cU && cU.checked);
+    };
+    [cC, cT, cU].forEach(el => el && el.addEventListener("change", syncFromDom));
+    syncFromDom();
+
+    const ex = root.querySelector("#editorExportJson");
+    if (ex) {
+      ex.addEventListener("click", () => {
+        if (!window.WOD || typeof WOD.exportMapData !== "function") return;
+        const data = WOD.exportMapData();
+        data.format = "simple-wars-map";
+        data.version = 1;
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "simple_wars_map.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+    const fileIn = root.querySelector("#editorImportJsonFile");
+    const impBtn = root.querySelector("#editorImportJsonBtn");
+    if (impBtn && fileIn) {
+      impBtn.addEventListener("click", () => fileIn.click());
+      fileIn.addEventListener("change", ev => {
+        const f = ev.target.files && ev.target.files[0];
+        ev.target.value = "";
+        if (!f || !window.WOD || typeof WOD.loadMapData !== "function") return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const o = JSON.parse(String(reader.result || "{}"));
+            WOD.loadMapData(o);
+            const sz = document.getElementById("editorSize");
+            if (sz) sz.value = String(WOD.gameData.mapRadius || 60);
+            state.selected = null;
+            state.viewPanX = 0;
+            state.viewPanY = 0;
+            state.viewZoom = 1;
+            markEditorMapChanged();
+            scheduleEditorRender();
+            renderSelection();
+            renderMapBrowser();
+          } catch (e) {
+            console.warn(e);
+            alert("Could not import this JSON as a map.");
+          }
+        };
+        reader.readAsText(f);
+      });
+    }
+  }
+
   function ensureEditorDom() {
     if (document.getElementById("mapEditorApp")) return;
     const style = document.createElement("style");
@@ -162,9 +252,39 @@
       #mapEditorApp.visible {
         display:grid;
         grid-template-columns:minmax(260px,300px) minmax(0,1fr) minmax(260px,300px);
-        grid-template-rows:auto 1fr;
+        grid-template-rows:auto auto 1fr;
         gap:0;
       }
+      .editor-toolbar { grid-column:1/-1; grid-row: 1; }
+      .editor-gen-wrap {
+        grid-column:1/-1; grid-row:2;
+        background:linear-gradient(180deg,#0f1a28,#0c1520);
+        border-bottom:1px solid rgba(201,162,39,.32);
+      }
+      .editor-gen-tabs { display:flex; gap:6px; padding:8px 14px 0; flex-wrap:wrap; }
+      .editor-gen-tab {
+        background:rgba(30,48,66,.9); color:#b8c9d9; border:1px solid rgba(120,150,175,.45);
+        border-radius:8px 8px 0 0; padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer;
+      }
+      .editor-gen-tab:hover { filter:brightness(1.08); }
+      .editor-gen-tab.active {
+        background:rgba(18,32,48,.98); color:#f4e4a6; border-bottom-color:transparent; margin-bottom:-1px;
+      }
+      .editor-gen-panel {
+        padding:10px 16px 12px; display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+        border-top:1px solid rgba(201,162,39,.22);
+      }
+      .editor-gen-hint { font-size:11px; color:#7a92a8; flex:1 1 200px; line-height:1.35; min-width:160px; }
+      .editor-gen-shape { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+      .editor-gen-shape > span { font-size:10px; color:#9db3c7; text-transform:uppercase; letter-spacing:.1em; font-weight:800; }
+      .editor-seg-btn {
+        background:#1a3348; color:#dbe8f5; border:1px solid rgba(139,173,192,.5); border-radius:7px;
+        padding:7px 12px; font-size:12px; font-weight:700; cursor:pointer;
+      }
+      .editor-seg-btn:hover { filter:brightness(1.08); }
+      .editor-seg-btn.active { background:linear-gradient(180deg,#1f7a4a,#26975a); border-color:#4be396; color:#061208; }
+      .editor-gen-tgl { display:flex; align-items:center; gap:7px; font-size:12px; color:#cfdce8; cursor:pointer; user-select:none; }
+      .editor-gen-tgl input { width:16px; height:16px; accent-color:#4be396; cursor:pointer; }
       .editor-toolbar {
         grid-column:1/-1;display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:12px 16px;
         background:linear-gradient(180deg,#122433,#0f1e2e);border-bottom:2px solid #c9a227;
@@ -241,7 +361,11 @@
         .editor-overlay-hint-touch { display: block; }
       }
       @media (max-width:1100px) {
-        #mapEditorApp.visible { grid-template-columns:1fr; grid-template-rows:auto minmax(200px,32vh) minmax(280px,1fr) minmax(200px,30vh); }
+        #mapEditorApp.visible {
+          grid-template-columns:1fr;
+          grid-template-rows:auto auto minmax(200px,32vh) minmax(280px,1fr) minmax(200px,30vh);
+        }
+        .editor-gen-wrap { grid-row: 2; }
         .editor-panel { max-height:none; border-right:none;border-bottom:1px solid rgba(201,162,39,.25); }
         .editor-right { border-left:none;border-top:1px solid rgba(201,162,39,.25); max-height:none; }
         #editorCanvasWrap { min-height:280px; }
@@ -258,6 +382,29 @@
         <p class="editor-toolbar-hint editor-toolbar-hint-touch">Paint terrain and ownership, place towns and units. Drag unit chips onto the map — ships need water. Use <strong>Select / move</strong> to reposition. <strong>Two fingers</strong> on the canvas pan and pinch-zoom.</p>
         <button type="button" class="editor-btn editor-btn-main" id="editorExitBtn">← Main menu</button>
       </header>
+      <div class="editor-gen-wrap">
+        <div class="editor-gen-tabs">
+          <button type="button" class="editor-gen-tab active" data-gen-tab="generate">Generate</button>
+          <button type="button" class="editor-gen-tab" data-gen-tab="files">Import / export JSON</button>
+        </div>
+        <div id="editorGenPanelGenerate" class="editor-gen-panel" data-gen-panel="generate">
+          <div class="editor-gen-shape">
+            <span>Shape</span>
+            <button type="button" class="editor-seg-btn active" data-ed-shape="island">Island</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="rectangle">Rectangle</button>
+          </div>
+          <label class="editor-gen-tgl"><input type="checkbox" id="editorGenCities" checked /> Cities during gen</label>
+          <label class="editor-gen-tgl"><input type="checkbox" id="editorGenTerritory" checked /> Territory during gen</label>
+          <label class="editor-gen-tgl"><input type="checkbox" id="editorGenUnits" checked /> Units during gen</label>
+          <p class="editor-gen-hint">Territory and units apply when cities are on. Use <strong>Random gen</strong> in the left panel to run with these settings.</p>
+        </div>
+        <div id="editorGenPanelFiles" class="editor-gen-panel" data-gen-panel="files" style="display:none">
+          <button type="button" class="editor-btn" id="editorExportJson">Export map JSON</button>
+          <button type="button" class="editor-btn" id="editorImportJsonBtn">Import map JSON…</button>
+          <input type="file" id="editorImportJsonFile" accept=".json,application/json" style="display:none" />
+          <p class="editor-gen-hint">JSON includes terrain, towns, roads, units, size, and shape. Import replaces the current editor map.</p>
+        </div>
+      </div>
       <div class="editor-panel editor-left">
         <section class="editor-card">
           <h3>Map &amp; files</h3>
@@ -386,6 +533,12 @@
       document.getElementById("setupMapSize").value = app.querySelector("#editorSize").value;
       WOD.gameData.mapRadius = parseInt(app.querySelector("#editorSize").value, 10);
       WOD.gameData.aiCount = Math.max(1, state.maxFactionSlots - 1);
+      WOD.gameData._mapGenOptions = {
+        mapShape: state.genShape,
+        cities: state.genCities,
+        territory: state.genTerritory,
+        units: state.genUnits,
+      };
       try {
         await WOD.generateMap();
       } catch (e) {
@@ -432,6 +585,7 @@
 
     window.addEventListener("resize", resizeEditorCanvas);
 
+    wireEditorGenerateStrip(app);
     rebuildUnitPalette();
   }
 
@@ -451,6 +605,30 @@
     state.viewPanDrag = null;
     editorPtrs.clear();
     editorPinch = null;
+    state.genShape = "island";
+    state.genCities = true;
+    state.genTerritory = true;
+    state.genUnits = true;
+    const genApp = document.getElementById("mapEditorApp");
+    if (genApp) {
+      genApp.querySelectorAll("[data-ed-shape]").forEach(b => b.classList.toggle("active", b.dataset.edShape === "island"));
+      const gC = genApp.querySelector("#editorGenCities");
+      const gT = genApp.querySelector("#editorGenTerritory");
+      const gU = genApp.querySelector("#editorGenUnits");
+      if (gC) gC.checked = true;
+      if (gT) {
+        gT.checked = true;
+        gT.disabled = false;
+      }
+      if (gU) {
+        gU.checked = true;
+        gU.disabled = false;
+      }
+      genApp.querySelectorAll("[data-gen-tab]").forEach(b => b.classList.toggle("active", b.dataset.genTab === "generate"));
+      genApp.querySelectorAll("[data-gen-panel]").forEach(p => {
+        p.style.display = p.dataset.genPanel === "generate" ? "flex" : "none";
+      });
+    }
     WOD.makeBlankMap(parseInt(document.getElementById("editorSize").value, 10));
     state.selected = null;
     state.editorTerrainDirty = true;
