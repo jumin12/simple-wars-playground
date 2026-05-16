@@ -6429,6 +6429,40 @@
             if(!landDeep.length) return;
             landDeep.sort((a, b) => b.dk - a.dk);
 
+            let islandLcm = null;
+            let islandRiverMaxGraphD = Infinity;
+            let islandCentroidHex = null;
+            if(mapShape === 'island') {
+                let landFor = [];
+                for(let h of gameData.hexList) {
+                    if(h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') landFor.push(h);
+                }
+                islandLcm = wodLandCentroidMaxRadius(landFor);
+                let dks = [];
+                for(let h of landFor) {
+                    let d0 = dist.get(key(h));
+                    if(d0 != null) dks.push(d0);
+                }
+                dks.sort((a, b) => a - b);
+                islandRiverMaxGraphD = dks.length ? dks[Math.min(dks.length - 1, Math.floor(dks.length * 0.56))] : Infinity;
+                let bestH = null, bestD2 = Infinity;
+                for(let h of landFor) {
+                    let dx = h.x - islandLcm.cx, dy = h.y - islandLcm.cy;
+                    let d2 = dx * dx + dy * dy;
+                    if(d2 < bestD2) {
+                        bestD2 = d2;
+                        bestH = h;
+                    }
+                }
+                islandCentroidHex = bestH;
+            }
+
+            function islandRadialNorm(h) {
+                if(!islandLcm || !h) return 0;
+                let dx = h.x - islandLcm.cx, dy = h.y - islandLcm.cy;
+                return Math.sqrt(dx * dx + dy * dy) / Math.max(islandLcm.maxR, 1);
+            }
+
             let riverCount = mapShape === 'rectangle' ? 4 : 3;
             let usedStarts = new Set();
             /** Centerline only — widen/fill must never expand from growing water blobs. */
@@ -6462,6 +6496,22 @@
                         if(w > 0.82) markRiverBankWater(nb);
                     }
                 }
+                for(let rk of cores) {
+                    let h = gameData.hexes[rk];
+                    if(!h) continue;
+                    let dh = dist.get(rk);
+                    if(dh == null) continue;
+                    for(let d of hexDirections) {
+                        if(d.q === 0 || d.r === 0) continue;
+                        let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                        if(!passableForRiverField(nb) || isWaterHex(nb)) continue;
+                        let nd = dist.get(key(nb));
+                        if(nd == null) continue;
+                        if(nd < dh || nd > dh + 1) continue;
+                        let w = fbm(nb.x * 0.027 + seedOffset + 5222, nb.y * 0.027 + seedOffset + 5222, 5);
+                        if(w > 0.9) markRiverBankWater(nb);
+                    }
+                }
             }
 
             /** Close single-hex pinches along the spine only (no flood into plains). */
@@ -6484,20 +6534,40 @@
                 }
             }
 
+            let startPool = landDeep;
+            if(mapShape === 'island' && islandLcm) {
+                let filtered = landDeep.filter((e) => {
+                    if(e.dk > islandRiverMaxGraphD) return false;
+                    if(islandRadialNorm(e.h) > 0.52) return false;
+                    return true;
+                });
+                if(filtered.length >= riverCount * 2) startPool = filtered;
+                else {
+                    let loose = landDeep.filter((e) => e.dk <= islandRiverMaxGraphD + 4 && islandRadialNorm(e.h) <= 0.62);
+                    startPool = loose.length ? loose : landDeep;
+                }
+            }
+
             for(let ri = 0; ri < riverCount; ri++) {
                 let start = null;
-                let stride = Math.max(7, Math.floor(landDeep.length / (riverCount + 2)));
-                for(let attempt = 0; attempt < 140 && !start; attempt++) {
-                    let idx = Math.min(landDeep.length - 1, (ri * stride + attempt * 3 + Math.floor(seedOffset + ri * 17)) % landDeep.length);
-                    let cand = landDeep[idx].h;
+                let stride = Math.max(7, Math.floor(startPool.length / (riverCount + 2)));
+                for(let attempt = 0; attempt < 160 && !start; attempt++) {
+                    let idx = Math.min(startPool.length - 1, (ri * stride + attempt * 3 + Math.floor(seedOffset + ri * 17)) % startPool.length);
+                    let cand = startPool[idx].h;
                     let ck = key(cand);
                     if(usedStarts.has(ck)) continue;
+                    if(mapShape === 'island' && islandCentroidHex) {
+                        let dSea = dist.get(ck);
+                        let dC = dist.get(key(islandCentroidHex));
+                        if(dSea != null && dC != null && dSea > dC + 1) continue;
+                    }
                     start = cand;
                     usedStarts.add(ck);
                 }
                 if(!start) continue;
 
                 let seen = new Set();
+                let prev = null;
                 let cur = start;
                 for(let step = 0; step < 1650 && cur; step++) {
                     let ck = key(cur);
@@ -6522,6 +6592,8 @@
 
                     if(!isWaterHex(cur)) markPathCore(cur);
 
+                    let strictDown = mapShape === 'island' && (islandRadialNorm(cur) > 0.44 || dcur >= islandRiverMaxGraphD - 1);
+
                     let bestDn = Infinity;
                     for(let dir of hexDirections) {
                         let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
@@ -6531,6 +6603,7 @@
                         let dn = dist.get(key(nb));
                         if(dn == null) continue;
                         if(dn > dcur) continue;
+                        if(strictDown && dn >= dcur) continue;
                         if(dn < bestDn) bestDn = dn;
                     }
                     if(bestDn === Infinity) break;
@@ -6543,15 +6616,27 @@
                         if(mapShape === 'island' && isWaterHex(nb) && !isIslandOceanSink(nb)) continue;
                         let dn = dist.get(key(nb));
                         if(dn == null || dn !== bestDn) continue;
-                        let wob = fbm(nb.x * 0.019 + seedOffset + ri * 41 + step * 0.041, nb.y * 0.019 + seedOffset + ri * 41, 4) * 0.55;
-                        wob += Math.sin(step * 0.33 + seedOffset * 0.015 + ri * 1.9) * 0.18 * (dir.q - dir.r);
+                        let wob = fbm(nb.x * 0.017 + seedOffset + ri * 41 + step * 0.037, nb.y * 0.017 + seedOffset + ri * 41, 4) * 0.52;
+                        wob += fbm(nb.x * 0.029 + step * 0.021, nb.y * 0.029 + seedOffset * 0.01, 3) * 0.44;
+                        wob += Math.sin(step * 0.26 + seedOffset * 0.018 + ri * 2.05) * 0.31 * Math.cos(step * 0.17 + ri * 0.7);
+                        if(prev) {
+                            let px = cur.x - prev.x, py = cur.y - prev.y;
+                            let vx = nb.x - cur.x, vy = nb.y - cur.y;
+                            let lp = Math.sqrt(px * px + py * py) || 1;
+                            let lv = Math.sqrt(vx * vx + vy * vy) || 1;
+                            let cross = Math.abs(px / lp * (vy / lv) - py / lp * (vx / lv));
+                            wob += cross * 0.62;
+                        }
+                        wob += Math.sin(step * 0.33 + seedOffset * 0.015 + ri * 1.9) * 0.16 * (dir.q - dir.r);
                         ties.push({ nb, wob });
                     }
                     if(!ties.length) break;
                     ties.sort((a, b) => b.wob - a.wob);
-                    let topN = Math.min(5, ties.length);
-                    let pickI = Math.floor(fbm(cur.x * 0.024 + seedOffset + step * 0.071, cur.y * 0.024 + seedOffset + ri * 13, 3) * topN);
-                    cur = ties[Math.max(0, Math.min(topN - 1, pickI))].nb;
+                    let topN = Math.min(7, ties.length);
+                    let pickI = Math.floor(fbm(cur.x * 0.022 + seedOffset + step * 0.079, cur.y * 0.022 + seedOffset + ri * 11, 3) * topN);
+                    let next = ties[Math.max(0, Math.min(topN - 1, pickI))].nb;
+                    prev = cur;
+                    cur = next;
                 }
             }
 
