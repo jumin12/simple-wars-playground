@@ -11498,7 +11498,7 @@
             if(unit.unpaidFlash && unit.unpaidFlash > 0) effects.push({label: '$ Unpaid', detail: 'No money for upkeep'});
             if(unit.retreating) effects.push({label: 'Retreating', detail: 'Falling back to safety'});
             if(unit.holding) effects.push({label: 'Holding', detail: 'Waiting for support'});
-            if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && ((unit.shake || 0) > 0 || (unit.activeCombatVisual || 0) > 0.06))
+            if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && ((unit.shake || 0) > 0 || (unit.activeCombatVisual || 0) > 0.04))
                 effects.push({label: 'Fighting', detail: 'Engaged — firing while advancing or retreating'});
             if(unit.type !== 'convoy') {
                 let mp = Math.round(unit.morale != null ? unit.morale : WOD_MORALE_MAX);
@@ -13977,6 +13977,7 @@
             let mapShapePre = shapePre ? shapePre.value : 'island';
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
             if(mapShapePre === 'rectangle') procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 22);
+            let wodHexGenYieldStride = mapShapePre === 'rectangle' ? 512 : 4096;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
                 if(procAttempt > 0) await wodYieldToMainThread();
@@ -14185,21 +14186,30 @@
                     
                     gameData.hexes[`${q},${r}`] = hex;
                     gameData.hexList.push(hex);
-                    if((gameData.hexList.length & 0xFFF) === 0) await wodYieldToMainThread();
+                    if((gameData.hexList.length % wodHexGenYieldStride) === 0) await wodYieldToMainThread();
                 }
             }
 
             wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
+            await wodYieldToMainThread();
             wodNaturalizeBiomeBlends(seedOffset, mapShape);
+            await wodYieldToMainThread();
             wodNormalizeRectangleWaterFeatures(seedOffset);
+            await wodYieldToMainThread();
             limitRectangleMountainDensity(mapShape, seedOffset);
+            await wodYieldToMainThread();
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
+            await wodYieldToMainThread();
             wodCarveNaturalRivers(mapShape, seedOffset, cols, rows);
+            await wodYieldToMainThread();
 
             // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
             ensureMountainPasses();
+            await wodYieldToMainThread();
             softenLandFullyBlockedByMountainRing();
+            await wodYieldToMainThread();
             ensureMountainPasses();
+            await wodYieldToMainThread();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
 
             await wodYieldToMainThread();
@@ -15676,6 +15686,10 @@
                         enemy.shake = 0.13;
                         unit.activeCombatVisual = Math.min(1, (unit.activeCombatVisual || 0) + dt * 2.4);
                         enemy.activeCombatVisual = Math.min(1, (enemy.activeCombatVisual || 0) + dt * 2.4);
+                    } else {
+                        // Standoff / ranged — still show the combat burst (especially on gfxLite mobile).
+                        unit.activeCombatVisual = Math.min(1, (unit.activeCombatVisual || 0) + dt * 2.0);
+                        enemy.activeCombatVisual = Math.min(1, (enemy.activeCombatVisual || 0) + dt * 2.0);
                     }
                 } else if(unit.owner > 1 && !unit.target && unit.type !== 'convoy') {
                     // Idle AI without orders: handled by updateAiStrategy / formation.
@@ -18544,9 +18558,10 @@
                         ctx.fillText('~', 0, ur + 12);
                     }
 
-                    let wodCombatLabel = unit.shake && unit.shake > 0 || (unit.activeCombatVisual || 0) > 0.06;
+                    let cvTh = gfxLite ? 0.04 : 0.06;
+                    let wodCombatLabel = (unit.shake || 0) > 0 || (unit.activeCombatVisual || 0) > cvTh;
                     if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && wodCombatLabel) {
-                        drawCombatBurstIcon(ctx, 0, -ur - 12, gfxLite ? 7 : 9);
+                        drawCombatBurstIcon(ctx, 0, -ur - 12, gfxLite ? 8 : 9);
                     }
 
                     drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
