@@ -6289,7 +6289,7 @@
                 totalWater -= c.size;
             }
         }
-        function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
+        async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
             for(let pass = 0; pass < 2; pass++) {
                 let changes = [];
                 for(let h of gameData.hexList) {
@@ -6320,8 +6320,10 @@
                     }
                 }
                 for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
+                if(pass === 0) await wodYieldToMainThread();
             }
 
+            await wodYieldToMainThread();
             for(let h of gameData.hexList) {
                 if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
                 let wet = fbm(h.x * 0.0065 + seedOffset + 4700, h.y * 0.0065 + seedOffset + 4700, 5);
@@ -6402,7 +6404,7 @@
             return !!(h && isClaimableLand(h) && !isWaterHex(h));
         }
         /** Iteratively adjust biased Voronoi so dry land totals (mountains counted) split evenly when possible (±1 if indivisible). */
-        function wodEqualizePoliticsBiasedVoronoi(ownerIds, capitalCities, iterations) {
+        async function wodEqualizePoliticsBiasedVoronoi(ownerIds, capitalCities, iterations) {
             if(!ownerIds || ownerIds.length < 2) return;
             let valid = new Set(ownerIds);
             let sorted = [...ownerIds].sort((a, b) => a - b);
@@ -6422,6 +6424,7 @@
             effIter = Math.min(198, Math.max(iterations + (multiFaction && !mpBoost ? 20 : 0), effIter));
             let minRelaxIter = Math.max(26, mpBoost ? 28 : 22, multiFaction ? 34 : (fCount === 2 ? 28 : 0));
             for(let it = 0; it < effIter; it++) {
+                if((it & 1) === 0 && it > 0) await wodYieldToMainThread();
                 wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
                 wodAssignWaterAndNonclaimablePoliticalVotes();
                 let cts = {};
@@ -6485,7 +6488,7 @@
             return keys;
         }
         /** Final border trim: move only adjacent dry frontier cells until each faction has the target non-water count. */
-        function wodExactEqualizePoliticalLandCounts(ownerIds, protectedCities, maxMovesOpt) {
+        async function wodExactEqualizePoliticalLandCounts(ownerIds, protectedCities, maxMovesOpt) {
             if(!ownerIds || ownerIds.length < 2) return;
             let sorted = [...ownerIds].sort((a, b) => a - b);
             let valid = new Set(sorted);
@@ -6501,6 +6504,7 @@
             }
 
             for(let move = 0; move < maxMoves && !countDeltaDone(); move++) {
+                if((move & 3) === 0 && move > 0) await wodYieldToMainThread();
                 let best = null;
                 let bestScore = -Infinity;
                 for(let hex of gameData.hexList) {
@@ -13051,7 +13055,7 @@
                         gameData.loadedCustomMap = false;
                         await generateMap();
                     } else {
-                        assignStartingCities();
+                        await assignStartingCities();
                     }
                 } else {
                     let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
@@ -13244,7 +13248,7 @@
          * political Voronoi from terrain seeds → equalize borders → equal city count inside each territory, non-touching urban footprints.
          * Sets gameData._wodProcgenBorderFirstApplied on success only. Does not call assignStartingCities.
          */
-        function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
+        async function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
             gameData._wodProcgenBorderFirstApplied = false;
             if(!(gameData.mp && gameData.mp.enabled)) {
                 let aiSync = document.getElementById('setupAI');
@@ -13289,10 +13293,10 @@
             softenMountainHexBetweenOwners(ownersSorted);
             ensureOwnersReachableByLand(ownersSorted);
             smoothStartingTerritory(ownersSorted, 4, 4);
-            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 56 : 48);
+            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 56 : 48);
             smoothStartingTerritory(ownersSorted, 5, 2);
             if(ownersSorted.length >= 3) {
-                wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(52, f * 7));
+                await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(52, f * 7));
                 wodAssignWaterAndNonclaimablePoliticalVotes();
                 smoothStartingTerritory(ownersSorted, 5, 1);
             }
@@ -13391,9 +13395,11 @@
             let winnerPlan = null;
             let kpf = 0;
             outerFind: for(let kk = kUpper; kk >= 2; kk--) {
+                await wodYieldToMainThread();
                 for(let sepTry = 12; sepTry >= 7; sepTry--) {
                     anchorChebSep = sepTry;
                     let plan = tryPlan(kk);
+                    await wodYieldToMainThread();
                     if(plan) {
                         winnerPlan = plan;
                         kpf = kk;
@@ -13409,6 +13415,7 @@
 
             let cityIx = 0;
             for(let ow of ownersSorted) {
+                await wodYieldToMainThread();
                 let plist = winnerPlan[String(ow)];
                 for(let ti = 0; ti < plist.length; ti++) {
                     let site = plist[ti];
@@ -13445,16 +13452,17 @@
 
             wodSyncUrbanFootprintOwners();
             wodRemoveUnconnectedFactionHexPockets(ownersSorted);
-            wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
+            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
             wodSyncUrbanFootprintOwners();
-            wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
+            await wodYieldToMainThread();
+            await wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
             wodNormalizeStartingCityEconomy(ownersSorted);
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
         }
 
-        function assignStartingCities() {
+        async function assignStartingCities() {
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
             // Clear entities & money just in case
@@ -13512,6 +13520,7 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
+                await wodYieldToMainThread();
                 spawnInitialFrontlineUnits(ownersList);
 
                 wodMarkTerrainPoliticalDirty();
@@ -13676,11 +13685,11 @@
 
             smoothStartingTerritory(ownersList, 5, 2);
             let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
-            wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
+            await wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
 
             if(ownersList.length >= 3) {
                 wodAssignWaterAndNonclaimablePoliticalVotes();
-                wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
+                await wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
                 smoothStartingTerritory(ownersList, 5, 1);
                 wodAssignWaterAndNonclaimablePoliticalVotes();
             }
@@ -13693,10 +13702,11 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             smoothStartingTerritory(ownersList, 6, 1);
-            wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
+            await wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
 
+            await wodYieldToMainThread();
             spawnInitialFrontlineUnits(ownersList);
 
             wodMarkTerrainPoliticalDirty();
@@ -13736,7 +13746,11 @@
         }
 
         function wodYieldToMainThread() {
-            return new Promise(function(resolve) { setTimeout(resolve, 0); });
+            return new Promise(function(resolve) {
+                requestAnimationFrame(function() {
+                    setTimeout(resolve, 0);
+                });
+            });
         }
 
         async function generateMap() {
@@ -13770,7 +13784,6 @@
             let mapShapePre = shapePre ? shapePre.value : 'island';
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
             if(mapShapePre === 'rectangle') procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 22);
-            let wodHexGenYieldStride = mapShapePre === 'rectangle' ? 512 : 4096;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
                 if(procAttempt > 0) await wodYieldToMainThread();
@@ -13808,6 +13821,8 @@
             // but these are square-neighbor dots, not hex tiles.
             let cols = mapR;
             let rows = Math.floor(mapR * 0.8);
+            let approxCells = (2 * cols + 1) * (2 * rows + 1);
+            let wodHexGenYieldStride = Math.max(28, Math.min(140, Math.ceil(approxCells / 55)));
             let spacing = hr * 1.35;
             
             for(let r = -rows; r <= rows; r++) {
@@ -13974,11 +13989,12 @@
                     gameData.hexList.push(hex);
                     if((gameData.hexList.length % wodHexGenYieldStride) === 0) await wodYieldToMainThread();
                 }
+                if(approxCells > 5000 && ((r + rows) & 1) === 0) await wodYieldToMainThread();
             }
 
             wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
             await wodYieldToMainThread();
-            wodNaturalizeBiomeBlends(seedOffset, mapShape);
+            await wodNaturalizeBiomeBlends(seedOffset, mapShape);
             await wodYieldToMainThread();
             wodNormalizeRectangleWaterFeatures(seedOffset);
             await wodYieldToMainThread();
@@ -14009,7 +14025,7 @@
             gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
 
             gameData._wodProcgenBorderFirstApplied = false;
-            let procOk = wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+            let procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
             if(procOk) {
                 procSucceeded = true;
                 break outerProcTerrain;
@@ -14017,7 +14033,11 @@
             }
 
             if(!procSucceeded) {
-                for(let hx of gameData.hexList) setHexOwner(hx, 0);
+                let wi = 0;
+                for(let hx of gameData.hexList) {
+                    setHexOwner(hx, 0);
+                    if((++wi & 2047) === 0) await wodYieldToMainThread();
+                }
                 gameData.cities = [];
 
                 let citiesPerPlayer = Math.min(4, Math.max(2, 1 + Math.floor(mapR / 72)));
@@ -14046,6 +14066,7 @@
                             h = gameData.hexList[(Math.floor(Math.random() * gameData.hexList.length)) | 0];
                         }
                         attempts++;
+                        if((attempts & 63) === 0) await wodYieldToMainThread();
                         if(!h || isWaterHex(h) || h.type === 'mountain') continue;
                         let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
                         if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) continue;
@@ -14108,6 +14129,7 @@
 
                         valid = true;
                     }
+                    if((i & 1) === 0) await wodYieldToMainThread();
                 }
             }
 
@@ -14124,7 +14146,7 @@
                 if(nearest) gameData.roads.push({from: c1, to: nearest});
             }
             
-            assignStartingCities();
+            await assignStartingCities();
             updateTerrainKey();
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
