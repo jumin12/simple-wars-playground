@@ -3229,14 +3229,14 @@
         }
         #inGameUI[data-mdock="hid"] .wod-m-dock-pack {
             bottom: 0 !important;
-            padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+            padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 5px);
             overflow: visible !important;
         }
         #inGameUI[data-mdock="hid"] .wod-m-dock-toggle {
-            margin-bottom: 6px !important;
-            min-height: 34px !important;
-            padding-top: max(9px, 0.62em);
-            padding-bottom: max(12px, 0.92em);
+            margin-bottom: 2px !important;
+            min-height: 30px !important;
+            padding-top: max(6px, 0.5em);
+            padding-bottom: max(7px, 0.72em);
             overflow: visible !important;
             box-sizing: border-box !important;
         }
@@ -18658,26 +18658,35 @@
         function drawCombatBurstIcon(ctx, x, y, size) {
             ctx.save();
             ctx.translate(x, y);
-            ctx.lineJoin = 'round';
+            ctx.rotate(-Math.PI / 2);
+            ctx.lineJoin = 'miter';
             ctx.lineCap = 'round';
-            ctx.fillStyle = '#f1c40f';
-            ctx.strokeStyle = '#050505';
-            ctx.lineWidth = Math.max(2, size * 0.16);
+            ctx.lineWidth = Math.max(1.35, size * 0.11);
+            let n = 22;
+            let outer = size * 1.05;
+            let inner = size * 0.36;
+            let g = ctx.createRadialGradient(0, 0, 0, 0, 0, outer * 1.02);
+            g.addColorStop(0, '#fff6b0');
+            g.addColorStop(0.35, '#fcd34d');
+            g.addColorStop(0.72, '#f59e0b');
+            g.addColorStop(1, '#d97706');
+            ctx.fillStyle = g;
+            ctx.strokeStyle = '#1a1006';
             ctx.beginPath();
-            for(let i = 0; i < 12; i++) {
-                let a = (Math.PI * 2 * i) / 12;
-                let r = (i % 2 === 0) ? size : size * 0.48;
-                let px = Math.cos(a) * r;
-                let py = Math.sin(a) * r;
+            for(let i = 0; i < n * 2; i++) {
+                let ang = (Math.PI * i) / n;
+                let rad = (i % 2 === 0) ? outer : inner;
+                let px = Math.cos(ang) * rad;
+                let py = Math.sin(ang) * rad;
                 if(i === 0) ctx.moveTo(px, py);
                 else ctx.lineTo(px, py);
             }
             ctx.closePath();
-            ctx.stroke();
             ctx.fill();
-            ctx.fillStyle = '#fff3a3';
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(255, 255, 235, 0.55)';
             ctx.beginPath();
-            ctx.arc(-size * 0.18, -size * 0.18, size * 0.18, 0, Math.PI * 2);
+            ctx.arc(-size * 0.24, -size * 0.18, size * 0.24, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
         }
@@ -20457,44 +20466,48 @@
             return 1;
         }
 
-        /** Heraldic heater shield (unit-local coords, centered near origin). */
+        /** Compact heater shield silhouette (fort defense badge). */
         function drawWodFortShieldBadge(ctx, cx, cy, rad) {
             ctx.save();
             ctx.translate(cx, cy);
-            ctx.scale(rad / 14, rad / 14);
+            ctx.scale(rad / 12.5, rad / 12.5);
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
             ctx.beginPath();
-            ctx.moveTo(-0.95, -12.58);
-            ctx.lineTo(0, -13.35);
-            ctx.lineTo(0.95, -12.58);
-            ctx.bezierCurveTo(11.5, -11.4, 13.15, -2.52, 12.28, 4.15);
-            ctx.bezierCurveTo(11.62, 10.15, 7.15, 13.85, 0, 17.35);
-            ctx.bezierCurveTo(-7.15, 13.85, -11.62, 10.15, -12.28, 4.15);
-            ctx.bezierCurveTo(-13.15, -2.52, -11.5, -11.4, -0.95, -12.58);
+            ctx.moveTo(0, -12.2);
+            ctx.lineTo(-9.2, -11.15);
+            ctx.bezierCurveTo(-10.95, -11, -11.25, -8.5, -11.08, -5.85);
+            ctx.bezierCurveTo(-10.82, 3.2, -7.35, 10.5, 0, 15.6);
+            ctx.bezierCurveTo(7.35, 10.5, 10.82, 3.2, 11.08, -5.85);
+            ctx.bezierCurveTo(11.25, -8.5, 10.95, -11, 9.2, -11.15);
+            ctx.lineTo(0, -12.2);
             ctx.closePath();
-            let g = ctx.createLinearGradient(-13, -14, 12, 16);
-            g.addColorStop(0, '#eafbff');
-            g.addColorStop(0.18, '#7fd2ff');
-            g.addColorStop(0.55, '#3898e8');
-            g.addColorStop(1, '#1b4f86');
+            let g = ctx.createLinearGradient(-10, -13, 11, 17);
+            g.addColorStop(0, '#eef8ff');
+            g.addColorStop(0.28, '#6eb8f0');
+            g.addColorStop(0.62, '#2a78c8');
+            g.addColorStop(1, '#153c64');
             ctx.fillStyle = g;
             ctx.fill();
-            ctx.lineWidth = 2.1;
-            ctx.strokeStyle = 'rgba(12,48,104,1)';
+            ctx.lineWidth = 2.15;
+            ctx.strokeStyle = '#0a2744';
             ctx.stroke();
-            ctx.lineWidth = 1.08;
-            ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+            ctx.lineWidth = 1.05;
+            ctx.strokeStyle = 'rgba(220, 240, 255, 0.72)';
             ctx.stroke();
             ctx.beginPath();
-            ctx.moveTo(-0.22, -8.92);
-            ctx.bezierCurveTo(4.8, -7.82, 5.92, -1.92, 5.82, 1.92);
-            ctx.bezierCurveTo(5.55, 6.92, 1.92, 10.92, -0.02, 13.62);
-            ctx.bezierCurveTo(-1.78, 10.92, -5.68, 6.92, -5.92, 1.92);
-            ctx.bezierCurveTo(-6.08, -1.92, -4.92, -7.92, -0.12, -8.94);
-            ctx.quadraticCurveTo(0, -9.32, -0.22, -8.92);
+            ctx.moveTo(-1.2, -8.4);
+            ctx.bezierCurveTo(-4.2, -8.1, -5.95, -3.4, -6.05, 0.9);
+            ctx.bezierCurveTo(-6.18, 6.4, -3.85, 11.2, 0, 14.15);
+            ctx.bezierCurveTo(3.85, 11.2, 6.18, 6.4, 6.05, 0.9);
+            ctx.bezierCurveTo(5.95, -3.4, 4.2, -8.1, 1.2, -8.4);
+            ctx.quadraticCurveTo(0.15, -9.35, -1.2, -8.4);
             ctx.closePath();
-            ctx.fillStyle = 'rgba(255,255,255,0.22)';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(0, -5.2, 2.1, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
             ctx.fill();
             ctx.restore();
         }
@@ -20511,15 +20524,15 @@
             let hasAny = combatBurstOn || kinds.length > 0;
             if(!hasAny) return;
             let glyphR = gfxLite ? 7.55 : 9.08;
-            let gap = gfxLite ? 6.95 : 8.05;
+            let gap = gfxLite ? 2.85 : 3.45;
             let rowY = -ur - (gfxLite ? 24 : 28);
             let burstSz = gfxLite ? 8.85 : 9.92;
-            let burstHalf = burstSz * 1.12;
+            let burstSlotW = burstSz * 1.85;
             let slots = [];
-            if(combatBurstOn) slots.push({ k: 'combat', w: burstHalf * 2 });
+            if(combatBurstOn) slots.push({ k: 'combat', w: burstSlotW });
             for(let kk = 0; kk < kinds.length; kk++) {
                 let t = kinds[kk];
-                let sw = (t === 'fort') ? glyphR * 2.85 : glyphR * 2.08;
+                let sw = (t === 'fort') ? glyphR * 2.35 : glyphR * 1.78;
                 slots.push({ k: t, w: sw });
             }
             let tw = slots.reduce(function(a, s) { return a + s.w; }, 0) + (slots.length > 1 ? gap * (slots.length - 1) : 0);
