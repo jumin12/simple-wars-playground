@@ -3251,6 +3251,8 @@
         }
         #inGameUI .wod-m-dock-clip {
             transition: max-height 0.32s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.22s ease;
+            position: relative;
+            z-index: 1;
         }
         #inGameUI .wod-m-dock {
             display: flex;
@@ -3623,6 +3625,8 @@
                 justify-content: center;
                 align-self: center;
                 flex-shrink: 0;
+                appearance: none;
+                -webkit-appearance: none;
                 width: 56px;
                 min-height: 30px;
                 height: auto;
@@ -3640,10 +3644,23 @@
                 box-shadow: 0 -3px 18px rgba(0, 0, 0, 0.35);
                 -webkit-tap-highlight-color: transparent;
                 position: relative;
-                z-index: 4;
+                z-index: 9;
+                isolation: isolate;
                 overflow: visible;
                 box-sizing: border-box;
                 pointer-events: auto;
+                touch-action: manipulation;
+            }
+            #inGameUI .wod-m-dock-toggle:active,
+            #inGameUI .wod-m-dock-toggle:focus-visible:active {
+                opacity: 1;
+                visibility: visible;
+                transform: translateZ(0);
+                filter: brightness(1.08);
+                -webkit-filter: brightness(1.08);
+            }
+            #inGameUI .wod-m-dock-toggle:active .wod-m-dock-chevron {
+                opacity: 1 !important;
             }
             #inGameUI .wod-m-dock-toggle .wod-m-dock-chevron {
                 display: inline-block;
@@ -4186,6 +4203,8 @@
                 justify-content: center;
                 align-self: center;
                 flex-shrink: 0;
+                appearance: none;
+                -webkit-appearance: none;
                 width: 54px;
                 min-height: 28px;
                 height: auto;
@@ -4203,10 +4222,23 @@
                 box-shadow: 0 -2px 14px rgba(0, 0, 0, 0.32);
                 -webkit-tap-highlight-color: transparent;
                 position: relative;
-                z-index: 4;
+                z-index: 9;
+                isolation: isolate;
                 overflow: visible;
                 box-sizing: border-box;
                 pointer-events: auto;
+                touch-action: manipulation;
+            }
+            #inGameUI .wod-m-dock-toggle:active,
+            #inGameUI .wod-m-dock-toggle:focus-visible:active {
+                opacity: 1;
+                visibility: visible;
+                transform: translateZ(0);
+                filter: brightness(1.08);
+                -webkit-filter: brightness(1.08);
+            }
+            #inGameUI .wod-m-dock-toggle:active .wod-m-dock-chevron {
+                opacity: 1 !important;
             }
             #inGameUI .wod-m-dock-toggle .wod-m-dock-chevron {
                 display: inline-block;
@@ -17569,19 +17601,23 @@
         }
 
         function strokeCountryBallSilhouette(ctx, radius, unitType) {
+            let g = Math.max(1.035, 1 + radius * 0.0036);
+            let rg = radius * g;
             ctx.strokeStyle = '#000000';
-            ctx.lineWidth = Math.max(1.12, radius * 0.095);
+            ctx.lineWidth = Math.max(1.18, rg * 0.092);
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
             ctx.beginPath();
             if(unitType === 'heavy') {
-                let w = radius * 2.15, h = radius * 1.42;
-                roundRect(ctx, -w / 2, -h / 2, w, h, radius * 0.24);
+                let w = rg * 2.15, h = rg * 1.42;
+                roundRect(ctx, -w / 2, -h / 2, w, h, rg * 0.24);
             } else if(unitType === 'ship') {
-                ctx.moveTo(radius * 0.92, 0);
-                ctx.lineTo(-radius * 0.58, radius * 0.78);
-                ctx.lineTo(-radius * 0.58, -radius * 0.78);
+                ctx.moveTo(rg * 0.92, 0);
+                ctx.lineTo(-rg * 0.58, rg * 0.78);
+                ctx.lineTo(-rg * 0.58, -rg * 0.78);
                 ctx.closePath();
             } else if(unitType === 'marine') {
-                let w = radius * 1.78, h = radius * 2.02;
+                let w = rg * 1.78, h = rg * 2.02;
                 ctx.moveTo(-w * 0.22, -h * 0.48);
                 ctx.lineTo(w * 0.52, -h * 0.12);
                 ctx.lineTo(w * 0.38, h * 0.52);
@@ -17589,7 +17625,7 @@
                 ctx.lineTo(-w * 0.55, h * 0.05);
                 ctx.closePath();
             } else {
-                ctx.arc(0, 0, radius, 0, Math.PI * 2);
+                ctx.arc(0, 0, rg, 0, Math.PI * 2);
             }
             ctx.stroke();
         }
@@ -17791,9 +17827,10 @@
                 ctx.moveTo(-radius * 0.68, 0.25); ctx.lineTo(radius * 0.68, 0.25);
             }
             ctx.stroke();
-            ctx.lineWidth = Math.max(1.08, radius * 0.084);
-            ctx.strokeStyle = 'rgba(10, 12, 18, 0.95)';
-            roundRect(ctx, x, y, w, h, rr);
+            let outRm = Math.max(0.55, radius * 0.041);
+            ctx.lineWidth = Math.max(1.12, radius * 0.084);
+            ctx.strokeStyle = 'rgba(10, 12, 18, 0.96)';
+            roundRect(ctx, x - outRm, y - outRm, w + outRm * 2, h + outRm * 2, rr + outRm * 0.52);
             ctx.stroke();
             ctx.restore();
         }
@@ -17811,33 +17848,46 @@
                 ctx.fillStyle = g;
                 roundRect(ctx, -w / 2, -h / 2, w, h, rr);
                 ctx.fill();
+                let eb = Math.max(0.62, radius * 0.048);
                 ctx.strokeStyle = '#07090c';
-                ctx.lineWidth = Math.max(1.15, radius * 0.09);
-                roundRect(ctx, -w / 2, -h / 2, w, h, rr);
+                ctx.lineWidth = Math.max(1.2, radius * 0.092);
+                roundRect(ctx, -w / 2 - eb, -h / 2 - eb, w + eb * 2, h + eb * 2, rr + eb * 0.55);
                 ctx.stroke();
                 ctx.strokeStyle = '#3a3410';
-                ctx.lineWidth = Math.max(1.35, radius * 0.1);
-                roundRect(ctx, -w / 2, -h / 2, w, h, rr);
+                ctx.lineWidth = Math.max(1.32, radius * 0.1);
+                roundRect(ctx, -w / 2 - eb * 0.55, -h / 2 - eb * 0.55, w + eb * 1.1, h + eb * 1.1, rr + eb * 0.32);
                 ctx.stroke();
                 ctx.fillStyle = accentColor;
                 ctx.fillRect(-stripeW / 2, -h / 2 - 0.5, stripeW, Math.max(3.5, radius * 0.2));
             } else if(unit.type === 'marine') {
                 let w = radius * 1.62, h = radius * 1.82;
-                ctx.beginPath();
-                ctx.moveTo(-w * 0.12, -h * 0.46);
-                ctx.lineTo(w * 0.5, -h * 0.1);
-                ctx.lineTo(w * 0.34, h * 0.5);
-                ctx.lineTo(-w * 0.36, h * 0.46);
-                ctx.lineTo(-w * 0.52, h * 0.04);
-                ctx.closePath();
+                let hull = function() {
+                    ctx.beginPath();
+                    ctx.moveTo(-w * 0.12, -h * 0.46);
+                    ctx.lineTo(w * 0.5, -h * 0.1);
+                    ctx.lineTo(w * 0.34, h * 0.5);
+                    ctx.lineTo(-w * 0.36, h * 0.46);
+                    ctx.lineTo(-w * 0.52, h * 0.04);
+                    ctx.closePath();
+                };
+                hull();
                 ctx.fillStyle = g;
                 ctx.fill();
+                ctx.lineJoin = 'round'; ctx.lineCap = 'round';
                 ctx.strokeStyle = '#07090c';
-                ctx.lineWidth = Math.max(1.15, radius * 0.09);
+                ctx.lineWidth = Math.max(1.18, radius * 0.09);
+                ctx.save();
+                ctx.scale(1.026, 1.026);
+                hull();
                 ctx.stroke();
+                ctx.restore();
                 ctx.strokeStyle = '#3a3410';
-                ctx.lineWidth = Math.max(1.35, radius * 0.1);
+                ctx.lineWidth = Math.max(1.3, radius * 0.1);
+                ctx.save();
+                ctx.scale(1.018, 1.018);
+                hull();
                 ctx.stroke();
+                ctx.restore();
                 ctx.strokeStyle = accentColor;
                 ctx.lineWidth = Math.max(4, radius * 0.16);
                 ctx.beginPath();
@@ -17847,12 +17897,24 @@
                 classicShipTrianglePath(ctx, radius);
                 ctx.fillStyle = g;
                 ctx.fill();
+                let slw = Math.max(1.24, radius * 0.094);
                 ctx.strokeStyle = '#07090c';
-                ctx.lineWidth = Math.max(1.12, radius * 0.088);
+                ctx.lineWidth = slw;
+                ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+                ctx.save();
+                ctx.scale(1.034, 1.034);
+                ctx.beginPath();
+                classicShipTrianglePath(ctx, radius);
                 ctx.stroke();
+                ctx.restore();
                 ctx.strokeStyle = '#3a3410';
-                ctx.lineWidth = Math.max(1.28, radius * 0.1);
+                ctx.lineWidth = Math.max(1.38, radius * 0.105);
+                ctx.save();
+                ctx.scale(1.024, 1.024);
+                ctx.beginPath();
+                classicShipTrianglePath(ctx, radius);
                 ctx.stroke();
+                ctx.restore();
                 ctx.fillStyle = accentColor;
                 ctx.fillRect(radius * 0.38 - stripeW / 2, -Math.max(2.2, radius * 0.09), stripeW, Math.max(3.2, radius * 0.17));
             } else {
@@ -17860,11 +17922,17 @@
                 ctx.arc(0, 0, radius, 0, Math.PI * 2);
                 ctx.fillStyle = g;
                 ctx.fill();
+                let alw = Math.max(1.22, radius * 0.089);
                 ctx.strokeStyle = '#07090c';
-                ctx.lineWidth = Math.max(1.12, radius * 0.088);
+                ctx.lineWidth = alw;
+                ctx.beginPath();
+                ctx.arc(0, 0, radius + alw * 0.48, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.strokeStyle = '#3a3410';
-                ctx.lineWidth = Math.max(1.28, radius * 0.1);
+                ctx.lineWidth = Math.max(1.36, radius * 0.104);
+                let blw = ctx.lineWidth;
+                ctx.beginPath();
+                ctx.arc(0, 0, radius + blw * 0.44, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.beginPath();
                 ctx.arc(0, 0, radius * 0.88, -0.55, 0.55, false);
@@ -17893,18 +17961,32 @@
             ctx.fillStyle = uColor;
             classicShipTrianglePath(ctx, ur);
             ctx.fill();
+            let olw = Math.max(1.42, ur * 0.1);
             ctx.strokeStyle = '#000';
-            ctx.lineWidth = Math.max(1.12, ur * 0.09);
+            ctx.lineWidth = olw;
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.save();
+            ctx.scale(1.036, 1.036);
+            ctx.beginPath();
+            classicShipTrianglePath(ctx, ur);
             ctx.stroke();
+            ctx.restore();
         }
 
         function drawClassicGoldTriangle(ctx, ur) {
             ctx.fillStyle = '#f1c40f';
             classicShipTrianglePath(ctx, ur);
             ctx.fill();
+            let olw = Math.max(1.42, ur * 0.1);
             ctx.strokeStyle = '#000';
-            ctx.lineWidth = Math.max(1.12, ur * 0.09);
+            ctx.lineWidth = olw;
+            ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+            ctx.save();
+            ctx.scale(1.036, 1.036);
+            ctx.beginPath();
+            classicShipTrianglePath(ctx, ur);
             ctx.stroke();
+            ctx.restore();
         }
 
         function drawClassicUnitShape(ctx, type, ur, uColor, unitOpt) {
@@ -17917,12 +17999,14 @@
                 ctx.fillStyle = uColor;
                 ctx.fillRect(-ur, -ur, ur * 2, ur * 2);
                 ctx.strokeStyle = '#000';
-                ctx.lineWidth = Math.max(1.15, ur * 0.1);
-                ctx.strokeRect(-ur, -ur, ur * 2, ur * 2);
+                let hlw = Math.max(1.4, ur * 0.1);
+                let hpad = hlw * 0.46;
+                ctx.lineWidth = hlw;
+                ctx.strokeRect(-ur - hpad, -ur - hpad, ur * 2 + hpad * 2, ur * 2 + hpad * 2);
                 ctx.beginPath();
                 ctx.moveTo(0, 0);
                 ctx.lineTo(ur * 1.2, 0);
-                ctx.lineWidth = Math.max(1, ur * 0.082);
+                ctx.lineWidth = Math.max(1, ur * 0.084);
                 ctx.stroke();
             } else if(type === 'convoy') {
                 let sea = unitOpt && unitOpt.convoySeaRoute;
@@ -17933,19 +18017,24 @@
                     ctx.restore();
                 } else {
                     let s = ur * 0.92;
+                    let clw = Math.max(1.22, ur * 0.088);
+                    let cp = clw * 0.46;
                     ctx.fillStyle = '#f1c40f';
                     ctx.fillRect(-s * 0.5, -s * 0.5, s, s);
                     ctx.strokeStyle = '#000';
-                    ctx.lineWidth = Math.max(1, ur * 0.08);
-                    ctx.strokeRect(-s * 0.5, -s * 0.5, s, s);
+                    ctx.lineWidth = clw;
+                    ctx.strokeRect(-s * 0.5 - cp, -s * 0.5 - cp, s + cp * 2, s + cp * 2);
                 }
             } else if(type === 'marine') {
                 ctx.beginPath();
                 ctx.arc(0, 0, ur, 0, Math.PI * 2);
                 ctx.fillStyle = uColor;
                 ctx.fill();
+                let mlw = Math.max(1.38, ur * 0.1);
                 ctx.strokeStyle = '#000';
-                ctx.lineWidth = Math.max(1.18, ur * 0.1);
+                ctx.lineWidth = mlw;
+                ctx.beginPath();
+                ctx.arc(0, 0, ur + mlw * 0.48, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.strokeStyle = 'rgba(25,55,82,0.95)';
                 ctx.lineWidth = Math.max(2, ur * 0.15);
@@ -17963,8 +18052,11 @@
                 ctx.arc(0, 0, ur, 0, Math.PI * 2);
                 ctx.fillStyle = uColor;
                 ctx.fill();
+                let lw = Math.max(1.38, ur * 0.1);
                 ctx.strokeStyle = '#000';
-                ctx.lineWidth = Math.max(1.18, ur * 0.1);
+                ctx.lineWidth = lw;
+                ctx.beginPath();
+                ctx.arc(0, 0, ur + lw * 0.48, 0, Math.PI * 2);
                 ctx.stroke();
             }
         }
@@ -19151,13 +19243,17 @@
                         }
                     }
 
-                    if(unit.type !== 'convoy')
-                        drawWodUnitStatusEffectRow(ctx, unit, ur, gfxLite);
-
-                    let cvTh = gfxLite ? 0.04 : 0.06;
-                    let wodCombatLabel = (unit.shake || 0) > 0 || (unit.activeCombatVisual || 0) > cvTh;
-                    if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && wodCombatLabel) {
-                        drawCombatBurstIcon(ctx, 0, -ur - 12, gfxLite ? 8 : 9);
+                    let cvTh = gfxLite ? 0.04 : 0.06,
+                        wodCombatLabel = unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
+                        ((unit.shake || 0) > 0 || (unit.activeCombatVisual || 0) > cvTh);
+                    if(unit.type !== 'convoy') {
+                        let badgeY = -ur - (gfxLite ? 23 : 27),
+                            badgeRH = gfxLite ? 9.05 : 10.82,
+                            bSz = gfxLite ? 8 : 9,
+                            bExt = bSz * 1.06;
+                        if(wodCombatLabel)
+                            drawCombatBurstIcon(ctx, 0, badgeY - badgeRH - 6 - bExt, bSz);
+                        drawWodUnitStatusEffectRow(ctx, unit, ur, gfxLite, badgeY);
                     }
 
                     drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
@@ -20357,25 +20453,39 @@
             return 1;
         }
 
-        /** Blue shield badge (world/unit-local coordinates). */
+        /** Heraldic shield badge scaled by ~rad @ unit-local coords. */
         function drawWodFortShieldBadge(ctx, cx, cy, rad) {
             ctx.save();
             ctx.translate(cx, cy);
-            ctx.fillStyle = 'rgba(93, 173, 226, 0.98)';
-            ctx.strokeStyle = 'rgba(21, 78, 118, 0.92)';
-            ctx.lineWidth = Math.max(1, rad * 0.12);
+            let s = rad / 13;
+            ctx.scale(s, s);
             ctx.beginPath();
-            ctx.moveTo(0, -rad);
-            ctx.bezierCurveTo(rad * 0.64, -rad * 0.52, rad * 0.55, rad * 0.42, 0, rad * 0.95);
-            ctx.bezierCurveTo(-rad * 0.55, rad * 0.42, -rad * 0.64, -rad * 0.52, 0, -rad);
+            ctx.moveTo(0, -13.25);
+            ctx.bezierCurveTo(7.1, -12.95, 10.95, -6.6, 10.62, -0.2);
+            ctx.bezierCurveTo(10.4, 4.95, 7.42, 9.92, 0, 15.25);
+            ctx.bezierCurveTo(-7.42, 9.92, -10.4, 4.95, -10.62, -0.2);
+            ctx.bezierCurveTo(-10.95, -6.6, -7.1, -12.95, 0, -13.25);
             ctx.closePath();
+            let g = ctx.createLinearGradient(-6, -12, 6, 12);
+            g.addColorStop(0, 'rgba(150, 222, 255, 1)');
+            g.addColorStop(0.5, 'rgba(70, 160, 240, 0.98)');
+            g.addColorStop(1, 'rgba(42, 110, 200, 0.98)');
+            ctx.fillStyle = g;
             ctx.fill();
+            ctx.strokeStyle = 'rgba(22, 70, 120, 0.98)';
+            ctx.lineWidth = 1.9;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, -10);
+            ctx.lineTo(0, 11.2);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.42)';
+            ctx.lineWidth = 1.05;
             ctx.stroke();
             ctx.restore();
         }
 
         /** Icons in a horizontal row above the unit (fort defense, hazards, heals, …). */
-        function drawWodUnitStatusEffectRow(ctx, unit, ur, gfxLite) {
+        function drawWodUnitStatusEffectRow(ctx, unit, ur, gfxLite, centerYOptional) {
             if(!unit || unit.hp <= 0 || unit.type === 'convoy') return;
             let kinds = [];
             if(wodFortDefenseDamageMultiplier(unit) < 1) kinds.push('fort');
@@ -20384,17 +20494,23 @@
             if((unit.healingFlash || 0) > 0) kinds.push('heal');
             if((unit.waterFlash || 0) > 0) kinds.push('water');
             if(!kinds.length) return;
-            let r = gfxLite ? 7.4 : 8.9;
-            let gap = gfxLite ? 3.25 : 3.85;
-            let step = r * 2 + gap;
-            let total = kinds.length * (r * 2) + (kinds.length - 1) * gap;
-            let x0 = -total / 2 + r;
-            let y = -ur - (gfxLite ? 19 : 22);
+            let r = gfxLite ? 7.85 : 9.42;
+            let gap = gfxLite ? 6.05 : 7.05;
+            let y = typeof centerYOptional === 'number' && isFinite(centerYOptional) ?
+                centerYOptional : (-ur - (gfxLite ? 23 : 27));
             ctx.save();
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            let slotW = kinds.map(function(kk) {
+                return kk === 'fort' ? r * 2.78 : r * 2.18;
+            });
+            let tw = slotW.reduce((a, w) => a + w, 0) + (kinds.length - 1) * gap;
+            let left = -tw / 2;
             for(let i = 0; i < kinds.length; i++) {
-                let cx = x0 + i * step;
+                let w = slotW[i];
+                left += w * 0.5;
+                let cx = left;
+                left += w * 0.5 + (i < kinds.length - 1 ? gap : 0);
                 let k = kinds[i];
                 if(k === 'fort') drawWodFortShieldBadge(ctx, cx, y, r);
                 else {
