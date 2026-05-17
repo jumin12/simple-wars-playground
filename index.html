@@ -849,6 +849,15 @@
                 font-size: 13px;
                 padding: 11px 16px;
             }
+            #inGameUI .info-card {
+                bottom: calc(52px + env(safe-area-inset-bottom, 0px));
+                right: 16px;
+                z-index: 14;
+                width: min(308px, calc(100vw - 32px));
+            }
+            #inGameUI .info-card.visible {
+                max-height: min(560px, calc(100vh - 92px));
+            }
         }
 
         .top-actions {
@@ -1073,21 +1082,25 @@
             position: absolute;
             bottom: 80px;
             right: 20px;
+            z-index: 14;
             background: rgba(15, 25, 35, 0.9);
             backdrop-filter: blur(8px);
             border: 2px solid #d4af37;
             padding: 15px;
             border-radius: 8px;
-            width: 250px;
+            width: min(300px, calc(100vw - 40px));
             pointer-events: auto;
             color: #fff;
             box-shadow: 0 4px 10px rgba(0,0,0,0.5);
             transition: opacity 0.2s;
             display: none;
+            box-sizing: border-box;
         }
 
         .info-card.visible {
-            display: block;
+            display: flex;
+            flex-direction: column;
+            max-height: min(520px, calc(100vh - 100px));
         }
 
         .info-card h3 {
@@ -1134,6 +1147,11 @@
 
         .info-card.visible .info-card-body {
             min-width: 0;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
         }
 
         .info-identity {
@@ -1162,6 +1180,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
+            align-content: flex-start;
         }
 
         .effect-pill {
@@ -1171,6 +1190,15 @@
             background: rgba(0,0,0,0.35);
             font-size: 12px;
             color: #ecf0f1;
+            max-width: 100%;
+            line-height: 1.35;
+            box-sizing: border-box;
+        }
+
+        .effect-pill--block {
+            flex: 1 1 100%;
+            border-radius: 8px;
+            white-space: normal;
         }
 
         .info-mobile-orders {
@@ -4771,7 +4799,7 @@
                 <p class="setup-victory-hint" id="setupVictoryModeDetail"></p>
                 <div class="setup-row">
                     <label>Starting Money:</label>
-                    <input type="number" id="setupMoney" value="12000" step="250">
+                    <input type="number" id="setupMoney" value="10000" step="250">
                 </div>
                 <div class="setup-row" id="setupPlayerColorRow">
                     <label>Your faction color:</label>
@@ -6279,7 +6307,7 @@
         }
 
         let gameData = {
-            money: 1000, income: 10, expenses: 0, manpower: 5000, manpowerIncome: 0, gold: 1000, speed: 1,
+            money: 10000, income: 10, expenses: 0, manpower: 5000, manpowerIncome: 0, gold: 1000, speed: 1,
             entities: [], cities: [], roads: [], forts: [],
             hexes: {}, hexList: [],
             camera: { x: 0, y: 0, zoom: 0.5 },
@@ -8243,7 +8271,7 @@
                 seatTypes: st,
                 lobbyMapSeed: window.wodMpRoomMeta.lobbyMapSeed >>> 0,
                 victoryMode: vic && vic.value === 'annihilation' ? 'annihilation' : 'domination',
-                money: moneyEl ? (parseInt(moneyEl.value, 10) || 1000) : 1000,
+                money: moneyEl ? (parseInt(moneyEl.value, 10) || 10000) : 10000,
                 maxHumans,
                 mapSizeLabel: msLab ? msLab.text : '',
                 mapShapeLabel: shLab ? shLab.text : '',
@@ -11846,32 +11874,39 @@
             return water * moraleSlow;
         }
 
+        function getTerrainCombatSummaryEffect(unit, hex) {
+            if(!hex || !unit || unit.type === 'convoy') return null;
+            let atk = getTerrainAttackModifier(unit, hex);
+            let def = getTerrainDefenseModifier(unit, hex);
+            let nm = terrainLabel(hex.type);
+            let atkPct = Math.round(atk * 100);
+            let defPct = Math.round(def * 100);
+            let atkLine = atk >= 1.02 ? `Attacks outgoing from this tile deal about ${atkPct}% damage (terrain helps).`
+                : (atk <= 0.98 ? `Attacks outgoing from this tile deal about ${atkPct}% damage (terrain hurts).`
+                    : `Attack strength about ${atkPct}% (baseline 100%).`);
+            let defLine = def <= 0.98 ? `Damage you take from hits is about ${defPct}% (stronger cover — lower is better).`
+                : (def >= 1.02 ? `Damage you take from hits is about ${defPct}% (you are more exposed — higher is worse).`
+                    : `Damage taken about ${defPct}% (baseline 100%).`);
+            return {
+                label: nm + ': terrain combat',
+                detail: atkLine + ' ' + defLine,
+                block: true
+            };
+        }
+
         function getUnitEffects(unit) {
             let effects = [];
             let hex = getNearestHexToPoint(unit.x, unit.y);
             if(hex && unit.type !== 'convoy') {
-                let atk = getTerrainAttackModifier(unit, hex);
-                let def = getTerrainDefenseModifier(unit, hex);
+                let tsum = getTerrainCombatSummaryEffect(unit, hex);
+                if(tsum) effects.push(tsum);
                 let spd = getUnitSpeedMultiplier(unit);
-                let terrainName = terrainLabel(hex.type);
-                let atkPct = Math.round(atk * 100);
-                let defPct = Math.round(def * 100);
                 let spdPct = Math.round(spd * 100);
-                let atkKind = atk > 1.04 ? 'buff' : (atk < 0.96 ? 'debuff' : 'neutral');
-                let defKind = def < 0.96 ? 'buff' : (def > 1.04 ? 'debuff' : 'neutral');
                 let spdKind = spd > 1.04 ? 'buff' : (spd < 0.96 ? 'debuff' : 'neutral');
-                effects.push({
-                    label: `${terrainName} atk ${atkPct}%`,
-                    detail: atkKind === 'buff' ? 'Terrain improves attack' : (atkKind === 'debuff' ? 'Terrain reduces attack' : 'No attack change from terrain')
-                });
-                effects.push({
-                    label: `${terrainName} def ${defPct}%`,
-                    detail: defKind === 'buff' ? 'Terrain improves defense' : (defKind === 'debuff' ? 'Terrain worsens defense' : 'No defense change from terrain')
-                });
                 if(spdKind !== 'neutral') {
                     effects.push({
                         label: `Speed ${spdPct}%`,
-                        detail: spdKind === 'buff' ? 'Current terrain/morale improves movement' : 'Current terrain/morale slows movement'
+                        detail: spdKind === 'buff' ? 'Morale/water/movement boosts speed' : 'Morale, water, or rough ground slows marching'
                     });
                 }
             }
@@ -13552,7 +13587,7 @@
             gameData.entities = wodDeepClonePlain(snap.entities);
             gameData.camera = wodDeepClonePlain(snap.camera);
 
-            let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 1000;
+            let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 10000;
             let owners = wodOwnersListActiveForProcgen();
             let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
             gameData.money = startMoney;
@@ -13618,7 +13653,7 @@
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
             let startMoney = document.getElementById('setupMoney');
-            if(startMoney) gameData.money = parseInt(startMoney.value);
+            if(startMoney) gameData.money = parseInt(startMoney.value, 10) || 10000;
             let shapeInput = document.getElementById('setupMapShape');
             let requestedShape = shapeInput ? shapeInput.value : 'island';
 
@@ -14133,7 +14168,7 @@
             gameData._campaignEnded = false;
             // Clear entities & money just in case
             gameData.entities = [];
-            gameData.money = parseInt(document.getElementById('setupMoney').value) || 1000;
+            gameData.money = parseInt(document.getElementById('setupMoney').value) || 10000;
             gameData.aiMoneyByOwner = {};
             gameData.aiManpowerByOwner = {};
             gameData.manpower = 5000;
@@ -14180,7 +14215,7 @@
 
                 let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
                 for(let owner of ownersList) {
-                    gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
+                    gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 10000);
                     gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
                 }
 
@@ -14325,7 +14360,7 @@
                 startCity.owner = owner;
                 startCity.hasFactory = true;
                 startCities.push(startCity);
-                gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 1000);
+                gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 10000);
                 gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
             }
 
@@ -14455,7 +14490,7 @@
             try {
             wodMapGenYieldingStart(26);
             let startMoneyInput = document.getElementById('setupMoney');
-            gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 1000;
+            gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 10000;
             gameData.income = 10;             gameData.selection = [];
             gameData.buildMode = null;
             syncBuildPlacementMobileUi();
@@ -15149,7 +15184,7 @@
             for(let h of gameData.hexList) h.owner = mapOwn(h.owner);
             for(let c of gameData.cities) c.owner = mapOwn(c.owner);
             for(let u of gameData.entities) u.owner = mapOwn(u.owner);
-            let starter = parseInt(document.getElementById('setupMoney').value) || 1000;
+            let starter = parseInt(document.getElementById('setupMoney').value, 10) || 10000;
             gameData.aiMoneyByOwner = {};
             gameData.aiManpowerByOwner = {};
             gameData.aiMoneyByOwner[3] = starter;
@@ -18819,8 +18854,10 @@
                     }
                     let effects = getUnitEffects(sel);
                     els.effects.innerHTML = effects.length
-                        ? effects.map(effect => `<span class="effect-pill" title="${effect.detail}">${effect.label}</span>`).join('')
-                        : '<span class="effect-pill">No active effects</span>';
+                        ? effects.map(effect =>
+                            `<span class="effect-pill${effect.block ? ' effect-pill--block' : ''}" title="${(effect.detail || '').replace(/"/g, '&quot;')}">${effect.label}</span>`
+                        ).join('')
+                        : '<span class="effect-pill effect-pill--block">No active effects listed for this hex.</span>';
                 }
                 if(els.rename) {
                     let canRename = sel.owner === lo && (sel.id || sel.hp !== undefined);
@@ -20515,16 +20552,16 @@
             if((unit.waterFlash || 0) > 0) kinds.push('water');
             let hasAny = combatBurstOn || kinds.length > 0;
             if(!hasAny) return;
-            let glyphR = gfxLite ? 7.55 : 9.08;
-            let gap = gfxLite ? 2.85 : 3.45;
-            let rowY = -ur - (gfxLite ? 24 : 28);
-            let burstSz = gfxLite ? 8.85 : 9.92;
-            let burstSlotW = burstSz * 1.85;
+            let glyphR = gfxLite ? 6.22 : 7.62;
+            let gap = gfxLite ? 2.45 : 2.95;
+            let rowY = -ur - (gfxLite ? 22 : 25);
+            let burstSz = gfxLite ? 7.72 : 8.76;
+            let burstSlotW = burstSz * 1.76;
             let slots = [];
             if(combatBurstOn) slots.push({ k: 'combat', w: burstSlotW });
             for(let kk = 0; kk < kinds.length; kk++) {
                 let t = kinds[kk];
-                let sw = (t === 'fort') ? glyphR * 2.35 : glyphR * 1.78;
+                let sw = (t === 'fort') ? glyphR * 2.2 : glyphR * 1.62;
                 slots.push({ k: t, w: sw });
             }
             let tw = slots.reduce(function(a, s) { return a + s.w; }, 0) + (slots.length > 1 ? gap * (slots.length - 1) : 0);
