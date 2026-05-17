@@ -29,6 +29,8 @@
     editorGestureMutatedMap: false,
     _editorKeyHandler: null,
     editorSaveSelectedId: null,
+    /** Alternating city vs unit when both hit on successive clicks at the same stack */
+    cityUnitStackTap: null,
   };
 
   const editorPtrs = new Map();
@@ -68,6 +70,7 @@
     rebuildUnitPalette();
     syncBrushScaleControls(document.getElementById("mapEditorApp"));
     markEditorMapChanged();
+    state.cityUnitStackTap = null;
     renderSelection();
     scheduleEditorRender();
     renderMapBrowser();
@@ -77,6 +80,7 @@
     const s = editorCaptureSnapshot();
     state.historyStack = [s];
     state.historyIndex = 0;
+    state.cityUnitStackTap = null;
     updateUndoRedoButtons();
   }
 
@@ -205,26 +209,20 @@
     return tool === "paint" || tool === "erase" || tool === "territory";
   }
 
-  function syncBrushSizeLabel() {
-    const lab = document.getElementById("editorBrushSizeVal");
-    const scale = Math.max(1, Math.min(EDITOR_BRUSH_SCALE_MAX, state.brushSize | 0));
-    if (!lab) return;
-    if (scale <= 1) lab.textContent = "Scale 1 — single hex";
-    else lab.textContent = `Scale ${scale} — center + ${scale - 1} hex ring${scale === 2 ? "" : "s"}`;
-  }
-
   function syncBrushScaleControls(root) {
     const r = root || document.getElementById("mapEditorApp");
     if (!r) return;
     const scale = Math.max(1, Math.min(EDITOR_BRUSH_SCALE_MAX, state.brushSize | 0));
     state.brushSize = scale;
     const slider = r.querySelector("#editorBrushSize");
-    if (slider) slider.value = String(scale);
+    if (slider) {
+      slider.value = String(scale);
+      slider.setAttribute("aria-valuenow", String(scale));
+    }
     r.querySelectorAll("[data-brush-scale]").forEach(btn => {
       const n = parseInt(btn.dataset.brushScale, 10);
       btn.classList.toggle("active", n === scale);
     });
-    syncBrushSizeLabel();
   }
 
   /** Axial hex disk (hex distance ≤ R); avoids WOD.getHexesInRadius which uses Euclidean dq,dr (wrong on hex grids). */
@@ -604,6 +602,14 @@
         font-size:12px;
         min-width:72px;
       }
+      .editor-gen-undo .editor-btn:disabled,
+      #editorUndoBtn:disabled,
+      #editorRedoBtn:disabled {
+        opacity:0.45;
+        cursor:not-allowed;
+        filter:grayscale(0.4);
+        box-shadow:none;
+      }
       .editor-save-overlay {
         position:fixed;
         inset:0;
@@ -755,14 +761,6 @@
         font-size: 13px;
         font-weight: 700;
         cursor: pointer;
-      }
-      .editor-brush-val {
-        flex: 0 0 auto;
-        font-size: 12px;
-        color: #9db3c7;
-        font-weight: 700;
-        min-width: 92px;
-        text-align: right;
       }
       .editor-grid-2 {
         display: grid;
@@ -960,8 +958,7 @@
           <div class="editor-row editor-brush-row">
             <label for="editorBrushSize">Brush scale</label>
             <div class="editor-brush-inner">
-              <input type="range" id="editorBrushSize" min="1" max="5" step="1" value="1" />
-              <span id="editorBrushSizeVal" class="editor-brush-val">Scale 1 — single hex</span>
+              <input type="range" id="editorBrushSize" min="1" max="5" step="1" value="1" aria-valuetext="brush scale" />
             </div>
           </div>
           <div class="editor-brush-presets">
@@ -1431,24 +1428,29 @@
   }
 
   /**
-   * City and unit can overlap in urban areas — pick whichever center is closer to the click
-   * so units on top of towns remain selectable.
+   * Unit stacks visually on cities. Prefer the unit on first click at an overlap;
+   * a second click on the same stack selects the city. Clicks that hit only the city
+   * ring (not the unit) select the city directly.
    */
   function pickCityOrUnitAt(pos, maxCityDist = 55, maxUnitDist = 35) {
     const maxC = maxCityDist * maxCityDist;
     const maxU = maxUnitDist * maxUnitDist;
-    let bestCity = null, bestCityD = maxC;
+    let bestCity = null;
+    let bestCityD = maxC;
     for (const city of WOD.gameData.cities) {
-      const dx = city.x - pos.x, dy = city.y - pos.y;
+      const dx = city.x - pos.x;
+      const dy = city.y - pos.y;
       const d = dx * dx + dy * dy;
       if (d < bestCityD) {
         bestCityD = d;
         bestCity = city;
       }
     }
-    let bestUnit = null, bestUnitD = maxU;
+    let bestUnit = null;
+    let bestUnitD = maxU;
     for (const unit of WOD.gameData.entities) {
-      const dx = unit.x - pos.x, dy = unit.y - pos.y;
+      const dx = unit.x - pos.x;
+      const dy = unit.y - pos.y;
       const d = dx * dx + dy * dy;
       if (d < bestUnitD) {
         bestUnitD = d;
@@ -1458,9 +1460,26 @@
     const hasCity = bestCity != null;
     const hasUnit = bestUnit != null;
     if (hasCity && hasUnit) {
-      if (bestUnitD <= bestCityD) return { kind: "unit", value: bestUnit };
-      return { kind: "city", value: bestCity };
+      const unitUid = bestUnit.uid;
+      const cityId = bestCity.id;
+      const st = state.cityUnitStackTap;
+      const sameStack =
+        st &&
+        st.cityId === cityId &&
+        st.unitUid === unitUid &&
+        (pos.x - st.x) * (pos.x - st.x) + (pos.y - st.y) * (pos.y - st.y) < 900;
+      if (sameStack) {
+        if (st.lastPick === "unit") {
+          state.cityUnitStackTap = { cityId, unitUid, x: pos.x, y: pos.y, lastPick: "city" };
+          return { kind: "city", value: bestCity };
+        }
+        state.cityUnitStackTap = { cityId, unitUid, x: pos.x, y: pos.y, lastPick: "unit" };
+        return { kind: "unit", value: bestUnit };
+      }
+      state.cityUnitStackTap = { cityId, unitUid, x: pos.x, y: pos.y, lastPick: "unit" };
+      return { kind: "unit", value: bestUnit };
     }
+    state.cityUnitStackTap = null;
     if (hasUnit) return { kind: "unit", value: bestUnit };
     if (hasCity) return { kind: "city", value: bestCity };
     return null;

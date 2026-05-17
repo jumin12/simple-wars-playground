@@ -6388,6 +6388,7 @@
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             menuDemoSeeded = false;
+            gameData._cityUnitStackTap = null;
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             UI.escMenu.classList.add('hidden');
@@ -20032,6 +20033,43 @@
             return null;
         }
 
+        /** Unit on a city: first tap selects unit, second tap same stack selects city; city-only clicks still pick the city. */
+        function wodPickCityOrUnitForMapSelection(worldPos) {
+            const CITY_R2 = 400;
+            let bestCity = null;
+            let bestD = Infinity;
+            for(let city of gameData.cities) {
+                let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
+                let d = dx * dx + dy * dy;
+                if(d < CITY_R2 && d < bestD) {
+                    bestD = d;
+                    bestCity = city;
+                }
+            }
+            let pickedUnit = pickInspectableUnitAt(worldPos);
+            if(pickedUnit && bestCity) {
+                let uid = pickedUnit.uid;
+                let cid = bestCity.id;
+                let st = gameData._cityUnitStackTap;
+                let sameStack = st && st.uid === uid && st.cityId === cid &&
+                    (worldPos.x - st.x) * (worldPos.x - st.x) + (worldPos.y - st.y) * (worldPos.y - st.y) < 900;
+                if(sameStack) {
+                    if(st.lastPick === 'unit') {
+                        gameData._cityUnitStackTap = { uid, cityId: cid, x: worldPos.x, y: worldPos.y, lastPick: 'city' };
+                        return { city: bestCity, unit: null };
+                    }
+                    gameData._cityUnitStackTap = { uid, cityId: cid, x: worldPos.x, y: worldPos.y, lastPick: 'unit' };
+                    return { city: null, unit: pickedUnit };
+                }
+                gameData._cityUnitStackTap = { uid, cityId: cid, x: worldPos.x, y: worldPos.y, lastPick: 'unit' };
+                return { city: null, unit: pickedUnit };
+            }
+            gameData._cityUnitStackTap = null;
+            if(pickedUnit) return { city: null, unit: pickedUnit };
+            if(bestCity) return { city: bestCity, unit: null };
+            return { city: null, unit: null };
+        }
+
         function getMovableSelectedUnits() {
             let o = wodLocalPlayerOwner();
             return gameData.selection.filter(s => s.hp !== undefined && !s.id && s.type !== 'convoy' && s.owner === o);
@@ -20331,17 +20369,12 @@
                         issueMoveOrder(worldPos);
                         return;
                     }
-                    for(let city of gameData.cities) {
-                        let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
-                        if(dx*dx + dy*dy < 400) {
-                            city.selected = true; gameData.selection.push(city); return;
-                        }
+                    let pickSel = wodPickCityOrUnitForMapSelection(worldPos);
+                    if(pickSel.city) {
+                        pickSel.city.selected = true; gameData.selection.push(pickSel.city); return;
                     }
-                    let picked = pickInspectableUnitAt(worldPos);
-                    if(picked) {
-                        picked.selected = true;
-                        gameData.selection.push(picked);
-                        return;
+                    if(pickSel.unit) {
+                        pickSel.unit.selected = true; gameData.selection.push(pickSel.unit); return;
                     }
                 } else {
                     const worldL = (Math.min(cx, dragStart.x) + gameData.camera.x) / gameData.camera.zoom;
@@ -20605,17 +20638,13 @@
                         issueMoveOrder(worldPos);
                         return;
                     }
-                    for(let city of gameData.cities) {
-                        let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
-                        if(dx * dx + dy * dy < 400) {
-                            city.selected = true; gameData.selection.push(city);
-                            return;
-                        }
+                    let pickSel = wodPickCityOrUnitForMapSelection(worldPos);
+                    if(pickSel.city) {
+                        pickSel.city.selected = true; gameData.selection.push(pickSel.city);
+                        return;
                     }
-                    let picked = pickInspectableUnitAt(worldPos);
-                    if(picked) {
-                        picked.selected = true;
-                        gameData.selection.push(picked);
+                    if(pickSel.unit) {
+                        pickSel.unit.selected = true; gameData.selection.push(pickSel.unit);
                         return;
                     }
                     tryMobileMapOrderTap(touch.clientX, touch.clientY);
@@ -20647,17 +20676,13 @@
                         issueMoveOrder(worldPos);
                         return;
                     }
-                    for(let city of gameData.cities) {
-                        let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
-                        if(dx * dx + dy * dy < 400) {
-                            city.selected = true; gameData.selection.push(city);
-                            return;
-                        }
+                    let pickSel = wodPickCityOrUnitForMapSelection(worldPos);
+                    if(pickSel.city) {
+                        pickSel.city.selected = true; gameData.selection.push(pickSel.city);
+                        return;
                     }
-                    let picked = pickInspectableUnitAt(worldPos);
-                    if(picked) {
-                        picked.selected = true;
-                        gameData.selection.push(picked);
+                    if(pickSel.unit) {
+                        pickSel.unit.selected = true; gameData.selection.push(pickSel.unit);
                         return;
                     }
                     tryMobileMapOrderTap(touch.clientX, touch.clientY);
