@@ -1430,6 +1430,42 @@
     return best;
   }
 
+  /**
+   * City and unit can overlap in urban areas — pick whichever center is closer to the click
+   * so units on top of towns remain selectable.
+   */
+  function pickCityOrUnitAt(pos, maxCityDist = 55, maxUnitDist = 35) {
+    const maxC = maxCityDist * maxCityDist;
+    const maxU = maxUnitDist * maxUnitDist;
+    let bestCity = null, bestCityD = maxC;
+    for (const city of WOD.gameData.cities) {
+      const dx = city.x - pos.x, dy = city.y - pos.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestCityD) {
+        bestCityD = d;
+        bestCity = city;
+      }
+    }
+    let bestUnit = null, bestUnitD = maxU;
+    for (const unit of WOD.gameData.entities) {
+      const dx = unit.x - pos.x, dy = unit.y - pos.y;
+      const d = dx * dx + dy * dy;
+      if (d < bestUnitD) {
+        bestUnitD = d;
+        bestUnit = unit;
+      }
+    }
+    const hasCity = bestCity != null;
+    const hasUnit = bestUnit != null;
+    if (hasCity && hasUnit) {
+      if (bestUnitD <= bestCityD) return { kind: "unit", value: bestUnit };
+      return { kind: "city", value: bestCity };
+    }
+    if (hasUnit) return { kind: "unit", value: bestUnit };
+    if (hasCity) return { kind: "city", value: bestCity };
+    return null;
+  }
+
   function findSpawnHexForType(type, pos) {
     let h = nearestHex(pos);
     if (type === "ship") {
@@ -1590,11 +1626,14 @@
       WOD.beginHexOwnerBatch();
     }
     if (state.tool === "select" || state.tool === "move") {
-      const city = nearestCity(pos);
-      const unit = nearestUnit(pos);
-      if (city) { state.selected = { type: "city", value: city }; state.dragKind = "city"; }
-      else if (unit) { state.selected = { type: "unit", value: unit }; state.dragKind = "unit"; }
-      else { state.selected = null; state.dragKind = null; }
+      const pick = pickCityOrUnitAt(pos);
+      if (pick) {
+        state.selected = { type: pick.kind, value: pick.value };
+        state.dragKind = pick.kind;
+      } else {
+        state.selected = null;
+        state.dragKind = null;
+      }
       renderSelection();
     } else {
       paintAt(pos);
