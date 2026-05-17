@@ -152,7 +152,7 @@
   /** Brush scale 1 = clicked hex only; each step adds one full hex ring around the center (max 5). */
   const EDITOR_BRUSH_SCALE_MAX = 5;
   /** Saved map lists: items per page (browser + save dialog). */
-  const SAVED_MAPS_PAGE_SIZE = 6;
+  const SAVED_MAPS_PAGE_SIZE = 3;
 
   function savedMapsPagination(page0, totalItems) {
     const n = Math.max(0, totalItems | 0);
@@ -654,7 +654,7 @@
     state.editorSaveListPage = pag.page;
     const pageMaps = maps.slice(pag.start, pag.end);
     if (pager) {
-      pager.hidden = pag.totalPages <= 1;
+      pager.hidden = false;
       if (pageLabel) pageLabel.textContent = `Page ${pag.page + 1} / ${pag.totalPages} (${maps.length} saves)`;
       if (prevBtn) {
         prevBtn.disabled = pag.page <= 0;
@@ -942,12 +942,13 @@
       .editor-save-list {
         display:grid;
         gap:8px;
-        max-height:min(38vh, 320px);
+        max-height:min(36vh, 240px);
         overflow:auto;
-        margin:10px 0 14px;
+        margin:10px 0 8px;
       }
       .editor-save-pager {
-        display:flex; align-items:center; justify-content:center; gap:10px; margin:4px 0 0; flex-wrap:wrap;
+        display:flex; align-items:center; justify-content:center; gap:10px; margin:0 0 12px; flex-wrap:wrap;
+        flex-shrink:0;
       }
       .editor-save-pager[hidden] { display:none !important; }
       .editor-save-row {
@@ -1206,9 +1207,16 @@
       }
       .editor-swatch { width:16px;height:16px;border:1px solid #061018;border-radius:4px;display:inline-block;flex-shrink:0; }
       .editor-hint { color:#93a8b9; font-size:12px; line-height:1.45;margin:6px 0 0;font-weight:400; }
-      .map-browser { display:grid; gap:8px; max-height:min(360px,52vh); overflow:auto; padding-right:2px;}
+      .map-browser-stack { display:flex; flex-direction:column; gap:10px; }
+      .map-browser {
+        display:grid; gap:8px;
+        min-height:min(240px, 42vh);
+        overflow:visible;
+        padding-right:2px;
+      }
       .map-browser-pager {
-        display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;
+        display:flex; align-items:center; justify-content:center; gap:10px; margin-top:2px; flex-wrap:wrap;
+        flex-shrink:0;
       }
       .map-browser-pager[hidden] { display:none !important; }
       .map-browser-page-label { font-size:12px; color:#9db3c7; min-width:120px; text-align:center; font-weight:700; }
@@ -1379,12 +1387,14 @@
         <section class="editor-card">
           <h3>Saved maps (browser)</h3>
           <p class="editor-hint" style="margin-top:0">Same collection as solo / multiplayer / map library. Click a row to load; Delete removes it everywhere.</p>
-          <div class="map-browser-pager" id="mapBrowserPager" hidden>
-            <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserPrev" aria-label="Previous page">←</button>
-            <span id="mapBrowserPageLabel" class="map-browser-page-label"></span>
-            <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserNext" aria-label="Next page">→</button>
+          <div class="map-browser-stack">
+            <div id="mapBrowser" class="map-browser"></div>
+            <div class="map-browser-pager" id="mapBrowserPager" hidden>
+              <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserPrev" aria-label="Previous page">←</button>
+              <span id="mapBrowserPageLabel" class="map-browser-page-label"></span>
+              <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserNext" aria-label="Next page">→</button>
+            </div>
           </div>
-          <div id="mapBrowser" class="map-browser"></div>
         </section>
       </div>
       <div id="editorCanvasWrap">
@@ -1426,12 +1436,12 @@
         <div class="editor-save-dialog">
           <h3>Save to library</h3>
           <p class="editor-hint" style="margin:0 0 8px">Select a map to overwrite its data, or enter a new name. Saved in this browser only.</p>
+          <div id="editorSaveList" class="editor-save-list"></div>
           <div class="editor-save-pager" id="editorSavePager" hidden>
             <button type="button" class="editor-btn map-browser-page-btn" id="editorSavePagePrev" aria-label="Previous page">←</button>
             <span id="editorSavePageLabel" class="map-browser-page-label"></span>
             <button type="button" class="editor-btn map-browser-page-btn" id="editorSavePageNext" aria-label="Next page">→</button>
           </div>
-          <div id="editorSaveList" class="editor-save-list"></div>
           <div class="editor-save-new-row">
             <input type="text" id="editorSaveNewName" placeholder="New map name" maxlength="96" />
             <button type="button" class="editor-btn" id="editorSaveAsNewBtn">Save as new</button>
@@ -2588,7 +2598,7 @@
     state.mapBrowserPage = pag.page;
     const pageItems = saved.slice(pag.start, pag.end);
     if (pager) {
-      pager.hidden = pag.totalPages <= 1;
+      pager.hidden = false;
       if (pageLabel) pageLabel.textContent = `Page ${pag.page + 1} / ${pag.totalPages} (${saved.length} saves)`;
       if (prevBtn) {
         prevBtn.disabled = pag.page <= 0;
