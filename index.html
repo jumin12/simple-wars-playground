@@ -2820,6 +2820,69 @@
             border-color: #ff7979 !important;
         }
 
+        .wod-help-terrain-combat-wrap {
+            overflow-x: auto;
+            margin: 10px 0 8px;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 8px;
+            border: 1px solid rgba(212, 175, 55, 0.32);
+            background: rgba(5, 10, 16, 0.45);
+            max-width: 100%;
+        }
+
+        .wod-help-terrain-combat-table {
+            width: max-content;
+            min-width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            font-variant-numeric: tabular-nums;
+            color: #ecf0f1;
+        }
+
+        .wod-help-terrain-combat-table th,
+        .wod-help-terrain-combat-table td {
+            border: 1px solid rgba(212, 175, 55, 0.26);
+            padding: 8px 7px;
+            vertical-align: top;
+            text-align: center;
+            line-height: 1.42;
+            min-width: 6.85rem;
+        }
+
+        .wod-help-terrain-combat-table th:first-child,
+        .wod-help-terrain-combat-table td:first-child {
+            text-align: left;
+            position: sticky;
+            left: 0;
+            z-index: 2;
+            min-width: 8.85rem;
+            background: rgba(15, 22, 31, 0.98);
+            box-shadow: 4px 0 12px rgba(0, 0, 0, 0.24);
+        }
+
+        .wod-help-terrain-combat-table thead th {
+            background: rgba(26, 39, 53, 0.96);
+            font-weight: 700;
+            color: rgba(243, 237, 226, 0.98);
+            font-size: 10.5px;
+        }
+
+        .wod-help-terrain-matrix-atk {
+            color: #f1c40f;
+            white-space: nowrap;
+        }
+
+        .wod-help-terrain-matrix-def {
+            color: #85c1e9;
+            white-space: nowrap;
+        }
+
+        .esc-help-matrix-footnote {
+            font-size: 0.93em;
+            color: #aab7c5;
+            margin-bottom: 0.45em !important;
+        }
+
         .help-terrain-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
@@ -5092,9 +5155,13 @@
                 </div>
 
                 <div class="esc-help-block">
-                    <h4>Terrain and movement</h4>
-                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. Armies route around them through passes and open ground; the game won’t path straight through rock you cannot enter.</p>
-                    <p class="esc-help-prose"><strong>Light infantry</strong> and <strong>heavies</strong> now route on land-only, cardinal paths: they avoid water, mountains, and diagonal shortcuts. <strong>Marines</strong> keep full speed on water and fight well there; they are weaker on dry inland terrain. <strong>Ships</strong> only move on water. Morale, terrain effects, and combat all modify movement speed.</p>
+                    <h4>Terrain, movement & combat tilt</h4>
+                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Light infantry</strong> and <strong>armor</strong> path on cardinal land tiles only—they avoid oceans, peaks, and diagonal shortcuts. <strong>Marines</strong> thrive on ocean hexes while amphibious; land regiments stranded in deep ocean hexes (<code>inWater</code> in code) suffer drowning upkeep about <strong>−2%</strong> max HP per second and severe march slowdown plus morale linkage. <strong>Ships</strong> fight only from water.</p>
+                    <p class="esc-help-prose"><strong>Attack %</strong> scales outgoing strikes vs the same regiment on baseline <strong>grass</strong>; <strong>Dmg taken %</strong> scales how hostile hits resolve on you (<strong>below 100%</strong> absorbs better; above 100% means more exposed).</p>
+                    <p class="esc-help-prose esc-help-matrix-footnote">Ocean columns: <strong>Marines &amp; ships</strong> assumes an amphibious stance on ocean; drowned columns mirror light infantry / armor drowning on that terrain.</p>
+                    <div class="wod-help-terrain-combat-mount"></div>
+                    <p class="esc-help-prose esc-help-matrix-footnote"><strong>Trade convoys</strong> are civilians—no terrain combat multipliers.</p>
+                    <p class="esc-help-prose esc-help-matrix-footnote">These numbers match the live code paths <code>getTerrainAttackModifier</code> / <code>getTerrainDefenseModifier</code>. Fort aura (<strong>×80%</strong> damage taken), morale, unpaid upkeep (<strong>−2.5%</strong> max HP/s), encirclement, and drowning stack separately—see unit card pills in play.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -5105,7 +5172,7 @@
 
                 <div class="esc-help-block">
                     <h4>Encirclement</h4>
-                    <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units caught inside take steady <strong>attrition</strong> (on the order of a few percent of max health per second), flash a warning, and <strong>cannot heal</strong> until the pocket is broken. You may still attack outward and seize tiles to reopen a corridor — the penalty is meant to reward tightening sieges without making escape impossible.</p>
+                    <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units caught inside take about <strong>3.5% max HP attrition per second</strong>, flash a warning, and <strong>cannot heal</strong> until the pocket is broken. You may still attack outward and seize tiles to reopen a corridor — the penalty is meant to reward tightening sieges without making escape impossible.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -6157,16 +6224,18 @@
             UI.escMenu.classList.toggle('hidden', !shouldOpen);
         }
 
+        const WOD_ESC_HELP_VERSION = '2';
+
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
-            if(!mount || mount.dataset.ready === '1') return;
+            if(!mount || mount.dataset.ready === WOD_ESC_HELP_VERSION) return;
             let guide = document.querySelector('#helpGuidePanel .panel');
             if(!guide) return;
             mount.innerHTML = guide.innerHTML
                 .replaceAll('menuHelpCanvas', 'escHelpCanvas')
                 .replaceAll('menuCompactTerrainKey', 'escCompactTerrainKey')
                 .replaceAll('hidePanels()', 'toggleEscMenu(false)');
-            mount.dataset.ready = '1';
+            mount.dataset.ready = WOD_ESC_HELP_VERSION;
         }
 
         function showEscSection(sectionId) {
@@ -9380,20 +9449,23 @@
         function updateTerrainKey() {
             normalizeTerrainHexes();
             let body = document.getElementById('terrainKeyBody');
-            if(!body) return;
-            let skipKey = { snow: 1, deep_water: 1 };
-            let present = [...new Set(gameData.hexList.map(h => h.type))]
-                .filter(t => !skipKey[t])
-                .sort((a, b) => terrainLabel(a).localeCompare(terrainLabel(b)));
-            let compactRows = present.map(type => terrainRowHtml(type, false)).join('');
-            body.innerHTML = compactRows;
+            if(body) {
+                let skipKey = { snow: 1, deep_water: 1 };
+                let list = gameData.hexList || [];
+                let present = [...new Set(list.map(h => h.type))]
+                    .filter(t => !skipKey[t])
+                    .sort((a, b) => terrainLabel(a).localeCompare(terrainLabel(b)));
+                let compactRows = present.map(type => terrainRowHtml(type, false)).join('');
+                body.innerHTML = compactRows;
 
-            let escCompact = document.getElementById('escCompactTerrainKey');
-            if(escCompact) escCompact.innerHTML = compactRows;
-            let menuCompact = document.getElementById('menuCompactTerrainKey');
-            if(menuCompact) menuCompact.innerHTML = compactRows;
+                let escCompact = document.getElementById('escCompactTerrainKey');
+                if(escCompact) escCompact.innerHTML = compactRows;
+                let menuCompact = document.getElementById('menuCompactTerrainKey');
+                if(menuCompact) menuCompact.innerHTML = compactRows;
+            }
 
             renderHelpMiniDiagrams();
+            fillTerrainCombatHelpTables();
         }
 
         function blendColorsFast(c1, c2, alpha) {
@@ -11910,6 +11982,77 @@
             return 1;
         }
 
+        const WOD_HELP_TERRAIN_COMBAT_COLS = [
+            { hexType: 'grass', mode: 'dry', label: 'Grass / open' },
+            { hexType: 'sand', mode: 'dry', label: 'Sand' },
+            { hexType: 'forest', mode: 'dry', label: 'Forest' },
+            { hexType: 'hill', mode: 'dry', label: 'Hill' },
+            { hexType: 'swamp', mode: 'dry', label: 'Swamp' },
+            { hexType: 'urban', mode: 'dry', label: 'Town (urban)' },
+            { hexType: 'mountain', mode: 'dry', label: 'Mountain' },
+            { hexType: 'water', mode: 'marine_amphib', label: 'Ocean · marines & ships' },
+            { hexType: 'water', mode: 'drown_light', label: 'Ocean · infantry drowned' },
+            { hexType: 'water', mode: 'drown_heavy', label: 'Ocean · armor drowned' },
+        ];
+
+        const WOD_HELP_TERRAIN_COMBAT_ROWS = [
+            { unitType: 'light', label: 'Light infantry' },
+            { unitType: 'heavy', label: 'Armor' },
+            { unitType: 'marine', label: 'Marines' },
+            { unitType: 'ship', label: 'Ships' },
+        ];
+
+        function wodHelpTerrainCombatRefCell(unitType, col) {
+            if(col.mode === 'marine_amphib') {
+                if(unitType !== 'marine' && unitType !== 'ship') return null;
+            } else if(col.mode === 'drown_light') {
+                if(unitType !== 'light') return null;
+            } else if(col.mode === 'drown_heavy') {
+                if(unitType !== 'heavy') return null;
+            }
+            let hex = { type: col.hexType };
+            let unit = {
+                type: unitType,
+                owner: 1,
+                hp: 10,
+                maxHp: 10,
+                morale: WOD_MORALE_MAX,
+                inWater: false,
+                amphibInWater: false
+            };
+            if(col.mode === 'marine_amphib' && unitType === 'marine') unit.amphibInWater = true;
+            if(col.mode === 'drown_light' || col.mode === 'drown_heavy') unit.inWater = true;
+
+            let atk = Math.round(getTerrainAttackModifier(unit, hex) * 100);
+            let defPct = Math.round(getTerrainDefenseModifier(unit, hex) * 100);
+            return { atk: atk, defPct: defPct };
+        }
+
+        function fillTerrainCombatHelpTables() {
+            function eh(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+            let thead = '<tr><th scope="col">Unit</th>' + WOD_HELP_TERRAIN_COMBAT_COLS.map(c =>
+                '<th scope="col">' + eh(c.label) + '</th>'
+            ).join('') + '</tr>';
+
+            let bodyRows = WOD_HELP_TERRAIN_COMBAT_ROWS.map(row => {
+                let cells = WOD_HELP_TERRAIN_COMBAT_COLS.map(col => {
+                    let ref = wodHelpTerrainCombatRefCell(row.unitType, col);
+                    if(!ref) return '<td>—</td>';
+                    let inner = '<span class="wod-help-terrain-matrix-atk">Atk ' + ref.atk + '%</span><br/><span class="wod-help-terrain-matrix-def">Dmg taken ' + ref.defPct + '%</span>';
+                    return '<td>' + inner + '</td>';
+                }).join('');
+                return '<tr><th scope="row">' + eh(row.label) + '</th>' + cells + '</tr>';
+            }).join('');
+
+            let tbl = `<div class="wod-help-terrain-combat-wrap" role="region" aria-label="Terrain combat percentages">
+<table class="wod-help-terrain-combat-table">
+<thead>${thead}</thead>
+<tbody>${bodyRows}</tbody>
+</table></div>`;
+
+            for(let mount of document.querySelectorAll('.wod-help-terrain-combat-mount')) mount.innerHTML = tbl;
+        }
+
         function getUnitSpeedMultiplier(unit) {
             let waterSlow = unit.amphibInWater ? 0.62 : (unit.inWater ? 0.28 : 1);
             let water = waterSlow;
@@ -11950,7 +12093,7 @@
             return {
                 label: 'Combat in this terrain',
                 detail: atkLine + ' ' + defLine,
-                stats: `Outgoing attacks ${atkPct}% of baseline · Damage you take ${defPct}% of each hit`,
+                stats: `Outgoing attacks ${atkPct}% of baseline · Dmg taken ${defPct}% of each hit`,
                 block: true
             };
         }
@@ -20711,7 +20854,7 @@
             if(!hasAny) return;
             let glyphR = gfxLite ? 3.59 : 4.41;
             let gap = gfxLite ? 1.37 : 1.68;
-            let rowY = -ur - (gfxLite ? 11 : 12.75);
+            let rowY = -ur - (gfxLite ? 6.85 : 7.92);
             let burstSz = gfxLite ? 4.51 : 5.21;
             let burstSlotW = burstSz * 1.64;
             let slots = [];
