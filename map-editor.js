@@ -673,7 +673,10 @@
       row.dataset.mapId = m.id || "";
       const img = document.createElement("img");
       img.alt = "";
-      if (m.thumb || m.thumbnail) img.src = m.thumb || m.thumbnail;
+      img.src =
+        typeof window.wodSavedMapThumbUrl === "function"
+          ? window.wodSavedMapThumbUrl(m, 72, 44)
+          : m.thumb || m.thumbnail || "";
       const mid = document.createElement("div");
       const t = document.createElement("div");
       t.className = "editor-save-name";
@@ -2618,7 +2621,10 @@
       const img = document.createElement("img");
       img.className = "map-thumb";
       img.alt = "";
-      if (m.thumb || m.thumbnail) img.src = m.thumb || m.thumbnail;
+      img.src =
+        typeof window.wodSavedMapThumbUrl === "function"
+          ? window.wodSavedMapThumbUrl(m, 120, 72)
+          : m.thumb || m.thumbnail || "";
 
       const mid = document.createElement("div");
       const title = document.createElement("div");
