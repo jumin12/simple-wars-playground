@@ -13771,7 +13771,8 @@
                 mapShape: gameData.mapShape || 'island',
                 hexList: gameData.hexList,
                 cities: gameData.cities,
-                roads: gameData.roads
+                roads: gameData.roads,
+                entities: gameData.entities
             };
             let dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(mapData));
             let dlAnchorElem = document.createElement('a');
@@ -13795,6 +13796,7 @@
                     gameData.hexList = mapData.hexList || [];
                     gameData.cities = mapData.cities || [];
                     gameData.roads = mapData.roads || [];
+                    gameData.entities = mapData.entities || [];
                     
                     // Rebuild hexes dictionary
                     gameData.hexes = {};
@@ -14540,8 +14542,9 @@
         async function assignStartingCities() {
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
-            // Clear entities & money just in case
-            gameData.entities = [];
+            let preserveLoadedLayout = !!(gameData.loadedCustomMap && (!gameData.mp || !gameData.mp.enabled));
+            // Clear entities for procedural maps; keep authored units on loaded library / editor exports.
+            if(!preserveLoadedLayout) gameData.entities = [];
             gameData.money = parseInt(document.getElementById('setupMoney').value) || 10000;
             gameData.aiMoneyByOwner = {};
             gameData.aiManpowerByOwner = {};
@@ -14609,6 +14612,36 @@
                 }
 
                 gameData._wodProcgenBorderFirstApplied = false;
+                return;
+            }
+
+            // Loaded custom map (library / JSON / editor export): keep borders, city ownership, factories/harbors, and unit positions.
+            if(preserveLoadedLayout) {
+                gameData.tradeTimer = 0;
+                let locO = 1;
+                let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 10000;
+                gameData.money = startMoney;
+                gameData.manpower = 5000;
+                for(let owner of ownersList) {
+                    gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : startMoney;
+                    gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
+                }
+                gameData._landIncomeCacheDirty = true;
+                wodMarkTerrainPoliticalDirty();
+
+                let startMe =
+                    gameData.entities.find(u => u && u.owner === locO && u.hp > 0) ||
+                    gameData.cities.find(c => c && c.owner === locO && c.hasFactory) ||
+                    gameData.cities.find(c => c && c.owner === locO);
+                if(!startMe) startMe = gameData.cities.find(c => c && c.owner === locO);
+                if(!startMe) startMe = gameData.cities[0];
+                if(!startMe) startMe = gameData.entities.find(u => u && u.hp > 0);
+                if(startMe) {
+                    let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+                    let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+                    gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
+                    gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
+                }
                 return;
             }
 
@@ -21471,6 +21504,7 @@
             unitName: generateUnitName,
             makeBlankMap(size) {
                 gameData.hexes = {}; gameData.hexList = []; gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = [];
+                gameData.loadedCustomMap = false;
                 gameData.mapRadius = size;
                 let spacing = gameData.hexRadius * 1.35;
                 let rows = Math.floor(size * 0.8);
@@ -21499,6 +21533,7 @@
                     if(hex.owner === undefined || hex.owner === null) hex.owner = 0;
                     gameData.hexes[`${hex.q},${hex.r}`] = hex;
                 }
+                gameData.loadedCustomMap = true;
                 normalizeTerrainHexes();
                 wodMarkTerrainFullDirty();
                 updateTerrainKey();
