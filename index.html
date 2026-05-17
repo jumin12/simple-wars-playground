@@ -405,7 +405,8 @@
             min-width: 0;
         }
         .wod-m-map-bundle,
-        .wod-m-build-bundle {
+        .wod-m-build-bundle,
+        .wod-m-units-bundle {
             display: contents;
         }
         .wod-m-sheet-banner {
@@ -736,6 +737,118 @@
             background: linear-gradient(135deg, #27ae60, #2ecc71);
             border-color: #2ecc71;
             transform: translateY(-2px);
+        }
+
+        .wod-pc-prod-root {
+            display: none;
+        }
+        @media (min-width: 901px) {
+            #gameWrapper:has(#inGameUI[style*="display: block"]) .wod-pc-prod-root {
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-end;
+                position: fixed;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                z-index: 9;
+                pointer-events: none;
+            }
+            .wod-pc-prod-slide {
+                pointer-events: auto;
+                max-height: min(288px, 34vh);
+                overflow: hidden;
+                transition: max-height 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
+                border-top: 2px solid rgba(212, 175, 55, 0.95);
+                background: rgba(15, 25, 35, 0.94);
+                backdrop-filter: blur(10px);
+                box-sizing: border-box;
+            }
+            .wod-pc-prod-root.wod-pc-collapsed .wod-pc-prod-slide {
+                max-height: 0;
+                opacity: 0;
+                border-top-color: transparent;
+                pointer-events: none;
+            }
+            .wod-pc-prod-root.wod-pc-collapsed .wod-pc-prod-pane-wrap {
+                padding: 0;
+            }
+            .wod-pc-prod-tabs {
+                pointer-events: auto;
+                display: flex;
+                flex-direction: row;
+                align-items: stretch;
+                gap: 0;
+                padding: 0;
+                margin: 0;
+                background: rgba(10, 18, 28, 0.98);
+                border-top: 2px solid #d4af37;
+                box-sizing: border-box;
+            }
+            .wod-pc-prod-tab {
+                flex: 1;
+                appearance: none;
+                border: none;
+                cursor: pointer;
+                font-weight: 800;
+                font-size: 13px;
+                letter-spacing: 0.06em;
+                text-transform: uppercase;
+                padding: 10px 14px;
+                background: transparent;
+                color: rgba(189, 195, 199, 0.95);
+                border-right: 1px solid rgba(212, 175, 55, 0.28);
+                transition: background 0.15s, color 0.15s;
+            }
+            .wod-pc-prod-tab:last-of-type {
+                border-right: none;
+            }
+            .wod-pc-prod-tab:hover {
+                background: rgba(212, 175, 55, 0.12);
+                color: #ecf0f1;
+            }
+            .wod-pc-prod-tab.active {
+                background: rgba(212, 175, 55, 0.22);
+                color: #f1c40f;
+            }
+            .wod-pc-prod-toggle {
+                flex: 0 0 auto;
+                min-width: 44px;
+                border: none;
+                cursor: pointer;
+                font-size: 16px;
+                line-height: 1;
+                background: rgba(8, 14, 22, 0.95);
+                color: rgba(236, 240, 241, 0.94);
+                border-left: 1px solid rgba(212, 175, 55, 0.45);
+                padding: 0 14px;
+            }
+            .wod-pc-prod-pane-wrap {
+                padding: 12px 16px 14px;
+                box-sizing: border-box;
+                max-height: min(276px, 33vh);
+                overflow-y: auto;
+            }
+            .wod-pc-prod-pane {
+                display: none;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 10px 12px;
+            }
+            .wod-pc-prod-pane.active {
+                display: flex;
+            }
+            #inGameUI .wod-m-sheet--build .bottom-bar,
+            #inGameUI .wod-m-sheet--units .bottom-bar {
+                display: none !important;
+            }
+            #inGameUI .wod-pc-prod-pane .build-btn {
+                flex: 1 1 200px;
+                max-width: 320px;
+                margin: 0;
+                font-size: 13px;
+                padding: 11px 16px;
+            }
         }
 
         .top-actions {
@@ -2777,7 +2890,8 @@
 
             #inGameUI[data-mtab] .wod-m-sheet--intel,
             #inGameUI[data-mtab] .wod-m-sheet--map,
-            #inGameUI[data-mtab] .wod-m-sheet--build {
+            #inGameUI[data-mtab] .wod-m-sheet--build,
+            #inGameUI[data-mtab] .wod-m-sheet--units {
                 contain: layout style;
             }
 
@@ -2788,7 +2902,8 @@
             }
             #inGameUI[data-build-picking] .wod-m-sheet--map,
             #inGameUI[data-build-picking] .wod-m-sheet--intel,
-            #inGameUI[data-build-picking] .wod-m-sheet--build {
+            #inGameUI[data-build-picking] .wod-m-sheet--build,
+            #inGameUI[data-build-picking] .wod-m-sheet--units {
                 display: none !important;
                 visibility: hidden !important;
                 pointer-events: none !important;
@@ -3756,6 +3871,56 @@
                 min-height: 46px;
                 padding: 10px 12px;
             }
+            #inGameUI[data-mtab="units"] .wod-m-sheet--units {
+                display: flex;
+                flex-direction: column;
+                position: fixed;
+                top: var(--wod-m-sheet-y);
+                left: max(10px, env(safe-area-inset-left, 0px));
+                right: max(10px, env(safe-area-inset-right, 0px));
+                bottom: calc(var(--wod-m-dock-gap) + 10px);
+                z-index: 8;
+                overflow: hidden;
+                padding: 14px;
+                box-sizing: border-box;
+                background: rgba(10, 17, 26, 0.97);
+                border: 1px solid rgba(212, 175, 55, 0.5);
+                border-radius: 16px;
+                box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+                pointer-events: auto;
+            }
+            #inGameUI[data-mtab="units"] .wod-m-sheet--units .bottom-bar {
+                display: flex !important;
+                flex-direction: column;
+                flex-wrap: nowrap;
+                align-items: stretch;
+                gap: 10px;
+                position: static !important;
+                left: auto !important;
+                right: auto !important;
+                bottom: auto !important;
+                width: auto !important;
+                max-height: none !important;
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                padding: 0;
+                margin: 0;
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            #inGameUI[data-mtab="units"] .wod-m-sheet--units .build-btn {
+                width: 100%;
+                flex-shrink: 0;
+                white-space: normal;
+                text-align: center;
+                line-height: 1.3;
+                font-size: 12px;
+                min-height: 46px;
+                padding: 10px 12px;
+            }
             #inGameUI .resource-section-chips { flex-wrap: wrap; justify-content: center; gap: 5px; }
             #inGameUI .resource-chip { padding: 5px 8px; font-size: 9px; }
             #inGameUI .resource-combat-split { flex-wrap: wrap; gap: 8px; justify-content: center; }
@@ -4224,6 +4389,60 @@
                 min-height: 44px;
                 padding: 10px 12px;
             }
+            #inGameUI[data-mtab="units"] .wod-m-sheet--units {
+                display: flex;
+                flex-direction: column;
+                position: fixed;
+                top: var(--wod-m-sheet-y);
+                left: max(10px, env(safe-area-inset-left, 0px));
+                right: max(10px, env(safe-area-inset-right, 0px));
+                width: auto;
+                transform: none;
+                max-width: none;
+                bottom: calc(var(--wod-m-dock-gap) + 8px);
+                z-index: 8;
+                overflow: hidden;
+                padding: 12px;
+                box-sizing: border-box;
+                background: rgba(10, 17, 26, 0.97);
+                border: 1px solid rgba(212, 175, 55, 0.5);
+                border-radius: 14px;
+                box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+                pointer-events: auto;
+            }
+            #inGameUI[data-mtab="units"] .wod-m-sheet--units .bottom-bar {
+                display: flex !important;
+                flex-direction: column;
+                flex-wrap: nowrap;
+                align-items: stretch;
+                gap: 8px;
+                position: static !important;
+                left: auto !important;
+                right: auto !important;
+                bottom: auto !important;
+                width: auto !important;
+                max-height: none !important;
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                padding: 0;
+                margin: 0;
+                transform: none !important;
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+            }
+            #inGameUI[data-mtab="units"] .wod-m-sheet--units .build-btn {
+                width: 100%;
+                flex-shrink: 0;
+                white-space: normal;
+                text-align: center;
+                line-height: 1.3;
+                font-size: 12px;
+                min-height: 44px;
+                padding: 10px 12px;
+            }
             #inGameUI .resource-section-chips { flex-wrap: wrap; justify-content: center; gap: 4px; }
             #inGameUI .resource-chip { padding: 4px 7px; font-size: 8px; }
             #inGameUI .resources {
@@ -4392,7 +4611,7 @@
                 <p class="setup-victory-hint" id="setupVictoryModeDetail"></p>
                 <div class="setup-row">
                     <label>Starting Money:</label>
-                    <input type="number" id="setupMoney" value="1000" step="100">
+                    <input type="number" id="setupMoney" value="12000" step="250">
                 </div>
                 <div class="setup-row" id="setupPlayerColorRow">
                     <label>Your faction color:</label>
@@ -4959,8 +5178,11 @@
                     <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="map" aria-selected="false" aria-label="Terrain legend and map layers">
                         <span class="wod-m-tab-glyph" aria-hidden="true">M</span><span class="wod-m-tab-lbl">Map</span>
                     </button>
-                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="build" aria-selected="false" aria-label="Build and train">
-                        <span class="wod-m-tab-glyph" aria-hidden="true">B</span><span class="wod-m-tab-lbl">Build</span>
+                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="build" aria-selected="false" aria-label="Structures">
+                        <span class="wod-m-tab-glyph" aria-hidden="true">⚙</span><span class="wod-m-tab-lbl">Build</span>
+                    </button>
+                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="units" aria-selected="false" aria-label="Train armies">
+                        <span class="wod-m-tab-glyph" aria-hidden="true">★</span><span class="wod-m-tab-lbl">Army</span>
                     </button>
                 </nav>
                 </div>
@@ -5073,17 +5295,52 @@
             <div class="wod-m-build-bundle">
                 <div class="wod-m-sheet wod-m-sheet--build">
                     <div class="wod-m-sheet-banner">
-                        <span class="wod-m-sheet-title">Build</span>
-                        <span class="wod-m-sheet-sub">Structures &amp; training</span>
+                        <span class="wod-m-sheet-title">Structures</span>
+                        <span class="wod-m-sheet-sub">Factories · harbors · forts · tap qualifying towns / owned land.</span>
                     </div>
-                    <div class="bottom-bar" id="buildMenu">
-                        <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $500. Requires City. Enables Armor.">Build Factory ($500)</button>
-                        <button class="build-btn" onclick="beginHarborBuild()" title="Costs $400. Requires City near water. Enables Ships.">Build Harbor ($400)</button>
-                        <button class="build-btn" onclick="buyUnit('light')" title="Costs $50, 1000 MP. Requires City.">Train Light Infantry ($50, 1k MP)</button>
-                        <button class="build-btn" onclick="buyUnit('marine')" title="Costs $50, 1000 MP. Coastal city only. Amphibious infantry.">Train Marines ($50, 1k MP)</button>
-                        <button class="build-btn" onclick="buyUnit('heavy')" title="Costs $1000, 1000 MP. Requires City + Factory.">Train Armor ($1k, 1k MP)</button>
-                        <button class="build-btn" onclick="buyUnit('ship')" title="Costs $265, 5000 MP. Requires City + Harbor.">Build Ship ($265, 5k MP)</button>
+                    <div class="bottom-bar" id="buildStructuresBarMobile">
+                        <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city without a factory.">Build Factory ($2k)</button>
+                        <button class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City must border water without a harbor.">Build Harbor ($1k)</button>
+                        <button class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on your owned land hex (not towns). Ally troops within range gain +20% defense.">Build Fort ($1.5k)</button>
                     </div>
+                </div>
+            </div>
+
+            <div class="wod-m-units-bundle">
+                <div class="wod-m-sheet wod-m-sheet--units">
+                    <div class="wod-m-sheet-banner">
+                        <span class="wod-m-sheet-title">Army</span>
+                        <span class="wod-m-sheet-sub">Recruit from qualifying cities.</span>
+                    </div>
+                    <div class="bottom-bar" id="buildUnitsBarMobile">
+                        <button class="build-btn" onclick="buyUnit('light')" title="Costs $500, 1000 MP. Requires City.">Train Light Infantry ($500, 1k MP)</button>
+                        <button class="build-btn" onclick="buyUnit('marine')" title="Costs $500, 1000 MP. Coastal cities only.">Train Marines ($500, 1k MP)</button>
+                        <button class="build-btn" onclick="buyUnit('heavy')" title="Costs $4000, 1000 MP. Requires Factory.">Train Armor ($4k, 1k MP)</button>
+                        <button class="build-btn" onclick="buyUnit('ship')" title="Costs $3800, 5000 MP. Requires Harbor.">Build Ship ($3.8k, 5k MP)</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="wod-pc-prod-root wod-pc-collapsed" id="wodPcProdRoot" aria-label="Production">
+                <div class="wod-pc-prod-slide">
+                    <div class="wod-pc-prod-pane-wrap">
+                        <div class="wod-pc-prod-pane active" data-wod-pc-pane="structures" role="tabpanel">
+                            <button type="button" class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city.">Build Factory ($2k)</button>
+                            <button type="button" class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City bordering water.">Build Harbor ($1k)</button>
+                            <button type="button" class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned terrain. Nearby troops take 20% less damage.">Build Fort ($1.5k)</button>
+                        </div>
+                        <div class="wod-pc-prod-pane" data-wod-pc-pane="units" role="tabpanel">
+                            <button type="button" class="build-btn" onclick="buyUnit('light')" title="Train light infantry ($500).">Train Light Infantry ($500, 1k MP)</button>
+                            <button type="button" class="build-btn" onclick="buyUnit('marine')" title="Train marines ($500).">Train Marines ($500, 1k MP)</button>
+                            <button type="button" class="build-btn" onclick="buyUnit('heavy')" title="Train armor ($4000).">Train Armor ($4k, 1k MP)</button>
+                            <button type="button" class="build-btn" onclick="buyUnit('ship')" title="Build ship ($3800).">Build Ship ($3.8k, 5k MP)</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="wod-pc-prod-tabs" role="tablist">
+                    <button type="button" class="wod-pc-prod-tab active" data-wod-pc-pane="structures" role="tab" aria-selected="true">Structures</button>
+                    <button type="button" class="wod-pc-prod-tab" data-wod-pc-pane="units" role="tab" aria-selected="false">Units</button>
+                    <button type="button" class="wod-pc-prod-toggle" id="wodPcProdToggle" title="Expand or hide production tray" aria-expanded="false">▲</button>
                 </div>
             </div>
 
@@ -5247,6 +5504,59 @@
                 apply(!panel.classList.contains('collapsed'));
             });
         }
+        function initWodPcProductionDock() {
+            let root = document.getElementById('wodPcProdRoot');
+            if(!root) return;
+            let toggle = document.getElementById('wodPcProdToggle');
+            let tabs = root.querySelectorAll('.wod-pc-prod-tab');
+            let panes = root.querySelectorAll('.wod-pc-prod-pane');
+
+            function openExpanded() {
+                root.classList.remove('wod-pc-collapsed');
+                if(toggle) {
+                    toggle.textContent = '▼';
+                    toggle.setAttribute('aria-expanded', 'true');
+                    toggle.title = 'Hide production tray';
+                }
+            }
+
+            function setPane(panelId, expand) {
+                tabs.forEach(t => {
+                    let on = t.getAttribute('data-wod-pc-pane') === panelId;
+                    t.classList.toggle('active', on);
+                    t.setAttribute('aria-selected', on ? 'true' : 'false');
+                });
+                panes.forEach(p => {
+                    let on = p.getAttribute('data-wod-pc-pane') === panelId;
+                    p.classList.toggle('active', on);
+                    if(on) p.removeAttribute('hidden');
+                    else p.setAttribute('hidden', '');
+                });
+                if(expand !== false) openExpanded();
+            }
+            tabs.forEach(t => {
+                t.addEventListener('click', ev => {
+                    ev.preventDefault();
+                    setPane(t.getAttribute('data-wod-pc-pane'), true);
+                });
+            });
+            if(toggle) {
+                toggle.addEventListener('click', ev => {
+                    ev.preventDefault();
+                    if(root.classList.contains('wod-pc-collapsed')) openExpanded();
+                    else {
+                        root.classList.add('wod-pc-collapsed');
+                        toggle.textContent = '▲';
+                        toggle.setAttribute('aria-expanded', 'false');
+                        toggle.title = 'Show production tray';
+                    }
+                });
+                toggle.title = 'Show production tray';
+            }
+            setPane('structures', false);
+            root.classList.add('wod-pc-collapsed');
+        }
+
         function initWodMobileHud() {
             let root = document.getElementById('inGameUI');
             let backdrop = document.getElementById('wodMobileBackdrop');
@@ -5390,6 +5700,7 @@
         initPlayerSummaryToggle();
         initTerrainKeyToggle();
         initWodMobileHud();
+        initWodPcProductionDock();
 
         let gameState = 'MENU'; 
         let menuDemoSeeded = false;
@@ -5399,6 +5710,20 @@
         /** Applies to per-city income & manpower (/s); global economic slowdown multiplier. */
         const WOD_CITY_ECON_TICK_MULT = 2 / 3;
         const WOD_LAND_INCOME_PER_HEX = 0.004;
+        /** Match production menu / economy balance. */
+        const WOD_PRICE_FACTORY = 2000;
+        const WOD_PRICE_HARBOR = 1000;
+        const WOD_PRICE_FORT = 1500;
+        const WOD_PRICE_LIGHT = 500;
+        const WOD_PRICE_MARINE = 500;
+        const WOD_PRICE_HEAVY = 4000;
+        const WOD_PRICE_SHIP = 3800;
+        const WOD_MANPOWER_INFANTRY = 1000;
+        const WOD_MANPOWER_SHIP = 5000;
+        const WOD_MANPOWER_ARMOR_DIV = 1000;
+        const WOD_ARMOR_DIV_TANKS = 500;
+        /** Radius in tiles (fractional × hexSpacing) fort aura for +20% defense (damage × 0.8). */
+        const WOD_FORT_DEFENSE_TILES = 4.95;
 
         function hideCampaignSummaryOverlay() {
             let el = document.getElementById('campaignSummaryOverlay');
@@ -5794,7 +6119,7 @@
 
         let gameData = {
             money: 1000, income: 10, expenses: 0, manpower: 5000, manpowerIncome: 0, gold: 1000, speed: 1,
-            entities: [], cities: [], roads: [],
+            entities: [], cities: [], roads: [], forts: [],
             hexes: {}, hexList: [],
             camera: { x: 0, y: 0, zoom: 0.5 },
             selection: [], buildMode: null,
@@ -6927,7 +7252,8 @@
                 aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner),
                 aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner),
                 factionColors: factionColors.slice(),
-                roads: gameData.roads.map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r }))
+                roads: gameData.roads.map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r })),
+                forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y }))
             };
         }
         function wodMpRebuildHexesFromList(list) {
@@ -6947,6 +7273,15 @@
                 let to = gameData.cities.find(c => c.q === ro.tq && c.r === ro.tr);
                 return from && to ? { from, to } : null;
             }).filter(Boolean);
+            gameData.forts = (p.forts || []).map(f => {
+                let o = Object.assign({}, f);
+                let he = gameData.hexes[`${o.q},${o.r}`];
+                if(he) {
+                    o.x = he.x;
+                    o.y = he.y;
+                }
+                return o;
+            });
             gameData.entities = [];
             for(let ed of p.entities) {
                 let u = wodEntityFromNet(ed);
@@ -7133,6 +7468,16 @@
                     if(h.owner !== s.hexOwners[i]) setHexOwner(h, s.hexOwners[i]);
                 }
             }
+            if(Array.isArray(s.forts)) {
+                gameData.forts = s.forts.map(f => Object.assign({}, f));
+                for(let ft of gameData.forts) {
+                    let hh = gameData.hexes[`${ft.q},${ft.r}`];
+                    if(hh) {
+                        ft.x = hh.x;
+                        ft.y = hh.y;
+                    }
+                }
+            }
             if(s.entities) {
                 let byUid = new Map(gameData.entities.map(e => [e.uid, e]));
                 let next = [];
@@ -7252,6 +7597,7 @@
                 entities: gameData.entities.filter(e => e.hp > 0).map(wodStripEntityForNet),
                 hexOwners: owners,
                 cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp })),
+                forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
                 encircledKeys,
                 cityWarKeys,
                 matchEnd: gameData._mpMatchEnd || undefined
@@ -8320,9 +8666,15 @@
                         assignUnitMoveAlongWaypoints(unit, pathPts);
                     });
                 } else if(d.cmd.kind === 'build') {
+                    let mode = d.cmd.mode;
+                    if(mode === 'fort') {
+                        let hex = gameData.hexes[`${d.cmd.hq},${d.cmd.hr}`];
+                        if(!hex || hex.owner !== d.fromSlot) return;
+                        attemptFortPlacementForOwner(hex, d.fromSlot);
+                        return;
+                    }
                     let city = gameData.cities.find(c => c.q === d.cmd.cq && c.r === d.cmd.cr);
                     if(!city || city.owner !== d.fromSlot) return;
-                    let mode = d.cmd.mode;
                     if(!cityEligibleForBuildPlacementForOwner(city, mode, d.fromSlot)) return;
                     wodApplyBuildAtCityForOwner(city, mode, d.fromSlot);
                 }
@@ -10071,9 +10423,10 @@
         }
 
         function getUnitCost(type) {
-            if(type === 'heavy') return {money: 1000, manpower: 1000};
-            if(type === 'ship') return {money: 265, manpower: 5000};
-            return {money: 50, manpower: 1000};
+            if(type === 'heavy') return {money: WOD_PRICE_HEAVY, manpower: WOD_MANPOWER_ARMOR_DIV};
+            if(type === 'ship') return {money: WOD_PRICE_SHIP, manpower: WOD_MANPOWER_SHIP};
+            if(type === 'marine') return {money: WOD_PRICE_MARINE, manpower: WOD_MANPOWER_INFANTRY};
+            return {money: WOD_PRICE_LIGHT, manpower: WOD_MANPOWER_INFANTRY};
         }
 
         function formatPeople(value) {
@@ -10142,10 +10495,15 @@
         function replacementMoneyFromLosses(unit, manpowerCasualties, tankLosses) {
             let mp = Math.max(0, manpowerCasualties || 0);
             let tk = Math.max(0, tankLosses || 0);
-            if(unit.type === 'heavy') return mp * (1000 / 5000) + tk * (1000 / 500);
-            if(unit.type === 'ship') return mp * (265 / 5000);
+            let mi = Math.max(1, WOD_MANPOWER_INFANTRY),
+                mh = Math.max(1, WOD_MANPOWER_ARMOR_DIV),
+                ms = Math.max(1, WOD_MANPOWER_SHIP),
+                at = Math.max(1, WOD_ARMOR_DIV_TANKS);
+            if(unit.type === 'heavy') return mp * (WOD_PRICE_HEAVY / mh) + tk * (WOD_PRICE_HEAVY / at);
+            if(unit.type === 'ship') return mp * (WOD_PRICE_SHIP / ms);
             if(unit.type === 'convoy') return 0;
-            return mp * (50 / 1000);
+            if(unit.type === 'marine') return mp * (WOD_PRICE_MARINE / mi);
+            return mp * (WOD_PRICE_LIGHT / mi);
         }
 
         function addCasualties(owner, amount, sourceOwner = 0) {
@@ -13977,7 +14335,7 @@
                 }
 
             gameData.hexes = {}; gameData.hexList = [];
-            gameData.cities = []; gameData.roads = []; gameData.entities = [];
+            gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = [];
             gameData._wodCitySplitAnglePhase = null;
 
             let seedOffset = Math.random() * 10000;
@@ -15139,27 +15497,27 @@
             let aiTroops = getOwnerUnitCount(ownerId);
 
             let aiMoney = gameData.aiMoneyByOwner[ownerKey] || 0;
-            if(aiMoney >= 800 && Math.random() < 0.4) {
+            if(aiMoney >= 4200 && Math.random() < 0.38) {
                 let cityNoFactory = aiCities.find(c => !c.hasFactory);
-                if(cityNoFactory && aiMoney >= 500) {
+                if(cityNoFactory && (gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_FACTORY) {
                     cityNoFactory.hasFactory = true;
-                    gameData.aiMoneyByOwner[ownerKey] -= 500;
+                    gameData.aiMoneyByOwner[ownerKey] -= WOD_PRICE_FACTORY;
                 }
             }
-            if(aiMoney >= 800 && Math.random() < 0.25) {
+            if(aiMoney >= 2400 && Math.random() < 0.26) {
                 let cityNoHarbor = aiCities.find(c => !c.hasHarbor && cityHasWaterNeighbor(c));
-                if(cityNoHarbor && (gameData.aiMoneyByOwner[ownerKey] || 0) >= 400) {
+                if(cityNoHarbor && (gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_HARBOR) {
                     cityNoHarbor.hasHarbor = true;
-                    gameData.aiMoneyByOwner[ownerKey] -= 400;
+                    gameData.aiMoneyByOwner[ownerKey] -= WOD_PRICE_HARBOR;
                 }
             }
 
             let spawnCap = wodUsesVisualViewportLayout() ? 2 : 3;
-            let spawnsThisTick = Math.min(spawnCap, Math.floor(gameData.aiMoneyByOwner[ownerKey] / 200) + 1);
+            let spawnsThisTick = Math.min(spawnCap, Math.floor(gameData.aiMoneyByOwner[ownerKey] / Math.max(120, WOD_PRICE_LIGHT)) + 1);
             let combatSafeCities = aiCities.filter(c => !isCitySiegeBlockedForProduction(c));
             for(let s = 0; s < spawnsThisTick; s++) {
                 if(aiCities.length === 0 || aiTroops >= troopCap) break;
-                if(aiNetIncome <= -5 || gameData.aiMoneyByOwner[ownerKey] < 50 || gameData.aiManpowerByOwner[ownerKey] < 1000) break;
+                if(aiNetIncome <= -5 || gameData.aiMoneyByOwner[ownerKey] < WOD_PRICE_LIGHT || gameData.aiManpowerByOwner[ownerKey] < 1000) break;
                 if(combatSafeCities.length === 0) break;
 
                 let candidates = combatSafeCities.slice().sort((a, b) => {
@@ -15169,11 +15527,11 @@
                 });
                 let city = candidates[0];
                 let type = 'light';
-                if(gameData.aiMoneyByOwner[ownerKey] >= 1000 && gameData.aiManpowerByOwner[ownerKey] >= 1000 && city.hasFactory && Math.random() > 0.68) {
+                if(gameData.aiMoneyByOwner[ownerKey] >= WOD_PRICE_HEAVY && gameData.aiManpowerByOwner[ownerKey] >= 1000 && city.hasFactory && Math.random() > 0.68) {
                     type = 'heavy';
-                } else if(city.hasHarbor && gameData.aiMoneyByOwner[ownerKey] >= 265 && gameData.aiManpowerByOwner[ownerKey] >= 5000 && Math.random() > 0.72) {
+                } else if(city.hasHarbor && gameData.aiMoneyByOwner[ownerKey] >= WOD_PRICE_SHIP && gameData.aiManpowerByOwner[ownerKey] >= 5000 && Math.random() > 0.72) {
                     type = 'ship';
-                } else if(cityHasWaterNeighbor(city) && gameData.aiMoneyByOwner[ownerKey] >= 50 && gameData.aiManpowerByOwner[ownerKey] >= 1000 && Math.random() < 0.28) {
+                } else if(cityHasWaterNeighbor(city) && gameData.aiMoneyByOwner[ownerKey] >= WOD_PRICE_MARINE && gameData.aiManpowerByOwner[ownerKey] >= 1000 && Math.random() < 0.28) {
                     type = 'marine';
                 }
                 if(canAffordUnit(ownerId, type)) {
@@ -15720,7 +16078,7 @@
                     if(interval < 0.05) interval = 0.05;
                     let meanRng = 0.95;
                     let dmgPerSec = (unit.damage * atkMod * defMod * meanRng * moraleAtk) / interval;
-                    applyDamage(enemy, dmgPerSec * dt, unit.owner);
+                    applyDamage(enemy, dmgPerSec * dt * wodFortDefenseDamageMultiplier(enemy), unit.owner);
                     wodStagingMarkCombatOnCityUrbanTile(unit, enemy);
                     if(shouldApplyCombatMeleeFx(unit, enemy, minDist2)) {
                         unit.shake = 0.13;
@@ -15780,6 +16138,7 @@
                     gameData._uiShipCache = getOwnerShipCount(loHudSim);
                 }
             }
+            wodSyncFortOwnershipFromTerrain();
             wodKickParallelTroopPowIfEligible();
             checkCampaignEndConditions(dt);
             if(gameData.mp && gameData.mp.enabled && gameData.mp.isHost) {
@@ -18292,8 +18651,37 @@
                 ctx.setLineDash([]);
             }
 
+            let fortPlacementPick = gameState === 'PLAYING' && gameData.buildMode === 'fort' && gameData.hexList && gameData.hexList.length;
+            let fortPickEligible = null;
+            if(fortPlacementPick) {
+                fortPickEligible = new Set();
+                let fflo = wodLocalPlayerOwner();
+                for(let fhi = 0, fhl = gameData.hexList.length; fhi < fhl; fhi++) {
+                    let hx = gameData.hexList[fhi];
+                    if(hexEligibleForFortPlacementForOwner(hx, fflo))
+                        fortPickEligible.add(`${hx.q},${hx.r}`);
+                }
+            }
+            if(fortPickEligible && fortPickEligible.size) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(241, 196, 15, 0.92)';
+                ctx.lineWidth = gfxLite ? 2 : 2.75;
+                ctx.setLineDash([7, 6]);
+                let ringR = Math.max(14, (gameData.hexRadius || 10) * 0.42);
+                for(let fhi = 0, fhl = gameData.hexList.length; fhi < fhl; fhi++) {
+                    let hh = gameData.hexList[fhi];
+                    if(!fortPickEligible.has(`${hh.q},${hh.r}`)) continue;
+                    if(wodCull && !wodInView(hh.x, hh.y, culPad)) continue;
+                    ctx.beginPath();
+                    ctx.arc(hh.x, hh.y, gfxLite ? Math.min(16, ringR) : ringR, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+
             // Draw Cities
-            let bmPick = gameState === 'PLAYING' && gameData.buildMode && gameData.layers && gameData.layers.cities;
+            let bmPick = gameState === 'PLAYING' && gameData.buildMode && gameData.layers && gameData.layers.cities && gameData.buildMode !== 'fort';
             let bmPickEligible = null;
             if(bmPick) {
                 bmPickEligible = new Set();
@@ -18385,6 +18773,16 @@
                         ctx.fillStyle = '#2ecc71';
                         ctx.fillRect(city.x - 20, city.y + 20, fillW, 4);
                     }
+                }
+            }
+
+            if(gameData.forts && gameData.forts.length) {
+                for(let fti = 0, ftl = gameData.forts.length; fti < ftl; fti++) {
+                    let ftf = gameData.forts[fti];
+                    let fcol = factionColors[ftf.owner] || '#95a5a6';
+                    drawFortSticker(ctx, ftf, fcol, gfxLite, function(wx, wy, pd) {
+                        return !wodCull || wodInView(wx, wy, pd != null ? pd : culPad);
+                    });
                 }
             }
 
@@ -19176,8 +19574,7 @@
                 if(Math.abs(cx - dragStart.x) < 5 && Math.abs(cy - dragStart.y) < 5) {
                     let worldPos = getMouseWorldPos(e);
                     if(gameData.buildMode) {
-                        let city = pickPlayerCityAtWorld(worldPos);
-                        if(city) tryApplyBuildPlacementAtCity(city);
+                        wodHandleProductionPlacementClick(worldPos);
                         return;
                     }
                     if(wodMovableSelectionHasActiveMarch() && getMovableSelectedUnits().length > 0) {
@@ -19451,8 +19848,7 @@
                 if(Math.abs(cx - g.startCx) < 5 && Math.abs(cy - g.startCy) < 5) {
                     let worldPos = getWorldPosFromClientXY(touch.clientX, touch.clientY);
                     if(gameData.buildMode) {
-                        let city = pickPlayerCityAtWorld(worldPos);
-                        if(city) tryApplyBuildPlacementAtCity(city);
+                        wodHandleProductionPlacementClick(worldPos);
                         return;
                     }
                     if(wodMovableSelectionHasActiveMarch() && getMovableSelectedUnits().length > 0) {
@@ -19494,8 +19890,7 @@
                 if(Math.abs(cx - dragStart.x) < 5 && Math.abs(cy - dragStart.y) < 5) {
                     let worldPos = getWorldPosFromClientXY(touch.clientX, touch.clientY);
                     if(gameData.buildMode) {
-                        let city = pickPlayerCityAtWorld(worldPos);
-                        if(city) tryApplyBuildPlacementAtCity(city);
+                        wodHandleProductionPlacementClick(worldPos);
                         return;
                     }
                     if(wodMovableSelectionHasActiveMarch() && getMovableSelectedUnits().length > 0) {
@@ -19741,6 +20136,158 @@
             }
         }
 
+        let wodFortPlacementSeq = 0;
+
+        function fortAtHexKey(q, r) {
+            let list = gameData.forts;
+            if(!list || !list.length) return null;
+            for(let f of list) {
+                if(f.q === q && f.r === r) return f;
+            }
+            return null;
+        }
+        function hexEligibleForFortTerrain(hex, owner) {
+            if(!hex || hex.owner !== owner || !owner) return false;
+            if(isWaterHex(hex) || hex.type === 'mountain') return false;
+            if(!isClaimableLand(hex)) return false;
+            if(hex.cityId && hex.type === 'urban') return false;
+            return true;
+        }
+        function hexEligibleForFortPlacementForOwner(hex, owner) {
+            if(!hexEligibleForFortTerrain(hex, owner)) return false;
+            if(fortAtHexKey(hex.q, hex.r)) return false;
+            return wodPlayerTreasury(owner) >= WOD_PRICE_FORT;
+        }
+        /** Same-side troops within this aura take multiply combat damage by 0.8 (shown as +20% defense). */
+        function wodFortDefenseDamageMultiplier(defenderUnit) {
+            if(!defenderUnit || defenderUnit.hp <= 0 || defenderUnit.type === 'convoy') return 1;
+            let ox = defenderUnit.owner;
+            if(ox <= 0) return 1;
+            let list = gameData.forts;
+            if(!list || !list.length) return 1;
+            let hr = gameData.hexRadius || 10,
+                radius = hr * WOD_FORT_DEFENSE_TILES,
+                r2 = radius * radius;
+            for(let i = list.length - 1; i >= 0; i--) {
+                let ft = list[i];
+                if(!ft || ft.owner !== ox) continue;
+                let dx = defenderUnit.x - ft.x,
+                    dy = defenderUnit.y - ft.y;
+                if(dx * dx + dy * dy <= r2) return 0.8;
+            }
+            return 1;
+        }
+        function wodSyncFortOwnershipFromTerrain() {
+            let list = gameData.forts;
+            if(!list || !list.length) return;
+            for(let ft of list) {
+                let h = gameData.hexes[`${ft.q},${ft.r}`];
+                if(!h) continue;
+                if(typeof h.owner === 'number' && h.owner >= 1) ft.owner = h.owner;
+            }
+        }
+        function drawFortSticker(ctx, f, factionCol, fxLite, culPadFn) {
+            if(typeof culPadFn === 'function' && !culPadFn(f.x, f.y, fxLite ? 28 : 40)) return;
+            let staffH = fxLite ? 18 : 24,
+                bx = fxLite ? 10 : 14;
+            ctx.save();
+            ctx.translate(f.x, f.y + (fxLite ? 2 : 3));
+            ctx.fillStyle = 'rgba(52,73,94,0.92)';
+            ctx.strokeStyle = 'rgba(236,240,241,0.38)';
+            ctx.lineWidth = fxLite ? 1.35 : 1.8;
+            ctx.beginPath();
+            ctx.rect(-bx, -4, bx * 2, fxLite ? 13 : 16);
+            ctx.fill();
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+            ctx.lineWidth = fxLite ? 2 : 2.8;
+            ctx.beginPath();
+            ctx.moveTo(0, -4);
+            ctx.lineTo(0, -staffH);
+            ctx.stroke();
+            ctx.fillStyle = factionCol || '#2ecc71';
+            ctx.strokeStyle = 'rgba(15,21,29,0.88)';
+            ctx.lineWidth = fxLite ? 1 : 1.25;
+            ctx.beginPath();
+            ctx.moveTo(2.5, -staffH + 4);
+            ctx.lineTo(2.5, -staffH - (fxLite ? 8 : 10));
+            ctx.lineTo(fxLite ? 15 : 20, -staffH - 1);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+        function wodFortPlacementRingRadiusSq() {
+            let hr = gameData.hexRadius || 10,
+                tiles = Math.max(WOD_FORT_DEFENSE_TILES, 3.2),
+                spacing = hr * 1.35;
+            let rad = spacing * tiles;
+            return rad * rad;
+        }
+        function attemptFortPlacementForOwner(hex, owner) {
+            if(!gameData.forts) gameData.forts = [];
+            if(!hex || !hexEligibleForFortTerrain(hex, owner)) {
+                showNotification('Forts belong on owned open ground (no mountains, oceans, or city cores).');
+                return false;
+            }
+            if(fortAtHexKey(hex.q, hex.r)) {
+                showNotification('There is already a fort on this hex.');
+                return false;
+            }
+            if(!hexEligibleForFortPlacementForOwner(hex, owner)) {
+                showNotification('Not enough cash for this fort.');
+                return false;
+            }
+            wodDeductPlayerMoney(owner, WOD_PRICE_FORT);
+            wodFortPlacementSeq++;
+            gameData.forts.push({
+                id: 'fort_' + wodFortPlacementSeq,
+                owner,
+                q: hex.q,
+                r: hex.r,
+                x: hex.x,
+                y: hex.y
+            });
+            showNotification('+20% defense aura for allied troops surrounding this fort.');
+            return true;
+        }
+        function tryApplyFortBuildAtWorld(worldPos) {
+            let hex = getNearestHexToPoint(worldPos.x, worldPos.y);
+            if(!hex) {
+                showNotification('No terrain hex there.');
+                return true;
+            }
+            let tol = Math.max(10, gameData.hexRadius || 15) * 0.92;
+            let dx = worldPos.x - hex.x,
+                dy = worldPos.y - hex.y;
+            if(dx * dx + dy * dy > tol * tol) {
+                showNotification('Click closer to a land tile to pave a fort footprint.');
+                return true;
+            }
+            let lo = wodLocalPlayerOwner();
+            if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
+                if(typeof WodMultiplayer !== 'undefined')
+                    WodMultiplayer.sendCmd({ kind: 'build', mode: 'fort', hq: hex.q, hr: hex.r });
+                exitBuildPlacementMode();
+                return true;
+            }
+            if(attemptFortPlacementForOwner(hex, lo)) exitBuildPlacementMode();
+            else showNotification(hex.owner !== lo ? 'You can only fortify your own provinces.' : 'Cannot build that fort here.');
+            return true;
+        }
+
+        function wodHandleProductionPlacementClick(worldPos) {
+            let mode = gameData.buildMode;
+            if(!mode) return false;
+            if(mode === 'fort') {
+                tryApplyFortBuildAtWorld(worldPos);
+                return true;
+            }
+            let city = pickPlayerCityAtWorld(worldPos);
+            if(city) tryApplyBuildPlacementAtCity(city);
+            return true;
+        }
+
         function pickPlayerCityAtWorld(worldPos) {
             let lo = wodLocalPlayerOwner();
             let best = null;
@@ -19762,11 +20309,11 @@
             if(!city || city.owner !== owner || !city.id || !mode) return false;
             if(mode === 'factory') {
                 if(city.hasFactory) return false;
-                return wodPlayerTreasury(owner) >= 500;
+                return wodPlayerTreasury(owner) >= WOD_PRICE_FACTORY;
             }
             if(mode === 'harbor') {
                 if(city.hasHarbor) return false;
-                if(wodPlayerTreasury(owner) < 400) return false;
+                if(wodPlayerTreasury(owner) < WOD_PRICE_HARBOR) return false;
                 return cityHasWaterNeighbor(city);
             }
             let cost = getUnitCost(mode);
@@ -19789,7 +20336,7 @@
 
         function wodApplyBuildAtCityForOwner(city, mode, owner) {
             if(mode === 'factory') {
-                wodDeductPlayerMoney(owner, 500);
+                wodDeductPlayerMoney(owner, WOD_PRICE_FACTORY);
                 city.hasFactory = true;
                 if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                     wodProgress.lifetime.factoriesBuilt = (wodProgress.lifetime.factoriesBuilt || 0) + 1;
@@ -19797,7 +20344,7 @@
                     scheduleSaveWodProgress();
                 }
             } else if(mode === 'harbor') {
-                wodDeductPlayerMoney(owner, 400);
+                wodDeductPlayerMoney(owner, WOD_PRICE_HARBOR);
                 city.hasHarbor = true;
                 if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                     wodProgress.lifetime.harborsBuilt = (wodProgress.lifetime.harborsBuilt || 0) + 1;
@@ -19824,16 +20371,30 @@
             }
             let lo = wodLocalPlayerOwner();
             let any = false;
-            for(let i = 0, cl = gameData.cities.length; i < cl; i++) {
-                let c = gameData.cities[i];
-                if(c.owner !== lo || !c.id) continue;
-                if(cityEligibleForBuildPlacementForOwner(c, mode, lo)) {
-                    any = true;
-                    break;
+            if(mode === 'fort') {
+                if(!gameData.hexList || !gameData.hexList.length) {
+                    showNotification('No usable map yet.');
+                    return;
+                }
+                for(let ix = gameData.hexList.length - 1; ix >= 0; ix--) {
+                    let hh = gameData.hexList[ix];
+                    if(hexEligibleForFortPlacementForOwner(hh, lo)) {
+                        any = true;
+                        break;
+                    }
+                }
+            } else {
+                for(let i = 0, cl = gameData.cities.length; i < cl; i++) {
+                    let c = gameData.cities[i];
+                    if(c.owner !== lo || !c.id) continue;
+                    if(cityEligibleForBuildPlacementForOwner(c, mode, lo)) {
+                        any = true;
+                        break;
+                    }
                 }
             }
             if(!any) {
-                showNotification('No towns qualify for that action right now.');
+                showNotification(mode === 'fort' ? 'No usable ground for a fort right now.' : 'No towns qualify for that action right now.');
                 return;
             }
             gameData.buildMode = mode;
@@ -19855,7 +20416,7 @@
                     else showNotification('Not enough money!');
                 } else if(mode === 'harbor') {
                     if(city.hasHarbor) showNotification('This town already has a harbor.');
-                    else if(wodPlayerTreasury(lo) < 400) showNotification('Not enough money!');
+                    else if(wodPlayerTreasury(lo) < WOD_PRICE_HARBOR) showNotification('Not enough money!');
                     else showNotification('Harbors require water next to the town.');
                 } else {
                     let cost = getUnitCost(mode);
@@ -19886,6 +20447,10 @@
 
         function beginHarborBuild() {
             enterBuildPlacementMode('harbor');
+        }
+
+        function beginFortBuild() {
+            enterBuildPlacementMode('fort');
         }
 
         function buyUnit(type) {
@@ -20060,7 +20625,7 @@
             cityName: generateCityName,
             unitName: generateUnitName,
             makeBlankMap(size) {
-                gameData.hexes = {}; gameData.hexList = []; gameData.cities = []; gameData.roads = []; gameData.entities = [];
+                gameData.hexes = {}; gameData.hexList = []; gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = [];
                 gameData.mapRadius = size;
                 let spacing = gameData.hexRadius * 1.35;
                 let rows = Math.floor(size * 0.8);
