@@ -5403,11 +5403,6 @@
                 <p class="shop-unlock-note"><strong>Unlock deck</strong> — buy once to own forever. Locked rows in the picker are greyed until purchased.</p>
                 <div class="skin-grid-scroll">
                 <div class="skin-grid">
-                    <button type="button" class="skin-card skin-owned" id="skinDefault" onclick="purchaseUnitSkin('default')">
-                        <canvas class="skin-preview" id="skinDefaultPreview" width="120" height="80" aria-hidden="true"></canvas>
-                        Classic shapes
-                        <div class="skin-card-footer"><span class="skin-card-state">Unlocked</span><span class="skin-card-price"></span></div>
-                    </button>
                     <button type="button" class="skin-card skin-owned" id="skinNato" onclick="purchaseUnitSkin('nato')">
                         <canvas class="skin-preview" id="skinNatoPreview" width="120" height="80" aria-hidden="true"></canvas>
                         NATO Counters
@@ -6537,7 +6532,7 @@
             citySkin: 'classic',
             unitSkin: 'nato',
             aiUnitSkin: 'nato',
-            ownedUnitSkins: { default: true, nato: true },
+            ownedUnitSkins: { nato: true },
             terrainViewMode: 'natural',
             menuAttractMode: false,
             playerShiftWaypoints: [],
@@ -9213,13 +9208,9 @@
         }
 
         function purchaseUnitSkin(skin) {
-            if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { default: true, nato: true };
+            if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { nato: true };
             if(skin === 'goldenChip') {
                 showNotification('Complete all ten achievements to unlock Sovereign chip.');
-                return;
-            }
-            if(skin === 'default') {
-                showNotification('Classic shapes are free for everyone.');
                 return;
             }
             if(gameData.ownedUnitSkins[skin]) {
@@ -9708,7 +9699,7 @@
                     unitsBuiltMarine: 0,
                     gamesStarted: 0
                 },
-                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { default: true, nato: true }, mpDisplayName: '' },
+                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, mpDisplayName: '' },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 }
             };
         }
@@ -9734,9 +9725,12 @@
             if(!wodProgress || !wodProgress.profile) return;
             let p = wodProgress.profile;
             if(p.gold !== undefined) gameData.gold = p.gold;
-            if(p.unitSkin) gameData.unitSkin = p.unitSkin;
-            if(p.aiUnitSkin) gameData.aiUnitSkin = p.aiUnitSkin;
-            gameData.ownedUnitSkins = Object.assign({ default: true, nato: true }, p.ownedUnitSkins || {});
+            let us = (!p.unitSkin || p.unitSkin === 'default') ? 'nato' : p.unitSkin;
+            let as = (!p.aiUnitSkin || p.aiUnitSkin === 'default') ? 'nato' : p.aiUnitSkin;
+            gameData.unitSkin = us;
+            gameData.aiUnitSkin = as;
+            gameData.ownedUnitSkins = Object.assign({ nato: true }, p.ownedUnitSkins || {});
+            if(gameData.ownedUnitSkins.default) delete gameData.ownedUnitSkins.default;
             if(gameData.ownedUnitSkins.goldenChip && wodProgress.achievements) wodProgress.achievements.goldenChipMaster = true;
             syncGoldenChipUnlockFromAchievements();
         }
@@ -9767,7 +9761,7 @@
                 unitSkin: gameData.unitSkin,
                 aiUnitSkin: gameData.aiUnitSkin || 'nato',
                 mpDisplayName: (wodProgress.profile && wodProgress.profile.mpDisplayName) || '',
-                ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { default: true, nato: true })
+                ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { nato: true })
             };
         }
 
@@ -13447,6 +13441,21 @@
                 }
             }
         }
+        function wodPaintMapPreviewEntities(pCtx, entities, cx, cy, scale, hr) {
+            if(!pCtx || !entities || entities.length === 0) return;
+            for(let unit of entities) {
+                if(!unit || unit.hp <= 0) continue;
+                if(unit.type === 'convoy') continue;
+                let px = cx + unit.x * scale;
+                let py = cy + unit.y * scale;
+                pCtx.save();
+                pCtx.translate(px, py);
+                let ur = Math.max(1.35, (hr || 10) * scale * 0.42);
+                let col = factionColors[unit.owner] || '#ecf0f1';
+                drawNatoCounter(pCtx, unit, ur, col);
+                pCtx.restore();
+            }
+        }
         function wodHexQuickWater(h) {
             return h && h.type === 'water';
         }
@@ -13485,6 +13494,7 @@
             let lk = {};
             for(let h of hexList) lk[`${h.q},${h.r}`] = h;
             wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, smooth, cx, cy, scale, hr, lk);
+            wodPaintMapPreviewEntities(pCtx, mapData.entities || [], cx, cy, scale, hr);
         }
         function wodMapDataToThumbnailDataUrl(mapData, tw, th) {
             let c = document.createElement('canvas');
@@ -18418,8 +18428,15 @@
         }
 
         function getEffectiveUnitSkin(unit) {
-            if(unit.skinOverride) return unit.skinOverride;
-            return unit.owner === 1 ? gameData.unitSkin : (gameData.aiUnitSkin || 'default');
+            let fromOv = null;
+            if(unit.skinOverride) {
+                fromOv = unit.skinOverride;
+                if(fromOv === 'default') fromOv = 'nato';
+                return fromOv;
+            }
+            let skin = unit.owner === 1 ? gameData.unitSkin : (gameData.aiUnitSkin || 'nato');
+            if(!skin || skin === 'default') skin = 'nato';
+            return skin;
         }
 
         function classicShipTrianglePath(ctx, ur) {
@@ -18545,7 +18562,12 @@
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.save();
                 ctx.translate(canvas.width / 2, canvas.height / 2);
-                drawClassicUnitShape(ctx, type, 13, col, extra || {});
+                let eu = Object.assign({
+                    type: type, owner: 1,
+                    hp: 100, maxHp: 100, manpower: 1000, tanks: 0,
+                }, extra || {});
+                let ur = 13;
+                if(!drawUnitSkin(ctx, eu, ur, col)) drawClassicUnitShape(ctx, type, ur, col, eu);
                 ctx.restore();
             }
             function fillMoveCanvas(id) {
@@ -18612,7 +18634,6 @@
 
         function drawUnitSkin(ctx, unit, radius, color) {
             let skin = getEffectiveUnitSkin(unit);
-            if(skin === 'default') return false;
             if(skin === 'nato') {
                 drawNatoCounter(ctx, unit, radius, color);
                 return true;
@@ -18631,8 +18652,7 @@
 
         function shopSkinMetaList() {
             return [
-                { id: 'default', label: 'Classic shapes' },
-                { id: 'nato', label: 'NATO counters' },
+                { id: 'nato', label: 'NATO counters (default)' },
                 { id: 'usa', label: 'USA countryball' },
                 { id: 'uk', label: 'UK countryball' },
                 { id: 'germany', label: 'Germany countryball' },
@@ -18673,7 +18693,7 @@
             ctx.translate(w / 2, h / 2);
             ctx.scale(m / 50, m / 50);
             let rDraw = 15;
-            let drawn = skinId !== 'default' && drawUnitSkin(ctx, u, rDraw, col);
+            let drawn = drawUnitSkin(ctx, u, rDraw, col);
             if(!drawn) {
                 ctx.beginPath();
                 ctx.arc(0, 0, rDraw, 0, Math.PI * 2);
@@ -18697,7 +18717,6 @@
         function renderSkinShopGridCanvases() {
             let dim = wodSkinCardPreviewSize();
             [
-                ['skinDefaultPreview', 'default'],
                 ['skinNatoPreview', 'nato'],
                 ['skinUsaPreview', 'usa'],
                 ['skinUkPreview', 'uk'],
@@ -18719,7 +18738,6 @@
         function shopSkinThumbClassList(id, baseClass) {
             let c = baseClass || 'shop-skin-picker-flag';
             if(id === 'goldenChip') return [c, 'shop-thumb-golden'];
-            if(id === 'default') return [c, 'shop-thumb-default'];
             if(id === 'nato') return [c, 'nato-preview'];
             return [c, 'ball-preview', 'ball-' + id];
         }
@@ -18732,7 +18750,7 @@
 
         function syncShopSkinBar(which) {
             let skinId = which === 'player' ? gameData.unitSkin : (gameData.aiUnitSkin || 'nato');
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinId]) skinId = 'default';
+            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinId]) skinId = 'nato';
             let meta = shopSkinMetaList().find(r => r.id === skinId) || shopSkinMetaList()[0];
             let flag = document.getElementById(which === 'player' ? 'shopSkinFlagPlayer' : 'shopSkinFlagAi');
             let lab = document.getElementById(which === 'player' ? 'shopSkinLabelPlayer' : 'shopSkinLabelAi');
@@ -18809,10 +18827,10 @@
             selP.innerHTML = optHtml;
             selA.innerHTML = optHtml;
 
-            let curP = gameData.unitSkin || 'default';
-            let curA = gameData.aiUnitSkin || 'default';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[curP]) curP = 'default';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[curA]) curA = 'default';
+            let curP = gameData.unitSkin || 'nato';
+            let curA = gameData.aiUnitSkin || 'nato';
+            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[curP]) curP = 'nato';
+            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[curA]) curA = 'nato';
             selP.value = curP;
             selA.value = curA;
             gameData.unitSkin = curP;
@@ -18870,10 +18888,10 @@
 
         function renderShopArmyCanvases() {
             let map = [['shopPvLight', 'light'], ['shopPvMarine', 'marine'], ['shopPvHeavy', 'heavy'], ['shopPvShip', 'ship'], ['shopAiLight', 'light'], ['shopAiMarine', 'marine'], ['shopAiHeavy', 'heavy'], ['shopAiShip', 'ship']];
-            let skinPlayer = gameData.unitSkin || 'default';
+            let skinPlayer = gameData.unitSkin || 'nato';
             let skinAi = gameData.aiUnitSkin || 'nato';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinPlayer]) skinPlayer = 'default';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinAi]) skinAi = 'default';
+            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinPlayer]) skinPlayer = 'nato';
+            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinAi]) skinAi = 'nato';
             let px = wodShopArmyCanvasPx();
             for(let [cid, ut] of map) {
                 let cnv = document.getElementById(cid);
@@ -18909,9 +18927,9 @@
         function updateSkinShop() {
             let goldEl = document.getElementById('shopGold');
             if(goldEl) goldEl.innerText = Math.floor(gameData.gold || 0);
-            let skinIds = ['default', 'nato', 'usa', 'uk', 'germany', 'france', 'japan', 'goldenChip'];
+            let skinIds = ['nato', 'usa', 'uk', 'germany', 'france', 'japan', 'goldenChip'];
             for(let skin of skinIds) {
-                let id = skin === 'uk' ? 'skinUk' : skin === 'default' ? 'skinDefault' : skin === 'goldenChip' ? 'skinGoldenChip' : 'skin' + skin.charAt(0).toUpperCase() + skin.slice(1);
+                let id = skin === 'uk' ? 'skinUk' : skin === 'goldenChip' ? 'skinGoldenChip' : 'skin' + skin.charAt(0).toUpperCase() + skin.slice(1);
                 let el = document.getElementById(id);
                 if(!el) continue;
                 let owned = !!(gameData.ownedUnitSkins && gameData.ownedUnitSkins[skin]);

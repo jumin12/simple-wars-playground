@@ -31,6 +31,12 @@
     editorSaveSelectedId: null,
     /** Alternating city vs unit when both hit on successive clicks at the same stack */
     cityUnitStackTap: null,
+    /** Shift-drag selection box [ax,ay,bx,by] in canvas pixel coords */
+    editorMarquee: null,
+    /** City move: terrain hexes linked at drag start */
+    cityMoveAttachedHexRefs: null,
+    /** While moving a town, draws at this anchor until mouseup commits terrain */
+    cityMoveGhostAnchor: null,
   };
 
   const editorPtrs = new Map();
@@ -71,6 +77,9 @@
     syncBrushScaleControls(document.getElementById("mapEditorApp"));
     markEditorMapChanged();
     state.cityUnitStackTap = null;
+    state.editorMarquee = null;
+    state.cityMoveAttachedHexRefs = null;
+    state.cityMoveGhostAnchor = null;
     renderSelection();
     scheduleEditorRender();
     renderMapBrowser();
@@ -81,6 +90,9 @@
     state.historyStack = [s];
     state.historyIndex = 0;
     state.cityUnitStackTap = null;
+    state.editorMarquee = null;
+    state.cityMoveAttachedHexRefs = null;
+    state.cityMoveGhostAnchor = null;
     updateUndoRedoButtons();
   }
 
@@ -1024,7 +1036,7 @@
       <div class="editor-panel editor-right">
         <section class="editor-card">
           <h3>Selection</h3>
-          <div id="editorSelection" class="editor-hint" style="margin:0">Nothing selected. Choose <strong>Select</strong>, click a unit or town, then switch to <strong>Move</strong> and drag on the map.</div>
+          <div id="editorSelection" class="editor-hint" style="margin:0">Nothing selected. <strong>Select</strong> clicks units/towns; <strong>drag a box</strong> on empty map (Select/Move) to grab several units; <strong>Move</strong> repositions.</div>
         </section>
       </div>
       <div id="editorSaveOverlay" class="editor-save-overlay hidden" aria-hidden="true">
@@ -1235,6 +1247,10 @@
     WOD.makeBlankMap(parseInt(document.getElementById("editorSize").value, 10));
     syncEditorTerritoryOverlayDefault();
     state.selected = null;
+    state.cityUnitStackTap = null;
+    state.editorMarquee = null;
+    state.cityMoveAttachedHexRefs = null;
+    state.cityMoveGhostAnchor = null;
     state.editorTerrainDirty = true;
     rebuildOwnerSelect();
     rebuildUnitPalette();
@@ -1274,6 +1290,9 @@
     if (app) app.classList.remove("visible");
     state.open = false;
     hideEditorSaveDialog();
+    state.editorMarquee = null;
+    state.cityMoveAttachedHexRefs = null;
+    state.cityMoveGhostAnchor = null;
     if (state._editorKeyHandler) {
       document.removeEventListener("keydown", state._editorKeyHandler);
       state._editorKeyHandler = null;
@@ -1319,7 +1338,12 @@
     } catch (_) { /* ignore */ }
     editorPtrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (editorPtrs.size === 2) {
-      if (state.dragging) onEditorUp();
+      if (state.dragging) {
+        state.cityMoveGhostAnchor = null;
+        state.cityMoveAttachedHexRefs = null;
+        state.editorMarquee = null;
+        onEditorUp();
+      }
       const pts = [...editorPtrs.values()];
       const midX = (pts[0].x + pts[1].x) / 2;
       const midY = (pts[0].y + pts[1].y) / 2;
@@ -1402,6 +1426,125 @@
     const vc = { cx: b.cx + state.viewPanX, cy: b.cy + state.viewPanY };
     const scale = getEditorBaseScale(canvas) * state.viewZoom;
     return { x: canvas.width / 2 + (x - vc.cx) * scale, y: canvas.height / 2 + (y - vc.cy) * scale, scale };
+  }
+
+  function canvasPixelToWorld(px, py) {
+    const canvas = document.getElementById("editorCanvas");
+    if (!canvas || !window.WOD) return { x: 0, y: 0 };
+    const b = bounds();
+    const vc = { cx: b.cx + state.viewPanX, cy: b.cy + state.viewPanY };
+    const scale = getEditorBaseScale(canvas) * state.viewZoom;
+    return {
+      x: (px - canvas.width / 2) / scale + vc.cx,
+      y: (py - canvas.height / 2) / scale + vc.cy,
+    };
+  }
+
+  function hexUrbanableDry(h) {
+    return !!(h && h.type !== "water" && h.type !== "deep_water");
+  }
+
+  function collectCityLinkedHexRefs(cityId) {
+    const refs = [];
+    for (const k of Object.keys(WOD.gameData.hexes || {})) {
+      const h = WOD.gameData.hexes[k];
+      if (h.cityId === cityId) refs.push(h);
+    }
+    return refs;
+  }
+
+  function stripUrbanLinksFromHexRefs(hexRefs, cityId) {
+    for (const h of hexRefs) {
+      if (!h || h.cityId !== cityId) continue;
+      h.cityId = null;
+      if (h.type === "urban") {
+        h.type = "grass";
+        h.baseColor = WOD.getTerrainColor("grass");
+      }
+      delete h.urbanVariant;
+    }
+  }
+
+  function applyUrbanSprawlAtAnchor(city, anchorHex) {
+    for (const pt of WOD.getHexesInRadius(anchorHex.q, anchorHex.r, 2)) {
+      const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
+      if (hexUrbanableDry(h)) {
+        h.type = "urban";
+        h.baseColor = WOD.getTerrainColor("urban");
+        h.cityId = city.id;
+        h.urbanVariant = Math.floor(Math.random() * 5);
+      }
+    }
+  }
+
+  /** After ghost-move: strip old suburb, move city centroid, repaint ring once. */
+  function commitCityRelocationIfNeeded() {
+    const g = state.cityMoveGhostAnchor;
+    if (!g || state.selected?.type !== "city") {
+      state.cityMoveGhostAnchor = null;
+      state.cityMoveAttachedHexRefs = null;
+      return false;
+    }
+    const city = state.selected.value;
+    const target = g.hex;
+    if (!target || city.id !== g.cityId) {
+      state.cityMoveGhostAnchor = null;
+      state.cityMoveAttachedHexRefs = null;
+      return false;
+    }
+    if (city.q === target.q && city.r === target.r) {
+      state.cityMoveGhostAnchor = null;
+      state.cityMoveAttachedHexRefs = null;
+      return false;
+    }
+    let attached = state.cityMoveAttachedHexRefs;
+    if (!attached || !attached.length) attached = collectCityLinkedHexRefs(city.id);
+    stripUrbanLinksFromHexRefs(attached, city.id);
+    city.q = target.q;
+    city.r = target.r;
+    city.x = target.x;
+    city.y = target.y;
+    applyUrbanSprawlAtAnchor(city, target);
+    touchEditorMutation();
+    markEditorMapChanged();
+    state.cityMoveGhostAnchor = null;
+    state.cityMoveAttachedHexRefs = null;
+    return true;
+  }
+
+  function finalizeEditorMarquee() {
+    const m = state.editorMarquee;
+    if (!m) return false;
+    const dx = Math.abs(m.bx - m.ax);
+    const dy = Math.abs(m.by - m.ay);
+    state.editorMarquee = null;
+    if (dx < 8 && dy < 8) return false;
+    let ax = Math.min(m.ax, m.bx);
+    let ay = Math.min(m.ay, m.by);
+    let bx = Math.max(m.ax, m.bx);
+    let by = Math.max(m.ay, m.by);
+    const w0 = canvasPixelToWorld(ax, ay);
+    const w1 = canvasPixelToWorld(bx, ay);
+    const w2 = canvasPixelToWorld(bx, by);
+    const w3 = canvasPixelToWorld(ax, by);
+    const wl = Math.min(w0.x, w1.x, w2.x, w3.x);
+    const wr = Math.max(w0.x, w1.x, w2.x, w3.x);
+    const wt = Math.min(w0.y, w1.y, w2.y, w3.y);
+    const wb = Math.max(w0.y, w1.y, w2.y, w3.y);
+    const picked = [];
+    for (const u of WOD.gameData.entities || []) {
+      if (!u || u.hp <= 0) continue;
+      if (u.x >= wl && u.x <= wr && u.y >= wt && u.y <= wb) picked.push(u);
+    }
+    if (picked.length === 0) {
+      state.selected = null;
+      renderSelection();
+      return true;
+    }
+    if (picked.length === 1) state.selected = { type: "unit", value: picked[0] };
+    else state.selected = { type: "units", values: picked };
+    renderSelection();
+    return true;
   }
 
   function nearestHex(pos) {
@@ -1645,13 +1788,20 @@
       WOD.beginHexOwnerBatch();
     }
     if (state.tool === "select" || state.tool === "move") {
+      const canvas = document.getElementById("editorCanvas");
+      const rect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0 };
+      state.editorMarquee = null;
       const pick = pickCityOrUnitAt(pos);
       if (pick) {
-        state.selected = { type: pick.kind, value: pick.value };
+        if (pick.kind === "city") state.selected = { type: "city", value: pick.value };
+        else state.selected = { type: "unit", value: pick.value };
         state.dragKind = pick.kind;
       } else {
-        state.selected = null;
         state.dragKind = null;
+        state.selected = null;
+        const ax = event.clientX - rect.left;
+        const ay = event.clientY - rect.top;
+        state.editorMarquee = { ax, ay, bx: ax, by: ay };
       }
       renderSelection();
     } else {
@@ -1676,34 +1826,59 @@
       scheduleEditorRender();
       return;
     }
-    const pos = editorWorldPos(event);
+    const canvasMid = document.getElementById("editorCanvas");
+    if (!canvasMid) return;
+    const posMid = editorWorldPos(event);
+    if (state.editorMarquee) {
+      const rectM = canvasMid.getBoundingClientRect();
+      state.editorMarquee.bx = event.clientX - rectM.left;
+      state.editorMarquee.by = event.clientY - rectM.top;
+      scheduleEditorRender();
+      return;
+    }
     if (state.tool === "move" && state.selected) {
-      touchEditorMutation();
-      const hex = nearestHex(pos);
-      if (!hex) return;
-      const obj = state.selected.value;
-      obj.x = hex.x; obj.y = hex.y; obj.q = hex.q; obj.r = hex.r;
-      if (state.selected.type === "city") {
-        for (const pt of WOD.getHexesInRadius(hex.q, hex.r, 2)) {
-          const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
-          if (h && h.type !== "water" && h.type !== "deep_water") {
-            h.type = "urban";
-            h.baseColor = WOD.getTerrainColor("urban");
-            h.cityId = obj.id;
-          }
-        }
+      if (state.selected.type === "units") {
+        scheduleEditorRender();
+        return;
       }
+      const hex = nearestHex(posMid);
+      if (!hex) return;
+      if (state.selected.type === "city") {
+        if (!state.cityMoveAttachedHexRefs) {
+          state.cityMoveAttachedHexRefs = collectCityLinkedHexRefs(state.selected.value.id).slice();
+        }
+        state.cityMoveGhostAnchor = {
+          cityId: state.selected.value.id,
+          hex,
+          x: hex.x,
+          y: hex.y,
+        };
+        scheduleEditorRender();
+        return;
+      }
+      touchEditorMutation();
+      const obj = state.selected.value;
+      obj.x = hex.x;
+      obj.y = hex.y;
+      obj.q = hex.q;
+      obj.r = hex.r;
       markEditorMapChanged();
     } else if (state.tool !== "select") {
-      paintAt(pos);
+      paintAt(posMid);
     }
     scheduleEditorRender();
   }
 
   function onEditorUp() {
+    if (state.open && state.editorMarquee) finalizeEditorMarquee();
     if (state.open && state.territoryPainting) {
       WOD.endHexOwnerBatch();
       state.territoryPainting = false;
+    }
+    if (state.open && state.cityMoveGhostAnchor && state.selected?.type === "city") commitCityRelocationIfNeeded();
+    else {
+      state.cityMoveGhostAnchor = null;
+      state.cityMoveAttachedHexRefs = null;
     }
     if (state.open && state.editorGestureMutatedMap) {
       editorPushSnapshot();
@@ -1770,7 +1945,13 @@
       ctx.setLineDash([]);
       if (typeof WOD.drawEditorCityAtScreen === "function") {
         for (const city of WOD.gameData.cities) {
-          const p = toCanvas(city.x, city.y);
+          let wx = city.x;
+          let wy = city.y;
+          if (state.cityMoveGhostAnchor && state.cityMoveGhostAnchor.cityId === city.id) {
+            wx = state.cityMoveGhostAnchor.x;
+            wy = state.cityMoveGhostAnchor.y;
+          }
+          const p = toCanvas(wx, wy);
           WOD.drawEditorCityAtScreen(ctx, p.x, p.y, p.scale, city);
         }
       }
@@ -1792,19 +1973,50 @@
       }
     }
 
+    if (state.editorMarquee) {
+      const mm = state.editorMarquee;
+      const ax = Math.min(mm.ax, mm.bx);
+      const ay = Math.min(mm.ay, mm.by);
+      const nw = Math.abs(mm.bx - mm.ax);
+      const nh = Math.abs(mm.by - mm.ay);
+      ctx.save();
+      ctx.fillStyle = "rgba(75, 227, 150, 0.08)";
+      ctx.strokeStyle = "rgba(75, 227, 150, 0.6)";
+      ctx.lineWidth = 1.35;
+      ctx.setLineDash([4, 3]);
+      ctx.fillRect(ax, ay, nw, nh);
+      ctx.strokeRect(ax, ay, nw, nh);
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
     const hlTool = state.tool === "select" || state.tool === "move";
-    if (hlTool && state.selected && state.selected.value) {
+    if (hlTool && state.selected) {
       const sel = state.selected;
       ctx.save();
-      if (sel.type === "city" && L.cities) {
+      if (sel.type === "units" && L.units && sel.values && sel.values.length) {
+        for (const u of sel.values) {
+          const p = toCanvas(u.x, u.y);
+          const ur = Math.max(8, (u.radius || 10) * p.scale);
+          ctx.strokeStyle = "#f1c40f";
+          ctx.lineWidth = 3;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, ur + 4, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+      } else if (sel.type === "city" && L.cities && sel.value) {
         const c = sel.value;
-        const p = toCanvas(c.x, c.y);
+        const gx = state.cityMoveGhostAnchor && state.cityMoveGhostAnchor.cityId === c.id ? state.cityMoveGhostAnchor.x : c.x;
+        const gy = state.cityMoveGhostAnchor && state.cityMoveGhostAnchor.cityId === c.id ? state.cityMoveGhostAnchor.y : c.y;
+        const p = toCanvas(gx, gy);
         ctx.beginPath();
         ctx.arc(p.x, p.y, 35 * p.scale, 0, Math.PI * 2);
         ctx.strokeStyle = "#f1c40f";
         ctx.lineWidth = Math.max(2.5, p.scale * 4);
         ctx.stroke();
-      } else if (sel.type === "unit" && L.units) {
+      } else if (sel.type === "unit" && L.units && sel.value) {
         const u = sel.value;
         const p = toCanvas(u.x, u.y);
         const ur = Math.max(8, (u.radius || 10) * p.scale);
@@ -1825,11 +2037,56 @@
     const panel = document.getElementById("editorSelection");
     if (!panel) return;
     if (!state.selected) {
-      panel.innerHTML = "Nothing selected. Use <strong>Select</strong> to pick a town or unit, then <strong>Move</strong> to drag it.";
+      panel.innerHTML = "Nothing selected. Use <strong>Select</strong> for a town/unit, <strong>drag a box</strong> on empty map (Select or Move) to grab several units, or <strong>Move</strong> to reposition.";
       panel.classList.add("editor-hint");
       return;
     }
     panel.classList.remove("editor-hint");
+    if (state.selected.type === "units") {
+      const vals = state.selected.values;
+      if (!vals.length) {
+        panel.innerHTML = "";
+        panel.classList.add("editor-hint");
+        return;
+      }
+      const refOwner = typeof vals[0].owner === "number" ? vals[0].owner : 1;
+      panel.innerHTML = `
+        <p class="editor-hint" style="margin:0 0 10px">${vals.length} units selected.</p>
+        <div class="editor-row"><label>Faction</label>
+          <div class="editor-faction-inline">
+            <span class="editor-swatch editor-sel-faction-swatch" id="selOwnerFactionSwatch" title="Faction color"></span>
+            <select id="selOwnerFaction" class="editor-sel-faction">${factionOwnerSelectHtml(refOwner)}</select>
+          </div>
+        </div>
+        <p class="editor-hint" style="margin:8px 0 0;font-size:12px">Change faction applies to every selected regiment. Drag-move is unavailable until you leave a single selection.</p>
+        <button type="button" class="editor-btn" id="bulkApplyFaction" style="width:100%;margin-top:12px">Apply faction to all</button>
+        <button type="button" class="editor-btn" id="bulkDeleteUnits" style="width:100%;margin-top:8px">Delete selected units</button>`;
+      wireSelectionFactionControls();
+      document.getElementById("bulkApplyFaction").onclick = () => {
+        const fv = Math.max(0, Math.min(parseInt(document.getElementById("selOwnerFaction").value, 10) || 0, state.maxFactionSlots));
+        for (const u of vals) u.owner = fv;
+        markEditorMapChanged();
+        rebuildUnitPalette();
+        scheduleEditorRender();
+        editorPushSnapshot();
+        state.editorGestureMutatedMap = false;
+      };
+      document.getElementById("bulkDeleteUnits").onclick = () => {
+        const ents = WOD.gameData.entities;
+        for (const u of [...vals]) {
+          const ix = ents.indexOf(u);
+          if (ix >= 0) ents.splice(ix, 1);
+        }
+        state.selected = null;
+        markEditorMapChanged();
+        rebuildUnitPalette();
+        renderSelection();
+        scheduleEditorRender();
+        editorPushSnapshot();
+        state.editorGestureMutatedMap = false;
+      };
+      return;
+    }
     const obj = state.selected.value;
     const factionRow = `
         <div class="editor-row"><label>Faction</label>
@@ -1984,6 +2241,10 @@
     if (!state.open) return;
     syncEditorTerritoryOverlayDefault();
     state.selected = null;
+    state.cityUnitStackTap = null;
+    state.editorMarquee = null;
+    state.cityMoveAttachedHexRefs = null;
+    state.cityMoveGhostAnchor = null;
     state.editorTerrainDirty = true;
     scheduleEditorRender();
     renderSelection();
