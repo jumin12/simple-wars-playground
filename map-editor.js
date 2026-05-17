@@ -103,7 +103,7 @@
     if (!centerHex || !WOD.gameData.hexes) return [];
     const ring = Math.max(0, (state.brushSize | 0) - 1);
     const out = [];
-    for (const pt of WOD.getHexesInRadius(centerHex.q, centerHex.r, ring)) {
+    for (const pt of hexesInHexDisk(centerHex.q, centerHex.r, ring)) {
       const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
       if (h) out.push(h);
     }
@@ -119,6 +119,51 @@
     const n = Math.max(1, Math.min(12, state.brushSize | 0));
     if (!lab) return;
     lab.textContent = n <= 1 ? "Single hex" : `Hex radius ${n - 1}`;
+  }
+
+  /** Axial hex disk (hex distance ≤ R); avoids WOD.getHexesInRadius which uses Euclidean dq,dr (wrong on hex grids). */
+  function hexesInHexDisk(cq, cr, R) {
+    const coords = [];
+    for (let dq = -R; dq <= R; dq++) {
+      const drMin = Math.max(-R, -dq - R);
+      const drMax = Math.min(R, -dq + R);
+      for (let dr = drMin; dr <= drMax; dr++) coords.push({ q: cq + dq, r: cr + dr });
+    }
+    return coords;
+  }
+
+  function syncEditorTerritoryOverlayDefault() {
+    if (!window.WOD || !WOD.gameData) return;
+    if (!WOD.gameData.layers) WOD.gameData.layers = {};
+    WOD.gameData.layers.territory = true;
+    markEditorMapChanged();
+    refreshEditorGameplayLayerButtons();
+  }
+
+  function factionOwnerSelectHtml(selectedOwner) {
+    const cols = factionPalette();
+    const cap = state.maxFactionSlots;
+    let cur = parseInt(selectedOwner, 10);
+    if (!Number.isFinite(cur)) cur = 0;
+    cur = Math.max(0, Math.min(cur, cap));
+    let html = `<option value="0" style="background:#5c6f82;color:#fff;font-weight:700"${cur === 0 ? " selected" : ""}>Neutral</option>`;
+    for (let i = 1; i <= cap; i++) {
+      const col = cols[i] || "#cccccc";
+      html += `<option value="${i}" style="background:${col};color:#061208;font-weight:700"${cur === i ? " selected" : ""}>Faction ${i}</option>`;
+    }
+    return html;
+  }
+
+  function wireSelectionFactionControls() {
+    const fos = document.getElementById("selOwnerFaction");
+    const sw = document.getElementById("selOwnerFactionSwatch");
+    if (!fos || !sw) return;
+    const syncSwatch = () => {
+      const v = parseInt(fos.value, 10) || 0;
+      sw.style.background = v <= 0 ? "#5c6f82" : factionPalette()[v] || "#cccccc";
+    };
+    fos.addEventListener("change", syncSwatch);
+    syncSwatch();
   }
 
   function refreshEditorGameplayLayerButtons() {
@@ -276,6 +321,7 @@
           try {
             const o = JSON.parse(String(reader.result || "{}"));
             WOD.loadMapData(o);
+            syncEditorTerritoryOverlayDefault();
             const sz = document.getElementById("editorSize");
             if (sz) sz.value = String(WOD.gameData.mapRadius || 60);
             state.selected = null;
@@ -409,10 +455,34 @@
         align-items: center;
         gap: 10px;
       }
+      .editor-brush-row { touch-action: manipulation; }
       .editor-brush-row input[type="range"] {
         flex: 1;
-        min-width: 0;
+        min-width: 40px;
+        width: 100%;
+        height: 28px;
         accent-color: #4be396;
+      }
+      .editor-faction-inline {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .editor-sel-faction-swatch {
+        flex-shrink: 0;
+      }
+      .editor-sel-faction {
+        flex: 1;
+        min-width: 0;
+        background: #1a3348;
+        color: #fff;
+        border: 1px solid rgba(139,173,192,.55);
+        border-radius: 6px;
+        padding: 8px;
+        font-size: 13px;
+        font-weight: 700;
       }
       .palette-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; }
       .palette-btn { text-align:left;font-size:11px;display:flex;align-items:center;gap:8px;padding:10px;}
@@ -523,7 +593,7 @@
           <div class="editor-row editor-brush-row">
             <label for="editorBrushSize">Brush size</label>
             <div class="editor-brush-inner">
-              <input type="range" id="editorBrushSize" min="1" max="12" value="1" />
+              <input type="range" id="editorBrushSize" min="1" max="12" step="1" value="1" />
               <span id="editorBrushSizeVal" class="editor-brush-val">Single hex</span>
             </div>
           </div>
@@ -622,12 +692,15 @@
 
     rebuildOwnerSelect();
 
-    const brushEl = document.getElementById("editorBrushSize");
+    const brushEl = app.querySelector("#editorBrushSize");
     if (brushEl) {
-      brushEl.addEventListener("input", () => {
-        state.brushSize = parseInt(brushEl.value, 10) || 1;
+      const syncFromBrushDom = () => {
+        state.brushSize = Math.max(1, Math.min(12, parseInt(brushEl.value, 10) || 1));
+        brushEl.value = String(state.brushSize);
         syncBrushSizeLabel();
-      });
+      };
+      brushEl.addEventListener("input", syncFromBrushDom);
+      brushEl.addEventListener("change", syncFromBrushDom);
     }
     syncBrushSizeLabel();
 
@@ -641,6 +714,7 @@
 
     app.querySelector("#editorBlank").addEventListener("click", () => {
       WOD.makeBlankMap(parseInt(app.querySelector("#editorSize").value, 10));
+      syncEditorTerritoryOverlayDefault();
       state.selected = null;
       state.viewPanX = 0;
       state.viewPanY = 0;
@@ -665,6 +739,7 @@
       } catch (e) {
         console.warn(e);
       }
+      syncEditorTerritoryOverlayDefault();
       state.selected = null;
       state.viewPanX = 0;
       state.viewPanY = 0;
@@ -757,6 +832,7 @@
       });
     }
     WOD.makeBlankMap(parseInt(document.getElementById("editorSize").value, 10));
+    syncEditorTerritoryOverlayDefault();
     state.selected = null;
     state.editorTerrainDirty = true;
     rebuildOwnerSelect();
@@ -1216,7 +1292,6 @@
   function renderSelection() {
     const panel = document.getElementById("editorSelection");
     if (!panel) return;
-    const ownMax = editorMaxPlayerSlots();
     if (!state.selected) {
       panel.innerHTML = "Nothing selected. Use <strong>Select</strong> to pick a town or unit, then <strong>Move</strong> to drag it.";
       panel.classList.add("editor-hint");
@@ -1224,19 +1299,27 @@
     }
     panel.classList.remove("editor-hint");
     const obj = state.selected.value;
+    const factionRow = `
+        <div class="editor-row"><label>Faction</label>
+          <div class="editor-faction-inline">
+            <span class="editor-swatch editor-sel-faction-swatch" id="selOwnerFactionSwatch" title="Faction color"></span>
+            <select id="selOwnerFaction" class="editor-sel-faction">${factionOwnerSelectHtml(obj.owner)}</select>
+          </div>
+        </div>`;
     if (state.selected.type === "city") {
       panel.innerHTML = `
         <div class="editor-row"><label>Name</label><input id="selName" value="${obj.name || ""}"></div>
-        <div class="editor-row"><label>Owner</label><input id="selOwner" type="number" min="0" max="${ownMax}" value="${obj.owner || 0}"></div>
+        ${factionRow}
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 1000}"></div>
         <div class="editor-row"><label>Income bonus</label><input id="selIncome" type="number" value="${obj.incomeBonus || 0}"></div>
         <div class="editor-row"><label>MP bonus</label><input id="selMp" type="number" value="${obj.manpowerBonus || 0}"></div>
         <div class="editor-row"><label>Factory</label><input id="selFactory" type="checkbox" ${obj.hasFactory ? "checked" : ""}></div>
         <div class="editor-row"><label>Harbor</label><input id="selHarbor" type="checkbox" ${obj.hasHarbor ? "checked" : ""}></div>
         <button type="button" class="editor-btn" id="applySelection" style="width:100%;margin-top:8px">Apply town</button>`;
+      wireSelectionFactionControls();
       document.getElementById("applySelection").onclick = () => {
         obj.name = document.getElementById("selName").value || obj.name;
-        obj.owner = parseInt(document.getElementById("selOwner").value, 10) || 0;
+        obj.owner = Math.max(0, Math.min(parseInt(document.getElementById("selOwnerFaction").value, 10) || 0, state.maxFactionSlots));
         obj.hp = parseInt(document.getElementById("selHp").value, 10) || obj.hp;
         obj.incomeBonus = parseInt(document.getElementById("selIncome").value, 10) || 0;
         obj.manpowerBonus = parseInt(document.getElementById("selMp").value, 10) || 0;
@@ -1248,7 +1331,7 @@
     } else {
       panel.innerHTML = `
         <div class="editor-row"><label>Name</label><input id="selName" value="${obj.name || ""}"></div>
-        <div class="editor-row"><label>Owner</label><input id="selOwner" type="number" min="0" max="${ownMax}" value="${obj.owner || 1}"></div>
+        ${factionRow}
         <div class="editor-row"><label>Type</label><select id="selType"><option value="light">Infantry</option><option value="marine">Marines</option><option value="heavy">Armor</option><option value="ship">Ship</option></select></div>
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 100}"></div>
         <div class="editor-row"><label>Speed</label><input id="selSpeed" type="number" value="${obj.speed || 10}"></div>
@@ -1260,9 +1343,12 @@
         <p class="editor-hint">Owner 1 uses your unit skin; other owners use the AI skin (same as in-game shop).</p>
         <button type="button" class="editor-btn" id="applySelection" style="width:100%;margin-top:8px">Apply unit</button>`;
       document.getElementById("selType").value = obj.type || "light";
+      wireSelectionFactionControls();
       document.getElementById("applySelection").onclick = () => {
         obj.name = document.getElementById("selName").value || obj.name;
-        obj.owner = parseInt(document.getElementById("selOwner").value, 10) || obj.owner;
+        let ov = parseInt(document.getElementById("selOwnerFaction").value, 10);
+        if (!Number.isFinite(ov)) ov = typeof obj.owner === "number" ? obj.owner : 1;
+        obj.owner = Math.max(0, Math.min(ov, state.maxFactionSlots));
         obj.type = document.getElementById("selType").value;
         obj.hp = parseInt(document.getElementById("selHp").value, 10) || obj.hp;
         obj.maxHp = Math.max(obj.maxHp || obj.hp, obj.hp);
@@ -1366,6 +1452,7 @@
         const map = saved.find((x) => String(x.id) === String(id));
         if (!map || !map.data) return;
         WOD.loadMapData(map.data);
+        syncEditorTerritoryOverlayDefault();
         state.selected = null;
         state.viewPanX = 0;
         state.viewPanY = 0;
@@ -1388,6 +1475,7 @@
 
   window.wodNotifyEditorMapChanged = function () {
     if (!state.open) return;
+    syncEditorTerritoryOverlayDefault();
     state.selected = null;
     state.editorTerrainDirty = true;
     scheduleEditorRender();
