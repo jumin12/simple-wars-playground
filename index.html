@@ -6466,7 +6466,7 @@
                 for(let o of sorted) bias[o] += gain * stepScale * (tgt[o] - cts[o]);
                 let acceptErr = exactDivide ? 0 : 1;
                 if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 27 : minRelaxIter - 4)) break;
-                if((it & 1) === 0) await wodMapGenYieldSlice();
+                if((it & 3) === 0) await wodMapGenYieldSlice();
             }
             await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
             await wodAssignWaterAndNonclaimablePoliticalVotes();
@@ -13302,7 +13302,7 @@
                 innerRSq = innerRad * innerRad;
             }
             let facRect = mapShape === 'rectangle' && factionGeom && factionGeom[owner],
-                rectInnerFrac = 0.88,
+                rectInnerFrac = 0.91,
                 rectInnerSq = Infinity;
             if(facRect && facRect.maxSq > 0 && facRect.n >= 10)
                 rectInnerSq = facRect.maxSq * rectInnerFrac * rectInnerFrac;
@@ -13318,7 +13318,7 @@
                 if(mapShape === 'rectangle') {
                     let rowCount = Math.floor(rows) || 1;
                     let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rowCount, 1));
-                    if(bf > 0.88) continue;
+                    if(bf > 0.90) continue;
                     if(rectInnerSq < Infinity && facRect) {
                         let dxF = h.x - facRect.cx,
                             dyF = h.y - facRect.cy;
@@ -13334,7 +13334,7 @@
                     if(h.owner !== owner) continue;
                     let rowCount = Math.floor(rows) || 1;
                     let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rowCount, 1));
-                    if(bf > 0.88) continue;
+                    if(bf > 0.90) continue;
                     if(wodBfsStepsToWater(h, 14) < 2) continue;
                     out.push(h);
                 }
@@ -13413,10 +13413,10 @@
             softenMountainHexBetweenOwners(ownersSorted);
             await ensureOwnersReachableByLand(ownersSorted);
             await smoothStartingTerritory(ownersSorted, 4, 4);
-            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 56 : 48);
+            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 42 : 36);
             await smoothStartingTerritory(ownersSorted, 5, 2);
             if(ownersSorted.length >= 3) {
-                await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(52, f * 7));
+                await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(38, f * 5));
                 await wodAssignWaterAndNonclaimablePoliticalVotes();
                 await smoothStartingTerritory(ownersSorted, 5, 1);
             }
@@ -13441,17 +13441,35 @@
             function buildCandidateList(owner, level) {
                 let cent = wodFactionPoliticalCentroid(owner);
                 let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionTerritoryGeom);
-                pool.sort((a, b) => {
-                    let ax = cent ? cent.x : lcm.cx,
-                        ay = cent ? cent.y : lcm.cy;
-                    let ca = Math.atan2(a.y - ay, a.x - ax);
-                    let cb = Math.atan2(b.y - ay, b.x - ax);
-                    let caOff = ca + level * (0.18 + owner * 0.011),
-                        cbOff = cb + level * (0.18 + owner * 0.011);
-                    if(caOff !== cbOff) return caOff - cbOff;
-                    if(a.q !== b.q) return a.q - b.q;
-                    return a.r - b.r;
-                });
+                let ax = cent ? cent.x : lcm.cx,
+                    ay = cent ? cent.y : lcm.cy;
+                if(mapShape === 'rectangle') {
+                    let sectors = 10;
+                    let lvAlt = level & 1;
+                    pool.sort((a, b) => {
+                        let ua = ((Math.atan2(a.y - ay, a.x - ax) + Math.PI) / (Math.PI * 2)) % 1;
+                        let ub = ((Math.atan2(b.y - ay, b.x - ax) + Math.PI) / (Math.PI * 2)) % 1;
+                        let sa = Math.min(sectors - 1, Math.floor(ua * sectors));
+                        let sb = Math.min(sectors - 1, Math.floor(ub * sectors));
+                        if(sa !== sb) return sa - sb;
+                        if(ua !== ub && Math.abs(ua - ub) > 1e-10) return ua - ub;
+                        let da = (a.x - ax) * (a.x - ax) + (a.y - ay) * (a.y - ay),
+                            db = (b.x - ax) * (b.x - ax) + (b.y - ay) * (b.y - ay);
+                        if(da !== db) return lvAlt ? db - da : da - db;
+                        if(a.q !== b.q) return a.q - b.q;
+                        return a.r - b.r;
+                    });
+                } else {
+                    pool.sort((a, b) => {
+                        let ca = Math.atan2(a.y - ay, a.x - ax);
+                        let cb = Math.atan2(b.y - ay, b.x - ax);
+                        let caOff = ca + level * (0.18 + owner * 0.011),
+                            cbOff = cb + level * (0.18 + owner * 0.011);
+                        if(caOff !== cbOff) return caOff - cbOff;
+                        if(a.q !== b.q) return a.q - b.q;
+                        return a.r - b.r;
+                    });
+                }
                 let list = [];
                 let seen = new Set();
                 if(mapShape === 'island' && level === 0 && cent) {
@@ -13483,13 +13501,13 @@
                     let ord = ownersSorted.slice();
                     if(lv % 2 === 1) ord.reverse();
                     for(let ow of ord) {
-                        if((++tryTick & 15) === 0) await wodMapGenYieldSlice();
+                        if((++tryTick & 31) === 0) await wodMapGenYieldSlice();
                         let cand = buildCandidateList(ow, lv);
                         let tried = cand.length > 960 ? cand.slice(0, 960) : cand;
                         let placedHere = false;
                         let hTick = 0;
                         tries: for(let hTry of tried) {
-                            if((++hTick & 63) === 0) await wodMapGenYieldSlice();
+                            if((++hTick & 127) === 0) await wodMapGenYieldSlice();
                             let qc = hTry.q,
                                 rc = hTry.r;
                             for(let o2 of ownersSorted)
@@ -13579,7 +13597,7 @@
 
             wodSyncUrbanFootprintOwners();
             await wodRemoveUnconnectedFactionHexPockets(ownersSorted);
-            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(92, f * 18));
+            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(64, f * 13));
             wodSyncUrbanFootprintOwners();
             await wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
             wodNormalizeStartingCityEconomy(ownersSorted);
@@ -13913,7 +13931,7 @@
                 }
             }
             try {
-            wodMapGenYieldingStart(9);
+            wodMapGenYieldingStart(26);
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 1000;
             gameData.income = 10;             gameData.selection = [];
@@ -13924,7 +13942,7 @@
             let mapR = gameData.mapRadius;
             let hr = gameData.hexRadius;
             let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed);
-            const PROCMAP_ACCEPT_TRIES_MAX = wodFingerReuseMapSeed ? 1 : Math.min(55, Math.max(18, 28 + Math.floor(mapR / 12)));
+            const PROCMAP_ACCEPT_TRIES_MAX = wodFingerReuseMapSeed ? 1 : Math.min(38, Math.max(12, 20 + Math.floor(mapR / 15)));
             let procSucceeded = false;
 
             let mog = gameData._mapGenOptions;
@@ -13935,7 +13953,7 @@
             let shapePre = document.getElementById('setupMapShape');
             let mapShapePre = (mog && (mog.mapShape === 'island' || mog.mapShape === 'rectangle')) ? mog.mapShape : (shapePre ? shapePre.value : 'island');
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
-            if(mapShapePre === 'rectangle') procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 22);
+            if(mapShapePre === 'rectangle') procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 16);
             if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
@@ -14147,27 +14165,19 @@
                     
                     gameData.hexes[`${q},${r}`] = hex;
                     gameData.hexList.push(hex);
-                    if((++terrainCellIx & 63) === 0) await wodMapGenYieldSlice();
+                    if((++terrainCellIx & 255) === 0) await wodMapGenYieldSlice();
                 }
             }
 
             await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
-            await wodMapGenYieldSlice();
             await wodNaturalizeBiomeBlends(seedOffset, mapShape);
-            await wodMapGenYieldSlice();
             await wodNormalizeRectangleWaterFeatures(seedOffset);
-            await wodMapGenYieldSlice();
             limitRectangleMountainDensity(mapShape, seedOffset);
-            await wodMapGenYieldSlice();
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
-            await wodMapGenYieldSlice();
             // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
             await ensureMountainPasses();
-            await wodMapGenYieldSlice();
             await softenLandFullyBlockedByMountainRing();
-            await wodMapGenYieldSlice();
             await ensureMountainPasses();
-            await wodMapGenYieldSlice();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
 
             await wodMapGenYieldSlice();
@@ -14231,7 +14241,7 @@
                         if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) continue;
                         if(mapShape === 'rectangle') {
                             let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
-                            if(bf > 0.86 && attempts < 480) continue;
+                            if(bf > 0.90 && attempts < 480) continue;
                         }
                         if(wodBfsStepsToWater(h, 14) < minWaterSteps && attempts < 460) continue;
                         let tooClose = gameData.cities.some(c => {
@@ -14700,11 +14710,11 @@
             gameData.aiFocusTimer = 4.1;
             updateAiFrontFocus();
             let dtSim = 2 / 60;
-            for(let step = 0; step < 56; step++) {
+            for(let step = 0; step < 36; step++) {
                 update(dtSim);
             }
             let drainGuard = 0;
-            while((gameData._aiStratWork || gameData._aiSpawnBurst) && drainGuard++ < 800)
+            while((gameData._aiStratWork || gameData._aiSpawnBurst) && drainGuard++ < 480)
                 update(dtSim);
         }
 
@@ -14782,23 +14792,23 @@
 
             (async () => {
                 try {
-                    await bootStage('Loading interface panels…', 8, null, 160);
+                    await bootStage('Loading interface panels…', 8, null, 72);
                     await bootStage('Reading profile and settings…', 16, () => {
                         try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
-                    }, 130);
+                    }, 55);
                     await bootStage('Preparing terrain palettes…', 25, () => {
                         normalizeTerrainHexes();
                         updateTerrainKey();
-                    }, 120);
-                    await bootStage('Building menu battlefield…', 38, () => bootstrapMenuBackgroundBattle(), 60);
+                    }, 48);
+                    await bootStage('Building menu battlefield…', 38, () => bootstrapMenuBackgroundBattle(), 28);
                     await bootStage('Baking terrain and borders…', 62, () => {
                         updateTerrainCache();
                         draw();
-                    }, 140);
+                    }, 54);
                     await bootStage('Warming AI planners…', 74, () => {
                         let dtSim = 2 / 60;
-                        for(let i = 0; i < 12; i++) update(dtSim);
-                    }, 130);
+                        for(let i = 0; i < 8; i++) update(dtSim);
+                    }, 52);
                     await bootStage('Priming path and selection caches…', 84, () => {
                         let movable = gameData.entities.filter(u => u && u.hp > 0 && u.type !== 'convoy').slice(0, 8);
                         for(let u of movable) {
@@ -14806,13 +14816,13 @@
                             if(h) findLocalDetourHex(u, h.x + gameData.hexRadius * 2, h.y);
                         }
                         syncInfoCardPanelThrottled();
-                    }, 130);
+                    }, 52);
                     await bootStage('Drawing first frame…', 92, () => {
                         draw();
-                    }, 120);
+                    }, 48);
 
                     let elapsed = performance.now() - splashT0;
-                    if(elapsed < 2400) await sleep(2400 - elapsed);
+                    if(elapsed < 900) await sleep(900 - elapsed);
                     let fillStart = performance.now();
                     let fillFrom = Math.max(displayed, 92);
                     function fillTick(now) {
