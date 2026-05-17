@@ -29,6 +29,9 @@
     editorGestureMutatedMap: false,
     _editorKeyHandler: null,
     editorSaveSelectedId: null,
+    /** 0-based pages for saved-map browser (left) and save dialog list. */
+    mapBrowserPage: 0,
+    editorSaveListPage: 0,
     /** Alternating city vs unit when both hit on successive clicks at the same stack */
     cityUnitStackTap: null,
     /** Shift-drag selection box [ax,ay,bx,by] in canvas pixel coords */
@@ -148,6 +151,16 @@
 
   /** Brush scale 1 = clicked hex only; each step adds one full hex ring around the center (max 5). */
   const EDITOR_BRUSH_SCALE_MAX = 5;
+  /** Saved map lists: items per page (browser + save dialog). */
+  const SAVED_MAPS_PAGE_SIZE = 6;
+
+  function savedMapsPagination(page0, totalItems) {
+    const n = Math.max(0, totalItems | 0);
+    const totalPages = Math.max(1, Math.ceil(n / SAVED_MAPS_PAGE_SIZE));
+    let p = Math.max(0, Math.min(page0 | 0, totalPages - 1));
+    const start = p * SAVED_MAPS_PAGE_SIZE;
+    return { page: p, totalPages, start, end: Math.min(start + SAVED_MAPS_PAGE_SIZE, n) };
+  }
 
   function editorMaxPlayerSlots() {
     return typeof window !== "undefined" && window.WOD && typeof WOD.maxLobbyPlayers === "number"
@@ -388,6 +401,25 @@
     host.classList.remove("editor-hint");
   }
 
+  function wireMapBrowserPager() {
+    const prev = document.getElementById("mapBrowserPrev");
+    const next = document.getElementById("mapBrowserNext");
+    if (prev && !prev.dataset.wiredMapPager) {
+      prev.dataset.wiredMapPager = "1";
+      prev.addEventListener("click", () => {
+        state.mapBrowserPage = Math.max(0, (state.mapBrowserPage | 0) - 1);
+        renderMapBrowser();
+      });
+    }
+    if (next && !next.dataset.wiredMapPager) {
+      next.dataset.wiredMapPager = "1";
+      next.addEventListener("click", () => {
+        state.mapBrowserPage = (state.mapBrowserPage | 0) + 1;
+        renderMapBrowser();
+      });
+    }
+  }
+
   function wireFactionEconomyPanel(root) {
     const app = root || document.getElementById("mapEditorApp");
     if (!app || app.dataset.factionEcoWired === "1") return;
@@ -598,6 +630,88 @@
     });
   }
 
+  function renderEditorSaveDialogList() {
+    const list = document.getElementById("editorSaveList");
+    const overBtn = document.getElementById("editorSaveOverwriteBtn");
+    const pager = document.getElementById("editorSavePager");
+    const pageLabel = document.getElementById("editorSavePageLabel");
+    const prevBtn = document.getElementById("editorSavePagePrev");
+    const nextBtn = document.getElementById("editorSavePageNext");
+    if (!list) return;
+    list.textContent = "";
+    state.editorSaveSelectedId = null;
+    if (overBtn) {
+      overBtn.disabled = true;
+      overBtn.setAttribute("disabled", "disabled");
+    }
+    const maps = typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
+    if (maps.length === 0) {
+      if (pager) pager.hidden = true;
+      list.innerHTML = `<div class="editor-hint" style="margin:0">No maps in your library yet — use <strong>Save as new</strong> below.</div>`;
+      return;
+    }
+    const pag = savedMapsPagination(state.editorSaveListPage, maps.length);
+    state.editorSaveListPage = pag.page;
+    const pageMaps = maps.slice(pag.start, pag.end);
+    if (pager) {
+      pager.hidden = pag.totalPages <= 1;
+      if (pageLabel) pageLabel.textContent = `Page ${pag.page + 1} / ${pag.totalPages} (${maps.length} saves)`;
+      if (prevBtn) {
+        prevBtn.disabled = pag.page <= 0;
+        prevBtn.toggleAttribute("disabled", pag.page <= 0);
+      }
+      if (nextBtn) {
+        const last = pag.page >= pag.totalPages - 1;
+        nextBtn.disabled = last;
+        nextBtn.toggleAttribute("disabled", last);
+      }
+    }
+    for (const m of pageMaps) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "editor-save-row";
+      row.dataset.mapId = m.id || "";
+      const img = document.createElement("img");
+      img.alt = "";
+      if (m.thumb || m.thumbnail) img.src = m.thumb || m.thumbnail;
+      const mid = document.createElement("div");
+      const t = document.createElement("div");
+      t.className = "editor-save-name";
+      t.textContent = m.name || "Map";
+      const meta = document.createElement("div");
+      meta.className = "editor-save-meta";
+      meta.textContent = new Date(m.savedAt || m.date || Date.now()).toLocaleString();
+      mid.appendChild(t);
+      mid.appendChild(meta);
+      row.appendChild(img);
+      row.appendChild(mid);
+      row.addEventListener("click", () => {
+        list.querySelectorAll(".editor-save-row").forEach((r) => r.classList.remove("selected"));
+        row.classList.add("selected");
+        state.editorSaveSelectedId = m.id || null;
+        if (overBtn) {
+          const ok = !!state.editorSaveSelectedId;
+          overBtn.disabled = !ok;
+          if (ok) overBtn.removeAttribute("disabled");
+          else overBtn.setAttribute("disabled", "disabled");
+        }
+      });
+      list.appendChild(row);
+    }
+  }
+
+  function showEditorSaveDialog() {
+    const ov = document.getElementById("editorSaveOverlay");
+    const nameIn = document.getElementById("editorSaveNewName");
+    if (!ov) return;
+    const defTitle = "Custom Map " + new Date().toLocaleTimeString();
+    if (nameIn) nameIn.value = defTitle;
+    state.editorSaveListPage = 0;
+    renderEditorSaveDialogList();
+    ov.classList.remove("hidden");
+    ov.setAttribute("aria-hidden", "false");
+  }
+
   function hideEditorSaveDialog() {
     const ov = document.getElementById("editorSaveOverlay");
     if (!ov) return;
@@ -606,71 +720,25 @@
     state.editorSaveSelectedId = null;
   }
 
-  function showEditorSaveDialog() {
-    const ov = document.getElementById("editorSaveOverlay");
-    const list = document.getElementById("editorSaveList");
-    const nameIn = document.getElementById("editorSaveNewName");
-    const overBtn = document.getElementById("editorSaveOverwriteBtn");
-    if (!ov || !list) return;
-    const defTitle = "Custom Map " + new Date().toLocaleTimeString();
-    if (nameIn) nameIn.value = defTitle;
-    state.editorSaveSelectedId = null;
-    if (overBtn) {
-      overBtn.disabled = true;
-      overBtn.setAttribute("disabled", "disabled");
-    }
-
-    list.textContent = "";
-    const maps = typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
-    if (maps.length === 0) {
-      list.innerHTML = `<div class="editor-hint" style="margin:0">No maps in your library yet — use <strong>Save as new</strong> below.</div>`;
-    } else {
-      for (const m of maps) {
-        const row = document.createElement("button");
-        row.type = "button";
-        row.className = "editor-save-row";
-        row.dataset.mapId = m.id || "";
-        const img = document.createElement("img");
-        img.alt = "";
-        if (m.thumb || m.thumbnail) img.src = m.thumb || m.thumbnail;
-        const mid = document.createElement("div");
-        const t = document.createElement("div");
-        t.className = "editor-save-name";
-        t.textContent = m.name || "Map";
-        const meta = document.createElement("div");
-        meta.className = "editor-save-meta";
-        meta.textContent = new Date(m.savedAt || m.date || Date.now()).toLocaleString();
-        mid.appendChild(t);
-        mid.appendChild(meta);
-        row.appendChild(img);
-        row.appendChild(mid);
-        row.addEventListener("click", () => {
-          list.querySelectorAll(".editor-save-row").forEach((r) => r.classList.remove("selected"));
-          row.classList.add("selected");
-          state.editorSaveSelectedId = m.id || null;
-          if (overBtn) {
-            const ok = !!state.editorSaveSelectedId;
-            overBtn.disabled = !ok;
-            if (ok) overBtn.removeAttribute("disabled");
-            else overBtn.setAttribute("disabled", "disabled");
-          }
-        });
-        list.appendChild(row);
-      }
-    }
-    ov.classList.remove("hidden");
-    ov.setAttribute("aria-hidden", "false");
-  }
-
   function wireEditorSaveDialog() {
     const cancel = document.getElementById("editorSaveCancelBtn");
     const asNew = document.getElementById("editorSaveAsNewBtn");
     const over = document.getElementById("editorSaveOverwriteBtn");
-    const ov = document.getElementById("editorSaveOverlay");
     if (cancel) cancel.addEventListener("click", () => hideEditorSaveDialog());
-    if (ov) {
-      ov.addEventListener("click", (e) => {
-        if (e.target === ov) hideEditorSaveDialog();
+    const sp = document.getElementById("editorSavePagePrev");
+    const sn = document.getElementById("editorSavePageNext");
+    if (sp && !sp.dataset.wiredSavePager) {
+      sp.dataset.wiredSavePager = "1";
+      sp.addEventListener("click", () => {
+        state.editorSaveListPage = Math.max(0, (state.editorSaveListPage | 0) - 1);
+        renderEditorSaveDialogList();
+      });
+    }
+    if (sn && !sn.dataset.wiredSavePager) {
+      sn.dataset.wiredSavePager = "1";
+      sn.addEventListener("click", () => {
+        state.editorSaveListPage = (state.editorSaveListPage | 0) + 1;
+        renderEditorSaveDialogList();
       });
     }
     const doSavePayload = () => {
@@ -874,10 +942,14 @@
       .editor-save-list {
         display:grid;
         gap:8px;
-        max-height:42vh;
+        max-height:min(38vh, 320px);
         overflow:auto;
         margin:10px 0 14px;
       }
+      .editor-save-pager {
+        display:flex; align-items:center; justify-content:center; gap:10px; margin:4px 0 0; flex-wrap:wrap;
+      }
+      .editor-save-pager[hidden] { display:none !important; }
       .editor-save-row {
         display:grid;
         grid-template-columns:72px 1fr;
@@ -1134,7 +1206,13 @@
       }
       .editor-swatch { width:16px;height:16px;border:1px solid #061018;border-radius:4px;display:inline-block;flex-shrink:0; }
       .editor-hint { color:#93a8b9; font-size:12px; line-height:1.45;margin:6px 0 0;font-weight:400; }
-      .map-browser { display:grid; gap:8px; max-height:200px; overflow:auto; padding-right:2px;}
+      .map-browser { display:grid; gap:8px; max-height:min(360px,52vh); overflow:auto; padding-right:2px;}
+      .map-browser-pager {
+        display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;
+      }
+      .map-browser-pager[hidden] { display:none !important; }
+      .map-browser-page-label { font-size:12px; color:#9db3c7; min-width:120px; text-align:center; font-weight:700; }
+      .map-browser-page-btn { padding:6px 14px; min-width:44px; }
       .map-card { display:grid; grid-template-columns:72px 1fr auto; gap:8px; align-items:center;
         padding:8px;border:1px solid rgba(201,162,39,.4);border-radius:8px;background:rgba(255,255,255,.04);cursor:pointer; }
       .map-card-del { font-size:10px;padding:4px 8px;min-width:0;line-height:1.2;flex-shrink:0;
@@ -1301,6 +1379,11 @@
         <section class="editor-card">
           <h3>Saved maps (browser)</h3>
           <p class="editor-hint" style="margin-top:0">Same collection as solo / multiplayer / map library. Click a row to load; Delete removes it everywhere.</p>
+          <div class="map-browser-pager" id="mapBrowserPager" hidden>
+            <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserPrev" aria-label="Previous page">←</button>
+            <span id="mapBrowserPageLabel" class="map-browser-page-label"></span>
+            <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserNext" aria-label="Next page">→</button>
+          </div>
           <div id="mapBrowser" class="map-browser"></div>
         </section>
       </div>
@@ -1343,6 +1426,11 @@
         <div class="editor-save-dialog">
           <h3>Save to library</h3>
           <p class="editor-hint" style="margin:0 0 8px">Select a map to overwrite its data, or enter a new name. Saved in this browser only.</p>
+          <div class="editor-save-pager" id="editorSavePager" hidden>
+            <button type="button" class="editor-btn map-browser-page-btn" id="editorSavePagePrev" aria-label="Previous page">←</button>
+            <span id="editorSavePageLabel" class="map-browser-page-label"></span>
+            <button type="button" class="editor-btn map-browser-page-btn" id="editorSavePageNext" aria-label="Next page">→</button>
+          </div>
           <div id="editorSaveList" class="editor-save-list"></div>
           <div class="editor-save-new-row">
             <input type="text" id="editorSaveNewName" placeholder="New map name" maxlength="96" />
@@ -1393,6 +1481,8 @@
     rebuildOwnerSelect();
 
     wireFactionEconomyPanel(app);
+
+    wireMapBrowserPager();
 
     const brushEl = app.querySelector("#editorBrushSize");
     if (brushEl) {
@@ -2481,14 +2571,36 @@
   function renderMapBrowser() {
     const browser = document.getElementById("mapBrowser");
     if (!browser) return;
+    const pager = document.getElementById("mapBrowserPager");
+    const pageLabel = document.getElementById("mapBrowserPageLabel");
+    const prevBtn = document.getElementById("mapBrowserPrev");
+    const nextBtn = document.getElementById("mapBrowserNext");
     const saved =
       typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
     browser.textContent = "";
     if (saved.length === 0) {
+      state.mapBrowserPage = 0;
+      if (pager) pager.hidden = true;
       browser.innerHTML = `<div class="editor-hint">No maps saved yet. Press <strong>Save to library…</strong> or open <strong>Browse library…</strong>.</div>`;
       return;
     }
-    for (const m of saved) {
+    const pag = savedMapsPagination(state.mapBrowserPage, saved.length);
+    state.mapBrowserPage = pag.page;
+    const pageItems = saved.slice(pag.start, pag.end);
+    if (pager) {
+      pager.hidden = pag.totalPages <= 1;
+      if (pageLabel) pageLabel.textContent = `Page ${pag.page + 1} / ${pag.totalPages} (${saved.length} saves)`;
+      if (prevBtn) {
+        prevBtn.disabled = pag.page <= 0;
+        prevBtn.toggleAttribute("disabled", pag.page <= 0);
+      }
+      if (nextBtn) {
+        const last = pag.page >= pag.totalPages - 1;
+        nextBtn.disabled = last;
+        nextBtn.toggleAttribute("disabled", last);
+      }
+    }
+    for (const m of pageItems) {
       const card = document.createElement("div");
       card.className = "map-card";
       card.dataset.mapId = m.id || "";
@@ -2539,6 +2651,10 @@
         const id = card.dataset.mapId;
         if (!id || !confirm("Delete this map from your library?")) return;
         if (typeof window.wodDeleteSavedMapById === "function") window.wodDeleteSavedMapById(id);
+        const after =
+          typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
+        const newPag = savedMapsPagination(state.mapBrowserPage, after.length);
+        state.mapBrowserPage = newPag.page;
         renderMapBrowser();
       });
 
