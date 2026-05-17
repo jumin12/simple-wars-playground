@@ -1193,6 +1193,39 @@
             max-width: 100%;
             line-height: 1.35;
             box-sizing: border-box;
+            display: inline-flex;
+            flex-direction: column;
+            align-items: stretch;
+            gap: 4px;
+        }
+
+        .effect-pill:not(.effect-pill--block) {
+            align-items: center;
+        }
+
+        .effect-pill-label {
+            font-weight: 600;
+        }
+
+        .effect-pill-stat {
+            font-size: 11px;
+            line-height: 1.38;
+            font-variant-numeric: tabular-nums;
+            opacity: 0.9;
+            color: rgba(189, 195, 199, 0.98);
+        }
+
+        .effect-pill:not(.effect-pill--block) .effect-pill-stat {
+            text-align: center;
+        }
+
+        .effect-pill:not(.effect-pill--block) .effect-pill-label {
+            text-align: center;
+        }
+
+        .effect-pill:not(.effect-pill--block):has(.effect-pill-stat) {
+            flex-direction: column;
+            align-items: stretch;
         }
 
         .effect-pill--block {
@@ -1207,9 +1240,12 @@
             color: #fdecea;
         }
 
-        .effect-pill--terrain {
-            border-color: rgba(174, 214, 241, 0.45);
-            background: rgba(52, 152, 219, 0.12);
+        .effect-pill--warn .effect-pill-stat {
+            color: rgba(253, 236, 234, 0.92);
+        }
+
+        .effect-pill--terrain .effect-pill-stat {
+            color: rgba(213, 232, 245, 0.95);
         }
 
         .info-mobile-orders {
@@ -11889,9 +11925,11 @@
         function getTerrainTileEffect(hex) {
             if(!hex) return null;
             let nm = terrainLabel(hex.type);
+            let cap = hex.owner >= 1 ? 'Hex owner: side ' + hex.owner + ' tiles' : (isWaterHex(hex) ? 'Naval/passable water tile' : 'Unclaimed or neutral-controlled ground');
             return {
                 label: nm,
                 detail: 'Terrain type of the tile under this unit.',
+                stats: cap,
                 terrain: true
             };
         }
@@ -11912,6 +11950,7 @@
             return {
                 label: 'Combat in this terrain',
                 detail: atkLine + ' ' + defLine,
+                stats: `Outgoing attacks ${atkPct}% of baseline · Damage you take ${defPct}% of each hit`,
                 block: true
             };
         }
@@ -11922,9 +11961,11 @@
             let m = wodFortDefenseDamageMultiplier(unit);
             if(m >= 0.995) return null;
             let pct = Math.round(m * 100);
+            let bonusPct = Math.max(1, Math.round((1 / m - 1) * 100));
             return {
                 label: 'Fortified',
-                detail: 'A friendly fort combat aura covers this stack. Incoming damage from attacks resolves at about ' + pct + '% of normal (about +' + Math.max(1, Math.round((1 / m - 1) * 100)) + '% effective defense). Hostile fort auras slow enemy march speed; your own does not slow you.',
+                detail: 'A friendly fort combat aura covers this stack. Incoming damage from attacks resolves at about ' + pct + '% of normal (about +' + bonusPct + '% effective defense). Hostile fort auras slow enemy march speed; your own does not slow you.',
+                stats: `Damage taken ×${pct}% (${bonusPct}% less than open ground)`,
                 block: true
             };
         }
@@ -11943,6 +11984,7 @@
                     effects.push({
                         label: 'Encircled',
                         detail: 'This hex is cut off behind enemy lines. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
+                        stats: 'Attrition −3.5% max HP/s · No healing/regen while pocket closed',
                         block: true,
                         warn: true
                     });
@@ -11951,6 +11993,7 @@
                     effects.push({
                         label: 'Deep water hazard',
                         detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
+                        stats: 'HP drain −2% max HP/s · March slow stacks with morale (see March speed line)',
                         block: true,
                         warn: true
                     });
@@ -11961,6 +12004,7 @@
                 if(spdKind !== 'neutral') {
                     effects.push({
                         label: `March speed ${spdPct}%`,
+                        stats: `Orders march at ×${spdPct}% of full baseline (morale · water · fort zone)`,
                         detail: spdKind === 'buff' ? 'Morale and tile effects are helping movement.' : 'Morale penalty, shallow water/rough ground, or an enemy fort zone is slowing orders.'
                     });
                 }
@@ -11968,29 +12012,58 @@
                 let tileC = getTerrainTileEffect(hex);
                 if(tileC) effects.push(tileC);
             }
-            if(unit.healingFlash && unit.healingFlash > 0) effects.push({label: '+ Healing', detail: 'Recovering in friendly territory'});
-            if(unit.amphibInWater) effects.push({label: '∿ Amphibious (water)', detail: 'Marines: no drowning damage while embarked in deep water'});
+            if(unit.healingFlash && unit.healingFlash > 0) effects.push({
+                label: '+ Healing',
+                stats: '~+3.5% max HP/s · Manpower tick +18/s · Morale climbs when uncontested',
+                detail: 'Recovering in friendly territory'
+            });
+            if(unit.amphibInWater) effects.push({
+                label: '∿ Amphibious (water)',
+                stats: 'No drowning damage · Amphib march ×62% baseline in water tile',
+                detail: 'Marines: no drowning damage while embarked in deep water'
+            });
             else if(hex && unit.type === 'convoy' && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
                 effects.push({
                     label: 'Deep water hazard',
                     detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
+                    stats: '−2% max HP/s · Severe march penalty in water tile',
                     block: true,
                     warn: true
                 });
             }
-            if(unit.unpaidFlash && unit.unpaidFlash > 0) effects.push({label: '$ Unpaid', detail: 'No money for upkeep'});
+            if(unit.unpaidFlash && unit.unpaidFlash > 0) effects.push({
+                label: '$ Unpaid',
+                stats: 'Treasury empty −2.5% max HP/s upkeep strike',
+                detail: 'No money for upkeep'
+            });
             if(unit.retreating) effects.push({label: 'Retreating', detail: 'Falling back to safety'});
             if(unit.holding) effects.push({label: 'Holding', detail: 'Waiting for support'});
             if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && ((unit.shake || 0) > 0 || (unit.activeCombatVisual || 0) > 0.04))
-                effects.push({label: 'Fighting', detail: 'Engaged — firing while advancing or retreating'});
+                effects.push({
+                    label: 'Fighting',
+                    stats: 'Active combat stance · Applies terrain/armor morale effects above while firing',
+                    detail: 'Engaged — firing while advancing or retreating'
+                });
             if(unit.type !== 'convoy') {
                 let mp = Math.round(unit.morale != null ? unit.morale : WOD_MORALE_MAX);
                 if(unit.moraleBroken)
-                    effects.push({label: 'Routed', detail: 'Fleeing — cannot fight until morale recovers while healing in safety'});
+                    effects.push({
+                        label: 'Routed',
+                        stats: 'Cannot attack until rallied · Recover while healing off contact',
+                        detail: 'Fleeing — cannot fight until morale recovers while healing in safety'
+                    });
                 else if(mp < 40)
-                    effects.push({label: 'Broken spirits', detail: 'Morale very low — attacks are weak'});
+                    effects.push({
+                        label: 'Broken spirits',
+                        stats: '~Severely reduced outbound damage via morale linkage',
+                        detail: 'Morale very low — attacks are weak'
+                    });
                 else if(mp < 68)
-                    effects.push({label: 'Shaken', detail: 'Below peak morale — reduced combat power'});
+                    effects.push({
+                        label: 'Shaken',
+                        stats: '~Below-peak morale throttles effective attack output',
+                        detail: 'Below peak morale — reduced combat power'
+                    });
             }
             return effects;
         }
@@ -18761,7 +18834,7 @@
             ctx.lineCap = 'round';
             ctx.fillStyle = '#f1c40f';
             ctx.strokeStyle = '#050505';
-            ctx.lineWidth = Math.max(2, size * 0.16);
+            ctx.lineWidth = Math.max(1.25, size * 0.16);
             let pts = 16;
             ctx.beginPath();
             for(let i = 0; i < pts; i++) {
@@ -18848,6 +18921,22 @@
             };
         }
 
+        function wodEscapeEffectInner(s) {
+            return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function wodFmtInfoEffectMarkup(effect) {
+            let cls = 'effect-pill';
+            if(effect.block) cls += ' effect-pill--block';
+            if(effect.warn) cls += ' effect-pill--warn';
+            if(effect.terrain) cls += ' effect-pill--terrain';
+            let title = (effect.detail || '').replace(/"/g, '&quot;').replace(/&/g, '&amp;');
+            let inner = effect.stats
+                ? '<span class="effect-pill-label">' + wodEscapeEffectInner(effect.label) + '</span><span class="effect-pill-stat">' + wodEscapeEffectInner(effect.stats) + '</span>'
+                : wodEscapeEffectInner(effect.label);
+            return '<span class="' + cls + '" title="' + title + '">' + inner + '</span>';
+        }
+
         function syncInfoCardPanel() {
             let els = getInfoCardDom();
             if(!els.card) return;
@@ -18918,9 +19007,7 @@
                     }
                     let effects = getUnitEffects(sel);
                     els.effects.innerHTML = effects.length
-                        ? effects.map(effect =>
-                            `<span class="effect-pill${effect.block ? ' effect-pill--block' : ''}${effect.warn ? ' effect-pill--warn' : ''}${effect.terrain ? ' effect-pill--terrain' : ''}" title="${(effect.detail || '').replace(/"/g, '&quot;')}">${effect.label}</span>`
-                        ).join('')
+                        ? effects.map(wodFmtInfoEffectMarkup).join('')
                         : '<span class="effect-pill effect-pill--block">No active effects listed for this hex.</span>';
                 }
                 if(els.rename) {
@@ -18967,6 +19054,10 @@
                     sig += '|h:' + (hx ? `${hx.q},${hx.r},${hx.type}` : 'none') + '|w:' + (s.inWater ? 1 : 0) + '|a:' + (s.amphibInWater ? 1 : 0);
                     sig += '|f:' + (wodFortDefenseDamageMultiplier(s) < 1 ? '1' : '0')
                         + '|e:' + ((hx && gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hx))) ? '1' : '0');
+                    if(hx && s.type !== 'convoy') {
+                        sig += '|td:' + Math.round(getTerrainAttackModifier(s, hx) * 100) + ':' + Math.round(getTerrainDefenseModifier(s, hx) * 100);
+                        sig += '|spd:' + Math.round(getUnitSpeedMultiplier(s) * 100);
+                    }
                 }
             } else sig = 'n|' + sel.length;
             if(sig === _infoCardUiThrottle.s && now - _infoCardUiThrottle.t < (wodUsesVisualViewportLayout() ? 165 : 95)) return;
@@ -20618,10 +20709,10 @@
             if((unit.waterFlash || 0) > 0) kinds.push('water');
             let hasAny = combatBurstOn || kinds.length > 0;
             if(!hasAny) return;
-            let glyphR = gfxLite ? 5.38 : 6.62;
-            let gap = gfxLite ? 2.05 : 2.52;
-            let rowY = -ur - (gfxLite ? 16 : 18.5);
-            let burstSz = gfxLite ? 6.76 : 7.82;
+            let glyphR = gfxLite ? 3.59 : 4.41;
+            let gap = gfxLite ? 1.37 : 1.68;
+            let rowY = -ur - (gfxLite ? 11 : 12.75);
+            let burstSz = gfxLite ? 4.51 : 5.21;
             let burstSlotW = burstSz * 1.64;
             let slots = [];
             if(combatBurstOn) slots.push({ k: 'combat', w: burstSlotW });
