@@ -10,6 +10,8 @@
     dragKind: null,
     renderView: null,
     territoryPainting: false,
+    territoryPaintOwner: 1,
+    brushSize: 1,
     viewPanX: 0,
     viewPanY: 0,
     viewZoom: 1,
@@ -66,6 +68,57 @@
       rebuildUnitPalette();
       scheduleEditorRender();
     };
+    rebuildTerritoryOwnerSelect();
+  }
+
+  function rebuildTerritoryOwnerSelect() {
+    const sel = document.getElementById("editorTerritoryOwner");
+    if (!sel) return;
+    sel.innerHTML = `<option value="0">Neutral</option>` + Array.from({ length: state.maxFactionSlots }, (_, i) => {
+      const id = i + 1;
+      return `<option value="${id}">Faction ${id}</option>`;
+    }).join("");
+    const cap = state.maxFactionSlots;
+    let v = state.territoryPaintOwner;
+    if (v > cap) v = cap;
+    if (v < 0) v = 0;
+    sel.value = String(v);
+    state.territoryPaintOwner = parseInt(sel.value, 10);
+    sel.onchange = () => {
+      state.territoryPaintOwner = parseInt(sel.value, 10);
+    };
+    syncTerritoryOwnerUi();
+  }
+
+  function syncTerritoryOwnerUi() {
+    const sel = document.getElementById("editorTerritoryOwner");
+    if (!sel) return;
+    const show = state.tool === "territory";
+    sel.style.display = show ? "block" : "none";
+    sel.toggleAttribute("hidden", !show);
+    sel.setAttribute("aria-hidden", show ? "false" : "true");
+  }
+
+  function hexesForBrush(centerHex) {
+    if (!centerHex || !WOD.gameData.hexes) return [];
+    const ring = Math.max(0, (state.brushSize | 0) - 1);
+    const out = [];
+    for (const pt of WOD.getHexesInRadius(centerHex.q, centerHex.r, ring)) {
+      const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
+      if (h) out.push(h);
+    }
+    return out.length ? out : [centerHex];
+  }
+
+  function paintUsesBrush(tool) {
+    return tool === "paint" || tool === "erase" || tool === "territory";
+  }
+
+  function syncBrushSizeLabel() {
+    const lab = document.getElementById("editorBrushSizeVal");
+    const n = Math.max(1, Math.min(12, state.brushSize | 0));
+    if (!lab) return;
+    lab.textContent = n <= 1 ? "Single hex" : `Hex radius ${n - 1}`;
   }
 
   function refreshEditorGameplayLayerButtons() {
@@ -312,8 +365,55 @@
       }
       .editor-btn:hover { filter:brightness(1.07);border-color:rgba(231,227,173,.85); }
       .editor-btn.active { background:linear-gradient(180deg,#1f7a4a,#26975a);border-color:#4be396;color:#061208;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12); }
-      .editor-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-      .editor-grid-4 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      .editor-tools-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .editor-territory-inline {
+        grid-column: 1 / -1;
+        display: flex;
+        gap: 8px;
+        align-items: stretch;
+      }
+      .editor-territory-inline > .editor-btn { flex: 1; min-width: 0; }
+      .editor-territory-owner-select {
+        flex: 0 0 min(148px, 42%);
+        max-width: 48%;
+        background: #1a3348;
+        color: #fff;
+        border: 1px solid rgba(139,173,192,.55);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .editor-brush-val {
+        flex: 0 0 auto;
+        font-size: 12px;
+        color: #9db3c7;
+        font-weight: 700;
+        min-width: 92px;
+        text-align: right;
+      }
+      .editor-grid-2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .editor-brush-inner {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .editor-brush-row input[type="range"] {
+        flex: 1;
+        min-width: 0;
+        accent-color: #4be396;
+      }
       .palette-grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; }
       .palette-btn { text-align:left;font-size:11px;display:flex;align-items:center;gap:8px;padding:10px;}
       #editorCanvasWrap { position:relative; overflow:hidden; background:#154360;display:flex;
@@ -377,8 +477,8 @@
     app.innerHTML = `
       <header class="editor-toolbar">
         <h1>Map editor</h1>
-        <p class="editor-toolbar-hint editor-toolbar-hint-desktop">Paint terrain and ownership, place towns and units. <strong>Left-drag</strong> on the canvas to paint or move the selection. <strong>Mouse wheel</strong> zooms. <strong>Middle-click drag</strong> pans the view. Drag unit chips from the palette onto the map (ships need water).</p>
-        <p class="editor-toolbar-hint editor-toolbar-hint-touch">Paint terrain and ownership, place towns and units. Drag unit chips onto the map — ships need water. Use <strong>Select / move</strong> to reposition. <strong>Two fingers</strong> on the canvas pan and pinch-zoom.</p>
+        <p class="editor-toolbar-hint editor-toolbar-hint-desktop">Paint terrain and ownership, place towns and units. <strong>Left-drag</strong> to paint; use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Mouse wheel</strong> zooms. <strong>Middle-click drag</strong> pans the view. Drag unit chips from the palette onto the map (ships need water).</p>
+        <p class="editor-toolbar-hint editor-toolbar-hint-touch">Paint terrain and ownership, place towns and units. Drag unit chips onto the map — ships need water. Use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Two fingers</strong> on the canvas pan and pinch-zoom.</p>
         <button type="button" class="editor-btn editor-btn-main" id="editorExitBtn">← Main menu</button>
       </header>
       <div class="editor-gen-wrap">
@@ -420,14 +520,25 @@
           <div class="editor-row"><label>Brush type</label><select id="editorTerrain"></select></div>
           <div id="editorPalette" class="palette-grid"></div>
           <p class="editor-hint">Quick-pick swatches set the brush and switch to Paint terrain.</p>
+          <div class="editor-row editor-brush-row">
+            <label for="editorBrushSize">Brush size</label>
+            <div class="editor-brush-inner">
+              <input type="range" id="editorBrushSize" min="1" max="12" value="1" />
+              <span id="editorBrushSizeVal" class="editor-brush-val">Single hex</span>
+            </div>
+          </div>
         </section>
         <section class="editor-card">
           <h3>Tools</h3>
-          <div class="editor-grid-4">
+          <div class="editor-tools-grid">
             <button type="button" class="editor-btn active" data-tool="paint">Paint terrain</button>
-            <button type="button" class="editor-btn" data-tool="select">Select / move</button>
-            <button type="button" class="editor-btn" data-tool="territory">Paint territory</button>
+            <button type="button" class="editor-btn" data-tool="select">Select</button>
+            <button type="button" class="editor-btn" data-tool="move">Move</button>
             <button type="button" class="editor-btn" data-tool="city">Place town</button>
+            <div class="editor-territory-inline">
+              <button type="button" class="editor-btn" data-tool="territory">Paint territory</button>
+              <select id="editorTerritoryOwner" class="editor-territory-owner-select" aria-label="Faction for territory paint" hidden></select>
+            </div>
             <button type="button" class="editor-btn" data-tool="unit">Click unit</button>
             <button type="button" class="editor-btn" data-tool="factory">Add factory</button>
             <button type="button" class="editor-btn" data-tool="harbor">Add harbor</button>
@@ -438,7 +549,7 @@
           <h3>Faction &amp; units</h3>
           <div class="editor-row"><label>Active faction</label><select id="editorOwner"><option value="1">Faction 1</option></select></div>
           <button type="button" class="editor-btn" id="editorAddFaction" style="width:100%;margin-top:4px">+ Add AI faction slot</button>
-          <p class="editor-hint">Territory paint, towns, and “Click unit” use this owner. Drag chips below — owner matches the dropdown.</p>
+          <p class="editor-hint">Towns and “Click unit” use this faction. Territory paint uses the player dropdown beside <strong>Paint territory</strong>. Drag chips below — owner matches Active faction.</p>
           <div id="editorUnitPalette" class="editor-unit-palette"></div>
         </section>
         <section class="editor-card">
@@ -471,7 +582,7 @@
       <div class="editor-panel editor-right">
         <section class="editor-card">
           <h3>Selection</h3>
-          <div id="editorSelection" class="editor-hint" style="margin:0">Nothing selected. Use Select / move and click a unit or town.</div>
+          <div id="editorSelection" class="editor-hint" style="margin:0">Nothing selected. Choose <strong>Select</strong>, click a unit or town, then switch to <strong>Move</strong> and drag on the map.</div>
         </section>
       </div>
     `;
@@ -486,6 +597,7 @@
       btn.addEventListener("click", () => {
         state.tool = btn.dataset.tool;
         app.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("active", b === btn));
+        syncTerritoryOwnerUi();
       });
     });
     app.querySelector("#editorTerrain").addEventListener("change", e => { state.terrain = e.target.value; });
@@ -495,6 +607,7 @@
         terrainSelect.value = state.terrain;
         state.tool = "paint";
         app.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("active", b.dataset.tool === "paint"));
+        syncTerritoryOwnerUi();
       });
     });
     app.querySelectorAll("[data-gl]").forEach(btn => {
@@ -508,6 +621,15 @@
     });
 
     rebuildOwnerSelect();
+
+    const brushEl = document.getElementById("editorBrushSize");
+    if (brushEl) {
+      brushEl.addEventListener("input", () => {
+        state.brushSize = parseInt(brushEl.value, 10) || 1;
+        syncBrushSizeLabel();
+      });
+    }
+    syncBrushSizeLabel();
 
     document.getElementById("editorAddFaction").addEventListener("click", () => {
       if (state.maxFactionSlots < editorMaxPlayerSlots()) {
@@ -608,6 +730,12 @@
     state.genCities = true;
     state.genTerritory = true;
     state.genUnits = true;
+    state.territoryPaintOwner = state.owner;
+    state.brushSize = 1;
+    const brushReset = document.getElementById("editorBrushSize");
+    if (brushReset) brushReset.value = "1";
+    syncBrushSizeLabel();
+    syncTerritoryOwnerUi();
     const genApp = document.getElementById("mapEditorApp");
     if (genApp) {
       genApp.querySelectorAll("[data-ed-shape]").forEach(b => b.classList.toggle("active", b.dataset.edShape === "island"));
@@ -846,23 +974,29 @@
     const hex = nearestHex(pos);
     if (!hex) return;
 
+    const brushTargets = paintUsesBrush(state.tool) ? hexesForBrush(hex) : [hex];
+
     if (state.tool === "territory") {
-      let own = Math.max(0, Math.min(state.owner, state.maxFactionSlots));
-      WOD.setHexOwner(hex, own);
+      const own = Math.max(0, Math.min(state.territoryPaintOwner | 0, state.maxFactionSlots));
+      for (const h of brushTargets) WOD.setHexOwner(h, own);
       markEditorMapChanged();
       return;
     }
     if (state.tool === "paint") {
-      hex.type = state.terrain;
-      hex.baseColor = WOD.getTerrainColor(hex.type);
-      if (hex.type === "urban") attachUrbanHex(hex);
+      for (const h of brushTargets) {
+        h.type = state.terrain;
+        h.baseColor = WOD.getTerrainColor(h.type);
+        if (h.type === "urban") attachUrbanHex(h);
+      }
       markEditorMapChanged();
       return;
     }
     if (state.tool === "erase") {
-      hex.type = "grass";
-      hex.baseColor = WOD.getTerrainColor("grass");
-      hex.cityId = null;
+      for (const h of brushTargets) {
+        h.type = "grass";
+        h.baseColor = WOD.getTerrainColor("grass");
+        h.cityId = null;
+      }
       markEditorMapChanged();
       return;
     }
@@ -937,7 +1071,7 @@
       state.territoryPainting = true;
       WOD.beginHexOwnerBatch();
     }
-    if (state.tool === "select") {
+    if (state.tool === "select" || state.tool === "move") {
       const city = nearestCity(pos);
       const unit = nearestUnit(pos);
       if (city) { state.selected = { type: "city", value: city }; state.dragKind = "city"; }
@@ -967,7 +1101,7 @@
       return;
     }
     const pos = editorWorldPos(event);
-    if (state.tool === "select" && state.selected) {
+    if (state.tool === "move" && state.selected) {
       const hex = nearestHex(pos);
       if (!hex) return;
       const obj = state.selected.value;
@@ -983,7 +1117,7 @@
         }
       }
       markEditorMapChanged();
-    } else {
+    } else if (state.tool !== "select") {
       paintAt(pos);
     }
     scheduleEditorRender();
@@ -1084,7 +1218,7 @@
     if (!panel) return;
     const ownMax = editorMaxPlayerSlots();
     if (!state.selected) {
-      panel.innerHTML = "Nothing selected.";
+      panel.innerHTML = "Nothing selected. Use <strong>Select</strong> to pick a town or unit, then <strong>Move</strong> to drag it.";
       panel.classList.add("editor-hint");
       return;
     }
