@@ -78,6 +78,8 @@
     state.editorMarquee = null;
     state.cityMoveAttachedHexRefs = null;
     state.cityMoveGhostAnchor = null;
+    renderSelection();
+    scheduleEditorRender();
     renderMapBrowser();
   }
 
@@ -151,122 +153,93 @@
       : 4;
   }
 
+  /** Grow faction slot count when map data references higher owner ids (territory, towns, units). */
+  function syncMaxFactionSlotsFromGameData() {
+    if (!window.WOD || !WOD.gameData) return;
+    const cap = editorMaxPlayerSlots();
+    let mx = 0;
+    const bump = (o) => {
+      const n = typeof o === "number" && Number.isFinite(o) ? Math.floor(o) : parseInt(o, 10);
+      if (!Number.isFinite(n) || n <= 0) return;
+      if (n > mx) mx = n;
+    };
+    for (const h of WOD.gameData.hexList || []) bump(h && h.owner);
+    for (const c of WOD.gameData.cities || []) bump(c && c.owner);
+    for (const u of WOD.gameData.entities || []) bump(u && u.owner);
+    state.maxFactionSlots = Math.min(cap, Math.max(2, mx));
+  }
+
   function factionPalette() {
     return window.WOD && WOD.factionColors ? WOD.factionColors : ["#000000", "#2ecc71", "#e74c3c", "#9b59b6", "#e67e22", "#3498db", "#f1c40f"];
   }
 
-  /** Highest faction index used on the map + minimum 2 slots, capped at lobby size. */
-  function inferMaxFactionSlotsFromLoadedMapData() {
-    if (!window.WOD || !WOD.gameData) return 2;
-    const lobbyCap = editorMaxPlayerSlots();
-    let m = 0;
-    const bump = (o) => {
-      let n = typeof o === "number" ? o : parseInt(String(o), 10);
-      if (!Number.isFinite(n) || n < 0) n = 0;
-      if (n > m) m = n | 0;
-    };
-    for (const h of WOD.gameData.hexList || []) bump(h.owner);
-    for (const c of WOD.gameData.cities || []) bump(c.owner);
-    for (const u of WOD.gameData.entities || []) bump(u.owner);
-    const forts = WOD.gameData.forts || [];
-    for (const f of forts) bump(f.owner);
-    if (m <= 0) return 2;
-    return Math.min(lobbyCap, Math.max(2, m));
+  function factionSwatchBg(ownerVal) {
+    const v = parseInt(ownerVal, 10);
+    const n = Number.isFinite(v) ? v : 0;
+    return n <= 0 ? "#5c6f82" : factionPalette()[n] || "#cccccc";
   }
 
-  function syncEditorMaxFactionSlotsFromMap() {
-    state.maxFactionSlots = inferMaxFactionSlotsFromLoadedMapData();
-    if ((state.owner | 0) > state.maxFactionSlots) state.owner = state.maxFactionSlots;
-    if ((state.territoryPaintOwner | 0) > state.maxFactionSlots) state.territoryPaintOwner = state.maxFactionSlots;
+  function syncEditorOwnerSwatch() {
+    const sel = document.getElementById("editorOwner");
+    const sw = document.getElementById("editorOwnerSwatch");
+    if (!sw) return;
+    const v = sel ? parseInt(sel.value, 10) : state.owner;
+    sw.style.background = factionSwatchBg(Number.isFinite(v) ? v : 0);
   }
 
-  /** After WOD.loadMapData while the editor is open: refresh faction slot count and UI. */
-  function wodEditorAfterLoadMapData() {
-    if (!state.open) return;
-    syncEditorMaxFactionSlotsFromMap();
-    rebuildOwnerSelect();
-    rebuildUnitPalette();
-    renderSelection();
-    scheduleEditorRender();
-  }
-  window.wodEditorAfterLoadMapData = wodEditorAfterLoadMapData;
-
-  function styledFactionSlotOptionsHtml(selectedValue, neutralLabel, slotLabel) {
-    const cols = factionPalette();
-    const cap = state.maxFactionSlots;
-    let cur = parseInt(selectedValue, 10);
-    if (!Number.isFinite(cur)) cur = 0;
-    cur = Math.max(0, Math.min(cur, cap));
-    let html = `<option value="0" style="background:#5c6f82;color:#fff;font-weight:700"${cur === 0 ? " selected" : ""}>${neutralLabel}</option>`;
-    for (let i = 1; i <= cap; i++) {
-      const col = cols[i] || "#cccccc";
-      const label = typeof slotLabel === "function" ? slotLabel(i) : `Faction ${i}`;
-      html += `<option value="${i}" style="background:${col};color:#061208;font-weight:700"${cur === i ? " selected" : ""}>${label}</option>`;
-    }
-    return html;
-  }
-
-  function applyFactionSelectClosedLook(selEl, mirrorSwatchEl) {
-    if (!selEl) return;
-    const v = parseInt(selEl.value, 10) || 0;
-    const cols = factionPalette();
-    const bg = v <= 0 ? "#5c6f82" : cols[v] || "#cccccc";
-    const fg = v <= 0 ? "#ffffff" : "#061208";
-    selEl.style.backgroundColor = bg;
-    selEl.style.color = fg;
-    selEl.style.fontWeight = "700";
-    if (mirrorSwatchEl) mirrorSwatchEl.style.background = bg;
+  function syncTerritoryOwnerSwatch() {
+    const sel = document.getElementById("editorTerritoryOwner");
+    const sw = document.getElementById("editorTerritoryOwnerSwatch");
+    if (!sw) return;
+    const v = sel ? parseInt(sel.value, 10) : state.territoryPaintOwner;
+    sw.style.background = factionSwatchBg(Number.isFinite(v) ? v : 0);
   }
 
   function rebuildOwnerSelect() {
     const sel = document.getElementById("editorOwner");
     if (!sel) return;
-    sel.innerHTML = styledFactionSlotOptionsHtml(state.owner, "Neutral (clear)", (id) => `Faction slot ${id}`);
     if (state.owner > state.maxFactionSlots) state.owner = state.maxFactionSlots;
-    sel.value = String(Math.max(0, Math.min(state.owner, state.maxFactionSlots)));
+    const cur = Math.max(0, Math.min(state.owner, state.maxFactionSlots));
+    state.owner = cur;
+    sel.innerHTML = factionOwnerSelectHtml(cur, { neutralLabel: "Neutral (clear)", factionOptionLabel: (i) => `Faction slot ${i}` });
+    sel.value = String(cur);
     state.owner = parseInt(sel.value, 10);
     sel.onchange = () => {
       state.owner = parseInt(sel.value, 10);
-      applyFactionSelectClosedLook(sel, document.getElementById("editorOwnerSwatch"));
+      syncEditorOwnerSwatch();
       rebuildUnitPalette();
       scheduleEditorRender();
     };
-    applyFactionSelectClosedLook(sel, document.getElementById("editorOwnerSwatch"));
+    syncEditorOwnerSwatch();
     rebuildTerritoryOwnerSelect();
   }
 
   function rebuildTerritoryOwnerSelect() {
     const sel = document.getElementById("editorTerritoryOwner");
     if (!sel) return;
-    sel.innerHTML = styledFactionSlotOptionsHtml(state.territoryPaintOwner, "Neutral", (id) => `Faction ${id}`);
     const cap = state.maxFactionSlots;
     let v = state.territoryPaintOwner;
     if (v > cap) v = cap;
     if (v < 0) v = 0;
+    state.territoryPaintOwner = v;
+    sel.innerHTML = factionOwnerSelectHtml(v, { neutralLabel: "Neutral" });
     sel.value = String(v);
     state.territoryPaintOwner = parseInt(sel.value, 10);
     sel.onchange = () => {
       state.territoryPaintOwner = parseInt(sel.value, 10);
-      applyFactionSelectClosedLook(sel, document.getElementById("editorTerritoryOwnerSwatch"));
+      syncTerritoryOwnerSwatch();
     };
-    applyFactionSelectClosedLook(sel, document.getElementById("editorTerritoryOwnerSwatch"));
+    syncTerritoryOwnerSwatch();
     syncTerritoryOwnerUi();
   }
 
   function syncTerritoryOwnerUi() {
-    const sel = document.getElementById("editorTerritoryOwner");
-    const sw = document.getElementById("editorTerritoryOwnerSwatch");
-    if (!sel) return;
+    const wrap = document.getElementById("editorTerritoryOwnerWrap");
+    if (!wrap) return;
     const show = state.tool === "territory";
-    sel.style.display = show ? "block" : "none";
-    sel.toggleAttribute("hidden", !show);
-    sel.setAttribute("aria-hidden", show ? "false" : "true");
-    if (sw) {
-      sw.style.display = show ? "inline-block" : "none";
-      sw.style.visibility = show ? "" : "hidden";
-      sw.toggleAttribute("hidden", !show);
-      sw.setAttribute("aria-hidden", show ? "false" : "true");
-    }
+    wrap.style.display = show ? "flex" : "none";
+    wrap.toggleAttribute("hidden", !show);
+    wrap.setAttribute("aria-hidden", show ? "false" : "true");
   }
 
   function hexesForBrush(centerHex) {
@@ -320,16 +293,35 @@
     refreshEditorGameplayLayerButtons();
   }
 
-  function factionOwnerSelectHtml(selectedOwner) {
-    return styledFactionSlotOptionsHtml(selectedOwner, "Neutral", (i) => `Faction ${i}`);
+  function factionOwnerSelectHtml(selectedOwner, opt) {
+    const cols = factionPalette();
+    const cap = state.maxFactionSlots;
+    const neutralLabel = opt && typeof opt.neutralLabel === "string" ? opt.neutralLabel : "Neutral";
+    const factionLabel =
+      typeof (opt && opt.factionOptionLabel) === "function"
+        ? opt.factionOptionLabel
+        : (i) => `Faction ${i}`;
+    let cur = parseInt(selectedOwner, 10);
+    if (!Number.isFinite(cur)) cur = 0;
+    cur = Math.max(0, Math.min(cur, cap));
+    let html = `<option value="0" style="background:#5c6f82;color:#fff;font-weight:700"${cur === 0 ? " selected" : ""}>${neutralLabel}</option>`;
+    for (let i = 1; i <= cap; i++) {
+      const col = cols[i] || "#cccccc";
+      const label = String(factionLabel(i));
+      html += `<option value="${i}" style="background:${col};color:#061208;font-weight:700"${cur === i ? " selected" : ""}>${label}</option>`;
+    }
+    return html;
   }
 
   function wireSelectionFactionControls() {
     const fos = document.getElementById("selOwnerFaction");
     const sw = document.getElementById("selOwnerFactionSwatch");
     if (!fos || !sw) return;
-    const syncSwatch = () => applyFactionSelectClosedLook(fos, sw);
-    fos.onchange = syncSwatch;
+    const syncSwatch = () => {
+      const v = parseInt(fos.value, 10) || 0;
+      sw.style.background = factionSwatchBg(v);
+    };
+    fos.addEventListener("change", syncSwatch);
     syncSwatch();
   }
 
@@ -795,6 +787,21 @@
       .editor-row label { flex:0 0 42%; color:#cfdce8; font-size:13px;line-height:1.25 }
       .editor-row input,.editor-row select { flex:1; min-width:0; background:#1a3348; color:#fff;
         border:1px solid rgba(139,173,192,.55); border-radius:6px; padding:8px;font-size:13px;}
+      .editor-faction-owner-wrap {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .editor-faction-swatch {
+        flex: 0 0 28px;
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        border: 1px solid rgba(0,0,0,.28);
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+      }
       .editor-btn {
         background:linear-gradient(180deg,#273d54,#203446);color:#ecf4fa;border:1px solid rgba(155,174,188,.55);
         border-radius:8px;padding:10px 12px;cursor:pointer;font-weight:700;font-size:12px;text-align:center;
@@ -810,13 +817,19 @@
         grid-column: 1 / -1;
         display: flex;
         gap: 8px;
-        align-items: center;
+        align-items: stretch;
       }
       .editor-territory-inline > .editor-btn { flex: 1; min-width: 0; }
-      #editorTerritoryOwnerSwatch { flex-shrink: 0; }
-      .editor-territory-owner-select {
+      .editor-terr-owner-wrap {
         flex: 0 0 min(148px, 42%);
         max-width: 48%;
+        display: none;
+        align-items: center;
+        gap: 6px;
+      }
+      .editor-territory-owner-select {
+        flex: 1;
+        min-width: 0;
         background: #1a3348;
         color: #fff;
         border: 1px solid rgba(139,173,192,.55);
@@ -1043,8 +1056,10 @@
             <button type="button" class="editor-btn" data-tool="city">Place town</button>
             <div class="editor-territory-inline">
               <button type="button" class="editor-btn" data-tool="territory">Paint territory</button>
-              <span class="editor-swatch editor-territory-owner-swatch" id="editorTerritoryOwnerSwatch" title="Territory faction color" hidden aria-hidden="true"></span>
-              <select id="editorTerritoryOwner" class="editor-territory-owner-select" aria-label="Faction for territory paint" hidden></select>
+              <div class="editor-terr-owner-wrap" id="editorTerritoryOwnerWrap" hidden aria-hidden="true">
+                <span id="editorTerritoryOwnerSwatch" class="editor-faction-swatch" aria-hidden="true"></span>
+                <select id="editorTerritoryOwner" class="editor-territory-owner-select" aria-label="Faction for territory paint"></select>
+              </div>
             </div>
             <button type="button" class="editor-btn" data-tool="unit">Click unit</button>
             <button type="button" class="editor-btn" data-tool="factory">Add factory</button>
@@ -1054,11 +1069,10 @@
         </section>
         <section class="editor-card">
           <h3>Faction &amp; units</h3>
-          <div class="editor-row editor-active-faction-row">
-            <label>Active faction</label>
-            <div class="editor-faction-inline">
-              <span class="editor-swatch editor-owner-swatch" id="editorOwnerSwatch" title="Active faction color"></span>
-              <select id="editorOwner" class="editor-sel-faction editor-faction-select"></select>
+          <div class="editor-row"><label>Active faction</label>
+            <div class="editor-faction-owner-wrap">
+              <span id="editorOwnerSwatch" class="editor-faction-swatch" aria-hidden="true"></span>
+              <select id="editorOwner" class="editor-owner-select"></select>
             </div>
           </div>
           <button type="button" class="editor-btn" id="editorAddFaction" style="width:100%;margin-top:4px">+ Add AI faction slot</button>
@@ -1184,6 +1198,9 @@
     app.querySelector("#editorBlank").addEventListener("click", () => {
       WOD.makeBlankMap(parseInt(app.querySelector("#editorSize").value, 10));
       syncEditorTerritoryOverlayDefault();
+      syncMaxFactionSlotsFromGameData();
+      rebuildOwnerSelect();
+      rebuildUnitPalette();
       state.selected = null;
       state.viewPanX = 0;
       state.viewPanY = 0;
@@ -1209,10 +1226,10 @@
       } catch (e) {
         console.warn(e);
       }
-      syncEditorMaxFactionSlotsFromMap();
+      syncEditorTerritoryOverlayDefault();
+      syncMaxFactionSlotsFromGameData();
       rebuildOwnerSelect();
       rebuildUnitPalette();
-      syncEditorTerritoryOverlayDefault();
       state.selected = null;
       state.viewPanX = 0;
       state.viewPanY = 0;
@@ -1268,7 +1285,6 @@
     const app = document.getElementById("mapEditorApp");
     app.classList.add("visible");
     state.open = true;
-    state.maxFactionSlots = 2;
     state.owner = 1;
     state.viewPanX = 0;
     state.viewPanY = 0;
@@ -1308,6 +1324,7 @@
     }
     WOD.makeBlankMap(parseInt(document.getElementById("editorSize").value, 10));
     syncEditorTerritoryOverlayDefault();
+    syncMaxFactionSlotsFromGameData();
     state.selected = null;
     state.cityUnitStackTap = null;
     state.editorMarquee = null;
@@ -2302,6 +2319,9 @@
   window.wodNotifyEditorMapChanged = function () {
     if (!state.open) return;
     syncEditorTerritoryOverlayDefault();
+    syncMaxFactionSlotsFromGameData();
+    rebuildOwnerSelect();
+    rebuildUnitPalette();
     state.selected = null;
     state.cityUnitStackTap = null;
     state.editorMarquee = null;
@@ -2312,6 +2332,13 @@
     renderSelection();
     renderMapBrowser();
     editorInitHistory();
+  };
+
+  window.wodEditorAfterLoadMapData = function () {
+    if (!state.open) return;
+    syncMaxFactionSlotsFromGameData();
+    rebuildOwnerSelect();
+    rebuildUnitPalette();
   };
 
   window.openMapEditor = openMapEditor;
