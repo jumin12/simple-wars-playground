@@ -8567,6 +8567,8 @@
                 wrap.style.height = '';
             }
             resizeCanvas();
+            if(typeof gameState !== 'undefined' && gameState === 'MENU' && gameData.menuAttractMode && typeof menuDemoSeeded !== 'undefined' && menuDemoSeeded)
+                wodCenterCameraOnLandmassForMenu();
         }
         function wodApplyVisualViewport() {
             if(wodVvFrameQueued) return;
@@ -12377,9 +12379,25 @@
             }
             return { cx, cy, maxR };
         }
-        /** Round-robin wedges from centroid; same rotation as Political splitPhase; favors hexes nearer each wedge’s focal arc (fewer stray towns deep in hostile cores). */
-        function wodWedgeFocusedCityCandidateOrder(landHexes, wedgeCount, lcm, anglePhase) {
+        /** Round-robin wedges from centroid; same rotation as Political splitPhase; favors hexes nearer each wedge’s focal arc (fewer stray towns deep in hostile cores).
+         * On rectangle maps wedges alternate opposing half-planes and towns read as a straight chain — use radial outside-in ordering instead. */
+        function wodWedgeFocusedCityCandidateOrder(landHexes, wedgeCount, lcm, anglePhase, mapShape) {
             if(!landHexes || landHexes.length === 0) return [];
+            if(mapShape === 'rectangle') {
+                let cx = lcm.cx,
+                    cy = lcm.cy;
+                let scored = [];
+                for(let h of landHexes) {
+                    let dx = h.x - cx,
+                        dy = h.y - cy;
+                    scored.push({ h, d: dx * dx + dy * dy, jitter: Math.random() });
+                }
+                scored.sort((a, b) => {
+                    if(b.d !== a.d) return b.d - a.d;
+                    return a.jitter - b.jitter;
+                });
+                return scored.map(s => s.h);
+            }
             let w = Math.max(1, wedgeCount | 0);
             let cx = lcm.cx, cy = lcm.cy;
             let twoPi = Math.PI * 2;
@@ -13345,8 +13363,17 @@
                 let cent = wodFactionPoliticalCentroid(owner);
                 let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows);
                 pool.sort((a, b) => {
-                    let ca = Math.atan2(a.y - (cent ? cent.y : lcm.cy), a.x - (cent ? cent.x : lcm.cx));
-                    let cb = Math.atan2(b.y - (cent ? cent.y : lcm.cy), b.x - (cent ? cent.x : lcm.cx));
+                    let ax = cent ? cent.x : lcm.cx,
+                        ay = cent ? cent.y : lcm.cy;
+                    if(mapShape === 'rectangle') {
+                        let da = (a.x - ax) * (a.x - ax) + (a.y - ay) * (a.y - ay);
+                        let db = (b.x - ax) * (b.x - ax) + (b.y - ay) * (b.y - ay);
+                        if(db !== da) return db - da;
+                        if(a.q !== b.q) return a.q - b.q;
+                        return a.r - b.r;
+                    }
+                    let ca = Math.atan2(a.y - ay, a.x - ax);
+                    let cb = Math.atan2(b.y - ay, b.x - ax);
                     let caOff = ca + level * (0.18 + owner * 0.011),
                         cbOff = cb + level * (0.18 + owner * 0.011);
                     if(caOff !== cbOff) return caOff - cbOff;
@@ -14110,7 +14137,7 @@
 
                 let citySpacing = Math.max(hr * 17, Math.min(hr * 41, mapR * hr * 0.395));
                 let lcm = wodLandCentroidMaxRadius(landForCities);
-                let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase);
+                let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase, mapShape);
                 let cityPickCursor = 0;
                 let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
                 let innerRSq = innerRad * innerRad;
@@ -14532,6 +14559,46 @@
             gameData._landIncomeCacheDirty = true;
         }
 
+        function wodCenterCameraOnLandmassForMenu() {
+            if(!gameData.hexList || !canvas) return;
+            let minX = Infinity,
+                maxX = -Infinity,
+                minY = Infinity,
+                maxY = -Infinity;
+            let nw = 0;
+            for(let h of gameData.hexList) {
+                if(isWaterHex(h)) continue;
+                if(h.x < minX) minX = h.x;
+                if(h.x > maxX) maxX = h.x;
+                if(h.y < minY) minY = h.y;
+                if(h.y > maxY) maxY = h.y;
+                nw++;
+            }
+            let sx, sy;
+            if(nw > 0) {
+                sx = (minX + maxX) * 0.5;
+                sy = (minY + maxY) * 0.5;
+            } else {
+                sx = 0;
+                sy = 0;
+                for(let h of gameData.hexList) {
+                    sx += h.x;
+                    sy += h.y;
+                    nw++;
+                }
+                if(nw > 0) {
+                    sx /= nw;
+                    sy /= nw;
+                }
+            }
+            if(nw === 0) return;
+            let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+            let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+            let z = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
+            gameData.camera.x = sx * z - vw / 2;
+            gameData.camera.y = sy * z - vh / 2;
+        }
+
         function pauseMenuBackgroundBattle() {
             gameData.menuAttractMode = false;
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
@@ -14549,6 +14616,7 @@
             gameData.menuAttractMode = true;
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
+            wodCenterCameraOnLandmassForMenu();
             menuDemoLastTime = performance.now();
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
@@ -14715,27 +14783,12 @@
             gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, units: true };
             syncInGameLayerToolbar();
             gameData.camera.zoom = 0.655;
-            let sx = 0, sy = 0, nw = 0;
-            for(let h of gameData.hexList) {
-                if(!isWaterHex(h)) {
-                    sx += h.x;
-                    sy += h.y;
-                    nw++;
-                }
-            }
-            if(nw > 0) {
-                sx /= nw;
-                sy /= nw;
-                let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
-                let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
-                gameData.camera.x = sx * gameData.camera.zoom - vw / 2;
-                gameData.camera.y = sy * gameData.camera.zoom - vh / 2;
-            }
             menuDemoSeeded = true;
             gameData.menuAttractMode = true;
             wodMarkTerrainFullDirty();
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
+            wodCenterCameraOnLandmassForMenu();
             kickstartMenuAttractSim();
             draw();
             menuDemoLastTime = performance.now();
