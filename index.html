@@ -8035,7 +8035,6 @@
             wodMpSnapSeq = 0;
             wodMpLobbyCount = 1;
             window.wodMpRoomMeta = {};
-            window._wodMpLastLobbyGenKey = null;
             if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
         }
 
@@ -8482,7 +8481,6 @@
                             window.wodMpRoomMeta.seatTypes[slot - 1] = v;
                         }
                         wodMpPushLobbyMetaFromCurrentUi();
-                        requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
                     };
                 });
                 slotsEl.querySelectorAll('.mp-gl-color-select').forEach(sel => {
@@ -8505,7 +8503,6 @@
             }
             let h2 = document.getElementById('mpGlHeading');
             if(h2) h2.textContent = api.isHost ? 'Game lobby (host)' : 'Game lobby';
-            requestAnimationFrame(() => wodMpRefreshLobbyMapPreview());
         }
         function wodMpBuildLobbyMetaFromSetup() {
             if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
@@ -8525,13 +8522,6 @@
             let st = (window.wodMpRoomMeta.seatTypes || []).slice(0, maxHumans);
             while(st.length < maxHumans) st.push('human');
             window.wodMpRoomMeta.seatTypes = st;
-            let genKey = maxHumans + '|' + st.join('');
-            if(window._wodMpLastLobbyGenKey == null) window._wodMpLastLobbyGenKey = genKey;
-            else if(window._wodMpLastLobbyGenKey !== genKey) {
-                window._wodMpLastLobbyGenKey = genKey;
-                window.wodMpRoomMeta.lobbyMapSeed = (Math.imul(Date.now() >>> 0, 2246822519) ^ (window.wodMpRoomMeta.lobbyMapSeed || 0) ^ 0x9e3779b9) >>> 0;
-                if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x6a09e667;
-            }
             if(window.wodMpRoomMeta.lobbyMapSeed == null || window.wodMpRoomMeta.lobbyMapSeed === '')
                 window.wodMpRoomMeta.lobbyMapSeed = ((Math.random() * 0xfffffffe) | 0) >>> 0;
             if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x5bd1e995;
@@ -8559,6 +8549,7 @@
             if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyMeta)
                 WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
             showPanel('multiplayer');
+            requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
         }
         function wodMpUpdateOnline(n) {
             let el = document.getElementById('mpOnlineCount');
@@ -8780,6 +8771,7 @@
                 wodMpCloseHostMapDlg();
                 showNotification('Map settings updated.');
                 wodMpRenderGameLobbyScreen();
+                requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
             };
             if(mpCfgMapClose) mpCfgMapClose.onclick = () => wodMpCloseHostMapDlg();
             if(mpCfgMapAdvanced) mpCfgMapAdvanced.onclick = () => {
@@ -8812,7 +8804,6 @@
                 }
                 window.wodMpRoomMeta = {};
                 wodMpLobbyCount = 1;
-                window._wodMpLastLobbyGenKey = null;
                 if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 if(st) st.textContent = 'Left lobby.';
@@ -8823,7 +8814,6 @@
                 if(st) st.textContent = 'Disconnected from server.';
                 window.wodMpRoomMeta = {};
                 wodMpLobbyCount = 1;
-                window._wodMpLastLobbyGenKey = null;
                 if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 wodMpRenderLobbyList([]);
@@ -8888,7 +8878,7 @@
                 mpGlMaxHumans.addEventListener('change', () => {
                     if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost && WodMultiplayer.sendLobbyMeta)
                         WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
-                    /** Rebuilds seats + RAF map preview (`wodMpRenderGameLobbyScreen` ends with lobby preview refresh). */
+                    /** Rebuild seat rows only — lobby map preview updates only when map settings are applied. */
                     wodMpRenderGameLobbyScreen();
                 });
             }
@@ -8904,7 +8894,6 @@
                     WodMultiplayer.requestLobbyList();
                 window.wodMpRoomMeta = {};
                 wodMpLobbyCount = 1;
-                window._wodMpLastLobbyGenKey = null;
                 if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 let stKick = document.getElementById('mpStatus');
@@ -8927,6 +8916,7 @@
                 wodMpRefreshMpPanelState();
                 wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
                 wodMpPushLobbyProfile();
+                requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
             });
             addEventListener('wod-mp-RoomMeta', (ev) => {
                 let m = ev.detail && ev.detail.meta;
@@ -8935,7 +8925,6 @@
             });
             addEventListener('wod-mp-LeftLobby', () => {
                 window.wodMpRoomMeta = {};
-                window._wodMpLastLobbyGenKey = null;
                 if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.socketOpen)
@@ -8943,7 +8932,6 @@
             });
             addEventListener('wod-mp-Close', () => {
                 window.wodMpRoomMeta = {};
-                window._wodMpLastLobbyGenKey = null;
                 if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 wodMpRenderLobbyList([]);
@@ -13864,10 +13852,10 @@
                     if(su && mps) mps.value = su.value;
                     document.getElementById('mapLibraryPanel').classList.add('hidden');
                     showPanel('multiplayer');
-                    wodMpRefreshLobbyMapPreview();
                     if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyMeta)
                         WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
                     if(typeof wodMpRenderGameLobbyScreen === 'function') wodMpRenderGameLobbyScreen();
+                    wodMpRefreshLobbyMapPreview({ force: true });
                     window._wodMapLibFromMpHost = false;
                     _wodMapLib.returnTo = null;
                 } else {
