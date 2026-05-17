@@ -12380,23 +12380,53 @@
             return { cx, cy, maxR };
         }
         /** Round-robin wedges from centroid; same rotation as Political splitPhase; favors hexes nearer each wedge’s focal arc (fewer stray towns deep in hostile cores).
-         * On rectangle maps wedges alternate opposing half-planes and towns read as a straight chain — use radial outside-in ordering instead. */
+         * Rectangle neutral fallback: 2D stratified shuffle so towns sample the map instead of wedge round-robin chains. */
         function wodWedgeFocusedCityCandidateOrder(landHexes, wedgeCount, lcm, anglePhase, mapShape) {
             if(!landHexes || landHexes.length === 0) return [];
             if(mapShape === 'rectangle') {
-                let cx = lcm.cx,
-                    cy = lcm.cy;
-                let scored = [];
-                for(let h of landHexes) {
-                    let dx = h.x - cx,
-                        dy = h.y - cy;
-                    scored.push({ h, d: dx * dx + dy * dy, jitter: Math.random() });
+                let hxs = landHexes;
+                let minX = Infinity,
+                    maxX = -Infinity,
+                    minY = Infinity,
+                    maxY = -Infinity;
+                for(let h of hxs) {
+                    if(h.x < minX) minX = h.x;
+                    if(h.x > maxX) maxX = h.x;
+                    if(h.y < minY) minY = h.y;
+                    if(h.y > maxY) maxY = h.y;
                 }
-                scored.sort((a, b) => {
-                    if(b.d !== a.d) return b.d - a.d;
-                    return a.jitter - b.jitter;
-                });
-                return scored.map(s => s.h);
+                let gw = Math.max(3, Math.min(11, Math.round(Math.pow(Math.max(hxs.length, 1) / 42, 0.5) * 5)));
+                let gh = gw;
+                let spanX = maxX - minX + 1e-9,
+                    spanY = maxY - minY + 1e-9,
+                    nc = gw * gh;
+                let buckets = [];
+                for(let i = 0; i < nc; i++) buckets.push([]);
+                for(let h of hxs) {
+                    let gx = Math.min(gw - 1, Math.floor(((h.x - minX) / spanX) * gw));
+                    let gy = Math.min(gh - 1, Math.floor(((h.y - minY) / spanY) * gh));
+                    buckets[gy * gw + gx].push(h);
+                }
+                let keys = [];
+                for(let i = 0; i < nc; i++) keys.push(i);
+                for(let i = keys.length - 1; i > 0; i--) {
+                    let j = Math.floor(Math.random() * (i + 1));
+                    let tmp = keys[i];
+                    keys[i] = keys[j];
+                    keys[j] = tmp;
+                }
+                let order = [];
+                for(let k of keys) {
+                    let b = buckets[k];
+                    for(let i = b.length - 1; i > 0; i--) {
+                        let j = Math.floor(Math.random() * (i + 1));
+                        let t = b[i];
+                        b[i] = b[j];
+                        b[j] = t;
+                    }
+                    for(let h of b) order.push(h);
+                }
+                return order.length ? order : hxs.slice();
             }
             let w = Math.max(1, wedgeCount | 0);
             let cx = lcm.cx, cy = lcm.cy;
@@ -13189,6 +13219,31 @@
             if(!n) return null;
             return { x: sx / n, y: sy / n };
         }
+        /** Bounding-radius^2 of owned claimable tiles from their centroid (rectangle city interior filter). */
+        function wodFactionTerritoryCentroidMaxSq(owner) {
+            let sx = 0,
+                sy = 0,
+                n = 0;
+            let tiles = [];
+            for(let h of gameData.hexList) {
+                if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
+                if(h.owner !== owner) continue;
+                tiles.push(h);
+                sx += h.x;
+                sy += h.y;
+                n++;
+            }
+            if(!n) return null;
+            let cx = sx / n,
+                cy = sy / n,
+                maxSq = 0;
+            for(let h of tiles) {
+                let dx = h.x - cx,
+                    dy = h.y - cy;
+                maxSq = Math.max(maxSq, dx * dx + dy * dy);
+            }
+            return { cx, cy, maxSq, n };
+        }
         /** Target ring for Voronoi seed hex picking (terrain only). */
         function wodTerrainSeedsForVoronoiOwners(ownersList, landCandidates, lcm, phase, mapShape) {
             let sorted = [...ownersList].sort((a, b) => a - b);
@@ -13240,12 +13295,17 @@
             }
             return keys;
         }
-        function wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows) {
+        function wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionGeom) {
             let innerRSq = Infinity;
             if(mapShape === 'island') {
                 let innerRad = Math.max(lcm.maxR * 0.8, (gameData.hexRadius || 10) * Math.max(gameData.mapRadius || 40, 8) * 0.12);
                 innerRSq = innerRad * innerRad;
             }
+            let facRect = mapShape === 'rectangle' && factionGeom && factionGeom[owner],
+                rectInnerFrac = 0.88,
+                rectInnerSq = Infinity;
+            if(facRect && facRect.maxSq > 0 && facRect.n >= 10)
+                rectInnerSq = facRect.maxSq * rectInnerFrac * rectInnerFrac;
             let out = [];
             for(let h of gameData.hexList) {
                 if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
@@ -13259,9 +13319,25 @@
                     let rowCount = Math.floor(rows) || 1;
                     let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rowCount, 1));
                     if(bf > 0.88) continue;
+                    if(rectInnerSq < Infinity && facRect) {
+                        let dxF = h.x - facRect.cx,
+                            dyF = h.y - facRect.cy;
+                        if(dxF * dxF + dyF * dyF > rectInnerSq) continue;
+                    }
                 }
                 if(wodBfsStepsToWater(h, 14) < (mapShape === 'island' ? 3 : 2)) continue;
                 out.push(h);
+            }
+            if(mapShape === 'rectangle' && out.length === 0 && rectInnerSq < Infinity) {
+                for(let h of gameData.hexList) {
+                    if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
+                    if(h.owner !== owner) continue;
+                    let rowCount = Math.floor(rows) || 1;
+                    let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rowCount, 1));
+                    if(bf > 0.88) continue;
+                    if(wodBfsStepsToWater(h, 14) < 2) continue;
+                    out.push(h);
+                }
             }
             return out;
         }
@@ -13359,19 +13435,15 @@
 
             let anchorChebSep = 6;
 
+            let factionTerritoryGeom = {};
+            for(let ow of ownersSorted) factionTerritoryGeom[ow] = wodFactionTerritoryCentroidMaxSq(ow);
+
             function buildCandidateList(owner, level) {
                 let cent = wodFactionPoliticalCentroid(owner);
-                let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows);
+                let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionTerritoryGeom);
                 pool.sort((a, b) => {
                     let ax = cent ? cent.x : lcm.cx,
                         ay = cent ? cent.y : lcm.cy;
-                    if(mapShape === 'rectangle') {
-                        let da = (a.x - ax) * (a.x - ax) + (a.y - ay) * (a.y - ay);
-                        let db = (b.x - ax) * (b.x - ax) + (b.y - ay) * (b.y - ay);
-                        if(db !== da) return db - da;
-                        if(a.q !== b.q) return a.q - b.q;
-                        return a.r - b.r;
-                    }
                     let ca = Math.atan2(a.y - ay, a.x - ax);
                     let cb = Math.atan2(b.y - ay, b.x - ax);
                     let caOff = ca + level * (0.18 + owner * 0.011),
