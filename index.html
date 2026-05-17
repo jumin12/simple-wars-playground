@@ -3687,7 +3687,8 @@
             }
             #inGameUI .wod-m-intel-bundle,
             #inGameUI .wod-m-map-bundle,
-            #inGameUI .wod-m-build-bundle {
+            #inGameUI .wod-m-build-bundle,
+            #inGameUI .wod-m-units-bundle {
                 display: contents;
             }
             #inGameUI #terrainKeyToggle,
@@ -3711,7 +3712,8 @@
             }
             #inGameUI .wod-m-sheet--intel,
             #inGameUI .wod-m-sheet--map,
-            #inGameUI .wod-m-sheet--build {
+            #inGameUI .wod-m-sheet--build,
+            #inGameUI .wod-m-sheet--units {
                 display: none;
             }
             #inGameUI[data-mtab="intel"] .wod-m-sheet--intel {
@@ -4198,7 +4200,8 @@
             }
             #inGameUI .wod-m-intel-bundle,
             #inGameUI .wod-m-map-bundle,
-            #inGameUI .wod-m-build-bundle {
+            #inGameUI .wod-m-build-bundle,
+            #inGameUI .wod-m-units-bundle {
                 display: contents;
             }
             #inGameUI #terrainKeyToggle,
@@ -4222,7 +4225,8 @@
             }
             #inGameUI .wod-m-sheet--intel,
             #inGameUI .wod-m-sheet--map,
-            #inGameUI .wod-m-sheet--build {
+            #inGameUI .wod-m-sheet--build,
+            #inGameUI .wod-m-sheet--units {
                 display: none;
             }
             #inGameUI[data-mtab="intel"] .wod-m-sheet--intel {
@@ -5178,11 +5182,11 @@
                     <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="map" aria-selected="false" aria-label="Terrain legend and map layers">
                         <span class="wod-m-tab-glyph" aria-hidden="true">M</span><span class="wod-m-tab-lbl">Map</span>
                     </button>
-                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="build" aria-selected="false" aria-label="Structures">
-                        <span class="wod-m-tab-glyph" aria-hidden="true">⚙</span><span class="wod-m-tab-lbl">Build</span>
+                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="build" aria-selected="false" aria-label="Factories, harbors, forts">
+                        <span class="wod-m-tab-glyph" aria-hidden="true">🏭</span><span class="wod-m-tab-lbl">Buildings</span>
                     </button>
-                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="units" aria-selected="false" aria-label="Train armies">
-                        <span class="wod-m-tab-glyph" aria-hidden="true">★</span><span class="wod-m-tab-lbl">Army</span>
+                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="units" aria-selected="false" aria-label="Train combat units">
+                        <span class="wod-m-tab-glyph" aria-hidden="true">★</span><span class="wod-m-tab-lbl">Units</span>
                     </button>
                 </nav>
                 </div>
@@ -5288,6 +5292,7 @@
                         <button class="layer-btn active" id="btnLayerCities" onclick="toggleLayer('cities')">Cities</button>
                         <button class="layer-btn active" id="btnLayerCityNames" onclick="toggleLayer('cityNames')">City Names</button>
                         <button class="layer-btn active" id="btnLayerUnits" onclick="toggleLayer('units')">Units</button>
+                        <button class="layer-btn active" id="btnLayerStructures" onclick="toggleLayer('structures')" title="Show forts on the map and their defense aura">Structures</button>
                     </div>
                 </div>
             </div>
@@ -6126,7 +6131,7 @@
             hexRadius: 20, mapRadius: 40,
             mapShape: 'island',
             loadedCustomMap: false,
-            layers: { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, units: true },
+            layers: { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, structures: true, units: true },
             aiCount: 1,
             victoryMode: 'domination',
             _campaignEnded: false,
@@ -8670,7 +8675,7 @@
                     if(mode === 'fort') {
                         let hex = gameData.hexes[`${d.cmd.hq},${d.cmd.hr}`];
                         if(!hex || hex.owner !== d.fromSlot) return;
-                        attemptFortPlacementForOwner(hex, d.fromSlot);
+                        attemptFortPlacementForOwner(hex, d.fromSlot, true);
                         return;
                     }
                     let city = gameData.cities.find(c => c.q === d.cmd.cq && c.r === d.cmd.cr);
@@ -8762,12 +8767,14 @@
             if(layer === 'territory') return 'btnLayerTerritory';
             if(layer === 'cities') return 'btnLayerCities';
             if(layer === 'units') return 'btnLayerUnits';
+            if(layer === 'structures') return 'btnLayerStructures';
             return 'btnLayer' + layer.charAt(0).toUpperCase() + layer.slice(1);
         }
 
 
         function syncInGameLayerToolbar() {
-            for(let k of ['terrain', 'diplomacy', 'territory', 'cities', 'cityNames', 'units']) {
+            if(gameData.layers && gameData.layers.structures === undefined) gameData.layers.structures = true;
+            for(let k of ['terrain', 'diplomacy', 'territory', 'cities', 'cityNames', 'structures', 'units']) {
                 let btn = document.getElementById(getLayerToggleButtonId(k));
                 if(btn && gameData.layers[k] !== undefined) {
                     btn.classList.toggle('active', !!gameData.layers[k]);
@@ -15220,7 +15227,7 @@
             gameData.aiCount = 1;
             await generateMap();
             remapAttractBattleFromPlayerSlotsToAis();
-            gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, units: true };
+            gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, structures: true, units: true };
             syncInGameLayerToolbar();
             gameData.camera.zoom = 0.655;
             menuDemoSeeded = true;
@@ -15485,6 +15492,21 @@
             });
         }
 
+        function wodAiTryFortForOwner(ownerId, ownerMoneyKey) {
+            if(!gameData.hexList || !gameData.hexList.length) return false;
+            if((gameData.aiMoneyByOwner[ownerMoneyKey] || 0) < WOD_PRICE_FORT) return false;
+            let n = gameData.hexList.length,
+                tries = Math.min(140, n);
+            let salt = Math.floor(ownerId * 8347 + n * 13 + ((gameData.forts && gameData.forts.length) || 0) * 71);
+            for(let t = 0; t < tries; t++) {
+                let idx = (salt + t * 11003) % n;
+                let h = gameData.hexList[idx];
+                if(hexEligibleForFortPlacementForOwner(h, ownerId))
+                    return attemptFortPlacementForOwner(h, ownerId, true);
+            }
+            return false;
+        }
+
         /** Runs one faction's econ/build/spawn work for a periodic AI pulse (spread across frames). */
         function wodRunAiSpawnBurstForOwner(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOwner) {
             let ownerId = typeof ownerKey === 'number' ? ownerKey : parseInt(ownerKey, 10);
@@ -15492,56 +15514,71 @@
             let aiCities = aiCitiesByOwner[ownerKey];
             if(!aiCities || aiCities.length === 0) return;
             let aiNetIncome = (aiIncomeByOwner[ownerKey] || 0) - (upkeepByOwner[ownerId] || 0);
-            let troopCap = Math.max(12, aiCities.length * 7 + Math.floor(Math.max(0, aiNetIncome) / 1.5));
-            if(gameData.menuAttractMode) troopCap = Math.min(troopCap, 56);
+            let troopCap = Math.max(12, aiCities.length * 8 + Math.floor(Math.max(0, aiNetIncome) / 1.25));
+            if(gameData.menuAttractMode) troopCap = Math.min(troopCap, 72);
             let aiTroops = getOwnerUnitCount(ownerId);
 
-            let aiMoney = gameData.aiMoneyByOwner[ownerKey] || 0;
-            if(aiMoney >= 4200 && Math.random() < 0.38) {
-                let cityNoFactory = aiCities.find(c => !c.hasFactory);
-                if(cityNoFactory && (gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_FACTORY) {
-                    cityNoFactory.hasFactory = true;
-                    gameData.aiMoneyByOwner[ownerKey] -= WOD_PRICE_FACTORY;
-                }
+            let cash = gameData.aiMoneyByOwner[ownerKey] || 0;
+            while(cash >= WOD_PRICE_FACTORY) {
+                let needFac = aiCities.find(ct => !ct.hasFactory);
+                if(!needFac) break;
+                needFac.hasFactory = true;
+                cash -= WOD_PRICE_FACTORY;
             }
-            if(aiMoney >= 2400 && Math.random() < 0.26) {
-                let cityNoHarbor = aiCities.find(c => !c.hasHarbor && cityHasWaterNeighbor(c));
-                if(cityNoHarbor && (gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_HARBOR) {
-                    cityNoHarbor.hasHarbor = true;
-                    gameData.aiMoneyByOwner[ownerKey] -= WOD_PRICE_HARBOR;
-                }
+            while(cash >= WOD_PRICE_HARBOR) {
+                let needHb = aiCities.find(ct => !ct.hasHarbor && cityHasWaterNeighbor(ct));
+                if(!needHb) break;
+                needHb.hasHarbor = true;
+                cash -= WOD_PRICE_HARBOR;
             }
+            gameData.aiMoneyByOwner[ownerKey] = cash;
 
-            let spawnCap = wodUsesVisualViewportLayout() ? 2 : 3;
-            let spawnsThisTick = Math.min(spawnCap, Math.floor(gameData.aiMoneyByOwner[ownerKey] / Math.max(120, WOD_PRICE_LIGHT)) + 1);
+            if((gameData.aiMoneyByOwner[ownerKey] || 0) >= Math.floor(WOD_PRICE_FORT * 2.1) && Math.random() < 0.15)
+                wodAiTryFortForOwner(ownerId, ownerKey);
+
+            let spawnCap = wodUsesVisualViewportLayout() ? 4 : 5;
+            let spawnsThisTick = Math.min(spawnCap, Math.max(2, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(180, WOD_PRICE_LIGHT))));
             let combatSafeCities = aiCities.filter(c => !isCitySiegeBlockedForProduction(c));
+            let trainOrder = ['ship', 'heavy', 'marine', 'light'];
+            if(!gameData._aiTrainPick) gameData._aiTrainPick = {};
+            let rotOff = gameData._aiTrainPick[String(ownerKey)] || 0;
             for(let s = 0; s < spawnsThisTick; s++) {
                 if(aiCities.length === 0 || aiTroops >= troopCap) break;
-                if(aiNetIncome <= -5 || gameData.aiMoneyByOwner[ownerKey] < WOD_PRICE_LIGHT || gameData.aiManpowerByOwner[ownerKey] < 1000) break;
+                if(aiNetIncome <= -18 || (gameData.aiMoneyByOwner[ownerKey] || 0) < Math.floor(WOD_PRICE_LIGHT * 0.9)) break;
                 if(combatSafeCities.length === 0) break;
 
                 let candidates = combatSafeCities.slice().sort((a, b) => {
-                    let aFront = isFrontlineHex(gameData.hexes[`${a.q},${a.r}`], ownerId) ? -2000 : 0;
-                    let bFront = isFrontlineHex(gameData.hexes[`${b.q},${b.r}`], ownerId) ? -2000 : 0;
-                    return (aFront + Math.random() * 100) - (bFront + Math.random() * 100);
+                    let aFront = isFrontlineHex(gameData.hexes[`${a.q},${a.r}`], ownerId) ? -2400 : 0;
+                    let bFront = isFrontlineHex(gameData.hexes[`${b.q},${b.r}`], ownerId) ? -2400 : 0;
+                    return (aFront + Math.random() * 120) - (bFront + Math.random() * 120);
                 });
-                let city = candidates[0];
-                let type = 'light';
-                if(gameData.aiMoneyByOwner[ownerKey] >= WOD_PRICE_HEAVY && gameData.aiManpowerByOwner[ownerKey] >= 1000 && city.hasFactory && Math.random() > 0.68) {
-                    type = 'heavy';
-                } else if(city.hasHarbor && gameData.aiMoneyByOwner[ownerKey] >= WOD_PRICE_SHIP && gameData.aiManpowerByOwner[ownerKey] >= 5000 && Math.random() > 0.72) {
-                    type = 'ship';
-                } else if(cityHasWaterNeighbor(city) && gameData.aiMoneyByOwner[ownerKey] >= WOD_PRICE_MARINE && gameData.aiManpowerByOwner[ownerKey] >= 1000 && Math.random() < 0.28) {
-                    type = 'marine';
-                }
-                if(canAffordUnit(ownerId, type)) {
-                    let spawned = spawnUnit(type, city, ownerId);
-                    if(spawned) {
-                        spendForUnit(ownerId, type);
+
+                let did = false,
+                    start = (rotOff + s) % trainOrder.length;
+                for(let k = 0; k < trainOrder.length; k++) {
+                    let ut = trainOrder[(start + k) % trainOrder.length];
+                    if(!canAffordUnit(ownerId, ut)) continue;
+                    let spawnCity = null;
+                    for(let ci = 0, cl = candidates.length; ci < cl; ci++) {
+                        let cTry = candidates[ci];
+                        if(cityEligibleForBuildPlacementForOwner(cTry, ut, ownerId)) {
+                            spawnCity = cTry;
+                            break;
+                        }
+                    }
+                    if(!spawnCity) continue;
+                    let spawnedUnit = spawnUnit(ut, spawnCity, ownerId);
+                    if(spawnedUnit) {
+                        spendForUnit(ownerId, ut);
                         aiTroops++;
-                    } else break;
-                } else break;
+                        did = true;
+                        rotOff++;
+                        break;
+                    }
+                }
+                if(!did) break;
             }
+            gameData._aiTrainPick[String(ownerKey)] = rotOff % 64;
         }
 
         /** Finishes chunked AI tactic pass (assigns one formation owner per call, then batches unit retarget). */
@@ -18776,16 +18813,6 @@
                 }
             }
 
-            if(gameData.forts && gameData.forts.length) {
-                for(let fti = 0, ftl = gameData.forts.length; fti < ftl; fti++) {
-                    let ftf = gameData.forts[fti];
-                    let fcol = factionColors[ftf.owner] || '#95a5a6';
-                    drawFortSticker(ctx, ftf, fcol, gfxLite, function(wx, wy, pd) {
-                        return !wodCull || wodInView(wx, wy, pd != null ? pd : culPad);
-                    });
-                }
-            }
-
             // Draw Units
             if(gameData.layers.units) {
                 if(!gfxLite && gameData.pathStrokePreview && gameData.pathStrokePreview.length >= 2) {
@@ -19006,6 +19033,35 @@
                     drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
                     
                     ctx.restore();
+                }
+            }
+
+            let structsOn = !(gameData.layers && gameData.layers.structures === false);
+            if(structsOn && gameData.forts && gameData.forts.length) {
+                let auraR = wodFortCombatAuraRadiusPx();
+                let auraPad = auraR + 52;
+                for(let fti = 0, ftl = gameData.forts.length; fti < ftl; fti++) {
+                    let ftf = gameData.forts[fti];
+                    if(wodCull && !wodInView(ftf.x, ftf.y, auraPad)) continue;
+                    let fcol = factionColors[ftf.owner] || '#95a5a6';
+                    let fillTint = /^#[0-9A-Fa-f]{6}$/.test(String(fcol)) ? fcol + '16' : 'rgba(149,165,166,0.11)';
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
+                    ctx.fillStyle = fillTint;
+                    ctx.fill();
+                    ctx.save();
+                    ctx.strokeStyle = fcol;
+                    ctx.globalAlpha = gfxLite ? 0.5 : 0.62;
+                    ctx.lineWidth = gfxLite ? 2 : 2.85;
+                    ctx.setLineDash([11, 8]);
+                    ctx.beginPath();
+                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                    ctx.setLineDash([]);
+                    ctx.restore();
+                    drawFortSticker(ctx, ftf, fcol, gfxLite, null);
                 }
             }
 
@@ -20158,6 +20214,10 @@
             if(fortAtHexKey(hex.q, hex.r)) return false;
             return wodPlayerTreasury(owner) >= WOD_PRICE_FORT;
         }
+        function wodFortCombatAuraRadiusPx() {
+            return (gameData.hexRadius || 10) * WOD_FORT_DEFENSE_TILES;
+        }
+
         /** Same-side troops within this aura take multiply combat damage by 0.8 (shown as +20% defense). */
         function wodFortDefenseDamageMultiplier(defenderUnit) {
             if(!defenderUnit || defenderUnit.hp <= 0 || defenderUnit.type === 'convoy') return 1;
@@ -20165,8 +20225,7 @@
             if(ox <= 0) return 1;
             let list = gameData.forts;
             if(!list || !list.length) return 1;
-            let hr = gameData.hexRadius || 10,
-                radius = hr * WOD_FORT_DEFENSE_TILES,
+            let radius = wodFortCombatAuraRadiusPx(),
                 r2 = radius * radius;
             for(let i = list.length - 1; i >= 0; i--) {
                 let ft = list[i];
@@ -20187,34 +20246,65 @@
             }
         }
         function drawFortSticker(ctx, f, factionCol, fxLite, culPadFn) {
-            if(typeof culPadFn === 'function' && !culPadFn(f.x, f.y, fxLite ? 28 : 40)) return;
-            let staffH = fxLite ? 18 : 24,
-                bx = fxLite ? 10 : 14;
+            let footprint = fxLite ? 30 : 40;
+            if(typeof culPadFn === 'function' && !culPadFn(f.x, f.y, footprint)) return;
+            factionCol = factionCol || '#2ecc71';
             ctx.save();
-            ctx.translate(f.x, f.y + (fxLite ? 2 : 3));
-            ctx.fillStyle = 'rgba(52,73,94,0.92)';
-            ctx.strokeStyle = 'rgba(236,240,241,0.38)';
-            ctx.lineWidth = fxLite ? 1.35 : 1.8;
+            ctx.translate(f.x, f.y + (fxLite ? 1 : 2));
+            // Ground shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.32)';
             ctx.beginPath();
-            ctx.rect(-bx, -4, bx * 2, fxLite ? 13 : 16);
+            ctx.ellipse(1, fxLite ? 13 : 16, fxLite ? 17 : 22, fxLite ? 9 : 12, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.stroke();
-            ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-            ctx.lineWidth = fxLite ? 2 : 2.8;
+            ctx.fillStyle = 'rgba(55,61,73,0.98)';
+            ctx.strokeStyle = 'rgba(23,31,43,1)';
+            ctx.lineWidth = fxLite ? 1.65 : 2.05;
+            ctx.lineJoin = 'round';
+            // Outer curtain wall — squarish star fort-ish footprint (no heavy spikes for clarity)
+            let w = fxLite ? 15 : 20;
+            let h = fxLite ? 11 : 15;
             ctx.beginPath();
-            ctx.moveTo(0, -4);
-            ctx.lineTo(0, -staffH);
+            ctx.rect(-w, -h, w * 2, h * 2);
             ctx.stroke();
-            ctx.fillStyle = factionCol || '#2ecc71';
-            ctx.strokeStyle = 'rgba(15,21,29,0.88)';
-            ctx.lineWidth = fxLite ? 1 : 1.25;
+            ctx.fill();
+            ctx.fillStyle = 'rgba(85,93,109,1)';
+            ctx.strokeStyle = 'rgba(15,21,31,1)';
+            ctx.lineWidth = fxLite ? 1.05 : 1.22;
             ctx.beginPath();
-            ctx.moveTo(2.5, -staffH + 4);
-            ctx.lineTo(2.5, -staffH - (fxLite ? 8 : 10));
-            ctx.lineTo(fxLite ? 15 : 20, -staffH - 1);
+            ctx.rect(-w * 0.58, -h * 0.58, w * 1.16, h * 1.05);
+            ctx.fill(); ctx.stroke();
+            // Bastion lumps
+            let br = fxLite ? 3.8 : 4.9;
+            for(let iy = -1; iy <= 1; iy += 2)
+                for(let ix = -1; ix <= 1; ix += 2) {
+                    ctx.beginPath();
+                    ctx.arc(ix * (w + br * 0.45), iy * (h + br * 0.45), br, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(60,67,82,1)';
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            // Gate shading
+            ctx.fillStyle = 'rgba(42,46,54,1)';
+            ctx.fillRect(-3, -h * 1.06, fxLite ? 6 : 7, fxLite ? 4 : 5);
+            ctx.strokeRect(-3, -h * 1.06, fxLite ? 6 : 7, fxLite ? 4 : 5);
+            // Tiny flagpole + flag at front corner (much smaller than old banner)
+            let px = w * 0.52,
+                poleTop = -h - (fxLite ? 4 : 5),
+                poleBase = -h + 5;
+            ctx.strokeStyle = 'rgba(20,26,38,1)';
+            ctx.lineWidth = fxLite ? 1.05 : 1.2;
+            ctx.beginPath(); ctx.moveTo(px, poleBase); ctx.lineTo(px, poleTop); ctx.stroke();
+            ctx.fillStyle = factionCol;
+            ctx.strokeStyle = 'rgba(14,21,34,1)';
+            ctx.lineWidth = fxLite ? 0.82 : 0.94;
+            let fw = fxLite ? 4.5 : 5.8,
+                fh = fxLite ? 2.6 : 3.35;
+            ctx.beginPath();
+            ctx.moveTo(px + 0.4, poleTop + 1);
+            ctx.lineTo(px + fw, poleTop + fh * 0.45);
+            ctx.lineTo(px + 0.4, poleTop + fh + 1);
             ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+            ctx.fill(); ctx.stroke();
             ctx.restore();
         }
         function wodFortPlacementRingRadiusSq() {
@@ -20224,18 +20314,19 @@
             let rad = spacing * tiles;
             return rad * rad;
         }
-        function attemptFortPlacementForOwner(hex, owner) {
+        function attemptFortPlacementForOwner(hex, owner, suppressNotes) {
             if(!gameData.forts) gameData.forts = [];
+            let noisy = !suppressNotes;
             if(!hex || !hexEligibleForFortTerrain(hex, owner)) {
-                showNotification('Forts belong on owned open ground (no mountains, oceans, or city cores).');
+                if(noisy) showNotification('Forts belong on owned open ground (no mountains, oceans, or city cores).');
                 return false;
             }
             if(fortAtHexKey(hex.q, hex.r)) {
-                showNotification('There is already a fort on this hex.');
+                if(noisy) showNotification('There is already a fort on this hex.');
                 return false;
             }
             if(!hexEligibleForFortPlacementForOwner(hex, owner)) {
-                showNotification('Not enough cash for this fort.');
+                if(noisy) showNotification('Not enough cash for this fort.');
                 return false;
             }
             wodDeductPlayerMoney(owner, WOD_PRICE_FORT);
@@ -20248,7 +20339,7 @@
                 x: hex.x,
                 y: hex.y
             });
-            showNotification('+20% defense aura for allied troops surrounding this fort.');
+            if(noisy) showNotification('+20% defense aura for allied troops surrounding this fort.');
             return true;
         }
         function tryApplyFortBuildAtWorld(worldPos) {
