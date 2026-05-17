@@ -12495,7 +12495,8 @@
             let dy = unit.target.y - unit.y;
             let dist = Math.sqrt(dx*dx + dy*dy);
             let combatSlow = getCombatMovementSlowdownFactor(unit, gameData.unitSpatialGrid);
-            let stepSpeed = unit.speed * getUnitSpeedMultiplier(unit) * WOD_MOVE_SPEED_FACTOR * combatSlow;
+            let fortZoneSlow = wodFortEnemyMovementSlowdownMultiplier(unit);
+            let stepSpeed = unit.speed * getUnitSpeedMultiplier(unit) * WOD_MOVE_SPEED_FACTOR * combatSlow * fortZoneSlow;
             if(dist <= stepSpeed * dt) {
                 unit.x = unit.target.x;
                 unit.y = unit.target.y;
@@ -18813,6 +18814,35 @@
                 }
             }
 
+            let structsOn = !(gameData.layers && gameData.layers.structures === false);
+            if(structsOn && gameData.forts && gameData.forts.length) {
+                let auraR = wodFortCombatAuraRadiusPx();
+                let auraPad = auraR + 52;
+                for(let fti = 0, ftl = gameData.forts.length; fti < ftl; fti++) {
+                    let ftf = gameData.forts[fti];
+                    if(wodCull && !wodInView(ftf.x, ftf.y, auraPad)) continue;
+                    let fcol = factionColors[ftf.owner] || '#95a5a6';
+                    let fillTint = /^#[0-9A-Fa-f]{6}$/.test(String(fcol)) ? fcol + '16' : 'rgba(149,165,166,0.11)';
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
+                    ctx.fillStyle = fillTint;
+                    ctx.fill();
+                    ctx.save();
+                    ctx.strokeStyle = fcol;
+                    ctx.globalAlpha = gfxLite ? 0.5 : 0.62;
+                    ctx.lineWidth = gfxLite ? 2 : 2.85;
+                    ctx.setLineDash([11, 8]);
+                    ctx.beginPath();
+                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
+                    ctx.stroke();
+                    ctx.restore();
+                    ctx.setLineDash([]);
+                    ctx.restore();
+                    drawFortSticker(ctx, ftf, fcol, gfxLite, null);
+                }
+            }
+
             // Draw Units
             if(gameData.layers.units) {
                 if(!gfxLite && gameData.pathStrokePreview && gameData.pathStrokePreview.length >= 2) {
@@ -19033,35 +19063,6 @@
                     drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
                     
                     ctx.restore();
-                }
-            }
-
-            let structsOn = !(gameData.layers && gameData.layers.structures === false);
-            if(structsOn && gameData.forts && gameData.forts.length) {
-                let auraR = wodFortCombatAuraRadiusPx();
-                let auraPad = auraR + 52;
-                for(let fti = 0, ftl = gameData.forts.length; fti < ftl; fti++) {
-                    let ftf = gameData.forts[fti];
-                    if(wodCull && !wodInView(ftf.x, ftf.y, auraPad)) continue;
-                    let fcol = factionColors[ftf.owner] || '#95a5a6';
-                    let fillTint = /^#[0-9A-Fa-f]{6}$/.test(String(fcol)) ? fcol + '16' : 'rgba(149,165,166,0.11)';
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
-                    ctx.fillStyle = fillTint;
-                    ctx.fill();
-                    ctx.save();
-                    ctx.strokeStyle = fcol;
-                    ctx.globalAlpha = gfxLite ? 0.5 : 0.62;
-                    ctx.lineWidth = gfxLite ? 2 : 2.85;
-                    ctx.setLineDash([11, 8]);
-                    ctx.beginPath();
-                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
-                    ctx.stroke();
-                    ctx.restore();
-                    ctx.setLineDash([]);
-                    ctx.restore();
-                    drawFortSticker(ctx, ftf, fcol, gfxLite, null);
                 }
             }
 
@@ -20236,6 +20237,25 @@
             }
             return 1;
         }
+
+        /** Enemy units inside a hostile fort aura move 20% slower (×0.8). */
+        function wodFortEnemyMovementSlowdownMultiplier(mover) {
+            if(!mover || mover.hp <= 0 || mover.type === 'convoy') return 1;
+            let ox = mover.owner;
+            if(ox <= 0) return 1;
+            let list = gameData.forts;
+            if(!list || !list.length) return 1;
+            let radius = wodFortCombatAuraRadiusPx(),
+                r2 = radius * radius;
+            for(let i = list.length - 1; i >= 0; i--) {
+                let ft = list[i];
+                if(!ft || ft.owner <= 0 || ft.owner === ox) continue;
+                let dx = mover.x - ft.x,
+                    dy = mover.y - ft.y;
+                if(dx * dx + dy * dy <= r2) return 0.8;
+            }
+            return 1;
+        }
         function wodSyncFortOwnershipFromTerrain() {
             let list = gameData.forts;
             if(!list || !list.length) return;
@@ -20246,63 +20266,62 @@
             }
         }
         function drawFortSticker(ctx, f, factionCol, fxLite, culPadFn) {
-            let footprint = fxLite ? 30 : 40;
+            // ~Infantry unit footprint (radius ~12): compact fort read
+            let footprint = fxLite ? 20 : 26;
             if(typeof culPadFn === 'function' && !culPadFn(f.x, f.y, footprint)) return;
             factionCol = factionCol || '#2ecc71';
             ctx.save();
-            ctx.translate(f.x, f.y + (fxLite ? 1 : 2));
-            // Ground shadow
-            ctx.fillStyle = 'rgba(0,0,0,0.32)';
+            ctx.translate(f.x, f.y + (fxLite ? 0.5 : 1));
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
             ctx.beginPath();
-            ctx.ellipse(1, fxLite ? 13 : 16, fxLite ? 17 : 22, fxLite ? 9 : 12, 0, 0, Math.PI * 2);
+            ctx.ellipse(0.5, fxLite ? 9.5 : 12, fxLite ? 12.5 : 16, fxLite ? 6.5 : 8.5, 0, 0, Math.PI * 2);
             ctx.fill();
             ctx.fillStyle = 'rgba(55,61,73,0.98)';
             ctx.strokeStyle = 'rgba(23,31,43,1)';
-            ctx.lineWidth = fxLite ? 1.65 : 2.05;
+            ctx.lineWidth = fxLite ? 1.35 : 1.75;
             ctx.lineJoin = 'round';
-            // Outer curtain wall — squarish star fort-ish footprint (no heavy spikes for clarity)
-            let w = fxLite ? 15 : 20;
-            let h = fxLite ? 11 : 15;
+            let w = fxLite ? 10 : 12;
+            let h = fxLite ? 7.2 : 9;
             ctx.beginPath();
             ctx.rect(-w, -h, w * 2, h * 2);
             ctx.stroke();
             ctx.fill();
             ctx.fillStyle = 'rgba(85,93,109,1)';
             ctx.strokeStyle = 'rgba(15,21,31,1)';
-            ctx.lineWidth = fxLite ? 1.05 : 1.22;
+            ctx.lineWidth = fxLite ? 0.9 : 1.05;
             ctx.beginPath();
-            ctx.rect(-w * 0.58, -h * 0.58, w * 1.16, h * 1.05);
+            ctx.rect(-w * 0.58, -h * 0.56, w * 1.16, h * 1.02);
             ctx.fill(); ctx.stroke();
-            // Bastion lumps
-            let br = fxLite ? 3.8 : 4.9;
+            let br = fxLite ? 2.6 : 3.35;
             for(let iy = -1; iy <= 1; iy += 2)
                 for(let ix = -1; ix <= 1; ix += 2) {
                     ctx.beginPath();
-                    ctx.arc(ix * (w + br * 0.45), iy * (h + br * 0.45), br, 0, Math.PI * 2);
+                    ctx.arc(ix * (w + br * 0.42), iy * (h + br * 0.42), br, 0, Math.PI * 2);
                     ctx.fillStyle = 'rgba(60,67,82,1)';
                     ctx.fill();
                     ctx.stroke();
                 }
-            // Gate shading
             ctx.fillStyle = 'rgba(42,46,54,1)';
-            ctx.fillRect(-3, -h * 1.06, fxLite ? 6 : 7, fxLite ? 4 : 5);
-            ctx.strokeRect(-3, -h * 1.06, fxLite ? 6 : 7, fxLite ? 4 : 5);
-            // Tiny flagpole + flag at front corner (much smaller than old banner)
-            let px = w * 0.52,
-                poleTop = -h - (fxLite ? 4 : 5),
-                poleBase = -h + 5;
+            ctx.strokeStyle = 'rgba(15,21,31,0.92)';
+            let gw = fxLite ? 4.8 : 5.8,
+                gh = fxLite ? 3.2 : 3.9;
+            ctx.fillRect(-gw * 0.5, -h * 1.05, gw, gh);
+            ctx.strokeRect(-gw * 0.5, -h * 1.05, gw, gh);
+            let px = w * 0.48,
+                poleTop = -h - (fxLite ? 2.8 : 3.8),
+                poleBase = -h + 4;
             ctx.strokeStyle = 'rgba(20,26,38,1)';
-            ctx.lineWidth = fxLite ? 1.05 : 1.2;
+            ctx.lineWidth = fxLite ? 0.88 : 1.02;
             ctx.beginPath(); ctx.moveTo(px, poleBase); ctx.lineTo(px, poleTop); ctx.stroke();
             ctx.fillStyle = factionCol;
             ctx.strokeStyle = 'rgba(14,21,34,1)';
-            ctx.lineWidth = fxLite ? 0.82 : 0.94;
-            let fw = fxLite ? 4.5 : 5.8,
-                fh = fxLite ? 2.6 : 3.35;
+            ctx.lineWidth = fxLite ? 0.65 : 0.78;
+            let fw = fxLite ? 3.2 : 4.2,
+                fh = fxLite ? 1.85 : 2.35;
             ctx.beginPath();
-            ctx.moveTo(px + 0.4, poleTop + 1);
-            ctx.lineTo(px + fw, poleTop + fh * 0.45);
-            ctx.lineTo(px + 0.4, poleTop + fh + 1);
+            ctx.moveTo(px + 0.35, poleTop + 0.55);
+            ctx.lineTo(px + fw, poleTop + fh * 0.48);
+            ctx.lineTo(px + 0.35, poleTop + fh + 0.55);
             ctx.closePath();
             ctx.fill(); ctx.stroke();
             ctx.restore();
