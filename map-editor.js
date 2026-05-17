@@ -22,6 +22,13 @@
     genCities: true,
     genTerritory: true,
     genUnits: true,
+    /** Undo stack stores JSON snapshots of exportMapData(); index points at current state. */
+    historyStack: [],
+    historyIndex: 0,
+    historyMax: 200,
+    editorGestureMutatedMap: false,
+    _editorKeyHandler: null,
+    editorSaveSelectedId: null,
   };
 
   const editorPtrs = new Map();
@@ -31,6 +38,86 @@
   function markEditorMapChanged() {
     state.editorTerrainDirty = true;
     if (window.WOD && typeof WOD.invalidateTerrain === "function") WOD.invalidateTerrain();
+  }
+
+  function touchEditorMutation() {
+    if (!state.open) return;
+    state.editorGestureMutatedMap = true;
+  }
+
+  function editorCaptureSnapshot() {
+    if (!window.WOD || typeof WOD.exportMapData !== "function") return "null";
+    try {
+      return JSON.stringify(WOD.exportMapData());
+    } catch (_) {
+      return "null";
+    }
+  }
+
+  function editorApplySnapshot(json) {
+    if (!json || json === "null" || !window.WOD || typeof WOD.loadMapData !== "function") return;
+    try {
+      WOD.loadMapData(JSON.parse(json));
+    } catch (_) {
+      return;
+    }
+    if (WOD.gameData) WOD.gameData.loadedCustomMap = true;
+    syncEditorTerritoryOverlayDefault();
+    state.selected = null;
+    rebuildOwnerSelect();
+    rebuildUnitPalette();
+    syncBrushScaleControls(document.getElementById("mapEditorApp"));
+    markEditorMapChanged();
+    renderSelection();
+    scheduleEditorRender();
+    renderMapBrowser();
+  }
+
+  function editorInitHistory() {
+    const s = editorCaptureSnapshot();
+    state.historyStack = [s];
+    state.historyIndex = 0;
+    updateUndoRedoButtons();
+  }
+
+  function editorPushSnapshot() {
+    if (!state.open) return;
+    const s = editorCaptureSnapshot();
+    if (s === "null") return;
+    const st = state.historyStack.slice(0, state.historyIndex + 1);
+    st.push(s);
+    if (st.length > state.historyMax) st.shift();
+    state.historyStack = st;
+    state.historyIndex = state.historyStack.length - 1;
+    updateUndoRedoButtons();
+  }
+
+  function editorUndo() {
+    if (state.historyIndex <= 0) return;
+    state.historyIndex -= 1;
+    editorApplySnapshot(state.historyStack[state.historyIndex]);
+    updateUndoRedoButtons();
+  }
+
+  function editorRedo() {
+    if (state.historyIndex >= state.historyStack.length - 1) return;
+    state.historyIndex += 1;
+    editorApplySnapshot(state.historyStack[state.historyIndex]);
+    updateUndoRedoButtons();
+  }
+
+  function updateUndoRedoButtons() {
+    const u = document.getElementById("editorUndoBtn");
+    const r = document.getElementById("editorRedoBtn");
+    if (u) {
+      u.disabled = state.historyIndex <= 0;
+      u.toggleAttribute("disabled", state.historyIndex <= 0);
+    }
+    if (r) {
+      const can = state.historyIndex < state.historyStack.length - 1;
+      r.disabled = !can;
+      r.toggleAttribute("disabled", !can);
+    }
   }
   function scheduleEditorRender() {
     if (editorFrame != null) return;
@@ -275,6 +362,119 @@
     });
   }
 
+  function hideEditorSaveDialog() {
+    const ov = document.getElementById("editorSaveOverlay");
+    if (!ov) return;
+    ov.classList.add("hidden");
+    ov.setAttribute("aria-hidden", "true");
+    state.editorSaveSelectedId = null;
+  }
+
+  function showEditorSaveDialog() {
+    const ov = document.getElementById("editorSaveOverlay");
+    const list = document.getElementById("editorSaveList");
+    const nameIn = document.getElementById("editorSaveNewName");
+    const overBtn = document.getElementById("editorSaveOverwriteBtn");
+    if (!ov || !list) return;
+    const defTitle = "Custom Map " + new Date().toLocaleTimeString();
+    if (nameIn) nameIn.value = defTitle;
+    state.editorSaveSelectedId = null;
+    if (overBtn) {
+      overBtn.disabled = true;
+      overBtn.setAttribute("disabled", "disabled");
+    }
+
+    list.textContent = "";
+    const maps = typeof window.wodGetSavedMapsList === "function" ? window.wodGetSavedMapsList() : [];
+    if (maps.length === 0) {
+      list.innerHTML = `<div class="editor-hint" style="margin:0">No maps in your library yet — use <strong>Save as new</strong> below.</div>`;
+    } else {
+      for (const m of maps) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "editor-save-row";
+        row.dataset.mapId = m.id || "";
+        const img = document.createElement("img");
+        img.alt = "";
+        if (m.thumb || m.thumbnail) img.src = m.thumb || m.thumbnail;
+        const mid = document.createElement("div");
+        const t = document.createElement("div");
+        t.className = "editor-save-name";
+        t.textContent = m.name || "Map";
+        const meta = document.createElement("div");
+        meta.className = "editor-save-meta";
+        meta.textContent = new Date(m.savedAt || m.date || Date.now()).toLocaleString();
+        mid.appendChild(t);
+        mid.appendChild(meta);
+        row.appendChild(img);
+        row.appendChild(mid);
+        row.addEventListener("click", () => {
+          list.querySelectorAll(".editor-save-row").forEach((r) => r.classList.remove("selected"));
+          row.classList.add("selected");
+          state.editorSaveSelectedId = m.id || null;
+          if (overBtn) {
+            const ok = !!state.editorSaveSelectedId;
+            overBtn.disabled = !ok;
+            if (ok) overBtn.removeAttribute("disabled");
+            else overBtn.setAttribute("disabled", "disabled");
+          }
+        });
+        list.appendChild(row);
+      }
+    }
+    ov.classList.remove("hidden");
+    ov.setAttribute("aria-hidden", "false");
+  }
+
+  function wireEditorSaveDialog() {
+    const cancel = document.getElementById("editorSaveCancelBtn");
+    const asNew = document.getElementById("editorSaveAsNewBtn");
+    const over = document.getElementById("editorSaveOverwriteBtn");
+    const ov = document.getElementById("editorSaveOverlay");
+    if (cancel) cancel.addEventListener("click", () => hideEditorSaveDialog());
+    if (ov) {
+      ov.addEventListener("click", (e) => {
+        if (e.target === ov) hideEditorSaveDialog();
+      });
+    }
+    const doSavePayload = () => {
+      if (!window.WOD || typeof WOD.exportMapData !== "function") return null;
+      return {
+        mapData: WOD.exportMapData(),
+        thumb: makeThumbnail() || undefined,
+      };
+    };
+    if (asNew) {
+      asNew.addEventListener("click", () => {
+        const nameIn = document.getElementById("editorSaveNewName");
+        const name = (nameIn && nameIn.value.trim()) || "Custom Map " + new Date().toLocaleTimeString();
+        const p = doSavePayload();
+        if (!p) return;
+        if (typeof window.wodSaveMapToLibraryWithName === "function") {
+          window.wodSaveMapToLibraryWithName(name, p);
+        }
+        hideEditorSaveDialog();
+        renderMapBrowser();
+        if (typeof window.showNotification === "function") window.showNotification("Map saved to library.");
+      });
+    }
+    if (over) {
+      over.addEventListener("click", () => {
+        if (!state.editorSaveSelectedId) return;
+        const p = doSavePayload();
+        if (!p) return;
+        const nameIn = document.getElementById("editorSaveNewName");
+        const name = nameIn && nameIn.value.trim();
+        if (typeof window.wodOverwriteSavedMapById === "function") {
+          window.wodOverwriteSavedMapById(state.editorSaveSelectedId, { ...p, name: name || undefined });
+        }
+        hideEditorSaveDialog();
+        renderMapBrowser();
+        if (typeof window.showNotification === "function") window.showNotification("Map updated in library.");
+      });
+    }
+  }
+
   function wireEditorGenerateStrip(root) {
     const setTab = (name) => {
       root.querySelectorAll("[data-gen-tab]").forEach(b => b.classList.toggle("active", b.dataset.genTab === name));
@@ -351,6 +551,7 @@
             scheduleEditorRender();
             renderSelection();
             renderMapBrowser();
+            if (state.open) editorInitHistory();
           } catch (e) {
             console.warn(e);
             alert("Could not import this JSON as a map.");
@@ -378,7 +579,108 @@
         background:linear-gradient(180deg,#0f1a28,#0c1520);
         border-bottom:1px solid rgba(201,162,39,.32);
       }
-      .editor-gen-tabs { display:flex; gap:6px; padding:8px 14px 0; flex-wrap:wrap; }
+      .editor-gen-head {
+        display:flex;
+        flex-wrap:wrap;
+        align-items:center;
+        gap:10px;
+        padding:8px 14px 0;
+      }
+      .editor-gen-head .editor-gen-tabs {
+        display:flex;
+        gap:6px;
+        flex:1 1 200px;
+        min-width:0;
+        flex-wrap:wrap;
+      }
+      .editor-gen-undo {
+        display:flex;
+        gap:6px;
+        flex-shrink:0;
+        align-items:center;
+      }
+      .editor-gen-undo .editor-btn {
+        padding:7px 12px;
+        font-size:12px;
+        min-width:72px;
+      }
+      .editor-save-overlay {
+        position:fixed;
+        inset:0;
+        z-index:60;
+        background:rgba(6,12,20,.75);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        padding:16px;
+      }
+      .editor-save-overlay.hidden { display:none; }
+      .editor-save-dialog {
+        background:linear-gradient(180deg,#152535,#101a28);
+        border:1px solid rgba(201,162,39,.45);
+        border-radius:12px;
+        padding:16px 18px;
+        max-width:520px;
+        width:100%;
+        max-height:88vh;
+        overflow:auto;
+        box-shadow:0 12px 40px rgba(0,0,0,.55);
+      }
+      .editor-save-dialog h3 { margin:0 0 8px; font-size:1.05rem; color:#f4e4a6; }
+      .editor-save-list {
+        display:grid;
+        gap:8px;
+        max-height:42vh;
+        overflow:auto;
+        margin:10px 0 14px;
+      }
+      .editor-save-row {
+        display:grid;
+        grid-template-columns:72px 1fr;
+        gap:10px;
+        align-items:center;
+        padding:8px;
+        border:1px solid rgba(201,162,39,.35);
+        border-radius:8px;
+        background:rgba(255,255,255,.04);
+        cursor:pointer;
+      }
+      .editor-save-row.selected {
+        border-color:#4be396;
+        box-shadow:inset 0 0 0 1px rgba(75,227,150,.25);
+      }
+      .editor-save-row img {
+        width:72px;
+        height:44px;
+        object-fit:cover;
+        border-radius:6px;
+        border:1px solid #000;
+      }
+      .editor-save-name { font-weight:800; color:#fff; font-size:13px; }
+      .editor-save-meta { font-size:11px; color:#93a8b9; }
+      .editor-save-new-row {
+        display:flex;
+        flex-wrap:wrap;
+        gap:8px;
+        align-items:center;
+        margin-bottom:12px;
+      }
+      .editor-save-new-row input {
+        flex:1;
+        min-width:160px;
+        background:#1a3348;
+        color:#fff;
+        border:1px solid rgba(139,173,192,.55);
+        border-radius:6px;
+        padding:8px 10px;
+        font-size:13px;
+      }
+      .editor-save-actions {
+        display:flex;
+        flex-wrap:wrap;
+        gap:10px;
+        justify-content:flex-end;
+      }
       .editor-gen-tab {
         background:rgba(30,48,66,.9); color:#b8c9d9; border:1px solid rgba(120,150,175,.45);
         border-radius:8px 8px 0 0; padding:8px 14px; font-size:12px; font-weight:700; cursor:pointer;
@@ -611,9 +913,15 @@
         <button type="button" class="editor-btn editor-btn-main" id="editorExitBtn">← Main menu</button>
       </header>
       <div class="editor-gen-wrap">
-        <div class="editor-gen-tabs">
-          <button type="button" class="editor-gen-tab active" data-gen-tab="generate">Generate</button>
-          <button type="button" class="editor-gen-tab" data-gen-tab="files">Import / export JSON</button>
+        <div class="editor-gen-head">
+          <div class="editor-gen-tabs">
+            <button type="button" class="editor-gen-tab active" data-gen-tab="generate">Generate</button>
+            <button type="button" class="editor-gen-tab" data-gen-tab="files">Import / export JSON</button>
+          </div>
+          <div class="editor-gen-undo">
+            <button type="button" class="editor-btn" id="editorUndoBtn" disabled title="Undo (Ctrl+Z)">Undo</button>
+            <button type="button" class="editor-btn" id="editorRedoBtn" disabled title="Redo (Ctrl+Shift+Z / Ctrl+Y)">Redo</button>
+          </div>
         </div>
         <div id="editorGenPanelGenerate" class="editor-gen-panel" data-gen-panel="generate">
           <div class="editor-gen-shape">
@@ -722,6 +1030,21 @@
           <div id="editorSelection" class="editor-hint" style="margin:0">Nothing selected. Choose <strong>Select</strong>, click a unit or town, then switch to <strong>Move</strong> and drag on the map.</div>
         </section>
       </div>
+      <div id="editorSaveOverlay" class="editor-save-overlay hidden" aria-hidden="true">
+        <div class="editor-save-dialog">
+          <h3>Save to library</h3>
+          <p class="editor-hint" style="margin:0 0 8px">Select a map to overwrite its data, or enter a new name. Saved in this browser only.</p>
+          <div id="editorSaveList" class="editor-save-list"></div>
+          <div class="editor-save-new-row">
+            <input type="text" id="editorSaveNewName" placeholder="New map name" maxlength="96" />
+            <button type="button" class="editor-btn" id="editorSaveAsNewBtn">Save as new</button>
+          </div>
+          <div class="editor-save-actions">
+            <button type="button" class="editor-btn" id="editorSaveOverwriteBtn" disabled>Overwrite selected</button>
+            <button type="button" class="editor-btn" id="editorSaveCancelBtn">Cancel</button>
+          </div>
+        </div>
+      </div>
     `;
     document.body.appendChild(app);
 
@@ -735,6 +1058,7 @@
         state.tool = btn.dataset.tool;
         app.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("active", b === btn));
         syncTerritoryOwnerUi();
+        scheduleEditorRender();
       });
     });
     app.querySelector("#editorTerrain").addEventListener("change", e => { state.terrain = e.target.value; });
@@ -776,6 +1100,11 @@
     });
     syncBrushScaleControls(app);
 
+    const undoB = document.getElementById("editorUndoBtn");
+    const redoB = document.getElementById("editorRedoBtn");
+    if (undoB) undoB.addEventListener("click", () => editorUndo());
+    if (redoB) redoB.addEventListener("click", () => editorRedo());
+
     document.getElementById("editorAddFaction").addEventListener("click", () => {
       if (state.maxFactionSlots < editorMaxPlayerSlots()) {
         state.maxFactionSlots++;
@@ -795,6 +1124,7 @@
       scheduleEditorRender();
       renderSelection();
       renderMapBrowser();
+      if (state.open) editorInitHistory();
     });
     app.querySelector("#editorRandom").addEventListener("click", async () => {
       document.getElementById("setupMapSize").value = app.querySelector("#editorSize").value;
@@ -820,6 +1150,7 @@
       scheduleEditorRender();
       renderSelection();
       renderMapBrowser();
+      if (state.open) editorInitHistory();
     });
     app.querySelector("#editorSave").addEventListener("click", saveEditorMap);
     let browseLib = app.querySelector("#editorBrowseLib");
@@ -855,6 +1186,7 @@
 
     wireEditorGenerateStrip(app);
     rebuildUnitPalette();
+    wireEditorSaveDialog();
   }
 
   function openMapEditor() {
@@ -913,6 +1245,27 @@
     resizeEditorCanvas();
     renderSelection();
     renderMapBrowser();
+    editorInitHistory();
+    if (!state._editorKeyHandler) {
+      state._editorKeyHandler = (ev) => {
+        if (!state.open) return;
+        const el = ev.target;
+        if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable))
+          return;
+        const k = ev.key;
+        if (ev.ctrlKey && !ev.shiftKey && (k === "z" || k === "Z")) {
+          ev.preventDefault();
+          editorUndo();
+        } else if (ev.ctrlKey && (k === "y" || k === "Y")) {
+          ev.preventDefault();
+          editorRedo();
+        } else if (ev.ctrlKey && ev.shiftKey && (k === "z" || k === "Z")) {
+          ev.preventDefault();
+          editorRedo();
+        }
+      };
+      document.addEventListener("keydown", state._editorKeyHandler);
+    }
   }
 
   function closeMapEditor() {
@@ -923,6 +1276,11 @@
     const app = document.getElementById("mapEditorApp");
     if (app) app.classList.remove("visible");
     state.open = false;
+    hideEditorSaveDialog();
+    if (state._editorKeyHandler) {
+      document.removeEventListener("keydown", state._editorKeyHandler);
+      state._editorKeyHandler = null;
+    }
     state.territoryPainting = false;
     state.viewPanDrag = null;
     editorPtrs.clear();
@@ -1111,11 +1469,14 @@
     const hex = findSpawnHexForType(type, pos);
     if (!hex) return;
     if (type === "ship" && !WOD.isWaterHex(hex)) return;
+    touchEditorMutation();
     const unit = WOD.createUnitAt(type, hex.x, hex.y, faction);
     state.selected = { type: "unit", value: unit };
     renderSelection();
     markEditorMapChanged();
     scheduleEditorRender();
+    editorPushSnapshot();
+    state.editorGestureMutatedMap = false;
   }
 
   function paintAt(pos) {
@@ -1125,12 +1486,14 @@
     const brushTargets = paintUsesBrush(state.tool) ? hexesForBrush(hex) : [hex];
 
     if (state.tool === "territory") {
+      touchEditorMutation();
       const own = Math.max(0, Math.min(state.territoryPaintOwner | 0, state.maxFactionSlots));
       for (const h of brushTargets) WOD.setHexOwner(h, own);
       markEditorMapChanged();
       return;
     }
     if (state.tool === "paint") {
+      touchEditorMutation();
       for (const h of brushTargets) {
         h.type = state.terrain;
         h.baseColor = WOD.getTerrainColor(h.type);
@@ -1140,6 +1503,7 @@
       return;
     }
     if (state.tool === "erase") {
+      touchEditorMutation();
       for (const h of brushTargets) {
         h.type = "grass";
         h.baseColor = WOD.getTerrainColor("grass");
@@ -1149,22 +1513,27 @@
       return;
     }
     if (state.tool === "city") {
+      touchEditorMutation();
       createTown(hex);
       return;
     }
     if (state.tool === "unit") {
+      touchEditorMutation();
       const uo = Math.max(1, state.owner || 1);
       const unit = WOD.createUnitAt("light", hex.x, hex.y, uo);
       state.selected = { type: "unit", value: unit };
       renderSelection();
+      markEditorMapChanged();
       return;
     }
     if (state.tool === "factory" || state.tool === "harbor") {
+      touchEditorMutation();
       const city = nearestCity(pos, 80) || createTown(hex);
       if (state.tool === "factory") city.hasFactory = true;
       if (state.tool === "harbor") city.hasHarbor = true;
       state.selected = { type: "city", value: city };
       renderSelection();
+      markEditorMapChanged();
     }
   }
 
@@ -1186,6 +1555,7 @@
       incomeBonus: 0,
       manpowerBonus: 0,
     };
+    touchEditorMutation();
     WOD.gameData.cities.push(city);
     for (const pt of WOD.getHexesInRadius(hex.q, hex.r, 2)) {
       const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
@@ -1250,6 +1620,7 @@
     }
     const pos = editorWorldPos(event);
     if (state.tool === "move" && state.selected) {
+      touchEditorMutation();
       const hex = nearestHex(pos);
       if (!hex) return;
       const obj = state.selected.value;
@@ -1275,6 +1646,10 @@
     if (state.open && state.territoryPainting) {
       WOD.endHexOwnerBatch();
       state.territoryPainting = false;
+    }
+    if (state.open && state.editorGestureMutatedMap) {
+      editorPushSnapshot();
+      state.editorGestureMutatedMap = false;
     }
     state.viewPanDrag = null;
     state.dragging = false;
@@ -1358,6 +1733,33 @@
         ctx.stroke();
       }
     }
+
+    const hlTool = state.tool === "select" || state.tool === "move";
+    if (hlTool && state.selected && state.selected.value) {
+      const sel = state.selected;
+      ctx.save();
+      if (sel.type === "city" && L.cities) {
+        const c = sel.value;
+        const p = toCanvas(c.x, c.y);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 35 * p.scale, 0, Math.PI * 2);
+        ctx.strokeStyle = "#f1c40f";
+        ctx.lineWidth = Math.max(2.5, p.scale * 4);
+        ctx.stroke();
+      } else if (sel.type === "unit" && L.units) {
+        const u = sel.value;
+        const p = toCanvas(u.x, u.y);
+        const ur = Math.max(8, (u.radius || 10) * p.scale);
+        ctx.strokeStyle = "#f1c40f";
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, ur + 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.restore();
+    }
     state.renderView = null;
   }
 
@@ -1399,6 +1801,8 @@
         obj.hasHarbor = document.getElementById("selHarbor").checked;
         markEditorMapChanged();
         scheduleEditorRender();
+        editorPushSnapshot();
+        state.editorGestureMutatedMap = false;
       };
     } else {
       panel.innerHTML = `
@@ -1435,42 +1839,14 @@
         markEditorMapChanged();
         rebuildUnitPalette();
         scheduleEditorRender();
+        editorPushSnapshot();
+        state.editorGestureMutatedMap = false;
       };
     }
   }
 
   function saveEditorMap() {
-    const fallback = () => {
-      const name = "Custom Map " + new Date().toLocaleTimeString();
-      pushEditorMap(name);
-    };
-    function pushEditorMap(trimmedName) {
-      const mapData = WOD.exportMapData();
-      const thumbnail = makeThumbnail();
-      if (typeof window.wodSaveMapToLibraryWithName === "function") {
-        window.wodSaveMapToLibraryWithName(String(trimmedName).trim(), { mapData, thumb: thumbnail || undefined });
-      }
-      renderMapBrowser();
-      if (typeof window.showNotification === "function") window.showNotification("Map saved to library.");
-    }
-
-    const defTitle = "Custom Map " + new Date().toLocaleTimeString();
-    if (typeof window.wodShowNameInputDialog === "function") {
-      window
-        .wodShowNameInputDialog({
-          title: "Save map to library",
-          hint: "Your map is saved in this browser — same library as solo and multiplayer.",
-          defaultValue: defTitle,
-          confirmLabel: "Save",
-          maxLength: 96,
-        })
-        .then((name) => {
-          if (name == null || !String(name).trim()) return;
-          pushEditorMap(name);
-        });
-      return;
-    }
-    fallback();
+    showEditorSaveDialog();
   }
 
   function makeThumbnail() {
@@ -1532,6 +1908,7 @@
         markEditorMapChanged();
         renderSelection();
         scheduleEditorRender();
+        if (state.open) editorInitHistory();
       });
       del.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -1553,6 +1930,7 @@
     scheduleEditorRender();
     renderSelection();
     renderMapBrowser();
+    editorInitHistory();
   };
 
   window.openMapEditor = openMapEditor;

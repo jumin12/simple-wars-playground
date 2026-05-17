@@ -13519,6 +13519,27 @@
             wodSetSavedMapsList(list);
             return entry;
         }
+        function wodOverwriteSavedMapById(id, custom) {
+            custom = custom || {};
+            let list = wodGetSavedMapsList();
+            let i = list.findIndex(e => e && String(e.id) === String(id));
+            if(i < 0) return null;
+            let mapData = custom.mapData || wodBuildMapPayloadFromGame();
+            let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapData, 280, 168);
+            let prev = list[i];
+            let name = custom.name != null && String(custom.name).trim() ? String(custom.name).trim() : (prev.name || 'Saved map');
+            list[i] = {
+                ...prev,
+                id: prev.id,
+                name,
+                savedAt: new Date().toISOString(),
+                thumb,
+                mapSize: mapData.mapSize || mapData.mapRadius,
+                data: mapData
+            };
+            wodSetSavedMapsList(list);
+            return list[i];
+        }
         function wodDeleteSavedMapById(id) {
             if(!id) return;
             let list = wodGetSavedMapsList().filter(e => e && e.id !== id);
