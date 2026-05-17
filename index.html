@@ -2727,14 +2727,42 @@
             flex-wrap: wrap;
             align-items: flex-start;
         }
-        .wod-map-lib-list {
+        .wod-map-lib-list-column {
             flex: 1 1 240px;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .wod-map-lib-list {
             max-height: min(62vh, 420px);
             overflow-y: auto;
             border: 1px solid rgba(255,255,255,0.12);
             border-radius: 10px;
             background: rgba(0,0,0,0.22);
             padding: 8px;
+        }
+        .wod-map-lib-pager {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            flex-shrink: 0;
+        }
+        .wod-map-lib-pager[hidden] {
+            display: none !important;
+        }
+        .wod-map-lib-page-label {
+            font-size: 12px;
+            color: #9db3c7;
+            min-width: 120px;
+            text-align: center;
+            font-weight: 700;
+        }
+        .wod-map-lib-page-btn {
+            padding: 6px 14px;
+            min-width: 44px;
         }
         .wod-map-lib-card {
             display: flex;
@@ -5185,7 +5213,14 @@
                 <h2 style="margin-top:0">Saved maps</h2>
                 <p class="wod-map-lib-sub">Maps are stored locally in your browser. Use them in solo setup, multiplayer, or the map editor. Previews match the setup view: terrain, faction borders, and town markers.</p>
                 <div class="wod-map-lib-layout">
-                    <div class="wod-map-lib-list" id="wodMapLibList" aria-label="Saved map list"></div>
+                    <div class="wod-map-lib-list-column">
+                        <div class="wod-map-lib-list" id="wodMapLibList" aria-label="Saved map list"></div>
+                        <div class="wod-map-lib-pager" id="wodMapLibPager" hidden>
+                            <button type="button" class="menu-btn wod-map-lib-page-btn" id="wodMapLibPagePrev" aria-label="Previous page">←</button>
+                            <span id="wodMapLibPageLabel" class="wod-map-lib-page-label"></span>
+                            <button type="button" class="menu-btn wod-map-lib-page-btn" id="wodMapLibPageNext" aria-label="Next page">→</button>
+                        </div>
+                    </div>
                     <div class="wod-map-lib-detail">
                         <canvas id="wodMapLibPreview" width="380" height="210" class="wod-map-lib-preview-canvas"></canvas>
                         <div id="wodMapLibMeta" class="wod-map-lib-meta"></div>
@@ -6216,6 +6251,7 @@
                 else if(opts.libContext === 'editor') _wodMapLib.returnTo = 'editor';
                 else if(opts.fromMpHost) _wodMapLib.returnTo = 'multiplayer';
                 else _wodMapLib.returnTo = 'setup';
+                _wodMapLib.listPage = 0;
                 wodWireMapLibraryPanelOnce();
                 wodRefreshMapLibraryPanel();
             }
@@ -13233,7 +13269,8 @@
 
         const WOD_SAVED_MAPS_V2_KEY = 'wodSavedMapsV2';
         const WOD_SAVED_MAPS_LEGACY_EDITOR = 'wodEditorMaps';
-        let _wodMapLib = { context: 'setup', selectedId: null, list: [], wired: false, returnTo: null };
+        const WOD_MAP_LIB_PAGE_SIZE = 3;
+        let _wodMapLib = { context: 'setup', selectedId: null, list: [], listPage: 0, wired: false, pagerWired: false, returnTo: null };
 
         function wodGetSavedMapsList() {
             try {
@@ -13265,7 +13302,21 @@
         function wodSetSavedMapsList(arr) {
             try {
                 localStorage.setItem(WOD_SAVED_MAPS_V2_KEY, JSON.stringify(Array.isArray(arr) ? arr : []));
-            } catch(e) {}
+                return true;
+            } catch(e) {
+                console.warn('wodSetSavedMapsList failed', e);
+                return false;
+            }
+        }
+        /** Ensures map payload is JSON-serializable (drops live object refs / cycles before localStorage). */
+        function wodCloneMapDataForStorage(mapData) {
+            if(mapData == null || typeof mapData !== 'object') return null;
+            try {
+                return JSON.parse(JSON.stringify(mapData));
+            } catch(e) {
+                console.warn('wodCloneMapDataForStorage', e);
+                return null;
+            }
         }
         function wodHexKeyFromQR(q, r) {
             return q + ',' + r;
@@ -13515,8 +13566,13 @@
         }
         function wodSaveMapToLibraryWithName(name, custom) {
             custom = custom || {};
-            let mapData = custom.mapData || wodBuildMapPayloadFromGame();
-            let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapData, 280, 168);
+            let mapDataRaw = custom.mapData || wodBuildMapPayloadFromGame();
+            let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapDataRaw, 280, 168);
+            let mapData = wodCloneMapDataForStorage(mapDataRaw);
+            if(!mapData) {
+                alert('Could not serialize this map for storage. Try saving again after reloading the page.');
+                return null;
+            }
             let list = wodGetSavedMapsList();
             let entry = {
                 id: 'wmap_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9),
@@ -13527,7 +13583,10 @@
                 data: mapData
             };
             list.unshift(entry);
-            wodSetSavedMapsList(list);
+            if(!wodSetSavedMapsList(list)) {
+                alert('Could not save map — browser storage may be full. Remove older saves or free disk space.');
+                return null;
+            }
             return entry;
         }
         function wodOverwriteSavedMapById(id, custom) {
@@ -13535,8 +13594,13 @@
             let list = wodGetSavedMapsList();
             let i = list.findIndex(e => e && String(e.id) === String(id));
             if(i < 0) return null;
-            let mapData = custom.mapData || wodBuildMapPayloadFromGame();
-            let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapData, 280, 168);
+            let mapDataRaw = custom.mapData || wodBuildMapPayloadFromGame();
+            let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapDataRaw, 280, 168);
+            let mapData = wodCloneMapDataForStorage(mapDataRaw);
+            if(!mapData) {
+                alert('Could not serialize this map for storage. Try saving again after reloading the page.');
+                return null;
+            }
             let prev = list[i];
             let name = custom.name != null && String(custom.name).trim() ? String(custom.name).trim() : (prev.name || 'Saved map');
             list[i] = {
@@ -13548,7 +13612,10 @@
                 mapSize: mapData.mapSize || mapData.mapRadius,
                 data: mapData
             };
-            wodSetSavedMapsList(list);
+            if(!wodSetSavedMapsList(list)) {
+                alert('Could not update map — browser storage may be full. Remove older saves or free disk space.');
+                return null;
+            }
             return list[i];
         }
         function wodDeleteSavedMapById(id) {
@@ -13580,6 +13647,19 @@
             previewLoadedMap();
         }
         function wodWireMapLibraryPanelOnce() {
+            if(!_wodMapLib.pagerWired) {
+                _wodMapLib.pagerWired = true;
+                let prevBtn = document.getElementById('wodMapLibPagePrev');
+                let nextBtn = document.getElementById('wodMapLibPageNext');
+                if(prevBtn) prevBtn.addEventListener('click', () => {
+                    _wodMapLib.listPage = Math.max(0, (_wodMapLib.listPage | 0) - 1);
+                    wodRefreshMapLibraryPanel();
+                });
+                if(nextBtn) nextBtn.addEventListener('click', () => {
+                    _wodMapLib.listPage = (_wodMapLib.listPage | 0) + 1;
+                    wodRefreshMapLibraryPanel();
+                });
+            }
             if(_wodMapLib.wired) return;
             _wodMapLib.wired = true;
             let loadB = document.getElementById('wodMapLibLoadBtn');
@@ -13627,11 +13707,16 @@
             let meta = document.getElementById('wodMapLibMeta');
             let prev = document.getElementById('wodMapLibPreview');
             let loadB = document.getElementById('wodMapLibLoadBtn');
+            let pager = document.getElementById('wodMapLibPager');
+            let pageLabel = document.getElementById('wodMapLibPageLabel');
+            let prevBtn = document.getElementById('wodMapLibPagePrev');
+            let nextBtn = document.getElementById('wodMapLibPageNext');
             if(loadB) {
                 loadB.textContent = _wodMapLib.context === 'editor' ? 'Load into editor' : 'Load into setup';
             }
             if(!listEl) return;
             if(_wodMapLib.list.length === 0) {
+                if(pager) pager.hidden = true;
                 listEl.innerHTML = '<div class="wod-map-lib-sub" style="padding:12px">No saves yet. Generate a map and press <strong>Save Map</strong>, or create one in the map editor.</div>';
                 if(meta) meta.textContent = '';
                 if(prev && prev.getContext) {
@@ -13641,8 +13726,30 @@
                 }
                 return;
             }
+            let n = _wodMapLib.list.length;
+            let totalPages = Math.max(1, Math.ceil(n / WOD_MAP_LIB_PAGE_SIZE));
+            _wodMapLib.listPage = Math.max(0, Math.min((_wodMapLib.listPage | 0), totalPages - 1));
+            let p = _wodMapLib.listPage;
+            let start = p * WOD_MAP_LIB_PAGE_SIZE;
+            let end = Math.min(start + WOD_MAP_LIB_PAGE_SIZE, n);
+            let pageSlice = _wodMapLib.list.slice(start, end);
+            if(pager) {
+                pager.hidden = false;
+                if(pageLabel) pageLabel.textContent = 'Page ' + (p + 1) + ' / ' + totalPages + ' (' + n + ' saves)';
+                if(prevBtn) {
+                    prevBtn.disabled = p <= 0;
+                    prevBtn.toggleAttribute('disabled', p <= 0);
+                }
+                if(nextBtn) {
+                    let last = p >= totalPages - 1;
+                    nextBtn.disabled = last;
+                    nextBtn.toggleAttribute('disabled', last);
+                }
+            }
+            if(!pageSlice.some(x => x.id === _wodMapLib.selectedId))
+                _wodMapLib.selectedId = pageSlice[0] ? pageSlice[0].id : null;
             listEl.innerHTML = '';
-            for(let e of _wodMapLib.list) {
+            for(let e of pageSlice) {
                 let card = document.createElement('div');
                 card.className = 'wod-map-lib-card' + (e.id === _wodMapLib.selectedId ? ' active' : '');
                 card.dataset.id = e.id;
@@ -13787,9 +13894,11 @@
                 maxLength: 96
             }).then(name => {
                 if(!name || !String(name).trim()) return;
-                wodSaveMapToLibraryWithName(name);
+                let ent = wodSaveMapToLibraryWithName(name);
+                if(!ent) return;
                 showNotification('Map saved to library.');
-                if(typeof window.renderMapBrowser === 'function') window.renderMapBrowser();
+                if(typeof window.wodNotifySavedMapsChanged === 'function') window.wodNotifySavedMapsChanged();
+                else if(typeof window.renderMapBrowser === 'function') window.renderMapBrowser();
             });
         }
         window.wodGetSavedMapsList = wodGetSavedMapsList;

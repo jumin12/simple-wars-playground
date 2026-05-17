@@ -755,10 +755,10 @@
         const p = doSavePayload();
         if (!p) return;
         if (typeof window.wodSaveMapToLibraryWithName === "function") {
-          window.wodSaveMapToLibraryWithName(name, p);
+          if (!window.wodSaveMapToLibraryWithName(name, p)) return;
         }
         hideEditorSaveDialog();
-        renderMapBrowser();
+        refreshSavedMapsUisAfterNewSave();
         if (typeof window.showNotification === "function") window.showNotification("Map saved to library.");
       });
     }
@@ -770,10 +770,10 @@
         const nameIn = document.getElementById("editorSaveNewName");
         const name = nameIn && nameIn.value.trim();
         if (typeof window.wodOverwriteSavedMapById === "function") {
-          window.wodOverwriteSavedMapById(state.editorSaveSelectedId, { ...p, name: name || undefined });
+          if (!window.wodOverwriteSavedMapById(state.editorSaveSelectedId, { ...p, name: name || undefined })) return;
         }
         hideEditorSaveDialog();
-        renderMapBrowser();
+        refreshSavedMapsUisAfterNewSave();
         if (typeof window.showNotification === "function") window.showNotification("Map updated in library.");
       });
     }
@@ -2671,6 +2671,14 @@
       browser.appendChild(card);
     }
   }
+
+  function refreshSavedMapsUisAfterNewSave() {
+    state.mapBrowserPage = 0;
+    state.editorSaveListPage = 0;
+    renderMapBrowser();
+  }
+
+  window.wodNotifySavedMapsChanged = refreshSavedMapsUisAfterNewSave;
 
   window.wodNotifyEditorMapChanged = function () {
     if (!state.open) return;
