@@ -37,6 +37,8 @@
     cityMoveAttachedHexRefs: null,
     /** While moving a town, draws at this anchor until mouseup commits terrain */
     cityMoveGhostAnchor: null,
+    /** Right panel: faction start editor slot (matches editor economy selects). */
+    factionEconomySlot: 1,
   };
 
   const editorPtrs = new Map();
@@ -212,6 +214,7 @@
     };
     syncEditorOwnerSwatch();
     rebuildTerritoryOwnerSelect();
+    rebuildEconomyFactionSelect(false);
   }
 
   function rebuildTerritoryOwnerSelect() {
@@ -240,6 +243,186 @@
     wrap.style.display = show ? "flex" : "none";
     wrap.toggleAttribute("hidden", !show);
     wrap.setAttribute("aria-hidden", show ? "false" : "true");
+  }
+
+  function editorNormalizeColorForPicker(hex) {
+    const fb = "#888888";
+    if (!hex || typeof hex !== "string") return fb;
+    const h = hex.trim();
+    const m6 = h.match(/^#([0-9a-f]{6})$/i);
+    if (m6) return `#${m6[1].toLowerCase()}`;
+    const m3 = h.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+    if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`.toLowerCase();
+    return fb;
+  }
+
+  function refreshEconomyFactionSelectStyles() {
+    const sel = document.getElementById("editorEconomyFaction");
+    if (!sel) return;
+    const cols = factionPalette();
+    Array.from(sel.options).forEach((opt) => {
+      const id = parseInt(opt.value, 10);
+      if (!Number.isFinite(id) || id < 1) return;
+      const c = cols[id] || "#cccccc";
+      opt.style.background = c;
+      opt.style.color = "#061208";
+      opt.style.fontWeight = "700";
+    });
+  }
+
+  /** Rebuild slot list when faction cap changes; keeps option styling in sync otherwise. */
+  function rebuildEconomyFactionSelect(forceRebuild) {
+    const sel = document.getElementById("editorEconomyFaction");
+    if (!sel || !window.WOD || !WOD.gameData) return;
+    const needRebuild = !!forceRebuild || sel.options.length !== state.maxFactionSlots;
+    if (!needRebuild) {
+      refreshEconomyFactionSelectStyles();
+      return;
+    }
+    const keep = Math.max(1, Math.min((state.factionEconomySlot | 0) || 1, state.maxFactionSlots));
+    let html = "";
+    const cols = factionPalette();
+    for (let i = 1; i <= state.maxFactionSlots; i++) {
+      const col = cols[i] || "#cccccc";
+      const lbl = i === 1 ? "Faction 1 (player)" : `Faction ${i}`;
+      html += `<option value="${i}" style="background:${col};color:#061208;font-weight:700">${lbl}</option>`;
+    }
+    sel.innerHTML = html;
+    state.factionEconomySlot = keep;
+    sel.value = String(keep);
+    refreshEconomyFactionSelectStyles();
+    pullFactionEconomyInputsFromGame();
+  }
+
+  function ensureAiEconomyBuckets() {
+    if (!window.WOD || !WOD.gameData) return;
+    const gd = WOD.gameData;
+    if (!gd.aiMoneyByOwner || typeof gd.aiMoneyByOwner !== "object") gd.aiMoneyByOwner = {};
+    if (!gd.aiManpowerByOwner || typeof gd.aiManpowerByOwner !== "object") gd.aiManpowerByOwner = {};
+  }
+
+  function pullFactionEconomyInputsFromGame() {
+    if (!window.WOD || !WOD.gameData) return;
+    ensureAiEconomyBuckets();
+    const sel = document.getElementById("editorEconomyFaction");
+    if (!sel) return;
+    const slotRaw = parseInt(sel.value, 10) || 1;
+    const slot = Math.max(1, Math.min(slotRaw, state.maxFactionSlots));
+    sel.value = String(slot);
+    state.factionEconomySlot = slot;
+    const col = document.getElementById("editorEconomyColor");
+    const cash = document.getElementById("editorEconomyCash");
+    const mp = document.getElementById("editorEconomyMp");
+    if (col) col.value = editorNormalizeColorForPicker(factionPalette()[slot]);
+    let moneyVal;
+    let mpVal;
+    if (slot === 1) {
+      moneyVal = WOD.gameData.money;
+      mpVal = WOD.gameData.manpower;
+    } else {
+      moneyVal = WOD.gameData.aiMoneyByOwner[slot];
+      mpVal = WOD.gameData.aiManpowerByOwner[slot];
+      if (moneyVal == null) moneyVal = 10000;
+      if (mpVal == null) mpVal = 5000;
+    }
+    if (cash) cash.value = String(Math.max(0, Math.round(Number(moneyVal) || 0)));
+    if (mp) mp.value = String(Math.max(0, Math.round(Number(mpVal) || 0)));
+  }
+
+  function pushFactionEconomyNumbersToGame() {
+    if (!state.open || !window.WOD || !WOD.gameData) return;
+    ensureAiEconomyBuckets();
+    const slotRaw = parseInt(document.getElementById("editorEconomyFaction").value, 10) || 1;
+    const slot = Math.max(1, Math.min(slotRaw, state.maxFactionSlots));
+    const cash = document.getElementById("editorEconomyCash");
+    const mp = document.getElementById("editorEconomyMp");
+    const money = Math.max(0, parseInt(cash && cash.value, 10) || 0);
+    const mpx = Math.max(0, parseInt(mp && mp.value, 10) || 0);
+    if (slot === 1) {
+      WOD.gameData.money = money;
+      WOD.gameData.manpower = mpx;
+    } else {
+      WOD.gameData.aiMoneyByOwner[slot] = money;
+      WOD.gameData.aiManpowerByOwner[slot] = mpx;
+    }
+    WOD.gameData._mapExportHadStartEconomy = true;
+    markEditorMapChanged();
+  }
+
+  function applyFactionEconomyColorFromPicker() {
+    if (!window.WOD || !WOD.gameData) return;
+    const sel = document.getElementById("editorEconomyFaction");
+    const colEl = document.getElementById("editorEconomyColor");
+    if (!sel || !colEl) return;
+    const slot = Math.max(1, Math.min(parseInt(sel.value, 10) || 1, state.maxFactionSlots));
+    const cols = factionPalette();
+    cols[slot] = editorNormalizeColorForPicker(colEl.value);
+    WOD.gameData._mapExportHadStartEconomy = true;
+    markEditorMapChanged();
+  }
+
+  function editorRefreshTradeRoutes() {
+    if (window.WOD && typeof WOD.rebuildEditorTradeRoutes === "function") WOD.rebuildEditorTradeRoutes();
+    markEditorMapChanged();
+    scheduleEditorRender();
+  }
+
+  function renderFactionBalanceChart() {
+    const host = document.getElementById("editorFactionChart");
+    if (!host || !state.open || !window.WOD || typeof WOD.getEditorFactionEconomy !== "function") return;
+    let html =
+      `<table class="editor-faction-chart"><thead><tr><th>Faction</th><th>Lnd</th><th>$ /s</th>` +
+      `<th title="Manpower income from towns">Mp+/s</th><th title="Army manpower (excl. convoys)">Troops</th>` +
+      `</tr></thead><tbody>`;
+    for (let slot = 1; slot <= state.maxFactionSlots; slot++) {
+      const st = WOD.getEditorFactionEconomy(slot);
+      const nm = slot === 1 ? "Faction 1" : `Faction ${slot}`;
+      const fc = factionPalette()[slot] || "#ccc";
+      const inc = (+st.income).toFixed(2);
+      const mpInc = (+st.manpowerIncome).toFixed(2);
+      html += `<tr><td><span class="efc-dot" style="background:${fc}"></span>${nm}</td><td>${st.territoryHexes}</td><td>${inc}</td>` +
+        `<td>${mpInc}</td><td>${Math.round(st.troopManpower)}</td></tr>`;
+    }
+    html += "</tbody></table>";
+    host.innerHTML = html;
+    host.classList.remove("editor-hint");
+  }
+
+  function wireFactionEconomyPanel(root) {
+    const app = root || document.getElementById("mapEditorApp");
+    if (!app || app.dataset.factionEcoWired === "1") return;
+    app.dataset.factionEcoWired = "1";
+    const fac = document.getElementById("editorEconomyFaction");
+    const col = document.getElementById("editorEconomyColor");
+    const cash = document.getElementById("editorEconomyCash");
+    const mpIn = document.getElementById("editorEconomyMp");
+    if (fac) {
+      fac.addEventListener("change", () => {
+        state.factionEconomySlot = parseInt(fac.value, 10) || 1;
+        pullFactionEconomyInputsFromGame();
+      });
+    }
+    if (col) {
+      col.addEventListener("input", () => {
+        applyFactionEconomyColorFromPicker();
+        refreshEconomyFactionSelectStyles();
+        syncEditorOwnerSwatch();
+        syncTerritoryOwnerSwatch();
+        scheduleEditorRender();
+      });
+      col.addEventListener("change", () => {
+        rebuildOwnerSelect();
+        scheduleEditorRender();
+        editorPushSnapshot();
+      });
+    }
+    const onFundsChange = () => {
+      pushFactionEconomyNumbersToGame();
+      renderFactionBalanceChart();
+      editorPushSnapshot();
+    };
+    if (cash) cash.addEventListener("change", onFundsChange);
+    if (mpIn) mpIn.addEventListener("change", onFundsChange);
   }
 
   function hexesForBrush(centerHex) {
@@ -783,6 +966,26 @@
         border-radius:10px;padding:11px 12px;
       }
       .editor-card h3 { margin:0 0 10px;font-size:.72rem;text-transform:uppercase;letter-spacing:.12em;color:#c9dcf0;font-weight:800 }
+      .editor-faction-chart-wrap {
+        margin-top:6px;font-size:12px;color:#dbe8f5;
+        overflow-x:auto;max-width:100%;
+      }
+      .editor-faction-chart {
+        width:100%;border-collapse:collapse;font-size:11px;line-height:1.25;
+      }
+      .editor-faction-chart th,
+      .editor-faction-chart td {
+        padding:5px 4px;text-align:right;border-bottom:1px solid rgba(120,150,175,.25);
+      }
+      .editor-faction-chart th:first-child,.editor-faction-chart td:first-child { text-align:left; }
+      .editor-faction-chart th { font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#8aa4b8;font-weight:800 }
+      .editor-faction-chart .efc-dot {
+        display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;
+        vertical-align:middle;border:1px solid rgba(0,0,0,.3);
+      }
+      .editor-economy-hint {
+        margin:8px 0 0;font-size:11px;color:#8aa4b8;line-height:1.35;
+      }
       .editor-row { display:flex; gap:10px; align-items:center; margin:7px 0; }
       .editor-row label { flex:0 0 42%; color:#cfdce8; font-size:13px;line-height:1.25 }
       .editor-row input,.editor-row select { flex:1; min-width:0; background:#1a3348; color:#fff;
@@ -1111,6 +1314,30 @@
           <h3>Selection</h3>
           <div id="editorSelection" class="editor-hint" style="margin:0">Nothing selected. <strong>Select</strong> clicks units/towns; <strong>drag a box</strong> on empty map (Select/Move) to grab several units; <strong>Move</strong> repositions.</div>
         </section>
+        <section class="editor-card">
+          <h3>Faction start (saved map)</h3>
+          <p class="editor-hint" style="margin-top:0">Starting cash and manpower for each slot when playing this exported map.</p>
+          <div class="editor-row"><label>Faction slot</label>
+            <select id="editorEconomyFaction" class="editor-economy-faction-select" aria-label="Faction economy slot"></select>
+          </div>
+          <div class="editor-row"><label>Color</label>
+            <input type="color" id="editorEconomyColor" value="#2ecc71" />
+          </div>
+          <div class="editor-row"><label title="Faction 1 = human player treasury">Cash</label>
+            <input type="number" id="editorEconomyCash" min="0" step="250" />
+          </div>
+          <div class="editor-row"><label title="Faction 1 = human manpower pool">Manpower</label>
+            <input type="number" id="editorEconomyMp" min="0" step="500" />
+          </div>
+          <p id="editorEconomySlotHint" class="editor-economy-hint">Faction 1 mirrors in-game player resources; AI use the per-slot pools.</p>
+        </section>
+        <section class="editor-card">
+          <h3>Balance preview</h3>
+          <p class="editor-hint" style="margin-top:0">Live cash income (territory + towns) vs troop manpower. Updates while you edit.</p>
+          <div id="editorFactionChartWrap" class="editor-faction-chart-wrap">
+            <div id="editorFactionChart" class="editor-hint" style="margin:0"></div>
+          </div>
+        </section>
       </div>
       <div id="editorSaveOverlay" class="editor-save-overlay hidden" aria-hidden="true">
         <div class="editor-save-dialog">
@@ -1164,6 +1391,8 @@
     });
 
     rebuildOwnerSelect();
+
+    wireFactionEconomyPanel(app);
 
     const brushEl = app.querySelector("#editorBrushSize");
     if (brushEl) {
@@ -1585,7 +1814,7 @@
     city.y = target.y;
     applyUrbanSprawlAtAnchor(city, target);
     touchEditorMutation();
-    markEditorMapChanged();
+    editorRefreshTradeRoutes();
     state.cityMoveGhostAnchor = null;
     state.cityMoveAttachedHexRefs = null;
     return true;
@@ -1844,7 +2073,7 @@
       }
     }
     state.selected = { type: "city", value: city };
-    markEditorMapChanged();
+    editorRefreshTradeRoutes();
     renderSelection();
     return city;
   }
@@ -2109,6 +2338,7 @@
       }
       ctx.restore();
     }
+    renderFactionBalanceChart();
     state.renderView = null;
   }
 

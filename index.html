@@ -14575,12 +14575,18 @@
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
             let preserveLoadedLayout = !!(gameData.loadedCustomMap && (!gameData.mp || !gameData.mp.enabled));
+            let useMapFileStartEconomy = !!(preserveLoadedLayout && gameData._mapExportHadStartEconomy);
             // Clear entities for procedural maps; keep authored units on loaded library / editor exports.
             if(!preserveLoadedLayout) gameData.entities = [];
-            gameData.money = parseInt(document.getElementById('setupMoney').value) || 10000;
-            gameData.aiMoneyByOwner = {};
-            gameData.aiManpowerByOwner = {};
-            gameData.manpower = 5000;
+            if(!useMapFileStartEconomy) {
+                gameData.money = parseInt(document.getElementById('setupMoney').value) || 10000;
+                gameData.aiMoneyByOwner = {};
+                gameData.aiManpowerByOwner = {};
+                gameData.manpower = 5000;
+            } else {
+                if(!gameData.aiMoneyByOwner) gameData.aiMoneyByOwner = {};
+                if(!gameData.aiManpowerByOwner) gameData.aiManpowerByOwner = {};
+            }
             gameData.manpowerIncome = 0;
             gameData.casualties = 0;
             gameData.enemyCasualties = 0;
@@ -14652,12 +14658,28 @@
                 gameData.tradeTimer = 0;
                 let locO = 1;
                 let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 10000;
-                gameData.money = startMoney;
-                gameData.manpower = 5000;
-                for(let owner of ownersList) {
-                    gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : startMoney;
-                    gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
+                let startMp = 5000;
+                if(!useMapFileStartEconomy) {
+                    gameData.money = startMoney;
+                    gameData.manpower = startMp;
+                    for(let owner of ownersList) {
+                        gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : startMoney;
+                        gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : startMp;
+                    }
+                } else {
+                    if(!gameData.aiMoneyByOwner) gameData.aiMoneyByOwner = {};
+                    if(!gameData.aiManpowerByOwner) gameData.aiManpowerByOwner = {};
+                    if(typeof gameData.money !== 'number' || isNaN(gameData.money)) gameData.money = startMoney;
+                    if(typeof gameData.manpower !== 'number' || isNaN(gameData.manpower)) gameData.manpower = startMp;
+                    for(let owner of ownersList) {
+                        if(owner === locO) continue;
+                        if(gameData.aiMoneyByOwner[owner] == null) gameData.aiMoneyByOwner[owner] = startMoney;
+                        if(gameData.aiManpowerByOwner[owner] == null) gameData.aiManpowerByOwner[owner] = startMp;
+                    }
+                    gameData.aiMoneyByOwner[locO] = 0;
+                    gameData.aiManpowerByOwner[locO] = 0;
                 }
+                delete gameData._mapExportHadStartEconomy;
                 gameData._landIncomeCacheDirty = true;
                 wodMarkTerrainPoliticalDirty();
 
@@ -21518,6 +21540,63 @@
             draw();
         };
 
+        function rebuildEditorTradeRoutesFromCities() {
+            let cities = gameData.cities || [];
+            gameData.roads = [];
+            for(let i = 0; i < cities.length; i++) {
+                let c1 = cities[i];
+                let nearest = null, minDist = Infinity;
+                for(let j = 0; j < cities.length; j++) {
+                    if(i === j) continue;
+                    let c2 = cities[j];
+                    let dx = c1.x - c2.x, dy = c1.y - c2.y;
+                    let d = dx * dx + dy * dy;
+                    if(d < minDist) { minDist = d; nearest = c2; }
+                }
+                if(nearest) gameData.roads.push({ from: c1, to: nearest });
+            }
+            gameData._landIncomeCacheDirty = true;
+        }
+
+        function snapEditorRoadRefsToCities() {
+            let cities = gameData.cities || [];
+            if(!cities.length) {
+                gameData.roads = [];
+                return;
+            }
+            let byId = new Map(cities.map(c => [String(c.id), c]));
+            let byQR = new Map(cities.map(c => [`${c.q},${c.r}`, c]));
+            function resolveEnd(end) {
+                if(!end) return null;
+                let byI = byId.get(String(end.id));
+                if(byI) return byI;
+                return byQR.get(`${end.q},${end.r}`) || null;
+            }
+            let next = [];
+            for(let r of gameData.roads || []) {
+                let f = resolveEnd(r.from);
+                let t = resolveEnd(r.to);
+                if(f && t && f !== t) next.push({ from: f, to: t });
+            }
+            gameData.roads = next;
+            if(!gameData.roads.length && cities.length >= 2)
+                rebuildEditorTradeRoutesFromCities();
+        }
+
+        function wodEditorFactionStats(owner) {
+            gameData._landIncomeCacheDirty = true;
+            let income = getOwnerIncome(owner);
+            let manpowerIncome = getOwnerManpowerIncome(owner);
+            let expenses = getOwnerExpenses(owner);
+            let territoryHexes = (gameData._landIncomeCache && gameData._landIncomeCache[owner]) || 0;
+            let troopManpower = 0;
+            for(let u of gameData.entities || []) {
+                if(!u || u.hp <= 0 || u.owner !== owner || u.type === 'convoy') continue;
+                troopManpower += u.manpower !== undefined ? u.manpower : Math.round((u.hp / Math.max(u.maxHp || 1, 1)) * 1000);
+            }
+            return { income, manpowerIncome, expenses, territoryHexes, troopManpower };
+        }
+
         window.WOD = {
             gameData,
             maxLobbyPlayers: WOD_MP_MAX_PLAYERS,
@@ -21569,6 +21648,7 @@
             makeBlankMap(size) {
                 gameData.hexes = {}; gameData.hexList = []; gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = [];
                 gameData.loadedCustomMap = false;
+                delete gameData._mapExportHadStartEconomy;
                 gameData.mapRadius = size;
                 let spacing = gameData.hexRadius * 1.35;
                 let rows = Math.floor(size * 0.8);
@@ -21598,6 +21678,18 @@
                     gameData.hexes[`${hex.q},${hex.r}`] = hex;
                 }
                 gameData.loadedCustomMap = true;
+                if(mapData.factionColors && mapData.factionColors.length) {
+                    for(let i = 0; i < Math.min(mapData.factionColors.length, factionColors.length); i++)
+                        factionColors[i] = mapData.factionColors[i];
+                }
+                if(mapData.savedStartEconomy) {
+                    if(typeof mapData.money === 'number') gameData.money = mapData.money;
+                    if(typeof mapData.manpower === 'number') gameData.manpower = mapData.manpower;
+                    gameData.aiMoneyByOwner = Object.assign({}, mapData.aiMoneyByOwner || {});
+                    gameData.aiManpowerByOwner = Object.assign({}, mapData.aiManpowerByOwner || {});
+                    gameData._mapExportHadStartEconomy = true;
+                } else delete gameData._mapExportHadStartEconomy;
+                snapEditorRoadRefsToCities();
                 normalizeTerrainHexes();
                 wodMarkTerrainFullDirty();
                 updateTerrainKey();
@@ -21610,9 +21702,18 @@
                     hexList: gameData.hexList,
                     cities: gameData.cities,
                     roads: gameData.roads,
-                    entities: gameData.entities
+                    entities: gameData.entities,
+                    factionColors: factionColors.slice(),
+                    savedStartEconomy: true,
+                    money: gameData.money,
+                    manpower: gameData.manpower,
+                    aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner || {}),
+                    aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner || {}),
                 };
             },
+            rebuildEditorTradeRoutes() { rebuildEditorTradeRoutesFromCities(); },
+            snapEditorRoadRefsToCities() { snapEditorRoadRefsToCities(); },
+            getEditorFactionEconomy(owner) { return wodEditorFactionStats(owner); },
             drawEditorUnitAtScreen(ctx, canvasX, canvasY, pxPerWorld, unit) {
                 let uColor = unit.colorOverride || factionColors[unit.owner] || '#cccccc';
                 let ur = Math.max(8, (unit.radius || 10) * pxPerWorld);
