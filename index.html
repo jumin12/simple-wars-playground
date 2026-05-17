@@ -1201,6 +1201,17 @@
             white-space: normal;
         }
 
+        .effect-pill--warn {
+            border-color: rgba(231, 76, 60, 0.75);
+            background: rgba(231, 76, 60, 0.14);
+            color: #fdecea;
+        }
+
+        .effect-pill--terrain {
+            border-color: rgba(174, 214, 241, 0.45);
+            background: rgba(52, 152, 219, 0.12);
+        }
+
         .info-mobile-orders {
             display: none;
             flex-direction: column;
@@ -11874,22 +11885,46 @@
             return water * moraleSlow;
         }
 
-        function getTerrainCombatSummaryEffect(unit, hex) {
+        /** Tile type only — combat modifiers are listed separately ("Combat in this terrain"). */
+        function getTerrainTileEffect(hex) {
+            if(!hex) return null;
+            let nm = terrainLabel(hex.type);
+            return {
+                label: nm,
+                detail: 'Terrain type of the tile under this unit.',
+                terrain: true
+            };
+        }
+
+        /** How this unit type fights on this hex (attack/defense multipliers vs baseline). */
+        function getTerrainCombatEffect(unit, hex) {
             if(!hex || !unit || unit.type === 'convoy') return null;
             let atk = getTerrainAttackModifier(unit, hex);
             let def = getTerrainDefenseModifier(unit, hex);
-            let nm = terrainLabel(hex.type);
             let atkPct = Math.round(atk * 100);
             let defPct = Math.round(def * 100);
-            let atkLine = atk >= 1.02 ? `Attacks outgoing from this tile deal about ${atkPct}% damage (terrain helps).`
-                : (atk <= 0.98 ? `Attacks outgoing from this tile deal about ${atkPct}% damage (terrain hurts).`
-                    : `Attack strength about ${atkPct}% (baseline 100%).`);
-            let defLine = def <= 0.98 ? `Damage you take from hits is about ${defPct}% (stronger cover — lower is better).`
-                : (def >= 1.02 ? `Damage you take from hits is about ${defPct}% (you are more exposed — higher is worse).`
-                    : `Damage taken about ${defPct}% (baseline 100%).`);
+            let atkLine = atk >= 1.02 ? `Outgoing attack damage from this tile is about ${atkPct}% of baseline (terrain helps your attacks).`
+                : (atk <= 0.98 ? `Outgoing attack damage from this tile is about ${atkPct}% of baseline (terrain hurts your attacks).`
+                    : `Outgoing attack damage is about ${atkPct}% of baseline (no strong terrain tilt).`);
+            let defLine = def <= 0.98 ? `Damage you take from enemy hits while standing here resolves at about ${defPct}% — lower is stronger cover.`
+                : (def >= 1.02 ? `Damage you take from enemy hits while standing here resolves at about ${defPct}% — higher means you are more exposed.`
+                    : `Damage taken from hits resolves at about ${defPct}% of baseline here.`);
             return {
-                label: nm + ': terrain combat',
+                label: 'Combat in this terrain',
                 detail: atkLine + ' ' + defLine,
+                block: true
+            };
+        }
+
+        /** Friendly fort aura: multiplier on incoming combat damage (< 1 means you take less). */
+        function getFortDefenseEffect(unit) {
+            if(!unit || unit.hp <= 0 || unit.type === 'convoy') return null;
+            let m = wodFortDefenseDamageMultiplier(unit);
+            if(m >= 0.995) return null;
+            let pct = Math.round(m * 100);
+            return {
+                label: 'Fortified',
+                detail: 'A friendly fort combat aura covers this stack. Incoming damage from attacks resolves at about ' + pct + '% of normal (about +' + Math.max(1, Math.round((1 / m - 1) * 100)) + '% effective defense). Hostile fort auras slow enemy march speed; your own does not slow you.',
                 block: true
             };
         }
@@ -11898,22 +11933,51 @@
             let effects = [];
             let hex = getNearestHexToPoint(unit.x, unit.y);
             if(hex && unit.type !== 'convoy') {
-                let tsum = getTerrainCombatSummaryEffect(unit, hex);
-                if(tsum) effects.push(tsum);
+                let tile = getTerrainTileEffect(hex);
+                if(tile) effects.push(tile);
+                let terrCombat = getTerrainCombatEffect(unit, hex);
+                if(terrCombat) effects.push(terrCombat);
+                let fortFx = getFortDefenseEffect(unit);
+                if(fortFx) effects.push(fortFx);
+                if(gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hex))) {
+                    effects.push({
+                        label: 'Encircled',
+                        detail: 'This hex is cut off behind enemy lines. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
+                        block: true,
+                        warn: true
+                    });
+                }
+                if(!unit.amphibInWater && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
+                    effects.push({
+                        label: 'Deep water hazard',
+                        detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
+                        block: true,
+                        warn: true
+                    });
+                }
                 let spd = getUnitSpeedMultiplier(unit);
                 let spdPct = Math.round(spd * 100);
                 let spdKind = spd > 1.04 ? 'buff' : (spd < 0.96 ? 'debuff' : 'neutral');
                 if(spdKind !== 'neutral') {
                     effects.push({
-                        label: `Speed ${spdPct}%`,
-                        detail: spdKind === 'buff' ? 'Morale/water/movement boosts speed' : 'Morale, water, or rough ground slows marching'
+                        label: `March speed ${spdPct}%`,
+                        detail: spdKind === 'buff' ? 'Morale and tile effects are helping movement.' : 'Morale penalty, shallow water/rough ground, or an enemy fort zone is slowing orders.'
                     });
                 }
+            } else if(hex && unit.type === 'convoy') {
+                let tileC = getTerrainTileEffect(hex);
+                if(tileC) effects.push(tileC);
             }
             if(unit.healingFlash && unit.healingFlash > 0) effects.push({label: '+ Healing', detail: 'Recovering in friendly territory'});
-            if(unit.encircledFlash && unit.encircledFlash > 0) effects.push({label: '! Encircled', detail: 'Taking attrition'});
-            if(unit.amphibInWater) effects.push({label: '∿ At sea', detail: 'Marine: no damage while in water'});
-            else if(unit.inWater || (unit.waterFlash && unit.waterFlash > 0)) effects.push({label: '~ Waterlogged', detail: 'Heavy movement and health penalty'});
+            if(unit.amphibInWater) effects.push({label: '∿ Amphibious (water)', detail: 'Marines: no drowning damage while embarked in deep water'});
+            else if(hex && unit.type === 'convoy' && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
+                effects.push({
+                    label: 'Deep water hazard',
+                    detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
+                    block: true,
+                    warn: true
+                });
+            }
             if(unit.unpaidFlash && unit.unpaidFlash > 0) effects.push({label: '$ Unpaid', detail: 'No money for upkeep'});
             if(unit.retreating) effects.push({label: 'Retreating', detail: 'Falling back to safety'});
             if(unit.holding) effects.push({label: 'Holding', detail: 'Waiting for support'});
@@ -18855,7 +18919,7 @@
                     let effects = getUnitEffects(sel);
                     els.effects.innerHTML = effects.length
                         ? effects.map(effect =>
-                            `<span class="effect-pill${effect.block ? ' effect-pill--block' : ''}" title="${(effect.detail || '').replace(/"/g, '&quot;')}">${effect.label}</span>`
+                            `<span class="effect-pill${effect.block ? ' effect-pill--block' : ''}${effect.warn ? ' effect-pill--warn' : ''}${effect.terrain ? ' effect-pill--terrain' : ''}" title="${(effect.detail || '').replace(/"/g, '&quot;')}">${effect.label}</span>`
                         ).join('')
                         : '<span class="effect-pill effect-pill--block">No active effects listed for this hex.</span>';
                 }
@@ -18901,6 +18965,8 @@
                 if(!s.id && s.hp !== undefined) {
                     let hx = getNearestHexToPoint(s.x, s.y);
                     sig += '|h:' + (hx ? `${hx.q},${hx.r},${hx.type}` : 'none') + '|w:' + (s.inWater ? 1 : 0) + '|a:' + (s.amphibInWater ? 1 : 0);
+                    sig += '|f:' + (wodFortDefenseDamageMultiplier(s) < 1 ? '1' : '0')
+                        + '|e:' + ((hx && gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hx))) ? '1' : '0');
                 }
             } else sig = 'n|' + sel.length;
             if(sig === _infoCardUiThrottle.s && now - _infoCardUiThrottle.t < (wodUsesVisualViewportLayout() ? 165 : 95)) return;
@@ -20552,16 +20618,16 @@
             if((unit.waterFlash || 0) > 0) kinds.push('water');
             let hasAny = combatBurstOn || kinds.length > 0;
             if(!hasAny) return;
-            let glyphR = gfxLite ? 6.22 : 7.62;
-            let gap = gfxLite ? 2.45 : 2.95;
-            let rowY = -ur - (gfxLite ? 22 : 25);
-            let burstSz = gfxLite ? 7.72 : 8.76;
-            let burstSlotW = burstSz * 1.76;
+            let glyphR = gfxLite ? 5.38 : 6.62;
+            let gap = gfxLite ? 2.05 : 2.52;
+            let rowY = -ur - (gfxLite ? 16 : 18.5);
+            let burstSz = gfxLite ? 6.76 : 7.82;
+            let burstSlotW = burstSz * 1.64;
             let slots = [];
             if(combatBurstOn) slots.push({ k: 'combat', w: burstSlotW });
             for(let kk = 0; kk < kinds.length; kk++) {
                 let t = kinds[kk];
-                let sw = (t === 'fort') ? glyphR * 2.2 : glyphR * 1.62;
+                let sw = (t === 'fort') ? glyphR * 2.06 : glyphR * 1.54;
                 slots.push({ k: t, w: sw });
             }
             let tw = slots.reduce(function(a, s) { return a + s.w; }, 0) + (slots.length > 1 ? gap * (slots.length - 1) : 0);
