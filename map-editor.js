@@ -126,6 +126,20 @@
     else lab.textContent = `Scale ${scale} — center + ${scale - 1} hex ring${scale === 2 ? "" : "s"}`;
   }
 
+  function syncBrushScaleControls(root) {
+    const r = root || document.getElementById("mapEditorApp");
+    if (!r) return;
+    const scale = Math.max(1, Math.min(EDITOR_BRUSH_SCALE_MAX, state.brushSize | 0));
+    state.brushSize = scale;
+    const slider = r.querySelector("#editorBrushSize");
+    if (slider) slider.value = String(scale);
+    r.querySelectorAll("[data-brush-scale]").forEach(btn => {
+      const n = parseInt(btn.dataset.brushScale, 10);
+      btn.classList.toggle("active", n === scale);
+    });
+    syncBrushSizeLabel();
+  }
+
   /** Axial hex disk (hex distance ≤ R); avoids WOD.getHexesInRadius which uses Euclidean dq,dr (wrong on hex grids). */
   function hexesInHexDisk(cq, cr, R) {
     const coords = [];
@@ -468,6 +482,46 @@
         height: 28px;
         accent-color: #4be396;
       }
+      .editor-brush-presets {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .editor-brush-presets span {
+        flex: 0 0 100%;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+        color: #8aa4b8;
+        text-align: center;
+      }
+      .editor-brush-circle {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 800;
+        cursor: pointer;
+        border: 2px solid rgba(155,174,188,.65);
+        background: linear-gradient(180deg,#273d54,#203446);
+        color: #ecf4fa;
+        flex-shrink: 0;
+      }
+      .editor-brush-circle:hover { filter: brightness(1.08); border-color: rgba(231,227,173,.85); }
+      .editor-brush-circle.active {
+        background: linear-gradient(180deg,#1f7a4a,#26975a);
+        border-color: #4be396;
+        color: #061208;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,.12);
+      }
       .editor-faction-inline {
         flex: 1;
         min-width: 0;
@@ -594,13 +648,21 @@
           <h3>Terrain paint</h3>
           <div class="editor-row"><label>Brush type</label><select id="editorTerrain"></select></div>
           <div id="editorPalette" class="palette-grid"></div>
-          <p class="editor-hint">Quick-pick swatches switch to Paint terrain. Brush scales 1–5: single hex, then each step adds one full hex ring around the clicked hex.</p>
+          <p class="editor-hint">Quick-pick swatches switch to Paint terrain. Brush scales 1–5: single hex, then each ring preset adds one full hex ring. Use the slider or numbered circles.</p>
           <div class="editor-row editor-brush-row">
             <label for="editorBrushSize">Brush scale</label>
             <div class="editor-brush-inner">
               <input type="range" id="editorBrushSize" min="1" max="5" step="1" value="1" />
               <span id="editorBrushSizeVal" class="editor-brush-val">Scale 1 — single hex</span>
             </div>
+          </div>
+          <div class="editor-brush-presets">
+            <span>Ring presets</span>
+            <button type="button" class="editor-brush-circle active" data-brush-scale="1" title="Single hex">1</button>
+            <button type="button" class="editor-brush-circle" data-brush-scale="2" title="+1 hex ring">2</button>
+            <button type="button" class="editor-brush-circle" data-brush-scale="3" title="+2 hex rings">3</button>
+            <button type="button" class="editor-brush-circle" data-brush-scale="4" title="+3 hex rings">4</button>
+            <button type="button" class="editor-brush-circle" data-brush-scale="5" title="+4 hex rings">5</button>
           </div>
         </section>
         <section class="editor-card">
@@ -701,13 +763,18 @@
     if (brushEl) {
       const syncFromBrushDom = () => {
         state.brushSize = Math.max(1, Math.min(EDITOR_BRUSH_SCALE_MAX, parseInt(brushEl.value, 10) || 1));
-        brushEl.value = String(state.brushSize);
-        syncBrushSizeLabel();
+        syncBrushScaleControls(app);
       };
       brushEl.addEventListener("input", syncFromBrushDom);
       brushEl.addEventListener("change", syncFromBrushDom);
     }
-    syncBrushSizeLabel();
+    app.querySelectorAll("[data-brush-scale]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.brushSize = parseInt(btn.dataset.brushScale, 10) || 1;
+        syncBrushScaleControls(app);
+      });
+    });
+    syncBrushScaleControls(app);
 
     document.getElementById("editorAddFaction").addEventListener("click", () => {
       if (state.maxFactionSlots < editorMaxPlayerSlots()) {
@@ -814,7 +881,7 @@
     state.brushSize = 1;
     const brushReset = document.getElementById("editorBrushSize");
     if (brushReset) brushReset.value = "1";
-    syncBrushSizeLabel();
+    syncBrushScaleControls(document.getElementById("mapEditorApp"));
     syncTerritoryOwnerUi();
     const genApp = document.getElementById("mapEditorApp");
     if (genApp) {
