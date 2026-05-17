@@ -101,7 +101,8 @@
 
   function hexesForBrush(centerHex) {
     if (!centerHex || !WOD.gameData.hexes) return [];
-    const ring = Math.max(0, (state.brushSize | 0) - 1);
+    const tier = Math.max(1, Math.min(3, state.brushSize | 0));
+    const ring = tier - 1;
     const out = [];
     for (const pt of hexesInHexDisk(centerHex.q, centerHex.r, ring)) {
       const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
@@ -116,9 +117,9 @@
 
   function syncBrushSizeLabel() {
     const lab = document.getElementById("editorBrushSizeVal");
-    const n = Math.max(1, Math.min(12, state.brushSize | 0));
+    const n = Math.max(1, Math.min(3, state.brushSize | 0));
     if (!lab) return;
-    lab.textContent = n <= 1 ? "Single hex" : `Hex radius ${n - 1}`;
+    lab.textContent = n === 1 ? "1 circle" : n === 2 ? "2 circles" : "3 circles";
   }
 
   /** Axial hex disk (hex distance ≤ R); avoids WOD.getHexesInRadius which uses Euclidean dq,dr (wrong on hex grids). */
@@ -436,11 +437,11 @@
         cursor: pointer;
       }
       .editor-brush-val {
-        flex: 0 0 auto;
+        flex-shrink: 0;
         font-size: 12px;
-        color: #9db3c7;
-        font-weight: 700;
-        min-width: 92px;
+        color: #c9dcf0;
+        font-weight: 800;
+        min-width: 0;
         text-align: right;
       }
       .editor-grid-2 {
@@ -448,19 +449,33 @@
         grid-template-columns: 1fr 1fr;
         gap: 8px;
       }
-      .editor-brush-inner {
-        flex: 1;
-        min-width: 0;
+      .editor-brush-block {
+        width: 100%;
+        box-sizing: border-box;
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(120,150,175,.28);
+      }
+      .editor-brush-head {
         display: flex;
+        justify-content: space-between;
         align-items: center;
         gap: 10px;
+        margin-bottom: 8px;
       }
-      .editor-brush-row { touch-action: manipulation; }
-      .editor-brush-row input[type="range"] {
-        flex: 1;
-        min-width: 40px;
+      .editor-brush-head > span:first-child {
+        font-size: 13px;
+        font-weight: 700;
+        color: #cfdce8;
+      }
+      .editor-brush-block input[type="range"] {
+        display: block;
         width: 100%;
-        height: 28px;
+        max-width: 100%;
+        box-sizing: border-box;
+        margin: 0;
+        height: 32px;
+        padding: 0;
         accent-color: #4be396;
       }
       .editor-faction-inline {
@@ -590,12 +605,12 @@
           <div class="editor-row"><label>Brush type</label><select id="editorTerrain"></select></div>
           <div id="editorPalette" class="palette-grid"></div>
           <p class="editor-hint">Quick-pick swatches set the brush and switch to Paint terrain.</p>
-          <div class="editor-row editor-brush-row">
-            <label for="editorBrushSize">Brush size</label>
-            <div class="editor-brush-inner">
-              <input type="range" id="editorBrushSize" min="1" max="12" step="1" value="1" />
-              <span id="editorBrushSizeVal" class="editor-brush-val">Single hex</span>
+          <div class="editor-brush-block">
+            <div class="editor-brush-head">
+              <span>Brush size</span>
+              <span id="editorBrushSizeVal" class="editor-brush-val">1 circle</span>
             </div>
+            <input type="range" id="editorBrushSize" min="1" max="3" step="1" value="1" aria-valuemin="1" aria-valuemax="3" aria-valuenow="1" aria-label="Brush size in hex circles" />
           </div>
         </section>
         <section class="editor-card">
@@ -695,8 +710,9 @@
     const brushEl = app.querySelector("#editorBrushSize");
     if (brushEl) {
       const syncFromBrushDom = () => {
-        state.brushSize = Math.max(1, Math.min(12, parseInt(brushEl.value, 10) || 1));
+        state.brushSize = Math.max(1, Math.min(3, parseInt(brushEl.value, 10) || 1));
         brushEl.value = String(state.brushSize);
+        brushEl.setAttribute("aria-valuenow", String(state.brushSize));
         syncBrushSizeLabel();
       };
       brushEl.addEventListener("input", syncFromBrushDom);
