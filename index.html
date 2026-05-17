@@ -8036,6 +8036,7 @@
             wodMpLobbyCount = 1;
             window.wodMpRoomMeta = {};
             window._wodMpLastLobbyGenKey = null;
+            if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
         }
 
         function wodMpEscapeHtml(s) {
@@ -8203,9 +8204,40 @@
             syncBuildPlacementMobileUi();
             wodMarkTerrainFullDirty();
         }
-        function wodMpRefreshLobbyMapPreview() {
+        /** Lobby preview uses seeded Math.random; overlapping refreshes corrupted RNG via `wodPushSeededRandom`. Serialize + dedupe. */
+        let _wodMpLobbyPreviewBusy = false;
+        let _wodMpLobbyPreviewQueued = false;
+        let _wodMpLobbyPreviewLastFp = '';
+        function wodMpLobbyPreviewFingerprint(meta) {
+            if(!meta || typeof meta !== 'object') return '';
+            try {
+                wodMpEnsureDefaultSeatTypes(meta);
+                let maxH = wodMpClampLobbyCap(meta.maxHumans);
+                let st = (meta.seatTypes || []).slice(0, maxH).join(',');
+                let occ = Array.isArray(meta.occupiedSlots) ? meta.occupiedSlots.slice().sort((a, b) => a - b).join(',') : '';
+                let seed = meta.lobbyMapSeed != null && meta.lobbyMapSeed !== '' ? (parseInt(meta.lobbyMapSeed, 10) >>> 0) : '';
+                return [seed, meta.mapSize, meta.mapShape || '', maxH, st, occ].join('|');
+            } catch(e) {
+                return String(Date.now());
+            }
+        }
+        function wodMpClearLobbyPreviewDedupeState() {
+            _wodMpLobbyPreviewBusy = false;
+            _wodMpLobbyPreviewQueued = false;
+            _wodMpLobbyPreviewLastFp = '';
+        }
+        function wodMpRefreshLobbyMapPreview(opts) {
+            opts = opts || {};
             let meta = window.wodMpRoomMeta;
-            if(!meta || gameState === 'PLAYING') return;
+            if(!meta || typeof meta !== 'object' || gameState === 'PLAYING') return;
+            let fp = wodMpLobbyPreviewFingerprint(meta);
+            if(!opts.force && fp === _wodMpLobbyPreviewLastFp && !_wodMpLobbyPreviewBusy && !_wodMpLobbyPreviewQueued) return;
+            if(_wodMpLobbyPreviewBusy) {
+                _wodMpLobbyPreviewQueued = true;
+                return;
+            }
+            _wodMpLobbyPreviewBusy = true;
+            _wodMpLobbyPreviewQueued = false;
             let shapeEl = document.getElementById('setupMapShape');
             let snap = wodMpSnapshotLobbyGenBackup();
             wodArmMapPreviewSpinner('mpLobbyMapPreview');
@@ -8243,6 +8275,7 @@
                                 wodPopRandom();
                             }
                             previewLoadedMap('mpLobbyMapPreview');
+                            _wodMpLobbyPreviewLastFp = fp;
                         } catch(err) {
                             console.warn('Lobby preview', err);
                         } finally {
@@ -8251,6 +8284,11 @@
                             if(msRestore && meta.mapSize != null) msRestore.value = String(meta.mapSize);
                             if(shapeEl && meta.mapShape) shapeEl.value = meta.mapShape;
                             wodDisarmMapPreviewSpinner('mpLobbyMapPreview');
+                            _wodMpLobbyPreviewBusy = false;
+                            if(_wodMpLobbyPreviewQueued) {
+                                _wodMpLobbyPreviewQueued = false;
+                                requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
+                            }
                         }
                     })();
                 });
@@ -8775,6 +8813,7 @@
                 window.wodMpRoomMeta = {};
                 wodMpLobbyCount = 1;
                 window._wodMpLastLobbyGenKey = null;
+                if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 if(st) st.textContent = 'Left lobby.';
                 wodMpRenderLobbyList(typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api.lobbies : []);
@@ -8785,6 +8824,7 @@
                 window.wodMpRoomMeta = {};
                 wodMpLobbyCount = 1;
                 window._wodMpLastLobbyGenKey = null;
+                if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 wodMpRenderLobbyList([]);
                 wodMpUpdateOnline(0);
@@ -8865,6 +8905,7 @@
                 window.wodMpRoomMeta = {};
                 wodMpLobbyCount = 1;
                 window._wodMpLastLobbyGenKey = null;
+                if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 let stKick = document.getElementById('mpStatus');
                 if(stKick) stKick.textContent = 'You were removed from the lobby.';
@@ -8895,6 +8936,7 @@
             addEventListener('wod-mp-LeftLobby', () => {
                 window.wodMpRoomMeta = {};
                 window._wodMpLastLobbyGenKey = null;
+                if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.socketOpen)
                     WodMultiplayer.requestLobbyList();
@@ -8902,6 +8944,7 @@
             addEventListener('wod-mp-Close', () => {
                 window.wodMpRoomMeta = {};
                 window._wodMpLastLobbyGenKey = null;
+                if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                 wodMpRefreshMpPanelState();
                 wodMpRenderLobbyList([]);
                 wodMpUpdateOnline(0);
