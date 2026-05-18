@@ -2820,6 +2820,29 @@
             margin-top: 0;
         }
 
+        .esc-full-help-guide > .menu-btn:last-of-type {
+            display: none !important;
+        }
+
+        .ach-stats-period-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            margin: 0 0 12px 0;
+        }
+
+        .ach-stats-period-row label {
+            font-size: 14px;
+            opacity: 0.92;
+        }
+
+        .ach-stats-period-row select {
+            flex: 1;
+            min-width: 160px;
+            max-width: 280px;
+        }
+
         .esc-help-intro {
             color: #ecf0f1;
             line-height: 1.55;
@@ -5207,6 +5230,15 @@
                     </select>
                 </div>
                 <div class="setup-row">
+                    <label>Period:</label>
+                    <select id="setupPeriod" title="Historical theme for unit counters and names">
+                        <option value="modern" selected>Modern (NATO counters)</option>
+                        <option value="napoleonic">Napoleonic</option>
+                        <option value="ancient">Ancient</option>
+                        <option value="medieval">Medieval</option>
+                    </select>
+                </div>
+                <div class="setup-row">
                     <label>Map Shape:</label>
                     <select id="setupMapShape">
                         <option value="island" selected>Island</option>
@@ -5381,6 +5413,14 @@
                 <p style="font-size:14px;opacity:0.9;margin-top:0">These mirror solo setup and are shown in the lobby browser for other players.</p>
                 <div class="setup-row"><label>AI players</label>
                     <p id="mpCfgAiNote" style="flex:1;font-size:13px;opacity:0.88;margin:0;line-height:1.45">Configure each seat in the lobby: set a slot to <strong>AI bot</strong> instead of a separate AI count.</p>
+                </div>
+                <div class="setup-row"><label>Period</label>
+                    <select id="mpCfgPeriod" style="flex:1">
+                        <option value="modern" selected>Modern (NATO counters)</option>
+                        <option value="napoleonic">Napoleonic</option>
+                        <option value="ancient">Ancient</option>
+                        <option value="medieval">Medieval</option>
+                    </select>
                 </div>
                 <div class="setup-row"><label>Victory</label>
                     <select id="mpCfgVictoryMode" style="flex:1">
@@ -5656,6 +5696,22 @@
                         NATO Counters
                         <div class="skin-card-footer"><span class="skin-card-state">Unlocked</span><span class="skin-card-price"></span></div>
                     </button>
+
+                    <button type="button" class="skin-card skin-owned" id="skinNapoleonic" onclick="wodSetGamePeriodFromShop('napoleonic')">
+                        <canvas class="skin-preview" id="skinNapoleonicPreview" width="120" height="80" aria-hidden="true"></canvas>
+                        Napoleonic host
+                        <div class="skin-card-footer"><span class="skin-card-state">Period</span><span class="skin-card-price"></span></div>
+                    </button>
+                    <button type="button" class="skin-card skin-owned" id="skinAncient" onclick="wodSetGamePeriodFromShop('ancient')">
+                        <canvas class="skin-preview" id="skinAncientPreview" width="120" height="80" aria-hidden="true"></canvas>
+                        Ancient host
+                        <div class="skin-card-footer"><span class="skin-card-state">Period</span><span class="skin-card-price"></span></div>
+                    </button>
+                    <button type="button" class="skin-card skin-owned" id="skinMedieval" onclick="wodSetGamePeriodFromShop('medieval')">
+                        <canvas class="skin-preview" id="skinMedievalPreview" width="120" height="80" aria-hidden="true"></canvas>
+                        Medieval host
+                        <div class="skin-card-footer"><span class="skin-card-state">Period</span><span class="skin-card-price"></span></div>
+                    </button>
                     <button type="button" class="skin-card skin-missing locked" id="skinUsa" onclick="purchaseUnitSkin('usa')">
                         <canvas class="skin-preview" id="skinUsaPreview" width="120" height="80" aria-hidden="true"></canvas>
                         USA Countryball
@@ -5716,6 +5772,16 @@
                         <div class="ach-panel-scroll" id="achTabBadgesBody" tabindex="0"></div>
                     </div>
                     <div id="achTabStats" class="ach-tab-panel">
+                        <div class="ach-stats-period-row" id="achStatsPeriodRow">
+                            <label for="achStatsPeriodFilter">Stats period</label>
+                            <select id="achStatsPeriodFilter" onchange="renderAchievementsUi()">
+                                <option value="all" selected>All periods</option>
+                                <option value="modern">Modern</option>
+                                <option value="napoleonic">Napoleonic</option>
+                                <option value="ancient">Ancient</option>
+                                <option value="medieval">Medieval</option>
+                            </select>
+                        </div>
                         <div class="ach-panel-scroll" id="achTabStatsBody" tabindex="0"></div>
                     </div>
                 </div>
@@ -5729,6 +5795,19 @@
                     <h3 style="color:#e74c3c;margin-top:0;">Reset progress</h3>
                     <p>Clear all saved data for this browser: achievements, lifetime stats, gold, and unlocked unit skins. This cannot be undone.</p>
                     <button type="button" class="menu-btn danger-btn" onclick="resetAllGameProgress()">Reset all progress</button>
+                </div>
+                <div class="settings-section">
+                    <h3 style="color:#9b59b6;margin-top:0;">Historical period</h3>
+                    <p style="margin:0 0 8px 0;">Default theme for new solo games, multiplayer lobbies, and the map editor. Changes unit counter art and themed names.</p>
+                    <div class="setup-row" style="max-width:420px">
+                        <label for="settingsPeriod">Period</label>
+                        <select id="settingsPeriod" style="flex:1" onchange="wodOnSettingsPeriodChange()">
+                            <option value="modern" selected>Modern (NATO counters)</option>
+                            <option value="napoleonic">Napoleonic</option>
+                            <option value="ancient">Ancient</option>
+                            <option value="medieval">Medieval</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="settings-section">
                     <h3 style="color:#3498db;margin-top:0;">Gameplay</h3>
@@ -6434,6 +6513,11 @@
                 aiSel._wodBound = true;
                 aiSel.addEventListener('change', regenerateSetupPreview);
             }
+            let periodSel = document.getElementById('setupPeriod');
+            if(periodSel && !periodSel._wodBound) {
+                periodSel._wodBound = true;
+                periodSel.addEventListener('change', () => wodOnSetupPeriodChange());
+            }
             if(victorySel && !victorySel._wodVictoryDetailBound) {
                 victorySel._wodVictoryDetailBound = true;
                 victorySel.addEventListener('change', syncSetupVictoryDetail);
@@ -6449,6 +6533,7 @@
             if(panelId === 'shop') updateSkinShop();
             if(panelId === 'achievements') renderAchievementsUi();
             if(panelId === 'settings') {
+                wodSyncAllPeriodSelects();
                 syncShowOrdersCheckbox();
                 syncOrderArrowsPathfindingCheckbox();
             }
@@ -6469,6 +6554,8 @@
                 wodRefreshMapLibraryPanel();
             }
             if(panelId === 'setup') {
+                wodSyncAllPeriodSelects();
+                wodSyncPeriodUiLabels();
                 syncSetupPlayerColorRow();
                 initSetupPanelBindings();
                 syncSetupVictoryDetail();
@@ -6567,7 +6654,7 @@
             UI.escMenu.classList.toggle('hidden', !shouldOpen);
         }
 
-        const WOD_ESC_HELP_VERSION = '3';
+        const WOD_ESC_HELP_VERSION = '4';
 
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
@@ -6578,6 +6665,9 @@
                 .replaceAll('menuHelpCanvas', 'escHelpCanvas')
                 .replaceAll('menuCompactTerrainKey', 'escCompactTerrainKey')
                 .replaceAll('hidePanels()', 'toggleEscMenu(false)');
+            mount.querySelectorAll('button.menu-btn').forEach((btn) => {
+                if(/back/i.test(btn.textContent || '')) btn.remove();
+            });
             mount.dataset.ready = WOD_ESC_HELP_VERSION;
         }
 
@@ -6791,6 +6881,7 @@
             citySkin: 'classic',
             unitSkin: 'nato',
             aiUnitSkin: 'nato',
+            gamePeriod: 'modern',
             ownedUnitSkins: { nato: true },
             terrainViewMode: 'natural',
             menuAttractMode: false,
@@ -8785,6 +8876,7 @@
             wodMpCopyFieldToField('setupMapShape', 'mpCfgMapShape');
             wodMpCopyFieldToField('setupVictoryMode', 'mpCfgVictoryMode');
             wodMpCopyFieldToField('setupMoney', 'mpCfgMoney');
+            wodMpCopyFieldToField('setupPeriod', 'mpCfgPeriod');
             wodMpCopyFieldToField('setupPlayerColor', 'mpCfgPlayerColor');
             wodMpSyncMpCfgVictoryDetail();
         }
@@ -8820,6 +8912,11 @@
             if(vic && window.wodMpRoomMeta.victoryMode) vic.value = window.wodMpRoomMeta.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
             let mon = document.getElementById('mpCfgMoney');
             if(mon && window.wodMpRoomMeta.money != null) mon.value = String(window.wodMpRoomMeta.money);
+            let per = document.getElementById('setupPeriod');
+            if(per && window.wodMpRoomMeta.gamePeriod) per.value = wodNormalizeGamePeriod(window.wodMpRoomMeta.gamePeriod);
+            let mpPer = document.getElementById('mpCfgPeriod');
+            if(mpPer && window.wodMpRoomMeta.gamePeriod) mpPer.value = wodNormalizeGamePeriod(window.wodMpRoomMeta.gamePeriod);
+            if(window.wodMpRoomMeta.gamePeriod) gameData.gamePeriod = wodNormalizeGamePeriod(window.wodMpRoomMeta.gamePeriod);
             wodMpSyncMpCfgVictoryDetail();
         }
         function wodMpSnapshotLobbyGenBackup() {
@@ -8982,13 +9079,13 @@
         }
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
-            for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupMoney', 'setupPlayerColor',
+            for(let id of ['setupMapSize', 'setupMapShape', 'setupPeriod', 'setupAI', 'setupVictoryMode', 'setupMoney', 'setupPlayerColor',
                 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch', 'mpGlMaxHumans',
                 'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
-                'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgMoney', 'mpCfgPlayerColor',
+                'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgPeriod', 'mpCfgVictoryMode', 'mpCfgMoney', 'mpCfgPlayerColor',
                 'mpCfgRulesApply', 'mpCfgRulesClose']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
@@ -9344,7 +9441,8 @@
                 maxHumans,
                 mapSizeLabel: msLab ? msLab.text : '',
                 mapShapeLabel: shLab ? shLab.text : '',
-                victoryLabel: vLab ? vLab.text : ''
+                victoryLabel: vLab ? vLab.text : '',
+                gamePeriod: wodReadPeriodFromSelect('mpCfgPeriod') || wodGetGamePeriod()
             };
         }
         function wodMpFinishSetupFromHost() {
@@ -9462,6 +9560,7 @@
         }
         function wodMpOpenHostRulesDlg() {
             if(wodIsMapPreviewGenerating()) return;
+            wodMpSyncHostCfgFromSetup();
             wodMpSyncMpCfgVictoryDetail();
             let d = document.getElementById('mpHostRulesDlg');
             if(d) { d.classList.remove('hidden'); d.setAttribute('aria-hidden', 'false'); }
@@ -9587,6 +9686,11 @@
                 requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
             };
             if(mpCfgMapClose) mpCfgMapClose.onclick = () => wodMpCloseHostMapDlg();
+            let mpCfgPeriodEl = document.getElementById('mpCfgPeriod');
+            if(mpCfgPeriodEl && !mpCfgPeriodEl._wodMpBound) {
+                mpCfgPeriodEl._wodMpBound = true;
+                mpCfgPeriodEl.addEventListener('change', wodOnMpCfgPeriodChange);
+            }
             let mpCfgRulesApply = document.getElementById('mpCfgRulesApply');
             let mpCfgRulesClose = document.getElementById('mpCfgRulesClose');
             let mpCfgVictoryModeEl = document.getElementById('mpCfgVictoryMode');
@@ -9596,6 +9700,8 @@
             }
             if(mpCfgRulesApply) mpCfgRulesApply.onclick = () => {
                 if(wodIsMapPreviewGenerating()) return;
+                wodMpCopyFieldToField('mpCfgPeriod', 'setupPeriod');
+                wodApplyGamePeriod(wodReadPeriodFromSelect('setupPeriod'));
                 wodMpCopyFieldToField('mpCfgVictoryMode', 'setupVictoryMode');
                 wodMpCopyFieldToField('mpCfgMoney', 'setupMoney');
                 wodMpCopyFieldToField('mpCfgPlayerColor', 'setupPlayerColor');
@@ -10242,12 +10348,183 @@
         document.addEventListener('gesturechange', wodSuppressSafariDocumentPinch, {passive: false});
         document.addEventListener('gestureend', wodSuppressSafariDocumentPinch, {passive: false});
 
+
+        const WOD_GAME_PERIODS = ['modern', 'napoleonic', 'ancient', 'medieval'];
+        const WOD_PERIOD_LABELS = {
+            modern: 'Modern',
+            napoleonic: 'Napoleonic',
+            ancient: 'Ancient',
+            medieval: 'Medieval'
+        };
+        const WOD_PERIOD_UI = {
+            modern: {
+                factoryBtn: 'Build Factory ($2k)', factoryTip: 'Costs $2000. Requires owned city without a factory.',
+                harborBtn: 'Build Harbor ($1k)', harborTip: 'Costs $1000. City must border water without a harbor.',
+                fortBtn: 'Build Fort ($1.5k)', fortTip: 'Costs $1500. Place on your owned land hex (not towns). Ally troops within range gain +20% defense.',
+                lightBtn: 'Train Light Infantry ($500, 1k MP)', lightTip: 'Costs $500, 1000 MP. Requires City.',
+                marineBtn: 'Train Marines ($500, 1k MP)', marineTip: 'Costs $500, 1000 MP. Coastal cities only.',
+                heavyBtn: 'Train Armor ($4k, 1k MP)', heavyTip: 'Costs $4000, 1000 MP. Requires Factory.',
+                shipBtn: 'Build Ship ($3.8k, 5k MP)', shipTip: 'Costs $3800, 5000 MP. Requires Harbor.',
+                statInfOwn: 'Infantry lost', statTankOwn: 'Tanks lost', statShipOwn: 'Ships lost',
+                statInfEnemy: 'Infantry eliminated', statTankEnemy: 'Tanks knocked out', statShipEnemy: 'Ships sunk',
+                statLightBuilt: 'Infantry trained', statHeavyBuilt: 'Tanks trained', statShipBuilt: 'Ships trained',
+                statFactory: 'Factories built', statHarbor: 'Harbors built'
+            },
+            napoleonic: {
+                factoryBtn: 'Build Arsenal ($2k)', factoryTip: 'Arsenal — train heavy cavalry. Costs $2000; needs a town without one.',
+                harborBtn: 'Build Naval Yard ($1k)', harborTip: 'Naval yard for ships of the line. Costs $1000; town must border water.',
+                fortBtn: 'Build Redoubt ($1.5k)', fortTip: 'Field redoubt on owned land. Nearby troops gain +20% defense.',
+                lightBtn: 'Train Line Infantry ($500, 1k MP)', lightTip: 'Line regiment. $500, 1000 MP; requires a town.',
+                marineBtn: 'Train Voltigeurs ($500, 1k MP)', marineTip: 'Light skirmishers. Coastal towns only.',
+                heavyBtn: 'Train Dragoons ($4k, 1k MP)', heavyTip: 'Dragoon regiment. $4000; requires an arsenal.',
+                shipBtn: 'Build Ship of the Line ($3.8k, 5k MP)', shipTip: 'Ship of the line. Requires naval yard.',
+                statInfOwn: 'Line infantry lost', statTankOwn: 'Cavalry lost', statShipOwn: 'Men-of-war lost',
+                statInfEnemy: 'Enemy infantry routed', statTankEnemy: 'Enemy cavalry routed', statShipEnemy: 'Enemy ships taken',
+                statLightBuilt: 'Line infantry raised', statHeavyBuilt: 'Cavalry raised', statShipBuilt: 'Ships launched',
+                statFactory: 'Arsenals built', statHarbor: 'Naval yards built'
+            },
+            ancient: {
+                factoryBtn: 'Build Workshop ($2k)', factoryTip: 'Bronze workshop for heavy infantry. $2000; town without one.',
+                harborBtn: 'Build Wharf ($1k)', harborTip: 'Harbor wharf for triremes. Town must border water.',
+                fortBtn: 'Build Palisade ($1.5k)', fortTip: 'Wooden palisade on owned land. Nearby allies defend better.',
+                lightBtn: 'Train Hoplites ($500, 1k MP)', lightTip: 'Hoplite lochos. $500, 1000 MP; requires polis.',
+                marineBtn: 'Train Peltasts ($500, 1k MP)', marineTip: 'Skirmishing peltasts. Coastal polis only.',
+                heavyBtn: 'Train Companions ($4k, 1k MP)', heavyTip: 'Companion cavalry. Requires workshop.',
+                shipBtn: 'Build Trireme ($3.8k, 5k MP)', shipTip: 'War trireme. Requires wharf.',
+                statInfOwn: 'Hoplites lost', statTankOwn: 'Cavalry lost', statShipOwn: 'Triremes lost',
+                statInfEnemy: 'Enemy hoplites broken', statTankEnemy: 'Enemy cavalry routed', statShipEnemy: 'Enemy triremes sunk',
+                statLightBuilt: 'Hoplites mustered', statHeavyBuilt: 'Cavalry mustered', statShipBuilt: 'Triremes built',
+                statFactory: 'Workshops built', statHarbor: 'Wharves built'
+            },
+            medieval: {
+                factoryBtn: 'Build Smithy ($2k)', factoryTip: 'Smithy to arm knights. $2000; town without a smithy.',
+                harborBtn: 'Build Quay ($1k)', harborTip: 'Quay for cogs. Town must border water.',
+                fortBtn: 'Build Keep ($1.5k)', fortTip: 'Stone keep on owned land. Allies nearby defend better.',
+                lightBtn: 'Train Levy ($500, 1k MP)', lightTip: 'Levy spearmen. $500, 1000 MP; requires town.',
+                marineBtn: 'Train Bowmen ($500, 1k MP)', marineTip: 'Longbowmen / crossbowmen. Coastal towns only.',
+                heavyBtn: 'Train Knights ($4k, 1k MP)', heavyTip: 'Knight banner. $4000; requires smithy.',
+                shipBtn: 'Build Cog ($3.8k, 5k MP)', shipTip: 'Merchant cog converted for war. Requires quay.',
+                statInfOwn: 'Levy lost', statTankOwn: 'Knights lost', statShipOwn: 'Cogs lost',
+                statInfEnemy: 'Enemy levy routed', statTankEnemy: 'Enemy knights unhorsed', statShipEnemy: 'Enemy cogs taken',
+                statLightBuilt: 'Levy raised', statHeavyBuilt: 'Knights fielded', statShipBuilt: 'Cogs launched',
+                statFactory: 'Smithies built', statHarbor: 'Quays built'
+            }
+        };
+        const wodMedievalCityStarts = ['York', 'Lancaster', 'Warwick', 'Chester', 'Durham', 'Salisbury', 'Norwich', 'Exeter', 'Gloucester', 'Windsor', 'Caernarfon', 'Edinburgh', 'Stirling', 'Avignon', 'Cologne', 'Bruges', 'Ghent', 'Toledo', 'Seville', 'Milan'];
+        const wodAncientCityStarts = ['Athens', 'Sparta', 'Thebes', 'Corinth', 'Argos', 'Rome', 'Carthage', 'Syracuse', 'Alexandria', 'Memphis', 'Babylon', 'Tyre', 'Sardis', 'Ephesus', 'Miletus', 'Pella', 'Byzantium', 'Massalia', 'Gades', 'Palmyra'];
+        const wodNapoleonicCityStarts = ['Paris', 'Marseille', 'Lyon', 'Bordeaux', 'Vienna', 'Berlin', 'Warsaw', 'Moscow', 'Madrid', 'Lisbon', 'Naples', 'Milan', 'Brussels', 'Amsterdam', 'Copenhagen', 'Stockholm', 'Dresden', 'Leipzig', 'Waterloo', 'Austerlitz'];
+
+        function wodNormalizeGamePeriod(raw) {
+            let p = (raw || 'modern').toLowerCase();
+            return WOD_GAME_PERIODS.includes(p) ? p : 'modern';
+        }
+        function wodGetGamePeriod() {
+            return wodNormalizeGamePeriod(gameData && gameData.gamePeriod);
+        }
+        function wodEmptyLifetimeSlice() {
+            return {
+                enemyTroopKills: 0, ownTroopLosses: 0, enemyTankKills: 0, ownTankLosses: 0,
+                enemyShipKills: 0, ownShipLosses: 0, peakFieldManpower: 0, battlesWon: 0, campaignLosses: 0,
+                citiesCaptured: 0, convoysCaptured: 0, factoriesBuilt: 0, harborsBuilt: 0, peakMoneyHeld: 0,
+                unitsBuiltLight: 0, unitsBuiltHeavy: 0, unitsBuiltShip: 0, unitsBuiltMarine: 0, gamesStarted: 0
+            };
+        }
+        function wodAddLifetimeStat(key, delta, periodOpt) {
+            if(!wodProgress) return;
+            delta = delta || 1;
+            wodProgress.lifetime[key] = (wodProgress.lifetime[key] || 0) + delta;
+            let p = wodNormalizeGamePeriod(periodOpt || (gameData && gameData.gamePeriod));
+            if(!wodProgress.lifetimeByPeriod) wodProgress.lifetimeByPeriod = {};
+            if(!wodProgress.lifetimeByPeriod[p]) wodProgress.lifetimeByPeriod[p] = wodEmptyLifetimeSlice();
+            wodProgress.lifetimeByPeriod[p][key] = (wodProgress.lifetimeByPeriod[p][key] || 0) + delta;
+        }
+        function wodSetLifetimePeak(key, val, periodOpt) {
+            if(!wodProgress || val == null) return;
+            let p = wodNormalizeGamePeriod(periodOpt || (gameData && gameData.gamePeriod));
+            if(val > (wodProgress.lifetime[key] || 0)) wodProgress.lifetime[key] = val;
+            if(!wodProgress.lifetimeByPeriod) wodProgress.lifetimeByPeriod = {};
+            if(!wodProgress.lifetimeByPeriod[p]) wodProgress.lifetimeByPeriod[p] = wodEmptyLifetimeSlice();
+            if(val > (wodProgress.lifetimeByPeriod[p][key] || 0)) wodProgress.lifetimeByPeriod[p][key] = val;
+        }
+        function wodGetLifetimeForStatsFilter(filter) {
+            if(!wodProgress) return wodEmptyLifetimeSlice();
+            if(!filter || filter === 'all') return Object.assign(wodEmptyLifetimeSlice(), wodProgress.lifetime || {});
+            let p = wodNormalizeGamePeriod(filter);
+            if(!wodProgress.lifetimeByPeriod) wodProgress.lifetimeByPeriod = {};
+            return Object.assign(wodEmptyLifetimeSlice(), wodProgress.lifetimeByPeriod[p] || {});
+        }
+        function wodPeriodUiPack(period) {
+            return WOD_PERIOD_UI[wodNormalizeGamePeriod(period)] || WOD_PERIOD_UI.modern;
+        }
+        function wodSyncPeriodUiLabels() {
+            let t = wodPeriodUiPack(wodGetGamePeriod());
+            function setBtns(onclickFrag, text, tip) {
+                document.querySelectorAll('button.build-btn[onclick*="' + onclickFrag + '"]').forEach((btn) => {
+                    btn.textContent = text;
+                    if(tip) btn.title = tip;
+                });
+            }
+            setBtns("beginFactoryBuild()", t.factoryBtn, t.factoryTip);
+            setBtns("beginHarborBuild()", t.harborBtn, t.harborTip);
+            setBtns("beginFortBuild()", t.fortBtn, t.fortTip);
+            setBtns("buyUnit('light')", t.lightBtn, t.lightTip);
+            setBtns("buyUnit('marine')", t.marineBtn, t.marineTip);
+            setBtns("buyUnit('heavy')", t.heavyBtn, t.heavyTip);
+            setBtns("buyUnit('ship')", t.shipBtn, t.shipTip);
+            let sub = document.querySelector('.wod-m-sheet--build .wod-m-sheet-sub');
+            if(sub) {
+                let p = wodGetGamePeriod();
+                if(p === 'medieval') sub.textContent = 'Smithies · quays · keeps · tap qualifying towns / owned land.';
+                else if(p === 'napoleonic') sub.textContent = 'Arsenals · naval yards · redoubts · tap qualifying towns / owned land.';
+                else if(p === 'ancient') sub.textContent = 'Workshops · wharves · palisades · tap qualifying towns / owned land.';
+                else sub.textContent = 'Factories · harbors · forts · tap qualifying towns / owned land.';
+            }
+        }
+        function wodSyncAllPeriodSelects() {
+            let p = wodGetGamePeriod();
+            for(let id of ['setupPeriod', 'mpCfgPeriod', 'settingsPeriod', 'editorGenPeriod']) {
+                let el = document.getElementById(id);
+                if(el && el.value !== p) el.value = p;
+            }
+        }
+        function wodApplyGamePeriod(raw, opts) {
+            opts = opts || {};
+            gameData.gamePeriod = wodNormalizeGamePeriod(raw);
+            wodSyncAllPeriodSelects();
+            wodSyncPeriodUiLabels();
+            if(opts.saveProfile !== false && wodProgress) {
+                if(!wodProgress.profile) wodProgress.profile = {};
+                wodProgress.profile.gamePeriod = gameData.gamePeriod;
+                scheduleSaveWodProgress();
+            }
+        }
+        function wodReadPeriodFromSelect(id) {
+            let el = document.getElementById(id);
+            return el ? wodNormalizeGamePeriod(el.value) : wodGetGamePeriod();
+        }
+        function wodOnSetupPeriodChange() { wodApplyGamePeriod(wodReadPeriodFromSelect('setupPeriod')); }
+        function wodOnMpCfgPeriodChange() { wodApplyGamePeriod(wodReadPeriodFromSelect('mpCfgPeriod')); }
+        function wodOnSettingsPeriodChange() { wodApplyGamePeriod(wodReadPeriodFromSelect('settingsPeriod')); }
+        function wodOnEditorPeriodChange() { wodApplyGamePeriod(wodReadPeriodFromSelect('editorGenPeriod')); }
+        function wodSetGamePeriodFromShop(period) {
+            wodApplyGamePeriod(period);
+            showNotification('Period set to ' + (WOD_PERIOD_LABELS[wodGetGamePeriod()] || 'Modern') + ' — also in Game Setup.');
+        }
+
         // --- Math & Map Utils ---
         const cityPrefixes = ["New ", "Old ", "Fort ", "Port ", "Saint ", "Lake ", "Mount ", "San ", "Los ", "Las ", "El ", "La ", "Grand "];
         const cityRoots = ["town", "ville", "city", "burg", "borough", "grad", "mouth", "chester", "ton", "land", "field", "haven", "cross", "gate", "depot", "harbor", "bridge", "heights", "works", "junction", "wood", "mont", "view", "brook", "springs", "falls", "ridge", "point", "ford", "park", "hill"];
         const cityStarts = ["Ash", "Oak", "Pine", "Maple", "River", "Stone", "Iron", "Gold", "Silver", "Copper", "Wind", "Storm", "Thunder", "Red", "Black", "White", "East", "West", "North", "South", "Fox", "Eagle", "Wolf", "Cedar", "Briar", "Dover", "Arden", "Kessel", "Roth", "Vale", "Crown", "Rose", "Clear", "Fair", "Green", "Blue", "High", "Low", "Middle", "Center"];
         
         function generateCityName() {
+            let period = wodGetGamePeriod();
+            if(period === 'medieval' && Math.random() < 0.55) {
+                let s = wodMedievalCityStarts[Math.floor(Math.random() * wodMedievalCityStarts.length)];
+                if(Math.random() < 0.35) return s + '-upon-' + cityRoots[Math.floor(Math.random() * cityRoots.length)];
+                return s;
+            }
+            if(period === 'ancient' && Math.random() < 0.6) return wodAncientCityStarts[Math.floor(Math.random() * wodAncientCityStarts.length)];
+            if(period === 'napoleonic' && Math.random() < 0.55) return wodNapoleonicCityStarts[Math.floor(Math.random() * wodNapoleonicCityStarts.length)];
             let name = "";
             let r = Math.random();
             if (r > 0.8) name += cityPrefixes[Math.floor(Math.random() * cityPrefixes.length)];
@@ -10262,6 +10539,28 @@
 
         function generateUnitName(type, convoySea) {
             let num = Math.floor(Math.random() * 999) + 1;
+            let period = wodGetGamePeriod();
+            if(period === 'medieval') {
+                if(type === 'light') return num + "th Levy Banner";
+                if(type === 'marine') return num + "th Bow Company";
+                if(type === 'heavy') return num + "th Knight Banner";
+                if(type === 'ship') return "Cog " + wodMedievalCityStarts[Math.floor(Math.random() * wodMedievalCityStarts.length)];
+                if(type === 'convoy') return (convoySea ? 'Sea caravan ' : 'Land caravan ') + num;
+            }
+            if(period === 'napoleonic') {
+                if(type === 'light') return num + "e Régiment de Ligne";
+                if(type === 'marine') return num + "e Voltigeurs";
+                if(type === 'heavy') return num + "e Régiment de Dragons";
+                if(type === 'ship') return "HMS " + wodNapoleonicCityStarts[Math.floor(Math.random() * wodNapoleonicCityStarts.length)];
+                if(type === 'convoy') return (convoySea ? 'Sea supply column ' : 'Baggage train ') + num;
+            }
+            if(period === 'ancient') {
+                if(type === 'light') return num + "th Hoplite Lochos";
+                if(type === 'marine') return num + "th Peltast Lochos";
+                if(type === 'heavy') return num + "th Companion Ilai";
+                if(type === 'ship') return "Trireme " + wodAncientCityStarts[Math.floor(Math.random() * wodAncientCityStarts.length)];
+                if(type === 'convoy') return (convoySea ? 'Grain fleet ' : 'Supply train ') + num;
+            }
             if(type === 'light') return num + "th Infantry Div.";
             if(type === 'marine') return num + "th Marine Regt.";
             if(type === 'heavy') return num + "th Armored Div.";
@@ -10591,7 +10890,8 @@
                     unitsBuiltMarine: 0,
                     gamesStarted: 0
                 },
-                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, mpDisplayName: '' },
+                lifetimeByPeriod: {},
+                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', gamePeriod: 'modern', ownedUnitSkins: { nato: true }, mpDisplayName: '' },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 }
             };
         }
@@ -10605,18 +10905,22 @@
                 wodProgress = {
                     achievements: Object.assign({}, base.achievements, o.achievements || {}),
                     lifetime: Object.assign({}, base.lifetime, o.lifetime || {}),
+                    lifetimeByPeriod: Object.assign({}, base.lifetimeByPeriod || {}, o.lifetimeByPeriod || {}),
                     profile: Object.assign({}, base.profile, o.profile || {}),
                     multiplayer: Object.assign({}, base.multiplayer, o.multiplayer || {})
                 };
             } catch (e) {
                 wodProgress = defaultWodProgress();
             }
+            if(wodProgress && wodProgress.profile && wodProgress.profile.gamePeriod)
+                gameData.gamePeriod = wodNormalizeGamePeriod(wodProgress.profile.gamePeriod);
         }
 
         function applyWodProfileToGame() {
             if(!wodProgress || !wodProgress.profile) return;
             let p = wodProgress.profile;
             if(p.gold !== undefined) gameData.gold = p.gold;
+            gameData.gamePeriod = wodNormalizeGamePeriod(p.gamePeriod || gameData.gamePeriod);
             let us = (!p.unitSkin || p.unitSkin === 'default') ? 'nato' : p.unitSkin;
             let as = (!p.aiUnitSkin || p.aiUnitSkin === 'default') ? 'nato' : p.aiUnitSkin;
             gameData.unitSkin = us;
@@ -10653,6 +10957,7 @@
                 unitSkin: gameData.unitSkin,
                 aiUnitSkin: gameData.aiUnitSkin || 'nato',
                 mpDisplayName: (wodProgress.profile && wodProgress.profile.mpDisplayName) || '',
+                gamePeriod: wodGetGamePeriod(),
                 ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { nato: true })
             };
         }
@@ -10677,7 +10982,11 @@
 
         function checkWodAchievements() {
             if(!wodProgress) return;
-            let L = wodProgress.lifetime, A = wodProgress.achievements;
+            let A = wodProgress.achievements;
+            let statsFilterEl = document.getElementById('achStatsPeriodFilter');
+            let statsFilter = statsFilterEl ? statsFilterEl.value : 'all';
+            let L = wodGetLifetimeForStatsFilter(statsFilter);
+            let statLabels = wodPeriodUiPack(statsFilter === 'all' ? 'modern' : statsFilter);
             if(!A.goldenChipMaster && allRegularWodAchievementsMet(L)) {
                 A.goldenChipMaster = true;
                 if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = {};
@@ -10696,18 +11005,23 @@
             let badges = document.getElementById('achTabBadgesBody');
             let stats = document.getElementById('achTabStatsBody');
             if(!badges || !stats) return;
-            let L = wodProgress.lifetime, A = wodProgress.achievements;
+            let A = wodProgress.achievements;
+            let Lbadges = wodProgress.lifetime;
+            let statsFilterEl = document.getElementById('achStatsPeriodFilter');
+            let statsFilter = statsFilterEl ? statsFilterEl.value : 'all';
+            let L = wodGetLifetimeForStatsFilter(statsFilter);
+            let statLabels = wodPeriodUiPack(statsFilter === 'all' ? 'modern' : statsFilter);
             let rows = [
-                { title: 'Broken shield', desc: 'Eliminate an enemy faction by capturing all of their cities.', prog: L.battlesWon || 0, need: 1 },
-                { title: 'Town taker', desc: 'Capture 15 enemy cities (lifetime).', prog: L.citiesCaptured || 0, need: 15 },
-                { title: 'Armor hunter', desc: 'Knock out 200 enemy tanks (lifetime).', prog: L.enemyTankKills || 0, need: 200 },
-                { title: 'Depth charge', desc: 'Sink 40 enemy warships (lifetime).', prog: L.enemyShipKills || 0, need: 40 },
-                { title: 'Merchant marine', desc: 'Capture 30 enemy trade convoys (lifetime).', prog: L.convoysCaptured || 0, need: 30 },
-                { title: 'Industrial base', desc: 'Build 12 factories in towns you control.', prog: L.factoriesBuilt || 0, need: 12 },
-                { title: 'Admiralty works', desc: 'Build 12 harbors in towns you control.', prog: L.harborsBuilt || 0, need: 12 },
-                { title: 'Fortunes of war', desc: 'Hold at least $20,000 cash at once in a campaign.', prog: L.peakMoneyHeld || 0, need: 20000 },
-                { title: 'Grand host', desc: 'Field at least 50,000 troops on the map at once.', prog: L.peakFieldManpower || 0, need: 50000 },
-                { title: 'Warmaster', desc: 'Eliminate 5 enemy factions across all campaigns (last city captured).', prog: L.battlesWon || 0, need: 5 }
+                { title: 'Broken shield', desc: 'Eliminate an enemy faction by capturing all of their cities.', prog: Lbadges.battlesWon || 0, need: 1 },
+                { title: 'Town taker', desc: 'Capture 15 enemy cities (lifetime).', prog: Lbadges.citiesCaptured || 0, need: 15 },
+                { title: 'Armor hunter', desc: 'Knock out 200 enemy tanks (lifetime).', prog: Lbadges.enemyTankKills || 0, need: 200 },
+                { title: 'Depth charge', desc: 'Sink 40 enemy warships (lifetime).', prog: Lbadges.enemyShipKills || 0, need: 40 },
+                { title: 'Merchant marine', desc: 'Capture 30 enemy trade convoys (lifetime).', prog: Lbadges.convoysCaptured || 0, need: 30 },
+                { title: 'Industrial base', desc: 'Build 12 factories in towns you control.', prog: Lbadges.factoriesBuilt || 0, need: 12 },
+                { title: 'Admiralty works', desc: 'Build 12 harbors in towns you control.', prog: Lbadges.harborsBuilt || 0, need: 12 },
+                { title: 'Fortunes of war', desc: 'Hold at least $20,000 cash at once in a campaign.', prog: Lbadges.peakMoneyHeld || 0, need: 20000 },
+                { title: 'Grand host', desc: 'Field at least 50,000 troops on the map at once.', prog: Lbadges.peakFieldManpower || 0, need: 50000 },
+                { title: 'Warmaster', desc: 'Eliminate 5 enemy factions across all campaigns (last city captured).', prog: Lbadges.battlesWon || 0, need: 5 }
             ];
             let html = '<div class="ach-grid">' + rows.map((r) => {
                 let ok = r.prog >= r.need;
@@ -10733,17 +11047,17 @@
                         <div>
                             <div class="stats-combat-sub">Your forces</div>
                             <div class="stats-grid stats-grid--combat-row">
-                                ${sc('Infantry lost', formatLifetimeBig(L.ownTroopLosses))}
-                                ${sc('Tanks lost', formatLifetimeBig(L.ownTankLosses))}
-                                ${sc('Ships lost', formatLifetimeBig(L.ownShipLosses))}
+                                ${sc(statLabels.statInfOwn, formatLifetimeBig(L.ownTroopLosses))}
+                                ${sc(statLabels.statTankOwn, formatLifetimeBig(L.ownTankLosses))}
+                                ${sc(statLabels.statShipOwn, formatLifetimeBig(L.ownShipLosses))}
                             </div>
                         </div>
                         <div>
                             <div class="stats-combat-sub">Enemy</div>
                             <div class="stats-grid stats-grid--combat-row">
-                                ${sc('Infantry eliminated', formatLifetimeBig(L.enemyTroopKills))}
-                                ${sc('Tanks knocked out', formatLifetimeBig(L.enemyTankKills))}
-                                ${sc('Ships sunk', formatLifetimeBig(L.enemyShipKills))}
+                                ${sc(statLabels.statInfEnemy, formatLifetimeBig(L.enemyTroopKills))}
+                                ${sc(statLabels.statTankEnemy, formatLifetimeBig(L.enemyTankKills))}
+                                ${sc(statLabels.statShipEnemy, formatLifetimeBig(L.enemyShipKills))}
                             </div>
                         </div>
                     </div>
@@ -10763,16 +11077,16 @@
                     <h3 class="stats-section-title">Economy &amp; infrastructure</h3>
                     <div class="stats-grid">
                         ${sc('Peak cash held (one campaign)', formatLifetimeBig(L.peakMoneyHeld))}
-                        ${sc('Factories built', formatLifetimeBig(L.factoriesBuilt))}
-                        ${sc('Harbors built', formatLifetimeBig(L.harborsBuilt))}
+                        ${sc(statLabels.statFactory, formatLifetimeBig(L.factoriesBuilt))}
+                        ${sc(statLabels.statHarbor, formatLifetimeBig(L.harborsBuilt))}
                     </div>
                 </section>
                 <section class="stats-section">
                     <h3 class="stats-section-title">Troops trained</h3>
                     <div class="stats-grid">
-                        ${sc('Infantry trained', formatLifetimeBig(L.unitsBuiltLight))}
-                        ${sc('Tanks trained', formatLifetimeBig(L.unitsBuiltHeavy))}
-                        ${sc('Ships trained', formatLifetimeBig(L.unitsBuiltShip))}
+                        ${sc(statLabels.statLightBuilt, formatLifetimeBig(L.unitsBuiltLight))}
+                        ${sc(statLabels.statHeavyBuilt, formatLifetimeBig(L.unitsBuiltHeavy))}
+                        ${sc(statLabels.statShipBuilt, formatLifetimeBig(L.unitsBuiltShip))}
                     </div>
                 </section>
             </div>`;
@@ -11344,7 +11658,7 @@
             setGameSpeed(0, true);
             openCampaignBattleSummary('victory', message, message);
             if(countAsBattleWon && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                wodProgress.lifetime.battlesWon = (wodProgress.lifetime.battlesWon || 0) + 1;
+                wodAddLifetimeStat('battlesWon', 1);
                 checkWodAchievements();
                 scheduleSaveWodProgress();
             }
@@ -11384,7 +11698,7 @@
                 return;
             }
             if(playerMil === 0 && enemyMil > 0 && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                wodProgress.lifetime.campaignLosses = (wodProgress.lifetime.campaignLosses || 0) + 1;
+                wodAddLifetimeStat('campaignLosses', 1);
                 checkWodAchievements();
                 scheduleSaveWodProgress();
                 triggerCampaignDefeat('Defeat — annihilation: all your combat forces were destroyed.');
@@ -11404,7 +11718,7 @@
             }
             if(!wodProgress) return;
             if(newOwner === 1 && prevOwner > 1) {
-                wodProgress.lifetime.citiesCaptured = (wodProgress.lifetime.citiesCaptured || 0) + 1;
+                wodAddLifetimeStat('citiesCaptured', 1);
                 gameData.sessionCitiesCaptured = (gameData.sessionCitiesCaptured || 0) + 1;
             }
             if(prevOwner <= 0) {
@@ -11418,9 +11732,9 @@
                 return;
             }
             if(prevOwner === 1) {
-                wodProgress.lifetime.campaignLosses = (wodProgress.lifetime.campaignLosses || 0) + 1;
+                wodAddLifetimeStat('campaignLosses', 1);
             } else if(newOwner === 1 && prevOwner > 1) {
-                wodProgress.lifetime.battlesWon = (wodProgress.lifetime.battlesWon || 0) + 1;
+                wodAddLifetimeStat('battlesWon', 1);
             }
             checkWodAchievements();
             scheduleSaveWodProgress();
@@ -11810,11 +12124,11 @@
             if(sourceOwner === 1 && owner !== 1) gameData.playerKills = (gameData.playerKills || 0) + amount;
             if(wodProgress) {
                 if(sourceOwner === 1 && owner !== 1) {
-                    wodProgress.lifetime.enemyTroopKills = (wodProgress.lifetime.enemyTroopKills || 0) + amount;
+                    wodAddLifetimeStat('enemyTroopKills', amount);
                     checkWodAchievements();
                     scheduleSaveWodProgress();
                 } else if(owner === 1 && sourceOwner !== 1) {
-                    wodProgress.lifetime.ownTroopLosses = (wodProgress.lifetime.ownTroopLosses || 0) + amount;
+                    wodAddLifetimeStat('ownTroopLosses', amount);
                     scheduleSaveWodProgress();
                 }
             }
@@ -11833,10 +12147,10 @@
             if(sourceOwner === 1 && owner !== 1) gameData.playerTankKills = (gameData.playerTankKills || 0) + amount;
             if(wodProgress) {
                 if(sourceOwner === 1 && owner !== 1) {
-                    wodProgress.lifetime.enemyTankKills = (wodProgress.lifetime.enemyTankKills || 0) + amount;
+                    wodAddLifetimeStat('enemyTankKills', amount);
                     scheduleSaveWodProgress();
                 } else if(owner === 1 && sourceOwner !== 1) {
-                    wodProgress.lifetime.ownTankLosses = (wodProgress.lifetime.ownTankLosses || 0) + amount;
+                    wodAddLifetimeStat('ownTankLosses', amount);
                     scheduleSaveWodProgress();
                 }
             }
@@ -11861,11 +12175,11 @@
             if(owner === 1) gameData.shipCasualties = (gameData.shipCasualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerShipKills = (gameData.playerShipKills || 0) + amount;
             if(wodProgress && sourceOwner === 1 && owner !== 1) {
-                wodProgress.lifetime.enemyShipKills = (wodProgress.lifetime.enemyShipKills || 0) + amount;
+                wodAddLifetimeStat('enemyShipKills', amount);
                 checkWodAchievements();
                 scheduleSaveWodProgress();
             } else if(wodProgress && owner === 1 && sourceOwner !== 1) {
-                wodProgress.lifetime.ownShipLosses = (wodProgress.lifetime.ownShipLosses || 0) + amount;
+                wodAddLifetimeStat('ownShipLosses', amount);
                 scheduleSaveWodProgress();
             }
         }
@@ -15400,6 +15714,9 @@
 
             let victorySel = document.getElementById('setupVictoryMode');
             gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
+            let periodSel = document.getElementById('setupPeriod');
+            if(periodSel) wodApplyGamePeriod(periodSel.value, { saveProfile: true });
+            wodSyncPeriodUiLabels();
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
             let startMoney = document.getElementById('setupMoney');
@@ -15408,7 +15725,7 @@
             let requestedShape = shapeInput ? shapeInput.value : 'island';
 
             if(wodProgress) {
-                wodProgress.lifetime.gamesStarted = (wodProgress.lifetime.gamesStarted || 0) + 1;
+                wodAddLifetimeStat('gamesStarted', 1);
                 scheduleSaveWodProgress();
             }
 
@@ -17945,12 +18262,12 @@
                 let fielded = gameData._uiTroopCache;
                 if(fielded === undefined) fielded = getOwnerTroopManpower(1);
                 if(fielded > (wodProgress.lifetime.peakFieldManpower || 0)) {
-                    wodProgress.lifetime.peakFieldManpower = fielded;
+                    wodSetLifetimePeak('peakFieldManpower', fielded);
                     dirty = true;
                 }
                 let cash = Math.floor(gameData.money || 0);
                 if(cash > (wodProgress.lifetime.peakMoneyHeld || 0)) {
-                    wodProgress.lifetime.peakMoneyHeld = cash;
+                    wodSetLifetimePeak('peakMoneyHeld', cash);
                     dirty = true;
                 }
                 if(dirty) {
@@ -18165,7 +18482,7 @@
                             unit.owner = captor.owner;
                             unit.name = "Captured " + generateUnitName('convoy', !!unit.convoySeaRoute);
                             if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode && captor.owner === 1 && prevConvOwner > 1) {
-                                wodProgress.lifetime.convoysCaptured = (wodProgress.lifetime.convoysCaptured || 0) + 1;
+                                wodAddLifetimeStat('convoysCaptured', 1);
                                 checkWodAchievements();
                                 scheduleSaveWodProgress();
                             }
@@ -19770,6 +20087,90 @@
             ctx.restore();
         }
 
+
+        function drawPeriodCounter(ctx, unit, radius, color, period) {
+            period = wodNormalizeGamePeriod(period);
+            let w = radius * 2.15;
+            let h = radius * 1.38;
+            let x = -w / 2;
+            let y = -h / 2;
+            let rr = Math.max(2, radius * 0.22);
+            let fillCol = '#f7fafc';
+            if(unit.owner === 1) fillCol = blendColorsFast('#ffffff', color, 0.1);
+            else fillCol = blendColorsFast('#e8ecf2', factionColors[unit.owner] || color, 0.48);
+            if(period === 'medieval') { w = radius * 1.95; h = radius * 1.55; x = -w / 2; y = -h / 2; rr = Math.max(2, radius * 0.14); }
+            if(period === 'ancient') { w = radius * 2.05; h = radius * 1.48; x = -w / 2; y = -h / 2; }
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.38)';
+            ctx.shadowBlur = Math.max(3, radius * 0.25);
+            ctx.shadowOffsetY = radius * 0.08;
+            ctx.fillStyle = fillCol;
+            roundRect(ctx, x, y, w, h, rr);
+            ctx.fill();
+            ctx.shadowColor = 'transparent';
+            ctx.lineWidth = Math.max(2, radius * 0.22);
+            ctx.strokeStyle = color;
+            roundRect(ctx, x, y, w, h, rr);
+            ctx.stroke();
+            let symCol = unit.owner !== 1 ? blendColorsFast('#243040', factionColors[unit.owner] || color, 0.42) : '#1a2634';
+            ctx.strokeStyle = symCol;
+            ctx.fillStyle = symCol;
+            ctx.lineWidth = Math.max(2, radius * 0.13);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            let ty = unit.type;
+            if(period === 'medieval') {
+                if(ty === 'heavy') {
+                    ctx.moveTo(0, -radius * 0.55); ctx.lineTo(radius * 0.5, -radius * 0.12); ctx.lineTo(radius * 0.42, radius * 0.5);
+                    ctx.lineTo(-radius * 0.42, radius * 0.5); ctx.lineTo(-radius * 0.5, -radius * 0.12); ctx.closePath();
+                    ctx.fill(); ctx.stroke();
+                } else if(ty === 'marine') {
+                    ctx.moveTo(-radius * 0.05, -radius * 0.55); ctx.lineTo(radius * 0.55, radius * 0.45); ctx.moveTo(radius * 0.05, -radius * 0.55); ctx.lineTo(-radius * 0.55, radius * 0.45);
+                    ctx.stroke();
+                } else if(ty === 'ship') {
+                    ctx.rect(-radius * 0.35, -radius * 0.35, radius * 0.7, radius * 0.55); ctx.fill();
+                    ctx.moveTo(0, -radius * 0.55); ctx.lineTo(0, -radius * 0.82); ctx.stroke();
+                } else {
+                    ctx.moveTo(0, -radius * 0.62); ctx.lineTo(0, radius * 0.55);
+                    ctx.moveTo(-radius * 0.22, -radius * 0.38); ctx.lineTo(radius * 0.22, -radius * 0.38);
+                    ctx.stroke();
+                }
+            } else if(period === 'napoleonic') {
+                if(ty === 'heavy') {
+                    ctx.moveTo(-radius * 0.55, radius * 0.35); ctx.lineTo(0, -radius * 0.55); ctx.lineTo(radius * 0.55, radius * 0.35);
+                    ctx.moveTo(-radius * 0.35, 0); ctx.lineTo(radius * 0.35, 0); ctx.stroke();
+                } else if(ty === 'marine') {
+                    ctx.moveTo(-radius * 0.62, -radius * 0.2); ctx.lineTo(radius * 0.62, -radius * 0.2);
+                    ctx.moveTo(-radius * 0.42, radius * 0.08); ctx.lineTo(radius * 0.42, radius * 0.08);
+                    ctx.moveTo(-radius * 0.22, radius * 0.36); ctx.lineTo(radius * 0.22, radius * 0.36);
+                    ctx.stroke();
+                } else if(ty === 'ship') {
+                    ctx.moveTo(-radius * 0.62, radius * 0.22); ctx.lineTo(0, -radius * 0.38); ctx.lineTo(radius * 0.62, radius * 0.22); ctx.closePath(); ctx.stroke();
+                    ctx.moveTo(0, -radius * 0.38); ctx.lineTo(0, -radius * 0.58); ctx.stroke();
+                } else {
+                    for(let i = -1; i <= 1; i++) { ctx.moveTo(-radius * 0.62, i * radius * 0.22); ctx.lineTo(radius * 0.62, i * radius * 0.22); }
+                    ctx.stroke();
+                }
+            } else if(period === 'ancient') {
+                if(ty === 'heavy') {
+                    ctx.arc(0, -radius * 0.08, radius * 0.42, Math.PI, 0); ctx.stroke();
+                    ctx.moveTo(-radius * 0.48, radius * 0.12); ctx.lineTo(radius * 0.48, radius * 0.12); ctx.stroke();
+                } else if(ty === 'marine') {
+                    ctx.moveTo(-radius * 0.62, radius * 0.28); ctx.lineTo(radius * 0.62, radius * 0.28);
+                    ctx.moveTo(-radius * 0.38, radius * 0.05); ctx.lineTo(radius * 0.38, radius * 0.05);
+                    ctx.stroke();
+                } else if(ty === 'ship') {
+                    ctx.moveTo(-radius * 0.65, radius * 0.2); ctx.lineTo(0, -radius * 0.45); ctx.lineTo(radius * 0.65, radius * 0.2); ctx.closePath(); ctx.stroke();
+                } else {
+                    ctx.moveTo(0, -radius * 0.62); ctx.lineTo(0, radius * 0.55);
+                    ctx.moveTo(-radius * 0.18, radius * 0.15); ctx.lineTo(radius * 0.18, -radius * 0.35);
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        }
+
         function drawNatoCounter(ctx, unit, radius, color) {
             let w = radius * 2.15;
             let h = radius * 1.38;
@@ -20146,7 +20547,9 @@
         function drawUnitSkin(ctx, unit, radius, color) {
             let skin = getEffectiveUnitSkin(unit);
             if(skin === 'nato') {
-                drawNatoCounter(ctx, unit, radius, color);
+                let period = wodGetGamePeriod();
+                if(period === 'modern') drawNatoCounter(ctx, unit, radius, color);
+                else drawPeriodCounter(ctx, unit, radius, color, period);
                 return true;
             }
             if(skin === 'goldenChip') {
@@ -20191,6 +20594,16 @@
             }
             ctx.fillStyle = '#0f1823';
             ctx.fillRect(0, 0, w, h);
+            if(skinId === 'napoleonic_period' || skinId === 'ancient_period' || skinId === 'medieval_period') {
+                let period = skinId.replace('_period', '');
+                let uP = { type: 'heavy', owner: 1, hp: 100, maxHp: 100, manpower: 1000, tanks: 0 };
+                let colP = factionColors[1];
+                ctx.translate(w / 2, h / 2);
+                ctx.scale(m / 50, m / 50);
+                drawPeriodCounter(ctx, uP, 15, colP, period);
+                ctx.restore();
+                return;
+            }
             let u = {
                 type: 'light',
                 owner: 1,
@@ -22804,7 +23217,7 @@
                 wodDeductPlayerMoney(owner, WOD_PRICE_FACTORY);
                 city.hasFactory = true;
                 if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodProgress.lifetime.factoriesBuilt = (wodProgress.lifetime.factoriesBuilt || 0) + 1;
+                    wodAddLifetimeStat('factoriesBuilt', 1);
                     checkWodAchievements();
                     scheduleSaveWodProgress();
                 }
@@ -22812,7 +23225,7 @@
                 wodDeductPlayerMoney(owner, WOD_PRICE_HARBOR);
                 city.hasHarbor = true;
                 if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodProgress.lifetime.harborsBuilt = (wodProgress.lifetime.harborsBuilt || 0) + 1;
+                    wodAddLifetimeStat('harborsBuilt', 1);
                     checkWodAchievements();
                     scheduleSaveWodProgress();
                 }
@@ -22990,10 +23403,10 @@
                 else ensureUnitPixelOnWalkableHex(unit, 14);
             }
             if(gameState === 'PLAYING' && owner === 1 && wodProgress) {
-                if(type === 'light') wodProgress.lifetime.unitsBuiltLight = (wodProgress.lifetime.unitsBuiltLight || 0) + 1;
-                else if(type === 'marine') wodProgress.lifetime.unitsBuiltMarine = (wodProgress.lifetime.unitsBuiltMarine || 0) + 1;
-                else if(type === 'heavy') wodProgress.lifetime.unitsBuiltHeavy = (wodProgress.lifetime.unitsBuiltHeavy || 0) + 1;
-                else if(type === 'ship') wodProgress.lifetime.unitsBuiltShip = (wodProgress.lifetime.unitsBuiltShip || 0) + 1;
+                if(type === 'light') wodAddLifetimeStat('unitsBuiltLight', 1);
+                else if(type === 'marine') wodAddLifetimeStat('unitsBuiltMarine', 1);
+                else if(type === 'heavy') wodAddLifetimeStat('unitsBuiltHeavy', 1);
+                else if(type === 'ship') wodAddLifetimeStat('unitsBuiltShip', 1);
                 scheduleSaveWodProgress();
             }
             return unit;
@@ -23264,10 +23677,15 @@
             bootstrapMenuBackgroundBattle,
             pauseMenuBackgroundBattle,
             resumeMenuBackgroundBattle,
+            wodApplyGamePeriod,
+            wodGetGamePeriod,
+            wodNormalizeGamePeriod,
         };
 
         loadWodProgress();
         applyWodProfileToGame();
+        wodSyncAllPeriodSelects();
+        wodSyncPeriodUiLabels();
         checkWodAchievements();
         updateSkinShop();
         renderAchievementsUi();

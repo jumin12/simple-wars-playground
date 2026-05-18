@@ -1320,6 +1320,13 @@
             <button type="button" class="editor-seg-btn" data-ed-shape="desert">Desert</button>
             </div>
           </div>
+
+          <div class="editor-row"><label>Period</label><select id="editorGenPeriod">
+            <option value="modern" selected>Modern (NATO)</option>
+            <option value="napoleonic">Napoleonic</option>
+            <option value="ancient">Ancient</option>
+            <option value="medieval">Medieval</option>
+          </select></div>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenCities" checked /> Cities during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenTerritory" checked /> Territory during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenUnits" checked /> Units during gen</label>
@@ -1571,7 +1578,16 @@
       renderMapBrowser();
       if (state.open) editorInitHistory();
     });
+    const editorGenPeriod = app.querySelector("#editorGenPeriod");
+    if (editorGenPeriod && window.WOD) {
+      editorGenPeriod.addEventListener("change", () => {
+        if (typeof WOD.wodApplyGamePeriod === "function") WOD.wodApplyGamePeriod(editorGenPeriod.value);
+      });
+      if (WOD.gameData && WOD.gameData.gamePeriod) editorGenPeriod.value = WOD.gameData.gamePeriod;
+    }
     app.querySelector("#editorRandom").addEventListener("click", async () => {
+      const edPer = app.querySelector("#editorGenPeriod");
+      if (edPer && window.WOD && typeof WOD.wodApplyGamePeriod === "function") WOD.wodApplyGamePeriod(edPer.value, { saveProfile: true });
       document.getElementById("setupMapSize").value = app.querySelector("#editorSize").value;
       WOD.gameData.mapRadius = parseInt(app.querySelector("#editorSize").value, 10);
       WOD.gameData.aiCount = Math.max(1, state.maxFactionSlots - 1);
