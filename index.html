@@ -15087,6 +15087,7 @@
                 let ax = cent ? cent.x : lcm.cx,
                     ay = cent ? cent.y : lcm.cy;
                 if(wodMapShapeUsesRectanglePipeline(mapShape)) {
+                    let sectors = 10;
                     let lvAlt = level & 1;
                     pool.sort((a, b) => {
                         let da = interiorDepthMap.get(getHexKey(a)) ?? 0;
@@ -15655,7 +15656,7 @@
             let shapePre = document.getElementById('setupMapShape');
             let mapShapePre = (mog && wodIsProcGenMapShape(mog.mapShape)) ? mog.mapShape : (shapePre ? shapePre.value : 'island');
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
-            if(wodMapShapeUsesRectanglePipeline(mapShapePre)) procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 16);
+            if(wodMapShapeUsesRectanglePipeline(mapShapePre)) procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 26);
             if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
@@ -15720,11 +15721,24 @@
                         let radialWarp = (fbm(Math.cos(angle) * 2.4 + seedOffset, Math.sin(angle) * 2.4 + seedOffset, 4) - 0.5) * (gp.coastNoiseAmp != null ? gp.coastNoiseAmp : 0.45);
                         mask = 1.12 - dist + radialWarp;
                         if(mapShape === 'ring') {
-                            let ri = gp.ringInnerFrac != null ? gp.ringInnerFrac : 0.24;
-                            let ro = gp.ringOuterFrac != null ? gp.ringOuterFrac : 0.93;
+                            let ri0 = gp.ringInnerFrac != null ? gp.ringInnerFrac : 0.24;
+                            let ro0 = gp.ringOuterFrac != null ? gp.ringOuterFrac : 0.93;
+                            let coastW = fbm(x * scale * 1.75 + seedOffset + 3120, y * scale * 1.75 + seedOffset + 3120, 4);
+                            let coastW2 = fbm(x * scale * 3.1 + seedOffset + 5140, y * scale * 3.1 + seedOffset + 5140, 3);
+                            let coastW3 = fbm(Math.cos(angle) * 2.1 + seedOffset, Math.sin(angle) * 2.1 + seedOffset + 880, 4);
+                            let ri = ri0 + (coastW - 0.5) * 0.095 + (coastW2 - 0.5) * 0.052 + (coastW3 - 0.5) * 0.04;
+                            let ro = ro0 + (coastW * 0.65 + coastW2 * 0.35 - 0.5) * 0.11 + Math.cos(angle * 2.15 + seedOffset * 0.019) * 0.035;
+                            ri = Math.max(0.07, Math.min(0.44, ri));
+                            ro = Math.max(ri + 0.11, Math.min(0.98, ro));
+                            let bandWobble = Math.cos(angle * 2.05 + seedOffset * 0.017) * 0.045 + (coastW2 - 0.5) * 0.038;
                             if(dist < ri) mask = 0.05;
                             else if(dist > ro) mask = 0.06;
-                            else mask = 1.04 + radialWarp * 0.88 - ((dist - ri) / Math.max(0.08, ro - ri)) * 0.26;
+                            else
+                                mask =
+                                    1.04 +
+                                    radialWarp * 0.92 +
+                                    bandWobble -
+                                    ((dist - ri) / Math.max(0.08, ro - ri)) * (0.26 + (coastW - 0.5) * 0.04);
                         } else if(mapShape === 'archipelago') {
                             let punch = gp.archipelagoCenterClearFrac != null ? gp.archipelagoCenterClearFrac : 0.55;
                             mask -= Math.max(0, punch - dist) * 1.62;
