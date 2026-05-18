@@ -6769,94 +6769,204 @@
             return s[shape] || (shape ? shape.charAt(0).toUpperCase() + shape.slice(1) : '');
         }
 
+        /** Shared biome/threshold roll used by island-shaped proc maps so ring & archipelago match island variety. */
+        function wodRollIslandStyleBiomeFields(islandMode) {
+            let atollExtra = islandMode === 'atoll';
+            let archipelagoExtra = islandMode === 'archipelago';
+            let accentRoll = Math.random();
+            let biomeAccent =
+                accentRoll < 0.26
+                    ? 'marsh'
+                    : accentRoll < 0.52
+                      ? 'flat_low_mtns'
+                      : accentRoll < 0.7
+                        ? 'forest'
+                        : accentRoll < 0.82
+                          ? 'dry'
+                          : accentRoll < 0.93
+                            ? 'rugged'
+                            : 'balanced';
+
+            if(atollExtra || archipelagoExtra) {
+                biomeAccent = Math.random() < 0.55 ? 'marsh' : biomeAccent === 'rugged' ? 'balanced' : biomeAccent;
+            }
+
+            let waterElevThresh = 0.395 + Math.random() * 0.062;
+            let sandThresh = 0.29 + Math.random() * 0.09;
+            let grassThresh = 0.5 + Math.random() * 0.14;
+            let forestThresh = 0.7 + Math.random() * 0.14;
+            let mountElevThresh = 0.798 + Math.random() * 0.1;
+            let moistShift = (Math.random() - 0.5) * 0.16;
+            let forestMoistBoost = (Math.random() - 0.5) * 0.11;
+            let mountainThin = 0.12 + Math.random() * 0.42;
+            let minMountainHexReserve = 2 + (Math.random() < 0.5 ? 0 : 1);
+            let maxMountainLandFrac = 0.055 + Math.random() * 0.095;
+            if(islandMode === 'broken') waterElevThresh += 0.018 + Math.random() * 0.018;
+
+            if(biomeAccent === 'marsh') {
+                moistShift += 0.085 + Math.random() * 0.12;
+                grassThresh -= 0.04 + Math.random() * 0.05;
+                forestThresh -= 0.06 + Math.random() * 0.07;
+                sandThresh -= 0.02 + Math.random() * 0.03;
+                waterElevThresh -= 0.012 + Math.random() * 0.014;
+                mountElevThresh += 0.055 + Math.random() * 0.07;
+                mountainThin = Math.min(0.58, mountainThin + 0.1 + Math.random() * 0.12);
+                maxMountainLandFrac = Math.min(0.11, maxMountainLandFrac * 0.72);
+            } else if(biomeAccent === 'flat_low_mtns') {
+                mountElevThresh += 0.09 + Math.random() * 0.08;
+                mountainThin = Math.min(0.62, mountainThin + 0.14 + Math.random() * 0.16);
+                maxMountainLandFrac = Math.min(0.085, maxMountainLandFrac * 0.62);
+                moistShift += 0.02 * Math.random();
+            } else if(biomeAccent === 'forest') {
+                forestMoistBoost += 0.08 + Math.random() * 0.1;
+                forestThresh -= 0.04 + Math.random() * 0.05;
+                grassThresh -= 0.02 + Math.random() * 0.03;
+                mountElevThresh += 0.03 + Math.random() * 0.05;
+            } else if(biomeAccent === 'dry') {
+                sandThresh += 0.02 + Math.random() * 0.04;
+                moistShift -= 0.08 + Math.random() * 0.08;
+                waterElevThresh += 0.015 + Math.random() * 0.02;
+                mountElevThresh += 0.02 + Math.random() * 0.04;
+            } else if(biomeAccent === 'rugged') {
+                mountElevThresh -= 0.025 + Math.random() * 0.04;
+                moistShift += 0.03 * Math.random();
+                maxMountainLandFrac = Math.min(0.16, maxMountainLandFrac + 0.035);
+                minMountainHexReserve += 2;
+            }
+
+            let mPick = Math.random();
+            let mountainStyle =
+                biomeAccent === 'flat_low_mtns'
+                    ? 'low'
+                    : mPick < 0.34
+                      ? 'default'
+                      : mPick < 0.58
+                        ? 'scattered'
+                        : mPick < 0.76
+                          ? 'low'
+                          : mPick < 0.9
+                            ? 'mixed'
+                            : 'ring';
+            if(biomeAccent === 'marsh' && mountainStyle === 'ring') mountainStyle = 'scattered';
+
+            let mountainPeakJitter = 0.05 + Math.random() * 0.14;
+            let mountainRingR = 0.34 + Math.random() * 0.24;
+
+            return {
+                waterElevThresh,
+                sandThresh,
+                grassThresh,
+                forestThresh,
+                mountElevThresh,
+                moistShift,
+                forestMoistBoost,
+                mountainThin,
+                mountainStyle,
+                mountainPeakJitter,
+                mountainRingR,
+                minMountainHexReserve,
+                maxMountainLandFrac,
+                biomeAccent
+            };
+        }
+
         function wodSampleMapGenProfile(mapShape) {
             if(mapShape === 'ring') {
-                let mz = (Math.random() - 0.5) * 0.1;
+                let bio = wodRollIslandStyleBiomeFields('ring');
+                let inner = 0.12 + Math.random() * 0.16;
+                let span = 0.11 + Math.random() * 0.17;
+                let outer = Math.min(0.97, inner + span + 0.07 + Math.random() * 0.22);
+                if(outer - inner < 0.12) outer = inner + 0.12 + Math.random() * 0.1;
+                let sx = Math.random() < 0.42 ? 0.84 + Math.random() * 0.28 : 0.98 + Math.random() * 0.22;
+                let sy = Math.random() < 0.42 ? 0.84 + Math.random() * 0.28 : 0.98 + Math.random() * 0.22;
+                if(Math.random() < 0.38) {
+                    let t = sx;
+                    sx = sy;
+                    sy = t;
+                }
                 return {
                     islandMode: 'ring',
-                    stretchX: 1,
-                    stretchY: 1,
-                    coastNoiseAmp: 0.34 + Math.random() * 0.2,
+                    stretchX: sx,
+                    stretchY: sy,
+                    coastNoiseAmp: 0.3 + Math.random() * 0.26,
                     chainAX: 0,
                     chainAY: 0,
                     chainBX: 0,
                     chainBY: 0,
-                    atollRing: 0.45,
-                    ringInnerFrac: 0.19 + Math.random() * 0.055,
-                    ringOuterFrac: 0.885 + Math.random() * 0.065,
-                    waterElevThresh: 0.398 + Math.random() * 0.058,
-                    sandThresh: 0.3 + Math.random() * 0.08,
-                    grassThresh: 0.52 + Math.random() * 0.12,
-                    forestThresh: 0.72 + Math.random() * 0.12,
-                    mountElevThresh: 0.795 + Math.random() * 0.095,
-                    moistShift: (Math.random() - 0.5) * 0.14 + mz,
-                    forestMoistBoost: (Math.random() - 0.5) * 0.09,
-                    mountainThin: 0.11 + Math.random() * 0.38,
-                    mountainStyle: Math.random() < 0.55 ? 'scattered' : 'mixed',
-                    mountainPeakJitter: 0.06 + Math.random() * 0.12,
-                    mountainRingR: 0.38 + Math.random() * 0.2,
-                    minMountainHexReserve: 2 + (Math.random() < 0.5 ? 0 : 1),
-                    maxMountainLandFrac: 0.055 + Math.random() * 0.085,
-                    biomeAccent: Math.random() < 0.38 ? 'marsh' : Math.random() < 0.45 ? 'balanced' : 'forest'
+                    atollRing: 0.41 + Math.random() * 0.14,
+                    ringInnerFrac: inner,
+                    ringOuterFrac: outer,
+                    ...bio
                 };
             }
             if(mapShape === 'archipelago') {
-                let mz = (Math.random() - 0.5) * 0.12;
+                let bio = wodRollIslandStyleBiomeFields('archipelago');
                 return {
                     islandMode: 'blob',
-                    archipelagoCenterClearFrac: 0.5 + Math.random() * 0.14,
-                    stretchX: 1,
-                    stretchY: 1,
-                    coastNoiseAmp: 0.5 + Math.random() * 0.26,
-                    chainAX: (Math.random() - 0.5) * 0.9,
-                    chainAY: (Math.random() - 0.5) * 0.85,
-                    chainBX: (Math.random() - 0.5) * 0.9 + 0.06,
-                    chainBY: (Math.random() - 0.5) * 0.8,
-                    atollRing: 0.44,
-                    waterElevThresh: 0.382 + Math.random() * 0.055,
-                    sandThresh: 0.28 + Math.random() * 0.08,
-                    grassThresh: 0.5 + Math.random() * 0.12,
-                    forestThresh: 0.7 + Math.random() * 0.12,
-                    mountElevThresh: 0.805 + Math.random() * 0.09,
-                    moistShift: (Math.random() - 0.5) * 0.15 + mz + 0.035,
-                    forestMoistBoost: (Math.random() - 0.5) * 0.1,
-                    mountainThin: 0.13 + Math.random() * 0.35,
-                    mountainStyle: Math.random() < 0.5 ? 'scattered' : 'low',
-                    mountainPeakJitter: 0.05 + Math.random() * 0.13,
-                    mountainRingR: 0.36 + Math.random() * 0.22,
-                    minMountainHexReserve: 2,
-                    maxMountainLandFrac: 0.048 + Math.random() * 0.07,
-                    biomeAccent: Math.random() < 0.55 ? 'marsh' : 'balanced'
+                    archipelagoCenterClearFrac: 0.4 + Math.random() * 0.22,
+                    stretchX: 0.94 + Math.random() * 0.2,
+                    stretchY: 0.94 + Math.random() * 0.2,
+                    coastNoiseAmp: 0.46 + Math.random() * 0.28,
+                    chainAX: (Math.random() - 0.5) * 0.95,
+                    chainAY: (Math.random() - 0.5) * 0.9,
+                    chainBX: (Math.random() - 0.5) * 0.95 + 0.06,
+                    chainBY: (Math.random() - 0.5) * 0.85,
+                    atollRing: 0.4 + Math.random() * 0.16,
+                    ...bio
                 };
             }
             if(wodMapShapeUsesRectanglePipeline(mapShape)) {
                 let mz = (Math.random() - 0.5) * 0.14;
                 let rectBiomePreset = mapShape === 'forest' ? 'forest' : mapShape === 'mountain' ? 'mountain' : mapShape === 'desert' ? 'desert' : null;
                 let moistShift = (Math.random() - 0.5) * 0.14 + mz;
-                let waterElevThresh = 0.42 + Math.random() * 0.04;
+                let waterElevThresh = 0.405 + Math.random() * 0.048;
+                let ra = Math.random();
+                let biomeAccent =
+                    ra < 0.18
+                        ? 'marsh'
+                        : ra < 0.38
+                          ? 'flat_low_mtns'
+                          : ra < 0.62
+                            ? 'balanced'
+                            : ra < 0.82
+                              ? 'dry'
+                              : 'rugged';
                 if(rectBiomePreset === 'forest') {
-                    moistShift += 0.09 + Math.random() * 0.06;
-                    waterElevThresh -= 0.012 + Math.random() * 0.014;
+                    moistShift += 0.09 + Math.random() * 0.065;
+                    waterElevThresh -= 0.014 + Math.random() * 0.016;
+                    if(biomeAccent === 'dry') biomeAccent = Math.random() < 0.65 ? 'balanced' : 'marsh';
                 } else if(rectBiomePreset === 'desert') {
-                    moistShift -= 0.12 + Math.random() * 0.07;
-                    waterElevThresh += 0.012 + Math.random() * 0.016;
+                    moistShift -= 0.12 + Math.random() * 0.075;
+                    waterElevThresh += 0.014 + Math.random() * 0.018;
+                    if(biomeAccent === 'marsh') biomeAccent = Math.random() < 0.62 ? 'balanced' : 'dry';
                 } else if(rectBiomePreset === 'mountain') {
-                    moistShift += (Math.random() - 0.5) * 0.06;
-                    waterElevThresh += 0.006 + Math.random() * 0.012;
+                    moistShift += (Math.random() - 0.5) * 0.07;
+                    waterElevThresh += 0.008 + Math.random() * 0.014;
+                    if(biomeAccent === 'marsh') biomeAccent = 'rugged';
+                }
+                if(biomeAccent === 'marsh') {
+                    moistShift += 0.05 + Math.random() * 0.06;
+                    waterElevThresh -= 0.008 + Math.random() * 0.01;
+                } else if(biomeAccent === 'dry') {
+                    moistShift -= 0.055 + Math.random() * 0.06;
+                    waterElevThresh += 0.008 + Math.random() * 0.012;
+                } else if(biomeAccent === 'rugged') {
+                    moistShift += 0.02 * Math.random();
                 }
                 return {
                     islandMode: 'none',
                     rectBiomePreset,
                     waterElevThresh,
-                    sandThresh: 0.32 + Math.random() * 0.06,
-                    grassThresh: 0.54 + Math.random() * 0.1,
-                    forestThresh: 0.76 + Math.random() * 0.1,
-                    mountElevThresh: 0.84 + Math.random() * 0.06,
+                    sandThresh: 0.29 + Math.random() * 0.09,
+                    grassThresh: 0.51 + Math.random() * 0.12,
+                    forestThresh: 0.73 + Math.random() * 0.1,
+                    mountElevThresh: 0.805 + Math.random() * 0.065,
                     moistShift,
-                    forestMoistBoost: (Math.random() - 0.5) * 0.09,
-                    mountainThin: Math.random() < 0.7 ? (0.12 + Math.random() * 0.22) : 0,
-                    maxMountainLandFrac: 0.1 + Math.random() * 0.1,
-                    biomeAccent: Math.random() < 0.32 ? 'marsh' : 'balanced'
+                    forestMoistBoost: (Math.random() - 0.5) * 0.11,
+                    mountainThin: Math.random() < 0.72 ? (0.11 + Math.random() * 0.24) : 0,
+                    maxMountainLandFrac: 0.09 + Math.random() * 0.11,
+                    biomeAccent,
+                    minMountainHexReserve: 2
                 };
             }
             if(mapShape !== 'island') {
@@ -6928,88 +7038,6 @@
                 coastNoiseAmp = 0.45 + Math.random() * 0.18;
             }
 
-            let accentRoll = Math.random();
-            /** Biome presets so marshes/coasts and mountain-sparse maps appear reliably */
-            let biomeAccent =
-                accentRoll < 0.26
-                    ? 'marsh'
-                    : accentRoll < 0.52
-                      ? 'flat_low_mtns'
-                      : accentRoll < 0.7
-                        ? 'forest'
-                        : accentRoll < 0.82
-                          ? 'dry'
-                          : accentRoll < 0.93
-                            ? 'rugged'
-                            : 'balanced';
-
-            /** Mode nudges: atolls/archipelagos lean wet + less alpine */
-            if(atollExtra || archipelagoExtra) {
-                biomeAccent = Math.random() < 0.55 ? 'marsh' : biomeAccent === 'rugged' ? 'balanced' : biomeAccent;
-            }
-
-            let waterElevThresh = 0.395 + Math.random() * 0.062;
-            let sandThresh = 0.29 + Math.random() * 0.09;
-            let grassThresh = 0.5 + Math.random() * 0.14;
-            let forestThresh = 0.7 + Math.random() * 0.14;
-            let mountElevThresh = 0.798 + Math.random() * 0.1;
-            let moistShift = (Math.random() - 0.5) * 0.16;
-            let forestMoistBoost = (Math.random() - 0.5) * 0.11;
-            /** Always some thinning on islands; strength scales with roll */
-            let mountainThin = 0.12 + Math.random() * 0.42;
-            let minMountainHexReserve = 2 + (Math.random() < 0.5 ? 0 : 1);
-            let maxMountainLandFrac = 0.055 + Math.random() * 0.095;
-            if(islandMode === 'broken') waterElevThresh += 0.018 + Math.random() * 0.018;
-
-            if(biomeAccent === 'marsh') {
-                moistShift += 0.085 + Math.random() * 0.12;
-                grassThresh -= 0.04 + Math.random() * 0.05;
-                forestThresh -= 0.06 + Math.random() * 0.07;
-                sandThresh -= 0.02 + Math.random() * 0.03;
-                waterElevThresh -= 0.012 + Math.random() * 0.014;
-                mountElevThresh += 0.055 + Math.random() * 0.07;
-                mountainThin = Math.min(0.58, mountainThin + 0.1 + Math.random() * 0.12);
-                maxMountainLandFrac = Math.min(0.11, maxMountainLandFrac * 0.72);
-            } else if(biomeAccent === 'flat_low_mtns') {
-                mountElevThresh += 0.09 + Math.random() * 0.08;
-                mountainThin = Math.min(0.62, mountainThin + 0.14 + Math.random() * 0.16);
-                maxMountainLandFrac = Math.min(0.085, maxMountainLandFrac * 0.62);
-                moistShift += 0.02 * Math.random();
-            } else if(biomeAccent === 'forest') {
-                forestMoistBoost += 0.08 + Math.random() * 0.1;
-                forestThresh -= 0.04 + Math.random() * 0.05;
-                grassThresh -= 0.02 + Math.random() * 0.03;
-                mountElevThresh += 0.03 + Math.random() * 0.05;
-            } else if(biomeAccent === 'dry') {
-                sandThresh += 0.02 + Math.random() * 0.04;
-                moistShift -= 0.08 + Math.random() * 0.08;
-                waterElevThresh += 0.015 + Math.random() * 0.02;
-                mountElevThresh += 0.02 + Math.random() * 0.04;
-            } else if(biomeAccent === 'rugged') {
-                mountElevThresh -= 0.025 + Math.random() * 0.04;
-                moistShift += 0.03 * Math.random();
-                maxMountainLandFrac = Math.min(0.16, maxMountainLandFrac + 0.035);
-                minMountainHexReserve += 2;
-            }
-
-            let mPick = Math.random();
-            let mountainStyle =
-                biomeAccent === 'flat_low_mtns'
-                    ? 'low'
-                    : mPick < 0.34
-                      ? 'default'
-                      : mPick < 0.58
-                        ? 'scattered'
-                        : mPick < 0.76
-                          ? 'low'
-                          : mPick < 0.9
-                            ? 'mixed'
-                            : 'ring';
-            if(biomeAccent === 'marsh' && mountainStyle === 'ring') mountainStyle = 'scattered';
-
-            let mountainPeakJitter = 0.05 + Math.random() * 0.14;
-            let mountainRingR = 0.34 + Math.random() * 0.24;
-
             return {
                 islandMode,
                 stretchX,
@@ -7020,20 +7048,7 @@
                 chainBX,
                 chainBY,
                 atollRing,
-                waterElevThresh,
-                sandThresh,
-                grassThresh,
-                forestThresh,
-                mountElevThresh,
-                moistShift,
-                forestMoistBoost,
-                mountainThin,
-                mountainStyle,
-                mountainPeakJitter,
-                mountainRingR,
-                minMountainHexReserve,
-                maxMountainLandFrac,
-                biomeAccent
+                ...wodRollIslandStyleBiomeFields(islandMode)
             };
         }
         /** Post-gen cap: peels weaker peaks first so swamp / hill coast variety stays readable */
@@ -7205,7 +7220,9 @@
                 let baseType = h.type;
                 let u = fbm(h.x * 0.008 + seedOffset + 9900, h.y * 0.008 + seedOffset + 9900, 4);
                 let mix = fbm(h.x * 0.0107 + seedOffset + 10220, h.y * 0.0107 + seedOffset + 10220, 4);
-                if(mix < 0.18) {
+                let v = fbm(h.x * 0.0062 + seedOffset + 10440, h.y * 0.0062 + seedOffset + 10440, 4);
+                let t = Math.max(0, Math.min(1, u + (v - 0.5) * 0.12));
+                if(mix < 0.23) {
                     if(baseType === 'water') {
                         if((++hi & 255) === 0) await wodMapGenYieldSlice();
                         continue;
@@ -7225,20 +7242,20 @@
                     continue;
                 }
                 if(preset === 'forest') {
-                    if(u < 0.055) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(u < 0.1) wodSetGeneratedTerrainType(h, 'sand');
-                    else if(u < 0.13) wodSetGeneratedTerrainType(h, 'hill');
-                    else if(u < 0.155) wodSetGeneratedTerrainType(h, 'swamp');
+                    if(t < 0.048) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(t < 0.082) wodSetGeneratedTerrainType(h, 'sand');
+                    else if(t < 0.11) wodSetGeneratedTerrainType(h, 'hill');
+                    else if(t < 0.135) wodSetGeneratedTerrainType(h, 'swamp');
                     else wodSetGeneratedTerrainType(h, 'forest');
                 } else if(preset === 'desert') {
-                    if(u < 0.065) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(u < 0.1) wodSetGeneratedTerrainType(h, 'hill');
-                    else if(u < 0.125) wodSetGeneratedTerrainType(h, 'forest');
+                    if(t < 0.055) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(t < 0.09) wodSetGeneratedTerrainType(h, 'hill');
+                    else if(t < 0.118) wodSetGeneratedTerrainType(h, 'forest');
                     else wodSetGeneratedTerrainType(h, 'sand');
                 } else if(preset === 'mountain') {
-                    if(u < 0.2) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(u < 0.33) wodSetGeneratedTerrainType(h, 'forest');
-                    else if(u < 0.52) wodSetGeneratedTerrainType(h, 'hill');
+                    if(t < 0.195) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(t < 0.315) wodSetGeneratedTerrainType(h, 'forest');
+                    else if(t < 0.505) wodSetGeneratedTerrainType(h, 'hill');
                     else wodSetGeneratedTerrainType(h, 'mountain');
                 }
                 if((++hi & 255) === 0) await wodMapGenYieldSlice();
@@ -12850,6 +12867,62 @@
             return unit.uid;
         }
 
+        function wodGetOwnerSpawnAnchorHexes(owner) {
+            let probe = { type: 'light', owner };
+            let fronts = getOwnerFrontlineHexes(owner).filter(h => h.type !== 'mountain' && canUnitEnterHex(probe, h));
+            if(fronts.length > 0) return fronts;
+            if(gameData.mapShape !== 'archipelago') return fronts;
+            let enemy = [];
+            for(let h of gameData.hexList) {
+                if(!h || !h.owner || h.owner === owner) continue;
+                if(!isClaimableLand(h) || isWaterHex(h)) continue;
+                enemy.push(h);
+            }
+            if(!enemy.length) return fronts;
+            let mine = [];
+            for(let h of gameData.hexList) {
+                if(!h || h.owner !== owner) continue;
+                if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
+                if(!canUnitEnterHex(probe, h)) continue;
+                mine.push(h);
+            }
+            if(!mine.length) return fronts;
+            let hr = Math.max(gameData.hexRadius || 10, 8);
+            let band = Math.pow(hr * (14 + Math.min(28, (gameData.mapRadius || 40) * 0.22)), 2);
+            let scored = [];
+            for(let h of mine) {
+                let d = Infinity;
+                for(let e of enemy) {
+                    let dx = h.x - e.x,
+                        dy = h.y - e.y;
+                    d = Math.min(d, dx * dx + dy * dy);
+                }
+                scored.push({ h, d });
+            }
+            scored.sort((a, b) => a.d - b.d);
+            let bestD = scored[0].d;
+            let cap = bestD + band;
+            let out = [];
+            for(let s of scored) {
+                if(s.d <= cap) out.push(s.h);
+            }
+            if(out.length < 8) out = scored.slice(0, Math.min(32, scored.length)).map(s => s.h);
+            return out;
+        }
+
+        function wodMinDistSqToForeignLand(hex, owner) {
+            let best = Infinity;
+            for(let h of gameData.hexList) {
+                if(!h || !h.owner || h.owner === owner) continue;
+                if(!isClaimableLand(h) || isWaterHex(h)) continue;
+                let dx = h.x - hex.x,
+                    dy = h.y - hex.y;
+                let d = dx * dx + dy * dy;
+                if(d < best) best = d;
+            }
+            return best === Infinity ? Math.pow(gameData.hexRadius * 80, 2) : best;
+        }
+
         function getOwnerFrontlineHexes(owner) {
             return gameData.hexList.filter(hex => {
                 if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain') return false;
@@ -12906,8 +12979,23 @@
                 enemyX = nearest.x;
                 enemyY = nearest.y;
             } else {
-                enemyX = 0;
-                enemyY = 0;
+                let ex = 0,
+                    ey = 0,
+                    ne = 0;
+                for(let h of gameData.hexList) {
+                    if(!h || !h.owner || h.owner === owner) continue;
+                    if(!isClaimableLand(h) || isWaterHex(h)) continue;
+                    ex += h.x;
+                    ey += h.y;
+                    ne++;
+                }
+                if(ne > 0) {
+                    enemyX = ex / ne;
+                    enemyY = ey / ne;
+                } else {
+                    enemyX = frontHex.x + Math.max(gameData.hexRadius || 10, 8);
+                    enemyY = frontHex.y;
+                }
             }
 
             let awayX = frontHex.x - enemyX;
@@ -12915,20 +13003,23 @@
             let awayLen = Math.hypot(awayX, awayY) || 1;
             awayX /= awayLen;
             awayY /= awayLen;
-            let desiredX = frontHex.x + awayX * START_SPAWN_BACKSTEP_DISTANCE;
-            let desiredY = frontHex.y + awayY * START_SPAWN_BACKSTEP_DISTANCE;
             let probe = {type: 'light', owner};
+            let archipelagoSpawn = gameData.mapShape === 'archipelago';
+            let backStep = START_SPAWN_BACKSTEP_DISTANCE * (archipelagoSpawn ? 1.12 : 1);
+            let desiredX = frontHex.x + awayX * backStep;
+            let desiredY = frontHex.y + awayY * backStep;
 
             for(let relaxed = 0; relaxed < 2; relaxed++) {
                 let bestHex = null;
                 let bestScore = Infinity;
-                let minEnemy = START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * (relaxed ? 0.72 : 1);
+                let minEnemy =
+                    START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * (archipelagoSpawn ? 0.55 : 1) * (relaxed ? 0.72 : 1);
                 let minEnemySq = minEnemy * minEnemy;
-                let minBand = START_SPAWN_BACKSTEP_DISTANCE * (relaxed ? 0.32 : 0.42);
-                let maxBand = START_SPAWN_BACKSTEP_DISTANCE * (relaxed ? 2.35 : 1.85);
+                let minBand = backStep * (relaxed ? 0.32 : archipelagoSpawn ? 0.2 : 0.42);
+                let maxBand = backStep * (relaxed ? 2.55 : archipelagoSpawn ? 2.25 : 1.85);
                 for(let hex of gameData.hexList) {
                     if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain' || !canUnitEnterHex(probe, hex)) continue;
-                    if(!relaxed && isFrontlineHex(hex, owner)) continue;
+                    if(!relaxed && isFrontlineHex(hex, owner) && !archipelagoSpawn) continue;
                     let blockedByUsed = usedPositions.some(pos => {
                         let dx = pos.x - hex.x;
                         let dy = pos.y - hex.y;
@@ -12945,7 +13036,7 @@
                     if(band < minBand || band > maxBand) continue;
                     let dx = hex.x - desiredX;
                     let dy = hex.y - desiredY;
-                    let tooFarBehind = Math.max(0, band - START_SPAWN_BACKSTEP_DISTANCE * 2.1);
+                    let tooFarBehind = Math.max(0, band - backStep * 2.1);
                     let score = dx * dx + dy * dy + tooFarBehind * tooFarBehind * 3;
                     score += hexMountainProximityScore(hex) * 620;
                     if(relaxed && isFrontlineHex(hex, owner)) score += 90000;
@@ -12999,9 +13090,9 @@
             let safeUnitSepSq = START_SPAWN_MIN_UNIT_DISTANCE * START_SPAWN_MIN_UNIT_DISTANCE;
             let frontHexesByOwner = {};
             for(let owner of ownerIds) {
-                frontHexesByOwner[owner] = getOwnerFrontlineHexes(owner)
-                    .filter(h => h.type !== 'mountain' && canUnitEnterHex({type: 'light', owner}, h))
-                    .sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
+                frontHexesByOwner[owner] = wodGetOwnerSpawnAnchorHexes(owner).sort(
+                    (a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x)
+                );
             }
             function pickFallbackStartingHex(owner, type, usedPositions, enemyFrontHexes) {
                 let probe = { type, owner };
@@ -13021,7 +13112,9 @@
                             return dx * dx + dy * dy < minSepSqFallback * (relaxed ? 0.55 : 1);
                         });
                         if(blockedByUsed) continue;
-                        let enemyDistSq = enemyFrontHexes.length ? nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes) : 0;
+                        let enemyDistSq = enemyFrontHexes.length
+                            ? nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes)
+                            : wodMinDistSqToForeignLand(hex, owner);
                         let score = -Math.min(enemyDistSq, Math.pow(gameData.hexRadius * 24, 2));
                         score += isFrontlineHex(hex, owner) ? 250000 : 0;
                         score += hexMountainProximityScore(hex) * 820;
@@ -15863,12 +15956,18 @@
                         let heightCore = macro * 0.41 + meso * 0.38 + detail * 0.21;
                         let valleySoft = macro * meso + (1 - macro) * 0.06;
                         let heightLand = Math.max(0.02, Math.min(0.93, heightCore - valleySoft * 0.17));
+                        let hiMicro =
+                            (fbm(wx * scale * 5.9 + seedOffset + 7211, wy * scale * 5.9 + seedOffset + 7211, 3) - 0.5) * 0.048;
+                        let hiMeso =
+                            (fbm(wx * scale * 8.4 + seedOffset + 1122, wy * scale * 8.4 + seedOffset + 1122, 2) - 0.5) * 0.032;
+                        heightLand = Math.max(0.02, Math.min(0.93, heightLand + hiMicro + hiMeso));
 
                         let edgePad = Math.max(Math.abs(q) / Math.max(mapR, 1), Math.abs(r) / Math.max(rows, 1));
                         let interior = Math.max(0.08, 1 - edgePad * 0.72);
                         let ridge = fbm(wx * scale * 2.45 + seedOffset + 6500, wy * scale * 2.45 + seedOffset + 6500, 5);
                         let riverCorridor = Math.abs(Math.sin(u * 1.12 + v * 0.88 + seedOffset * 0.019)) * (0.32 + interior * 0.28);
                         ridge = ridge - riverCorridor * 0.24;
+                        ridge += (fbm(wx * scale * 6.15 + seedOffset + 3301, wy * scale * 6.15 + seedOffset + 3301, 3) - 0.5) * 0.038;
 
                         let coastalEdge = edgePad > 0.88;
                         let lakeNoise = fbm(wx * scale * 1.72 + seedOffset + 7010, wy * scale * 1.72 + seedOffset + 7010, 4);
@@ -15895,10 +15994,23 @@
                         } else if (heightLand > 0.49 && ridge > 0.58) type = 'hill';
                         else if (heightLand < 0.34 && ridge < 0.48 && macro < 0.46) type = 'swamp';
                         else {
-                            let bio = moist * 0.72 + (heightLand - 0.38) * 0.35 + (interior - 0.5) * 0.1;
-                            if (bio < 0.28) type = 'sand';
-                            else if (bio < 0.52) type = 'grass';
-                            else if (bio < 0.76) type = 'forest';
+                            let bioJ =
+                                (fbm(wx * scale * 4.35 + seedOffset + 9120, wy * scale * 4.35 + seedOffset + 9120, 4) - 0.5) * 0.095;
+                            let patch = fbm(wx * scale * 2.12 + seedOffset + 8140, wy * scale * 2.12 + seedOffset + 8140, 5);
+                            let bio =
+                                moist * 0.67 +
+                                (heightLand - 0.38) * 0.33 +
+                                (interior - 0.5) * 0.095 +
+                                patch * 0.07 +
+                                bioJ;
+                            let acc = gPrm.biomeAccent;
+                            if(acc === 'marsh') bio += 0.072 + edgePad * 0.038;
+                            else if(acc === 'dry') bio -= 0.078;
+                            else if(acc === 'rugged') bio += (heightLand - 0.43) * 0.065;
+                            else if(acc === 'flat_low_mtns') bio -= 0.035;
+                            if (bio < 0.255) type = 'sand';
+                            else if (bio < 0.495) type = 'grass';
+                            else if (bio < 0.735) type = 'forest';
                             else type = 'swamp';
                         }
                     }
