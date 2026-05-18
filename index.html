@@ -7228,6 +7228,87 @@
                 if((++hi & 255) === 0) await wodMapGenYieldSlice();
             }
         }
+        function wodBuildOceanConnectedWaterKeys(colM, rowM) {
+            let margin = Math.max(1, Math.min(3, Math.floor(Math.min(colM, rowM) / 24)));
+            let ocean = new Set();
+            let q = [];
+            for(let h of gameData.hexList) {
+                if(!h || !isWaterHex(h)) continue;
+                let ed = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
+                if(ed > margin) continue;
+                let k = getHexKey(h);
+                ocean.add(k);
+                q.push(h);
+            }
+            if(q.length === 0) {
+                for(let h of gameData.hexList) {
+                    if(h && isWaterHex(h)) {
+                        ocean.add(getHexKey(h));
+                        q.push(h);
+                        break;
+                    }
+                }
+            }
+            let qi = 0;
+            while(qi < q.length) {
+                let cur = q[qi++];
+                for(let nb of getNeighborHexes(cur)) {
+                    if(!nb || !isWaterHex(nb)) continue;
+                    let nk = getHexKey(nb);
+                    if(ocean.has(nk)) continue;
+                    ocean.add(nk);
+                    q.push(nb);
+                }
+            }
+            return ocean;
+        }
+        /** BFS land distances starting only from ocean (exterior) water — isolates inland lakes on island maps. */
+        function wodLandDistanceToOceanMap(oceanKeys) {
+            let dist = new Map();
+            if(!oceanKeys || oceanKeys.size === 0) return wodLandDistanceToWaterMap();
+            let q = [];
+            for(let h of gameData.hexList) {
+                if(!h || !isWaterHex(h)) continue;
+                if(!oceanKeys.has(getHexKey(h))) continue;
+                let k = getHexKey(h);
+                dist.set(k, 0);
+                q.push(h);
+            }
+            if(q.length === 0) return wodLandDistanceToWaterMap();
+            let qi = 0;
+            while(qi < q.length) {
+                let cur = q[qi++];
+                let d = dist.get(getHexKey(cur)) | 0;
+                for(let nb of getNeighborHexes(cur)) {
+                    if(!nb || isWaterHex(nb)) continue;
+                    let nk = getHexKey(nb);
+                    if(dist.has(nk)) continue;
+                    dist.set(nk, d + 1);
+                    q.push(nb);
+                }
+            }
+            return dist;
+        }
+        /** Higher values make terrain count as farther in political Voronoi — borders hug mountains, shores, rivers. */
+        function wodTerrainPoliticalDistanceWeight(h) {
+            if(!h) return 1;
+            let w = 1;
+            if(isWaterHex(h)) return 1;
+            if(h.type === 'mountain') w *= 1.42;
+            else if(h.type === 'hill') w *= 1.16;
+            if(getNeighborHexes(h).some(nb => nb && isWaterHex(nb))) w *= 1.12;
+            return w;
+        }
+        async function wodPaintCoastalSandAllLand() {
+            let hi = 0;
+            for(let h of gameData.hexList) {
+                if(!h || isWaterHex(h) || h.type === 'urban') continue;
+                if(!getNeighborHexes(h).some(nb => nb && isWaterHex(nb))) continue;
+                if(h.type === 'mountain') wodSetGeneratedTerrainType(h, 'hill');
+                wodSetGeneratedTerrainType(h, 'sand');
+                if((++hi & 255) === 0) await wodMapGenYieldSlice();
+            }
+        }
         /** Multi-source BFS: shortest steps from each land hex to nearest water (8-neighbor grid). */
         function wodLandDistanceToWaterMap() {
             let dist = new Map();
@@ -7289,11 +7370,12 @@
             let minSteps = rivShape ? 5 : 4;
             let maxSteps = rivShape ? 46 : 54;
             let riverTargets = rivShape ? 1 + ((Math.random() > 0.52) ? 1 : 0) : 2 + ((Math.random() > 0.38) ? 1 : 0);
+            let oceanKeys = rivShape ? wodBuildOceanConnectedWaterKeys(colM, rowM) : null;
             let carved = 0;
             let attempt = 0;
             while(carved < riverTargets && attempt < riverTargets + 5) {
                 attempt++;
-                let distMap = wodLandDistanceToWaterMap();
+                let distMap = rivShape ? wodLandDistanceToOceanMap(oceanKeys) : wodLandDistanceToWaterMap();
                 let candidates = [];
                 for(let h of gameData.hexList) {
                     if(!landOk(h)) continue;
@@ -7355,7 +7437,7 @@
                     continue;
                 }
                 let mouth = path[path.length - 1];
-                if(!getNeighborHexes(mouth).some(nb => nb && isWaterHex(nb))) {
+                if(!getNeighborHexes(mouth).some(nb => nb && isWaterHex(nb) && (!rivShape || !oceanKeys || oceanKeys.has(getHexKey(nb))))) {
                     await wodMapGenYieldSlice();
                     continue;
                 }
@@ -7484,7 +7566,8 @@
                     if(!s || !valid.has(o)) continue;
                     let dx = h.x - s.x, dy = h.y - s.y;
                     let d = dx * dx + dy * dy;
-                    let score = d - (bias[o] || 0);
+                    let geo = wodTerrainPoliticalDistanceWeight(h);
+                    let score = d * geo - (bias[o] || 0);
                     if(score < bestScore) {
                         bestScore = score;
                         bestO = o;
@@ -7636,6 +7719,7 @@
                         let donorExcess = (counts[donor] || 0) - target[donor];
                         let shorePenalty = isWaterHex(hex) ? 5 : 0;
                         let score = receiverVotes * 120 + Math.min(receiverNeed, donorExcess) * 22 - donorVotes * 18 - shorePenalty;
+                        if(getNeighborHexes(hex).some(nb => nb && isWaterHex(nb))) score += 26;
                         if(hex.type === 'mountain') score -= 12;
                         if(score > bestScore) {
                             bestScore = score;
@@ -16037,6 +16121,7 @@
             await ensureMountainPasses();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
             await wodCarveProceduralRivers(seedOffset, mapShape, cols, rows);
+            await wodPaintCoastalSandAllLand();
 
             await wodMapGenYieldSlice();
 
