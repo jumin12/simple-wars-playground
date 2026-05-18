@@ -792,12 +792,13 @@
     root.querySelectorAll("[data-gen-tab]").forEach(btn => {
       btn.addEventListener("click", () => setTab(btn.dataset.genTab));
     });
-    root.querySelectorAll("[data-ed-shape]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        state.genShape = btn.dataset.edShape || "island";
-        root.querySelectorAll("[data-ed-shape]").forEach(b => b.classList.toggle("active", b === btn));
+    const shapeSel = root.querySelector("#editorGenMapShape");
+    if(shapeSel) {
+      shapeSel.value = state.genShape || "island";
+      shapeSel.addEventListener("change", () => {
+        state.genShape = shapeSel.value || "island";
       });
-    });
+    }
     const cC = root.querySelector("#editorGenCities");
     const cT = root.querySelector("#editorGenTerritory");
     const cU = root.querySelector("#editorGenUnits");
@@ -1292,9 +1293,16 @@
         </div>
         <div id="editorGenPanelGenerate" class="editor-gen-panel" data-gen-panel="generate">
           <div class="editor-gen-shape">
-            <span>Shape</span>
-            <button type="button" class="editor-seg-btn active" data-ed-shape="island">Island</button>
-            <button type="button" class="editor-seg-btn" data-ed-shape="rectangle">Rectangle</button>
+            <label class="editor-gen-shape-label" for="editorGenMapShape">Shape</label>
+            <select id="editorGenMapShape" class="editor-gen-shape-select">
+              <option value="island" selected>Island</option>
+              <option value="rectangle">Rectangle</option>
+              <option value="ring">Ring island</option>
+              <option value="archipelago">Archipelago</option>
+              <option value="forest">Forest</option>
+              <option value="mountain">Mountain</option>
+              <option value="desert">Desert</option>
+            </select>
           </div>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenCities" checked /> Cities during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenTerritory" checked /> Territory during gen</label>
@@ -1636,7 +1644,8 @@
     syncTerritoryOwnerUi();
     const genApp = document.getElementById("mapEditorApp");
     if (genApp) {
-      genApp.querySelectorAll("[data-ed-shape]").forEach(b => b.classList.toggle("active", b.dataset.edShape === "island"));
+      const gShape = genApp.querySelector("#editorGenMapShape");
+      if (gShape) gShape.value = "island";
       const gC = genApp.querySelector("#editorGenCities");
       const gT = genApp.querySelector("#editorGenTerritory");
       const gU = genApp.querySelector("#editorGenUnits");

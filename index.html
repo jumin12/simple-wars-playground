@@ -5006,6 +5006,11 @@
                     <select id="setupMapShape">
                         <option value="island" selected>Island</option>
                         <option value="rectangle">Rectangle</option>
+                        <option value="ring">Ring island</option>
+                        <option value="archipelago">Archipelago</option>
+                        <option value="forest">Forest</option>
+                        <option value="mountain">Mountain</option>
+                        <option value="desert">Desert</option>
                     </select>
                 </div>
                 <div class="setup-row">
@@ -5150,6 +5155,11 @@
                     <select id="mpCfgMapShape" style="flex:1">
                         <option value="island" selected>Island</option>
                         <option value="rectangle">Rectangle</option>
+                        <option value="ring">Ring island</option>
+                        <option value="archipelago">Archipelago</option>
+                        <option value="forest">Forest</option>
+                        <option value="mountain">Mountain</option>
+                        <option value="desert">Desert</option>
                     </select>
                 </div>
                 <div class="mp-host-dlg-actions">
@@ -6728,26 +6738,77 @@
                 ai: aiCount != null ? aiCount : gameData.aiCount
             });
         }
+
+        const WOD_PROC_MAP_SHAPES = new Set(['island', 'rectangle', 'ring', 'archipelago', 'forest', 'mountain', 'desert']);
+        const WOD_MAP_SHAPE_LABELS = {
+            island: 'Island',
+            rectangle: 'Rectangle',
+            ring: 'Ring island',
+            archipelago: 'Archipelago',
+            forest: 'Forest',
+            mountain: 'Mountain',
+            desert: 'Desert'
+        };
+        function wodIsKnownProcMapShape(s) {
+            return typeof s === 'string' && WOD_PROC_MAP_SHAPES.has(s);
+        }
+        function wodResolveProceduralMapShapeFromUi(mog, shapeInputEl, fallback) {
+            if(mog && wodIsKnownProcMapShape(mog.mapShape)) return mog.mapShape;
+            let v = shapeInputEl && shapeInputEl.value;
+            if(wodIsKnownProcMapShape(v)) return v;
+            return fallback || 'island';
+        }
+        function wodIsContinentalMapShape(shape) {
+            return shape === 'rectangle' || shape === 'forest' || shape === 'mountain' || shape === 'desert';
+        }
+        function wodUsesIslandTerrainMask(shape) {
+            return shape === 'island' || shape === 'ring' || shape === 'archipelago';
+        }
+
         function wodSampleMapGenProfile(mapShape) {
-            if(mapShape !== 'island') {
+            if(wodIsContinentalMapShape(mapShape)) {
                 let mz = (Math.random() - 0.5) * 0.14;
+                let continentalBiome = 'balanced';
+                if(mapShape === 'forest') continentalBiome = 'forest';
+                else if(mapShape === 'desert') continentalBiome = 'desert';
+                else if(mapShape === 'mountain') continentalBiome = 'mountain';
+                let moistShift = (Math.random() - 0.5) * 0.14 + mz;
+                let sandThresh = 0.32 + Math.random() * 0.06;
+                let grassThresh = 0.54 + Math.random() * 0.1;
+                let forestThresh = 0.76 + Math.random() * 0.1;
+                let mountElevThresh = 0.84 + Math.random() * 0.06;
+                let maxMountainLandFrac = 0.1 + Math.random() * 0.1;
+                if(continentalBiome === 'forest') {
+                    moistShift += 0.1;
+                    grassThresh -= 0.05;
+                    forestThresh -= 0.14;
+                } else if(continentalBiome === 'desert') {
+                    moistShift -= 0.14;
+                    sandThresh += 0.1;
+                } else if(continentalBiome === 'mountain') {
+                    mountElevThresh -= 0.08;
+                    maxMountainLandFrac = 0.22 + Math.random() * 0.14;
+                }
                 return {
                     islandMode: 'none',
+                    continentalBiome,
                     waterElevThresh: 0.42 + Math.random() * 0.04,
-                    sandThresh: 0.32 + Math.random() * 0.06,
-                    grassThresh: 0.54 + Math.random() * 0.1,
-                    forestThresh: 0.76 + Math.random() * 0.1,
-                    mountElevThresh: 0.84 + Math.random() * 0.06,
-                    moistShift: (Math.random() - 0.5) * 0.14 + mz,
+                    sandThresh,
+                    grassThresh,
+                    forestThresh,
+                    mountElevThresh,
+                    moistShift,
                     forestMoistBoost: (Math.random() - 0.5) * 0.09,
                     mountainThin: Math.random() < 0.7 ? (0.12 + Math.random() * 0.22) : 0,
-                    maxMountainLandFrac: 0.1 + Math.random() * 0.1,
+                    maxMountainLandFrac,
                     biomeAccent: Math.random() < 0.32 ? 'marsh' : 'balanced'
                 };
             }
             /** Equal-ish pick — include split/broken silhouettes so islands do not all read as the same blob. */
             let modePool = ['blob', 'elongated', 'wide', 'archipelago', 'crescent', 'chain', 'atoll', 'double', 'hook', 'broken'];
             let islandMode = modePool[(Math.floor(Math.random() * modePool.length)) | 0];
+            if(mapShape === 'archipelago') islandMode = Math.random() < 0.55 ? 'archipelago' : 'chain';
+            else if(mapShape === 'ring') islandMode = 'ring';
             let stretchX = 1,
                 stretchY = 1;
             let coastNoiseAmp = 0.38 + Math.random() * 0.22;
@@ -6879,6 +6940,8 @@
 
             let mountainPeakJitter = 0.05 + Math.random() * 0.14;
             let mountainRingR = 0.34 + Math.random() * 0.24;
+            let ringLagoonR = islandMode === 'ring' ? 0.26 + Math.random() * 0.09 : undefined;
+            let ringLagoonFeather = islandMode === 'ring' ? 0.095 + Math.random() * 0.055 : undefined;
 
             return {
                 islandMode,
@@ -6890,6 +6953,8 @@
                 chainBX,
                 chainBY,
                 atollRing,
+                ringLagoonR,
+                ringLagoonFeather,
                 waterElevThresh,
                 sandThresh,
                 grassThresh,
@@ -6908,7 +6973,7 @@
         }
         /** Post-gen cap: peels weaker peaks first so swamp / hill coast variety stays readable */
         function wodClampIslandMountainLandFraction(gp, seedOffset) {
-            if(gameData.mapShape !== 'island' || !gp || gp.maxMountainLandFrac == null || !(gp.maxMountainLandFrac > 0)) return;
+            if(!wodUsesIslandTerrainMask(gameData.mapShape) || !gp || gp.maxMountainLandFrac == null || !(gp.maxMountainLandFrac > 0)) return;
             let land = [];
             for(let h of gameData.hexList) {
                 if(h && !isWaterHex(h)) land.push(h);
@@ -6938,7 +7003,7 @@
             }
         }
         function wodThinMountainsForProfile(gp, seedOffset) {
-            if(!gp || !gp.mountainThin || gameData.mapShape !== 'island') return;
+            if(!gp || !gp.mountainThin || !wodUsesIslandTerrainMask(gameData.mapShape)) return;
             let landM = gameData.hexList.filter(h => !isWaterHex(h) && h.type === 'mountain');
             if(!landM.length) return;
             let take = Math.floor(landM.length * gp.mountainThin);
@@ -6972,7 +7037,7 @@
             hex.renderColor = hex.baseColor;
         }
         async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
-            if(gameData.mapShape !== 'island') return;
+            if(!wodUsesIslandTerrainMask(gameData.mapShape)) return;
             let pad = Math.max(1, bufferTiles || 5);
             let feather = pad + 9;
             let hi = 0;
@@ -6990,8 +7055,27 @@
                 if((++hi & 255) === 0) await wodMapGenYieldSlice();
             }
         }
+        /** Ocean margin on full-grid maps so rivers can reach water (rectangle / biome continents). */
+        async function wodForceContinentalEdgeWater(cols, rows, seedOffset) {
+            if(!wodIsContinentalMapShape(gameData.mapShape)) return;
+            let colM = Math.max(1, cols | 0);
+            let pad = 0.062;
+            let feather = pad + 0.07;
+            let hi = 0;
+            for(let h of gameData.hexList) {
+                let edgeFrac = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
+                if(edgeFrac >= 1 - pad * 0.45) {
+                    wodSetGeneratedTerrainType(h, 'water');
+                } else if(edgeFrac >= 1 - feather) {
+                    let t = (edgeFrac - (1 - feather)) / Math.max(1e-6, feather - pad * 0.45);
+                    let n = fbm(h.x * 0.016 + seedOffset + 9220, h.y * 0.016 + seedOffset + 9220, 4);
+                    if(n < 0.4 + t * 0.48) wodSetGeneratedTerrainType(h, 'water');
+                }
+                if((++hi & 255) === 0) await wodMapGenYieldSlice();
+            }
+        }
         async function wodNormalizeRectangleWaterFeatures(seedOffset) {
-            if(gameData.mapShape !== 'rectangle') return;
+            if(!wodIsContinentalMapShape(gameData.mapShape)) return;
             let water = gameData.hexList.filter(h => isWaterHex(h));
             if(!water.length) return;
             let seen = new Set();
@@ -7107,9 +7191,9 @@
             let rowM = Math.max(1, rowCount);
             let landOk = (h) => h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban';
             let edgeDistH = (h) => Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
-            let minSteps = mapShape === 'island' ? 5 : 4;
-            let maxSteps = mapShape === 'island' ? 46 : 54;
-            let riverTargets = mapShape === 'island' ? 1 + ((Math.random() > 0.52) ? 1 : 0) : 2 + ((Math.random() > 0.38) ? 1 : 0);
+            let minSteps = wodUsesIslandTerrainMask(mapShape) ? 5 : 4;
+            let maxSteps = wodUsesIslandTerrainMask(mapShape) ? 46 : 54;
+            let riverTargets = wodUsesIslandTerrainMask(mapShape) ? 1 + ((Math.random() > 0.52) ? 1 : 0) : 2 + ((Math.random() > 0.38) ? 1 : 0);
             let carved = 0;
             let attempt = 0;
             while(carved < riverTargets && attempt < riverTargets + 5) {
@@ -7120,8 +7204,8 @@
                     if(!landOk(h)) continue;
                     let d0 = distMap.get(getHexKey(h));
                     if(d0 == null || d0 < minSteps || d0 > maxSteps) continue;
-                    if(mapShape === 'island' && edgeDistH(h) < 8) continue;
-                    if(mapShape === 'rectangle') {
+                    if(wodUsesIslandTerrainMask(mapShape) && edgeDistH(h) < 8) continue;
+                    if(wodIsContinentalMapShape(mapShape)) {
                         let bf = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
                         if(bf > 0.93) continue;
                     }
@@ -7255,7 +7339,7 @@
                 if(wet > 0.78 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'forest');
                 else if(wet > 0.68 && heat < 0.42 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'swamp');
                 else if(wet < 0.22 && (h.type === 'grass' || h.type === 'hill')) wodSetGeneratedTerrainType(h, 'sand');
-                else if(wet > 0.36 && wet < 0.62 && h.type === 'sand' && mapShape !== 'island') wodSetGeneratedTerrainType(h, 'grass');
+                else if(wet > 0.36 && wet < 0.62 && h.type === 'sand' && wodIsContinentalMapShape(mapShape)) wodSetGeneratedTerrainType(h, 'grass');
                 if((++hi2 & 255) === 0) await wodMapGenYieldSlice();
             }
         }
@@ -8549,7 +8633,7 @@
                 let msL = meta.mapSizeLabel;
                 if(!msL && meta.mapSize) msL = meta.mapSize === 40 ? 'Small' : (meta.mapSize === 80 ? 'Large' : 'Medium');
                 let shL = meta.mapShapeLabel;
-                if(!shL && meta.mapShape) shL = meta.mapShape === 'rectangle' ? 'Rectangle' : 'Island';
+                if(!shL && meta.mapShape) shL = WOD_MAP_SHAPE_LABELS[meta.mapShape] || meta.mapShape;
                 let botN = 0;
                 for(let i = 0; i < maxH; i++) {
                     if(st[i] === 'bot') botN++;
@@ -13701,7 +13785,7 @@
          * Rectangle neutral fallback: 2D stratified shuffle so towns sample the map instead of wedge round-robin chains. */
         function wodWedgeFocusedCityCandidateOrder(landHexes, wedgeCount, lcm, anglePhase, mapShape) {
             if(!landHexes || landHexes.length === 0) return [];
-            if(mapShape === 'rectangle') {
+            if(wodIsContinentalMapShape(mapShape)) {
                 let hxs = landHexes;
                 let minX = Infinity,
                     maxX = -Infinity,
@@ -14674,7 +14758,7 @@
             let seeds = {};
             let taken = new Set();
             let f = sorted.length;
-            let frac = lcm.maxR * (mapShape === 'island' ? 0.38 : 0.42);
+            let frac = lcm.maxR * (wodUsesIslandTerrainMask(mapShape) ? 0.38 : 0.42);
             let twoPi = Math.PI * 2;
             for(let i = 0; i < f; i++) {
                 let ow = sorted[i];
@@ -14761,11 +14845,11 @@
         }
         function wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionGeom) {
             let innerRSq = Infinity;
-            if(mapShape === 'island') {
+            if(wodUsesIslandTerrainMask(mapShape)) {
                 let innerRad = Math.max(lcm.maxR * 0.78, (gameData.hexRadius || 10) * Math.max(gameData.mapRadius || 40, 8) * 0.14);
                 innerRSq = innerRad * innerRad;
             }
-            let facRect = mapShape === 'rectangle' && factionGeom && factionGeom[owner],
+            let facRect = wodIsContinentalMapShape(mapShape) && factionGeom && factionGeom[owner],
                 rectInnerFrac = 0.86,
                 rectInnerSq = Infinity;
             if(facRect && facRect.maxSq > 0 && facRect.n >= 10)
@@ -14774,12 +14858,12 @@
             for(let h of gameData.hexList) {
                 if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
                 if(h.owner !== owner) continue;
-                if(mapShape === 'island') {
+                if(wodUsesIslandTerrainMask(mapShape)) {
                     let dxC = h.x - lcm.cx,
                         dyC = h.y - lcm.cy;
                     if(dxC * dxC + dyC * dyC > innerRSq) continue;
                 }
-                if(mapShape === 'rectangle') {
+                if(wodIsContinentalMapShape(mapShape)) {
                     let rowCount = Math.floor(rows) || 1;
                     let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rowCount, 1));
                     if(bf > 0.90) continue;
@@ -14789,10 +14873,10 @@
                         if(dxF * dxF + dyF * dyF > rectInnerSq) continue;
                     }
                 }
-                if(wodBfsStepsToWater(h, 14) < (mapShape === 'island' ? 4 : 3)) continue;
+                if(wodBfsStepsToWater(h, 14) < (wodUsesIslandTerrainMask(mapShape) ? 4 : 3)) continue;
                 out.push(h);
             }
-            if(mapShape === 'rectangle' && out.length === 0 && rectInnerSq < Infinity) {
+            if(wodIsContinentalMapShape(mapShape) && out.length === 0 && rectInnerSq < Infinity) {
                 for(let h of gameData.hexList) {
                     if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
                     if(h.owner !== owner) continue;
@@ -14916,8 +15000,7 @@
                 }
                 let ax = cent ? cent.x : lcm.cx,
                     ay = cent ? cent.y : lcm.cy;
-                if(mapShape === 'rectangle') {
-                    let sectors = 10;
+                if(wodIsContinentalMapShape(mapShape)) {
                     let lvAlt = level & 1;
                     pool.sort((a, b) => {
                         let da = interiorDepthMap.get(getHexKey(a)) ?? 0;
@@ -14951,7 +15034,7 @@
                 }
                 let list = [];
                 let seen = new Set();
-                if(mapShape === 'island' && level === 0 && cent) {
+                if(wodUsesIslandTerrainMask(mapShape) && level === 0 && cent) {
                     let pch = wodBestCoastalTerrainHexAmongOwned(owner, cent);
                     if(pch && (interiorDepthMap.get(getHexKey(pch)) ?? 0) >= 2) {
                         seen.add(`${pch.q},${pch.r}`);
@@ -15250,7 +15333,7 @@
                 let center = ownerCenters[owner] || { x: cx, y: cy };
                 let candidates = gameData.cities.filter(c => c.owner === owner);
                 let harborEligible = candidates.filter(c => cityUrbanClusterEligibleForHarbor(c));
-                let preferCoastalIsland = gameData.mapShape === 'island';
+                let preferCoastalIsland = wodUsesIslandTerrainMask(gameData.mapShape);
                 let startCity = null;
                 let bestDist = Infinity;
 
@@ -15398,7 +15481,7 @@
         }
 
         function limitRectangleMountainDensity(mapShape, seedOffset) {
-            if(mapShape !== 'rectangle') return;
+            if(mapShape === 'mountain' || !wodIsContinentalMapShape(mapShape)) return;
             let land = gameData.hexList.filter(h => !isWaterHex(h));
             if(land.length === 0) return;
             let mountains = land.filter(h => h.type === 'mountain');
@@ -15483,9 +15566,9 @@
             let wantUnits = !mog || mog.units !== false;
 
             let shapePre = document.getElementById('setupMapShape');
-            let mapShapePre = (mog && (mog.mapShape === 'island' || mog.mapShape === 'rectangle')) ? mog.mapShape : (shapePre ? shapePre.value : 'island');
+            let mapShapePre = wodResolveProceduralMapShapeFromUi(mog, shapePre, 'island');
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
-            if(mapShapePre === 'rectangle') procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 16);
+            if(wodIsContinentalMapShape(mapShapePre)) procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 16);
             if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
@@ -15515,7 +15598,7 @@
             let seedOffset = Math.random() * 10000;
             
             let shapeInput = document.getElementById('setupMapShape');
-            let mapShape = (mog && (mog.mapShape === 'island' || mog.mapShape === 'rectangle')) ? mog.mapShape : (shapeInput ? shapeInput.value : 'island');
+            let mapShape = wodResolveProceduralMapShapeFromUi(mog, shapeInput, 'island');
             gameData.mapShape = mapShape;
             gameData.loadedCustomMap = false;
             gameData._genProfile = wodSampleMapGenProfile(mapShape);
@@ -15539,7 +15622,7 @@
                     
                     let mask = 1.0;
                     let gp = gameData._genProfile || {};
-                    if (mapShape === 'island') {
+                    if (wodUsesIslandTerrainMask(mapShape)) {
                         let normX = x / (mapR * spacing * 0.95);
                         let normY = y / (rows * spacing * 0.95);
                         let sx = normX * (gp.stretchX != null ? gp.stretchX : 1);
@@ -15599,6 +15682,12 @@
                         if(gp.islandMode === 'wide') {
                             mask += 0.055 - Math.abs(sy) * 0.11;
                         }
+                        if(gp.islandMode === 'ring') {
+                            let lagoonR = gp.ringLagoonR != null ? gp.ringLagoonR : 0.32;
+                            let lf = gp.ringLagoonFeather != null ? gp.ringLagoonFeather : 0.1;
+                            let punch = Math.max(0, lagoonR + lf * 0.4 - dist);
+                            mask -= punch * (1.58 + (1 - Math.min(dist / Math.max(lagoonR, 0.12), 1.35)) * 0.22);
+                        }
                         let boxFrac = Math.max(Math.abs(q) / Math.max(cols, 1), Math.abs(r) / Math.max(rows, 1));
                         mask -= Math.pow(Math.max(0, boxFrac - 0.74), 1.45) * 0.92;
                     } else {
@@ -15614,7 +15703,7 @@
                     let fb = gp2.forestMoistBoost != null ? gp2.forestMoistBoost : 0;
                     
                     let type = 'water';
-                    if (mapShape === 'rectangle') {
+                    if (wodIsContinentalMapShape(mapShape)) {
                         let wx = x + warpX;
                         let wy = y + warpY;
                         let u = wx * scale;
@@ -15637,6 +15726,12 @@
 
                         let ridgeNeed = 0.50 + (1 - interior) * 0.07;
                         let landNeed = 0.51 + (1 - interior) * 0.05;
+                        let contBio = gp2.continentalBiome || 'balanced';
+                        let bioShift = contBio === 'forest' ? 0.17 : contBio === 'desert' ? -0.26 : 0;
+                        if(contBio === 'mountain') {
+                            ridgeNeed -= 0.058;
+                            landNeed -= 0.042;
+                        }
                         let isMountain = ridge > ridgeNeed && heightLand > landNeed && !lakeBlob;
 
                         if (lakeBlob) {
@@ -15651,18 +15746,31 @@
                         } else if (heightLand > 0.49 && ridge > 0.58) type = 'hill';
                         else if (heightLand < 0.34 && ridge < 0.48 && macro < 0.46) type = 'swamp';
                         else {
-                            let bio = moist * 0.72 + (heightLand - 0.38) * 0.35 + (interior - 0.5) * 0.1;
+                            let bio = moist * 0.72 + (heightLand - 0.38) * 0.35 + (interior - 0.5) * 0.1 + bioShift;
                             if (bio < 0.28) type = 'sand';
                             else if (bio < 0.52) type = 'grass';
                             else if (bio < 0.76) type = 'forest';
                             else type = 'swamp';
+                        }
+                        if(contBio === 'forest' && type !== 'water' && type !== 'mountain' && type !== 'urban') {
+                            let rj = fbm(wx * 0.0049 + seedOffset + 7401, wy * 0.0049 + seedOffset + 7401, 3);
+                            if(rj < 0.62 && (type === 'grass' || type === 'sand')) type = rj < 0.35 ? 'forest' : 'grass';
+                            else if(type === 'sand' && rj < 0.22) type = 'grass';
+                        } else if(contBio === 'desert' && type !== 'water' && type !== 'mountain' && type !== 'urban') {
+                            let rj = fbm(wx * 0.0052 + seedOffset + 7501, wy * 0.0052 + seedOffset + 7501, 3);
+                            if(type !== 'sand' && rj < 0.68) type = rj < 0.38 ? 'sand' : 'hill';
+                            else if(type === 'forest' && rj < 0.55) type = 'grass';
+                        } else if(contBio === 'mountain' && type !== 'water' && type !== 'urban') {
+                            let rj = fbm(wx * 0.0046 + seedOffset + 7601, wy * 0.0046 + seedOffset + 7601, 3);
+                            if((type === 'grass' || type === 'forest' || type === 'sand') && rj < 0.48) type = rj < 0.2 ? 'mountain' : 'hill';
+                            else if(type === 'hill' && rj < 0.28) type = 'mountain';
                         }
                     }
                     else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43)) type = 'water';
                     else if (elev < (gp2.waterElevThresh != null ? gp2.waterElevThresh : 0.43) + 0.05) type = 'sand';
                     else {
                         let mTh0 = gp2.mountElevThresh != null ? gp2.mountElevThresh : 0.86;
-                        if(mapShape === 'island') {
+                        if(wodUsesIslandTerrainMask(mapShape)) {
                             let pk = fbm(x * scale * 2.55 + seedOffset + 7711, y * scale * 2.55 + seedOffset + 7711, 5);
                             let pk2 = fbm(x * scale * 5.1 + seedOffset + 3322, y * scale * 5.1 + seedOffset + 3322, 4);
                             let j = (gp2.mountainPeakJitter != null ? gp2.mountainPeakJitter : 0.09) * (pk - 0.5) * 2.2;
@@ -15702,6 +15810,7 @@
             }
 
             await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
+            await wodForceContinentalEdgeWater(cols, rows, seedOffset);
             await wodNaturalizeBiomeBlends(seedOffset, mapShape);
             await wodNormalizeRectangleWaterFeatures(seedOffset);
             limitRectangleMountainDensity(mapShape, seedOffset);
@@ -15754,9 +15863,9 @@
                 let lcm = wodLandCentroidMaxRadius(landForCities);
                 let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase, mapShape);
                 let cityPickCursor = 0;
-                let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.78 : 0.84), hr * Math.max(mapR, 8) * 0.14);
+                let innerRad = Math.max(lcm.maxR * (wodUsesIslandTerrainMask(mapShape) ? 0.78 : 0.84), hr * Math.max(mapR, 8) * 0.14);
                 let innerRSq = innerRad * innerRad;
-                let minWaterSteps = mapShape === 'island' ? 4 : 3;
+                let minWaterSteps = wodUsesIslandTerrainMask(mapShape) ? 4 : 3;
                 let maxAttemptsPerCity = Math.min(980, Math.max(160, (cityPickOrder.length || mapR * mapR) * 4));
                 for(let i=0; i<numCities; i++) {
                     let valid = false; let attempts = 0;
@@ -15772,7 +15881,7 @@
                         if(!h || isWaterHex(h) || h.type === 'mountain') continue;
                         let dxC = h.x - lcm.cx, dyC = h.y - lcm.cy;
                         if(dxC * dxC + dyC * dyC > innerRSq && attempts < 480) continue;
-                        if(mapShape === 'rectangle') {
+                        if(wodIsContinentalMapShape(mapShape)) {
                             let bf = Math.max(Math.abs(h.q) / Math.max(cols, 1), Math.abs(h.r) / Math.max(rows, 1));
                             if(bf > 0.90 && attempts < 480) continue;
                         }
