@@ -7050,6 +7050,157 @@
                 totalWater -= c.size;
             }
         }
+        /** Multi-source BFS: shortest steps from each land hex to nearest water (8-neighbor grid). */
+        function wodLandDistanceToWaterMap() {
+            let dist = new Map();
+            let q = [];
+            for(let h of gameData.hexList) {
+                if(!h || !isWaterHex(h)) continue;
+                let k = getHexKey(h);
+                if(dist.has(k)) continue;
+                dist.set(k, 0);
+                q.push(h);
+            }
+            let qi = 0;
+            while(qi < q.length) {
+                let cur = q[qi++];
+                let d = dist.get(getHexKey(cur)) | 0;
+                for(let nb of getNeighborHexes(cur)) {
+                    if(!nb || isWaterHex(nb)) continue;
+                    let nk = getHexKey(nb);
+                    if(dist.has(nk)) continue;
+                    dist.set(nk, d + 1);
+                    q.push(nb);
+                }
+            }
+            return dist;
+        }
+        function wodCountPassableLandComponents() {
+            let landKey = (h) => `${h.q},${h.r}`;
+            let isPassable = (h) => h && !isWaterHex(h) && h.type !== 'mountain';
+            let visited = new Set();
+            let comps = 0;
+            for(let hex of gameData.hexList) {
+                if(!isPassable(hex) || visited.has(landKey(hex))) continue;
+                comps++;
+                let queue = [hex];
+                let qj = 0;
+                visited.add(landKey(hex));
+                while(qj < queue.length) {
+                    let cur = queue[qj++];
+                    for(let dir of hexDirections) {
+                        let nKey = `${cur.q + dir.q},${cur.r + dir.r}`;
+                        let nHex = gameData.hexes[nKey];
+                        if(!isPassable(nHex) || visited.has(nKey)) continue;
+                        visited.add(nKey);
+                        queue.push(nHex);
+                    }
+                }
+            }
+            return comps;
+        }
+        /** Meandering rivers — walk down a distance field toward water; skip paths that split passable land. */
+        async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
+            if(!gameData.hexList || gameData.hexList.length === 0) return;
+            let rowCount = Math.floor(rows) | 0;
+            let colM = Math.max(1, cols | 0);
+            let rowM = Math.max(1, rowCount);
+            let landOk = (h) => h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban';
+            let edgeDistH = (h) => Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
+            let minSteps = mapShape === 'island' ? 5 : 4;
+            let maxSteps = mapShape === 'island' ? 46 : 54;
+            let riverTargets = mapShape === 'island' ? 1 + ((Math.random() > 0.52) ? 1 : 0) : 2 + ((Math.random() > 0.38) ? 1 : 0);
+            let carved = 0;
+            let attempt = 0;
+            while(carved < riverTargets && attempt < riverTargets + 5) {
+                attempt++;
+                let distMap = wodLandDistanceToWaterMap();
+                let candidates = [];
+                for(let h of gameData.hexList) {
+                    if(!landOk(h)) continue;
+                    let d0 = distMap.get(getHexKey(h));
+                    if(d0 == null || d0 < minSteps || d0 > maxSteps) continue;
+                    if(mapShape === 'island' && edgeDistH(h) < 8) continue;
+                    if(mapShape === 'rectangle') {
+                        let bf = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
+                        if(bf > 0.93) continue;
+                    }
+                    let jitter = fbm(h.x * 0.0027 + seedOffset + 3103, h.y * 0.0027 + seedOffset + 3103, 3);
+                    candidates.push({ h, d0, jitter });
+                }
+                candidates.sort((a, b) => b.d0 - a.d0 || a.jitter - b.jitter);
+                let start = null;
+                if(candidates.length) {
+                    let off = (attempt - 1) % candidates.length;
+                    for(let ri = 0; ri < candidates.length; ri++) {
+                        let c = candidates[(off + ri) % candidates.length];
+                        if(landOk(c.h)) {
+                            start = c.h;
+                            break;
+                        }
+                    }
+                }
+                if(!start) break;
+                let path = [];
+                let cur = start;
+                let seenLocal = new Set();
+                let guard = 0;
+                while(guard++ < 520 && landOk(cur)) {
+                    let ck = getHexKey(cur);
+                    if(seenLocal.has(ck)) break;
+                    seenLocal.add(ck);
+                    path.push(cur);
+                    if(getNeighborHexes(cur).some(nb => nb && isWaterHex(nb))) break;
+                    let curD = distMap.get(ck);
+                    if(curD == null || curD <= 1) break;
+                    let landNbs = getNeighborHexes(cur).filter(nb => landOk(nb));
+                    if(!landNbs.length) break;
+                    let scored = landNbs.map(nb => {
+                        let nd = distMap.get(getHexKey(nb));
+                        return { nb, nd: nd == null ? 999999 : nd };
+                    });
+                    scored.sort((a, b) => a.nd - b.nd);
+                    let pickPool = scored.filter(s => s.nd < curD);
+                    if(!pickPool.length) {
+                        let bestNd = scored[0].nd;
+                        pickPool = scored.filter(s => s.nd === bestNd);
+                    }
+                    if(Math.random() < 0.2 && scored.length > pickPool.length) {
+                        let alt = scored.filter(s => s.nd <= curD && s.nd <= scored[0].nd + 1);
+                        if(alt.length) pickPool = alt;
+                    }
+                    cur = pickPool[Math.floor(Math.random() * pickPool.length)].nb;
+                }
+                if(path.length < 7 || path.length > 220) {
+                    await wodMapGenYieldSlice();
+                    continue;
+                }
+                let mouth = path[path.length - 1];
+                if(!getNeighborHexes(mouth).some(nb => nb && isWaterHex(nb))) {
+                    await wodMapGenYieldSlice();
+                    continue;
+                }
+                let before = wodCountPassableLandComponents();
+                let backup = [];
+                for(let pi = 1; pi < path.length; pi++) {
+                    let hx = path[pi];
+                    if(!hx || isWaterHex(hx)) continue;
+                    backup.push({ hex: hx, type: hx.type, baseColor: hx.baseColor, renderColor: hx.renderColor });
+                    wodSetGeneratedTerrainType(hx, 'water');
+                }
+                let after = wodCountPassableLandComponents();
+                if(after > before) {
+                    for(let bk of backup) {
+                        bk.hex.type = bk.type;
+                        bk.hex.baseColor = bk.baseColor;
+                        bk.hex.renderColor = bk.renderColor;
+                    }
+                } else {
+                    carved++;
+                }
+                await wodMapGenYieldSlice();
+            }
+        }
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
             for(let pass = 0; pass < 2; pass++) {
                 let changes = [];
@@ -14558,14 +14709,54 @@
             }
             return keys;
         }
+        /** Steps from each faction’s political frontline inward ( deeper = safer core for towns ). */
+        function wodBuildInteriorDepthFromFrontlineMap(ownersSorted) {
+            let depth = new Map();
+            if(!ownersSorted || ownersSorted.length === 0) return depth;
+            for(let ow of ownersSorted) {
+                let q = [];
+                let seen = new Set();
+                for(let h of gameData.hexList) {
+                    if(!h || h.owner !== ow || !isClaimableLand(h) || isWaterHex(h)) continue;
+                    if(!isFrontlineHex(h, ow)) continue;
+                    let k = getHexKey(h);
+                    if(seen.has(k)) continue;
+                    seen.add(k);
+                    depth.set(k, 0);
+                    q.push(h);
+                }
+                if(q.length === 0) {
+                    for(let h of gameData.hexList) {
+                        if(!h || h.owner !== ow || !isClaimableLand(h) || isWaterHex(h)) continue;
+                        let k = getHexKey(h);
+                        if(!depth.has(k)) depth.set(k, 96);
+                    }
+                    continue;
+                }
+                let qi = 0;
+                while(qi < q.length) {
+                    let cur = q[qi++];
+                    let d = depth.get(getHexKey(cur)) | 0;
+                    for(let nb of getNeighborHexes(cur)) {
+                        if(!nb || nb.owner !== ow || !isClaimableLand(nb) || isWaterHex(nb)) continue;
+                        let nk = getHexKey(nb);
+                        if(seen.has(nk)) continue;
+                        seen.add(nk);
+                        depth.set(nk, d + 1);
+                        q.push(nb);
+                    }
+                }
+            }
+            return depth;
+        }
         function wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionGeom) {
             let innerRSq = Infinity;
             if(mapShape === 'island') {
-                let innerRad = Math.max(lcm.maxR * 0.8, (gameData.hexRadius || 10) * Math.max(gameData.mapRadius || 40, 8) * 0.12);
+                let innerRad = Math.max(lcm.maxR * 0.78, (gameData.hexRadius || 10) * Math.max(gameData.mapRadius || 40, 8) * 0.14);
                 innerRSq = innerRad * innerRad;
             }
             let facRect = mapShape === 'rectangle' && factionGeom && factionGeom[owner],
-                rectInnerFrac = 0.91,
+                rectInnerFrac = 0.86,
                 rectInnerSq = Infinity;
             if(facRect && facRect.maxSq > 0 && facRect.n >= 10)
                 rectInnerSq = facRect.maxSq * rectInnerFrac * rectInnerFrac;
@@ -14588,7 +14779,7 @@
                         if(dxF * dxF + dyF * dyF > rectInnerSq) continue;
                     }
                 }
-                if(wodBfsStepsToWater(h, 14) < (mapShape === 'island' ? 3 : 2)) continue;
+                if(wodBfsStepsToWater(h, 14) < (mapShape === 'island' ? 4 : 3)) continue;
                 out.push(h);
             }
             if(mapShape === 'rectangle' && out.length === 0 && rectInnerSq < Infinity) {
@@ -14700,16 +14891,28 @@
 
             let factionTerritoryGeom = {};
             for(let ow of ownersSorted) factionTerritoryGeom[ow] = wodFactionTerritoryCentroidMaxSq(ow);
+            let interiorDepthMap = wodBuildInteriorDepthFromFrontlineMap(ownersSorted);
 
             function buildCandidateList(owner, level) {
                 let cent = wodFactionPoliticalCentroid(owner);
                 let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionTerritoryGeom);
+                let minDepth = 3;
+                for(let relax = 0; relax < 4; relax++, minDepth--) {
+                    let filt = pool.filter(h => (interiorDepthMap.get(getHexKey(h)) ?? 999) >= minDepth);
+                    if(filt.length >= 8 || minDepth <= 0) {
+                        pool = filt.length ? filt : pool;
+                        break;
+                    }
+                }
                 let ax = cent ? cent.x : lcm.cx,
                     ay = cent ? cent.y : lcm.cy;
                 if(mapShape === 'rectangle') {
                     let sectors = 10;
                     let lvAlt = level & 1;
                     pool.sort((a, b) => {
+                        let da = interiorDepthMap.get(getHexKey(a)) ?? 0;
+                        let db = interiorDepthMap.get(getHexKey(b)) ?? 0;
+                        if(da !== db) return db - da;
                         let ua = ((Math.atan2(a.y - ay, a.x - ax) + Math.PI) / (Math.PI * 2)) % 1;
                         let ub = ((Math.atan2(b.y - ay, b.x - ax) + Math.PI) / (Math.PI * 2)) % 1;
                         let sa = Math.min(sectors - 1, Math.floor(ua * sectors));
@@ -14724,6 +14927,9 @@
                     });
                 } else {
                     pool.sort((a, b) => {
+                        let da = interiorDepthMap.get(getHexKey(a)) ?? 0;
+                        let db = interiorDepthMap.get(getHexKey(b)) ?? 0;
+                        if(da !== db) return db - da;
                         let ca = Math.atan2(a.y - ay, a.x - ax);
                         let cb = Math.atan2(b.y - ay, b.x - ax);
                         let caOff = ca + level * (0.18 + owner * 0.011),
@@ -14737,7 +14943,7 @@
                 let seen = new Set();
                 if(mapShape === 'island' && level === 0 && cent) {
                     let pch = wodBestCoastalTerrainHexAmongOwned(owner, cent);
-                    if(pch) {
+                    if(pch && (interiorDepthMap.get(getHexKey(pch)) ?? 0) >= 2) {
                         seen.add(`${pch.q},${pch.r}`);
                         list.push(pch);
                     }
@@ -14805,7 +15011,7 @@
             let winnerPlan = null;
             let kpf = 0;
             outerFind: for(let kk = kUpper; kk >= 2; kk--) {
-                for(let sepTry = 12; sepTry >= 7; sepTry--) {
+                for(let sepTry = 14; sepTry >= 8; sepTry--) {
                     await wodMapGenYieldSlice();
                     anchorChebSep = sepTry;
                     let plan = await tryPlan(kk);
@@ -15495,6 +15701,7 @@
             await softenLandFullyBlockedByMountainRing();
             await ensureMountainPasses();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
+            await wodCarveProceduralRivers(seedOffset, mapShape, cols, rows);
 
             await wodMapGenYieldSlice();
 
@@ -15537,9 +15744,9 @@
                 let lcm = wodLandCentroidMaxRadius(landForCities);
                 let cityPickOrder = wodWedgeFocusedCityCandidateOrder(landForCities, factionSlots, lcm, gameData._wodCitySplitAnglePhase, mapShape);
                 let cityPickCursor = 0;
-                let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.8 : 0.86), hr * Math.max(mapR, 8) * 0.12);
+                let innerRad = Math.max(lcm.maxR * (mapShape === 'island' ? 0.78 : 0.84), hr * Math.max(mapR, 8) * 0.14);
                 let innerRSq = innerRad * innerRad;
-                let minWaterSteps = mapShape === 'island' ? 3 : 2;
+                let minWaterSteps = mapShape === 'island' ? 4 : 3;
                 let maxAttemptsPerCity = Math.min(980, Math.max(160, (cityPickOrder.length || mapR * mapR) * 4));
                 for(let i=0; i<numCities; i++) {
                     let valid = false; let attempts = 0;
