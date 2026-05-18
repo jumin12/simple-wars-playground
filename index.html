@@ -13909,13 +13909,36 @@
             if(!window.indexedDB) return;
             try {
                 let idbVal = await wodIdbGetSavedMapsList();
+                let mem = Array.isArray(_wodSavedMapsCache) ? _wodSavedMapsCache : [];
+                try {
+                    if((!mem || mem.length === 0) && typeof localStorage !== 'undefined') {
+                        let raw = localStorage.getItem(WOD_SAVED_MAPS_V2_KEY);
+                        if(raw) {
+                            let p = JSON.parse(raw);
+                            if(Array.isArray(p) && p.length) mem = p;
+                        }
+                    }
+                } catch(eLS) {}
                 if(idbVal === undefined) {
-                    let mig = wodStripThumbsForPersist(_wodSavedMapsCache || []);
+                    let mig = wodStripThumbsForPersist(mem);
                     await wodIdbPutSavedMapsList(mig);
-                    try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
+                    _wodSavedMapsCache = mig;
+                    if(mig.length > 0) {
+                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
+                    }
                 } else if(Array.isArray(idbVal)) {
-                    _wodSavedMapsCache = idbVal;
-                    try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
+                    if(idbVal.length > 0) {
+                        _wodSavedMapsCache = idbVal;
+                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
+                    } else if(mem.length > 0) {
+                        let mig = wodStripThumbsForPersist(mem);
+                        await wodIdbPutSavedMapsList(mig);
+                        _wodSavedMapsCache = mig;
+                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
+                    } else {
+                        _wodSavedMapsCache = [];
+                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
+                    }
                 }
             } catch(e) {
                 console.warn('wodHydrateSavedMapsFromIdb', e);
