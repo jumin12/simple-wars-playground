@@ -5238,7 +5238,7 @@
                     <label>Time period:</label>
                     <select id="setupGamePeriod" title="Unit counter style and themed names for this match">
                         <option value="modern" selected>Modern (NATO counters)</option>
-                        <option value="napoleonic">Napoleonic</option>
+                        <option value="napoleonic">Line Wars (Napoleonic)</option>
                         <option value="ancient">Ancient</option>
                         <option value="medieval">Medieval</option>
                     </select>
@@ -5401,7 +5401,7 @@
                 <div class="setup-row"><label>Time period</label>
                     <select id="mpCfgGamePeriod" style="flex:1">
                         <option value="modern" selected>Modern (NATO counters)</option>
-                        <option value="napoleonic">Napoleonic</option>
+                        <option value="napoleonic">Line Wars (Napoleonic)</option>
                         <option value="ancient">Ancient</option>
                         <option value="medieval">Medieval</option>
                     </select>
@@ -5625,6 +5625,16 @@
                 <p>Spend <strong>100 gold</strong> to permanently unlock styles. Equip unlocked looks below — <strong>Yours</strong> and <strong>AI</strong> use independent picks.</p>
                 <p>Gold: <strong id="shopGold">1000</strong></p>
 
+                <div class="shop-period-row setup-row" style="max-width:480px;margin:12px 0 16px">
+                    <label>Time period</label>
+                    <select id="shopGamePeriod" title="Counter art and themed names for your next battles" style="flex:1">
+                        <option value="modern" selected>Modern (NATO counters)</option>
+                        <option value="napoleonic">Napoleonic (Line Wars style)</option>
+                        <option value="ancient">Ancient</option>
+                        <option value="medieval">Medieval</option>
+                    </select>
+                </div>
+
                 <select id="shopSelectPlayer" class="shop-select-hidden" tabindex="-1" aria-hidden="true"></select>
                 <select id="shopSelectAi" class="shop-select-hidden" tabindex="-1" aria-hidden="true"></select>
 
@@ -5700,7 +5710,7 @@
                     </button>
                     <button type="button" class="skin-card skin-missing locked" id="skinNapoleonic" onclick="purchaseUnitSkin('napoleonic')">
                         <canvas class="skin-preview" id="skinNapoleonicPreview" width="120" height="80" aria-hidden="true"></canvas>
-                        Napoleonic era
+                        Line Wars (Napoleonic)
                         <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
                     </button>
                     <button type="button" class="skin-card skin-missing locked" id="skinAncient" onclick="purchaseUnitSkin('ancient')">
@@ -5769,7 +5779,7 @@
                         <label>Default period</label>
                         <select id="settingsGamePeriod" style="flex:1">
                             <option value="modern" selected>Modern (NATO counters)</option>
-                            <option value="napoleonic">Napoleonic</option>
+                            <option value="napoleonic">Line Wars (Napoleonic)</option>
                             <option value="ancient">Ancient</option>
                             <option value="medieval">Medieval</option>
                         </select>
@@ -6494,9 +6504,11 @@
 
         function wodInitPeriodSettingsBinding() {
             let sel = document.getElementById('settingsGamePeriod');
-            if(!sel || sel._wodBound) return;
-            sel._wodBound = true;
-            sel.addEventListener('change', () => wodApplyGamePeriod(sel.value, { saveProfile: true }));
+            if(sel && !sel._wodBound) {
+                sel._wodBound = true;
+                sel.addEventListener('change', () => wodApplyGamePeriod(sel.value, { saveProfile: true }));
+            }
+            wodInitShopPeriodBinding();
         }
 
         function showPanel(panelId, opts) {
@@ -6504,7 +6516,12 @@
             pauseMenuBackgroundBattle();
             UI.mainMenu.classList.add('hidden');
             document.getElementById(panelId + 'Panel').classList.remove('hidden');
-            if(panelId === 'shop') updateSkinShop();
+            if(panelId === 'shop') {
+                wodInitShopPeriodBinding();
+                wodSyncAllPeriodSelects();
+                updateSkinShop();
+                wodApplyPeriodUiLabels();
+            }
             if(panelId === 'achievements') renderAchievementsUi();
             if(panelId === 'settings') {
                 syncShowOrdersCheckbox();
@@ -10188,9 +10205,12 @@
                 return;
             }
             if(gameData.ownedUnitSkins[skin]) {
-                if(WOD_PERIOD_SKIN_IDS.includes(skin))
-                    showNotification(wodPeriodLabel(skin) + ' era already unlocked. Pick it under Time period.');
-                else showNotification('Already unlocked. Use the dropdowns to equip.');
+                if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
+                    wodApplyGamePeriod(skin, { saveProfile: true });
+                    showNotification(wodPeriodLabel(skin) + ' era selected.');
+                    return;
+                }
+                showNotification('Already unlocked. Use the dropdowns to equip.');
                 return;
             }
             if((gameData.gold || 0) < 100) { showNotification('Not enough gold!'); return; }
@@ -10198,7 +10218,8 @@
             gameData.ownedUnitSkins[skin] = true;
             if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
                 wodGrantPeriodSkinAchievement(skin);
-                showNotification(wodPeriodLabel(skin) + ' era unlocked! Select it in setup or settings.');
+                wodApplyGamePeriod(skin, { saveProfile: true });
+                showNotification(wodPeriodLabel(skin) + ' era unlocked and equipped!');
             } else {
                 showNotification('Skin unlocked! Choose it for you and/or the AI above.');
             }
@@ -10804,14 +10825,15 @@
             let stats = document.getElementById('achTabStatsBody');
             if(!badges || !stats) return;
             let L = wodProgress.lifetime, A = wodProgress.achievements;
+            let badgeFlavor = wodPeriodFlavor('modern');
             let rows = [
                 { title: 'Broken shield', desc: 'Eliminate an enemy faction by capturing all of their cities.', prog: L.battlesWon || 0, need: 1 },
                 { title: 'Town taker', desc: 'Capture 15 enemy cities (lifetime).', prog: L.citiesCaptured || 0, need: 15 },
-                { title: 'Armor hunter', desc: 'Knock out 200 enemy tanks (lifetime).', prog: L.enemyTankKills || 0, need: 200 },
+                { title: badgeFlavor.achHunter, desc: badgeFlavor.achHunterDesc, prog: L.enemyTankKills || 0, need: 200 },
                 { title: 'Depth charge', desc: 'Sink 40 enemy warships (lifetime).', prog: L.enemyShipKills || 0, need: 40 },
                 { title: 'Merchant marine', desc: 'Capture 30 enemy trade convoys (lifetime).', prog: L.convoysCaptured || 0, need: 30 },
-                { title: 'Industrial base', desc: 'Build 12 factories in towns you control.', prog: L.factoriesBuilt || 0, need: 12 },
-                { title: 'Admiralty works', desc: 'Build 12 harbors in towns you control.', prog: L.harborsBuilt || 0, need: 12 },
+                { title: badgeFlavor.achIndustrial, desc: badgeFlavor.achIndustrialDesc, prog: L.factoriesBuilt || 0, need: 12 },
+                { title: badgeFlavor.achAdmiralty, desc: badgeFlavor.achAdmiraltyDesc, prog: L.harborsBuilt || 0, need: 12 },
                 { title: 'Fortunes of war', desc: 'Hold at least $20,000 cash at once in a campaign.', prog: L.peakMoneyHeld || 0, need: 20000 },
                 { title: 'Grand host', desc: 'Field at least 50,000 troops on the map at once.', prog: L.peakFieldManpower || 0, need: 50000 },
                 { title: 'Warmaster', desc: 'Eliminate 5 enemy factions across all campaigns (last city captured).', prog: L.battlesWon || 0, need: 5 },
@@ -10834,8 +10856,12 @@
             badges.innerHTML = html;
 
             let statsL = wodProgress.lifetime;
-            if(_achStatsPeriodFilter && _achStatsPeriodFilter !== 'all')
+            let statsPeriod = 'modern';
+            if(_achStatsPeriodFilter && _achStatsPeriodFilter !== 'all') {
                 statsL = wodLifetimeBucket(_achStatsPeriodFilter) || statsL;
+                statsPeriod = _achStatsPeriodFilter;
+            }
+            let sf = wodPeriodFlavor(statsPeriod);
             function sc(lab, val) {
                 return `<div class="stat-cell"><div class="stat-label">${lab}</div><div class="stat-value">${val}</div></div>`;
             }
@@ -10854,17 +10880,17 @@
                         <div>
                             <div class="stats-combat-sub">Your forces</div>
                             <div class="stats-grid stats-grid--combat-row">
-                                ${sc('Infantry lost', formatLifetimeBig(statsL.ownTroopLosses))}
-                                ${sc('Tanks lost', formatLifetimeBig(statsL.ownTankLosses))}
-                                ${sc('Ships lost', formatLifetimeBig(statsL.ownShipLosses))}
+                                ${sc(sf.statOwnInfantry, formatLifetimeBig(statsL.ownTroopLosses))}
+                                ${sc(sf.statOwnHeavy, formatLifetimeBig(statsL.ownTankLosses))}
+                                ${sc(sf.statOwnShips, formatLifetimeBig(statsL.ownShipLosses))}
                             </div>
                         </div>
                         <div>
                             <div class="stats-combat-sub">Enemy</div>
                             <div class="stats-grid stats-grid--combat-row">
-                                ${sc('Infantry eliminated', formatLifetimeBig(statsL.enemyTroopKills))}
-                                ${sc('Tanks knocked out', formatLifetimeBig(statsL.enemyTankKills))}
-                                ${sc('Ships sunk', formatLifetimeBig(statsL.enemyShipKills))}
+                                ${sc(sf.statEnemyInfantry, formatLifetimeBig(statsL.enemyTroopKills))}
+                                ${sc(sf.statEnemyHeavy, formatLifetimeBig(statsL.enemyTankKills))}
+                                ${sc(sf.statEnemyShips, formatLifetimeBig(statsL.enemyShipKills))}
                             </div>
                         </div>
                     </div>
@@ -10884,16 +10910,17 @@
                     <h3 class="stats-section-title">Economy &amp; infrastructure</h3>
                     <div class="stats-grid">
                         ${sc('Peak cash held (one campaign)', formatLifetimeBig(statsL.peakMoneyHeld))}
-                        ${sc('Factories built', formatLifetimeBig(statsL.factoriesBuilt))}
-                        ${sc('Harbors built', formatLifetimeBig(statsL.harborsBuilt))}
+                        ${sc(sf.statFactories, formatLifetimeBig(statsL.factoriesBuilt))}
+                        ${sc(sf.statHarbors, formatLifetimeBig(statsL.harborsBuilt))}
                     </div>
                 </section>
                 <section class="stats-section">
                     <h3 class="stats-section-title">Troops trained</h3>
                     <div class="stats-grid">
-                        ${sc('Infantry trained', formatLifetimeBig(statsL.unitsBuiltLight))}
-                        ${sc('Tanks trained', formatLifetimeBig(statsL.unitsBuiltHeavy))}
-                        ${sc('Ships trained', formatLifetimeBig(statsL.unitsBuiltShip))}
+                        ${sc(sf.statTrainLight, formatLifetimeBig(statsL.unitsBuiltLight))}
+                        ${sc(sf.statTrainMarine, formatLifetimeBig(statsL.unitsBuiltMarine || 0))}
+                        ${sc(sf.statTrainHeavy, formatLifetimeBig(statsL.unitsBuiltHeavy))}
+                        ${sc(sf.statTrainShip, formatLifetimeBig(statsL.unitsBuiltShip))}
                     </div>
                 </section>
             </div>`;
@@ -11447,7 +11474,7 @@
                         '</div>' +
                     '</div>' +
                     '<div class="cs-bar-row">' +
-                        '<div class="cs-bar-head"><span>Armor destroyed</span><span>' + csYouLbl + ' ' + formatTanks(plyTkLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiTkLoss) + '</span></div>' +
+                        '<div class="cs-bar-head"><span>' + wodActivePeriodFlavor().summaryHeavyDestroyed + '</span><span>' + csYouLbl + ' ' + formatTanks(plyTkLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiTkLoss) + '</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barTk.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barTk.wAi + '"></div>' +
@@ -19912,7 +19939,7 @@
         const WOD_PERIOD_SKIN_IDS = ['napoleonic', 'ancient', 'medieval'];
 
         function wodPeriodLabel(id) {
-            if(id === 'napoleonic') return 'Napoleonic';
+            if(id === 'napoleonic') return 'Line Wars (Napoleonic)';
             if(id === 'ancient') return 'Ancient';
             if(id === 'medieval') return 'Medieval';
             return 'Modern (NATO)';
@@ -19943,55 +19970,114 @@
                     convoyLand: 'Land trade convoy', convoySea: 'Sea trade convoy',
                     trainLight: 'Train Light Infantry ($500, 1k MP)', trainMarine: 'Train Marines ($500, 1k MP)',
                     trainHeavy: 'Train Armor ($4k, 1k MP)', trainShip: 'Build Ship ($3.8k, 5k MP)',
-                    factory: 'Factory', harbor: 'Harbor',
+                    factory: 'Factory', harbor: 'Harbor', fort: 'Fort',
                     cityTown: 'Town', cityPort: 'Port City', cityIndustrial: 'Industrial City', cityPortIndustrial: 'Industrial Port City',
                     unitLight: (n) => n + 'th Infantry Div.',
                     unitMarine: (n) => n + 'th Marine Regt.',
                     unitHeavy: (n) => n + 'th Armored Div.',
                     unitShip: (n) => 'USS ' + cityStarts[Math.floor(Math.random() * cityStarts.length)],
-                    unitConvoy: (n, sea) => (sea ? 'Sea trade convoy ' : 'Land trade convoy ') + n
+                    unitConvoy: (n, sea) => (sea ? 'Sea trade convoy ' : 'Land trade convoy ') + n,
+                    hudHeavy: 'Armor', hudShips: 'Ships', hudInfantryLost: 'Soldiers lost', hudHeavyLost: 'Tanks lost', hudShipsLost: 'Ships lost',
+                    hudInfantryKills: 'Soldiers', hudHeavyKills: 'Tanks', hudShipsKills: 'Ships',
+                    heavyCount: 'Tanks', playerSummaryHeavy: 'Tanks', summaryHeavyDestroyed: 'Armor destroyed',
+                    statOwnInfantry: 'Infantry lost', statOwnHeavy: 'Tanks lost', statOwnShips: 'Ships lost',
+                    statEnemyInfantry: 'Infantry eliminated', statEnemyHeavy: 'Tanks knocked out', statEnemyShips: 'Ships sunk',
+                    statFactories: 'Factories built', statHarbors: 'Harbors built',
+                    statTrainLight: 'Infantry trained', statTrainMarine: 'Marines trained', statTrainHeavy: 'Tanks trained', statTrainShip: 'Ships trained',
+                    achHunter: 'Armor hunter', achHunterDesc: 'Knock out 200 enemy tanks (lifetime).',
+                    achIndustrial: 'Industrial base', achIndustrialDesc: 'Build 12 factories in towns you control.',
+                    achAdmiralty: 'Admiralty works', achAdmiraltyDesc: 'Build 12 harbors in towns you control.',
+                    helpHeavy: 'Armor', matrixHeavy: 'Armor'
                 },
                 napoleonic: {
-                    light: 'Line infantry', marine: 'Naval infantry', heavy: 'Cuirassiers / dragoons', ship: 'Ship of the line',
+                    light: 'Musket line', marine: 'Naval infantry', heavy: 'Horse regiments', ship: 'Ship of the line',
                     convoyLand: 'Wagon train', convoySea: 'Merchant convoy',
-                    trainLight: 'Recruit line infantry ($500, 1k MP)', trainMarine: 'Embark marines ($500, 1k MP)',
-                    trainHeavy: 'Raise cavalry ($4k, 1k MP)', trainShip: 'Commission man-of-war ($3.8k, 5k MP)',
-                    factory: 'Arsenal', harbor: 'Naval yard',
-                    cityTown: 'Borough', cityPort: 'Port borough', cityIndustrial: 'Manufacturing town', cityPortIndustrial: 'Arsenal port',
-                    unitLight: (n) => n + 'e Régiment de ligne',
-                    unitMarine: (n) => n + 'e Régiment de marine',
-                    unitHeavy: (n) => n + 'e Dragons',
+                    trainLight: 'Form musket battalion ($500, 1k MP)', trainMarine: 'Embark naval infantry ($500, 1k MP)',
+                    trainHeavy: 'Raise horse regiments ($4k, 1k MP)', trainShip: 'Commission ship of the line ($3.8k, 5k MP)',
+                    factory: 'Foundry', harbor: 'Naval yard', fort: 'Redoubt',
+                    cityTown: 'Commune', cityPort: 'Port commune', cityIndustrial: 'Arsenal town', cityPortIndustrial: 'Grand arsenal port',
+                    unitLight: (n) => n + 'e Bataillon de ligne',
+                    unitMarine: (n) => n + 'e Infanterie de marine',
+                    unitHeavy: (n) => n + 'e Régiment de cavalerie',
                     unitShip: (n) => 'HMS ' + cityStarts[Math.floor(Math.random() * cityStarts.length)],
-                    unitConvoy: (n, sea) => (sea ? 'Convoi maritime ' : 'Convoi terrestre ') + n
+                    unitConvoy: (n, sea) => (sea ? 'Convoi maritime ' : 'Convoi de vivres ') + n,
+                    hudHeavy: 'Horses', hudShips: 'Men-of-war', hudInfantryLost: 'Line lost', hudHeavyLost: 'Horses lost', hudShipsLost: 'Ships lost',
+                    hudInfantryKills: 'Line broken', hudHeavyKills: 'Horses', hudShipsKills: 'Ships',
+                    heavyCount: 'Horses', playerSummaryHeavy: 'Horses', summaryHeavyDestroyed: 'Cavalry routed',
+                    statOwnInfantry: 'Line infantry lost', statOwnHeavy: 'Horses lost', statOwnShips: 'Ships lost',
+                    statEnemyInfantry: 'Line infantry broken', statEnemyHeavy: 'Horse regiments routed', statEnemyShips: 'Men-of-war sunk',
+                    statFactories: 'Foundries built', statHarbors: 'Naval yards built',
+                    statTrainLight: 'Musket lines formed', statTrainMarine: 'Naval infantry raised', statTrainHeavy: 'Horse regiments raised', statTrainShip: 'Ships commissioned',
+                    achHunter: 'Cavalry breaker', achHunterDesc: 'Rout 200 enemy horse regiments (lifetime).',
+                    achIndustrial: 'Arsenal master', achIndustrialDesc: 'Build 12 foundries in towns you control.',
+                    achAdmiralty: 'Grand admiral', achAdmiraltyDesc: 'Build 12 naval yards in towns you control.',
+                    helpHeavy: 'Horse regiments (Line Wars)', matrixHeavy: 'Cavalry'
                 },
                 ancient: {
-                    light: 'Hoplites / skirmishers', marine: 'Marines (trireme crews)', heavy: 'Cataphracts / chariots', ship: 'Trireme',
+                    light: 'Hoplites', marine: 'Marines (oarsmen)', heavy: 'Chariots', ship: 'Trireme',
                     convoyLand: 'Supply caravan', convoySea: 'Grain convoy',
                     trainLight: 'Levy hoplites ($500, 1k MP)', trainMarine: 'Embark marines ($500, 1k MP)',
                     trainHeavy: 'Field chariots ($4k, 1k MP)', trainShip: 'Launch trireme ($3.8k, 5k MP)',
-                    factory: 'Workshop', harbor: 'Harbor',
-                    cityTown: 'Polis', cityPort: 'Emporion', cityIndustrial: 'Workshop polis', cityPortIndustrial: 'Great harbor',
+                    factory: 'Workshop', harbor: 'Emporion', fort: 'Palisade',
+                    cityTown: 'Polis', cityPort: 'Emporion', cityIndustrial: 'Workshop polis', cityPortIndustrial: 'Great emporion',
                     unitLight: (n) => n + 'th Hoplite Lochos',
-                    unitMarine: (n) => n + 'th Marine Epibolos',
+                    unitMarine: (n) => n + 'th Epibatai',
                     unitHeavy: (n) => n + 'th Hippikon Tagma',
                     unitShip: (n) => 'Trireme ' + cityStarts[Math.floor(Math.random() * cityStarts.length)],
-                    unitConvoy: (n, sea) => (sea ? 'Nautikos konvoi ' : 'Chorēgía konvoi ') + n
+                    unitConvoy: (n, sea) => (sea ? 'Nautikos konvoi ' : 'Chorēgía konvoi ') + n,
+                    hudHeavy: 'Chariots', hudShips: 'Triremes', hudInfantryLost: 'Hoplites lost', hudHeavyLost: 'Chariots lost', hudShipsLost: 'Triremes lost',
+                    hudInfantryKills: 'Hoplites', hudHeavyKills: 'Chariots', hudShipsKills: 'Triremes',
+                    heavyCount: 'Chariots', playerSummaryHeavy: 'Chariots', summaryHeavyDestroyed: 'Chariots destroyed',
+                    statOwnInfantry: 'Hoplites lost', statOwnHeavy: 'Chariots lost', statOwnShips: 'Triremes lost',
+                    statEnemyInfantry: 'Hoplites shattered', statEnemyHeavy: 'Chariots destroyed', statEnemyShips: 'Triremes sunk',
+                    statFactories: 'Workshops built', statHarbors: 'Emporia built',
+                    statTrainLight: 'Hoplites levied', statTrainMarine: 'Marines embarked', statTrainHeavy: 'Chariots fielded', statTrainShip: 'Triremes launched',
+                    achHunter: 'Chariot slayer', achHunterDesc: 'Destroy 200 enemy chariots (lifetime).',
+                    achIndustrial: 'Master artisan', achIndustrialDesc: 'Build 12 workshops in towns you control.',
+                    achAdmiralty: 'Lord of the waves', achAdmiraltyDesc: 'Build 12 emporia in towns you control.',
+                    helpHeavy: 'Chariots', matrixHeavy: 'Chariots'
                 },
                 medieval: {
-                    light: 'Men-at-arms / archers', marine: 'Sea raiders', heavy: 'Knights', ship: 'Cog / galley',
+                    light: 'Men-at-arms', marine: 'Sea raiders', heavy: 'Knights', ship: 'War galley',
                     convoyLand: 'Pack train', convoySea: 'Hanse convoy',
                     trainLight: 'Raise men-at-arms ($500, 1k MP)', trainMarine: 'Embark sea raiders ($500, 1k MP)',
                     trainHeavy: 'Muster knights ($4k, 1k MP)', trainShip: 'Build war galley ($3.8k, 5k MP)',
-                    factory: 'Smithy', harbor: 'Quay',
+                    factory: 'Smithy', harbor: 'Quay', fort: 'Keep',
                     cityTown: 'Bailiwick', cityPort: 'Port town', cityIndustrial: 'Castle town', cityPortIndustrial: 'Castle port',
                     unitLight: (n) => n + 'th Company of Foot',
                     unitMarine: (n) => n + 'th Sea Company',
                     unitHeavy: (n) => n + 'th Order of Knights',
                     unitShip: (n) => 'Galley ' + cityStarts[Math.floor(Math.random() * cityStarts.length)],
-                    unitConvoy: (n, sea) => (sea ? 'Sea pack train ' : 'Land pack train ') + n
+                    unitConvoy: (n, sea) => (sea ? 'Sea pack train ' : 'Land pack train ') + n,
+                    hudHeavy: 'Knights', hudShips: 'Galleys', hudInfantryLost: 'Foot lost', hudHeavyLost: 'Knights lost', hudShipsLost: 'Galleys lost',
+                    hudInfantryKills: 'Foot', hudHeavyKills: 'Knights', hudShipsKills: 'Galleys',
+                    heavyCount: 'Knights', playerSummaryHeavy: 'Knights', summaryHeavyDestroyed: 'Knights unhorsed',
+                    statOwnInfantry: 'Men-at-arms lost', statOwnHeavy: 'Knights lost', statOwnShips: 'Galleys lost',
+                    statEnemyInfantry: 'Men-at-arms slain', statEnemyHeavy: 'Knights unhorsed', statEnemyShips: 'Galleys sunk',
+                    statFactories: 'Smithies built', statHarbors: 'Quays built',
+                    statTrainLight: 'Men-at-arms raised', statTrainMarine: 'Sea raiders raised', statTrainHeavy: 'Knights mustered', statTrainShip: 'Galleys built',
+                    achHunter: 'Knight breaker', achHunterDesc: 'Unhorse 200 enemy knights (lifetime).',
+                    achIndustrial: 'Royal smith', achIndustrialDesc: 'Build 12 smithies in towns you control.',
+                    achAdmiralty: 'Hanse captain', achAdmiraltyDesc: 'Build 12 quays in towns you control.',
+                    helpHeavy: 'Knights', matrixHeavy: 'Knights'
                 }
             };
             return F[period] || F.modern;
+        }
+
+        function wodActivePeriodFlavor() {
+            let p = (gameState === 'PLAYING' || gameState === 'PAUSED') ? wodGetMatchPeriod() : wodGetGamePeriod();
+            return wodPeriodFlavor(p);
+        }
+
+        function wodSetChipPrefix(chipValueId, prefix) {
+            let val = document.getElementById(chipValueId);
+            if(!val || !val.parentElement) return;
+            let chip = val.parentElement;
+            for(let n of [...chip.childNodes]) {
+                if(n.nodeType === 3) chip.removeChild(n);
+            }
+            chip.insertBefore(document.createTextNode(prefix + ' '), val);
         }
 
         function wodSyncPeriodSelectEl(el, period) {
@@ -20010,20 +20096,18 @@
             wodSyncPeriodSelectEl(document.getElementById('setupGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('settingsGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('mpCfgGamePeriod'), gameData.gamePeriod);
+            wodSyncPeriodSelectEl(document.getElementById('shopGamePeriod'), gameData.gamePeriod);
             let ed = document.getElementById('editorGenPeriod');
             if(ed) wodSyncPeriodSelectEl(ed, gameData.gamePeriod);
         }
 
         function wodApplyPeriodUiLabels() {
-            let f = wodPeriodFlavor();
-            let map = [
-                ['buyUnit', 'light', f.trainLight], ['buyUnit', 'marine', f.trainMarine],
-                ['buyUnit', 'heavy', f.trainHeavy], ['buyUnit', 'ship', f.trainShip]
-            ];
+            let f = wodActivePeriodFlavor();
             document.querySelectorAll('.build-btn').forEach(btn => {
                 let oc = btn.getAttribute('onclick') || '';
-                if(oc.indexOf("beginFactoryBuild") >= 0) btn.textContent = 'Build ' + f.factory + ' ($2k)';
-                else if(oc.indexOf("beginHarborBuild") >= 0) btn.textContent = 'Build ' + f.harbor + ' ($1k)';
+                if(oc.indexOf('beginFactoryBuild') >= 0) btn.textContent = 'Build ' + f.factory + ' ($2k)';
+                else if(oc.indexOf('beginHarborBuild') >= 0) btn.textContent = 'Build ' + f.harbor + ' ($1k)';
+                else if(oc.indexOf('beginFortBuild') >= 0) btn.textContent = 'Build ' + (f.fort || 'Fort') + ' ($1.5k)';
                 else if(oc.indexOf("buyUnit('light')") >= 0) btn.textContent = f.trainLight;
                 else if(oc.indexOf("buyUnit('marine')") >= 0) btn.textContent = f.trainMarine;
                 else if(oc.indexOf("buyUnit('heavy')") >= 0) btn.textContent = f.trainHeavy;
@@ -20034,6 +20118,22 @@
                 if(i < 4) lab.textContent = labels[i];
                 else if(i < 8) lab.textContent = labels[i - 4];
             });
+            wodSetChipPrefix('ui-tanks', f.hudHeavy);
+            wodSetChipPrefix('ui-ships', f.hudShips);
+            wodSetChipPrefix('ui-casualties', f.hudInfantryLost);
+            wodSetChipPrefix('ui-tank-casualties', f.hudHeavyLost);
+            wodSetChipPrefix('ui-ship-casualties', f.hudShipsLost);
+            wodSetChipPrefix('ui-enemy-casualties', f.hudInfantryKills);
+            wodSetChipPrefix('ui-tank-kills', f.hudHeavyKills);
+            wodSetChipPrefix('ui-ship-kills', f.hudShipsKills);
+            if(typeof renderPlayerSummary === 'function') renderPlayerSummary();
+        }
+
+        function wodInitShopPeriodBinding() {
+            let sel = document.getElementById('shopGamePeriod');
+            if(!sel || sel._wodBound) return;
+            sel._wodBound = true;
+            sel.addEventListener('change', () => wodApplyGamePeriod(sel.value, { saveProfile: true }));
         }
 
         function wodApplyGamePeriod(period, opts) {
@@ -20041,11 +20141,14 @@
             if(!period || !WOD_PERIOD_IDS.includes(period)) period = 'modern';
             if(!wodIsPeriodUnlocked(period)) period = 'modern';
             gameData.gamePeriod = period;
+            if(gameState === 'PLAYING' || gameState === 'PAUSED') gameData._matchPeriod = period;
             wodSyncAllPeriodSelects();
             wodApplyPeriodUiLabels();
             renderShopArmyCanvases();
             renderSkinShopGridCanvases();
             renderHelpMiniDiagrams();
+            let achPanel = document.getElementById('achievementsPanel');
+            if(achPanel && !achPanel.classList.contains('hidden')) renderAchievementsUi();
             if(opts.saveProfile !== false && wodProgress) {
                 if(!wodProgress.profile) wodProgress.profile = {};
                 wodProgress.profile.gamePeriod = period;
@@ -20143,9 +20246,11 @@
                 } else if(unit.type === 'ship') {
                     ctx.moveTo(-r * 0.6, r * 0.2); ctx.lineTo(0, -r * 0.42); ctx.lineTo(r * 0.6, r * 0.2); ctx.closePath();
                 } else {
-                    ctx.moveTo(-r * 0.65, -r * 0.15); ctx.lineTo(r * 0.65, -r * 0.15);
-                    ctx.moveTo(-r * 0.65, r * 0.2); ctx.lineTo(r * 0.65, r * 0.2);
-                    ctx.moveTo(0, -r * 0.45); ctx.lineTo(0, r * 0.35);
+                    for(let i = -1; i <= 1; i++) {
+                        ctx.moveTo(i * r * 0.22, -r * 0.48);
+                        ctx.lineTo(i * r * 0.22, r * 0.42);
+                    }
+                    ctx.moveTo(-r * 0.62, -r * 0.08); ctx.lineTo(r * 0.62, -r * 0.08);
                 }
             } else if(period === 'ancient') {
                 if(unit.type === 'heavy') {
@@ -21145,7 +21250,8 @@
                 return `<div class="player-row"><span class="player-dot" style="background:${factionColors[owner]}"></span><span>${label}</span><span>$${Math.floor(money)}</span><span>${troops}</span><span>${tanks}</span><span>${ships}</span><span></span></div>
                         <div class="player-row loss-row"><span></span><span>Losses</span><span>$${lossMoney}</span><span>${casualties}</span><span>${tankLosses}</span><span>${shipLosses}</span><span></span></div>`;
             }).join('');
-            body.innerHTML = `<div class="player-row header"><span></span><span>Side</span><span>Money</span><span>Troops</span><span>Tanks</span><span>Ships</span><span></span></div>${rows}`;
+            let pfSum = wodActivePeriodFlavor();
+            body.innerHTML = `<div class="player-row header"><span></span><span>Side</span><span>Money</span><span>Troops</span><span>${pfSum.playerSummaryHeavy}</span><span>${pfSum.hudShips}</span><span></span></div>${rows}`;
         }
 
         let _infoCardDomCache = null;
@@ -21234,7 +21340,8 @@
                         : `Manpower: ${formatPeople(sel.manpower !== undefined ? sel.manpower : maxMp)} / ${formatPeople(maxMp)}`;
                     if(infoTanks) {
                         if(sel.type === 'heavy') {
-                            infoTanks.innerText = `Tanks: ${Math.round(sel.tanks || 0)} / ${sel.maxTanks || 500}`;
+                            let hf = wodPeriodFlavor(wodGetMatchPeriod());
+                            infoTanks.innerText = `${hf.heavyCount}: ${Math.round(sel.tanks || 0)} / ${sel.maxTanks || 500}`;
                             infoTanks.style.display = '';
                             infoTanks.setAttribute('aria-hidden', 'false');
                         } else {
@@ -23689,6 +23796,7 @@
 
         initSetupPanelBindings();
         wodInitPeriodSettingsBinding();
+        wodInitShopPeriodBinding();
         wodSyncAllPeriodSelects();
         wodApplyPeriodUiLabels();
         wireShowOrdersCheckbox();
