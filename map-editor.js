@@ -2742,6 +2742,7 @@
   window.openMapEditor = openMapEditor;
   window.closeMapEditor = closeMapEditor;
   window.renderMapBrowser = renderMapBrowser;
+  window.wodEnsureMapEditorDom = ensureEditorDom;
   window.wodShowEditorSaveToLibraryDialog = function () {
     ensureEditorDom();
     showEditorSaveDialog();

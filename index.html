@@ -6392,6 +6392,10 @@
                         gameData._soloMapPreviewMatchesStart = false;
                     }
                 }
+                if(!_wodEditorSaveDomPrewarmed && typeof window.wodEnsureMapEditorDom === 'function') {
+                    _wodEditorSaveDomPrewarmed = true;
+                    try { window.wodEnsureMapEditorDom(); } catch(e) { console.warn(e); }
+                }
             }
         }
 
@@ -13937,6 +13941,7 @@
         const WOD_IDB_SAVED_MAPS_KEY = 'savedMapsV2';
         const WOD_MAP_LIB_PAGE_SIZE = 3;
         let _wodMapLib = { context: 'setup', selectedId: null, list: [], listPage: 0, wired: false, pagerWired: false, returnTo: null };
+        let _wodEditorSaveDomPrewarmed = false;
         /** In-memory list; thumbs may exist for maps saved this session (persisted copies omit thumbs). */
         let _wodSavedMapsCache = null;
         let _wodSavedMapsHydrateStarted = false;
@@ -14396,9 +14401,16 @@
                 entities: gameData.entities
             };
         }
+        /** Same rich shape as the map editor (faction colors, start economy when applicable); falls back for early boot. */
+        function wodDefaultMapPayloadForLibrary() {
+            if(typeof WOD !== 'undefined' && WOD && typeof WOD.exportMapData === 'function') {
+                try { return WOD.exportMapData(); } catch(e) { console.warn('wodDefaultMapPayloadForLibrary', e); }
+            }
+            return wodBuildMapPayloadFromGame();
+        }
         function wodSaveMapToLibraryWithName(name, custom) {
             custom = custom || {};
-            let mapDataRaw = custom.mapData || wodBuildMapPayloadFromGame();
+            let mapDataRaw = custom.mapData != null ? custom.mapData : wodDefaultMapPayloadForLibrary();
             let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapDataRaw, 280, 168);
             let mapData = wodCloneMapDataForStorage(mapDataRaw);
             if(!mapData) {
@@ -14423,7 +14435,7 @@
             let list = wodGetSavedMapsList();
             let i = list.findIndex(e => e && String(e.id) === String(id));
             if(i < 0) return null;
-            let mapDataRaw = custom.mapData || wodBuildMapPayloadFromGame();
+            let mapDataRaw = custom.mapData != null ? custom.mapData : wodDefaultMapPayloadForLibrary();
             let thumb = custom.thumb !== undefined && custom.thumb !== null ? custom.thumb : wodMapDataToThumbnailDataUrl(mapDataRaw, 280, 168);
             let mapData = wodCloneMapDataForStorage(mapDataRaw);
             if(!mapData) {
@@ -14712,23 +14724,31 @@
                 alert('Generate or load a map first.');
                 return;
             }
-            if(typeof window.wodShowEditorSaveToLibraryDialog === 'function') {
+            function tryOpenEditorSave() {
+                if(typeof window.wodShowEditorSaveToLibraryDialog !== 'function') return false;
                 window.wodShowEditorSaveToLibraryDialog();
-                return;
+                return true;
             }
-            window.wodShowNameInputDialog({
-                title: 'Save map to library',
-                hint: 'Stored in this browser (IndexedDB — much larger than old localStorage limits). For backups, export maps as JSON from the setup panel.',
-                defaultValue: 'My map ' + new Date().toLocaleDateString(),
-                confirmLabel: 'Save',
-                maxLength: 96
-            }).then(name => {
-                if(!name || !String(name).trim()) return;
-                let ent = wodSaveMapToLibraryWithName(name);
-                if(!ent) return;
-                showNotification('Map saved to library.');
-                if(typeof window.wodNotifySavedMapsChanged === 'function') window.wodNotifySavedMapsChanged();
-                else if(typeof window.renderMapBrowser === 'function') window.renderMapBrowser();
+            if(tryOpenEditorSave()) return;
+            requestAnimationFrame(() => {
+                if(tryOpenEditorSave()) return;
+                setTimeout(() => {
+                    if(tryOpenEditorSave()) return;
+                    window.wodShowNameInputDialog({
+                        title: 'Save map to library',
+                        hint: 'Stored in this browser (IndexedDB — much larger than old localStorage limits). For backups, export maps as JSON from the setup panel.',
+                        defaultValue: 'My map ' + new Date().toLocaleDateString(),
+                        confirmLabel: 'Save',
+                        maxLength: 96
+                    }).then(name => {
+                        if(!name || !String(name).trim()) return;
+                        let ent = wodSaveMapToLibraryWithName(name);
+                        if(!ent) return;
+                        showNotification('Map saved to library.');
+                        if(typeof window.wodNotifySavedMapsChanged === 'function') window.wodNotifySavedMapsChanged();
+                        else if(typeof window.renderMapBrowser === 'function') window.renderMapBrowser();
+                    });
+                }, 0);
             });
         }
         window.wodGetSavedMapsList = wodGetSavedMapsList;
