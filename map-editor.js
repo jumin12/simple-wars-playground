@@ -792,13 +792,12 @@
     root.querySelectorAll("[data-gen-tab]").forEach(btn => {
       btn.addEventListener("click", () => setTab(btn.dataset.genTab));
     });
-    const shapeSel = root.querySelector("#editorGenMapShape");
-    if(shapeSel) {
-      shapeSel.value = state.genShape || "island";
-      shapeSel.addEventListener("change", () => {
-        state.genShape = shapeSel.value || "island";
+    root.querySelectorAll("[data-ed-shape]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.genShape = btn.dataset.edShape || "island";
+        root.querySelectorAll("[data-ed-shape]").forEach(b => b.classList.toggle("active", b === btn));
       });
-    }
+    });
     const cC = root.querySelector("#editorGenCities");
     const cT = root.querySelector("#editorGenTerritory");
     const cU = root.querySelector("#editorGenUnits");
@@ -1015,8 +1014,10 @@
         border-top:1px solid rgba(201,162,39,.22);
       }
       .editor-gen-hint { font-size:11px; color:#7a92a8; flex:1 1 200px; line-height:1.35; min-width:160px; }
-      .editor-gen-shape { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-      .editor-gen-shape > span { font-size:10px; color:#9db3c7; text-transform:uppercase; letter-spacing:.1em; font-weight:800; }
+      .editor-gen-shape { display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; }
+      .editor-gen-shape > span { font-size:10px; color:#9db3c7; text-transform:uppercase; letter-spacing:.1em; font-weight:800; flex:0 0 100%; }
+      .editor-shape-btns { display:flex; flex-wrap:wrap; gap:5px; }
+      .editor-shape-btns .editor-seg-btn { flex:1 1 auto; min-width:72px; font-size:11px; padding:6px 8px; }
       .editor-seg-btn {
         background:#1a3348; color:#dbe8f5; border:1px solid rgba(139,173,192,.5); border-radius:7px;
         padding:7px 12px; font-size:12px; font-weight:700; cursor:pointer;
@@ -1293,16 +1294,16 @@
         </div>
         <div id="editorGenPanelGenerate" class="editor-gen-panel" data-gen-panel="generate">
           <div class="editor-gen-shape">
-            <label class="editor-gen-shape-label" for="editorGenMapShape">Shape</label>
-            <select id="editorGenMapShape" class="editor-gen-shape-select">
-              <option value="island" selected>Island</option>
-              <option value="rectangle">Rectangle</option>
-              <option value="ring">Ring island</option>
-              <option value="archipelago">Archipelago</option>
-              <option value="forest">Forest</option>
-              <option value="mountain">Mountain</option>
-              <option value="desert">Desert</option>
-            </select>
+            <span>Shape</span>
+            <div class="editor-shape-btns">
+            <button type="button" class="editor-seg-btn active" data-ed-shape="island">Island</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="rectangle">Rectangle</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="ring">Ring</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="archipelago">Archipelago</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="forest">Forest</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="mountain">Mountain</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="desert">Desert</button>
+            </div>
           </div>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenCities" checked /> Cities during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenTerritory" checked /> Territory during gen</label>
@@ -1644,8 +1645,7 @@
     syncTerritoryOwnerUi();
     const genApp = document.getElementById("mapEditorApp");
     if (genApp) {
-      const gShape = genApp.querySelector("#editorGenMapShape");
-      if (gShape) gShape.value = "island";
+      genApp.querySelectorAll("[data-ed-shape]").forEach(b => b.classList.toggle("active", b.dataset.edShape === "island"));
       const gC = genApp.querySelector("#editorGenCities");
       const gT = genApp.querySelector("#editorGenTerritory");
       const gU = genApp.querySelector("#editorGenUnits");
