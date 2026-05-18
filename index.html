@@ -8180,7 +8180,10 @@
                 aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner),
                 factionColors: factionColors.slice(),
                 roads: gameData.roads.map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r })),
-                forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y }))
+                forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
+                playerPublic: (window.wodMpRoomMeta && window.wodMpRoomMeta.playerPublic && typeof window.wodMpRoomMeta.playerPublic === 'object')
+                    ? JSON.parse(JSON.stringify(window.wodMpRoomMeta.playerPublic))
+                    : {}
             };
         }
         function wodMpRebuildHexesFromList(list) {
@@ -8543,6 +8546,25 @@
             if(s == null) return '';
             return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
         }
+        /** Lobby / match seat label from synced profiles; falls back to local saved name for your slot, else "Seat N". */
+        function wodMpDisplayNameForSlot(slot, context) {
+            context = context || {};
+            let s = slot | 0;
+            if(s < 1) return 'Seat ?';
+            let metaMine = context.meta || (typeof window !== 'undefined' ? window.wodMpRoomMeta : null) || {};
+            let gdMp = context.gameDataMp;
+            if(gdMp == null && typeof gameData !== 'undefined' && gameData.mp) gdMp = gameData.mp;
+            let pub = (gdMp && gdMp.playerPublic) || metaMine.playerPublic || {};
+            let pp = pub[String(s)] || {};
+            let dn = pp.displayName;
+            if(dn && String(dn).trim()) return String(dn).trim();
+            let api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : {};
+            if(api && (api.slot | 0) === s && wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName) {
+                let loc = String(wodProgress.profile.mpDisplayName).trim();
+                if(loc) return loc;
+            }
+            return 'Seat ' + s;
+        }
         function wodMpLobbyEffectiveSlotColor(meta, slot) {
             let pc = (meta && meta.playerColors) || {};
             let hex = pc[String(slot)];
@@ -8882,8 +8904,9 @@
             let sub = document.getElementById('mpGlSub');
             if(sub) {
                 let code = api.code ? 'Code: ' + api.code : '';
+                let myNm = wodMpEscapeHtml(wodMpDisplayNameForSlot(api.slot | 0, { meta }));
                 sub.innerHTML = wodMpEscapeHtml(api.lobbyName || 'Lobby') + (code ? ' · ' + wodMpEscapeHtml(code) : '') +
-                    ' · Your slot: <strong>' + (api.slot | 0) + '</strong> · Humans connected: <strong>' + (wodMpLobbyCount | 0) + '</strong>';
+                    ' · <strong>' + myNm + '</strong> (seat ' + (api.slot | 0) + ') · Humans connected: <strong>' + (wodMpLobbyCount | 0) + '</strong>';
             }
             let readout = document.getElementById('mpGlSettingsReadout');
             if(readout) {
@@ -8929,7 +8952,10 @@
                     if(!active) status = '— Not in this match';
                     else if(seatT === 'closed') status = '<em>Closed</em> — not playing';
                     else if(seatT === 'bot') status = '<strong>AI</strong> occupies this seat';
-                    else if(isOcc) status = (s === api.slot) ? '<strong>You</strong> (human)' : 'Human player (connected)';
+                    else if(isOcc) {
+                        let nm = wodMpEscapeHtml(wodMpDisplayNameForSlot(s, { meta }));
+                        status = '<strong>' + nm + '</strong> (human)';
+                    }
                     else status = 'Open human seat — waiting for join';
 
                     let typeCell = '';
@@ -9076,8 +9102,9 @@
                     .filter(Boolean).join(' · ');
                 if(!detail) detail = 'Host still configuring map';
                 let name = wodMpEscapeHtml(l.name || 'Game');
+                let selfNm = (wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName) ? String(wodProgress.profile.mpDisplayName).trim() : '';
                 let joinPart = myId === l.id
-                    ? '<span style="font-size:12px;opacity:0.85">You are here</span>'
+                    ? '<span style="font-size:12px;opacity:0.85">' + (selfNm ? (wodMpEscapeHtml(selfNm) + ' — you\'re in this lobby') : 'You\'re in this lobby') + '</span>'
                     : '<button type="button" class="build-btn mp-join-btn" data-id="' + wodMpEscapeHtml(l.id) + '" data-locked="' + (l.locked ? '1' : '0') + '">Join</button>';
                 return '<div class="mp-lobby-row" style="border:1px solid rgba(255,255,255,0.12);padding:10px;margin-bottom:8px;border-radius:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">' +
                     '<div style="min-width:0;flex:1">' +
@@ -9355,7 +9382,10 @@
                         seatTypes: st,
                         maxLobbySlots: maxH,
                         lobbyCount: wodMpLobbyCount | 0,
-                        eliminatedSlots: []
+                        eliminatedSlots: [],
+                        playerPublic: (meta.playerPublic && typeof meta.playerPublic === 'object')
+                            ? Object.assign({}, meta.playerPublic)
+                            : {}
                     };
                     hidePanels();
                     gameState = 'PLAYING';
@@ -9485,7 +9515,10 @@
                     humanSlots: pl.humanSlots || [1],
                     seatTypes: pl.seatTypes || [],
                     maxLobbySlots: wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS),
-                    eliminatedSlots: []
+                    eliminatedSlots: [],
+                    playerPublic: (pl.playerPublic && typeof pl.playerPublic === 'object')
+                        ? Object.assign({}, pl.playerPublic)
+                        : {}
                 };
                 if(pl.aiCount != null) gameData.aiCount = pl.aiCount;
                 hidePanels();
@@ -10845,8 +10878,10 @@
             let plyMpLoss, aiMpLoss, plyTkLoss, aiTkLoss, plyShLoss, aiShLoss;
             let endCashVal, endMpVal;
             let rivalIncomeTitle, rivalIncomeSub, shareRivalLabel, lossCardTitle, rivalLossShort, rivalLossLegend;
+            let mpSelfNameEsc = '';
 
             if(isMp) {
+                mpSelfNameEsc = wodMpEscapeHtml(wodMpDisplayNameForSlot(lo, { gameDataMp: gameData.mp }));
                 plyCities = countCitiesForOwner(lo);
                 enCities = 0;
                 for(let c of gameData.cities) if(c.owner > 0 && c.owner !== lo) enCities++;
@@ -10867,7 +10902,7 @@
                 rivalIncomeTitle = 'All rivals (combined)';
                 rivalIncomeSub = 'Sum of every other faction\'s city revenue this match';
                 shareRivalLabel = 'Rivals combined';
-                lossCardTitle = 'Total losses (you vs rivals)';
+                lossCardTitle = 'Total losses (' + mpSelfNameEsc + ' vs rivals)';
                 rivalLossShort = 'Rivals';
                 rivalLossLegend = 'Combined rival losses';
             } else {
@@ -10906,6 +10941,8 @@
                 ? ((gameData.sessionCitiesCapturedByOwner && gameData.sessionCitiesCapturedByOwner[lo]) || 0)
                 : (gameData.sessionCitiesCaptured || 0);
 
+            let csYouLbl = isMp ? mpSelfNameEsc : 'You';
+
             let mpFactionSection = '';
             if(isMp) {
                 let endSpec = gameData._mpLastMatchEnd || {};
@@ -10920,8 +10957,9 @@
                     let resCell = resRaw === 'won' ? '<span class="cs-mp-res-won">Victory</span>'
                         : (resRaw === 'lost' ? '<span class="cs-mp-res-lost">Defeat</span>'
                         : (resRaw === 'ongoing' ? '—' : (resRaw ? String(resRaw) : '—')));
-                    let label = o === lo ? 'You'
-                        : (wodMpIsHumanOwner(o) ? ('Player ' + o) : ('AI seat ' + o));
+                    let label = wodMpIsHumanOwner(o)
+                        ? wodMpEscapeHtml(wodMpDisplayNameForSlot(o, { gameDataMp: gameData.mp }))
+                        : ('AI seat ' + o);
                     let col = factionColors[o] || '#999999';
                     let inc = Math.max(0, Math.floor(byOMp[o] || 0));
                     rowHtml += '<tr>' +
@@ -10969,7 +11007,7 @@
                     '<p class="cs-card-title">Income accrued (city revenue)</p>' +
                     '<div class="cs-dual">' +
                         '<div class="cs-pillar">' +
-                            '<h5>You</h5>' +
+                            '<h5>' + csYouLbl + '</h5>' +
                             '<div class="cs-big">$' + plyIncomeAcc.toLocaleString('en-US') + '</div>' +
                             '<div class="cs-sub">Gross revenue from your cities this match</div>' +
                         '</div>' +
@@ -10980,13 +11018,13 @@
                         '</div>' +
                     '</div>' +
                     '<div class="cs-bar-row" aria-hidden="true">' +
-                        '<div class="cs-bar-head"><span>Share of total gross income</span><span>You ' + pctYouUsd + '% · ' + shareRivalLabel + ' ' + pctAiUsd + '%</span></div>' +
+                        '<div class="cs-bar-head"><span>Share of total gross income</span><span>' + csYouLbl + ' ' + pctYouUsd + '% · ' + shareRivalLabel + ' ' + pctAiUsd + '%</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barUsd.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barUsd.wAi + '"></div>' +
                         '</div>' +
                         '<div class="cs-legend-inline">' +
-                            '<span><span class="cs-dot you" role="presentation"></span> You</span>' +
+                            '<span><span class="cs-dot you" role="presentation"></span> ' + csYouLbl + '</span>' +
                             '<span><span class="cs-dot ai" role="presentation"></span> ' + shareRivalLabel + '</span>' +
                         '</div>' +
                     '</div>' +
@@ -10994,27 +11032,27 @@
                 '<section class="cs-card">' +
                     '<p class="cs-card-title">' + lossCardTitle + '</p>' +
                     '<div class="cs-bar-row">' +
-                        '<div class="cs-bar-head"><span>Soldiers lost (manpower)</span><span>You ' + formatFullCount(plyMpLoss) + ' · ' + rivalLossShort + ' ' + formatFullCount(aiMpLoss) + '</span></div>' +
+                        '<div class="cs-bar-head"><span>Soldiers lost (manpower)</span><span>' + csYouLbl + ' ' + formatFullCount(plyMpLoss) + ' · ' + rivalLossShort + ' ' + formatFullCount(aiMpLoss) + '</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barMp.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barMp.wAi + '"></div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="cs-bar-row">' +
-                        '<div class="cs-bar-head"><span>Armor destroyed</span><span>You ' + formatTanks(plyTkLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiTkLoss) + '</span></div>' +
+                        '<div class="cs-bar-head"><span>Armor destroyed</span><span>' + csYouLbl + ' ' + formatTanks(plyTkLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiTkLoss) + '</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barTk.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barTk.wAi + '"></div>' +
                         '</div>' +
                     '</div>' +
                     '<div class="cs-bar-row">' +
-                        '<div class="cs-bar-head"><span>Ships lost</span><span>You ' + formatTanks(plyShLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiShLoss) + '</span></div>' +
+                        '<div class="cs-bar-head"><span>Ships lost</span><span>' + csYouLbl + ' ' + formatTanks(plyShLoss) + ' · ' + rivalLossShort + ' ' + formatTanks(aiShLoss) + '</span></div>' +
                         '<div class="cs-bar-track">' +
                             '<div class="cs-bar-a" style="width:' + barSh.wYou + '"></div>' +
                             '<div class="cs-bar-b" style="width:' + barSh.wAi + '"></div>' +
                         '</div>' +
                         '<div class="cs-legend-inline">' +
-                            '<span><span class="cs-dot you" role="presentation"></span> Your losses</span>' +
+                            '<span><span class="cs-dot you" role="presentation"></span> ' + (isMp ? (csYouLbl + ' (losses)') : 'Your losses') + '</span>' +
                             '<span><span class="cs-dot ai" role="presentation"></span> ' + rivalLossLegend + '</span>' +
                         '</div>' +
                     '</div>' +
@@ -14672,6 +14710,10 @@
         function wodPromptSaveMapToLibrary() {
             if(!gameData.hexList || gameData.hexList.length === 0) {
                 alert('Generate or load a map first.');
+                return;
+            }
+            if(typeof window.wodShowEditorSaveToLibraryDialog === 'function') {
+                window.wodShowEditorSaveToLibraryDialog();
                 return;
             }
             window.wodShowNameInputDialog({
@@ -20269,8 +20311,16 @@
                 let casualties = formatFullCount(getOwnerCasualties(owner));
                 let tankLosses = formatTanks(getOwnerTankCasualties(owner));
                 let lossMoney = Math.floor(getOwnerCasualtyReplacementCost(owner));
-                let label = owner === wodLocalPlayerOwner() ? 'You'
-                    : (wodMpIsHumanOwner(owner) ? ('Player ' + owner) : ('AI ' + (owner - 1)));
+                let label;
+                if(gameData.mp && gameData.mp.enabled) {
+                    if(wodMpIsHumanOwner(owner))
+                        label = wodMpEscapeHtml(wodMpDisplayNameForSlot(owner, { gameDataMp: gameData.mp }));
+                    else
+                        label = 'AI ' + (owner - 1);
+                } else {
+                    label = owner === wodLocalPlayerOwner() ? 'You'
+                        : (wodMpIsHumanOwner(owner) ? ('Player ' + owner) : ('AI ' + (owner - 1)));
+                }
                 return `<div class="player-row"><span class="player-dot" style="background:${factionColors[owner]}"></span><span>${label}</span><span>$${Math.floor(money)}</span><span>${troops}</span><span>${tanks}</span><span>${ships}</span><span></span></div>
                         <div class="player-row loss-row"><span></span><span>Losses</span><span>$${lossMoney}</span><span>${casualties}</span><span>${tankLosses}</span><span>${shipLosses}</span><span></span></div>`;
             }).join('');

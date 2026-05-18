@@ -704,6 +704,7 @@
   }
 
   function showEditorSaveDialog() {
+    ensureEditorDom();
     const ov = document.getElementById("editorSaveOverlay");
     const nameIn = document.getElementById("editorSaveNewName");
     if (!ov) return;
@@ -746,10 +747,24 @@
     }
     const doSavePayload = () => {
       if (!window.WOD || typeof WOD.exportMapData !== "function") return null;
-      return {
-        mapData: WOD.exportMapData(),
-        thumb: makeThumbnail() || undefined,
-      };
+      const mapData = WOD.exportMapData();
+      let thumb;
+      try {
+        if (state.open) {
+          const c = document.getElementById("editorCanvas");
+          if (c) thumb = c.toDataURL("image/png");
+        }
+      } catch (_) {
+        thumb = undefined;
+      }
+      if (!thumb && typeof window.wodMapDataToThumbnailDataUrl === "function") {
+        try {
+          thumb = window.wodMapDataToThumbnailDataUrl(mapData, 280, 168);
+        } catch (_) {
+          thumb = undefined;
+        }
+      }
+      return { mapData, thumb: thumb || undefined };
     };
     if (asNew) {
       asNew.addEventListener("click", () => {
@@ -922,7 +937,7 @@
       .editor-save-overlay {
         position:fixed;
         inset:0;
-        z-index:60;
+        z-index:13000;
         background:rgba(6,12,20,.75);
         display:flex;
         align-items:center;
@@ -1466,6 +1481,10 @@
       </div>
     `;
     document.body.appendChild(app);
+    const editorSaveOv = document.getElementById("editorSaveOverlay");
+    if (editorSaveOv && editorSaveOv.parentElement !== document.body) {
+      document.body.appendChild(editorSaveOv);
+    }
 
     const terrainSelect = app.querySelector("#editorTerrain");
     terrainSelect.innerHTML = terrainTypes.map(t => `<option value="${t}">${t.replace("_", " ")}</option>`).join("");
@@ -2723,4 +2742,8 @@
   window.openMapEditor = openMapEditor;
   window.closeMapEditor = closeMapEditor;
   window.renderMapBrowser = renderMapBrowser;
+  window.wodShowEditorSaveToLibraryDialog = function () {
+    ensureEditorDom();
+    showEditorSaveDialog();
+  };
 })();
