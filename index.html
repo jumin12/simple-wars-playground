@@ -10187,7 +10187,7 @@
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
             }
-            // Light / heavy: no mountains; route-level movement below keeps them off water.
+            // Light / heavy: no mountains; may enter water (slow / drowning) when path or orders require it.
             if (hex.type === 'mountain') return false;
             if (isWaterHex(hex)) return true;
             return isClaimableLand(hex);
@@ -11274,8 +11274,8 @@
         }
 
         function canUseHexForMovement(unit, hex) {
-            // Route planning is stricter than terrain damage: normal armies stay on cardinal land paths.
-            if(isLandArmyUnit(unit) && isWaterHex(hex)) return false;
+            /* Align with canUnitEnterHex: land armies may path through water when ordered
+               (costly in A*). Land-only marches still use runPathAst(true) which forbids water. */
             return canUnitEnterHex(unit, hex);
         }
 
@@ -11773,7 +11773,8 @@
                 } else {
                     let heavy = (gameData.hexList.length > 9000 ? 5800 / gameData.hexList.length : 1) * (gameData.entities.length > 380 ? 320 / gameData.entities.length : 1);
                     maxVisits = Math.max(900, Math.floor(maxVisits * heavy));
-                    if((unit.type === 'light' || unit.type === 'heavy') && !forbidWater) maxVisits = Math.min(maxVisits, 2400);
+                    if((unit.type === 'light' || unit.type === 'heavy') && !forbidWater)
+                        maxVisits = Math.max(maxVisits, Math.min(34000, 11000 + Math.floor(mapCells * 1.85)));
                     if(unit.type === 'marine' && !forbidWater) maxVisits = Math.min(maxVisits, 3800);
                 }
                 let pathDirs = cardinalHexDirections;
