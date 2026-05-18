@@ -13296,7 +13296,59 @@
             return best;
         }
 
-        function pickBacklineSpawnHex(frontHex, owner, enemyFrontHexes, usedPositions, minSepSq) {
+        function isArmyStartSpawnHex(unit, hex) {
+            if(!hex || !unit) return false;
+            if(hex.owner !== unit.owner) return false;
+            if(isWaterHex(hex) || hex.type === 'mountain') return false;
+            return isClaimableLand(hex);
+        }
+
+        function wodMinDistSqToEnemyTerritory(x, y, owner) {
+            let best = Infinity;
+            for(let h of gameData.hexList) {
+                if(!h || !h.owner || h.owner === owner || h.owner === 0) continue;
+                if(!isClaimableLand(h) || isWaterHex(h)) continue;
+                let dx = h.x - x, dy = h.y - y;
+                let d = dx * dx + dy * dy;
+                if(d < best) best = d;
+            }
+            return best;
+        }
+
+        function getNearestArmyStartSpawnHex(unit, x, y, ringMax) {
+            let probe = { type: unit.type, owner: unit.owner };
+            let ring = ringMax != null ? ringMax : 12;
+            let primary = getNearestHexToPoint(x, y);
+            if(primary && isArmyStartSpawnHex(probe, primary)) return primary;
+            let center = pixelToHex(x, y);
+            let best = null, bestD = Infinity;
+            for(let dq = -ring; dq <= ring; dq++) {
+                for(let dr = -ring; dr <= ring; dr++) {
+                    let h = gameData.hexes[`${center.q + dq},${center.r + dr}`];
+                    if(!isArmyStartSpawnHex(probe, h)) continue;
+                    let dx = h.x - x, dy = h.y - y;
+                    let d = dx * dx + dy * dy;
+                    if(d < bestD) { bestD = d; best = h; }
+                }
+            }
+            return best;
+        }
+
+        function ensureStartUnitOnLandHex(unit, preferHex) {
+            if(!unit || unit.type === 'ship' || unit.type === 'convoy') return;
+            let probe = { type: unit.type, owner: unit.owner };
+            let h = getNearestHexToPoint(unit.x, unit.y);
+            if(h && isArmyStartSpawnHex(probe, h) && !isFrontlineHex(h, unit.owner)) return;
+            let safe = preferHex && isArmyStartSpawnHex(probe, preferHex) && !isFrontlineHex(preferHex, unit.owner)
+                ? preferHex
+                : getNearestArmyStartSpawnHex(unit, unit.x, unit.y, 14);
+            if(safe) {
+                unit.x = safe.x;
+                unit.y = safe.y;
+            }
+        }
+
+        function pickBacklineSpawnHex(frontHex, owner, enemyFrontHexes, usedPositions, minSepSq, forGameStart) {
             let enemyNeighbors = getNeighborHexes(frontHex).filter(nHex => isClaimableLand(nHex) && nHex.owner !== owner);
             let enemyX = 0;
             let enemyY = 0;
@@ -13352,24 +13404,28 @@
             let desiredX = frontHex.x + awayX * backStep;
             let desiredY = frontHex.y + awayY * backStep;
 
-            for(let relaxed = 0; relaxed < 2; relaxed++) {
+            let startPasses = forGameStart ? 3 : 2;
+            for(let relaxed = 0; relaxed < startPasses; relaxed++) {
                 let bestHex = null;
                 let bestScore = Infinity;
                 let minEnemy =
-                    START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * (archipelagoSpawn ? 0.55 : 1) * (relaxed ? 0.72 : 1);
+                    START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * (archipelagoSpawn ? 0.55 : 1) * (forGameStart ? (relaxed ? 0.78 : 1) : (relaxed ? 0.72 : 1));
                 let minEnemySq = minEnemy * minEnemy;
                 let minBand = backStep * (relaxed ? 0.32 : archipelagoSpawn ? 0.2 : 0.42);
                 let maxBand = backStep * (relaxed ? 2.55 : archipelagoSpawn ? 2.25 : 1.85);
                 for(let hex of gameData.hexList) {
-                    if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain' || !canUnitEnterHex(probe, hex)) continue;
-                    if(!relaxed && isFrontlineHex(hex, owner) && !archipelagoSpawn) continue;
+                    if(!isArmyStartSpawnHex(probe, hex)) continue;
+                    if(forGameStart && isFrontlineHex(hex, owner)) continue;
+                    if(!forGameStart && !relaxed && isFrontlineHex(hex, owner) && !archipelagoSpawn) continue;
                     let blockedByUsed = usedPositions.some(pos => {
                         let dx = pos.x - hex.x;
                         let dy = pos.y - hex.y;
                         return dx * dx + dy * dy < minSepSq;
                     });
                     if(blockedByUsed) continue;
-                    let enemyDistSq = enemyFrontHexes.length ? nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes) : Infinity;
+                    let enemyDistSq = wodMinDistSqToEnemyTerritory(hex.x, hex.y, owner);
+                    if(enemyFrontHexes.length)
+                        enemyDistSq = Math.min(enemyDistSq, nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes));
                     if(enemyDistSq < minEnemySq) continue;
                     let foeUnitSq = nearestForeignCombatUnitDistSq(hex.x, hex.y, owner);
                     if(foeUnitSq < 8464) continue; // stay off contact tiles (~92px)
@@ -13382,7 +13438,7 @@
                     let tooFarBehind = Math.max(0, band - backStep * 2.1);
                     let score = dx * dx + dy * dy + tooFarBehind * tooFarBehind * 3;
                     score += hexMountainProximityScore(hex) * 620;
-                    if(relaxed && isFrontlineHex(hex, owner)) score += 90000;
+                    if(!forGameStart && relaxed && isFrontlineHex(hex, owner)) score += 90000;
                     if(enemyDistSq < Infinity) score -= Math.min(enemyDistSq, minEnemySq * 2.4) * 0.025;
                     if(score < bestScore) {
                         bestScore = score;
@@ -13437,17 +13493,19 @@
                     (a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x)
                 );
             }
-            function pickFallbackStartingHex(owner, type, usedPositions, enemyFrontHexes) {
+            function pickFallbackStartingHex(owner, type, usedPositions, enemyFrontHexes, forGameStart) {
                 let probe = { type, owner };
                 let best = null;
                 let bestScore = Infinity;
                 let minSepSqFallback = Math.pow(gameData.hexRadius * (type === 'heavy' ? 2.4 : 2.0), 2);
+                let minEnemySqStart = START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * 0.82;
                 for(let relaxed = 0; relaxed < 3; relaxed++) {
                     best = null;
                     bestScore = Infinity;
                     for(let hex of gameData.hexList) {
-                        if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain' || !canUnitEnterHex(probe, hex)) continue;
-                        if(relaxed === 0 && isFrontlineHex(hex, owner)) continue;
+                        if(!isArmyStartSpawnHex(probe, hex)) continue;
+                        if(forGameStart && isFrontlineHex(hex, owner)) continue;
+                        if(!forGameStart && relaxed === 0 && isFrontlineHex(hex, owner)) continue;
                         if(relaxed < 2 && !worldPositionClearOfUnits(hex.x, hex.y, gameData.hexRadius * 1.65, null)) continue;
                         let blockedByUsed = usedPositions.some(pos => {
                             let dx = pos.x - hex.x;
@@ -13455,11 +13513,12 @@
                             return dx * dx + dy * dy < minSepSqFallback * (relaxed ? 0.55 : 1);
                         });
                         if(blockedByUsed) continue;
-                        let enemyDistSq = enemyFrontHexes.length
-                            ? nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes)
-                            : wodMinDistSqToForeignLand(hex, owner);
+                        let enemyDistSq = wodMinDistSqToEnemyTerritory(hex.x, hex.y, owner);
+                        if(enemyFrontHexes.length)
+                            enemyDistSq = Math.min(enemyDistSq, nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes));
+                        if(forGameStart && enemyDistSq < minEnemySqStart * (relaxed ? 0.65 : 1)) continue;
                         let score = -Math.min(enemyDistSq, Math.pow(gameData.hexRadius * 24, 2));
-                        score += isFrontlineHex(hex, owner) ? 250000 : 0;
+                        if(!forGameStart && isFrontlineHex(hex, owner)) score += 250000;
                         score += hexMountainProximityScore(hex) * 820;
                         if(score < bestScore) {
                             bestScore = score;
@@ -13470,6 +13529,31 @@
                 }
                 return null;
             }
+            function wodFixInvalidStartUnits(ownerIds, frontHexesByOwner) {
+                if(!ownerIds || !ownerIds.length) return;
+                let minEnemySq = START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * 0.82;
+                let usedAll = gameData.entities.filter(u => u && u.hp > 0).map(u => ({ x: u.x, y: u.y }));
+                for(let i = gameData.entities.length - 1; i >= 0; i--) {
+                    let unit = gameData.entities[i];
+                    if(!unit || unit.hp <= 0 || unit.type === 'ship' || unit.type === 'convoy') continue;
+                    if(ownerIds.indexOf(unit.owner) < 0) continue;
+                    let probe = { type: unit.type, owner: unit.owner };
+                    let h = getNearestHexToPoint(unit.x, unit.y);
+                    let invalid = !h || !isArmyStartSpawnHex(probe, h) || isFrontlineHex(h, unit.owner);
+                    if(!invalid && wodMinDistSqToEnemyTerritory(unit.x, unit.y, unit.owner) < minEnemySq) invalid = true;
+                    if(!invalid) continue;
+                    gameData.entities.splice(i, 1);
+                    let enemyFront = [];
+                    for(let o of ownerIds) {
+                        if(o !== unit.owner) enemyFront.push(...(frontHexesByOwner[o] || []));
+                    }
+                    let hex = pickFallbackStartingHex(unit.owner, unit.type, usedAll, enemyFront, true);
+                    if(!hex) continue;
+                    createUnitAt(unit.type, hex.x, hex.y, unit.owner, { startSpawn: true });
+                    usedAll.push({ x: hex.x, y: hex.y });
+                }
+            }
+            gameData.entities = [];
             let usedAll = [];
             for(let owner of ownerIds) {
                 let frontHexes = frontHexesByOwner[owner];
@@ -13494,7 +13578,7 @@
                             let dy = hex.y - candidate.y;
                             return dx * dx + dy * dy < minSepSq;
                         });
-                        let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, safeUnitSepSq);
+                        let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, safeUnitSepSq, true);
                         if(!tooCloseHex && spawnHex) {
                             chosen = spawnHex;
                             break;
@@ -13504,7 +13588,7 @@
                         for(let step = 0; step < frontHexes.length; step++) {
                             let candidate = frontHexes[(startIdx + step) % frontHexes.length];
                             if(candidate.type === 'mountain') continue;
-                            let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, minSepSq);
+                            let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, minSepSq, true);
                             if(spawnHex) {
                                 chosen = spawnHex;
                                 break;
@@ -13513,14 +13597,14 @@
                     }
                     if(!chosen) continue;
                     used.push(chosen);
-                    let unit = createUnitAt('light', chosen.x, chosen.y, owner);
+                    let unit = createUnitAt('light', chosen.x, chosen.y, owner, { startSpawn: true });
                     usedAll.push({x: unit.x, y: unit.y});
                     placedLights++;
                 }
                 while(placedLights < unitsPerOwner) {
-                    let spawnHex = pickFallbackStartingHex(owner, 'light', usedAll, enemyFrontHexes);
+                    let spawnHex = pickFallbackStartingHex(owner, 'light', usedAll, enemyFrontHexes, true);
                     if(!spawnHex) break;
-                    let unit = createUnitAt('light', spawnHex.x, spawnHex.y, owner);
+                    let unit = createUnitAt('light', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
                     used.push(spawnHex);
                     usedAll.push({x: unit.x, y: unit.y});
                     placedLights++;
@@ -13535,9 +13619,9 @@
                     for(let attempt = 0; attempt < Math.min(80, frontHexes.length * 4); attempt++) {
                         let candidate = frontHexes[(hAnchor + attempt) % frontHexes.length];
                         if(candidate.type === 'mountain') continue;
-                        let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, safeUnitSepSq);
+                        let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, safeUnitSepSq, true);
                         if(spawnHex && worldPositionClearOfUnits(spawnHex.x, spawnHex.y, minSep, null)) {
-                            let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner);
+                            let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
                             usedAll.push({x: unit.x, y: unit.y});
                             placed = true;
                             placedHeavies++;
@@ -13546,22 +13630,23 @@
                     }
                     if(!placed) {
                         let candidate = frontHexes.find(x => x.type !== 'mountain') || frontHexes[0];
-                        let spawnHex = candidate ? pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, minSepSq) : null;
+                        let spawnHex = candidate ? pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, minSepSq, true) : null;
                         if(spawnHex) {
-                            let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner);
+                            let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
                             usedAll.push({x: unit.x, y: unit.y});
                             placedHeavies++;
                         }
                     }
                 }
                 while(placedHeavies < numHeavies) {
-                    let spawnHex = pickFallbackStartingHex(owner, 'heavy', usedAll, enemyFrontHexes);
+                    let spawnHex = pickFallbackStartingHex(owner, 'heavy', usedAll, enemyFrontHexes, true);
                     if(!spawnHex) break;
-                    let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner);
+                    let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
                     usedAll.push({x: unit.x, y: unit.y});
                     placedHeavies++;
                 }
             }
+            wodFixInvalidStartUnits(ownerIds, frontHexesByOwner);
         }
 
         function findNearestOwnedHex(owner, x, y, avoidFront = false) {
@@ -15862,8 +15947,10 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
-                if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false))
+                if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false)) {
+                    gameData.entities = [];
                     spawnInitialFrontlineUnits(ownersList);
+                }
 
                 wodMarkTerrainPoliticalDirty();
 
@@ -22757,7 +22844,8 @@
             ensureUnitPixelOnWalkableHex(unit, 28);
         }
 
-        function createUnitAt(type, x, y, owner) {
+        function createUnitAt(type, x, y, owner, opts) {
+            opts = opts || {};
             let unit = {
                 type: type, owner: owner,
                 name: generateUnitName(type),
@@ -22781,17 +22869,21 @@
             unit.moraleBroken = false;
             ensureUnitId(unit);
             if(type !== 'ship') {
-                let safeHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y, 10);
+                let safeHex = opts.startSpawn
+                    ? getNearestArmyStartSpawnHex(unit, x, y, 12)
+                    : getNearestWalkableHexForUnit(unit, unit.x, unit.y, 10);
                 if(safeHex) {
-                    let j = wodSpawnJitterRange();
+                    let j = opts.startSpawn ? wodSpawnJitterRange() * 0.32 : wodSpawnJitterRange();
                     unit.x = safeHex.x + (Math.random() * j * 2 - j);
                     unit.y = safeHex.y + (Math.random() * j * 2 - j);
                 }
             }
             gameData.entities.push(unit);
             if(type !== 'ship') {
+                if(opts.startSpawn) ensureStartUnitOnLandHex(unit, getNearestArmyStartSpawnHex(unit, unit.x, unit.y, 8));
                 snapUnitApartFromNeighbors(unit);
-                ensureUnitPixelOnWalkableHex(unit, 14);
+                if(opts.startSpawn) ensureStartUnitOnLandHex(unit, null);
+                else ensureUnitPixelOnWalkableHex(unit, 14);
             }
             if(gameState === 'PLAYING' && owner === 1 && wodProgress) {
                 if(type === 'light') wodProgress.lifetime.unitsBuiltLight = (wodProgress.lifetime.unitsBuiltLight || 0) + 1;
