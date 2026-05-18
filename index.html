@@ -6916,58 +6916,34 @@
                 };
             }
             if(wodMapShapeUsesRectanglePipeline(mapShape)) {
-                let mz = (Math.random() - 0.5) * 0.14;
                 let rectBiomePreset = mapShape === 'forest' ? 'forest' : mapShape === 'mountain' ? 'mountain' : mapShape === 'desert' ? 'desert' : null;
-                let moistShift = (Math.random() - 0.5) * 0.14 + mz;
-                let waterElevThresh = 0.405 + Math.random() * 0.048;
-                let ra = Math.random();
-                let biomeAccent =
-                    ra < 0.18
-                        ? 'marsh'
-                        : ra < 0.38
-                          ? 'flat_low_mtns'
-                          : ra < 0.62
-                            ? 'balanced'
-                            : ra < 0.82
-                              ? 'dry'
-                              : 'rugged';
-                if(rectBiomePreset === 'forest') {
-                    moistShift += 0.09 + Math.random() * 0.065;
-                    waterElevThresh -= 0.014 + Math.random() * 0.016;
-                    if(biomeAccent === 'dry') biomeAccent = Math.random() < 0.65 ? 'balanced' : 'marsh';
-                } else if(rectBiomePreset === 'desert') {
-                    moistShift -= 0.12 + Math.random() * 0.075;
-                    waterElevThresh += 0.014 + Math.random() * 0.018;
-                    if(biomeAccent === 'marsh') biomeAccent = Math.random() < 0.62 ? 'balanced' : 'dry';
-                } else if(rectBiomePreset === 'mountain') {
-                    moistShift += (Math.random() - 0.5) * 0.07;
-                    waterElevThresh += 0.008 + Math.random() * 0.014;
-                    if(biomeAccent === 'marsh') biomeAccent = 'rugged';
-                }
-                if(biomeAccent === 'marsh') {
-                    moistShift += 0.05 + Math.random() * 0.06;
-                    waterElevThresh -= 0.008 + Math.random() * 0.01;
-                } else if(biomeAccent === 'dry') {
-                    moistShift -= 0.055 + Math.random() * 0.06;
-                    waterElevThresh += 0.008 + Math.random() * 0.012;
-                } else if(biomeAccent === 'rugged') {
-                    moistShift += 0.02 * Math.random();
-                }
-                return {
+                let mz = (Math.random() - 0.5) * 0.14;
+                let base = {
                     islandMode: 'none',
                     rectBiomePreset,
-                    waterElevThresh,
-                    sandThresh: 0.29 + Math.random() * 0.09,
-                    grassThresh: 0.51 + Math.random() * 0.12,
-                    forestThresh: 0.73 + Math.random() * 0.1,
-                    mountElevThresh: 0.805 + Math.random() * 0.065,
-                    moistShift,
-                    forestMoistBoost: (Math.random() - 0.5) * 0.11,
-                    mountainThin: Math.random() < 0.72 ? (0.11 + Math.random() * 0.24) : 0,
-                    maxMountainLandFrac: 0.09 + Math.random() * 0.11,
-                    biomeAccent,
+                    waterElevThresh: 0.42 + Math.random() * 0.04,
+                    sandThresh: 0.32 + Math.random() * 0.06,
+                    grassThresh: 0.54 + Math.random() * 0.1,
+                    forestThresh: 0.76 + Math.random() * 0.1,
+                    mountElevThresh: 0.84 + Math.random() * 0.06,
+                    moistShift: (Math.random() - 0.5) * 0.14 + mz,
+                    forestMoistBoost: (Math.random() - 0.5) * 0.09,
+                    mountainThin: Math.random() < 0.7 ? (0.12 + Math.random() * 0.22) : 0,
+                    maxMountainLandFrac: 0.1 + Math.random() * 0.1,
+                    biomeAccent: Math.random() < 0.32 ? 'marsh' : 'balanced',
                     minMountainHexReserve: 2
                 };
+                if(rectBiomePreset === 'forest') {
+                    base.moistShift += 0.034 + Math.random() * 0.028;
+                    base.waterElevThresh -= 0.005 + Math.random() * 0.006;
+                } else if(rectBiomePreset === 'desert') {
+                    base.moistShift -= 0.042 + Math.random() * 0.034;
+                    base.waterElevThresh += 0.006 + Math.random() * 0.007;
+                } else if(rectBiomePreset === 'mountain') {
+                    base.mountElevThresh -= 0.018 + Math.random() * 0.018;
+                    base.maxMountainLandFrac = Math.min(0.2, base.maxMountainLandFrac + 0.028 + Math.random() * 0.03);
+                }
+                return base;
             }
             if(mapShape !== 'island') {
                 let mz = (Math.random() - 0.5) * 0.14;
@@ -7217,45 +7193,36 @@
             let hi = 0;
             for(let h of gameData.hexList) {
                 if(!h || isWaterHex(h) || h.type === 'urban') continue;
-                let baseType = h.type;
                 let u = fbm(h.x * 0.008 + seedOffset + 9900, h.y * 0.008 + seedOffset + 9900, 4);
-                let mix = fbm(h.x * 0.0107 + seedOffset + 10220, h.y * 0.0107 + seedOffset + 10220, 4);
                 let v = fbm(h.x * 0.0062 + seedOffset + 10440, h.y * 0.0062 + seedOffset + 10440, 4);
                 let t = Math.max(0, Math.min(1, u + (v - 0.5) * 0.12));
-                if(mix < 0.23) {
-                    if(baseType === 'water') {
-                        if((++hi & 255) === 0) await wodMapGenYieldSlice();
-                        continue;
-                    }
-                    let bt = baseType;
-                    if(preset === 'forest') {
-                        if(bt === 'mountain') bt = u > 0.62 ? 'hill' : 'forest';
-                        else if(bt === 'swamp' && u > 0.72) bt = 'forest';
-                    } else if(preset === 'desert') {
-                        if(bt === 'forest' || bt === 'swamp') bt = u > 0.58 ? 'sand' : 'grass';
-                    } else if(preset === 'mountain') {
-                        if(bt === 'swamp') bt = 'grass';
-                        else if(bt === 'forest' && u > 0.68) bt = 'hill';
-                    }
-                    wodSetGeneratedTerrainType(h, bt);
+                let region = fbm(h.x * 0.0025 + seedOffset + 7710, h.y * 0.0025 + seedOffset + 7710, 3);
+                if(region < 0.5) {
+                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                    continue;
+                }
+                let edge = 0.065;
+                let w = Math.max(0, Math.min(1, (region - (0.5 - edge)) / (2 * edge)));
+                let soften = fbm(h.x * 0.017 + seedOffset + 3310, h.y * 0.017 + seedOffset + 3310, 2);
+                if(w < 0.995 && soften > 0.38 + w * 0.52) {
                     if((++hi & 255) === 0) await wodMapGenYieldSlice();
                     continue;
                 }
                 if(preset === 'forest') {
-                    if(t < 0.048) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(t < 0.082) wodSetGeneratedTerrainType(h, 'sand');
-                    else if(t < 0.11) wodSetGeneratedTerrainType(h, 'hill');
-                    else if(t < 0.135) wodSetGeneratedTerrainType(h, 'swamp');
+                    if(t < 0.055) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(t < 0.095) wodSetGeneratedTerrainType(h, 'sand');
+                    else if(t < 0.125) wodSetGeneratedTerrainType(h, 'hill');
+                    else if(t < 0.155) wodSetGeneratedTerrainType(h, 'swamp');
                     else wodSetGeneratedTerrainType(h, 'forest');
                 } else if(preset === 'desert') {
-                    if(t < 0.055) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(t < 0.09) wodSetGeneratedTerrainType(h, 'hill');
-                    else if(t < 0.118) wodSetGeneratedTerrainType(h, 'forest');
+                    if(t < 0.06) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(t < 0.1) wodSetGeneratedTerrainType(h, 'hill');
+                    else if(t < 0.132) wodSetGeneratedTerrainType(h, 'forest');
                     else wodSetGeneratedTerrainType(h, 'sand');
                 } else if(preset === 'mountain') {
-                    if(t < 0.195) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(t < 0.315) wodSetGeneratedTerrainType(h, 'forest');
-                    else if(t < 0.505) wodSetGeneratedTerrainType(h, 'hill');
+                    if(t < 0.21) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(t < 0.34) wodSetGeneratedTerrainType(h, 'forest');
+                    else if(t < 0.52) wodSetGeneratedTerrainType(h, 'hill');
                     else wodSetGeneratedTerrainType(h, 'mountain');
                 }
                 if((++hi & 255) === 0) await wodMapGenYieldSlice();
