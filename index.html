@@ -8244,6 +8244,7 @@
                 requestAnimationFrame(() => {
                     (async function() {
                         try {
+                            if(gameState === 'PLAYING') return;
                             let r = parseInt(meta.mapSize, 10) || 60;
                             gameData.mapRadius = r;
                             if(shapeEl) shapeEl.value = meta.mapShape || 'island';
@@ -8273,20 +8274,25 @@
                             } finally {
                                 wodPopRandom();
                             }
+                            if(gameState === 'PLAYING') return;
                             previewLoadedMap('mpLobbyMapPreview');
                             _wodMpLobbyPreviewLastFp = fp;
                         } catch(err) {
                             console.warn('Lobby preview', err);
                         } finally {
-                            wodMpRestoreLobbyGenBackup(snap);
-                            let msRestore = document.getElementById('setupMapSize');
-                            if(msRestore && meta.mapSize != null) msRestore.value = String(meta.mapSize);
-                            if(shapeEl && meta.mapShape) shapeEl.value = meta.mapShape;
+                            if(gameState !== 'PLAYING') {
+                                wodMpRestoreLobbyGenBackup(snap);
+                                let msRestore = document.getElementById('setupMapSize');
+                                if(msRestore && meta.mapSize != null) msRestore.value = String(meta.mapSize);
+                                if(shapeEl && meta.mapShape) shapeEl.value = meta.mapShape;
+                            }
                             wodDisarmMapPreviewSpinner('mpLobbyMapPreview');
                             _wodMpLobbyPreviewBusy = false;
-                            if(_wodMpLobbyPreviewQueued) {
+                            if(gameState !== 'PLAYING' && _wodMpLobbyPreviewQueued) {
                                 _wodMpLobbyPreviewQueued = false;
                                 requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
+                            } else {
+                                _wodMpLobbyPreviewQueued = false;
                             }
                         }
                     })();
@@ -8824,36 +8830,45 @@
                 if(!WodMultiplayer.api || !WodMultiplayer.api.isHost) return;
                 let meta = window.wodMpRoomMeta;
                 if(!wodMpValidateLaunchReady(meta)) return;
-                wodMpEnsureDefaultSeatTypes(meta);
-                let maxH = wodMpClampLobbyCap(meta.maxHumans);
-                let st = (meta.seatTypes || []).slice(0, maxH);
-                while(st.length < maxH) st.push('human');
-                let occ = (meta.occupiedSlots || []).slice().sort((a, b) => a - b);
-                wodMpApplyMetaToSetupFields(meta);
-                wodMpApplyLaunchColorsFromHumans(meta, occ);
-                gameData.aiCount = st.filter(t => t === 'bot').length;
-                gameData.mp = {
-                    enabled: true, isHost: true, localSlot: WodMultiplayer.api.slot,
-                    humanSlots: occ,
-                    seatTypes: st,
-                    maxLobbySlots: maxH,
-                    lobbyCount: wodMpLobbyCount | 0,
-                    eliminatedSlots: []
-                };
-                hidePanels();
-                gameState = 'PLAYING';
-                pauseMenuBackgroundBattle();
-                menuDemoSeeded = false;
-                UI.mainMenu.classList.add('hidden');
-                UI.panels.forEach(p => p.classList.add('hidden'));
-                UI.escMenu.classList.add('hidden');
-                UI.inGameUI.style.display = 'block';
-                UI.canvas.style.display = 'block';
-                wodSetMpMatchUiFlag(true);
-                wodResetMobileHud();
-                if(!gameData.layers) gameData.layers = {};
-                gameData.layers.territory = false;
                 void (async function() {
+                    let spin = performance.now();
+                    while(typeof _wodMpLobbyPreviewBusy !== 'undefined' && _wodMpLobbyPreviewBusy && performance.now() - spin < 90000) {
+                        await new Promise(r => setTimeout(r, 24));
+                    }
+                    if(typeof _wodMpLobbyPreviewBusy !== 'undefined' && _wodMpLobbyPreviewBusy) {
+                        showNotification('Lobby map preview is still generating — wait a moment and tap Launch again.');
+                        return;
+                    }
+                    if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
+                    wodMpEnsureDefaultSeatTypes(meta);
+                    let maxH = wodMpClampLobbyCap(meta.maxHumans);
+                    let st = (meta.seatTypes || []).slice(0, maxH);
+                    while(st.length < maxH) st.push('human');
+                    let occ = (meta.occupiedSlots || []).slice().sort((a, b) => a - b);
+                    wodMpApplyMetaToSetupFields(meta);
+                    wodMpApplyLaunchColorsFromHumans(meta, occ);
+                    gameData.aiCount = st.filter(t => t === 'bot').length;
+                    gameData.mp = {
+                        enabled: true, isHost: true, localSlot: WodMultiplayer.api.slot,
+                        humanSlots: occ,
+                        seatTypes: st,
+                        maxLobbySlots: maxH,
+                        lobbyCount: wodMpLobbyCount | 0,
+                        eliminatedSlots: []
+                    };
+                    hidePanels();
+                    gameState = 'PLAYING';
+                    pauseMenuBackgroundBattle();
+                    menuDemoSeeded = false;
+                    UI.mainMenu.classList.add('hidden');
+                    UI.panels.forEach(p => p.classList.add('hidden'));
+                    UI.escMenu.classList.add('hidden');
+                    UI.inGameUI.style.display = 'block';
+                    UI.canvas.style.display = 'block';
+                    wodSetMpMatchUiFlag(true);
+                    wodResetMobileHud();
+                    if(!gameData.layers) gameData.layers = {};
+                    gameData.layers.territory = false;
                     try {
                         await initGame();
                     } catch(e) {
