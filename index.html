@@ -17459,9 +17459,15 @@
             let color = hex.baseColor;
             ctx.fillStyle = color;
             if(!gameData.layers || gameData.terrainViewMode === 'schematic') return;
-            let discMul = isWaterHex(hex) ? 0.91 : 0.74;
+            /* Map cells use a square lattice; water as circles leaves rhombus gaps (darker base #154360).
+               Tile water with slightly oversized squares so channels read as solid fill. */
+            if(isWaterHex(hex)) {
+                let wsq = spacing * 1.08;
+                ctx.fillRect(px - wsq / 2, py - wsq / 2, wsq, wsq);
+                return;
+            }
             ctx.beginPath();
-            ctx.arc(px, py, spacing * discMul, 0, Math.PI * 2);
+            ctx.arc(px, py, spacing * 0.74, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -17471,17 +17477,15 @@
 
         function drawTerrainSchematicMap(ctx, offsetX, offsetY) {
             let spacing = gameData.hexRadius * 1.35;
-            let discRW = spacing * 0.91;
+            let wsqW = spacing * 1.08;
             let discRL = spacing * 0.74;
             ctx.fillStyle = '#1f588f';
             ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
             for(let hex of gameData.hexList) {
                 if(!isWaterHex(hex)) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
-                ctx.beginPath();
-                ctx.arc(px, py, discRW, 0, Math.PI * 2);
                 ctx.fillStyle = '#2980b9';
-                ctx.fill();
+                ctx.fillRect(px - wsqW / 2, py - wsqW / 2, wsqW, wsqW);
             }
             for(let hex of gameData.hexList) {
                 if(isWaterHex(hex)) continue;
