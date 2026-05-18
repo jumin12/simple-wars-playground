@@ -7180,10 +7180,19 @@
                     await wodMapGenYieldSlice();
                     continue;
                 }
-                let before = wodCountPassableLandComponents();
-                let backup = [];
+                let riverFillKeys = new Set();
                 for(let pi = 1; pi < path.length; pi++) {
                     let hx = path[pi];
+                    if(!hx || isWaterHex(hx)) continue;
+                    riverFillKeys.add(getHexKey(hx));
+                    for(let nb of getNeighborHexes(hx)) {
+                        if(nb && landOk(nb) && !isWaterHex(nb)) riverFillKeys.add(getHexKey(nb));
+                    }
+                }
+                let before = wodCountPassableLandComponents();
+                let backup = [];
+                for(let rk of riverFillKeys) {
+                    let hx = gameData.hexes[rk];
                     if(!hx || isWaterHex(hx)) continue;
                     backup.push({ hex: hx, type: hx.type, baseColor: hx.baseColor, renderColor: hx.renderColor });
                     wodSetGeneratedTerrainType(hx, 'water');
@@ -17450,8 +17459,9 @@
             let color = hex.baseColor;
             ctx.fillStyle = color;
             if(!gameData.layers || gameData.terrainViewMode === 'schematic') return;
+            let discMul = isWaterHex(hex) ? 0.91 : 0.74;
             ctx.beginPath();
-            ctx.arc(px, py, spacing * 0.74, 0, Math.PI * 2);
+            ctx.arc(px, py, spacing * discMul, 0, Math.PI * 2);
             ctx.fill();
         }
 
@@ -17461,14 +17471,15 @@
 
         function drawTerrainSchematicMap(ctx, offsetX, offsetY) {
             let spacing = gameData.hexRadius * 1.35;
-            let discR = spacing * 0.74;
+            let discRW = spacing * 0.91;
+            let discRL = spacing * 0.74;
             ctx.fillStyle = '#1f588f';
             ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
             for(let hex of gameData.hexList) {
                 if(!isWaterHex(hex)) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
                 ctx.beginPath();
-                ctx.arc(px, py, discR, 0, Math.PI * 2);
+                ctx.arc(px, py, discRW, 0, Math.PI * 2);
                 ctx.fillStyle = '#2980b9';
                 ctx.fill();
             }
@@ -17476,7 +17487,7 @@
                 if(isWaterHex(hex)) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
                 ctx.beginPath();
-                ctx.arc(px, py, discR, 0, Math.PI * 2);
+                ctx.arc(px, py, discRL, 0, Math.PI * 2);
                 ctx.fillStyle = '#f7f9fc';
                 ctx.fill();
             }
@@ -17602,7 +17613,7 @@
             let sameTerrainDirs = hexDirections;
 
             ctx.strokeStyle = color;
-            ctx.lineWidth = spacing * 1.25;
+            ctx.lineWidth = spacing * (type === 'water' ? 1.52 : 1.25);
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
 
