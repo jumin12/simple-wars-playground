@@ -1321,11 +1321,8 @@
             </div>
           </div>
 
-          <div class="editor-row"><label>Period</label><select id="editorGenPeriod">
-            <option value="modern" selected>Modern (NATO)</option>
-            <option value="napoleonic">Napoleonic</option>
-            <option value="ancient">Ancient</option>
-            <option value="medieval">Medieval</option>
+          <div class="editor-row" id="editorGenPeriodRow" style="display:none"><label>Period</label><select id="editorGenPeriod">
+            <option value="modern" selected>Modern</option>
           </select></div>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenCities" checked /> Cities during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenTerritory" checked /> Territory during gen</label>
@@ -1579,10 +1576,15 @@
       if (state.open) editorInitHistory();
     });
     const editorGenPeriod = app.querySelector("#editorGenPeriod");
+    const editorGenPeriodRow = app.querySelector("#editorGenPeriodRow");
     if (editorGenPeriod && window.WOD) {
       editorGenPeriod.addEventListener("change", () => {
         if (typeof WOD.wodApplyGamePeriod === "function") WOD.wodApplyGamePeriod(editorGenPeriod.value);
       });
+      if (typeof WOD.wodRefreshPeriodSelectorVisibility === "function") WOD.wodRefreshPeriodSelectorVisibility();
+      else if (editorGenPeriodRow && typeof WOD.wodHasAnyEraSkinUnlocked === "function") {
+        editorGenPeriodRow.style.display = WOD.wodHasAnyEraSkinUnlocked() ? "" : "none";
+      }
       if (WOD.gameData && WOD.gameData.gamePeriod) editorGenPeriod.value = WOD.gameData.gamePeriod;
     }
     app.querySelector("#editorRandom").addEventListener("click", async () => {

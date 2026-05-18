@@ -5234,13 +5234,10 @@
                     </select>
                 </div>
                 <p class="setup-victory-hint" id="setupVictoryModeDetail"></p>
-                <div class="setup-row">
+                <div class="setup-row hidden" id="setupGamePeriodRow">
                     <label>Time period:</label>
-                    <select id="setupGamePeriod" title="Unit counter style and themed names for this match">
-                        <option value="modern" selected>Modern (NATO counters)</option>
-                        <option value="napoleonic">Line Wars (Napoleonic)</option>
-                        <option value="ancient">Ancient</option>
-                        <option value="medieval">Medieval</option>
+                    <select id="setupGamePeriod" title="Themed unit names and buildings for this match">
+                        <option value="modern" selected>Modern</option>
                     </select>
                 </div>
                 <div class="setup-row">
@@ -5398,12 +5395,9 @@
                     </select>
                 </div>
                 <p class="setup-victory-hint" id="mpCfgVictoryDetail" style="text-align:left;font-size:13px"></p>
-                <div class="setup-row"><label>Time period</label>
+                <div class="setup-row hidden" id="mpCfgGamePeriodRow"><label>Time period</label>
                     <select id="mpCfgGamePeriod" style="flex:1">
-                        <option value="modern" selected>Modern (NATO counters)</option>
-                        <option value="napoleonic">Line Wars (Napoleonic)</option>
-                        <option value="ancient">Ancient</option>
-                        <option value="medieval">Medieval</option>
+                        <option value="modern" selected>Modern</option>
                     </select>
                 </div>
                 <div class="setup-row"><label>Starting money</label>
@@ -5625,13 +5619,10 @@
                 <p>Spend <strong>100 gold</strong> to permanently unlock styles. Equip unlocked looks below — <strong>Yours</strong> and <strong>AI</strong> use independent picks.</p>
                 <p>Gold: <strong id="shopGold">1000</strong></p>
 
-                <div class="shop-period-row setup-row" style="max-width:480px;margin:12px 0 16px">
+                <div class="shop-period-row setup-row hidden" id="shopGamePeriodRow" style="max-width:480px;margin:12px 0 16px">
                     <label>Time period</label>
-                    <select id="shopGamePeriod" title="Counter art and themed names for your next battles" style="flex:1">
-                        <option value="modern" selected>Modern (NATO counters)</option>
-                        <option value="napoleonic">Napoleonic (Line Wars style)</option>
-                        <option value="ancient">Ancient</option>
-                        <option value="medieval">Medieval</option>
+                    <select id="shopGamePeriod" title="Themed unit names and buildings for your next battles" style="flex:1">
+                        <option value="modern" selected>Modern</option>
                     </select>
                 </div>
 
@@ -5772,16 +5763,13 @@
                     <p>Clear all saved data for this browser: achievements, lifetime stats, gold, and unlocked unit skins. This cannot be undone.</p>
                     <button type="button" class="menu-btn danger-btn" onclick="resetAllGameProgress()">Reset all progress</button>
                 </div>
-                <div class="settings-section">
+                <div class="settings-section hidden" id="settingsGamePeriodSection">
                     <h3 style="color:#9b59b6;margin-top:0;">Time period</h3>
-                    <p style="margin:0 0 8px 0;">Default era for solo setup, multiplayer, and the map editor. Unlock Napoleonic, Ancient, and Medieval in the skin shop.</p>
+                    <p style="margin:0 0 8px 0;">Default era for solo setup, multiplayer, and the map editor. Unlock era skins in the unit skin shop to choose a period.</p>
                     <div class="setup-row" style="max-width:420px">
                         <label>Default period</label>
                         <select id="settingsGamePeriod" style="flex:1">
-                            <option value="modern" selected>Modern (NATO counters)</option>
-                            <option value="napoleonic">Line Wars (Napoleonic)</option>
-                            <option value="ancient">Ancient</option>
-                            <option value="medieval">Medieval</option>
+                            <option value="modern" selected>Modern</option>
                         </select>
                     </div>
                 </div>
@@ -9072,12 +9060,12 @@
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
             for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupMoney', 'setupPlayerColor',
-                'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn']) {
+                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch', 'mpGlMaxHumans',
                 'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
-                'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgMoney', 'mpCfgPlayerColor',
+                'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
                 'mpCfgRulesApply', 'mpCfgRulesClose']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
@@ -10206,8 +10194,10 @@
             }
             if(gameData.ownedUnitSkins[skin]) {
                 if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
+                    gameData.unitSkin = skin;
                     wodApplyGamePeriod(skin, { saveProfile: true });
-                    showNotification(wodPeriodLabel(skin) + ' era selected.');
+                    updateSkinShop();
+                    showNotification(wodPeriodLabel(skin) + ' era equipped.');
                     return;
                 }
                 showNotification('Already unlocked. Use the dropdowns to equip.');
@@ -10218,6 +10208,7 @@
             gameData.ownedUnitSkins[skin] = true;
             if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
                 wodGrantPeriodSkinAchievement(skin);
+                gameData.unitSkin = skin;
                 wodApplyGamePeriod(skin, { saveProfile: true });
                 showNotification(wodPeriodLabel(skin) + ' era unlocked and equipped!');
             } else {
@@ -10225,6 +10216,7 @@
             }
             updateSkinShop();
             wodSyncAllPeriodSelects();
+            wodRefreshPeriodSelectorVisibility();
             scheduleSaveWodProgress();
         }
 
@@ -10753,6 +10745,7 @@
             gameData.gamePeriod = (p.gamePeriod && wodIsPeriodUnlocked(p.gamePeriod)) ? p.gamePeriod : 'modern';
             syncGoldenChipUnlockFromAchievements();
             wodSyncAllPeriodSelects();
+            wodRefreshPeriodSelectorVisibility();
         }
 
         function syncGoldenChipUnlockFromAchievements() {
@@ -10859,20 +10852,27 @@
             badges.innerHTML = html;
 
             let statsL = wodProgress.lifetime;
-            let statsPeriod = (_achStatsPeriodFilter && _achStatsPeriodFilter !== 'all') ? _achStatsPeriodFilter : 'all';
-            if(statsPeriod !== 'all') statsL = wodLifetimeBucket(statsPeriod) || statsL;
-            let sf = wodPeriodFlavor(statsPeriod);
+            let statsPeriod = 'all';
+            if(_achStatsPeriodFilter && _achStatsPeriodFilter !== 'all') {
+                statsL = wodLifetimeBucket(_achStatsPeriodFilter) || statsL;
+                statsPeriod = _achStatsPeriodFilter;
+            }
+            let sf = wodStatsFlavor(statsPeriod);
             function sc(lab, val) {
                 return `<div class="stat-cell"><div class="stat-label">${lab}</div><div class="stat-value">${val}</div></div>`;
             }
-            let periodOpts = '<option value="all"' + (_achStatsPeriodFilter === 'all' ? ' selected' : '') + '>All periods (combined)</option>';
-            for(let pid of WOD_PERIOD_IDS) {
-                periodOpts += '<option value="' + pid + '"' + (_achStatsPeriodFilter === pid ? ' selected' : '') + '>' + wodPeriodLabel(pid) + '</option>';
+            let periodBar = '';
+            if(wodHasAnyEraSkinUnlocked()) {
+                let periodOpts = '<option value="all"' + (_achStatsPeriodFilter === 'all' ? ' selected' : '') + '>All periods (combined)</option>';
+                for(let pid of wodListUnlockedPeriodIds()) {
+                    periodOpts += '<option value="' + pid + '"' + (_achStatsPeriodFilter === pid ? ' selected' : '') + '>' + wodPeriodLabel(pid) + '</option>';
+                }
+                periodBar = `<div class="stats-period-bar setup-row" style="margin-bottom:14px;max-width:360px">
+                    <label>Stats period</label>
+                    <select id="achStatsPeriodFilter" style="flex:1">${periodOpts}</select>
+                </div>`;
             }
-            stats.innerHTML = `<div class="stats-period-bar setup-row" style="margin-bottom:14px;max-width:360px">
-                <label>Stats period</label>
-                <select id="achStatsPeriodFilter" style="flex:1">${periodOpts}</select>
-            </div>
+            stats.innerHTML = `${periodBar}
             <div class="stats-layout">
                 <section class="stats-section">
                     <h3 class="stats-section-title">Combat</h3>
@@ -10881,7 +10881,7 @@
                             <div class="stats-combat-sub">Your forces</div>
                             <div class="stats-grid stats-grid--combat-row">
                                 ${sc(sf.statOwnInfantry, formatLifetimeBig(statsL.ownTroopLosses))}
-                                ${sc(sf.statOwnMarine, formatLifetimeBig(statsL.ownMarineLosses || 0))}
+                                ${sc(sf.statOwnMarine, formatLifetimeBig(statsL.ownMarineLosses))}
                                 ${sc(sf.statOwnHeavy, formatLifetimeBig(statsL.ownTankLosses))}
                                 ${sc(sf.statOwnShips, formatLifetimeBig(statsL.ownShipLosses))}
                             </div>
@@ -10890,7 +10890,7 @@
                             <div class="stats-combat-sub">Enemy</div>
                             <div class="stats-grid stats-grid--combat-row">
                                 ${sc(sf.statEnemyInfantry, formatLifetimeBig(statsL.enemyTroopKills))}
-                                ${sc(sf.statEnemyMarine, formatLifetimeBig(statsL.enemyMarineKills || 0))}
+                                ${sc(sf.statEnemyMarine, formatLifetimeBig(statsL.enemyMarineKills))}
                                 ${sc(sf.statEnemyHeavy, formatLifetimeBig(statsL.enemyTankKills))}
                                 ${sc(sf.statEnemyShips, formatLifetimeBig(statsL.enemyShipKills))}
                             </div>
@@ -10914,7 +10914,7 @@
                         ${sc('Peak cash held (one campaign)', formatLifetimeBig(statsL.peakMoneyHeld))}
                         ${sc(sf.statFactories, formatLifetimeBig(statsL.factoriesBuilt))}
                         ${sc(sf.statHarbors, formatLifetimeBig(statsL.harborsBuilt))}
-                        ${sc(sf.statForts, formatLifetimeBig(statsL.fortsBuilt || 0))}
+                        ${sc(sf.statForts, formatLifetimeBig(statsL.fortsBuilt))}
                     </div>
                 </section>
                 <section class="stats-section">
@@ -11959,7 +11959,7 @@
             return mp * (WOD_PRICE_LIGHT / mi);
         }
 
-        function addCasualties(owner, amount, sourceOwner = 0) {
+        function addCasualties(owner, amount, sourceOwner = 0, unitType = 'light') {
             amount = Math.max(0, amount || 0);
             if(amount <= 0) return;
             if(!gameData.casualtiesByOwner) gameData.casualtiesByOwner = {};
@@ -11971,45 +11971,17 @@
             if(owner === 1) gameData.casualties = (gameData.casualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerKills = (gameData.playerKills || 0) + amount;
             if(wodProgress) {
+                let killField = unitType === 'marine' ? 'enemyMarineKills' : 'enemyTroopKills';
+                let lossField = unitType === 'marine' ? 'ownMarineLosses' : 'ownTroopLosses';
                 if(sourceOwner === 1 && owner !== 1) {
-                    wodBumpLifetime('enemyTroopKills', amount);
+                    wodBumpLifetime(killField, amount);
                     checkWodAchievements();
                     scheduleSaveWodProgress();
                 } else if(owner === 1 && sourceOwner !== 1) {
-                    wodBumpLifetime('ownTroopLosses', amount);
+                    wodBumpLifetime(lossField, amount);
                     scheduleSaveWodProgress();
                 }
             }
-        }
-
-        function addMarineCasualties(owner, amount, sourceOwner = 0) {
-            amount = Math.max(0, amount || 0);
-            if(amount <= 0) return;
-            if(!gameData.marineCasualtiesByOwner) gameData.marineCasualtiesByOwner = {};
-            gameData.marineCasualtiesByOwner[owner] = (gameData.marineCasualtiesByOwner[owner] || 0) + amount;
-            if(sourceOwner > 0 && owner > 0 && owner !== sourceOwner) {
-                if(!gameData.marineKillsByOwner) gameData.marineKillsByOwner = {};
-                gameData.marineKillsByOwner[sourceOwner] = (gameData.marineKillsByOwner[sourceOwner] || 0) + amount;
-            }
-            if(owner === 1) gameData.marineCasualties = (gameData.marineCasualties || 0) + amount;
-            if(sourceOwner === 1 && owner !== 1) gameData.playerMarineKills = (gameData.playerMarineKills || 0) + amount;
-            if(wodProgress) {
-                if(sourceOwner === 1 && owner !== 1) {
-                    wodBumpLifetime('enemyMarineKills', amount);
-                    scheduleSaveWodProgress();
-                } else if(owner === 1 && sourceOwner !== 1) {
-                    wodBumpLifetime('ownMarineLosses', amount);
-                    scheduleSaveWodProgress();
-                }
-            }
-        }
-
-        function wodRouteManpowerCasualties(unit, casualties, source) {
-            if(casualties <= 0) return;
-            if(unit.type === 'marine') addMarineCasualties(unit.owner, casualties, source);
-            else if(unit.type === 'light') addCasualties(unit.owner, casualties, source);
-            else if(unit.type !== 'heavy' && unit.type !== 'ship' && unit.type !== 'convoy')
-                addCasualties(unit.owner, casualties, source);
         }
 
         function addTankCasualties(owner, amount, sourceOwner = 0) {
@@ -12076,7 +12048,7 @@
             let casualties = unit.type === 'convoy' ? 0 : Math.min(prevManpower, hpLossRatio * (unit.maxManpower || 1000));
             if(unit.hp <= 0 && unit.type !== 'convoy') casualties = prevManpower;
             unit.manpower = Math.max(0, prevManpower - casualties);
-            wodRouteManpowerCasualties(unit, casualties, source);
+            addCasualties(unit.owner, casualties, source, unit.type === 'marine' ? 'marine' : 'light');
             if(unit.type !== 'convoy') {
                 unit.morale = Math.max(0, (unit.morale != null ? unit.morale : WOD_MORALE_MAX) - (amount / unit.maxHp) * 52);
             }
@@ -18321,7 +18293,7 @@
                 ensureUnitId(unit);
                 if (unit.hp <= 0) {
                     if(unit.type !== 'convoy' && (unit.manpower || 0) > 0) {
-                        wodRouteManpowerCasualties(unit, unit.manpower, 0);
+                        addCasualties(unit.owner, unit.manpower, 0, unit.type === 'marine' ? 'marine' : 'light');
                         if(unit.type === 'heavy' && (unit.tanks || 0) > 0) addTankCasualties(unit.owner, unit.tanks);
                     }
                     unit.target = null;
@@ -19995,35 +19967,7 @@
             return p;
         }
 
-        function wodPeriodFlavorAll() {
-            return {
-                light: 'Infantry', marine: 'Marines', heavy: 'Heavy units', ship: 'Ships',
-                convoyLand: 'Land trade convoy', convoySea: 'Sea trade convoy',
-                trainLight: 'Train infantry', trainMarine: 'Train marines', trainHeavy: 'Train heavy units', trainShip: 'Build ships',
-                factory: 'Factory', harbor: 'Harbor', fort: 'Fort',
-                cityTown: 'Town', cityPort: 'Port', cityIndustrial: 'Industrial city', cityPortIndustrial: 'Industrial port',
-                unitLight: (n) => n + 'th Infantry',
-                unitMarine: (n) => n + 'th Marines',
-                unitHeavy: (n) => n + 'th Heavy formation',
-                unitShip: (n) => 'Ship ' + n,
-                unitConvoy: (n, sea) => (sea ? 'Sea convoy ' : 'Land convoy ') + n,
-                hudHeavy: 'Heavy units', hudShips: 'Ships', hudInfantryLost: 'Infantry lost', hudMarineLost: 'Marines lost',
-                hudHeavyLost: 'Heavy units lost', hudShipsLost: 'Ships lost',
-                hudInfantryKills: 'Infantry', hudMarineKills: 'Marines', hudHeavyKills: 'Heavy units', hudShipsKills: 'Ships',
-                heavyCount: 'Heavy units', playerSummaryHeavy: 'Heavy units', summaryHeavyDestroyed: 'Heavy units destroyed',
-                statOwnInfantry: 'Infantry lost', statOwnMarine: 'Marines lost', statOwnHeavy: 'Heavy units lost', statOwnShips: 'Ships lost',
-                statEnemyInfantry: 'Infantry eliminated', statEnemyMarine: 'Marines eliminated', statEnemyHeavy: 'Heavy units eliminated', statEnemyShips: 'Ships sunk',
-                statFactories: 'Factories built', statHarbors: 'Harbors built', statForts: 'Forts built',
-                statTrainLight: 'Infantry trained', statTrainMarine: 'Marines trained', statTrainHeavy: 'Heavy units trained', statTrainShip: 'Ships trained',
-                achHunter: 'Heavy unit hunter', achHunterDesc: 'Eliminate 200 enemy heavy units (lifetime).',
-                achIndustrial: 'Industrial base', achIndustrialDesc: 'Build 12 factories in towns you control.',
-                achAdmiralty: 'Admiralty works', achAdmiraltyDesc: 'Build 12 harbors in towns you control.',
-                helpHeavy: 'Heavy units', matrixHeavy: 'Heavy units'
-            };
-        }
-
         function wodPeriodFlavor(period) {
-            if(period === 'all') return wodPeriodFlavorAll();
             period = period || wodGetGamePeriod();
             const F = {
                 modern: {
@@ -20041,8 +19985,8 @@
                     hudHeavy: 'Armor', hudShips: 'Ships', hudInfantryLost: 'Soldiers lost', hudHeavyLost: 'Tanks lost', hudShipsLost: 'Ships lost',
                     hudInfantryKills: 'Soldiers', hudHeavyKills: 'Tanks', hudShipsKills: 'Ships',
                     heavyCount: 'Tanks', playerSummaryHeavy: 'Tanks', summaryHeavyDestroyed: 'Armor destroyed',
-                    statOwnInfantry: 'Infantry lost', statOwnMarine: 'Marines lost', statOwnHeavy: 'Armor lost', statOwnShips: 'Ships lost',
-                    statEnemyInfantry: 'Infantry eliminated', statEnemyMarine: 'Marines eliminated', statEnemyHeavy: 'Armor knocked out', statEnemyShips: 'Ships sunk',
+                    statOwnInfantry: 'Infantry lost', statOwnMarine: 'Marines lost', statOwnHeavy: 'Tanks lost', statOwnShips: 'Ships lost',
+                    statEnemyInfantry: 'Infantry eliminated', statEnemyMarine: 'Marines eliminated', statEnemyHeavy: 'Tanks knocked out', statEnemyShips: 'Ships sunk',
                     statFactories: 'Factories built', statHarbors: 'Harbors built', statForts: 'Forts built',
                     statTrainLight: 'Infantry trained', statTrainMarine: 'Marines trained', statTrainHeavy: 'Tanks trained', statTrainShip: 'Ships trained',
                     achHunter: 'Armor hunter', achHunterDesc: 'Knock out 200 enemy tanks (lifetime).',
@@ -20065,7 +20009,7 @@
                     hudHeavy: 'Horses', hudShips: 'Men-of-war', hudInfantryLost: 'Line lost', hudHeavyLost: 'Horses lost', hudShipsLost: 'Ships lost',
                     hudInfantryKills: 'Line broken', hudHeavyKills: 'Horses', hudShipsKills: 'Ships',
                     heavyCount: 'Horses', playerSummaryHeavy: 'Horses', summaryHeavyDestroyed: 'Cavalry routed',
-                    statOwnInfantry: 'Line infantry lost', statOwnMarine: 'Naval infantry lost', statOwnHeavy: 'Horse regiments lost', statOwnShips: 'Men-of-war lost',
+                    statOwnInfantry: 'Line infantry lost', statOwnMarine: 'Naval infantry lost', statOwnHeavy: 'Horses lost', statOwnShips: 'Ships lost',
                     statEnemyInfantry: 'Line infantry broken', statEnemyMarine: 'Naval infantry broken', statEnemyHeavy: 'Horse regiments routed', statEnemyShips: 'Men-of-war sunk',
                     statFactories: 'Foundries built', statHarbors: 'Naval yards built', statForts: 'Redoubts built',
                     statTrainLight: 'Musket lines formed', statTrainMarine: 'Naval infantry raised', statTrainHeavy: 'Horse regiments raised', statTrainShip: 'Ships commissioned',
@@ -20089,8 +20033,8 @@
                     hudHeavy: 'Chariots', hudShips: 'Triremes', hudInfantryLost: 'Hoplites lost', hudHeavyLost: 'Chariots lost', hudShipsLost: 'Triremes lost',
                     hudInfantryKills: 'Hoplites', hudHeavyKills: 'Chariots', hudShipsKills: 'Triremes',
                     heavyCount: 'Chariots', playerSummaryHeavy: 'Chariots', summaryHeavyDestroyed: 'Chariots destroyed',
-                    statOwnInfantry: 'Hoplites lost', statOwnMarine: 'Epibatai lost', statOwnHeavy: 'Chariots lost', statOwnShips: 'Triremes lost',
-                    statEnemyInfantry: 'Hoplites shattered', statEnemyMarine: 'Epibatai shattered', statEnemyHeavy: 'Chariots destroyed', statEnemyShips: 'Triremes sunk',
+                    statOwnInfantry: 'Hoplites lost', statOwnMarine: 'Marines lost', statOwnHeavy: 'Chariots lost', statOwnShips: 'Triremes lost',
+                    statEnemyInfantry: 'Hoplites shattered', statEnemyMarine: 'Marines shattered', statEnemyHeavy: 'Chariots destroyed', statEnemyShips: 'Triremes sunk',
                     statFactories: 'Workshops built', statHarbors: 'Emporia built', statForts: 'Palisades built',
                     statTrainLight: 'Hoplites levied', statTrainMarine: 'Marines embarked', statTrainHeavy: 'Chariots fielded', statTrainShip: 'Triremes launched',
                     achHunter: 'Chariot slayer', achHunterDesc: 'Destroy 200 enemy chariots (lifetime).',
@@ -20126,6 +20070,58 @@
             return F[period] || F.modern;
         }
 
+        function wodCombinedStatsFlavor() {
+            return {
+                statOwnInfantry: 'Infantry lost', statOwnMarine: 'Marines lost', statOwnHeavy: 'Heavy units lost', statOwnShips: 'Ships lost',
+                statEnemyInfantry: 'Infantry eliminated', statEnemyMarine: 'Marines eliminated', statEnemyHeavy: 'Heavy units destroyed', statEnemyShips: 'Ships sunk',
+                statFactories: 'Factories built', statHarbors: 'Harbors built', statForts: 'Forts built',
+                statTrainLight: 'Light troops trained', statTrainMarine: 'Marines trained', statTrainHeavy: 'Heavy units trained', statTrainShip: 'Ships trained'
+            };
+        }
+
+        function wodStatsFlavor(period) {
+            if(period === 'all') return wodCombinedStatsFlavor();
+            return wodPeriodFlavor(period);
+        }
+
+        function wodHasAnyEraSkinUnlocked() {
+            return WOD_PERIOD_SKIN_IDS.some((id) => wodIsPeriodUnlocked(id));
+        }
+
+        function wodListUnlockedPeriodIds() {
+            let ids = ['modern'];
+            for(let sid of WOD_PERIOD_SKIN_IDS) {
+                if(wodIsPeriodUnlocked(sid)) ids.push(sid);
+            }
+            return ids;
+        }
+
+        function wodRebuildPeriodSelectEl(el) {
+            if(!el) return;
+            let cur = wodIsPeriodUnlocked(gameData.gamePeriod) ? gameData.gamePeriod : 'modern';
+            if(!wodHasAnyEraSkinUnlocked()) {
+                el.innerHTML = '';
+                return;
+            }
+            el.innerHTML = wodListUnlockedPeriodIds().map((pid) =>
+                '<option value="' + pid + '">' + wodPeriodLabel(pid) + '</option>'
+            ).join('');
+            wodSyncPeriodSelectEl(el, cur);
+        }
+
+        function wodRefreshPeriodSelectorVisibility() {
+            let show = wodHasAnyEraSkinUnlocked();
+            for(let id of ['setupGamePeriodRow', 'shopGamePeriodRow', 'settingsGamePeriodSection', 'mpCfgGamePeriodRow']) {
+                let row = document.getElementById(id);
+                if(row) row.classList.toggle('hidden', !show);
+            }
+            if(show) {
+                for(let id of ['setupGamePeriod', 'settingsGamePeriod', 'mpCfgGamePeriod', 'shopGamePeriod', 'editorGenPeriod']) {
+                    wodRebuildPeriodSelectEl(document.getElementById(id));
+                }
+            }
+        }
+
         function wodActivePeriodFlavor() {
             let p = (gameState === 'PLAYING' || gameState === 'PAUSED') ? wodGetMatchPeriod() : wodGetGamePeriod();
             return wodPeriodFlavor(p);
@@ -20154,6 +20150,8 @@
         }
 
         function wodSyncAllPeriodSelects() {
+            wodRefreshPeriodSelectorVisibility();
+            if(!wodHasAnyEraSkinUnlocked()) return;
             wodSyncPeriodSelectEl(document.getElementById('setupGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('settingsGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('mpCfgGamePeriod'), gameData.gamePeriod);
@@ -20262,137 +20260,132 @@
         }
 
         function drawPeriodCounter(ctx, unit, radius, color, period) {
-            const eraStyle = {
-                napoleonic: { wMul: 1.02, hMul: 1.02, rrMul: 0.1, fill: '#e8dcc8', sym: '#2c1810', accent: '#5c3d1e' },
-                ancient: { wMul: 1.12, hMul: 1.08, rrMul: 0.38, fill: '#d9c9a3', sym: '#4a3520', accent: '#8b6914' },
-                medieval: { wMul: 1.08, hMul: 0.98, rrMul: 0.14, fill: '#c8c4bc', sym: '#1a1410', accent: '#4a4540' }
-            };
-            let es = eraStyle[period] || eraStyle.napoleonic;
-            let w = radius * 2.15 * es.wMul, h = radius * 1.38 * es.hMul, x = -w / 2, y = -h / 2;
-            let rr = Math.max(1.5, radius * es.rrMul);
-            let fillCol = unit.owner === 1 ? blendColorsFast(es.fill, color, 0.14)
-                : blendColorsFast(es.fill, factionColors[unit.owner] || color, 0.38);
+            let w = radius * 2.15, h = radius * 1.38, x = -w / 2, y = -h / 2;
+            let rr = Math.max(2, radius * 0.22);
+            if(period === 'napoleonic') { w = radius * 2.05; h = radius * 1.52; x = -w / 2; y = -h / 2; rr = Math.max(2, radius * 0.14); }
+            if(period === 'ancient') { w = radius * 2.22; h = radius * 2.22; x = -w / 2; y = -h / 2; rr = w * 0.5; }
+            if(period === 'medieval') { w = radius * 2.18; h = radius * 1.48; x = -w / 2; y = -h / 2; rr = Math.max(2, radius * 0.1); }
+            let fillBase = '#f7fafc';
+            if(period === 'napoleonic') fillBase = '#f2e6c8';
+            else if(period === 'ancient') fillBase = '#ebe4d4';
+            else if(period === 'medieval') fillBase = '#d5d0c4';
+            let fillCol = unit.owner === 1 ? blendColorsFast(fillBase, color, period === 'medieval' ? 0.14 : 0.08)
+                : blendColorsFast(fillBase, factionColors[unit.owner] || color, 0.42);
+            let strokeCol = color;
+            if(period === 'napoleonic') strokeCol = blendColorsFast('#1a2744', color, 0.35);
+            else if(period === 'ancient') strokeCol = blendColorsFast('#6b4a1e', color, 0.28);
+            else if(period === 'medieval') strokeCol = blendColorsFast('#3d3028', color, 0.32);
             ctx.save();
-            ctx.shadowColor = 'rgba(0,0,0,0.42)';
-            ctx.shadowBlur = Math.max(3, radius * 0.28);
-            ctx.shadowOffsetY = radius * 0.1;
+            ctx.shadowColor = 'rgba(0,0,0,0.38)';
+            ctx.shadowBlur = Math.max(3, radius * 0.25);
+            ctx.shadowOffsetY = radius * 0.08;
             ctx.fillStyle = fillCol;
-            roundRect(ctx, x, y, w, h, rr);
-            ctx.fill();
-            ctx.shadowColor = 'transparent';
-            ctx.lineWidth = Math.max(2.2, radius * 0.24);
-            ctx.strokeStyle = blendColorsFast(es.accent, color, 0.55);
-            roundRect(ctx, x, y, w, h, rr);
-            ctx.stroke();
-            let r = radius;
-            let symCol = unit.owner !== 1 ? blendColorsFast(es.sym, factionColors[unit.owner] || color, 0.35) : es.sym;
-            ctx.fillStyle = symCol;
-            ctx.strokeStyle = symCol;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            if(period === 'napoleonic') {
-                ctx.lineWidth = Math.max(2.4, radius * 0.16);
-                if(unit.type === 'heavy') {
-                    ctx.beginPath();
-                    ctx.ellipse(0, r * 0.08, r * 0.38, r * 0.22, 0, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.lineWidth = Math.max(2, radius * 0.12);
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.5, -r * 0.35); ctx.lineTo(r * 0.5, r * 0.35);
-                    ctx.moveTo(r * 0.5, -r * 0.35); ctx.lineTo(-r * 0.5, r * 0.35);
-                    ctx.stroke();
-                } else if(unit.type === 'marine') {
-                    ctx.beginPath();
-                    ctx.arc(0, r * 0.12, r * 0.32, Math.PI, 0);
-                    ctx.lineTo(0, -r * 0.38);
-                    ctx.closePath();
-                    ctx.fill();
-                    ctx.lineWidth = Math.max(1.8, radius * 0.1);
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.55, -r * 0.15); ctx.lineTo(r * 0.55, -r * 0.15);
-                    ctx.stroke();
-                } else if(unit.type === 'ship') {
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.62, r * 0.22); ctx.lineTo(0, -r * 0.48); ctx.lineTo(r * 0.62, r * 0.22); ctx.closePath();
-                    ctx.fill();
-                    ctx.beginPath();
-                    ctx.moveTo(0, -r * 0.48); ctx.lineTo(0, -r * 0.72);
-                    ctx.stroke();
-                } else {
-                    ctx.beginPath();
-                    for(let i = -2; i <= 2; i++) {
-                        ctx.moveTo(i * r * 0.2, -r * 0.5);
-                        ctx.lineTo(i * r * 0.2, r * 0.42);
-                    }
-                    ctx.moveTo(-r * 0.68, -r * 0.05); ctx.lineTo(r * 0.68, -r * 0.05);
-                    ctx.moveTo(-r * 0.68, r * 0.18); ctx.lineTo(r * 0.68, r * 0.18);
-                    ctx.stroke();
+            if(period === 'medieval') {
+                roundRect(ctx, x, y + radius * 0.14, w, h - radius * 0.14, rr);
+                ctx.fill();
+                ctx.fillStyle = blendColorsFast(fillCol, '#8a7f72', 0.22);
+                let bw = w / 5, bt = radius * 0.2;
+                for(let i = 0; i < 5; i++) {
+                    if(i % 2 === 0) ctx.fillRect(x + i * bw, y, bw + 0.5, bt);
                 }
             } else if(period === 'ancient') {
-                if(unit.type === 'heavy') {
-                    ctx.beginPath();
-                    ctx.arc(0, 0, r * 0.44, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.lineWidth = Math.max(2.2, radius * 0.14);
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.58, 0); ctx.lineTo(r * 0.58, 0);
-                    ctx.moveTo(0, -r * 0.58); ctx.lineTo(0, r * 0.58);
-                    ctx.stroke();
-                } else if(unit.type === 'marine') {
-                    ctx.beginPath();
-                    ctx.moveTo(0, -r * 0.55); ctx.lineTo(r * 0.38, r * 0.42); ctx.lineTo(-r * 0.38, r * 0.42); ctx.closePath();
-                    ctx.fill();
-                } else if(unit.type === 'ship') {
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.68, r * 0.28); ctx.lineTo(0, -r * 0.42); ctx.lineTo(r * 0.68, r * 0.28); ctx.closePath();
-                    ctx.fill();
-                    ctx.lineWidth = Math.max(1.8, radius * 0.11);
-                    for(let i = -1; i <= 1; i++) {
-                        ctx.beginPath();
-                        ctx.moveTo(i * r * 0.24, -r * 0.02); ctx.lineTo(i * r * 0.24, r * 0.38);
-                        ctx.stroke();
-                    }
-                } else {
-                    ctx.lineWidth = Math.max(2.2, radius * 0.13);
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.22, -r * 0.55); ctx.lineTo(r * 0.22, -r * 0.55);
-                    for(let i = -2; i <= 2; i++) {
-                        ctx.moveTo(i * r * 0.19, -r * 0.55); ctx.lineTo(i * r * 0.19, r * 0.45);
-                    }
-                    ctx.stroke();
-                }
-            } else if(period === 'medieval') {
-                if(unit.type === 'heavy') {
-                    ctx.beginPath();
-                    ctx.moveTo(0, -r * 0.58); ctx.lineTo(r * 0.45, r * 0.48); ctx.lineTo(-r * 0.45, r * 0.48); ctx.closePath();
-                    ctx.fill();
-                    ctx.lineWidth = Math.max(1.6, radius * 0.09);
-                    ctx.strokeStyle = es.accent;
-                    ctx.beginPath();
-                    ctx.moveTo(0, -r * 0.2); ctx.lineTo(0, r * 0.35);
-                    ctx.stroke();
-                } else if(unit.type === 'marine') {
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.52, r * 0.22); ctx.quadraticCurveTo(0, -r * 0.55, r * 0.52, r * 0.22); ctx.closePath();
-                    ctx.fill();
-                } else if(unit.type === 'ship') {
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.58, r * 0.18); ctx.lineTo(0, -r * 0.48); ctx.lineTo(r * 0.58, r * 0.18);
-                    ctx.lineTo(r * 0.35, r * 0.42); ctx.lineTo(-r * 0.35, r * 0.42); ctx.closePath();
-                    ctx.fill();
-                } else {
-                    ctx.lineWidth = Math.max(2.4, radius * 0.15);
-                    ctx.beginPath();
-                    ctx.moveTo(-r * 0.18, -r * 0.55); ctx.lineTo(r * 0.18, -r * 0.55);
-                    ctx.moveTo(0, -r * 0.55); ctx.lineTo(0, r * 0.48);
-                    ctx.moveTo(-r * 0.42, r * 0.12); ctx.lineTo(r * 0.42, r * 0.12);
+                ctx.beginPath();
+                ctx.arc(0, 0, w * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                roundRect(ctx, x, y, w, h, rr);
+                ctx.fill();
+            }
+            ctx.shadowColor = 'transparent';
+            ctx.lineWidth = Math.max(2, radius * (period === 'napoleonic' ? 0.16 : 0.22));
+            ctx.strokeStyle = strokeCol;
+            if(period === 'medieval') {
+                roundRect(ctx, x, y + radius * 0.14, w, h - radius * 0.14, rr);
+                ctx.stroke();
+                ctx.strokeRect(x, y, w, radius * 0.22);
+            } else if(period === 'ancient') {
+                ctx.beginPath();
+                ctx.arc(0, 0, w * 0.5, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.lineWidth = Math.max(1.2, radius * 0.1);
+                ctx.strokeStyle = 'rgba(90,62,28,0.55)';
+                ctx.beginPath();
+                ctx.arc(0, 0, w * 0.38, 0, Math.PI * 2);
+                ctx.stroke();
+            } else {
+                roundRect(ctx, x, y, w, h, rr);
+                ctx.stroke();
+                if(period === 'napoleonic') {
+                    ctx.lineWidth = Math.max(1, radius * 0.09);
+                    ctx.strokeStyle = 'rgba(26,39,68,0.45)';
+                    roundRect(ctx, x + radius * 0.1, y + radius * 0.1, w - radius * 0.2, h - radius * 0.2, rr * 0.7);
                     ctx.stroke();
                 }
             }
-            ctx.lineWidth = Math.max(1.2, radius * 0.09);
-            ctx.strokeStyle = 'rgba(10, 12, 18, 0.92)';
-            roundRect(ctx, x - 1, y - 1, w + 2, h + 2, rr + 0.5);
+            let symCol = unit.owner !== 1 ? blendColorsFast('#243040', factionColors[unit.owner] || color, 0.42) : '#1a2634';
+            ctx.strokeStyle = symCol;
+            ctx.lineWidth = Math.max(2, radius * 0.13);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            let r = radius;
+            if(period === 'medieval') {
+                if(unit.type === 'heavy') {
+                    ctx.moveTo(0, -r * 0.55); ctx.lineTo(r * 0.42, r * 0.45); ctx.lineTo(-r * 0.42, r * 0.45); ctx.closePath();
+                } else if(unit.type === 'marine') {
+                    ctx.moveTo(-r * 0.5, r * 0.2); ctx.quadraticCurveTo(0, -r * 0.5, r * 0.5, r * 0.2);
+                } else if(unit.type === 'ship') {
+                    ctx.moveTo(-r * 0.55, r * 0.15); ctx.lineTo(0, -r * 0.45); ctx.lineTo(r * 0.55, r * 0.15);
+                    ctx.moveTo(-r * 0.35, r * 0.35); ctx.lineTo(r * 0.35, r * 0.35);
+                } else {
+                    ctx.moveTo(-r * 0.15, -r * 0.55); ctx.lineTo(r * 0.15, -r * 0.55);
+                    ctx.moveTo(0, -r * 0.55); ctx.lineTo(0, r * 0.45);
+                }
+            } else if(period === 'napoleonic') {
+                if(unit.type === 'heavy') {
+                    ctx.moveTo(-r * 0.55, -r * 0.35); ctx.lineTo(r * 0.55, r * 0.35);
+                    ctx.moveTo(r * 0.55, -r * 0.35); ctx.lineTo(-r * 0.55, r * 0.35);
+                    ctx.moveTo(0, -r * 0.55); ctx.lineTo(0, r * 0.55);
+                } else if(unit.type === 'marine') {
+                    ctx.arc(0, r * 0.15, r * 0.35, Math.PI, 0);
+                    ctx.moveTo(-r * 0.55, -r * 0.2); ctx.lineTo(r * 0.55, -r * 0.2);
+                } else if(unit.type === 'ship') {
+                    ctx.moveTo(-r * 0.6, r * 0.2); ctx.lineTo(0, -r * 0.42); ctx.lineTo(r * 0.6, r * 0.2); ctx.closePath();
+                } else {
+                    for(let i = -1; i <= 1; i++) {
+                        ctx.moveTo(i * r * 0.22, -r * 0.48);
+                        ctx.lineTo(i * r * 0.22, r * 0.42);
+                    }
+                    ctx.moveTo(-r * 0.62, -r * 0.08); ctx.lineTo(r * 0.62, -r * 0.08);
+                }
+            } else if(period === 'ancient') {
+                if(unit.type === 'heavy') {
+                    ctx.arc(0, 0, r * 0.42, 0, Math.PI * 2);
+                    ctx.moveTo(-r * 0.55, 0); ctx.lineTo(r * 0.55, 0);
+                } else if(unit.type === 'marine') {
+                    ctx.moveTo(0, -r * 0.55); ctx.lineTo(r * 0.35, r * 0.45); ctx.lineTo(-r * 0.35, r * 0.45); ctx.closePath();
+                } else if(unit.type === 'ship') {
+                    ctx.moveTo(-r * 0.65, r * 0.25); ctx.lineTo(0, -r * 0.4); ctx.lineTo(r * 0.65, r * 0.25);
+                    for(let i = -1; i <= 1; i++) { ctx.moveTo(i * r * 0.22, -r * 0.05); ctx.lineTo(i * r * 0.22, r * 0.35); }
+                } else {
+                    ctx.moveTo(-r * 0.2, -r * 0.55); ctx.lineTo(r * 0.2, -r * 0.55);
+                    for(let i = -2; i <= 2; i++) { ctx.moveTo(i * r * 0.18, -r * 0.55); ctx.lineTo(i * r * 0.18, r * 0.45); }
+                }
+            }
             ctx.stroke();
+            ctx.lineWidth = Math.max(1.12, radius * 0.084);
+            ctx.strokeStyle = 'rgba(10, 12, 18, 0.96)';
+            if(period === 'ancient') {
+                ctx.beginPath();
+                ctx.arc(0, 0, w * 0.5 + Math.max(1.12, radius * 0.084), 0, Math.PI * 2);
+                ctx.stroke();
+            } else if(period === 'medieval') {
+                roundRect(ctx, x - 1, y + radius * 0.14 - 1, w + 2, h - radius * 0.14 + 2, rr + 0.5);
+                ctx.stroke();
+            } else {
+                roundRect(ctx, x - 1, y - 1, w + 2, h + 2, rr + 0.5);
+                ctx.stroke();
+            }
             ctx.restore();
         }
 
@@ -20702,7 +20695,7 @@
                 let eu = Object.assign({
                     type: type, owner: 1,
                     hp: 100, maxHp: 100, manpower: 1000, tanks: 0,
-                    _drawPeriod: wodGetGamePeriod(),
+                    skinOverride: gameData.unitSkin || 'nato',
                 }, extra || {});
                 let ur = 13;
                 if(!drawUnitSkin(ctx, eu, ur, col)) drawClassicUnitShape(ctx, type, ur, col, eu);
@@ -20781,10 +20774,8 @@
                 drawCountryBall(ctx, skin, radius, ut);
                 return true;
             }
-            let period = unit._drawPeriod || wodGetMatchPeriod();
-            if(WOD_PERIOD_SKIN_IDS.includes(skin)) period = skin;
-            if(period && period !== 'modern' && WOD_PERIOD_IDS.includes(period)) {
-                drawPeriodCounter(ctx, unit, radius, color, period);
+            if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
+                drawPeriodCounter(ctx, unit, radius, color, skin);
                 return true;
             }
             drawNatoCounter(ctx, unit, radius, color);
@@ -20794,6 +20785,9 @@
         function shopSkinMetaList() {
             return [
                 { id: 'nato', label: 'NATO counters (default)' },
+                { id: 'napoleonic', label: 'Line Wars (Napoleonic)' },
+                { id: 'ancient', label: 'Ancient era' },
+                { id: 'medieval', label: 'Medieval era' },
                 { id: 'usa', label: 'USA countryball' },
                 { id: 'uk', label: 'UK countryball' },
                 { id: 'germany', label: 'Germany countryball' },
@@ -20828,8 +20822,7 @@
                 maxHp: 100,
                 manpower: 1000,
                 tanks: 0,
-                skinOverride: WOD_PERIOD_SKIN_IDS.includes(skinId) ? 'nato' : skinId,
-                _drawPeriod: WOD_PERIOD_SKIN_IDS.includes(skinId) ? skinId : undefined
+                skinOverride: skinId
             };
             let col = factionColors[1];
             ctx.translate(w / 2, h / 2);
@@ -21055,15 +21048,13 @@
                 ctx2.fillRect(0, 0, w, h);
                 let owner = cid.indexOf('shopPv') === 0 ? 1 : 2;
                 let skinOv = owner === 1 ? skinPlayer : skinAi;
-                let drawPeriod = WOD_PERIOD_SKIN_IDS.includes(skinOv) ? skinOv : wodGetGamePeriod();
                 let u = {
                     type: ut, owner: owner, x: 0, y: 0,
                     target: ut === 'ship' ? { x: 48, y: -8 } : undefined,
                     hp: ut === 'heavy' ? 300 : (ut === 'ship' ? 200 : 100),
                     maxHp: ut === 'heavy' ? 300 : (ut === 'ship' ? 200 : 100),
                     manpower: 1000, tanks: ut === 'heavy' ? 500 : 0, radius: 22,
-                    skinOverride: WOD_PERIOD_SKIN_IDS.includes(skinOv) ? 'nato' : skinOv,
-                    _drawPeriod: (drawPeriod && drawPeriod !== 'modern') ? drawPeriod : undefined
+                    skinOverride: skinOv
                 };
                 ctx2.translate(w / 2, h / 2);
                 let drawScale = w <= 58 ? 0.72 : (w <= 64 ? 0.78 : 0.84);
@@ -23354,11 +23345,11 @@
                 x: hex.x,
                 y: hex.y
             });
+            if(noisy) showNotification('+20% defense aura for allied troops surrounding this fort.');
             if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                 wodBumpLifetime('fortsBuilt', 1);
                 scheduleSaveWodProgress();
             }
-            if(noisy) showNotification('+20% defense aura for allied troops surrounding this fort.');
             return true;
         }
         function tryApplyFortBuildAtWorld(worldPos) {
@@ -23910,6 +23901,9 @@
             pauseMenuBackgroundBattle,
             resumeMenuBackgroundBattle,
             wodApplyGamePeriod,
+            wodRefreshPeriodSelectorVisibility,
+            wodHasAnyEraSkinUnlocked,
+            wodRebuildPeriodSelectEl,
         };
 
         loadWodProgress();
