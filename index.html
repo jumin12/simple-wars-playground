@@ -747,6 +747,25 @@
             box-shadow: none;
         }
 
+        .menu-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            filter: grayscale(0.35);
+        }
+
+        #setupPanel select:disabled,
+        #setupPanel input:disabled,
+        #mpHostMapDlg select:disabled,
+        #mpHostMapDlg input:disabled,
+        #mpHostRulesDlg select:disabled,
+        #mpHostRulesDlg input:disabled,
+        #mpGameLobbyScreen select:disabled,
+        #mpGameLobbyScreen .mp-gl-slot button:disabled,
+        #mpGameLobbyScreen .mp-gl-slot select:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
         .wod-pc-prod-root {
             display: none;
         }
@@ -5250,9 +5269,8 @@
                 </div>
                 <div class="mp-host-dlg-actions">
                     <button type="button" class="menu-btn" id="mpCfgMapApply">Apply &amp; regenerate preview</button>
-                    <button type="button" class="wod-editor-btn" id="mpCfgMapSaveLib" title="Save current generated map to this browser">Save to library…</button>
-                    <button type="button" class="wod-editor-btn" id="mpCfgMapLoadLib" title="Load a map stored on this device">Browse saved maps…</button>
-                    <button type="button" class="build-btn" id="mpCfgMapAdvanced">Full setup (load/save map)…</button>
+                    <button type="button" class="wod-editor-btn" id="mpCfgMapSaveMap">Save Map</button>
+                    <button type="button" class="wod-editor-btn" id="mpCfgMapLoadMap">Load Map</button>
                     <button type="button" class="build-btn" id="mpCfgMapClose">Close</button>
                 </div>
             </div>
@@ -6376,9 +6394,7 @@
                 if(!opts.preserveMap) {
                     wodArmMapPreviewSpinner('mapPreview');
                     gameData._soloPreviewGenerating = true;
-                    wodSetSetupMapToolbarBusy(true);
-                    let startBtnOpen = document.getElementById('setupBtnStartAi');
-                    if(startBtnOpen) startBtnOpen.disabled = true;
+                    wodRefreshMapPreviewGeneratingUi();
                     void generateMap()
                         .then(() => {
                             previewLoadedMap();
@@ -6397,8 +6413,7 @@
                         .finally(() => {
                             wodDisarmMapPreviewSpinner('mapPreview');
                             gameData._soloPreviewGenerating = false;
-                            wodSetSetupMapToolbarBusy(false);
-                            if(startBtnOpen) startBtnOpen.disabled = false;
+                            wodRefreshMapPreviewGeneratingUi();
                         });
                 } else {
                     previewLoadedMap();
@@ -8768,6 +8783,30 @@
             _wodMpLobbyPreviewBusy = false;
             _wodMpLobbyPreviewQueued = false;
             _wodMpLobbyPreviewLastFp = '';
+            wodRefreshMapPreviewGeneratingUi();
+        }
+        function wodIsMapPreviewGenerating() {
+            return !!(gameData._soloPreviewGenerating || _wodMpLobbyPreviewBusy);
+        }
+        function wodSetElementDisabled(el, on) {
+            if(!el) return;
+            el.disabled = !!on;
+            el.toggleAttribute('disabled', !!on);
+        }
+        function wodRefreshMapPreviewGeneratingUi() {
+            let on = wodIsMapPreviewGenerating();
+            for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupMoney', 'setupPlayerColor',
+                'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn']) {
+                wodSetElementDisabled(document.getElementById(id), on);
+            }
+            for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch', 'mpGlMaxHumans',
+                'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
+                'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgMoney', 'mpCfgPlayerColor',
+                'mpCfgRulesApply', 'mpCfgRulesClose']) {
+                wodSetElementDisabled(document.getElementById(id), on);
+            }
+            let slotsEl = document.getElementById('mpGlSlots');
+            if(slotsEl) slotsEl.querySelectorAll('select, button').forEach(el => wodSetElementDisabled(el, on));
         }
         function wodMpRefreshLobbyMapPreview(opts) {
             opts = opts || {};
@@ -8781,6 +8820,7 @@
             }
             _wodMpLobbyPreviewBusy = true;
             _wodMpLobbyPreviewQueued = false;
+            wodRefreshMapPreviewGeneratingUi();
             let shapeEl = document.getElementById('setupMapShape');
             let snap = wodMpSnapshotLobbyGenBackup();
             wodArmMapPreviewSpinner('mpLobbyMapPreview');
@@ -8832,6 +8872,7 @@
                             }
                             wodDisarmMapPreviewSpinner('mpLobbyMapPreview');
                             _wodMpLobbyPreviewBusy = false;
+                            wodRefreshMapPreviewGeneratingUi();
                             if(gameState !== 'PLAYING' && _wodMpLobbyPreviewQueued) {
                                 _wodMpLobbyPreviewQueued = false;
                                 requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
@@ -9057,6 +9098,7 @@
             }
             let h2 = document.getElementById('mpGlHeading');
             if(h2) h2.textContent = api.isHost ? 'Game lobby (host)' : 'Game lobby';
+            wodRefreshMapPreviewGeneratingUi();
         }
         function wodMpBuildLobbyMetaFromSetup() {
             if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
@@ -9201,17 +9243,21 @@
             span.textContent = WOD_VICTORY_MODE_DETAIL_TEXT[mode] || '';
         }
         function wodMpOpenHostMapDlg() {
+            if(wodIsMapPreviewGenerating()) return;
             let d = document.getElementById('mpHostMapDlg');
             if(d) { d.classList.remove('hidden'); d.setAttribute('aria-hidden', 'false'); }
+            wodRefreshMapPreviewGeneratingUi();
         }
         function wodMpCloseHostMapDlg() {
             let d = document.getElementById('mpHostMapDlg');
             if(d) { d.classList.add('hidden'); d.setAttribute('aria-hidden', 'true'); }
         }
         function wodMpOpenHostRulesDlg() {
+            if(wodIsMapPreviewGenerating()) return;
             wodMpSyncMpCfgVictoryDetail();
             let d = document.getElementById('mpHostRulesDlg');
             if(d) { d.classList.remove('hidden'); d.setAttribute('aria-hidden', 'false'); }
+            wodRefreshMapPreviewGeneratingUi();
         }
         function wodMpCloseHostRulesDlg() {
             let d = document.getElementById('mpHostRulesDlg');
@@ -9306,15 +9352,19 @@
             if(mpGlRules) mpGlRules.onclick = () => wodMpOpenHostRulesDlg();
             let mpCfgMapApply = document.getElementById('mpCfgMapApply');
             let mpCfgMapClose = document.getElementById('mpCfgMapClose');
-            let mpCfgMapAdvanced = document.getElementById('mpCfgMapAdvanced');
-            let mpCfgMapSaveLib = document.getElementById('mpCfgMapSaveLib');
-            let mpCfgMapLoadLib = document.getElementById('mpCfgMapLoadLib');
-            if(mpCfgMapSaveLib) mpCfgMapSaveLib.onclick = () => wodPromptSaveMapToLibrary();
-            if(mpCfgMapLoadLib) mpCfgMapLoadLib.onclick = () => {
+            let mpCfgMapSaveMap = document.getElementById('mpCfgMapSaveMap');
+            let mpCfgMapLoadMap = document.getElementById('mpCfgMapLoadMap');
+            if(mpCfgMapSaveMap) mpCfgMapSaveMap.onclick = () => {
+                if(wodIsMapPreviewGenerating()) return;
+                wodPromptSaveMapToLibrary();
+            };
+            if(mpCfgMapLoadMap) mpCfgMapLoadMap.onclick = () => {
+                if(wodIsMapPreviewGenerating()) return;
                 wodMpCloseHostMapDlg();
                 showPanel('mapLibrary', { libContext: 'setup', fromMpHost: true });
             };
             if(mpCfgMapApply) mpCfgMapApply.onclick = () => {
+                if(wodIsMapPreviewGenerating()) return;
                 wodMpCopyFieldToField('mpCfgMapSize', 'setupMapSize');
                 wodMpCopyFieldToField('mpCfgMapShape', 'setupMapShape');
                 if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
@@ -9329,10 +9379,6 @@
                 requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
             };
             if(mpCfgMapClose) mpCfgMapClose.onclick = () => wodMpCloseHostMapDlg();
-            if(mpCfgMapAdvanced) mpCfgMapAdvanced.onclick = () => {
-                wodMpCloseHostMapDlg();
-                showPanel('setup', { fromMpHost: true });
-            };
             let mpCfgRulesApply = document.getElementById('mpCfgRulesApply');
             let mpCfgRulesClose = document.getElementById('mpCfgRulesClose');
             let mpCfgVictoryModeEl = document.getElementById('mpCfgVictoryMode');
@@ -9341,6 +9387,7 @@
                 mpCfgVictoryModeEl.addEventListener('change', wodMpSyncMpCfgVictoryDetail);
             }
             if(mpCfgRulesApply) mpCfgRulesApply.onclick = () => {
+                if(wodIsMapPreviewGenerating()) return;
                 wodMpCopyFieldToField('mpCfgVictoryMode', 'setupVictoryMode');
                 wodMpCopyFieldToField('mpCfgMoney', 'setupMoney');
                 wodMpCopyFieldToField('mpCfgPlayerColor', 'setupPlayerColor');
@@ -14737,6 +14784,7 @@
         })();
 
         function wodPromptSaveMapToLibrary() {
+            if(wodIsMapPreviewGenerating()) return;
             if(!gameData.hexList || gameData.hexList.length === 0) {
                 alert('Generate or load a map first.');
                 return;
@@ -14989,24 +15037,13 @@
             return true;
         }
 
-        function wodSetSetupMapToolbarBusy(busy) {
-            let on = !!busy;
-            for(let id of ['setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap']) {
-                let el = document.getElementById(id);
-                if(!el) continue;
-                el.disabled = on;
-                el.toggleAttribute('disabled', on);
-            }
-        }
-
         function previewMap() {
+            if(wodIsMapPreviewGenerating()) return;
             wodArmMapPreviewSpinner('mapPreview');
             gameData._soloPreviewGenerating = true;
             gameData._soloMapPreviewMatchesStart = false;
             gameData._soloPreviewSnapshot = null;
-            wodSetSetupMapToolbarBusy(true);
-            let startBtn = document.getElementById('setupBtnStartAi');
-            if(startBtn) startBtn.disabled = true;
+            wodRefreshMapPreviewGeneratingUi();
             requestAnimationFrame(() => {
                 requestAnimationFrame(async () => {
                     let ok = true;
@@ -15026,8 +15063,7 @@
                         gameData._soloMapPreviewMatchesStart = ok;
                         if(ok) wodCaptureSoloPreviewSnapshot();
                         gameData._soloPreviewGenerating = false;
-                        wodSetSetupMapToolbarBusy(false);
-                        if(startBtn) startBtn.disabled = false;
+                        wodRefreshMapPreviewGeneratingUi();
                     }
                 });
             });
