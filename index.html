@@ -7202,18 +7202,43 @@
             let hi = 0;
             for(let h of gameData.hexList) {
                 if(!h || isWaterHex(h) || h.type === 'urban') continue;
+                let baseType = h.type;
                 let u = fbm(h.x * 0.008 + seedOffset + 9900, h.y * 0.008 + seedOffset + 9900, 4);
+                let mix = fbm(h.x * 0.0107 + seedOffset + 10220, h.y * 0.0107 + seedOffset + 10220, 4);
+                if(mix < 0.18) {
+                    if(baseType === 'water') {
+                        if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                        continue;
+                    }
+                    let bt = baseType;
+                    if(preset === 'forest') {
+                        if(bt === 'mountain') bt = u > 0.62 ? 'hill' : 'forest';
+                        else if(bt === 'swamp' && u > 0.72) bt = 'forest';
+                    } else if(preset === 'desert') {
+                        if(bt === 'forest' || bt === 'swamp') bt = u > 0.58 ? 'sand' : 'grass';
+                    } else if(preset === 'mountain') {
+                        if(bt === 'swamp') bt = 'grass';
+                        else if(bt === 'forest' && u > 0.68) bt = 'hill';
+                    }
+                    wodSetGeneratedTerrainType(h, bt);
+                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                    continue;
+                }
                 if(preset === 'forest') {
-                    if(u < 0.09) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(u < 0.16) wodSetGeneratedTerrainType(h, 'sand');
+                    if(u < 0.055) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(u < 0.1) wodSetGeneratedTerrainType(h, 'sand');
+                    else if(u < 0.13) wodSetGeneratedTerrainType(h, 'hill');
+                    else if(u < 0.155) wodSetGeneratedTerrainType(h, 'swamp');
                     else wodSetGeneratedTerrainType(h, 'forest');
                 } else if(preset === 'desert') {
-                    if(u < 0.1) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(u < 0.16) wodSetGeneratedTerrainType(h, 'hill');
+                    if(u < 0.065) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(u < 0.1) wodSetGeneratedTerrainType(h, 'hill');
+                    else if(u < 0.125) wodSetGeneratedTerrainType(h, 'forest');
                     else wodSetGeneratedTerrainType(h, 'sand');
                 } else if(preset === 'mountain') {
-                    if(u < 0.24) wodSetGeneratedTerrainType(h, 'grass');
-                    else if(u < 0.58) wodSetGeneratedTerrainType(h, 'hill');
+                    if(u < 0.2) wodSetGeneratedTerrainType(h, 'grass');
+                    else if(u < 0.33) wodSetGeneratedTerrainType(h, 'forest');
+                    else if(u < 0.52) wodSetGeneratedTerrainType(h, 'hill');
                     else wodSetGeneratedTerrainType(h, 'mountain');
                 }
                 if((++hi & 255) === 0) await wodMapGenYieldSlice();
@@ -14548,8 +14573,8 @@
             
             if(!hasLand) return;
             
-            let landWidth = maxX - minX;
-            let landHeight = maxY - minY;
+            let landWidth = Math.max(maxX - minX, (gameData.hexRadius || 10) * 0.35);
+            let landHeight = Math.max(maxY - minY, (gameData.hexRadius || 10) * 0.35);
             let scale = Math.min((prevCanvas.width - 20) / landWidth, (prevCanvas.height - 20) / landHeight);
             
             let cx = prevCanvas.width / 2 - ((minX + maxX) / 2) * scale;
@@ -14868,16 +14893,26 @@
                 if(best) {
                     taken.add(`${best.q},${best.r}`);
                     seeds[ow] = best;
+                } else {
+                    for(let h of landCandidates) {
+                        if(!isClaimableLand(h) || isWaterHex(h) || h.type === 'mountain') continue;
+                        let k = `${h.q},${h.r}`;
+                        if(taken.has(k)) continue;
+                        taken.add(k);
+                        seeds[ow] = h;
+                        break;
+                    }
                 }
             }
             return seeds;
         }
-        /** Max stamp footprint matches stampUrbanTerrainAroundCity fringe: dq²+dr² ≤ (R+1)², R=2 → ≤9. */
+        /** Max stamp footprint matches stampUrbanTerrainAroundCity fringe: dq²+dr² ≤ (R+1)², R=2 → ≤9; archipelago uses ≤6 for narrow islets. */
         function wodProceduralUrbanFootprintKeys(q, r, owner) {
+            let r2Max = gameData.mapShape === 'archipelago' ? 6 : 9;
             let keys = [];
             for(let dq = -3; dq <= 3; dq++) {
                 for(let dr = -3; dr <= 3; dr++) {
-                    if(dq * dq + dr * dr > 9) continue;
+                    if(dq * dq + dr * dr > r2Max) continue;
                     let qq = q + dq,
                         rr = r + dr;
                     let hk = `${qq},${rr}`;
@@ -14932,7 +14967,9 @@
         function wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionGeom) {
             let innerRSq = Infinity;
             if(wodMapShapeIsRadialForTownPolicy(mapShape)) {
-                let innerRad = Math.max(lcm.maxR * 0.78, (gameData.hexRadius || 10) * Math.max(gameData.mapRadius || 40, 8) * 0.14);
+                let arch = mapShape === 'archipelago';
+                let innerFrac = arch ? 0.93 : 0.78;
+                let innerRad = Math.max(lcm.maxR * innerFrac, (gameData.hexRadius || 10) * Math.max(gameData.mapRadius || 40, 8) * (arch ? 0.1 : 0.14));
                 innerRSq = innerRad * innerRad;
             }
             let facRect = wodMapShapeUsesRectanglePipeline(mapShape) && factionGeom && factionGeom[owner],
@@ -14959,7 +14996,8 @@
                         if(dxF * dxF + dyF * dyF > rectInnerSq) continue;
                     }
                 }
-                if(wodBfsStepsToWater(h, 14) < (wodMapShapeIsRadialForTownPolicy(mapShape) ? 4 : 3)) continue;
+                let minSea = mapShape === 'archipelago' ? 2 : wodMapShapeIsRadialForTownPolicy(mapShape) ? 4 : 3;
+                if(wodBfsStepsToWater(h, 14) < minSea) continue;
                 out.push(h);
             }
             if(wodMapShapeUsesRectanglePipeline(mapShape) && out.length === 0 && rectInnerSq < Infinity) {
@@ -15076,7 +15114,7 @@
             function buildCandidateList(owner, level) {
                 let cent = wodFactionPoliticalCentroid(owner);
                 let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionTerritoryGeom);
-                let minDepth = 3;
+                let minDepth = mapShape === 'archipelago' ? 1 : 3;
                 for(let relax = 0; relax < 4; relax++, minDepth--) {
                     let filt = pool.filter(h => (interiorDepthMap.get(getHexKey(h)) ?? 999) >= minDepth);
                     if(filt.length >= 8 || minDepth <= 0) {
@@ -15190,8 +15228,9 @@
 
             let winnerPlan = null;
             let kpf = 0;
+            let sepLo = mapShape === 'archipelago' ? 5 : 8;
             outerFind: for(let kk = kUpper; kk >= 2; kk--) {
-                for(let sepTry = 14; sepTry >= 8; sepTry--) {
+                for(let sepTry = 14; sepTry >= sepLo; sepTry--) {
                     await wodMapGenYieldSlice();
                     anchorChebSep = sepTry;
                     let plan = await tryPlan(kk);
@@ -15657,6 +15696,7 @@
             let mapShapePre = (mog && wodIsProcGenMapShape(mog.mapShape)) ? mog.mapShape : (shapePre ? shapePre.value : 'island');
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
             if(wodMapShapeUsesRectanglePipeline(mapShapePre)) procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 26);
+            if(mapShapePre === 'archipelago') procMapAcceptTriesMax = Math.max(procMapAcceptTriesMax, 34);
             if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
@@ -15929,6 +15969,17 @@
             let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
             let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
             let landNC = Math.max(1, landForCities.length);
+
+            if(mapShape === 'archipelago') {
+                let passLand = 0;
+                for(let hx0 of gameData.hexList) if(hx0 && !isWaterHex(hx0)) passLand++;
+                let gridN = Math.max(1, gameData.hexList.length);
+                let minPass = Math.max(factionSlots * 100, 160, Math.floor(gridN * 0.016));
+                if(passLand < minPass) {
+                    if(ownsInnerRng) wodPopRandom();
+                    continue outerProcTerrain;
+                }
+            }
 
             gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
 
