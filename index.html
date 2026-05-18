@@ -733,10 +733,18 @@
             box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
 
-        .build-btn:hover {
+        .build-btn:hover:not(:disabled) {
             background: linear-gradient(135deg, #27ae60, #2ecc71);
             border-color: #2ecc71;
             transform: translateY(-2px);
+        }
+
+        .build-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+            filter: grayscale(0.4);
+            transform: none;
+            box-shadow: none;
         }
 
         .wod-pc-prod-root {
@@ -5125,9 +5133,9 @@
                     </select>
                 </div>
                 <div class="setup-row">
-                    <button class="build-btn" onclick="previewMap()">Generate New</button>
-                    <button type="button" class="wod-editor-btn" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
-                    <button type="button" class="wod-editor-btn" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
+                    <button type="button" class="build-btn" id="setupBtnGenerateNew" onclick="previewMap()">Generate New</button>
+                    <button type="button" class="wod-editor-btn" id="setupBtnSaveMap" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
+                    <button type="button" class="wod-editor-btn" id="setupBtnLoadMap" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
                 </div>
                 <div class="wod-preview-shell">
                     <canvas id="mapPreview"></canvas>
@@ -6367,6 +6375,10 @@
                 gameData.mapRadius = mapSize;
                 if(!opts.preserveMap) {
                     wodArmMapPreviewSpinner('mapPreview');
+                    gameData._soloPreviewGenerating = true;
+                    wodSetSetupMapToolbarBusy(true);
+                    let startBtnOpen = document.getElementById('setupBtnStartAi');
+                    if(startBtnOpen) startBtnOpen.disabled = true;
                     void generateMap()
                         .then(() => {
                             previewLoadedMap();
@@ -6382,7 +6394,12 @@
                             previewLoadedMap();
                             gameData._soloMapPreviewMatchesStart = false;
                         })
-                        .finally(() => wodDisarmMapPreviewSpinner('mapPreview'));
+                        .finally(() => {
+                            wodDisarmMapPreviewSpinner('mapPreview');
+                            gameData._soloPreviewGenerating = false;
+                            wodSetSetupMapToolbarBusy(false);
+                            if(startBtnOpen) startBtnOpen.disabled = false;
+                        });
                 } else {
                     previewLoadedMap();
                     try {
@@ -14972,11 +14989,22 @@
             return true;
         }
 
+        function wodSetSetupMapToolbarBusy(busy) {
+            let on = !!busy;
+            for(let id of ['setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap']) {
+                let el = document.getElementById(id);
+                if(!el) continue;
+                el.disabled = on;
+                el.toggleAttribute('disabled', on);
+            }
+        }
+
         function previewMap() {
             wodArmMapPreviewSpinner('mapPreview');
             gameData._soloPreviewGenerating = true;
             gameData._soloMapPreviewMatchesStart = false;
             gameData._soloPreviewSnapshot = null;
+            wodSetSetupMapToolbarBusy(true);
             let startBtn = document.getElementById('setupBtnStartAi');
             if(startBtn) startBtn.disabled = true;
             requestAnimationFrame(() => {
@@ -14998,6 +15026,7 @@
                         gameData._soloMapPreviewMatchesStart = ok;
                         if(ok) wodCaptureSoloPreviewSnapshot();
                         gameData._soloPreviewGenerating = false;
+                        wodSetSetupMapToolbarBusy(false);
                         if(startBtn) startBtn.disabled = false;
                     }
                 });
