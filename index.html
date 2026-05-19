@@ -6438,7 +6438,7 @@
                     <div class="bottom-bar" id="buildStructuresBarMobile">
                         <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city without a factory.">Build Factory ($2k)</button>
                         <button class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City must border water without a harbor.">Build Harbor ($1k)</button>
-                        <button class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on your owned land hex (not towns). Ally troops within range gain +20% defense.">Build Fort ($1.5k)</button>
+                        <button class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned land (not city cores). Forts may be built near each other; defense bonuses do not stack.">Build Fort ($1.5k)</button>
                     </div>
                 </div>
             </div>
@@ -6464,7 +6464,7 @@
                         <div class="wod-pc-prod-pane active" data-wod-pc-pane="structures" role="tabpanel">
                             <button type="button" class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city.">Build Factory ($2k)</button>
                             <button type="button" class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City bordering water.">Build Harbor ($1k)</button>
-                            <button type="button" class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned terrain. Nearby troops take 20% less damage.">Build Fort ($1.5k)</button>
+                            <button type="button" class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned terrain. Forts can be built close together; aura bonuses do not stack.">Build Fort ($1.5k)</button>
                         </div>
                         <div class="wod-pc-prod-pane" data-wod-pc-pane="units" role="tabpanel">
                             <button type="button" class="build-btn" onclick="buyUnit('light')" title="Train light infantry ($500).">Train Light Infantry ($500, 1k MP)</button>
@@ -19015,7 +19015,8 @@
             });
         }
 
-        function wodFortOverlapsFriendlyAura(hex, owner) {
+        /** True when a new fort here would sit inside another friendly fort's combat aura (bonuses do not stack). */
+        function wodFortInsideFriendlyAura(hex, owner) {
             if(!hex || !owner) return false;
             let list = gameData.forts;
             if(!list || !list.length) return false;
@@ -19027,12 +19028,6 @@
                 if(dx * dx + dy * dy <= r2) return true;
             }
             return false;
-        }
-
-        function hexEligibleForAiFortPlacement(hex, owner) {
-            if(!hexEligibleForFortPlacementForOwner(hex, owner)) return false;
-            if(wodFortOverlapsFriendlyAura(hex, owner)) return false;
-            return true;
         }
 
         function wodAiCityNeedsFortGuard(city, ownerId) {
@@ -19102,7 +19097,7 @@
         }
 
         function wodAiScoreFortHex(hex, ownerId) {
-            if(!hexEligibleForAiFortPlacement(hex, ownerId)) return -1e9;
+            if(!hexEligibleForFortPlacementForOwner(hex, ownerId)) return -1e9;
             let score = 0;
             let hr = gameData.hexRadius || 10;
             let tilePx = hr * 1.35;
@@ -25332,7 +25327,7 @@
             return (gameData.hexRadius || 10) * WOD_FORT_DEFENSE_TILES;
         }
 
-        /** Same-side troops within this aura take multiply combat damage by 0.8 (shown as +20% defense). */
+        /** Same-side troops in any one friendly fort aura take ×0.8 damage (does not stack with multiple forts). */
         function wodFortDefenseDamageMultiplier(defenderUnit) {
             if(!defenderUnit || defenderUnit.hp <= 0 || defenderUnit.type === 'convoy') return 1;
             let ox = defenderUnit.owner;
@@ -25686,7 +25681,12 @@
                 x: hex.x,
                 y: hex.y
             });
-            if(noisy && !opts.editor) showNotification('+20% defense aura for allied troops surrounding this fort.');
+            if(noisy && !opts.editor) {
+                if(wodFortInsideFriendlyAura(hex, owner))
+                    showNotification('Fort built. You may place forts close together — overlapping auras do not stack (+20% defense once).');
+                else
+                    showNotification('+20% defense aura for allied troops surrounding this fort.');
+            }
             if(!opts.editor && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                 wodBumpLifetime('fortsBuilt', 1);
                 scheduleSaveWodProgress();
