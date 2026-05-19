@@ -1680,77 +1680,29 @@
             inset: 0;
             display: flex;
             flex-direction: column;
-            align-items: stretch;
-            justify-content: flex-end;
-            gap: 6px;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
             border-radius: 8px;
-            background: transparent;
+            background: rgba(9, 20, 34, 0.48);
             color: rgba(237, 243, 249, 0.94);
-            font: 700 11px system-ui, sans-serif;
+            font: 700 13px system-ui, sans-serif;
             letter-spacing: 0.04em;
             pointer-events: none;
             z-index: 2;
-            padding: 8px 10px 10px;
-            box-sizing: border-box;
         }
 
         .wod-preview-busy .wod-load-spinner {
-            display: none;
+            width: 36px;
+            height: 36px;
+            border-width: 3px;
+            border-color: rgba(255, 255, 255, 0.14);
+            border-top-color: rgba(200, 220, 255, 0.95);
+            flex-shrink: 0;
         }
 
         .wod-preview-busy.hidden {
             display: none;
-        }
-
-        .wod-preview-gen-bar {
-            width: 100%;
-            height: 7px;
-            border-radius: 4px;
-            background: rgba(255, 255, 255, 0.12);
-            overflow: hidden;
-            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.45);
-        }
-
-        .wod-preview-gen-bar-inner {
-            height: 100%;
-            width: 100%;
-            transform-origin: 0 50%;
-            transform: scaleX(0);
-            background: linear-gradient(90deg, #2e6b8f, #5ab0d8, #8fd4f0);
-            transition: transform 0.18s ease-out;
-        }
-
-        .wod-preview-gen-caption {
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            color: rgba(230, 240, 250, 0.88);
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
-        }
-
-        #wodMenuMapGenBar {
-            position: fixed;
-            left: 50%;
-            bottom: max(18px, env(safe-area-inset-bottom, 0px));
-            transform: translateX(-50%);
-            width: min(420px, 88vw);
-            z-index: 11;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-            pointer-events: none;
-            padding: 0 4px;
-            box-sizing: border-box;
-        }
-
-        #wodMenuMapGenBar.hidden {
-            display: none !important;
-        }
-
-        #wodMenuMapGenBar .wod-preview-gen-caption {
-            text-align: center;
-            font-size: 11px;
         }
 
         #shopPanel.overlay {
@@ -5583,13 +5535,6 @@
         <!-- Selection Box -->
         <div id="selectionBox"></div>
 
-        <div id="wodMenuMapGenBar" class="hidden" aria-hidden="true">
-            <div class="wod-preview-gen-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                <div id="wodMenuMapGenBarInner" class="wod-preview-gen-bar-inner"></div>
-            </div>
-            <span id="wodMenuMapGenCaption" class="wod-preview-gen-caption">Generating battlefield…</span>
-        </div>
-
         <!-- Main Menu -->
         <div id="mainMenu" class="overlay">
             <div class="main-menu-land-wrap">
@@ -5680,10 +5625,8 @@
                 <div class="wod-preview-shell">
                     <canvas id="mapPreview"></canvas>
                     <div id="mapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
-                        <div class="wod-preview-gen-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                            <div id="mapPreviewGenBarInner" class="wod-preview-gen-bar-inner"></div>
-                        </div>
-                        <span id="mapPreviewGenCaption" class="wod-preview-gen-caption">Generating map…</span>
+                        <div class="wod-load-spinner" aria-hidden="true"></div>
+                        <span>Generating map…</span>
                     </div>
                 </div>
                 <button class="menu-btn" id="setupBtnStartAi" onclick="startGame('ai')">Start Game</button>
@@ -5749,10 +5692,8 @@
                             <div class="wod-preview-shell" style="max-width:440px">
                                 <canvas id="mpLobbyMapPreview" width="360" height="200"></canvas>
                                 <div id="mpLobbyMapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
-                                    <div class="wod-preview-gen-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-                                        <div id="mpLobbyMapPreviewGenBarInner" class="wod-preview-gen-bar-inner"></div>
-                                    </div>
-                                    <span id="mpLobbyMapPreviewGenCaption" class="wod-preview-gen-caption">Generating map…</span>
+                                    <div class="wod-load-spinner" aria-hidden="true"></div>
+                                    <span>Generating map…</span>
                                 </div>
                             </div>
                             <div id="mpGlSettingsReadout" class="mp-gl-readout"></div>
@@ -8288,49 +8229,32 @@
         }
         async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
             if(!wodMapShapeUsesRadialIslandMask(gameData.mapShape)) return;
-            let pad = Math.max(2, bufferTiles || 7);
-            let feather = pad + 11;
-            let colM = Math.max(1, cols | 0);
-            let rowM = Math.max(1, rows | 0);
-            let hi = 0;
+            let cx = 0, cy = 0, n = 0;
             for(let h of gameData.hexList) {
-                let edgeDist = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
-                let boxFrac = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
-                let wobble = fbm(h.x * 0.011 + seedOffset + 8800, h.y * 0.011 + seedOffset + 8800, 4);
-                let coastNoise = fbm(h.x * 0.019 + seedOffset + 9100, h.y * 0.019 + seedOffset + 9100, 3);
-                let effectiveEdge = edgeDist + (wobble - 0.5) * 7 + (coastNoise - 0.5) * 4 - boxFrac * 4;
-                let dynamicPad = pad + Math.floor(wobble * 5);
-                if(effectiveEdge < dynamicPad) {
-                    wodSetGeneratedTerrainType(h, 'water');
-                    continue;
-                }
-                if(effectiveEdge < feather && !isWaterHex(h)) {
-                    let t = (feather - effectiveEdge) / Math.max(1, feather - dynamicPad);
-                    if(t > 0.48 || (t > 0.24 && h.type !== 'mountain' && wobble > 0.52))
-                        wodSetGeneratedTerrainType(h, 'water');
-                    else if(t > 0.18 && h.type === 'sand' && wobble > 0.62)
-                        wodSetGeneratedTerrainType(h, 'water');
-                }
-                if((++hi & 2047) === 0) await wodMapGenYieldSlice();
+                cx += h.x;
+                cy += h.y;
+                n++;
             }
-        }
-        /** Wavy erosion for rectangle-style maps so playable land never hugs the outer box edge. */
-        async function wodSoftenRectangleMapEdgeCoast(cols, rows, seedOffset) {
-            if(!wodMapShapeUsesRectanglePipeline(gameData.mapShape)) return;
-            let colM = Math.max(1, cols | 0);
-            let rowM = Math.max(1, rows | 0);
+            if(!n) return;
+            cx /= n;
+            cy /= n;
+            let maxR = 0;
+            for(let h of gameData.hexList) {
+                let d = Math.hypot(h.x - cx, h.y - cy);
+                if(d > maxR) maxR = d;
+            }
+            let hr = gameData.hexRadius || 20;
+            let pad = Math.max(1, bufferTiles || 5);
+            let inner = maxR - hr * pad * 2.6;
+            let fadeW = hr * (pad + 7.5);
             let hi = 0;
             for(let h of gameData.hexList) {
-                if(!h || isWaterHex(h)) continue;
-                let edgeDist = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
-                let boxFrac = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
-                if(boxFrac < 0.82 && edgeDist > 8) continue;
-                let wobble = fbm(h.x * 0.012 + seedOffset + 9400, h.y * 0.012 + seedOffset + 9400, 4);
-                let bite = Math.max(0, boxFrac - 0.78) * 1.35 + Math.max(0, 7 - edgeDist) * 0.11;
-                bite += (wobble - 0.42) * 0.22;
-                if(bite > 0.58 || (bite > 0.36 && wobble > 0.58 && edgeDist < 6))
-                    wodSetGeneratedTerrainType(h, 'water');
-                if((++hi & 2047) === 0) await wodMapGenYieldSlice();
+                let d = Math.hypot(h.x - cx, h.y - cy);
+                if(d < inner) continue;
+                let t = (d - inner) / Math.max(fadeW, 1);
+                if(t > 0.58) wodSetGeneratedTerrainType(h, 'water');
+                else if(t > 0.34 && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') wodSetGeneratedTerrainType(h, 'sand');
+                if((++hi & 1023) === 0) await wodMapGenYieldSlice();
             }
         }
         async function wodNormalizeRectangleWaterFeatures(seedOffset) {
@@ -8597,27 +8521,6 @@
             }
             return comps;
         }
-        function wodPassableLandComponentId(startHex) {
-            if(!startHex || isWaterHex(startHex) || startHex.type === 'mountain') return -1;
-            let landKey = (h) => `${h.q},${h.r}`;
-            let isPassable = (h) => h && !isWaterHex(h) && h.type !== 'mountain';
-            let target = landKey(startHex);
-            let visited = new Set([target]);
-            let queue = [startHex];
-            let qi = 0;
-            while(qi < queue.length) {
-                let cur = queue[qi++];
-                for(let dir of hexDirections) {
-                    let nHex = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
-                    if(!isPassable(nHex)) continue;
-                    let nk = landKey(nHex);
-                    if(visited.has(nk)) continue;
-                    visited.add(nk);
-                    queue.push(nHex);
-                }
-            }
-            return visited;
-        }
         /** Meandering rivers — walk down a distance field toward water; skip paths that split passable land. */
         async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
             if(!gameData.hexList || gameData.hexList.length === 0) return;
@@ -8731,109 +8634,112 @@
                 await wodMapGenYieldSlice();
             }
         }
-        let wodBridgePlacementSeq = 0;
-        function bridgeCoversHex(q, r) {
-            let list = gameData.bridges;
-            if(!list || !list.length) return null;
-            let key = `${q},${r}`;
-            for(let b of list) {
-                if(b.q === q && b.r === r) return b;
-                if(b.spanKeys && b.spanKeys.indexOf(key) >= 0) return b;
+        function wodSyncBridgeWorldCoords(br) {
+            if(!br || !br.landA || !br.landB) return;
+            let ha = gameData.hexes[`${br.landA.q},${br.landA.r}`];
+            let hb = gameData.hexes[`${br.landB.q},${br.landB.r}`];
+            if(ha) {
+                br.landA.x = ha.x;
+                br.landA.y = ha.y;
             }
-            return null;
-        }
-        function isBridgeWalkableHex(hex) {
-            return !!(hex && bridgeCoversHex(hex.q, hex.r));
-        }
-        function wodCollectBridgeSpanKeys(centerHex, landA, landB) {
-            if(!centerHex || !landA || !landB) return [getHexKey(centerHex)];
-            let keys = new Set([getHexKey(centerHex)]);
-            let dq = landB.q - landA.q, dr = landB.r - landA.r;
-            let sq = dq === 0 ? 0 : (dq > 0 ? 1 : -1);
-            let sr = dr === 0 ? 0 : (dr > 0 ? 1 : -1);
-            if(!sq && !sr) return [getHexKey(centerHex)];
-            let cur = centerHex;
-            for(let step = 0; step < 4; step++) {
-                let nb = gameData.hexes[`${cur.q + sq},${cur.r + sr}`];
-                if(!nb || !isWaterHex(nb)) break;
-                keys.add(getHexKey(nb));
-                cur = nb;
+            if(hb) {
+                br.landB.x = hb.x;
+                br.landB.y = hb.y;
             }
-            cur = centerHex;
-            for(let step = 0; step < 4; step++) {
-                let nb = gameData.hexes[`${cur.q - sq},${cur.r - sr}`];
-                if(!nb || !isWaterHex(nb)) break;
-                keys.add(getHexKey(nb));
-                cur = nb;
+            if(ha && hb) {
+                br.x = (ha.x + hb.x) * 0.5;
+                br.y = (ha.y + hb.y) * 0.5 - (gameData.hexRadius || 20) * 0.14;
             }
-            return Array.from(keys);
         }
-        /** Place up to two neutral bridge buildings on narrow river crossings (land on both sides). */
-        async function wodPlaceProceduralBridges(seedOffset, maxBridges) {
-            if(!gameData.hexList || gameData.hexList.length === 0) return;
+        function wodBridgeLinkTargets(hex) {
+            if(!hex || !gameData.bridges || !gameData.bridges.length) return [];
+            let out = [];
+            let q = hex.q,
+                r = hex.r;
+            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                let br = gameData.bridges[bi];
+                if(!br || !br.landA || !br.landB) continue;
+                if(br.landA.q === q && br.landA.r === r) {
+                    let t = gameData.hexes[`${br.landB.q},${br.landB.r}`];
+                    if(t) out.push(t);
+                } else if(br.landB.q === q && br.landB.r === r) {
+                    let t = gameData.hexes[`${br.landA.q},${br.landA.r}`];
+                    if(t) out.push(t);
+                }
+            }
+            return out;
+        }
+        function bridgeShoreHexKey(q, r) {
+            if(!gameData.bridges) return false;
+            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                let br = gameData.bridges[bi];
+                if(!br || !br.landA || !br.landB) continue;
+                if((br.landA.q === q && br.landA.r === r) || (br.landB.q === q && br.landB.r === r)) return true;
+            }
+            return false;
+        }
+        /** Up to maxBridges neutral river crossings (land shore to land shore, not ocean tiles). */
+        async function wodPlaceProceduralRiverBridges(seedOffset, mapShape, cols, rows, maxBridges) {
+            maxBridges = maxBridges == null ? 2 : Math.max(0, maxBridges | 0);
+            if(!maxBridges) return;
             if(!gameData.bridges) gameData.bridges = [];
-            let cap = maxBridges == null ? 2 : Math.max(0, Math.min(2, maxBridges | 0));
-            if(cap <= 0) return;
+            gameData.bridges.length = 0;
+            let rowCount = Math.floor(rows) | 0;
+            let colM = Math.max(1, cols | 0);
+            let rowM = Math.max(1, rowCount);
+            let rivShape = wodMapShapeUsesRadialIslandMask(mapShape);
+            let oceanKeys = rivShape ? wodBuildOceanConnectedWaterKeys(colM, rowM) : null;
             let landOk = (h) => h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban';
-            let colM = Math.max(1, gameData.mapRadius || 40);
-            let rowM = Math.max(1, Math.floor((gameData.mapRadius || 40) * 0.8));
+            let edgeDistH = (h) => Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
             let candidates = [];
+            let hi = 0;
             for(let h of gameData.hexList) {
                 if(!isWaterHex(h)) continue;
-                let landNbs = getNeighborHexes(h).filter(nb => landOk(nb));
+                let wk = getHexKey(h);
+                if(rivShape && oceanKeys && oceanKeys.has(wk)) continue;
+                let landNbs = [];
+                for(let nb of getNeighborHexes(h)) {
+                    if(landOk(nb)) landNbs.push(nb);
+                }
                 if(landNbs.length < 2) continue;
-                let edgeDist = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
-                if(edgeDist < 4) continue;
                 for(let i = 0; i < landNbs.length; i++) {
                     for(let j = i + 1; j < landNbs.length; j++) {
-                        let a = landNbs[i], b = landNbs[j];
-                        let dx = b.q - a.q, dr = b.r - a.r;
-                        let manhattan = Math.abs(dx) + Math.abs(dr);
-                        if(manhattan < 2 || manhattan > 5) continue;
-                        let dot = dx * (h.q - a.q) + dr * (h.r - a.r);
-                        if(dot < 0) continue;
-                        let spanKeys = wodCollectBridgeSpanKeys(h, a, b);
-                        let width = spanKeys.length;
-                        if(width > 4) continue;
-                        let jitter = fbm(h.x * 0.0085 + seedOffset + 5200, h.y * 0.0085 + seedOffset + 5200, 3);
-                        let score = 120 - width * 18 + landNbs.length * 4 + jitter * 16;
-                        if(manhattan <= 3) score += 14;
-                        candidates.push({ h, landA: a, landB: b, spanKeys, score, width });
+                        let a = landNbs[i],
+                            b = landNbs[j];
+                        let man = Math.abs(a.q - b.q) + Math.abs(a.r - b.r);
+                        if(man < 2 || man > 3) continue;
+                        let score = man === 2 ? 2.8 : 1.1;
+                        score += fbm(h.x * 0.011 + seedOffset + 4411, h.y * 0.011 + seedOffset + 4411, 3) * 0.55;
+                        if(edgeDistH(h) < 7) score -= 1.4;
+                        candidates.push({ water: h, landA: a, landB: b, score });
                     }
                 }
+                if((++hi & 511) === 0) await wodMapGenYieldSlice();
             }
-            candidates.sort((a, b) => b.score - a.score || a.width - b.width);
-            let minBridgeDistSq = Math.pow((gameData.hexRadius || 10) * 9.5, 2);
+            candidates.sort((a, b) => b.score - a.score);
+            let usedShore = new Set();
             let placed = 0;
-            for(let c of candidates) {
-                if(placed >= cap) break;
-                if(bridgeCoversHex(c.h.q, c.h.r)) continue;
-                let tooClose = false;
-                for(let b of gameData.bridges) {
-                    let dx = b.x - c.h.x, dy = b.y - c.h.y;
-                    if(dx * dx + dy * dy < minBridgeDistSq) {
-                        tooClose = true;
-                        break;
-                    }
-                }
-                if(tooClose) continue;
-                let compA = wodPassableLandComponentId(c.landA);
-                let compB = wodPassableLandComponentId(c.landB);
-                if(!compA || !compB || compA.has(getHexKey(c.landB))) continue;
-                wodBridgePlacementSeq++;
-                gameData.bridges.push({
-                    id: 'bridge_' + wodBridgePlacementSeq,
+            for(let ci = 0; ci < candidates.length && placed < maxBridges; ci++) {
+                let c = candidates[ci];
+                if(!landOk(c.landA) || !landOk(c.landB) || !isWaterHex(c.water)) continue;
+                let ak = getHexKey(c.landA),
+                    bk = getHexKey(c.landB);
+                if(usedShore.has(ak) || usedShore.has(bk)) continue;
+                let br = {
+                    id: 'br_' + placed + '_' + ((Math.random() * 1e7) | 0),
                     owner: 0,
-                    q: c.h.q,
-                    r: c.h.r,
-                    x: c.h.x,
-                    y: c.h.y,
-                    landA: { q: c.landA.q, r: c.landA.r },
-                    landB: { q: c.landB.q, r: c.landB.r },
-                    spanKeys: c.spanKeys.slice()
-                });
+                    landA: { q: c.landA.q, r: c.landA.r, x: c.landA.x, y: c.landA.y },
+                    landB: { q: c.landB.q, r: c.landB.r, x: c.landB.x, y: c.landB.y },
+                    waterQ: c.water.q,
+                    waterR: c.water.r,
+                    x: 0,
+                    y: 0
+                };
+                wodSyncBridgeWorldCoords(br);
+                gameData.bridges.push(br);
+                usedShore.add(ak);
+                usedShore.add(bk);
                 placed++;
-                await wodMapGenYieldSlice();
             }
         }
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
@@ -9538,7 +9444,11 @@
                 factionColors: factionColors.slice(),
                 roads: gameData.roads.map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r })),
                 forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                bridges: (gameData.bridges || []).map(b => ({ id: b.id, owner: b.owner, q: b.q, r: b.r, x: b.x, y: b.y, landA: b.landA, landB: b.landB, spanKeys: (b.spanKeys || []).slice() })),
+                bridges: (gameData.bridges || []).map(b => ({
+                    id: b.id, owner: b.owner || 0,
+                    landA: { q: b.landA.q, r: b.landA.r }, landB: { q: b.landB.q, r: b.landB.r },
+                    waterQ: b.waterQ, waterR: b.waterR, x: b.x, y: b.y
+                })),
                 playerPublic: (window.wodMpRoomMeta && window.wodMpRoomMeta.playerPublic && typeof window.wodMpRoomMeta.playerPublic === 'object')
                     ? JSON.parse(JSON.stringify(window.wodMpRoomMeta.playerPublic))
                     : {}
@@ -9572,12 +9482,9 @@
             });
             gameData.bridges = (p.bridges || []).map(b => {
                 let o = Object.assign({}, b);
-                let he = gameData.hexes[`${o.q},${o.r}`];
-                if(he) {
-                    o.x = he.x;
-                    o.y = he.y;
-                }
-                if(!o.spanKeys) o.spanKeys = [`${o.q},${o.r}`];
+                o.landA = Object.assign({}, b.landA || {});
+                o.landB = Object.assign({}, b.landB || {});
+                wodSyncBridgeWorldCoords(o);
                 return o;
             });
             gameData.entities = [];
@@ -9777,15 +9684,13 @@
                 }
             }
             if(Array.isArray(s.bridges)) {
-                gameData.bridges = s.bridges.map(b => Object.assign({}, b));
-                for(let br of gameData.bridges) {
-                    let hh = gameData.hexes[`${br.q},${br.r}`];
-                    if(hh) {
-                        br.x = hh.x;
-                        br.y = hh.y;
-                    }
-                    if(!br.spanKeys) br.spanKeys = [`${br.q},${br.r}`];
-                }
+                gameData.bridges = s.bridges.map(b => {
+                    let o = Object.assign({}, b);
+                    o.landA = Object.assign({}, b.landA || {});
+                    o.landB = Object.assign({}, b.landB || {});
+                    wodSyncBridgeWorldCoords(o);
+                    return o;
+                });
             }
             if(s.entities) {
                 let byUid = new Map(gameData.entities.map(e => [e.uid, e]));
@@ -9907,7 +9812,11 @@
                 hexOwners: owners,
                 cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp })),
                 forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                bridges: (gameData.bridges || []).map(b => ({ id: b.id, owner: b.owner, q: b.q, r: b.r, x: b.x, y: b.y, landA: b.landA, landB: b.landB, spanKeys: (b.spanKeys || []).slice() })),
+                bridges: (gameData.bridges || []).map(b => ({
+                    id: b.id, owner: b.owner || 0,
+                    landA: { q: b.landA.q, r: b.landA.r }, landB: { q: b.landB.q, r: b.landB.r },
+                    waterQ: b.waterQ, waterR: b.waterR, x: b.x, y: b.y
+                })),
                 encircledKeys,
                 cityWarKeys,
                 matchEnd: gameData._mpMatchEnd || undefined
@@ -10139,6 +10048,7 @@
                 };
             }
             gameData._wodTerrainPoliticsBase = snap;
+            gameData._wodTerrainPoliticsBridges = (gameData.bridges || []).map(b => JSON.parse(JSON.stringify(b)));
             gameData._wodTerrainPoliticsBaseFp = wodTerrainOnlyFingerprint();
         }
         function wodCanRegeneratePoliticsOnly() {
@@ -10164,7 +10074,8 @@
             gameData.roads = [];
             gameData.entities = [];
             gameData.forts = [];
-            gameData.bridges = [];
+            gameData.bridges = (gameData._wodTerrainPoliticsBridges || []).map(b => JSON.parse(JSON.stringify(b)));
+            for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
             gameData._wodProcgenBorderFirstApplied = false;
             return true;
         }
@@ -12503,19 +12414,17 @@
                 if (hex.type === 'mountain') return false;
                 return isWaterHex(hex) || isClaimableLand(hex);
             }
-            if (unit.type === 'ship') return isWaterHex(hex) && !isBridgeWalkableHex(hex);
+            if (unit.type === 'ship') return isWaterHex(hex);
             if (unit.type === 'convoy') {
                 if (unit.convoySeaRoute) {
                     if (!isWaterHex(hex)) return false;
                     return true;
                 }
-                if (isBridgeWalkableHex(hex)) return true;
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
             }
             // Light / heavy: no mountains; may enter water (slow / drowning) when path or orders require it.
             if (hex.type === 'mountain') return false;
-            if (isBridgeWalkableHex(hex)) return true;
             if (isWaterHex(hex)) return true;
             return isClaimableLand(hex);
         }
@@ -13989,8 +13898,7 @@
                 }
                 function movementCost(a, b) {
                     let terrain = 0;
-                    if(isBridgeWalkableHex(b)) terrain = -0.15;
-                    else if(b.type === 'forest') terrain = 0.5;
+                    if(b.type === 'forest') terrain = 0.5;
                     else if(b.type === 'swamp') terrain = 1.2;
                     else if(b.type === 'hill') terrain = 0.6;
                     else if(b.type === 'sand') terrain = 0.15;
@@ -14001,7 +13909,7 @@
                     if(unit.type === 'ship' || seaConvoy) {
                         if(isWaterHex(b)) terrain -= 0.35;
                     }
-                    if(unit.type !== 'ship' && !pathSeaConvoy && isWaterHex(b) && !isBridgeWalkableHex(b)) terrain += pathMarine ? 2.65 : 62;
+                    if(unit.type !== 'ship' && !pathSeaConvoy && isWaterHex(b)) terrain += pathMarine ? 2.65 : 62;
                     if((unit.type === 'ship' || seaConvoy) && !isWaterHex(b)) terrain += 80;
                     // Route land units away from mountain edges and one-tile mountain moats.
                     if(unit.type !== 'ship' && !seaConvoy && b.type !== 'mountain') {
@@ -14086,7 +13994,7 @@
 
                 function neighborOk(nHex) {
                     if(!canUseHexForMovement(unit, nHex)) return false;
-                    if(forbidWater && (unit.type === 'light' || unit.type === 'heavy') && isWaterHex(nHex) && !isBridgeWalkableHex(nHex)) return false;
+                    if(forbidWater && (unit.type === 'light' || unit.type === 'heavy') && isWaterHex(nHex)) return false;
                     return true;
                 }
 
@@ -14134,6 +14042,19 @@
                         let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
                         if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
 
+                        cameFrom[nKey] = current;
+                        gScore[nKey] = tentativeG;
+                        fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
+                        heapPush(open, nHex, fScore);
+                    }
+                    let bridgeNbs = wodBridgeLinkTargets(current);
+                    for(let bi = 0; bi < bridgeNbs.length; bi++) {
+                        let nHex = bridgeNbs[bi];
+                        if(!nHex) continue;
+                        let nKey = key(nHex);
+                        if(visited.has(nKey) || !neighborOk(nHex)) continue;
+                        let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex) * 1.05;
+                        if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
                         cameFrom[nKey] = current;
                         gScore[nKey] = tentativeG;
                         fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
@@ -14572,7 +14493,7 @@
 
         function applyTerrainUnitEffects(unit, dt) {
             let hex = getNearestHexToPoint(unit.x, unit.y);
-            let sea = !!(hex && isWaterHex(hex) && !isBridgeWalkableHex(hex) && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
+            let sea = !!(hex && isWaterHex(hex) && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             unit.inWater = !!(sea && unit.type !== 'marine');
             if(unit.inWater) {
@@ -16926,202 +16847,28 @@
             reader.readAsText(file);
         }
 
-        let _wodMapGenProgress = null;
-
-        function wodMapGenProgressBarParts(canvasId) {
-            let barInner = null, caption = null, barTrack = null;
-            if(canvasId === 'mapPreview') {
-                barInner = document.getElementById('mapPreviewGenBarInner');
-                caption = document.getElementById('mapPreviewGenCaption');
-                barTrack = barInner ? barInner.parentElement : null;
-            } else if(canvasId === 'mpLobbyMapPreview') {
-                barInner = document.getElementById('mpLobbyMapPreviewGenBarInner');
-                caption = document.getElementById('mpLobbyMapPreviewGenCaption');
-                barTrack = barInner ? barInner.parentElement : null;
-            }
-            return { barInner, caption, barTrack };
-        }
-
-        function wodMapGenProgressSetBar(barInner, barTrack, caption, pct, label) {
-            let p = Math.max(0, Math.min(100, pct || 0));
-            if(barInner) barInner.style.transform = 'scaleX(' + (p / 100).toFixed(4) + ')';
-            if(barTrack) barTrack.setAttribute('aria-valuenow', String(Math.round(p)));
-            if(caption && label) caption.textContent = label;
-        }
-
-        function wodMapGenProgressSyncUi() {
-            let st = _wodMapGenProgress;
-            if(!st) return;
-            let label = (st.stage || 'Generating map…') + ' · ' + Math.round(st.pct || 0) + '%';
-            if(st.previewCanvasIds && st.previewCanvasIds.length) {
-                for(let cid of st.previewCanvasIds) {
-                    let parts = wodMapGenProgressBarParts(cid);
-                    wodMapGenProgressSetBar(parts.barInner, parts.barTrack, parts.caption, st.pct, label);
-                }
-            }
-            if(st.menuBar) {
-                wodMapGenProgressSetBar(
-                    document.getElementById('wodMenuMapGenBarInner'),
-                    document.getElementById('wodMenuMapGenBarInner') ? document.getElementById('wodMenuMapGenBarInner').parentElement : null,
-                    document.getElementById('wodMenuMapGenCaption'),
-                    st.pct,
-                    label
-                );
-            }
-        }
-
-        function wodMapGenProgressBegin(opts) {
-            opts = opts || {};
-            _wodMapGenProgress = {
-                pct: 0,
-                stage: 'Starting…',
-                previewCanvasIds: (opts.previewCanvasIds || []).slice(),
-                menuBar: !!opts.menuBar,
-                previewLayout: {},
-                menuLayout: null,
-                terrainDrawn: 0,
-                terrainTotal: 0
-            };
-            for(let cid of _wodMapGenProgress.previewCanvasIds) {
-                let cv = document.getElementById(cid);
-                if(!cv) continue;
-                let busy = document.getElementById(cid + 'Busy');
-                if(busy) {
-                    busy.classList.remove('hidden');
-                    busy.setAttribute('aria-hidden', 'false');
-                }
-                let rect = cv.getBoundingClientRect();
-                let w = Math.max(80, Math.floor(rect.width) || 320);
-                let h = Math.max(60, Math.floor(rect.height) || 220);
-                cv.width = w;
-                cv.height = h;
-                let ctx = cv.getContext('2d');
-                if(ctx) {
-                    ctx.fillStyle = '#154360';
-                    ctx.fillRect(0, 0, w, h);
-                }
-                _wodMapGenProgress.previewLayout[cid] = { w, h, ctx, cx: w / 2, cy: h / 2, scale: 0.01, ready: false };
-            }
-            if(_wodMapGenProgress.menuBar) {
-                let menuBar = document.getElementById('wodMenuMapGenBar');
-                if(menuBar) {
-                    menuBar.classList.remove('hidden');
-                    menuBar.setAttribute('aria-hidden', 'false');
-                }
-            }
-            wodMapGenProgressSyncUi();
-        }
-
-        function wodMapGenProgressUpdate(pct, stage) {
-            if(!_wodMapGenProgress) return;
-            if(pct != null) _wodMapGenProgress.pct = Math.max(_wodMapGenProgress.pct || 0, Math.min(100, pct));
-            if(stage) _wodMapGenProgress.stage = stage;
-            wodMapGenProgressSyncUi();
-        }
-
-        function wodMapGenProgressEnsurePreviewLayout(canvasId, hexList) {
-            let st = _wodMapGenProgress;
-            if(!st || !hexList || !hexList.length) return null;
-            let lay = st.previewLayout[canvasId];
-            if(!lay || !lay.ctx) return null;
-            if(lay.ready) return lay;
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            for(let hex of hexList) {
-                if(!hex || isWaterHex(hex)) continue;
-                if(hex.x < minX) minX = hex.x;
-                if(hex.x > maxX) maxX = hex.x;
-                if(hex.y < minY) minY = hex.y;
-                if(hex.y > maxY) maxY = hex.y;
-            }
-            if(!isFinite(minX)) return lay;
-            let landWidth = Math.max(maxX - minX, (gameData.hexRadius || 10) * 0.35);
-            let landHeight = Math.max(maxY - minY, (gameData.hexRadius || 10) * 0.35);
-            lay.scale = Math.min((lay.w - 20) / landWidth, (lay.h - 20) / landHeight);
-            lay.cx = lay.w / 2 - ((minX + maxX) / 2) * lay.scale;
-            lay.cy = lay.h / 2 - ((minY + maxY) / 2) * lay.scale;
-            lay.ready = true;
-            return lay;
-        }
-
-        function wodMapGenProgressDrawHex(hex) {
-            let st = _wodMapGenProgress;
-            if(!st || !hex || isWaterHex(hex)) return;
-            let pSizeBase = Math.max(1, (gameData.hexRadius || 10) * 1.45);
-            let col = getTerrainColor(hex.type);
-            for(let cid of st.previewCanvasIds) {
-                let lay = wodMapGenProgressEnsurePreviewLayout(cid, gameData.hexList);
-                if(!lay || !lay.ctx || !lay.ready) continue;
-                lay.ctx.fillStyle = col;
-                let pSize = Math.max(1, pSizeBase * lay.scale);
-                lay.ctx.fillRect(lay.cx + hex.x * lay.scale - pSize / 2, lay.cy + hex.y * lay.scale - pSize / 2, pSize + 1, pSize + 1);
-            }
-        }
-
-        async function wodMapGenProgressApplyTerrainChunk(hexList, start, end, pctBase, pctSpan) {
-            if(!hexList || !hexList.length) return;
-            let st = _wodMapGenProgress;
-            if(!st) {
-                for(let ci = start; ci < end; ci++) {
-                    let cell = hexList[ci];
-                    let hex = { q: cell.q, r: cell.r, x: cell.x, y: cell.y, type: cell.type, owner: 0, baseColor: '', renderColor: '' };
-                    hex.baseColor = getTerrainColor(hex.type);
-                    setHexOwner(hex, 0);
-                    gameData.hexes[`${cell.q},${cell.r}`] = hex;
-                    gameData.hexList.push(hex);
-                }
-                return;
-            }
-            st.terrainTotal = hexList.length;
-            let chunk = Math.max(48, gameData._wodFastMapGen ? 640 : 256);
-            for(let ci = start; ci < end; ci++) {
-                let cell = hexList[ci];
-                let hex = { q: cell.q, r: cell.r, x: cell.x, y: cell.y, type: cell.type, owner: 0, baseColor: '', renderColor: '' };
-                hex.baseColor = getTerrainColor(hex.type);
-                setHexOwner(hex, 0);
-                gameData.hexes[`${cell.q},${cell.r}`] = hex;
-                gameData.hexList.push(hex);
-                wodMapGenProgressDrawHex(hex);
-                st.terrainDrawn = ci + 1;
-                if(((ci - start) % chunk) === 0) {
-                    let tPct = pctBase + ((ci - start + 1) / Math.max(1, end - start)) * pctSpan;
-                    wodMapGenProgressUpdate(tPct, 'Laying terrain…');
-                    if(st.menuBar && gameData.menuAttractMode) {
-                        wodMarkTerrainFullDirty();
-                        draw();
-                    }
-                    await wodMapGenYieldSlice();
-                }
-            }
-        }
-
-        function wodMapGenProgressEnd() {
-            if(_wodMapGenProgress && _wodMapGenProgress.menuBar) {
-                let menuBar = document.getElementById('wodMenuMapGenBar');
-                if(menuBar) {
-                    menuBar.classList.add('hidden');
-                    menuBar.setAttribute('aria-hidden', 'true');
-                }
-            }
-            _wodMapGenProgress = null;
-        }
-
         function wodArmMapPreviewSpinner(canvasId) {
             if(!canvasId) return;
             if(!gameData._wodPreviewSpinnerCanvasIds) gameData._wodPreviewSpinnerCanvasIds = new Set();
             let cv = document.getElementById(canvasId);
             if(!cv) return;
             cv.dataset.wodMapGenerating = '1';
-            gameData._wodPreviewSpinnerCanvasIds.add(canvasId);
-            if(!_wodMapGenProgress) {
-                wodMapGenProgressBegin({ previewCanvasIds: Array.from(gameData._wodPreviewSpinnerCanvasIds) });
-            } else if(_wodMapGenProgress.previewCanvasIds.indexOf(canvasId) < 0) {
-                _wodMapGenProgress.previewCanvasIds.push(canvasId);
-                let busy = document.getElementById(canvasId + 'Busy');
-                if(busy) {
-                    busy.classList.remove('hidden');
-                    busy.setAttribute('aria-hidden', 'false');
-                }
+            let busy = document.getElementById(canvasId + 'Busy');
+            if(busy) {
+                busy.classList.remove('hidden');
+                busy.setAttribute('aria-hidden', 'false');
             }
+            let rect = cv.getBoundingClientRect();
+            let w = Math.max(80, Math.floor(rect.width) || 320);
+            let h = Math.max(60, Math.floor(rect.height) || 220);
+            cv.width = w;
+            cv.height = h;
+            let ctx = cv.getContext('2d');
+            if(ctx) {
+                ctx.fillStyle = '#154360';
+                ctx.fillRect(0, 0, w, h);
+            }
+            gameData._wodPreviewSpinnerCanvasIds.add(canvasId);
         }
 
         function wodDisarmMapPreviewSpinner(canvasId) {
@@ -17134,7 +16881,6 @@
                 busy.classList.add('hidden');
                 busy.setAttribute('aria-hidden', 'true');
             }
-            if(!gameData._wodPreviewSpinnerCanvasIds.size) wodMapGenProgressEnd();
         }
 
         function previewLoadedMap(canvasOrId) {
@@ -17188,16 +16934,6 @@
             if(wodPreviewDrawPolitical) {
                 let hxLookup = gameData.hexes || {};
                 wodPaintMapPreviewPolitical(pCtx, gameData.hexList, gameData.cities, null, cx, cy, scale, gameData.hexRadius, hxLookup);
-                if(gameData.bridges && gameData.bridges.length) {
-                    for(let br of gameData.bridges) {
-                        if(!br) continue;
-                        let bx = cx + br.x * scale;
-                        let by = cy + br.y * scale;
-                        let span = Math.max(2, scale * (gameData.hexRadius || 10) * 1.6);
-                        pCtx.fillStyle = '#6d4c2f';
-                        pCtx.fillRect(bx - span / 2, by - 1.5, span, 3);
-                    }
-                }
                 for(let u of gameData.entities) {
                     if(!u.owner || u.hp <= 0 || u.type === 'convoy') continue;
                     let col = factionColors[u.owner] || '#bbb';
@@ -17229,7 +16965,6 @@
                 hexList: wodDeepClonePlain(gameData.hexList || []),
                 cities: wodDeepClonePlain(gameData.cities || []),
                 roads: wodDeepClonePlain(gameData.roads || []),
-                bridges: wodDeepClonePlain(gameData.bridges || []),
                 entities: wodDeepClonePlain(gameData.entities || []),
                 camera: wodDeepClonePlain(gameData.camera || { x: 0, y: 0, zoom: 0.5 }),
                 citySplitAnglePhase: gameData._wodCitySplitAnglePhase,
@@ -17253,7 +16988,6 @@
             for(let h of gameData.hexList) gameData.hexes[`${h.q},${h.r}`] = h;
             gameData.cities = wodDeepClonePlain(snap.cities);
             gameData.roads = wodDeepClonePlain(snap.roads);
-            gameData.bridges = wodDeepClonePlain(snap.bridges || []);
             gameData.entities = wodDeepClonePlain(snap.entities);
             gameData.camera = wodDeepClonePlain(snap.camera);
 
@@ -18302,7 +18036,7 @@
             if(!st) return;
             if(gameData._wodFastMapGen) {
                 st.fastTick = (st.fastTick || 0) + 1;
-                if((st.fastTick & 4095) !== 0) return;
+                if((st.fastTick & 1023) !== 0) return;
             }
             let now = performance.now();
             if(now < st.due) return;
@@ -18337,16 +18071,6 @@
             try {
             gameData._wodFastMapGen = true;
             wodMapGenYieldingStart(4);
-            let menuGenVisual = !!(gameData._wodMenuMapGenVisual || (gameData.menuAttractMode && gameState === 'MENU'));
-            if(menuGenVisual) {
-                UI.canvas.style.display = 'block';
-                UI.canvas.classList.add('menu-bg-active');
-                wodSyncViewportAndCanvas();
-                wodMapGenProgressBegin({ menuBar: true });
-            } else if(previewSpinnerActive) {
-                wodMapGenProgressBegin({ previewCanvasIds: Array.from(gameData._wodPreviewSpinnerCanvasIds || []) });
-            }
-            wodMapGenProgressUpdate(2, 'Preparing terrain…');
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 10000;
             gameData.income = 10;             gameData.selection = [];
@@ -18425,7 +18149,14 @@
                     mapR, hr, mapShape, genProfile: gameData._genProfile, seedOffset, cols, rows, spacing
                 });
                 if(workerHexList && workerHexList.length > 0) {
-                    await wodMapGenProgressApplyTerrainChunk(workerHexList, 0, workerHexList.length, 4, 34);
+                    for(let ci = 0; ci < workerHexList.length; ci++) {
+                        let cell = workerHexList[ci];
+                        let hex = { q: cell.q, r: cell.r, x: cell.x, y: cell.y, type: cell.type, owner: 0, baseColor: '', renderColor: '' };
+                        hex.baseColor = getTerrainColor(hex.type);
+                        setHexOwner(hex, 0);
+                        gameData.hexes[`${cell.q},${cell.r}`] = hex;
+                        gameData.hexList.push(hex);
+                    }
                     terrainAppliedFromWorker = true;
                 }
             } catch(_) {}
@@ -18531,11 +18262,8 @@
                                 mask += 0.055 - Math.abs(sy) * 0.11;
                             }
                         }
-                        let boxFrac = Math.max(Math.abs(q) / Math.max(cols, 1), Math.abs(r) / Math.max(rows, 1));
-                        let edgeWobble =
-                            fbm(x * scale * 2.8 + seedOffset + 8800, y * scale * 2.8 + seedOffset + 8800, 4) - 0.5;
-                        mask -= Math.pow(Math.max(0, boxFrac - 0.62 + edgeWobble * 0.08), 1.35) * 1.08;
-                        if(boxFrac > 0.78) mask -= (boxFrac - 0.78) * (1.05 + edgeWobble * 0.35);
+                        let ellFrac = Math.sqrt(normX * normX + normY * normY);
+                        mask -= Math.pow(Math.max(0, ellFrac - 0.9), 1.55) * 0.58;
                     } else {
                         mask = 1.0;
                     }
@@ -18656,48 +18384,34 @@
                     
                     gameData.hexes[`${q},${r}`] = hex;
                     gameData.hexList.push(hex);
-                    wodMapGenProgressDrawHex(hex);
-                    if((++terrainCellIx & 511) === 0) {
-                        wodMapGenProgressUpdate(4 + Math.min(34, (terrainCellIx / Math.max(1, (rows * 2 + 1) * (cols * 2 + 1))) * 34), 'Laying terrain…');
-                        await wodMapGenYieldSlice();
-                    }
+                    if((++terrainCellIx & 255) === 0) await wodMapGenYieldSlice();
                 }
             }
 
-            wodMapGenProgressUpdate(38, 'Shaping coastlines…');
-            await wodForceIslandEdgeWaterBuffer(cols, rows, 7, seedOffset);
+            await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
             await wodNaturalizeBiomeBlends(seedOffset, mapShape);
-            await wodCoalesceTerrainSpeckles(gameData._wodFastMapGen ? 1 : 2);
+            await wodCoalesceTerrainSpeckles(2);
             await wodPaintRectangleMapPerimeterWater(cols, rows);
-            await wodSoftenRectangleMapEdgeCoast(cols, rows, seedOffset);
             await wodNormalizeRectangleWaterFeatures(seedOffset);
             limitRectangleMountainDensity(mapShape, seedOffset);
             await wodApplyRectangleBiomeDominance(seedOffset);
             wodThinMountainsForProfile(gameData._genProfile, seedOffset);
-            wodMapGenProgressUpdate(48, 'Carving passes…');
             // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
             await ensureMountainPasses();
             await softenLandFullyBlockedByMountainRing();
             if(!gameData._wodFastMapGen) await ensureMountainPasses();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
-            wodMapGenProgressUpdate(56, 'Carving rivers…');
             await wodCarveProceduralRivers(seedOffset, mapShape, cols, rows);
-            wodMapGenProgressUpdate(62, 'Placing bridges…');
-            await wodPlaceProceduralBridges(seedOffset, 2);
+            await wodPlaceProceduralRiverBridges(seedOffset, mapShape, cols, rows, 2);
             await wodPaintCoastalSandAllLand();
-            if(!gameData._wodFastMapGen) await wodCoalesceTerrainSpeckles(1);
+            await wodCoalesceTerrainSpeckles(2);
             wodCaptureTerrainPoliticsBase();
-            if(menuGenVisual) {
-                wodMarkTerrainFullDirty();
-                draw();
-            }
 
             if(!wodMapLandFractionAcceptable(mapShape)) {
                 if(ownsInnerRng) wodPopRandom();
                 continue outerProcTerrain;
             }
 
-            wodMapGenProgressUpdate(68, 'Assigning borders…');
             await wodMapGenYieldSlice();
 
             // Generate Cities — uses live faction count from solo setup or lobby before placing towns.
@@ -18724,7 +18438,6 @@
 
             gameData._wodProcgenBorderFirstApplied = false;
             if(wantCities && wantTerritory) {
-                wodMapGenProgressUpdate(78, 'Placing towns…');
                 let procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
                 if(procOk) {
                     procSucceeded = true;
@@ -18867,17 +18580,9 @@
             updateTerrainKey();
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
-            wodMapGenProgressUpdate(100, 'Map ready');
-            if(menuGenVisual) {
-                wodMarkTerrainFullDirty();
-                draw();
-            }
             } finally {
                 gameData._wodFastMapGen = false;
-                gameData._wodMenuMapGenVisual = false;
                 wodMapGenYieldingStop();
-                if(!gameData._wodPreviewSpinnerCanvasIds || !gameData._wodPreviewSpinnerCanvasIds.size)
-                    wodMapGenProgressEnd();
                 if(showMapGenOverlay && mapGenOverlayEl) {
                     mapGenOverlayEl.classList.add('hidden');
                     mapGenOverlayEl.setAttribute('aria-busy', 'false');
@@ -19262,7 +18967,13 @@
             gameData.roads = s.roads.map(r => Object.assign({}, r));
             gameData.entities = s.entities.map(e => Object.assign({}, e, e.target ? { target: Object.assign({}, e.target) } : {}));
             gameData.forts = (s.forts || []).map(f => Object.assign({}, f));
-            gameData.bridges = (s.bridges || []).map(b => Object.assign({}, b));
+            gameData.bridges = (s.bridges || []).map(b => {
+                let o = Object.assign({}, b);
+                if(o.landA) o.landA = Object.assign({}, o.landA);
+                if(o.landB) o.landB = Object.assign({}, o.landB);
+                wodSyncBridgeWorldCoords(o);
+                return o;
+            });
             gameData.mapRadius = s.mapRadius;
             gameData.mapShape = s.mapShape;
             Object.assign(gameData.camera, s.camera);
@@ -19506,7 +19217,6 @@
             }
             let _wodPrevSkipLoader = gameData._wodSkipMapGenLoader;
             gameData._wodSkipMapGenLoader = true;
-            gameData._wodMenuMapGenVisual = true;
             try {
             wodSyncViewportAndCanvas();
             gameData.selection = [];
@@ -19520,9 +19230,6 @@
             let shapeEl = document.getElementById('setupMapShape');
             if(shapeEl) shapeEl.value = 'island';
             gameData.aiCount = 1;
-            UI.canvas.style.display = 'block';
-            UI.canvas.classList.add('menu-bg-active');
-            wodCenterCameraOnLandmassForMenu();
             await generateMap();
             remapAttractBattleFromPlayerSlotsToAis();
             gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, structures: true, units: true };
@@ -19542,7 +19249,6 @@
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
             } finally {
                 gameData._wodSkipMapGenLoader = _wodPrevSkipLoader;
-                gameData._wodMenuMapGenVisual = false;
             }
         }
 
@@ -24900,14 +24606,6 @@
             }
 
             let structsOn = !(gameData.layers && gameData.layers.structures === false);
-            if(structsOn && gameData.bridges && gameData.bridges.length) {
-                for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
-                    let br = gameData.bridges[bi];
-                    if(!br) continue;
-                    if(wodCull && !wodInView(br.x, br.y, culPad + 40)) continue;
-                    drawBridgeSticker(ctx, br, gfxLite);
-                }
-            }
             if(structsOn && gameData.forts && gameData.forts.length) {
                 let auraR = wodFortCombatAuraRadiusPx();
                 let auraPad = auraR + 52,
@@ -24931,6 +24629,13 @@
                     ctx.setLineDash([]);
                     ctx.restore();
                     drawFortSticker(ctx, ftf, fcol, gfxLite, null);
+                }
+            }
+            if(structsOn && gameData.bridges && gameData.bridges.length) {
+                for(let bri = 0, brl = gameData.bridges.length; bri < brl; bri++) {
+                    let brg = gameData.bridges[bri];
+                    if(wodCull && !wodInView(brg.x, brg.y, 48)) continue;
+                    drawBridgeSticker(ctx, brg, gfxLite, null);
                 }
             }
 
@@ -26567,28 +26272,6 @@
             ctx.strokeRect(-gw * 0.5, -h * 1.05, gw, gh);
         }
 
-        function drawBridgeSticker(ctx, bridge, fxLite) {
-            if(!bridge) return;
-            ctx.save();
-            ctx.translate(bridge.x, bridge.y);
-            let hr = gameData.hexRadius || 10;
-            let span = hr * (fxLite ? 1.55 : 1.85);
-            let deckW = hr * (fxLite ? 0.42 : 0.52);
-            ctx.fillStyle = '#6d4c2f';
-            ctx.strokeStyle = '#3e2723';
-            ctx.lineWidth = fxLite ? 1.2 : 1.6;
-            ctx.fillRect(-span / 2, -deckW / 2, span, deckW);
-            ctx.strokeRect(-span / 2, -deckW / 2, span, deckW);
-            ctx.fillStyle = '#8d6e63';
-            for(let i = -2; i <= 2; i++) {
-                let px = i * span * 0.18;
-                ctx.fillRect(px - 1.2, -deckW / 2 - 1.5, 2.4, deckW + 3);
-            }
-            ctx.fillStyle = '#cfd8dc';
-            ctx.fillRect(-span * 0.08, -deckW * 0.65, span * 0.16, deckW * 0.35);
-            ctx.restore();
-        }
-
         function drawFortSticker(ctx, f, factionCol, fxLite, culPadFn, period) {
             period = period || wodGetRenderPeriod();
             let footprint = fxLite ? 20 : 26;
@@ -26674,6 +26357,56 @@
             ctx.lineWidth = fxLite ? 0.78 : 0.92;
             ctx.fillRect(px + 1, poleTop + 0.45, fs, fs);
             ctx.strokeRect(px + 1, poleTop + 0.45, fs, fs);
+            ctx.restore();
+        }
+        function drawBridgeSticker(ctx, br, fxLite, culPadFn) {
+            if(!br || !br.landA || !br.landB) return;
+            let ha = gameData.hexes[`${br.landA.q},${br.landA.r}`];
+            let hb = gameData.hexes[`${br.landB.q},${br.landB.r}`];
+            if(!ha || !hb) return;
+            let mx = (ha.x + hb.x) * 0.5,
+                my = (ha.y + hb.y) * 0.5;
+            let footprint = fxLite ? 34 : 44;
+            if(typeof culPadFn === 'function' && !culPadFn(mx, my, footprint)) return;
+            let ang = Math.atan2(hb.y - ha.y, hb.x - ha.x);
+            let span = Math.hypot(hb.x - ha.x, hb.y - ha.y);
+            let plankN = Math.max(4, Math.min(9, Math.round(span / (fxLite ? 11 : 9))));
+            ctx.save();
+            ctx.translate(mx, my);
+            ctx.rotate(ang);
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.beginPath();
+            ctx.ellipse(0, fxLite ? 5 : 7, span * 0.42, fxLite ? 5 : 6.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            let deckW = span * 0.82,
+                deckH = fxLite ? 5.5 : 7.2;
+            ctx.fillStyle = '#6b4f2f';
+            ctx.strokeStyle = '#3d2a18';
+            ctx.lineWidth = fxLite ? 1.1 : 1.45;
+            ctx.fillRect(-deckW * 0.5, -deckH * 0.5, deckW, deckH);
+            ctx.strokeRect(-deckW * 0.5, -deckH * 0.5, deckW, deckH);
+            ctx.strokeStyle = '#8a6540';
+            ctx.lineWidth = fxLite ? 0.75 : 0.95;
+            let step = deckW / plankN;
+            for(let pi = 1; pi < plankN; pi++) {
+                let px = -deckW * 0.5 + pi * step;
+                ctx.beginPath();
+                ctx.moveTo(px, -deckH * 0.5);
+                ctx.lineTo(px, deckH * 0.5);
+                ctx.stroke();
+            }
+            let pierW = fxLite ? 4.2 : 5.4,
+                pierH = fxLite ? 7.5 : 9.5;
+            ctx.fillStyle = '#4a3828';
+            ctx.strokeStyle = '#2a1e14';
+            ctx.lineWidth = fxLite ? 1 : 1.2;
+            for(let side = -1; side <= 1; side += 2) {
+                let px = side * deckW * 0.46;
+                ctx.fillRect(px - pierW * 0.5, deckH * 0.5, pierW, pierH);
+                ctx.strokeRect(px - pierW * 0.5, deckH * 0.5, pierW, pierH);
+            }
+            ctx.fillStyle = 'rgba(210, 190, 150, 0.35)';
+            ctx.fillRect(-deckW * 0.46, -deckH * 0.35, deckW * 0.92, deckH * 0.42);
             ctx.restore();
         }
         function wodFortPlacementRingRadiusSq() {
@@ -27189,7 +26922,13 @@
                 gameData.roads = mapData.roads || [];
                 gameData.entities = mapData.entities || [];
                 gameData.forts = (mapData.forts || []).map(f => Object.assign({}, f));
-                gameData.bridges = (mapData.bridges || []).map(b => Object.assign({}, b));
+                gameData.bridges = (mapData.bridges || []).map(b => {
+                    let o = Object.assign({}, b);
+                    if(o.landA) o.landA = Object.assign({}, o.landA);
+                    if(o.landB) o.landB = Object.assign({}, o.landB);
+                    wodSyncBridgeWorldCoords(o);
+                    return o;
+                });
                 gameData.hexes = {};
                 for(let hex of gameData.hexList) {
                     hex.baseColor = getTerrainColor(hex.type);
@@ -27224,7 +26963,12 @@
                     roads: gameData.roads,
                     entities: gameData.entities,
                     forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                    bridges: (gameData.bridges || []).map(b => ({ id: b.id, owner: b.owner, q: b.q, r: b.r, x: b.x, y: b.y, landA: b.landA, landB: b.landB, spanKeys: (b.spanKeys || []).slice() })),
+                    bridges: (gameData.bridges || []).map(b => ({
+                        id: b.id, owner: b.owner || 0,
+                        landA: { q: b.landA.q, r: b.landA.r, x: b.landA.x, y: b.landA.y },
+                        landB: { q: b.landB.q, r: b.landB.r, x: b.landB.x, y: b.landB.y },
+                        waterQ: b.waterQ, waterR: b.waterR, x: b.x, y: b.y
+                    })),
                     factionColors: factionColors.slice(),
                     savedStartEconomy: true,
                     money: gameData.money,
