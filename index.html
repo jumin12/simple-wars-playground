@@ -6382,6 +6382,7 @@
 
         let gameState = 'MENU'; 
         let menuDemoSeeded = false;
+        let menuBattleSnapshot = null;
         let menuDemoAnimId = 0;
         let menuDemoLastTime = 0;
 
@@ -6707,6 +6708,7 @@
                 showNotification('Map is still generating...');
                 return;
             }
+            saveMenuBattleSnapshot();
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             menuDemoSeeded = false;
@@ -6742,8 +6744,10 @@
             UI.mainMenu.classList.remove('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             stopGame();
-            menuDemoSeeded = false;
-            void bootstrapMenuBackgroundBattle();
+            if(!restoreMenuBattleFromSnapshot()) {
+                menuDemoSeeded = false;
+                void bootstrapMenuBackgroundBattle();
+            }
         }
 
         // --- Game Setup ---
@@ -9746,6 +9750,7 @@
                             ? Object.assign({}, meta.playerPublic)
                             : {}
                     };
+                    saveMenuBattleSnapshot();
                     hidePanels();
                     gameState = 'PLAYING';
                     pauseMenuBackgroundBattle();
@@ -10465,10 +10470,14 @@
                 let us = wodUrbanPeriodStyle(wodGetRenderPeriod());
                 return `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
                     <rect width="16" height="16" fill="${us.base}"/>
-                    <rect x="1.6" y="1.4" width="4.2" height="4.2" rx=".4" fill="${us.blockB}"/>
-                    <rect x="10.2" y="1.7" width="4" height="3.7" rx=".4" fill="${us.blockA}"/>
-                    <rect x="2" y="10.3" width="3.7" height="4" rx=".4" fill="${us.blockA}"/>
-                    <rect x="10.4" y="10.1" width="4.1" height="4.2" rx=".4" fill="${us.blockB}"/>
+                    <rect x="1.6" y="1.4" width="4.2" height="4.2" rx=".35" fill="${us.blockB}" stroke="${us.stroke}" stroke-width=".35"/>
+                    <rect x="10.2" y="1.7" width="4" height="3.7" rx=".35" fill="${us.blockA}" stroke="${us.stroke}" stroke-width=".35"/>
+                    <rect x="2" y="10.3" width="3.7" height="4" rx=".35" fill="${us.blockA}" stroke="${us.stroke}" stroke-width=".35"/>
+                    <rect x="10.4" y="10.1" width="4.1" height="4.2" rx=".35" fill="${us.blockB}" stroke="${us.stroke}" stroke-width=".35"/>
+                    <rect x="2.8" y="2.6" width="1" height="1.4" fill="rgba(18,22,28,.55)"/><rect x="5" y="3" width="1" height="1.4" fill="rgba(18,22,28,.55)"/>
+                    <rect x="11.4" y="2.9" width="1" height="1.4" fill="rgba(18,22,28,.55)"/><rect x="13.6" y="2.9" width="1" height="1.4" fill="rgba(18,22,28,.55)"/>
+                    <rect x="3.2" y="11.5" width="1" height="1.4" fill="rgba(18,22,28,.55)"/><rect x="5.4" y="11.8" width="1" height="1.4" fill="rgba(18,22,28,.55)"/>
+                    <rect x="11.6" y="11.3" width="1" height="1.4" fill="rgba(18,22,28,.55)"/><rect x="13.8" y="11.6" width="1" height="1.4" fill="rgba(18,22,28,.55)"/>
                 </svg>`;
             }
             return '';
@@ -17352,6 +17361,49 @@
             gameData.camera.y = sy * z - vh / 2;
         }
 
+        function saveMenuBattleSnapshot() {
+            if(!menuDemoSeeded || gameState !== 'MENU' || !gameData.hexList || !gameData.hexList.length) return;
+            menuBattleSnapshot = {
+                hexList: gameData.hexList.map(h => Object.assign({}, h)),
+                cities: gameData.cities.map(c => Object.assign({}, c)),
+                roads: gameData.roads.map(r => Object.assign({}, r)),
+                entities: gameData.entities.map(e => Object.assign({}, e)),
+                forts: (gameData.forts || []).map(f => Object.assign({}, f)),
+                mapRadius: gameData.mapRadius,
+                mapShape: gameData.mapShape,
+                camera: Object.assign({}, gameData.camera),
+                layers: Object.assign({}, gameData.layers || {}),
+            };
+        }
+
+        function restoreMenuBattleFromSnapshot() {
+            if(!menuBattleSnapshot) return false;
+            let s = menuBattleSnapshot;
+            gameData.hexes = {};
+            gameData.hexList = s.hexList;
+            for(let h of gameData.hexList) gameData.hexes[`${h.q},${h.r}`] = h;
+            gameData.cities = s.cities;
+            gameData.roads = s.roads;
+            gameData.entities = s.entities;
+            gameData.forts = s.forts || [];
+            gameData.mapRadius = s.mapRadius;
+            gameData.mapShape = s.mapShape;
+            Object.assign(gameData.camera, s.camera);
+            gameData.layers = Object.assign({}, s.layers);
+            menuDemoSeeded = true;
+            gameData.menuAttractMode = true;
+            wodMarkTerrainFullDirty();
+            UI.canvas.style.display = 'block';
+            UI.canvas.classList.add('menu-bg-active');
+            wodCenterCameraOnLandmassForMenu();
+            kickstartMenuAttractSim();
+            draw();
+            menuDemoLastTime = performance.now();
+            if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
+            menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
+            return true;
+        }
+
         function pauseMenuBackgroundBattle() {
             gameData.menuAttractMode = false;
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
@@ -17370,6 +17422,7 @@
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
+            kickstartMenuAttractSim();
             menuDemoLastTime = performance.now();
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
@@ -18796,11 +18849,13 @@
                     let h = spacing * (0.18 + ((style + i) % 3) * 0.06);
                     let ox = ((i % 2) - 0.5) * spacing * 0.42 + ((variant % 3) - 1) * 2;
                     let oy = (Math.floor(i / 2) - 0.35) * spacing * 0.42 + ((style % 3) - 1) * 2;
+                    let bx = px + ox - w / 2, by = py + oy - h / 2;
                     ctx.fillStyle = i % 2 === 0 ? us.blockA : us.blockB;
-                    ctx.fillRect(px + ox - w/2, py + oy - h/2, w, h);
+                    ctx.fillRect(bx, by, w, h);
                     ctx.strokeStyle = us.stroke;
                     ctx.lineWidth = 1;
-                    ctx.strokeRect(px + ox - w/2, py + oy - h/2, w, h);
+                    ctx.strokeRect(bx, by, w, h);
+                    wodDrawStructureWindows(ctx, bx, by, w, h);
                 }
             }
         }
@@ -19508,55 +19563,70 @@
             ctx.drawImage(terrainCanvas, terrainBounds.minX, terrainBounds.minY);
         }
 
+        function wodPeriodStructurePalette(period) {
+            let us = wodUrbanPeriodStyle(period);
+            return {
+                wall: us.blockA,
+                wallHi: us.blockB,
+                stroke: us.stroke,
+                window: 'rgba(18, 22, 28, 0.62)',
+                accent: period === 'ancient' ? '#d4c4a0' : period === 'medieval' ? '#6d5a48' : period === 'napoleonic' ? '#5c4a38' : '#8a9399',
+                water: period === 'ancient' ? '#3d6a7a' : '#2c4f68',
+                roof: period === 'medieval' ? '#4a4038' : period === 'ancient' ? '#8b7355' : '#3d4450',
+            };
+        }
+
+        function wodDrawStructureWindows(ctx, bx, by, bw, bh) {
+            ctx.fillStyle = 'rgba(18, 22, 28, 0.62)';
+            for(let wx = bx + 2.5; wx < bx + bw - 2; wx += 5) {
+                for(let wy = by + 3; wy < by + bh - 2.5; wy += 6.5) {
+                    ctx.fillRect(wx, wy, 2.2, 3);
+                }
+            }
+        }
+
         function drawPeriodCityMarker(ctx, city, period) {
             if(city.owner === 0) return;
             let ownerColor = factionColors[city.owner];
             let us = wodUrbanPeriodStyle(period);
+            let pal = wodPeriodStructurePalette(period);
             ctx.save();
             ctx.translate(city.x, city.y);
             ctx.strokeStyle = us.stroke;
             ctx.lineWidth = 2.2;
-            let blocks;
-            if(period === 'napoleonic') {
-                blocks = [[-18,-10,12,22],[-6,-16,13,28],[9,-8,11,20],[-16,14,30,7]];
-            } else if(period === 'medieval') {
-                blocks = [[-14,-18,9,34],[-4,-20,11,38],[8,-14,10,28],[-20,12,38,9]];
-            } else if(period === 'ancient') {
-                blocks = [[-16,-8,14,18],[-4,-12,12,24],[10,-6,10,16],[-14,14,28,8]];
-            } else {
-                let skin = city.owner === 1 ? gameData.citySkin : 'classic';
-                blocks = skin === 'fort'
-                    ? [[-22,-12,13,28],[-7,-20,14,36],[10,-10,12,26],[-24,-23,8,10],[16,-22,8,10]]
-                    : skin === 'ring'
-                        ? [[-20,-8,10,18],[-8,-18,16,10],[10,-8,10,18],[-8,10,16,10],[-5,-5,10,10]]
-                        : [[-20,-12,10,26],[-7,-18,14,32],[10,-10,11,24],[-18,16,34,8]];
-            }
+            let skin = (!period || period === 'modern') && city.owner === 1 ? gameData.citySkin : 'classic';
+            let blocks = skin === 'fort'
+                ? [[-22,-12,13,28],[-7,-20,14,36],[10,-10,12,26],[-24,-23,8,10],[16,-22,8,10]]
+                : skin === 'ring'
+                    ? [[-20,-8,10,18],[-8,-18,16,10],[10,-8,10,18],[-8,10,16,10],[-5,-5,10,10]]
+                    : [[-20,-12,10,26],[-7,-18,14,32],[10,-10,11,24],[-18,16,34,8]];
             for(let i = 0; i < blocks.length; i++) {
                 let b = blocks[i];
-                ctx.fillStyle = i % 2 === 0 ? us.blockA : us.blockB;
+                ctx.fillStyle = i % 2 === 0 ? pal.wall : pal.wallHi;
                 ctx.fillRect(b[0], b[1], b[2], b[3]);
                 ctx.strokeRect(b[0], b[1], b[2], b[3]);
+                wodDrawStructureWindows(ctx, b[0], b[1], b[2], b[3]);
                 if(period === 'medieval' && i === 0) {
                     let bw = b[2] / 5;
-                    ctx.fillStyle = us.blockB;
+                    ctx.fillStyle = pal.wallHi;
                     for(let t = 0; t < 5; t++) {
-                        if(t % 2 === 0) ctx.fillRect(b[0] + t * bw, b[1] - 3, bw + 0.5, 4);
+                        if(t % 2 === 0) ctx.fillRect(b[0] + t * bw, b[1] - 3.5, bw + 0.5, 4);
                     }
                 }
                 if(period === 'ancient' && i < 3) {
-                    ctx.fillStyle = 'rgba(235, 228, 210, 0.55)';
-                    ctx.fillRect(b[0] + b[2] * 0.35, b[1] + 2, 2, b[3] - 4);
+                    ctx.fillStyle = pal.accent;
+                    ctx.globalAlpha = 0.45;
+                    ctx.fillRect(b[0] + b[2] * 0.32, b[1] + 2, 2.5, b[3] - 4);
+                    ctx.globalAlpha = 1;
                 }
-                if(period === 'modern' || !period || period === 'napoleonic') {
-                    ctx.fillStyle = 'rgba(25, 30, 35, 0.55)';
-                    for(let wx = b[0] + 3; wx < b[0] + b[2] - 2; wx += 6) {
-                        for(let wy = b[1] + 5; wy < b[1] + b[3] - 3; wy += 8) {
-                            ctx.fillRect(wx, wy, 2, 3);
-                        }
-                    }
+                if(period === 'napoleonic' && i === 1) {
+                    ctx.fillStyle = pal.roof;
+                    ctx.fillRect(b[0] - 1, b[1] - 4, b[2] + 2, 4);
+                    ctx.strokeRect(b[0] - 1, b[1] - 4, b[2] + 2, 4);
                 }
             }
             ctx.fillStyle = ownerColor;
+            ctx.strokeStyle = us.stroke;
             if(period === 'ancient') {
                 ctx.beginPath();
                 ctx.moveTo(12, -26);
@@ -19566,6 +19636,18 @@
                 ctx.closePath();
                 ctx.fill();
                 ctx.stroke();
+            } else if(period === 'medieval') {
+                ctx.fillRect(12, -30, 18, 12);
+                ctx.strokeRect(12, -30, 18, 12);
+                ctx.beginPath();
+                ctx.moveTo(12, -30);
+                ctx.lineTo(12, -6);
+                ctx.stroke();
+                let mw = 18 / 4;
+                ctx.fillStyle = pal.wallHi;
+                for(let t = 0; t < 4; t++) {
+                    if(t % 2 === 0) ctx.fillRect(12 + t * mw, -33, mw + 0.5, 3.5);
+                }
             } else {
                 ctx.fillRect(14, -28, 16, 10);
                 ctx.strokeRect(14, -28, 16, 10);
@@ -19583,48 +19665,54 @@
 
         function drawPeriodFactoryIcon(ctx, x, y, period, lite) {
             let s = lite ? 0.82 : 1;
+            let pal = wodPeriodStructurePalette(period);
             ctx.save();
             ctx.translate(x, y);
-            ctx.strokeStyle = '#0d0d0d';
+            ctx.strokeStyle = pal.stroke;
             ctx.lineWidth = Math.max(1, 1.2 * s);
+            ctx.lineJoin = 'round';
+            let bw = 14 * s, bh = 10 * s, bx = -7 * s, by = -5 * s;
+            ctx.fillStyle = pal.wallHi;
+            ctx.fillRect(bx, by, bw, bh);
+            ctx.strokeRect(bx, by, bw, bh);
+            wodDrawStructureWindows(ctx, bx, by, bw, bh);
             if(period === 'napoleonic') {
-                ctx.fillStyle = '#5a4a3a';
-                ctx.fillRect(-7 * s, -5 * s, 14 * s, 10 * s);
-                ctx.strokeRect(-7 * s, -5 * s, 14 * s, 10 * s);
-                ctx.fillStyle = '#3d3228';
-                ctx.fillRect(-2 * s, -11 * s, 4 * s, 7 * s);
-                ctx.strokeRect(-2 * s, -11 * s, 4 * s, 7 * s);
+                ctx.fillStyle = pal.wall;
+                ctx.fillRect(-3.5 * s, -12 * s, 3 * s, 8 * s);
+                ctx.strokeRect(-3.5 * s, -12 * s, 3 * s, 8 * s);
+                ctx.fillRect(1.5 * s, -11 * s, 3 * s, 7 * s);
+                ctx.strokeRect(1.5 * s, -11 * s, 3 * s, 7 * s);
+                ctx.fillStyle = 'rgba(40, 32, 24, 0.35)';
+                ctx.fillRect(-2.5 * s, -13.5 * s, 2 * s, 1.5 * s);
+                ctx.fillRect(2.5 * s, -12.5 * s, 2 * s, 1.5 * s);
             } else if(period === 'medieval') {
-                ctx.fillStyle = '#4a4238';
-                ctx.fillRect(-8 * s, -4 * s, 16 * s, 9 * s);
-                ctx.strokeRect(-8 * s, -4 * s, 16 * s, 9 * s);
-                ctx.fillStyle = '#c0392b';
+                ctx.fillStyle = pal.roof;
                 ctx.beginPath();
-                ctx.moveTo(0, -10 * s);
-                ctx.lineTo(5 * s, -4 * s);
-                ctx.lineTo(-5 * s, -4 * s);
+                ctx.moveTo(-8 * s, -5 * s);
+                ctx.lineTo(0, -11 * s);
+                ctx.lineTo(8 * s, -5 * s);
                 ctx.closePath();
                 ctx.fill();
                 ctx.stroke();
+                ctx.fillStyle = pal.accent;
+                ctx.fillRect(-2.5 * s, 1 * s, 5 * s, 2 * s);
+                ctx.strokeRect(-2.5 * s, 1 * s, 5 * s, 2 * s);
             } else if(period === 'ancient') {
-                ctx.fillStyle = '#9a8668';
-                ctx.fillRect(-7 * s, -3 * s, 14 * s, 8 * s);
-                ctx.strokeRect(-7 * s, -3 * s, 14 * s, 8 * s);
+                ctx.fillStyle = pal.accent;
                 for(let i = -1; i <= 1; i++) {
-                    ctx.beginPath();
-                    ctx.arc(i * 4 * s, -6 * s, 1.8 * s, 0, Math.PI * 2);
-                    ctx.fillStyle = '#e8dcc8';
-                    ctx.fill();
-                    ctx.stroke();
+                    ctx.fillRect(i * 4.2 * s - 1.2 * s, -9 * s, 2.4 * s, 6 * s);
+                    ctx.strokeRect(i * 4.2 * s - 1.2 * s, -9 * s, 2.4 * s, 6 * s);
                 }
+                ctx.beginPath();
+                ctx.moveTo(-8 * s, -5 * s);
+                ctx.lineTo(0, -10 * s);
+                ctx.lineTo(8 * s, -5 * s);
+                ctx.stroke();
             } else {
-                ctx.fillStyle = '#6f777d';
-                ctx.fillRect(-7 * s, -5 * s, 14 * s, 10 * s);
-                ctx.strokeRect(-7 * s, -5 * s, 14 * s, 10 * s);
-                ctx.fillStyle = '#95a5a6';
+                ctx.fillStyle = pal.accent;
                 ctx.fillRect(-2 * s, -12 * s, 4 * s, 8 * s);
                 ctx.strokeRect(-2 * s, -12 * s, 4 * s, 8 * s);
-                ctx.fillStyle = 'rgba(180,180,180,0.5)';
+                ctx.fillStyle = 'rgba(210, 215, 220, 0.55)';
                 ctx.fillRect(-1 * s, -11 * s, 2 * s, 3 * s);
             }
             ctx.restore();
@@ -19632,54 +19720,68 @@
 
         function drawPeriodHarborIcon(ctx, x, y, period, lite) {
             let s = lite ? 0.82 : 1;
+            let pal = wodPeriodStructurePalette(period);
             ctx.save();
             ctx.translate(x, y);
-            ctx.strokeStyle = '#0d0d0d';
+            ctx.strokeStyle = pal.stroke;
             ctx.lineWidth = Math.max(1, 1.15 * s);
-            ctx.fillStyle = '#2c3e50';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.fillStyle = pal.water;
+            ctx.beginPath();
+            ctx.moveTo(-9 * s, 5 * s);
+            ctx.quadraticCurveTo(0, 10 * s, 9 * s, 5 * s);
+            ctx.lineTo(9 * s, 8 * s);
+            ctx.quadraticCurveTo(0, 12 * s, -9 * s, 8 * s);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = pal.wallHi;
+            ctx.fillRect(-8 * s, -2 * s, 16 * s, 4 * s);
+            ctx.strokeRect(-8 * s, -2 * s, 16 * s, 4 * s);
             if(period === 'napoleonic') {
-                ctx.fillRect(-8 * s, 2 * s, 16 * s, 3 * s);
-                ctx.strokeRect(-8 * s, 2 * s, 16 * s, 3 * s);
+                ctx.fillStyle = pal.wall;
+                ctx.fillRect(-7 * s, -7 * s, 3 * s, 6 * s);
+                ctx.fillRect(4 * s, -7 * s, 3 * s, 6 * s);
+                ctx.strokeRect(-7 * s, -7 * s, 3 * s, 6 * s);
+                ctx.strokeRect(4 * s, -7 * s, 3 * s, 6 * s);
                 ctx.beginPath();
-                ctx.moveTo(-6 * s, 2 * s);
-                ctx.lineTo(-6 * s, -6 * s);
-                ctx.lineTo(6 * s, -6 * s);
-                ctx.lineTo(6 * s, 2 * s);
-                ctx.stroke();
-                ctx.beginPath();
-                ctx.moveTo(-5 * s, 4 * s);
-                ctx.quadraticCurveTo(0, 7 * s, 5 * s, 4 * s);
+                ctx.moveTo(-8 * s, -7 * s);
+                ctx.lineTo(8 * s, -7 * s);
                 ctx.stroke();
             } else if(period === 'medieval') {
-                ctx.fillStyle = '#5d4e37';
-                ctx.fillRect(-9 * s, 0, 4 * s, 8 * s);
-                ctx.fillRect(5 * s, 0, 4 * s, 8 * s);
-                ctx.strokeRect(-9 * s, 0, 4 * s, 8 * s);
-                ctx.strokeRect(5 * s, 0, 4 * s, 8 * s);
+                ctx.fillStyle = pal.wall;
+                ctx.fillRect(-9 * s, -1 * s, 3.5 * s, 7 * s);
+                ctx.fillRect(5.5 * s, -1 * s, 3.5 * s, 7 * s);
+                ctx.strokeRect(-9 * s, -1 * s, 3.5 * s, 7 * s);
+                ctx.strokeRect(5.5 * s, -1 * s, 3.5 * s, 7 * s);
                 ctx.beginPath();
-                ctx.moveTo(-10 * s, 8 * s);
-                ctx.lineTo(10 * s, 8 * s);
+                ctx.moveTo(-10 * s, 6 * s);
+                ctx.lineTo(10 * s, 6 * s);
                 ctx.stroke();
             } else if(period === 'ancient') {
+                ctx.strokeStyle = pal.accent;
                 ctx.beginPath();
-                ctx.moveTo(0, -8 * s);
-                ctx.quadraticCurveTo(8 * s, 2 * s, 0, 8 * s);
-                ctx.quadraticCurveTo(-8 * s, 2 * s, 0, -8 * s);
+                ctx.moveTo(0, -9 * s);
+                ctx.lineTo(0, 2 * s);
+                ctx.moveTo(-6 * s, -4 * s);
+                ctx.quadraticCurveTo(0, -10 * s, 6 * s, -4 * s);
+                ctx.stroke();
+                ctx.fillStyle = pal.wall;
+                ctx.beginPath();
+                ctx.moveTo(-5 * s, 0);
+                ctx.lineTo(0, -4 * s);
+                ctx.lineTo(5 * s, 0);
+                ctx.closePath();
                 ctx.fill();
                 ctx.stroke();
-                ctx.fillStyle = '#8b7355';
-                ctx.fillRect(-3 * s, -2 * s, 6 * s, 5 * s);
-                ctx.strokeRect(-3 * s, -2 * s, 6 * s, 5 * s);
             } else {
+                ctx.fillStyle = pal.accent;
                 ctx.beginPath();
-                ctx.arc(0, -2 * s, 2.5 * s, 0, Math.PI * 2);
+                ctx.arc(0, -3 * s, 2.5 * s, 0, Math.PI * 2);
                 ctx.fill();
                 ctx.stroke();
                 ctx.beginPath();
-                ctx.moveTo(0, 0);
-                ctx.lineTo(0, 8 * s);
-                ctx.moveTo(-5 * s, 4 * s);
-                ctx.quadraticCurveTo(0, 9 * s, 5 * s, 4 * s);
                 ctx.moveTo(-4 * s, -1 * s);
                 ctx.lineTo(4 * s, -1 * s);
                 ctx.stroke();
@@ -23518,11 +23620,43 @@
                 if(typeof h.owner === 'number' && h.owner >= 1) ft.owner = h.owner;
             }
         }
+        function wodDrawFortBunkerCore(ctx, w, h, fxLite, pal) {
+            ctx.fillStyle = pal.wall;
+            ctx.strokeStyle = pal.stroke;
+            ctx.lineWidth = fxLite ? 1.35 : 1.75;
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.rect(-w, -h, w * 2, h * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = pal.wallHi;
+            ctx.lineWidth = fxLite ? 0.9 : 1.05;
+            ctx.beginPath();
+            ctx.rect(-w * 0.58, -h * 0.56, w * 1.16, h * 1.02);
+            ctx.fill();
+            ctx.stroke();
+            let br = fxLite ? 2.6 : 3.35;
+            for(let iy = -1; iy <= 1; iy += 2) {
+                for(let ix = -1; ix <= 1; ix += 2) {
+                    ctx.beginPath();
+                    ctx.arc(ix * (w + br * 0.42), iy * (h + br * 0.42), br, 0, Math.PI * 2);
+                    ctx.fillStyle = pal.wall;
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            }
+            ctx.fillStyle = pal.roof;
+            let gw = fxLite ? 4.8 : 5.8, gh = fxLite ? 3.2 : 3.9;
+            ctx.fillRect(-gw * 0.5, -h * 1.05, gw, gh);
+            ctx.strokeRect(-gw * 0.5, -h * 1.05, gw, gh);
+        }
+
         function drawFortSticker(ctx, f, factionCol, fxLite, culPadFn, period) {
             period = period || wodGetRenderPeriod();
             let footprint = fxLite ? 20 : 26;
             if(typeof culPadFn === 'function' && !culPadFn(f.x, f.y, footprint)) return;
             factionCol = factionCol || '#2ecc71';
+            let pal = wodPeriodStructurePalette(period);
             ctx.save();
             ctx.translate(f.x, f.y + (fxLite ? 0.5 : 1));
             ctx.fillStyle = 'rgba(0,0,0,0.28)';
@@ -23531,76 +23665,71 @@
             ctx.fill();
             let w = fxLite ? 10 : 12;
             let h = fxLite ? 7.2 : 9;
-            ctx.lineWidth = fxLite ? 1.35 : 1.75;
-            ctx.lineJoin = 'round';
             if(period === 'napoleonic') {
-                ctx.fillStyle = 'rgba(120,98,72,0.96)';
-                ctx.strokeStyle = 'rgba(40,28,16,1)';
+                ctx.fillStyle = pal.wallHi;
+                ctx.strokeStyle = pal.stroke;
+                ctx.lineWidth = fxLite ? 1.35 : 1.75;
+                ctx.lineJoin = 'round';
                 ctx.beginPath();
-                ctx.moveTo(-w * 1.1, h * 0.5);
-                ctx.lineTo(-w * 0.3, -h * 0.4);
-                ctx.lineTo(w * 0.8, -h * 0.2);
-                ctx.lineTo(w * 1.05, h * 0.55);
+                ctx.moveTo(-w * 1.15, h * 0.55);
+                ctx.lineTo(-w * 0.15, -h * 0.15);
+                ctx.lineTo(w * 0.15, -h * 0.15);
+                ctx.lineTo(w * 1.15, h * 0.55);
                 ctx.closePath();
                 ctx.fill();
                 ctx.stroke();
-            } else if(period === 'medieval') {
-                ctx.fillStyle = 'rgba(90,86,78,0.98)';
-                ctx.strokeStyle = 'rgba(22,16,12,1)';
-                ctx.fillRect(-w, -h, w * 2, h * 2);
-                ctx.strokeRect(-w, -h, w * 2, h * 2);
-                ctx.fillStyle = 'rgba(70,66,60,1)';
-                let bw = (w * 2) / 5;
-                for(let i = 0; i < 5; i++) {
-                    if(i % 2 === 0) ctx.fillRect(-w + i * bw, -h - (fxLite ? 2.5 : 3.2), bw + 0.5, fxLite ? 2.8 : 3.5);
+                ctx.fillStyle = pal.wall;
+                ctx.fillRect(-w * 0.72, -h * 0.62, w * 1.44, h * 0.95);
+                ctx.strokeRect(-w * 0.72, -h * 0.62, w * 1.44, h * 0.95);
+                wodDrawStructureWindows(ctx, -w * 0.55, -h * 0.5, w * 1.1, h * 0.82);
+                let brN = fxLite ? 2.2 : 2.8;
+                for(let iy = -1; iy <= 1; iy += 2) {
+                    for(let ix = -1; ix <= 1; ix += 2) {
+                        ctx.beginPath();
+                        ctx.arc(ix * (w * 0.95), iy * (h * 0.72), brN, 0, Math.PI * 2);
+                        ctx.fillStyle = pal.wall;
+                        ctx.fill();
+                        ctx.stroke();
+                    }
                 }
             } else if(period === 'ancient') {
-                ctx.strokeStyle = 'rgba(55,40,22,1)';
-                ctx.fillStyle = 'rgba(140,110,70,0.95)';
+                ctx.strokeStyle = pal.stroke;
+                ctx.lineWidth = fxLite ? 1.2 : 1.5;
+                ctx.fillStyle = pal.wallHi;
                 for(let i = -2; i <= 2; i++) {
                     ctx.beginPath();
-                    ctx.moveTo(i * (w * 0.38), h);
-                    ctx.lineTo(i * (w * 0.38) + w * 0.12, -h);
-                    ctx.lineTo(i * (w * 0.38) - w * 0.12, -h);
+                    ctx.moveTo(i * (w * 0.36), h * 0.95);
+                    ctx.lineTo(i * (w * 0.36) + w * 0.11, -h * 0.85);
+                    ctx.lineTo(i * (w * 0.36) - w * 0.11, -h * 0.85);
                     ctx.closePath();
                     ctx.fill();
                     ctx.stroke();
                 }
+                ctx.fillStyle = pal.wall;
+                ctx.fillRect(-w * 0.55, -h * 0.35, w * 1.1, h * 0.75);
+                ctx.strokeRect(-w * 0.55, -h * 0.35, w * 1.1, h * 0.75);
+                ctx.fillStyle = pal.accent;
+                ctx.fillRect(-w * 0.22, -h * 0.2, w * 0.44, h * 0.5);
+                ctx.strokeRect(-w * 0.22, -h * 0.2, w * 0.44, h * 0.5);
+            } else if(period === 'medieval') {
+                wodDrawFortBunkerCore(ctx, w, h, fxLite, pal);
+                ctx.fillStyle = pal.wallHi;
+                let bw = (w * 2) / 5;
+                for(let i = 0; i < 5; i++) {
+                    if(i % 2 === 0) ctx.fillRect(-w + i * bw, -h - (fxLite ? 2.8 : 3.4), bw + 0.5, fxLite ? 3 : 3.6);
+                }
             } else {
-                ctx.fillStyle = 'rgba(55,61,73,0.98)';
-                ctx.strokeStyle = 'rgba(23,31,43,1)';
-                ctx.beginPath();
-                ctx.rect(-w, -h, w * 2, h * 2);
-                ctx.stroke();
-                ctx.fill();
-                ctx.fillStyle = 'rgba(85,93,109,1)';
-                ctx.strokeStyle = 'rgba(15,21,31,1)';
-                ctx.lineWidth = fxLite ? 0.9 : 1.05;
-                ctx.beginPath();
-                ctx.rect(-w * 0.58, -h * 0.56, w * 1.16, h * 1.02);
-                ctx.fill(); ctx.stroke();
-                let br = fxLite ? 2.6 : 3.35;
-                for(let iy = -1; iy <= 1; iy += 2)
-                    for(let ix = -1; ix <= 1; ix += 2) {
-                        ctx.beginPath();
-                        ctx.arc(ix * (w + br * 0.42), iy * (h + br * 0.42), br, 0, Math.PI * 2);
-                        ctx.fillStyle = 'rgba(60,67,82,1)';
-                        ctx.fill();
-                        ctx.stroke();
-                    }
-                ctx.fillStyle = 'rgba(42,46,54,1)';
-                ctx.strokeStyle = 'rgba(15,21,31,0.92)';
-                let gw = fxLite ? 4.8 : 5.8,
-                    gh = fxLite ? 3.2 : 3.9;
-                ctx.fillRect(-gw * 0.5, -h * 1.05, gw, gh);
-                ctx.strokeRect(-gw * 0.5, -h * 1.05, gw, gh);
+                wodDrawFortBunkerCore(ctx, w, h, fxLite, pal);
             }
             let px = w * 0.48,
                 poleTop = -h - (fxLite ? 2.8 : 3.8),
                 poleBase = -h + 4;
             ctx.strokeStyle = 'rgba(20,26,38,1)';
             ctx.lineWidth = fxLite ? 0.88 : 1.02;
-            ctx.beginPath(); ctx.moveTo(px, poleBase); ctx.lineTo(px, poleTop); ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(px, poleBase);
+            ctx.lineTo(px, poleTop);
+            ctx.stroke();
             let fs = fxLite ? 7.35 : 9.35;
             ctx.fillStyle = factionCol;
             ctx.strokeStyle = 'rgba(14,21,34,1)';
@@ -23616,10 +23745,12 @@
             let rad = spacing * tiles;
             return rad * rad;
         }
-        function attemptFortPlacementForOwner(hex, owner, suppressNotes) {
+        function placeFortAtHex(hex, owner, opts) {
+            opts = opts || {};
             if(!gameData.forts) gameData.forts = [];
-            let noisy = !suppressNotes;
-            if(!hex || !hexEligibleForFortTerrain(hex, owner)) {
+            let noisy = !opts.suppressNotes;
+            if(!hex || !owner) return false;
+            if(!hexEligibleForFortTerrain(hex, owner)) {
                 if(noisy) showNotification('Forts belong on owned open ground (no mountains, oceans, or city cores).');
                 return false;
             }
@@ -23627,11 +23758,13 @@
                 if(noisy) showNotification('There is already a fort on this hex.');
                 return false;
             }
-            if(!hexEligibleForFortPlacementForOwner(hex, owner)) {
-                if(noisy) showNotification('Not enough cash for this fort.');
-                return false;
+            if(!opts.editor) {
+                if(!hexEligibleForFortPlacementForOwner(hex, owner)) {
+                    if(noisy) showNotification('Not enough cash for this fort.');
+                    return false;
+                }
+                wodDeductPlayerMoney(owner, WOD_PRICE_FORT);
             }
-            wodDeductPlayerMoney(owner, WOD_PRICE_FORT);
             wodFortPlacementSeq++;
             gameData.forts.push({
                 id: 'fort_' + wodFortPlacementSeq,
@@ -23641,12 +23774,16 @@
                 x: hex.x,
                 y: hex.y
             });
-            if(noisy) showNotification('+20% defense aura for allied troops surrounding this fort.');
-            if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+            if(noisy && !opts.editor) showNotification('+20% defense aura for allied troops surrounding this fort.');
+            if(!opts.editor && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                 wodBumpLifetime('fortsBuilt', 1);
                 scheduleSaveWodProgress();
             }
             return true;
+        }
+
+        function attemptFortPlacementForOwner(hex, owner, suppressNotes) {
+            return placeFortAtHex(hex, owner, { suppressNotes: !!suppressNotes });
         }
         function tryApplyFortBuildAtWorld(worldPos) {
             let hex = getNearestHexToPoint(worldPos.x, worldPos.y);
@@ -24108,6 +24245,7 @@
                 gameData.cities = mapData.cities || [];
                 gameData.roads = mapData.roads || [];
                 gameData.entities = mapData.entities || [];
+                gameData.forts = (mapData.forts || []).map(f => Object.assign({}, f));
                 gameData.hexes = {};
                 for(let hex of gameData.hexList) {
                     hex.baseColor = getTerrainColor(hex.type);
@@ -24141,6 +24279,7 @@
                     cities: gameData.cities,
                     roads: gameData.roads,
                     entities: gameData.entities,
+                    forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
                     factionColors: factionColors.slice(),
                     savedStartEconomy: true,
                     money: gameData.money,
@@ -24193,6 +24332,16 @@
             drawEditorCityAtScreen(ctx, sx, sy, px, city) {
                 paintEditorCityScreen(ctx, sx, sy, px, city);
             },
+            drawEditorFortAtScreen(ctx, sx, sy, pxPerWorld, fort) {
+                ctx.save();
+                ctx.translate(sx, sy);
+                ctx.scale(pxPerWorld, pxPerWorld);
+                drawFortSticker(ctx, Object.assign({}, fort, { x: 0, y: 0 }), factionColors[fort.owner] || '#2ecc71', false, null);
+                ctx.restore();
+            },
+            placeFortAtHex,
+            fortAtHexKey,
+            drawFortSticker,
             bootstrapMenuBackgroundBattle,
             pauseMenuBackgroundBattle,
             resumeMenuBackgroundBattle,

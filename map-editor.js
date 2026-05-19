@@ -1382,6 +1382,7 @@
             <button type="button" class="editor-btn" data-tool="unit">Click unit</button>
             <button type="button" class="editor-btn" data-tool="factory">Add factory</button>
             <button type="button" class="editor-btn" data-tool="harbor">Add harbor</button>
+            <button type="button" class="editor-btn" data-tool="fort">Place fort</button>
             <button type="button" class="editor-btn" data-tool="erase">Erase terrain</button>
           </div>
         </section>
@@ -1760,7 +1761,8 @@
     editorPinch = null;
     document.getElementById("mainMenu").classList.remove("hidden");
     WOD.invalidateTerrain();
-    if (window.WOD && typeof WOD.bootstrapMenuBackgroundBattle === "function") WOD.bootstrapMenuBackgroundBattle();
+    if (window.WOD && typeof WOD.resumeMenuBackgroundBattle === "function") WOD.resumeMenuBackgroundBattle();
+    else if (window.WOD && typeof WOD.bootstrapMenuBackgroundBattle === "function") WOD.bootstrapMenuBackgroundBattle();
   }
 
   function resizeEditorCanvas() {
@@ -2163,6 +2165,10 @@
         h.type = "grass";
         h.baseColor = WOD.getTerrainColor("grass");
         h.cityId = null;
+        if (WOD.gameData.forts && WOD.gameData.forts.length) {
+          const idx = WOD.gameData.forts.findIndex(f => f.q === h.q && f.r === h.r);
+          if (idx >= 0) WOD.gameData.forts.splice(idx, 1);
+        }
       }
       markEditorMapChanged();
       return;
@@ -2188,6 +2194,14 @@
       if (state.tool === "harbor") city.hasHarbor = true;
       state.selected = { type: "city", value: city };
       renderSelection();
+      markEditorMapChanged();
+      return;
+    }
+    if (state.tool === "fort") {
+      touchEditorMutation();
+      const uo = Math.max(1, state.owner || 1);
+      if (hex.owner !== uo && typeof WOD.setHexOwner === "function") WOD.setHexOwner(hex, uo);
+      if (typeof WOD.placeFortAtHex === "function") WOD.placeFortAtHex(hex, uo, { editor: true, suppressNotes: true });
       markEditorMapChanged();
     }
   }
@@ -2427,6 +2441,12 @@
         ctx.fill();
         ctx.strokeStyle = "#050505";
         ctx.stroke();
+      }
+    }
+    if (L.structures !== false && WOD.gameData.forts && typeof WOD.drawEditorFortAtScreen === "function") {
+      for (const fort of WOD.gameData.forts) {
+        const p = toCanvas(fort.x, fort.y);
+        WOD.drawEditorFortAtScreen(ctx, p.x, p.y, p.scale, fort);
       }
     }
 
