@@ -8288,27 +8288,41 @@
         }
         async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
             if(!wodMapShapeUsesRadialIslandMask(gameData.mapShape)) return;
-            let pad = Math.max(2, bufferTiles || 7);
-            let feather = pad + 11;
+            let pad = Math.max(3, bufferTiles || 8);
+            let feather = pad + 13;
             let colM = Math.max(1, cols | 0);
             let rowM = Math.max(1, rows | 0);
             let hi = 0;
             for(let h of gameData.hexList) {
-                let edgeDist = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
+                let edgeDistBox = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
+                let normX = h.q / colM, normY = h.r / rowM;
+                let radialFrac = Math.sqrt(normX * normX + normY * normY);
+                let edgeDistRadial = (1 - radialFrac) * Math.min(colM, rowM);
+                let edgeDist = Math.min(edgeDistBox, edgeDistRadial);
                 let boxFrac = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
+                let angle = Math.atan2(h.y, h.x);
                 let wobble = fbm(h.x * 0.011 + seedOffset + 8800, h.y * 0.011 + seedOffset + 8800, 4);
                 let coastNoise = fbm(h.x * 0.019 + seedOffset + 9100, h.y * 0.019 + seedOffset + 9100, 3);
-                let effectiveEdge = edgeDist + (wobble - 0.5) * 7 + (coastNoise - 0.5) * 4 - boxFrac * 4;
-                let dynamicPad = pad + Math.floor(wobble * 5);
+                let angleRipple =
+                    Math.sin(angle * 3.6 + seedOffset * 0.019) * 2.8 +
+                    Math.cos(angle * 5.3 - seedOffset * 0.014) * 1.6;
+                let effectiveEdge =
+                    edgeDist +
+                    (wobble - 0.5) * 9 +
+                    (coastNoise - 0.5) * 5 +
+                    angleRipple -
+                    boxFrac * 5 -
+                    Math.max(0, radialFrac - 0.84) * 8;
+                let dynamicPad = pad + Math.floor(wobble * 6 + coastNoise * 3);
                 if(effectiveEdge < dynamicPad) {
                     wodSetGeneratedTerrainType(h, 'water');
                     continue;
                 }
                 if(effectiveEdge < feather && !isWaterHex(h)) {
                     let t = (feather - effectiveEdge) / Math.max(1, feather - dynamicPad);
-                    if(t > 0.48 || (t > 0.24 && h.type !== 'mountain' && wobble > 0.52))
+                    if(t > 0.42 || (t > 0.2 && h.type !== 'mountain' && wobble > 0.48))
                         wodSetGeneratedTerrainType(h, 'water');
-                    else if(t > 0.18 && h.type === 'sand' && wobble > 0.62)
+                    else if(t > 0.14 && h.type === 'sand' && wobble > 0.56)
                         wodSetGeneratedTerrainType(h, 'water');
                 }
                 if((++hi & 2047) === 0) await wodMapGenYieldSlice();
@@ -8322,13 +8336,22 @@
             let hi = 0;
             for(let h of gameData.hexList) {
                 if(!h || isWaterHex(h)) continue;
-                let edgeDist = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
+                let edgeDistBox = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
+                let normX = h.q / colM, normY = h.r / rowM;
+                let radialFrac = Math.sqrt(normX * normX + normY * normY);
+                let edgeDist = Math.min(edgeDistBox, (1 - radialFrac) * Math.min(colM, rowM));
                 let boxFrac = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
-                if(boxFrac < 0.82 && edgeDist > 8) continue;
+                if(boxFrac < 0.78 && edgeDist > 9) continue;
+                let angle = Math.atan2(h.y, h.x);
                 let wobble = fbm(h.x * 0.012 + seedOffset + 9400, h.y * 0.012 + seedOffset + 9400, 4);
-                let bite = Math.max(0, boxFrac - 0.78) * 1.35 + Math.max(0, 7 - edgeDist) * 0.11;
-                bite += (wobble - 0.42) * 0.22;
-                if(bite > 0.58 || (bite > 0.36 && wobble > 0.58 && edgeDist < 6))
+                let angleRipple = Math.sin(angle * 3.2 + seedOffset * 0.018) * 0.14;
+                let bite =
+                    Math.max(0, boxFrac - 0.74) * 1.45 +
+                    Math.max(0, 8 - edgeDist) * 0.13 +
+                    Math.max(0, radialFrac - 0.82) * 0.38 +
+                    angleRipple;
+                bite += (wobble - 0.42) * 0.26;
+                if(bite > 0.52 || (bite > 0.32 && wobble > 0.54 && edgeDist < 7))
                     wodSetGeneratedTerrainType(h, 'water');
                 if((++hi & 2047) === 0) await wodMapGenYieldSlice();
             }
@@ -8777,9 +8800,11 @@
             let landOk = (h) => h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban';
             let colM = Math.max(1, gameData.mapRadius || 40);
             let rowM = Math.max(1, Math.floor((gameData.mapRadius || 40) * 0.8));
+            let oceanKeys = wodBuildOceanConnectedWaterKeys(colM, rowM);
             let candidates = [];
             for(let h of gameData.hexList) {
                 if(!isWaterHex(h)) continue;
+                if(oceanKeys && oceanKeys.has(getHexKey(h))) continue;
                 let landNbs = getNeighborHexes(h).filter(nb => landOk(nb));
                 if(landNbs.length < 2) continue;
                 let edgeDist = Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
@@ -18665,7 +18690,7 @@
             }
 
             wodMapGenProgressUpdate(38, 'Shaping coastlines…');
-            await wodForceIslandEdgeWaterBuffer(cols, rows, 7, seedOffset);
+            await wodForceIslandEdgeWaterBuffer(cols, rows, 8, seedOffset);
             await wodNaturalizeBiomeBlends(seedOffset, mapShape);
             await wodCoalesceTerrainSpeckles(gameData._wodFastMapGen ? 1 : 2);
             await wodPaintRectangleMapPerimeterWater(cols, rows);
@@ -26571,9 +26596,22 @@
             if(!bridge) return;
             ctx.save();
             ctx.translate(bridge.x, bridge.y);
+            let angle = 0;
+            if(bridge.landA && bridge.landB) {
+                let ax = bridge.landA.q, ay = bridge.landA.r;
+                let bx = bridge.landB.q, by = bridge.landB.r;
+                let ha = gameData.hexes[`${ax},${ay}`];
+                let hb = gameData.hexes[`${bx},${by}`];
+                if(ha && hb) angle = Math.atan2(hb.y - ha.y, hb.x - ha.x);
+            }
+            ctx.rotate(angle);
             let hr = gameData.hexRadius || 10;
             let span = hr * (fxLite ? 1.55 : 1.85);
             let deckW = hr * (fxLite ? 0.42 : 0.52);
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.beginPath();
+            ctx.ellipse(0, hr * 0.18, span * 0.46, deckW * 0.55, 0, 0, Math.PI * 2);
+            ctx.fill();
             ctx.fillStyle = '#6d4c2f';
             ctx.strokeStyle = '#3e2723';
             ctx.lineWidth = fxLite ? 1.2 : 1.6;
