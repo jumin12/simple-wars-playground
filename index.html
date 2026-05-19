@@ -10423,7 +10423,7 @@
             if(type === 'hill') return '#a1887f';
             if(type === 'snow') return '#a1887f';
             if(type === 'mountain') return '#95a5a6';
-            if(type === 'urban') return '#7f8c8d';
+            if(type === 'urban') return getUrbanTerrainColor(wodGetRenderPeriod());
             if(type === 'bridge') return '#e67e22';
             return '#000';
         }
@@ -10462,14 +10462,13 @@
                 </svg>`;
             }
             if(type === 'urban') {
+                let us = wodUrbanPeriodStyle(wodGetRenderPeriod());
                 return `<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                    <rect width="16" height="16" fill="${getTerrainColor(type)}"/>
-                    <path d="M7 0h2v16H7zM0 7h16v2H0z" fill="#5f6a6a" opacity="0.75"/>
-                    <rect x="1.6" y="1.4" width="4.2" height="4.2" rx=".5" fill="#bdc3c7"/>
-                    <rect x="10.2" y="1.7" width="4" height="3.7" rx=".5" fill="#95a5a6"/>
-                    <rect x="2" y="10.3" width="3.7" height="4" rx=".5" fill="#95a5a6"/>
-                    <rect x="10.4" y="10.1" width="4.1" height="4.2" rx=".5" fill="#c8d0d2"/>
-                    <path d="M8 0v16M0 8h16" stroke="#2c3e50" stroke-width=".55" opacity=".85"/>
+                    <rect width="16" height="16" fill="${us.base}"/>
+                    <rect x="1.6" y="1.4" width="4.2" height="4.2" rx=".4" fill="${us.blockB}"/>
+                    <rect x="10.2" y="1.7" width="4" height="3.7" rx=".4" fill="${us.blockA}"/>
+                    <rect x="2" y="10.3" width="3.7" height="4" rx=".4" fill="${us.blockA}"/>
+                    <rect x="10.4" y="10.1" width="4.1" height="4.2" rx=".4" fill="${us.blockB}"/>
                 </svg>`;
             }
             return '';
@@ -10738,12 +10737,13 @@
             gameData.ownedUnitSkins = Object.assign({ nato: true }, p.ownedUnitSkins || {});
             if(gameData.ownedUnitSkins.default) delete gameData.ownedUnitSkins.default;
             if(gameData.ownedUnitSkins.goldenChip && wodProgress.achievements) wodProgress.achievements.goldenChipMaster = true;
-            for(let pid of ['napoleonic', 'ancient', 'medieval']) {
+            for(let pid of ['napoleonic', 'medieval', 'ancient']) {
                 if(gameData.ownedUnitSkins[pid] && wodProgress.achievements)
                     wodProgress.achievements['period' + pid.charAt(0).toUpperCase() + pid.slice(1)] = true;
             }
             gameData.gamePeriod = (p.gamePeriod && wodIsPeriodUnlocked(p.gamePeriod)) ? p.gamePeriod : 'modern';
             syncGoldenChipUnlockFromAchievements();
+            wodRefreshUrbanHexColorsForPeriod(gameData.gamePeriod);
             wodSyncAllPeriodSelects();
             wodRefreshPeriodSelectorVisibility();
         }
@@ -11802,7 +11802,7 @@
                     targetH.type = 'urban';
                     targetH.cityId = city.id;
                     targetH.urbanVariant = Math.floor(Math.random() * 5);
-                    targetH.baseColor = getTerrainColor('urban');
+                    targetH.baseColor = getUrbanTerrainColor(wodGetGamePeriod());
                     targetH.renderColor = targetH.baseColor;
                 }
             }
@@ -11841,7 +11841,7 @@
                 targetH.type = 'urban';
                 targetH.cityId = cid;
                 targetH.urbanVariant = Math.floor(Math.random() * 5);
-                targetH.baseColor = getTerrainColor('urban');
+                targetH.baseColor = getUrbanTerrainColor(wodGetGamePeriod());
                 targetH.renderColor = targetH.baseColor;
             }
         }
@@ -16962,7 +16962,7 @@
                                 targetH.type = 'urban';
                                 targetH.cityId = 'city_' + i;
                                 targetH.urbanVariant = Math.floor(Math.random() * 5);
-                                targetH.baseColor = getTerrainColor('urban');
+                                targetH.baseColor = getUrbanTerrainColor(wodGetGamePeriod());
                                 targetH.renderColor = targetH.baseColor;
                             }
                         }
@@ -18782,6 +18782,7 @@
             let spacing = gameData.hexRadius * 1.35;
             let cityById = {};
             for(let city of gameData.cities) cityById[city.id] = city;
+            let us = wodUrbanPeriodStyle(wodGetRenderPeriod());
             for(let hex of gameData.hexList) {
                 if(hex.type !== 'urban') continue;
                 let city = cityById[hex.cityId] || gameData.cities.find(c => Math.abs(c.q - hex.q) <= 3 && Math.abs(c.r - hex.r) <= 3);
@@ -18795,9 +18796,9 @@
                     let h = spacing * (0.18 + ((style + i) % 3) * 0.06);
                     let ox = ((i % 2) - 0.5) * spacing * 0.42 + ((variant % 3) - 1) * 2;
                     let oy = (Math.floor(i / 2) - 0.35) * spacing * 0.42 + ((style % 3) - 1) * 2;
-                    ctx.fillStyle = i % 2 === 0 ? '#5f666b' : '#858d92';
+                    ctx.fillStyle = i % 2 === 0 ? us.blockA : us.blockB;
                     ctx.fillRect(px + ox - w/2, py + oy - h/2, w, h);
-                    ctx.strokeStyle = 'rgba(10,12,14,0.55)';
+                    ctx.strokeStyle = us.stroke;
                     ctx.lineWidth = 1;
                     ctx.strokeRect(px + ox - w/2, py + oy - h/2, w, h);
                 }
@@ -19507,42 +19508,198 @@
             ctx.drawImage(terrainCanvas, terrainBounds.minX, terrainBounds.minY);
         }
 
-        function drawCitySkinMarker(ctx, city) {
+        function drawPeriodCityMarker(ctx, city, period) {
             if(city.owner === 0) return;
             let ownerColor = factionColors[city.owner];
-            let skin = city.owner === 1 ? gameData.citySkin : 'classic';
+            let us = wodUrbanPeriodStyle(period);
             ctx.save();
             ctx.translate(city.x, city.y);
-            ctx.strokeStyle = '#050505';
-            ctx.lineWidth = 2.5;
-
-            let blocks = skin === 'fort'
-                ? [[-22,-12,13,28],[-7,-20,14,36],[10,-10,12,26],[-24,-23,8,10],[16,-22,8,10]]
-                : skin === 'ring'
-                    ? [[-20,-8,10,18],[-8,-18,16,10],[10,-8,10,18],[-8,10,16,10],[-5,-5,10,10]]
-                    : [[-20,-12,10,26],[-7,-18,14,32],[10,-10,11,24],[-18,16,34,8]];
-
+            ctx.strokeStyle = us.stroke;
+            ctx.lineWidth = 2.2;
+            let blocks;
+            if(period === 'napoleonic') {
+                blocks = [[-18,-10,12,22],[-6,-16,13,28],[9,-8,11,20],[-16,14,30,7]];
+            } else if(period === 'medieval') {
+                blocks = [[-14,-18,9,34],[-4,-20,11,38],[8,-14,10,28],[-20,12,38,9]];
+            } else if(period === 'ancient') {
+                blocks = [[-16,-8,14,18],[-4,-12,12,24],[10,-6,10,16],[-14,14,28,8]];
+            } else {
+                let skin = city.owner === 1 ? gameData.citySkin : 'classic';
+                blocks = skin === 'fort'
+                    ? [[-22,-12,13,28],[-7,-20,14,36],[10,-10,12,26],[-24,-23,8,10],[16,-22,8,10]]
+                    : skin === 'ring'
+                        ? [[-20,-8,10,18],[-8,-18,16,10],[10,-8,10,18],[-8,10,16,10],[-5,-5,10,10]]
+                        : [[-20,-12,10,26],[-7,-18,14,32],[10,-10,11,24],[-18,16,34,8]];
+            }
             for(let i = 0; i < blocks.length; i++) {
                 let b = blocks[i];
-                ctx.fillStyle = i % 2 === 0 ? '#6f777d' : '#8b9398';
+                ctx.fillStyle = i % 2 === 0 ? us.blockA : us.blockB;
                 ctx.fillRect(b[0], b[1], b[2], b[3]);
                 ctx.strokeRect(b[0], b[1], b[2], b[3]);
-                ctx.fillStyle = 'rgba(25, 30, 35, 0.7)';
-                for(let wx = b[0] + 3; wx < b[0] + b[2] - 2; wx += 6) {
-                    for(let wy = b[1] + 5; wy < b[1] + b[3] - 3; wy += 8) {
-                        ctx.fillRect(wx, wy, 2, 3);
+                if(period === 'medieval' && i === 0) {
+                    let bw = b[2] / 5;
+                    ctx.fillStyle = us.blockB;
+                    for(let t = 0; t < 5; t++) {
+                        if(t % 2 === 0) ctx.fillRect(b[0] + t * bw, b[1] - 3, bw + 0.5, 4);
+                    }
+                }
+                if(period === 'ancient' && i < 3) {
+                    ctx.fillStyle = 'rgba(235, 228, 210, 0.55)';
+                    ctx.fillRect(b[0] + b[2] * 0.35, b[1] + 2, 2, b[3] - 4);
+                }
+                if(period === 'modern' || !period || period === 'napoleonic') {
+                    ctx.fillStyle = 'rgba(25, 30, 35, 0.55)';
+                    for(let wx = b[0] + 3; wx < b[0] + b[2] - 2; wx += 6) {
+                        for(let wy = b[1] + 5; wy < b[1] + b[3] - 3; wy += 8) {
+                            ctx.fillRect(wx, wy, 2, 3);
+                        }
                     }
                 }
             }
-
             ctx.fillStyle = ownerColor;
-            ctx.fillRect(14, -28, 16, 10);
-            ctx.strokeRect(14, -28, 16, 10);
-            ctx.beginPath();
-            ctx.moveTo(14, -28);
-            ctx.lineTo(14, -7);
-            ctx.stroke();
+            if(period === 'ancient') {
+                ctx.beginPath();
+                ctx.moveTo(12, -26);
+                ctx.lineTo(22, -18);
+                ctx.lineTo(20, -8);
+                ctx.lineTo(14, -8);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            } else {
+                ctx.fillRect(14, -28, 16, 10);
+                ctx.strokeRect(14, -28, 16, 10);
+                ctx.beginPath();
+                ctx.moveTo(14, -28);
+                ctx.lineTo(14, -7);
+                ctx.stroke();
+            }
             ctx.restore();
+        }
+
+        function drawCitySkinMarker(ctx, city) {
+            drawPeriodCityMarker(ctx, city, wodGetRenderPeriod());
+        }
+
+        function drawPeriodFactoryIcon(ctx, x, y, period, lite) {
+            let s = lite ? 0.82 : 1;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.strokeStyle = '#0d0d0d';
+            ctx.lineWidth = Math.max(1, 1.2 * s);
+            if(period === 'napoleonic') {
+                ctx.fillStyle = '#5a4a3a';
+                ctx.fillRect(-7 * s, -5 * s, 14 * s, 10 * s);
+                ctx.strokeRect(-7 * s, -5 * s, 14 * s, 10 * s);
+                ctx.fillStyle = '#3d3228';
+                ctx.fillRect(-2 * s, -11 * s, 4 * s, 7 * s);
+                ctx.strokeRect(-2 * s, -11 * s, 4 * s, 7 * s);
+            } else if(period === 'medieval') {
+                ctx.fillStyle = '#4a4238';
+                ctx.fillRect(-8 * s, -4 * s, 16 * s, 9 * s);
+                ctx.strokeRect(-8 * s, -4 * s, 16 * s, 9 * s);
+                ctx.fillStyle = '#c0392b';
+                ctx.beginPath();
+                ctx.moveTo(0, -10 * s);
+                ctx.lineTo(5 * s, -4 * s);
+                ctx.lineTo(-5 * s, -4 * s);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            } else if(period === 'ancient') {
+                ctx.fillStyle = '#9a8668';
+                ctx.fillRect(-7 * s, -3 * s, 14 * s, 8 * s);
+                ctx.strokeRect(-7 * s, -3 * s, 14 * s, 8 * s);
+                for(let i = -1; i <= 1; i++) {
+                    ctx.beginPath();
+                    ctx.arc(i * 4 * s, -6 * s, 1.8 * s, 0, Math.PI * 2);
+                    ctx.fillStyle = '#e8dcc8';
+                    ctx.fill();
+                    ctx.stroke();
+                }
+            } else {
+                ctx.fillStyle = '#6f777d';
+                ctx.fillRect(-7 * s, -5 * s, 14 * s, 10 * s);
+                ctx.strokeRect(-7 * s, -5 * s, 14 * s, 10 * s);
+                ctx.fillStyle = '#95a5a6';
+                ctx.fillRect(-2 * s, -12 * s, 4 * s, 8 * s);
+                ctx.strokeRect(-2 * s, -12 * s, 4 * s, 8 * s);
+                ctx.fillStyle = 'rgba(180,180,180,0.5)';
+                ctx.fillRect(-1 * s, -11 * s, 2 * s, 3 * s);
+            }
+            ctx.restore();
+        }
+
+        function drawPeriodHarborIcon(ctx, x, y, period, lite) {
+            let s = lite ? 0.82 : 1;
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.strokeStyle = '#0d0d0d';
+            ctx.lineWidth = Math.max(1, 1.15 * s);
+            ctx.fillStyle = '#2c3e50';
+            if(period === 'napoleonic') {
+                ctx.fillRect(-8 * s, 2 * s, 16 * s, 3 * s);
+                ctx.strokeRect(-8 * s, 2 * s, 16 * s, 3 * s);
+                ctx.beginPath();
+                ctx.moveTo(-6 * s, 2 * s);
+                ctx.lineTo(-6 * s, -6 * s);
+                ctx.lineTo(6 * s, -6 * s);
+                ctx.lineTo(6 * s, 2 * s);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(-5 * s, 4 * s);
+                ctx.quadraticCurveTo(0, 7 * s, 5 * s, 4 * s);
+                ctx.stroke();
+            } else if(period === 'medieval') {
+                ctx.fillStyle = '#5d4e37';
+                ctx.fillRect(-9 * s, 0, 4 * s, 8 * s);
+                ctx.fillRect(5 * s, 0, 4 * s, 8 * s);
+                ctx.strokeRect(-9 * s, 0, 4 * s, 8 * s);
+                ctx.strokeRect(5 * s, 0, 4 * s, 8 * s);
+                ctx.beginPath();
+                ctx.moveTo(-10 * s, 8 * s);
+                ctx.lineTo(10 * s, 8 * s);
+                ctx.stroke();
+            } else if(period === 'ancient') {
+                ctx.beginPath();
+                ctx.moveTo(0, -8 * s);
+                ctx.quadraticCurveTo(8 * s, 2 * s, 0, 8 * s);
+                ctx.quadraticCurveTo(-8 * s, 2 * s, 0, -8 * s);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = '#8b7355';
+                ctx.fillRect(-3 * s, -2 * s, 6 * s, 5 * s);
+                ctx.strokeRect(-3 * s, -2 * s, 6 * s, 5 * s);
+            } else {
+                ctx.beginPath();
+                ctx.arc(0, -2 * s, 2.5 * s, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(0, 8 * s);
+                ctx.moveTo(-5 * s, 4 * s);
+                ctx.quadraticCurveTo(0, 9 * s, 5 * s, 4 * s);
+                ctx.moveTo(-4 * s, -1 * s);
+                ctx.lineTo(4 * s, -1 * s);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function drawWodCityStructureIcons(ctx, city, gfxLite, atLocalOrigin) {
+            if(!city || city.owner === 0) return;
+            let period = wodGetRenderPeriod();
+            let x = atLocalOrigin ? 0 : city.x;
+            let y = atLocalOrigin ? (gfxLite ? 10 : 12) : city.y + (gfxLite ? 10 : 12);
+            if(city.hasFactory && city.hasHarbor) {
+                drawPeriodFactoryIcon(ctx, x - 9, y, period, gfxLite);
+                drawPeriodHarborIcon(ctx, x + 9, y, period, gfxLite);
+            } else if(city.hasFactory) {
+                drawPeriodFactoryIcon(ctx, x, y, period, gfxLite);
+            } else if(city.hasHarbor) {
+                drawPeriodHarborIcon(ctx, x, y, period, gfxLite);
+            }
         }
 
         function paintEditorCityScreen(ctx, screenX, screenY, pxPerWorld, city) {
@@ -19563,13 +19720,7 @@
                 ctx.fillStyle = city.owner === 0 ? '#bdc3c7' : factionColors[city.owner];
                 ctx.fillText(city.name || '', 0, -10);
                 ctx.shadowBlur = 0;
-                let icons = '';
-                if(city.hasFactory) icons += '🏭';
-                if(city.hasHarbor) icons += '⚓';
-                if(icons !== '') {
-                    ctx.font = '14px Arial';
-                    ctx.fillText(icons, 0, 12);
-                }
+                if(city.hasFactory || city.hasHarbor) drawWodCityStructureIcons(ctx, city, false, true);
             } else if(city.owner !== 0) {
                 ctx.beginPath();
                 ctx.arc(0, -10, 8, 0, Math.PI * 2);
@@ -19940,8 +20091,8 @@
             ctx.restore();
         }
 
-        const WOD_PERIOD_IDS = ['modern', 'napoleonic', 'ancient', 'medieval'];
-        const WOD_PERIOD_SKIN_IDS = ['napoleonic', 'ancient', 'medieval'];
+        const WOD_PERIOD_IDS = ['modern', 'napoleonic', 'medieval', 'ancient'];
+        const WOD_PERIOD_SKIN_IDS = ['napoleonic', 'medieval', 'ancient'];
 
         function wodPeriodLabel(id) {
             if(id === 'napoleonic') return 'Napoleonic';
@@ -20093,7 +20244,54 @@
             for(let sid of WOD_PERIOD_SKIN_IDS) {
                 if(wodIsPeriodUnlocked(sid)) ids.push(sid);
             }
-            return ids;
+            return ids.filter((id) => WOD_PERIOD_IDS.indexOf(id) >= 0).sort((a, b) => WOD_PERIOD_IDS.indexOf(a) - WOD_PERIOD_IDS.indexOf(b));
+        }
+
+        function wodListAllPeriodIds() {
+            return WOD_PERIOD_IDS.slice();
+        }
+
+        function wodGetRenderPeriod() {
+            if(gameState === 'PLAYING' || gameState === 'PAUSED') return wodGetMatchPeriod();
+            return wodGetGamePeriod();
+        }
+
+        function wodUrbanPeriodStyle(period) {
+            period = period || wodGetRenderPeriod();
+            const S = {
+                modern: { base: '#7f8c8d', blockA: '#5f666b', blockB: '#858d92', stroke: 'rgba(10,12,14,0.55)' },
+                napoleonic: { base: '#a89478', blockA: '#6b5744', blockB: '#8f7a62', stroke: 'rgba(28,18,10,0.58)' },
+                medieval: { base: '#8f8678', blockA: '#5a5248', blockB: '#746b5e', stroke: 'rgba(18,14,10,0.62)' },
+                ancient: { base: '#c9b896', blockA: '#9a8668', blockB: '#b5a07a', stroke: 'rgba(42,32,18,0.55)' }
+            };
+            return S[period] || S.modern;
+        }
+
+        function getUrbanTerrainColor(period) {
+            return wodUrbanPeriodStyle(period).base;
+        }
+
+        function wodRefreshUrbanHexColorsForPeriod(period) {
+            period = period || wodGetGamePeriod();
+            let col = getUrbanTerrainColor(period);
+            if(!gameData.hexList) return;
+            for(let h of gameData.hexList) {
+                if(h.type === 'urban') {
+                    h.baseColor = col;
+                    h.renderColor = col;
+                }
+            }
+            wodMarkTerrainFullDirty();
+        }
+
+        function wodRebuildEditorPeriodSelectEl(el) {
+            if(!el) return;
+            let cur = gameData.gamePeriod || 'modern';
+            if(!WOD_PERIOD_IDS.includes(cur)) cur = 'modern';
+            el.innerHTML = wodListAllPeriodIds().map((pid) =>
+                '<option value="' + pid + '">' + wodPeriodLabel(pid) + '</option>'
+            ).join('');
+            el.value = cur;
         }
 
         function wodRebuildPeriodSelectEl(el) {
@@ -20116,10 +20314,11 @@
                 if(row) row.classList.toggle('hidden', !show);
             }
             if(show) {
-                for(let id of ['setupGamePeriod', 'settingsGamePeriod', 'mpCfgGamePeriod', 'shopGamePeriod', 'editorGenPeriod']) {
+                for(let id of ['setupGamePeriod', 'settingsGamePeriod', 'mpCfgGamePeriod', 'shopGamePeriod']) {
                     wodRebuildPeriodSelectEl(document.getElementById(id));
                 }
             }
+            wodRebuildEditorPeriodSelectEl(document.getElementById('editorMapPeriod'));
         }
 
         function wodActivePeriodFlavor() {
@@ -20156,8 +20355,7 @@
             wodSyncPeriodSelectEl(document.getElementById('settingsGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('mpCfgGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('shopGamePeriod'), gameData.gamePeriod);
-            let ed = document.getElementById('editorGenPeriod');
-            if(ed) wodSyncPeriodSelectEl(ed, gameData.gamePeriod);
+            wodRebuildEditorPeriodSelectEl(document.getElementById('editorMapPeriod'));
         }
 
         function wodApplyPeriodUiLabels() {
@@ -20198,14 +20396,17 @@
         function wodApplyGamePeriod(period, opts) {
             opts = opts || {};
             if(!period || !WOD_PERIOD_IDS.includes(period)) period = 'modern';
-            if(!wodIsPeriodUnlocked(period)) period = 'modern';
+            if(!opts.allowAnyPeriod && !wodIsPeriodUnlocked(period)) period = 'modern';
             gameData.gamePeriod = period;
             if(gameState === 'PLAYING' || gameState === 'PAUSED') gameData._matchPeriod = period;
+            wodRefreshUrbanHexColorsForPeriod(period);
             wodSyncAllPeriodSelects();
             wodApplyPeriodUiLabels();
             renderShopArmyCanvases();
             renderSkinShopGridCanvases();
             renderHelpMiniDiagrams();
+            updateTerrainKey();
+            if(typeof scheduleEditorRender === 'function') scheduleEditorRender();
             let achPanel = document.getElementById('achievementsPanel');
             if(achPanel && !achPanel.classList.contains('hidden')) renderAchievementsUi();
             if(opts.saveProfile !== false && wodProgress) {
@@ -20852,8 +21053,8 @@
             return [
                 { id: 'nato', label: 'NATO counters (default)' },
                 { id: 'napoleonic', label: 'Napoleonic' },
-                { id: 'ancient', label: 'Ancient era' },
                 { id: 'medieval', label: 'Medieval era' },
+                { id: 'ancient', label: 'Ancient era' },
                 { id: 'usa', label: 'USA countryball' },
                 { id: 'uk', label: 'UK countryball' },
                 { id: 'germany', label: 'Germany countryball' },
@@ -21750,13 +21951,7 @@
                         ctx.fillText(city.name, city.x, city.y - 10);
                         ctx.shadowBlur = 0;
 
-                        let icons = "";
-                        if(city.hasFactory) icons += "🏭";
-                        if(city.hasHarbor) icons += "⚓";
-                        if(icons !== "") {
-                            ctx.font = gfxLite ? '12px Arial' : '14px Arial';
-                            ctx.fillText(icons, city.x, city.y + 12);
-                        }
+                        if(city.hasFactory || city.hasHarbor) drawWodCityStructureIcons(ctx, city, gfxLite);
                     } else if(!gfxLite) {
                         ctx.beginPath();
                         ctx.arc(city.x, city.y - 10, 8, 0, Math.PI*2);
@@ -23323,48 +23518,83 @@
                 if(typeof h.owner === 'number' && h.owner >= 1) ft.owner = h.owner;
             }
         }
-        function drawFortSticker(ctx, f, factionCol, fxLite, culPadFn) {
-            // ~Infantry unit footprint (radius ~12): compact fort read
+        function drawFortSticker(ctx, f, factionCol, fxLite, culPadFn, period) {
+            period = period || wodGetRenderPeriod();
             let footprint = fxLite ? 20 : 26;
             if(typeof culPadFn === 'function' && !culPadFn(f.x, f.y, footprint)) return;
             factionCol = factionCol || '#2ecc71';
             ctx.save();
             ctx.translate(f.x, f.y + (fxLite ? 0.5 : 1));
-            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fillStyle = 'rgba(0,0,0,0.28)';
             ctx.beginPath();
             ctx.ellipse(0.5, fxLite ? 9.5 : 12, fxLite ? 12.5 : 16, fxLite ? 6.5 : 8.5, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.fillStyle = 'rgba(55,61,73,0.98)';
-            ctx.strokeStyle = 'rgba(23,31,43,1)';
-            ctx.lineWidth = fxLite ? 1.35 : 1.75;
-            ctx.lineJoin = 'round';
             let w = fxLite ? 10 : 12;
             let h = fxLite ? 7.2 : 9;
-            ctx.beginPath();
-            ctx.rect(-w, -h, w * 2, h * 2);
-            ctx.stroke();
-            ctx.fill();
-            ctx.fillStyle = 'rgba(85,93,109,1)';
-            ctx.strokeStyle = 'rgba(15,21,31,1)';
-            ctx.lineWidth = fxLite ? 0.9 : 1.05;
-            ctx.beginPath();
-            ctx.rect(-w * 0.58, -h * 0.56, w * 1.16, h * 1.02);
-            ctx.fill(); ctx.stroke();
-            let br = fxLite ? 2.6 : 3.35;
-            for(let iy = -1; iy <= 1; iy += 2)
-                for(let ix = -1; ix <= 1; ix += 2) {
+            ctx.lineWidth = fxLite ? 1.35 : 1.75;
+            ctx.lineJoin = 'round';
+            if(period === 'napoleonic') {
+                ctx.fillStyle = 'rgba(120,98,72,0.96)';
+                ctx.strokeStyle = 'rgba(40,28,16,1)';
+                ctx.beginPath();
+                ctx.moveTo(-w * 1.1, h * 0.5);
+                ctx.lineTo(-w * 0.3, -h * 0.4);
+                ctx.lineTo(w * 0.8, -h * 0.2);
+                ctx.lineTo(w * 1.05, h * 0.55);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+            } else if(period === 'medieval') {
+                ctx.fillStyle = 'rgba(90,86,78,0.98)';
+                ctx.strokeStyle = 'rgba(22,16,12,1)';
+                ctx.fillRect(-w, -h, w * 2, h * 2);
+                ctx.strokeRect(-w, -h, w * 2, h * 2);
+                ctx.fillStyle = 'rgba(70,66,60,1)';
+                let bw = (w * 2) / 5;
+                for(let i = 0; i < 5; i++) {
+                    if(i % 2 === 0) ctx.fillRect(-w + i * bw, -h - (fxLite ? 2.5 : 3.2), bw + 0.5, fxLite ? 2.8 : 3.5);
+                }
+            } else if(period === 'ancient') {
+                ctx.strokeStyle = 'rgba(55,40,22,1)';
+                ctx.fillStyle = 'rgba(140,110,70,0.95)';
+                for(let i = -2; i <= 2; i++) {
                     ctx.beginPath();
-                    ctx.arc(ix * (w + br * 0.42), iy * (h + br * 0.42), br, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(60,67,82,1)';
+                    ctx.moveTo(i * (w * 0.38), h);
+                    ctx.lineTo(i * (w * 0.38) + w * 0.12, -h);
+                    ctx.lineTo(i * (w * 0.38) - w * 0.12, -h);
+                    ctx.closePath();
                     ctx.fill();
                     ctx.stroke();
                 }
-            ctx.fillStyle = 'rgba(42,46,54,1)';
-            ctx.strokeStyle = 'rgba(15,21,31,0.92)';
-            let gw = fxLite ? 4.8 : 5.8,
-                gh = fxLite ? 3.2 : 3.9;
-            ctx.fillRect(-gw * 0.5, -h * 1.05, gw, gh);
-            ctx.strokeRect(-gw * 0.5, -h * 1.05, gw, gh);
+            } else {
+                ctx.fillStyle = 'rgba(55,61,73,0.98)';
+                ctx.strokeStyle = 'rgba(23,31,43,1)';
+                ctx.beginPath();
+                ctx.rect(-w, -h, w * 2, h * 2);
+                ctx.stroke();
+                ctx.fill();
+                ctx.fillStyle = 'rgba(85,93,109,1)';
+                ctx.strokeStyle = 'rgba(15,21,31,1)';
+                ctx.lineWidth = fxLite ? 0.9 : 1.05;
+                ctx.beginPath();
+                ctx.rect(-w * 0.58, -h * 0.56, w * 1.16, h * 1.02);
+                ctx.fill(); ctx.stroke();
+                let br = fxLite ? 2.6 : 3.35;
+                for(let iy = -1; iy <= 1; iy += 2)
+                    for(let ix = -1; ix <= 1; ix += 2) {
+                        ctx.beginPath();
+                        ctx.arc(ix * (w + br * 0.42), iy * (h + br * 0.42), br, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(60,67,82,1)';
+                        ctx.fill();
+                        ctx.stroke();
+                    }
+                ctx.fillStyle = 'rgba(42,46,54,1)';
+                ctx.strokeStyle = 'rgba(15,21,31,0.92)';
+                let gw = fxLite ? 4.8 : 5.8,
+                    gh = fxLite ? 3.2 : 3.9;
+                ctx.fillRect(-gw * 0.5, -h * 1.05, gw, gh);
+                ctx.strokeRect(-gw * 0.5, -h * 1.05, gw, gh);
+            }
             let px = w * 0.48,
                 poleTop = -h - (fxLite ? 2.8 : 3.8),
                 poleBase = -h + 4;
@@ -23970,6 +24200,9 @@
             wodRefreshPeriodSelectorVisibility,
             wodHasAnyEraSkinUnlocked,
             wodRebuildPeriodSelectEl,
+            wodRebuildEditorPeriodSelectEl,
+            wodListAllPeriodIds,
+            getUrbanTerrainColor,
         };
 
         loadWodProgress();

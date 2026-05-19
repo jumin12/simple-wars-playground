@@ -1321,9 +1321,6 @@
             </div>
           </div>
 
-          <div class="editor-row" id="editorGenPeriodRow" style="display:none"><label>Period</label><select id="editorGenPeriod">
-            <option value="modern" selected>Modern</option>
-          </select></div>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenCities" checked /> Cities during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenTerritory" checked /> Territory during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenUnits" checked /> Units during gen</label>
@@ -1340,6 +1337,7 @@
         <section class="editor-card">
           <h3>Map &amp; files</h3>
           <div class="editor-row"><label>Hex radius</label><select id="editorSize"><option value="40">Small</option><option value="60" selected>Medium</option><option value="80">Large</option></select></div>
+          <div class="editor-row"><label>Time period</label><select id="editorMapPeriod"><option value="modern" selected>Modern (NATO)</option><option value="napoleonic">Napoleonic</option><option value="medieval">Medieval</option><option value="ancient">Ancient</option></select></div>
           <div class="editor-grid-2">
             <button type="button" class="editor-btn" id="editorBlank">New blank</button>
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
@@ -1414,18 +1412,6 @@
         <section class="editor-card">
           <h3>Legend</h3>
           <div id="editorMapKey"></div>
-        </section>
-        <section class="editor-card">
-          <h3>Saved maps (browser)</h3>
-          <p class="editor-hint" style="margin-top:0">Same collection as solo / multiplayer / map library. Click a row to load; Delete removes it everywhere.</p>
-          <div class="map-browser-stack">
-            <div id="mapBrowser" class="map-browser"></div>
-            <div class="map-browser-pager" id="mapBrowserPager" hidden>
-              <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserPrev" aria-label="Previous page">←</button>
-              <span id="mapBrowserPageLabel" class="map-browser-page-label"></span>
-              <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserNext" aria-label="Next page">→</button>
-            </div>
-          </div>
         </section>
       </div>
       <div id="editorCanvasWrap">
@@ -1575,21 +1561,35 @@
       renderMapBrowser();
       if (state.open) editorInitHistory();
     });
-    const editorGenPeriod = app.querySelector("#editorGenPeriod");
-    const editorGenPeriodRow = app.querySelector("#editorGenPeriodRow");
-    if (editorGenPeriod && window.WOD) {
-      editorGenPeriod.addEventListener("change", () => {
-        if (typeof WOD.wodApplyGamePeriod === "function") WOD.wodApplyGamePeriod(editorGenPeriod.value);
+    const editorMapPeriod = app.querySelector("#editorMapPeriod");
+    const refreshEditorMapKey = () => {
+      const mk = app.querySelector("#editorMapKey");
+      if (!mk || !WOD || typeof WOD.getTerrainColor !== "function") return;
+      mk.innerHTML = terrainTypes
+        .map(
+          (t) =>
+            `<div class="editor-key-row"><span class="editor-swatch" style="background:${WOD.getTerrainColor(t)}"></span>${t.replace("_", " ")}</div>`
+        )
+        .join("");
+    };
+    if (editorMapPeriod && window.WOD) {
+      editorMapPeriod.addEventListener("change", () => {
+        if (typeof WOD.wodApplyGamePeriod === "function") {
+          WOD.wodApplyGamePeriod(editorMapPeriod.value, { saveProfile: true, allowAnyPeriod: true });
+        }
+        refreshEditorMapKey();
       });
-      if (typeof WOD.wodRefreshPeriodSelectorVisibility === "function") WOD.wodRefreshPeriodSelectorVisibility();
-      else if (editorGenPeriodRow && typeof WOD.wodHasAnyEraSkinUnlocked === "function") {
-        editorGenPeriodRow.style.display = WOD.wodHasAnyEraSkinUnlocked() ? "" : "none";
+      if (typeof WOD.wodRebuildEditorPeriodSelectEl === "function") {
+        WOD.wodRebuildEditorPeriodSelectEl(editorMapPeriod);
+      } else if (WOD.gameData && WOD.gameData.gamePeriod) {
+        editorMapPeriod.value = WOD.gameData.gamePeriod;
       }
-      if (WOD.gameData && WOD.gameData.gamePeriod) editorGenPeriod.value = WOD.gameData.gamePeriod;
     }
     app.querySelector("#editorRandom").addEventListener("click", async () => {
-      const edPer = app.querySelector("#editorGenPeriod");
-      if (edPer && window.WOD && typeof WOD.wodApplyGamePeriod === "function") WOD.wodApplyGamePeriod(edPer.value, { saveProfile: true });
+      const edPer = app.querySelector("#editorMapPeriod");
+      if (edPer && window.WOD && typeof WOD.wodApplyGamePeriod === "function") {
+        WOD.wodApplyGamePeriod(edPer.value, { saveProfile: true, allowAnyPeriod: true });
+      }
       document.getElementById("setupMapSize").value = app.querySelector("#editorSize").value;
       WOD.gameData.mapRadius = parseInt(app.querySelector("#editorSize").value, 10);
       WOD.gameData.aiCount = Math.max(1, state.maxFactionSlots - 1);
