@@ -6533,8 +6533,8 @@
 
         let gameState = 'MENU'; 
         let menuDemoSeeded = false;
-        /** Frozen copy of the first menu background map — never overwritten after initial boot. */
-        let menuBattleOriginal = null;
+        /** Snapshot of the running menu background battle (preserved while browsing menus or playing). */
+        let menuBattleLive = null;
         let menuDemoAnimId = 0;
         let menuDemoLastTime = 0;
         let menuDemoPausedByVisibility = false;
@@ -6932,7 +6932,6 @@
             }
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
-            menuDemoSeeded = false;
             gameData._cityUnitStackTap = null;
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
@@ -6965,11 +6964,12 @@
             UI.mainMenu.classList.remove('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             stopGame();
-            if(!resetMenuBattleToOriginal()) {
-                menuDemoSeeded = false;
-                void bootstrapMenuBackgroundBattle();
-            } else {
+            if(menuBattleLive && applyMenuBattleState(menuBattleLive)) {
                 resumeMenuBackgroundBattle();
+            } else if(menuDemoSeeded) {
+                resumeMenuBackgroundBattle();
+            } else {
+                void bootstrapMenuBackgroundBattle();
             }
         }
 
@@ -9976,7 +9976,6 @@
                     hidePanels();
                     gameState = 'PLAYING';
                     pauseMenuBackgroundBattle();
-                    menuDemoSeeded = false;
                     UI.mainMenu.classList.add('hidden');
                     UI.panels.forEach(p => p.classList.add('hidden'));
                     UI.escMenu.classList.add('hidden');
@@ -17961,17 +17960,23 @@
                 mapShape: gameData.mapShape,
                 camera: Object.assign({}, gameData.camera),
                 layers: Object.assign({}, gameData.layers || {}),
+                aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner || {}),
+                aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner || {}),
+                casualtiesByOwner: Object.assign({}, gameData.casualtiesByOwner || {}),
+                casualtyReplacementCostByOwner: Object.assign({}, gameData.casualtyReplacementCostByOwner || {}),
+                aiStrategyTimer: gameData.aiStrategyTimer || 0,
+                aiFocusTimer: gameData.aiFocusTimer || 0,
+                aiFrontFocus: gameData.aiFrontFocus ? JSON.parse(JSON.stringify(gameData.aiFrontFocus)) : {}
             };
         }
 
-        function captureMenuBattleOriginal() {
+        function captureMenuBattleLive() {
             if(!gameData.hexList || !gameData.hexList.length) return;
-            menuBattleOriginal = cloneMenuBattleState();
+            menuBattleLive = cloneMenuBattleState();
         }
 
-        function resetMenuBattleToOriginal() {
-            if(!menuBattleOriginal) return false;
-            let s = menuBattleOriginal;
+        function applyMenuBattleState(s) {
+            if(!s || !s.hexList || !s.hexList.length) return false;
             gameData.hexes = {};
             gameData.hexList = s.hexList.map(h => Object.assign({}, h));
             for(let h of gameData.hexList) gameData.hexes[`${h.q},${h.r}`] = h;
@@ -17983,8 +17988,21 @@
             gameData.mapShape = s.mapShape;
             Object.assign(gameData.camera, s.camera);
             gameData.layers = Object.assign({}, s.layers);
+            gameData.aiMoneyByOwner = Object.assign({}, s.aiMoneyByOwner || {});
+            gameData.aiManpowerByOwner = Object.assign({}, s.aiManpowerByOwner || {});
+            gameData.casualtiesByOwner = Object.assign({}, s.casualtiesByOwner || {});
+            gameData.casualtyReplacementCostByOwner = Object.assign({}, s.casualtyReplacementCostByOwner || {});
+            gameData.aiStrategyTimer = s.aiStrategyTimer || 0;
+            gameData.aiFocusTimer = s.aiFocusTimer || 0;
+            gameData.aiFrontFocus = s.aiFrontFocus ? JSON.parse(JSON.stringify(s.aiFrontFocus)) : {};
+            gameData._aiStratWork = null;
+            gameData._aiSpawnBurst = null;
+            gameData._encircWork = null;
+            gameData.money = 0;
+            gameData.manpower = 0;
             gameData.selection = [];
             gameData.buildMode = null;
+            gameData._landIncomeCacheDirty = true;
             wodMarkTerrainFullDirty();
             return true;
         }
@@ -18016,6 +18034,7 @@
         }
 
         function pauseMenuBackgroundBattle() {
+            if(gameData.menuAttractMode && menuDemoSeeded) captureMenuBattleLive();
             menuDemoPausedByVisibility = false;
             gameData.menuAttractMode = false;
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
@@ -18028,18 +18047,17 @@
             if(gameState === 'PLAYING') return;
             if(!wodIsMainMenuAttractEligible()) return;
             menuDemoPausedByVisibility = false;
-            if(menuBattleOriginal) resetMenuBattleToOriginal();
-            if(!menuDemoSeeded && !menuBattleOriginal) {
+            if(!menuDemoSeeded && !menuBattleLive) {
                 void bootstrapMenuBackgroundBattle();
                 return;
             }
+            if(menuBattleLive) applyMenuBattleState(menuBattleLive);
             menuDemoSeeded = true;
             gameData.menuAttractMode = true;
             gameData.speed = Math.max(1, gameData.speed || 1);
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
-            kickstartMenuAttractSim();
             draw();
             menuDemoLastTime = performance.now();
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
@@ -18194,13 +18212,17 @@
 
         async function bootstrapMenuBackgroundBattle() {
             pauseMenuBackgroundBattle();
-            if(menuBattleOriginal) {
+            if(menuDemoSeeded && menuBattleLive) {
+                applyMenuBattleState(menuBattleLive);
                 if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
                 else {
                     menuDemoSeeded = true;
                     gameData.menuAttractMode = true;
-                    resetMenuBattleToOriginal();
                 }
+                return;
+            }
+            if(menuDemoSeeded && gameData.hexList && gameData.hexList.length) {
+                if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
                 return;
             }
             let _wodPrevSkipLoader = gameData._wodSkipMapGenLoader;
@@ -18230,7 +18252,7 @@
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
             kickstartMenuAttractSim();
-            captureMenuBattleOriginal();
+            captureMenuBattleLive();
             draw();
             menuDemoLastTime = performance.now();
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
