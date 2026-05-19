@@ -7187,8 +7187,8 @@
                 }
                 let aiEl = document.getElementById('setupAI');
                 if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
-                let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
-                gameData.mapRadius = mapSize;
+                let mapSizeEl = document.getElementById('setupMapSize');
+                wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
                 if(!opts.preserveMap) {
                     wodArmMapPreviewSpinner('mapPreview');
                     gameData._soloPreviewGenerating = true;
@@ -7787,6 +7787,51 @@
                 shape: mapShape != null ? mapShape : gameData.mapShape,
                 ai: aiCount != null ? aiCount : gameData.aiCount
             });
+        }
+        /** Fixed grid + hex scale per setup size so Small / Medium / Large stay predictable. */
+        function wodMapSizePreset(sizeVal) {
+            let v = parseInt(sizeVal, 10);
+            if(v === 40) {
+                return { mapRadius: 40, hexRadius: 18, rowsMul: 0.8, landFracMin: 0.34, landFracMax: 0.5 };
+            }
+            if(v === 80) {
+                return { mapRadius: 80, hexRadius: 22, rowsMul: 0.8, landFracMin: 0.3, landFracMax: 0.44 };
+            }
+            return { mapRadius: 60, hexRadius: 20, rowsMul: 0.8, landFracMin: 0.32, landFracMax: 0.46 };
+        }
+        function wodApplyMapSizePreset(sizeVal) {
+            let p = wodMapSizePreset(sizeVal);
+            gameData.mapRadius = p.mapRadius;
+            gameData.hexRadius = p.hexRadius;
+            gameData._mapSizePreset = p;
+            return p;
+        }
+        function wodPlayableLandFraction() {
+            let land = 0,
+                n = 0;
+            for(let h of gameData.hexList) {
+                if(!h) continue;
+                n++;
+                if(!isWaterHex(h)) land++;
+            }
+            return n ? land / n : 0;
+        }
+        function wodMapLandFractionAcceptable(mapShape) {
+            let p = gameData._mapSizePreset || wodMapSizePreset(gameData.mapRadius);
+            let frac = wodPlayableLandFraction();
+            let minF = p.landFracMin,
+                maxF = p.landFracMax;
+            if(wodMapShapeUsesRectanglePipeline(mapShape)) {
+                minF += 0.1;
+                maxF += 0.14;
+            } else if(mapShape === 'archipelago') {
+                minF = Math.max(0.12, minF - 0.14);
+                maxF = Math.min(0.36, maxF - 0.08);
+            } else if(mapShape === 'ring') {
+                minF = Math.max(0.18, minF - 0.08);
+                maxF = Math.min(0.42, maxF - 0.04);
+            }
+            return frac >= minF && frac <= maxF;
         }
 
         const WOD_PROC_GEN_MAP_SHAPES = ['island', 'rectangle', 'ring', 'archipelago', 'forest', 'mountain', 'desert'];
@@ -8390,13 +8435,30 @@
             return w;
         }
         async function wodPaintCoastalSandAllLand() {
+            let distMap = wodLandDistanceToWaterMap();
             let hi = 0;
             for(let h of gameData.hexList) {
                 if(!h || isWaterHex(h) || h.type === 'urban') continue;
-                if(!getNeighborHexes(h).some(nb => nb && isWaterHex(nb))) continue;
-                if(h.type === 'mountain') wodSetGeneratedTerrainType(h, 'hill');
-                wodSetGeneratedTerrainType(h, 'sand');
-                if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                let d = distMap.get(getHexKey(h));
+                if(d == null || d > 1) continue;
+                let waterN = 0,
+                    landN = 0;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb) continue;
+                    if(isWaterHex(nb)) waterN++;
+                    else if(nb.type !== 'mountain' && nb.type !== 'urban') landN++;
+                }
+                if(waterN < 1) continue;
+                if(waterN < 2 && landN >= 5) continue;
+                if(h.type === 'swamp' && waterN >= 2) continue;
+                if(h.type === 'forest' && landN >= 4) continue;
+                if(h.type === 'mountain') {
+                    wodSetGeneratedTerrainType(h, waterN >= 3 ? 'sand' : 'hill');
+                    if((++hi & 511) === 0) await wodMapGenYieldSlice();
+                    continue;
+                }
+                if(h.type !== 'sand') wodSetGeneratedTerrainType(h, 'sand');
+                if((++hi & 511) === 0) await wodMapGenYieldSlice();
             }
         }
         /** Multi-source BFS: shortest steps from each land hex to nearest water (8-neighbor grid). */
@@ -8586,7 +8648,7 @@
                             bestCount = counts[type];
                         }
                     }
-                    if(waterAdj >= 2 && h.type !== 'sand' && h.type !== 'swamp') {
+                    if(waterAdj >= 4 && h.type !== 'sand' && h.type !== 'swamp') {
                         changes.push({ h, type: 'sand' });
                     } else if(bestType !== h.type && bestCount >= (pass === 0 ? 4 : 3)) {
                         changes.push({ h, type: bestType });
@@ -16274,8 +16336,9 @@
         function wodApplyMapDataToSetup(mapData) {
             if(!mapData) return;
             let ms = document.getElementById('setupMapSize');
-            if(ms) ms.value = String(mapData.mapSize || mapData.mapRadius || 60);
-            gameData.mapRadius = mapData.mapSize || mapData.mapRadius || 60;
+            let sz = mapData.mapSize || mapData.mapRadius || 60;
+            if(ms) ms.value = String(sz);
+            wodApplyMapSizePreset(sz);
             gameData.mapShape = 'custom';
             gameData.loadedCustomMap = true;
             gameData.hexList = mapData.hexList || [];
@@ -16796,8 +16859,8 @@
                 requestAnimationFrame(async () => {
                     let ok = true;
                     try {
-                        let mapSize = parseInt(document.getElementById('setupMapSize').value, 10) || 60;
-                        gameData.mapRadius = mapSize;
+                        let prevSz = document.getElementById('setupMapSize');
+                        wodApplyMapSizePreset(prevSz ? prevSz.value : 60);
                         let aiEl = document.getElementById('setupAI');
                         if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
                         if(!politicsOnly) gameData.loadedCustomMap = false;
@@ -16844,8 +16907,9 @@
             gameData._aiStratWork = null;
             wodTerrainBakeNextMs = 0;
             // Apply Setup variables
-            let mapSize = document.getElementById('setupMapSize');
-            let newRadius = mapSize ? parseInt(mapSize.value) : 120;
+            let mapSizeEl = document.getElementById('setupMapSize');
+            let sizePreset = wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
+            let newRadius = sizePreset.mapRadius;
             
             let aiCount = document.getElementById('setupAI');
             if(aiCount && (!gameData.mp || !gameData.mp.enabled))
@@ -17853,6 +17917,16 @@
             syncBuildPlacementMobileUi();
             wodMarkTerrainFullDirty();
 
+            let sizeVal = gameData.mapRadius || 60;
+            if(gameData.mp && gameData.mp.enabled) {
+                let mpSz = document.getElementById('mpCfgMapSize');
+                if(mpSz) sizeVal = mpSz.value;
+                else if(window.wodMpRoomMeta && window.wodMpRoomMeta.mapSize != null) sizeVal = window.wodMpRoomMeta.mapSize;
+            } else {
+                let sizeEl = document.getElementById('setupMapSize');
+                if(sizeEl) sizeVal = sizeEl.value;
+            }
+            wodApplyMapSizePreset(sizeVal);
             let mapR = gameData.mapRadius;
             let hr = gameData.hexRadius;
             let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed);
@@ -17906,7 +17980,7 @@
             // Generate dense cell grid on the map. The old variable names remain,
             // but these are square-neighbor dots, not hex tiles.
             let cols = mapR;
-            let rows = Math.floor(mapR * 0.8);
+            let rows = Math.floor(mapR * ((gameData._mapSizePreset && gameData._mapSizePreset.rowsMul) || 0.8));
             let spacing = hr * 1.35;
             let terrainAppliedFromWorker = false;
             try {
@@ -18170,6 +18244,11 @@
             await wodPaintCoastalSandAllLand();
             await wodCoalesceTerrainSpeckles(2);
             wodCaptureTerrainPoliticsBase();
+
+            if(!wodMapLandFractionAcceptable(mapShape)) {
+                if(ownsInnerRng) wodPopRandom();
+                continue outerProcTerrain;
+            }
 
             await wodMapGenYieldSlice();
 
@@ -18977,7 +19056,7 @@
             gameData.citySkin = gameData.citySkin || 'classic';
             let sz = document.getElementById('setupMapSize');
             if(sz) sz.value = '60';
-            gameData.mapRadius = sz ? parseInt(sz.value, 10) : 60;
+            wodApplyMapSizePreset(sz ? sz.value : 60);
             let shapeEl = document.getElementById('setupMapShape');
             if(shapeEl) shapeEl.value = 'island';
             gameData.aiCount = 1;
@@ -26594,11 +26673,11 @@
                 gameData.hexes = {}; gameData.hexList = []; gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = [];
                 gameData.loadedCustomMap = false;
                 delete gameData._mapExportHadStartEconomy;
-                gameData.mapRadius = size;
-                let spacing = gameData.hexRadius * 1.35;
-                let rows = Math.floor(size * 0.8);
+                let p = wodApplyMapSizePreset(size);
+                let spacing = p.hexRadius * 1.35;
+                let rows = Math.floor(p.mapRadius * p.rowsMul);
                 for(let r = -rows; r <= rows; r++) {
-                    for(let q = -size; q <= size; q++) {
+                    for(let q = -p.mapRadius; q <= p.mapRadius; q++) {
                         let x = q * spacing, y = r * spacing;
                         let hex = {q, r, x, y, type: 'grass', owner: 0, baseColor: getTerrainColor('grass'), renderColor: getTerrainColor('grass')};
                         gameData.hexes[`${q},${r}`] = hex;
@@ -26609,7 +26688,7 @@
                 updateTerrainKey();
             },
             loadMapData(mapData) {
-                gameData.mapRadius = mapData.mapSize || mapData.mapRadius || gameData.mapRadius;
+                wodApplyMapSizePreset(mapData.mapSize || mapData.mapRadius || gameData.mapRadius || 60);
                 gameData.mapShape = mapData.mapShape || gameData.mapShape || 'island';
                 gameData.hexList = mapData.hexList || [];
                 gameData.cities = mapData.cities || [];
