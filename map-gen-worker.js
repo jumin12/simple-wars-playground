@@ -48,8 +48,8 @@
         let rect = usesRect(mapShape);
         let hexList = [];
         let scale = 0.004;
-        let rMin = d.rowStart != null ? d.rowStart : -rows;
-        let rMax = d.rowEnd != null ? d.rowEnd : rows;
+        let rMin = d.rMin != null ? d.rMin : -rows;
+        let rMax = d.rMax != null ? d.rMax : rows;
 
         for (let r = rMin; r <= rMax; r++) {
             for (let q = -cols; q <= cols; q++) {
