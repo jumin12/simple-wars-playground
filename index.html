@@ -3449,8 +3449,8 @@
         .ball-japan { background: radial-gradient(circle,#bc002d 0 28%,#fff 29%); }
         .ball-ussr {
             background: #cc1d1d;
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 60'%3E%3Crect width='60' height='60' fill='%23cc1d1d'/%3E%3Cpath fill='%23ffd700' d='M12 38 L22 28 L18 38 L28 34 L20 42 L30 36 L26 46 L34 38 L32 48 L38 40 L36 50 L42 42 L44 52 L46 44 L52 50 L48 40 L56 44 L50 36 L58 38 L52 30 L60 32 L54 24 L60 26 L52 20 L58 18 L48 16 L54 10 L44 14 L42 6 L38 12 L34 4 L30 10 L26 4 L22 12 L18 6 L16 14 L8 10 L12 18 L4 16 L10 24 L2 22 L8 30 L0 28 L6 36 L2 38 Z'/%3E%3C/svg%3E");
-            background-size: 72% 72%;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' fill='%23cc1d1d'/%3E%3Cg fill='%23ffd700' stroke='%231a0a0a' stroke-width='1.1' stroke-linejoin='round'%3E%3Crect x='9' y='36' width='6' height='17' rx='1'/%3E%3Crect x='5' y='30' width='18' height='5.5' rx='1'/%3E%3Cpath d='M26 42 C38 26 46 36 38 50 C32 56 24 52 20 44 Z'/%3E%3C/g%3E%3C/svg%3E");
+            background-size: 52% 52%;
             background-position: 18% 78%;
             background-repeat: no-repeat;
         }
@@ -3474,6 +3474,28 @@
             margin: 0 0 10px;
             font-size: 0.88rem;
             color: #bdc3c7;
+        }
+        .shop-section-buy-row {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin: 16px 0 8px;
+        }
+        .shop-section-buy-row .shop-skin-section-title {
+            margin: 0;
+            width: auto;
+        }
+        .shop-purchase-all-btn {
+            padding: 6px 14px;
+            font-size: 0.82rem;
+            min-width: 0;
+        }
+        .shop-purchase-all-btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
         }
 
         @media (orientation: landscape) and (max-height: 600px), (max-width: 900px) {
@@ -5783,10 +5805,13 @@
                     </div>
                 </div>
 
-                <p class="shop-unlock-note"><strong>Unlock deck</strong> — buy once to own forever. Locked rows in the picker are greyed until purchased.</p>
+                <p class="shop-unlock-note"><strong>Unlock deck</strong> — buy once to own forever. Equip unlocked skins from the dropdowns above.</p>
                 <div class="skin-grid-scroll">
                 <div class="skin-grid">
-                    <p class="shop-skin-section-title">Standard</p>
+                    <div class="shop-section-buy-row">
+                        <p class="shop-skin-section-title">Standard</p>
+                        <button type="button" class="menu-btn shop-purchase-all-btn" id="shopBuyAllStandard" onclick="purchaseAllShopSkins('standard')">Purchase all</button>
+                    </div>
                     <button type="button" class="skin-card skin-owned" id="skinNato" onclick="purchaseUnitSkin('nato')">
                         <canvas class="skin-preview" id="skinNatoPreview" width="120" height="80" aria-hidden="true"></canvas>
                         NATO Counters
@@ -5812,7 +5837,10 @@
                         Sovereign chip
                         <div class="skin-card-footer"><span class="skin-card-state">Secret</span><span class="skin-card-price">?</span></div>
                     </button>
-                    <p class="shop-skin-section-title">Countryballs</p>
+                    <div class="shop-section-buy-row">
+                        <p class="shop-skin-section-title">Countryballs</p>
+                        <button type="button" class="menu-btn shop-purchase-all-btn" id="shopBuyAllCountryballs" onclick="purchaseAllShopSkins('countryballs')">Purchase all</button>
+                    </div>
                     <p class="shop-skin-section-desc">Polandball-style armies with meme eyes.</p>
                     <button type="button" class="skin-card skin-missing locked" id="skinUsa" onclick="purchaseUnitSkin('usa')">
                         <canvas class="skin-preview" id="skinUsaPreview" width="120" height="80" aria-hidden="true"></canvas>
@@ -5845,7 +5873,10 @@
                         Soviet Union Countryball
                         <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
                     </button>
-                    <p class="shop-skin-section-title">Skin sets</p>
+                    <div class="shop-section-buy-row">
+                        <p class="shop-skin-section-title">Skin sets</p>
+                        <button type="button" class="menu-btn shop-purchase-all-btn" id="shopBuyAllRuse" onclick="purchaseAllShopSkins('ruse')">Purchase all</button>
+                    </div>
                     <p class="shop-skin-section-desc">RUSE — tabletop-style unit chips inspired by the classic RTS.</p>
                     <button type="button" class="skin-card skin-missing locked" id="skinRuseUsa" onclick="purchaseUnitSkin('ruseUsa')">
                         <canvas class="skin-preview" id="skinRuseUsaPreview" width="120" height="80" aria-hidden="true"></canvas>
@@ -10499,6 +10530,29 @@
             } else {
                 showNotification('Skin unlocked! Choose it for you and/or the AI above.');
             }
+            updateSkinShop();
+            wodSyncAllPeriodSelects();
+            wodRefreshPeriodSelectorVisibility();
+            scheduleSaveWodProgress();
+        }
+
+        function purchaseAllShopSkins(sectionKey) {
+            if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { nato: true };
+            let ids = WOD_SHOP_PURCHASABLE_SECTIONS[sectionKey];
+            if(!ids || !ids.length) return;
+            let toBuy = ids.filter(id => !gameData.ownedUnitSkins[id]);
+            if(toBuy.length === 0) {
+                showNotification('You already own everything in this section.');
+                return;
+            }
+            let cost = toBuy.length * 100;
+            if((gameData.gold || 0) < cost) {
+                showNotification('Not enough gold! Need ' + cost + 'g for ' + toBuy.length + ' skin(s).');
+                return;
+            }
+            gameData.gold -= cost;
+            for(let id of toBuy) gameData.ownedUnitSkins[id] = true;
+            showNotification('Unlocked ' + toBuy.length + ' skin(s)! Equip them from the dropdowns above.');
             updateSkinShop();
             wodSyncAllPeriodSelects();
             wodRefreshPeriodSelectorVisibility();
@@ -20729,18 +20783,9 @@
                 ctx.fillStyle = '#fff'; ctx.fillRect(-r, -r, r * 2, r * 2);
                 ctx.fillStyle = '#bc002d'; ctx.beginPath(); ctx.arc(0, 0, r * 0.45, 0, Math.PI * 2); ctx.fill();
             } else if(skin === 'ussr') {
-                ctx.fillStyle = '#cc1d1d'; ctx.fillRect(-r, -r, r * 2, r * 2);
-                ctx.fillStyle = '#ffd700';
-                let hx = -r * 0.55, hy = r * 0.42, hs = r * 0.34;
-                ctx.fillRect(hx, hy, hs * 0.22, hs * 0.72);
-                ctx.beginPath();
-                ctx.arc(hx + hs * 0.11, hy - hs * 0.08, hs * 0.2, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.save();
-                ctx.translate(hx + hs * 0.62, hy + hs * 0.08);
-                ctx.rotate(-0.55);
-                ctx.fillRect(-hs * 0.42, -hs * 0.07, hs * 0.84, hs * 0.14);
-                ctx.restore();
+                ctx.fillStyle = '#cc1d1d';
+                ctx.fillRect(-r, -r, r * 2, r * 2);
+                wodPaintHammerSickleEmblem(ctx, -r * 0.18, r * 0.22, r * 0.52, '#ffd700', 'rgba(20,8,8,0.45)');
             }
         }
 
@@ -20938,6 +20983,11 @@
         const WOD_PERIOD_SKIN_IDS = ['napoleonic', 'medieval', 'ancient'];
         const WOD_RUSE_SKIN_IDS = ['ruseUsa', 'ruseGermany', 'ruseUssr', 'ruseJapan'];
         const WOD_COUNTRYBALL_SKIN_IDS = ['usa', 'uk', 'germany', 'france', 'japan', 'ussr'];
+        const WOD_SHOP_PURCHASABLE_SECTIONS = {
+            standard: ['napoleonic', 'ancient', 'medieval'],
+            countryballs: WOD_COUNTRYBALL_SKIN_IDS.slice(),
+            ruse: WOD_RUSE_SKIN_IDS.slice()
+        };
 
         function wodPeriodLabel(id) {
             if(id === 'napoleonic') return 'Napoleonic';
@@ -21561,52 +21611,122 @@
             ctx.restore();
         }
 
+        function wodPaintHammerSickleEmblem(ctx, cx, cy, size, fill, stroke) {
+            let s = Math.max(4, size);
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.fillStyle = fill || '#ffd700';
+            if(stroke) {
+                ctx.strokeStyle = stroke;
+                ctx.lineWidth = Math.max(0.6, s * 0.04);
+                ctx.lineJoin = 'round';
+            }
+            let hw = s * 0.14, hh = s * 0.52, hx = -s * 0.07;
+            ctx.fillRect(hx, s * 0.02, hw, hh);
+            ctx.fillRect(-s * 0.42, -s * 0.38, s * 0.5, s * 0.14);
+            ctx.beginPath();
+            ctx.moveTo(s * 0.08, s * 0.22);
+            ctx.bezierCurveTo(s * 0.62, -s * 0.08, s * 0.48, -s * 0.42, -s * 0.32, -s * 0.36);
+            ctx.bezierCurveTo(-s * 0.02, s * 0.02, s * 0.02, s * 0.12, s * 0.08, s * 0.22);
+            ctx.closePath();
+            ctx.fill();
+            if(stroke) ctx.stroke();
+            ctx.restore();
+        }
+
         function wodRuseNationPalette(skinId) {
-            if(skinId === 'ruseUsa') return { top: '#8f9a5c', edge: '#4f5736', rim: '#2f3424', mark: '#f4f1e6', markStyle: 'star' };
-            if(skinId === 'ruseGermany') return { top: '#8b8f82', edge: '#555850', rim: '#2e312c', mark: '#1a1a1a', markStyle: 'cross' };
-            if(skinId === 'ruseUssr') return { top: '#a82424', edge: '#6e1414', rim: '#3a0c0c', mark: '#f1c232', markStyle: 'soviet' };
-            if(skinId === 'ruseJapan') return { top: '#c9b07a', edge: '#8a7448', rim: '#4a3e28', mark: '#bc002d', markStyle: 'sun' };
-            return { top: '#7a7f74', edge: '#4a4f48', rim: '#2a2d28', mark: '#111', markStyle: 'none' };
+            if(skinId === 'ruseUsa') return { face: '#8a9468', hi: '#a3ad7e', rim: '#2a2618', mark: '#f2efe4', markStyle: 'star' };
+            if(skinId === 'ruseGermany') return { face: '#7d8274', hi: '#959a8e', rim: '#262824', mark: '#111', markStyle: 'cross' };
+            if(skinId === 'ruseUssr') return { face: '#9a5c4a', hi: '#b0705c', rim: '#301810', mark: '#ffd700', markStyle: 'soviet' };
+            if(skinId === 'ruseJapan') return { face: '#c4ad78', hi: '#d9c492', rim: '#3e3420', mark: '#bc002d', markStyle: 'sun' };
+            return { face: '#7a7f74', hi: '#90968c', rim: '#242620', mark: '#111', markStyle: 'none' };
+        }
+
+        function wodRuseDrawUnitSilhouette(ctx, unit, r) {
+            let ut = unit.type;
+            ctx.fillStyle = '#080808';
+            ctx.strokeStyle = '#080808';
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            if(ut === 'heavy') {
+                ctx.beginPath();
+                ctx.ellipse(0, 0, r * 0.62, r * 0.36, 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillRect(-r * 0.08, -r * 0.52, r * 0.16, r * 0.28);
+                ctx.fillRect(-r * 0.52, -r * 0.12, r * 0.28, r * 0.1);
+            } else if(ut === 'marine') {
+                ctx.lineWidth = Math.max(2.2, r * 0.2);
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.48, -r * 0.38);
+                ctx.lineTo(r * 0.48, r * 0.38);
+                ctx.moveTo(r * 0.48, -r * 0.38);
+                ctx.lineTo(-r * 0.48, r * 0.38);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.38, r * 0.34);
+                ctx.quadraticCurveTo(0, r * 0.58, r * 0.38, r * 0.34);
+                ctx.lineWidth = Math.max(2.8, r * 0.24);
+                ctx.stroke();
+            } else if(ut === 'ship') {
+                ctx.beginPath();
+                ctx.moveTo(0, -r * 0.58);
+                ctx.lineTo(r * 0.42, r * 0.42);
+                ctx.lineTo(-r * 0.42, r * 0.42);
+                ctx.closePath();
+                ctx.fill();
+                ctx.fillRect(-r * 0.34, -r * 0.08, r * 0.68, r * 0.12);
+            } else if(ut === 'convoy') {
+                ctx.fillRect(-r * 0.22, -r * 0.22, r * 0.44, r * 0.44);
+            } else {
+                ctx.lineWidth = Math.max(2.4, r * 0.22);
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.5, -r * 0.42);
+                ctx.lineTo(r * 0.5, r * 0.42);
+                ctx.moveTo(r * 0.5, -r * 0.42);
+                ctx.lineTo(-r * 0.5, r * 0.42);
+                ctx.stroke();
+            }
         }
 
         function wodRusePaintNationMark(ctx, skinId, r) {
             let pal = wodRuseNationPalette(skinId);
-            let mx = -r * 0.52, my = -r * 0.42, ms = r * 0.34;
+            let mx = -r * 0.62, my = -r * 0.52, ms = r * 0.36;
             ctx.save();
-            ctx.fillStyle = pal.mark;
-            ctx.strokeStyle = 'rgba(0,0,0,0.45)';
-            ctx.lineWidth = Math.max(0.8, r * 0.05);
+            if(pal.markStyle === 'cross') {
+                ctx.fillStyle = '#ece8dc';
+                ctx.fillRect(mx - ms * 0.08, my - ms * 0.08, ms * 0.88, ms * 0.88);
+            }
             if(pal.markStyle === 'star') {
+                ctx.fillStyle = pal.mark;
                 ctx.beginPath();
                 for(let i = 0; i < 5; i++) {
                     let a = -Math.PI / 2 + i * Math.PI * 2 / 5;
-                    let x = mx + Math.cos(a) * ms * 0.55;
-                    let y = my + Math.sin(a) * ms * 0.55;
+                    let x = mx + ms * 0.38 + Math.cos(a) * ms * 0.38;
+                    let y = my + ms * 0.38 + Math.sin(a) * ms * 0.38;
                     if(i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
                     a += Math.PI / 5;
-                    x = mx + Math.cos(a) * ms * 0.22;
-                    y = my + Math.sin(a) * ms * 0.22;
+                    x = mx + ms * 0.38 + Math.cos(a) * ms * 0.15;
+                    y = my + ms * 0.38 + Math.sin(a) * ms * 0.15;
                     ctx.lineTo(x, y);
                 }
                 ctx.closePath();
                 ctx.fill();
             } else if(pal.markStyle === 'cross') {
-                let cw = ms * 0.16, cl = ms * 0.72;
-                ctx.fillRect(mx - cw / 2, my - cl / 2, cw, cl);
-                ctx.fillRect(mx - cl / 2, my - cw / 2, cl, cw);
+                ctx.fillStyle = pal.mark;
+                let cw = ms * 0.14, cl = ms * 0.62;
+                let cx = mx + ms * 0.36, cy = my + ms * 0.36;
+                ctx.fillRect(cx - cw / 2, cy - cl / 2, cw, cl);
+                ctx.fillRect(cx - cl / 2, cy - cw / 2, cl, cw);
             } else if(pal.markStyle === 'soviet') {
-                ctx.fillRect(mx, my, ms * 0.2, ms * 0.62);
-                ctx.beginPath();
-                ctx.arc(mx + ms * 0.1, my - ms * 0.06, ms * 0.18, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.save();
-                ctx.translate(mx + ms * 0.58, my + ms * 0.06);
-                ctx.rotate(-0.5);
-                ctx.fillRect(-ms * 0.38, -ms * 0.06, ms * 0.76, ms * 0.12);
-                ctx.restore();
+                wodPaintHammerSickleEmblem(ctx, mx + ms * 0.42, my + ms * 0.48, ms * 0.95, pal.mark, 'rgba(20,8,8,0.4)');
             } else if(pal.markStyle === 'sun') {
+                ctx.fillStyle = '#fff';
                 ctx.beginPath();
-                ctx.arc(mx + ms * 0.15, my + ms * 0.05, ms * 0.22, 0, Math.PI * 2);
+                ctx.arc(mx + ms * 0.42, my + ms * 0.44, ms * 0.28, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = pal.mark;
+                ctx.beginPath();
+                ctx.arc(mx + ms * 0.42, my + ms * 0.44, ms * 0.18, 0, Math.PI * 2);
                 ctx.fill();
             }
             ctx.restore();
@@ -21615,41 +21735,44 @@
         function drawRuseChip(ctx, unit, radius, skinId) {
             let pal = wodRuseNationPalette(skinId);
             let ut = wodSkinShapeType(unit);
-            let rx = radius * 0.96, ry = radius * 0.88;
-            if(ut === 'heavy') { rx = radius * 1.02; ry = radius * 0.78; }
-            if(ut === 'ship') { rx = radius * 0.9; ry = radius * 0.86; }
+            let rx = radius * 1.02, ry = radius * 0.9;
+            if(ut === 'heavy') { rx = radius * 1.1; ry = radius * 0.76; }
+            if(ut === 'ship') { rx = radius * 0.94; ry = radius * 0.88; }
+            let rim = Math.max(2.2, radius * 0.16);
             ctx.save();
             if(unit.type === 'ship') ctx.rotate(getUnitFacingAngle(unit));
-            ctx.fillStyle = 'rgba(0,0,0,0.28)';
+            ctx.fillStyle = 'rgba(0,0,0,0.32)';
             ctx.beginPath();
-            ctx.ellipse(0, ry * 0.42, rx * 0.72, ry * 0.16, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, ry * 0.5, rx * 0.78, ry * 0.14, 0, 0, Math.PI * 2);
             ctx.fill();
-            let g = ctx.createLinearGradient(-rx, -ry, rx, ry);
-            g.addColorStop(0, pal.top);
-            g.addColorStop(0.55, pal.edge);
-            g.addColorStop(1, pal.rim);
+            ctx.fillStyle = pal.rim;
+            ctx.beginPath();
+            if(ut === 'heavy') roundRect(ctx, -rx - rim * 0.45, -ry - rim * 0.45, (rx + rim * 0.45) * 2, (ry + rim * 0.45) * 2, radius * 0.2);
+            else ctx.ellipse(0, 0, rx + rim * 0.5, ry + rim * 0.5, 0, 0, Math.PI * 2);
+            ctx.fill();
+            let g = ctx.createRadialGradient(-rx * 0.35, -ry * 0.4, radius * 0.1, 0, 0, rx * 1.15);
+            g.addColorStop(0, pal.hi);
+            g.addColorStop(0.65, pal.face);
+            g.addColorStop(1, pal.face);
             ctx.fillStyle = g;
             ctx.beginPath();
-            if(ut === 'heavy') {
-                roundRect(ctx, -rx, -ry, rx * 2, ry * 2, radius * 0.18);
-            } else {
-                ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-            }
+            if(ut === 'heavy') roundRect(ctx, -rx, -ry, rx * 2, ry * 2, radius * 0.16);
+            else ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
             ctx.fill();
-            ctx.lineWidth = Math.max(1.6, radius * 0.14);
-            ctx.strokeStyle = 'rgba(8,8,8,0.88)';
-            ctx.stroke();
-            ctx.lineWidth = Math.max(1, radius * 0.08);
-            ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+            ctx.lineWidth = Math.max(1.2, radius * 0.09);
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
             ctx.beginPath();
-            if(ut === 'heavy') roundRect(ctx, -rx * 0.82, -ry * 0.78, rx * 1.64, ry * 1.56, radius * 0.12);
-            else ctx.ellipse(0, 0, rx * 0.86, ry * 0.84, 0, 0, Math.PI * 2);
+            if(ut === 'heavy') roundRect(ctx, -rx * 0.88, -ry * 0.86, rx * 1.76, ry * 1.72, radius * 0.12);
+            else ctx.ellipse(0, 0, rx * 0.9, ry * 0.88, 0, 0, Math.PI * 2);
             ctx.stroke();
+            ctx.lineWidth = Math.max(1.8, radius * 0.12);
+            ctx.strokeStyle = 'rgba(12,10,8,0.92)';
+            ctx.beginPath();
+            if(ut === 'heavy') roundRect(ctx, -rx, -ry, rx * 2, ry * 2, radius * 0.16);
+            else ctx.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            wodRuseDrawUnitSilhouette(ctx, unit, radius * 0.95);
             wodRusePaintNationMark(ctx, skinId, radius);
-            ctx.save();
-            ctx.globalAlpha = 0.92;
-            wodNatoDrawIcon(ctx, unit, radius * 0.92);
-            ctx.restore();
             ctx.restore();
         }
 
@@ -21995,6 +22118,11 @@
             return true;
         }
 
+        function ownedShopSkinMetaList() {
+            if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { nato: true };
+            return shopSkinMetaList().filter(row => !!gameData.ownedUnitSkins[row.id]);
+        }
+
         function shopSkinMetaList() {
             return [
                 { id: 'nato', label: 'NATO counters (default)' },
@@ -22151,12 +22279,10 @@
             let menu = document.getElementById(menuId);
             if(!menu) return;
             menu.innerHTML = '';
-            for(let row of shopSkinMetaList()) {
-                let owned = !!(gameData.ownedUnitSkins && gameData.ownedUnitSkins[row.id]);
+            for(let row of ownedShopSkinMetaList()) {
                 let btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'shop-skin-option';
-                btn.disabled = !owned;
                 let thumb = document.createElement('canvas');
                 thumb.className = 'shop-skin-option-canvas';
                 thumb.width = 36;
@@ -22165,13 +22291,9 @@
                 renderShopSkinThumbCanvas(thumb, row.id);
                 let txt = document.createElement('span');
                 txt.textContent = row.label;
-                let badge = document.createElement('span');
-                badge.className = 'shop-skin-option-own ' + (owned ? 'yes' : 'no');
-                badge.textContent = owned ? 'Owned' : 'Locked';
-                btn.append(thumb, txt, badge);
+                btn.append(thumb, txt);
                 btn.addEventListener('click', (ev) => {
                     ev.stopPropagation();
-                    if(!owned) return;
                     equipShopSkinChoice(which, row.id);
                 });
                 menu.appendChild(btn);
@@ -22195,7 +22317,7 @@
             let selP = document.getElementById('shopSelectPlayer');
             let selA = document.getElementById('shopSelectAi');
             if(!selP || !selA) return;
-            let rows = shopSkinMetaList();
+            let rows = ownedShopSkinMetaList();
             let optHtml = rows.map(({ id, label }) =>
                 `<option value="${id}">${label}</option>`
             ).join('');
@@ -22333,6 +22455,19 @@
             populateShopEquipSelects();
             renderShopArmyCanvases();
             renderSkinShopGridCanvases();
+            updateShopPurchaseAllButtons();
+        }
+
+        function updateShopPurchaseAllButtons() {
+            let map = { standard: 'shopBuyAllStandard', countryballs: 'shopBuyAllCountryballs', ruse: 'shopBuyAllRuse' };
+            for(let key of Object.keys(map)) {
+                let btn = document.getElementById(map[key]);
+                let ids = WOD_SHOP_PURCHASABLE_SECTIONS[key];
+                if(!btn || !ids) continue;
+                let remaining = ids.filter(id => !(gameData.ownedUnitSkins && gameData.ownedUnitSkins[id])).length;
+                btn.disabled = remaining === 0;
+                btn.textContent = remaining === 0 ? 'All owned' : ('Purchase all (' + (remaining * 100) + 'g)');
+            }
         }
 
         function getUnitPathPoints(unit) {
