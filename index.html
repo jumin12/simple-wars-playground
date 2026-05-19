@@ -1907,6 +1907,10 @@
         .map-skin-preview-default {
             background: linear-gradient(135deg, #2d6a4f 0%, #40916c 40%, #74c69d 70%, #1b4332 100%);
         }
+        #shopTabCommand {
+            --shop-frontline-color: #050505;
+            --shop-command-color: #050505;
+        }
         .frontline-preview-solid::after,
         .frontline-preview-dotted::after,
         .frontline-preview-double::before,
@@ -1917,7 +1921,7 @@
             right: 8%;
             height: 3px;
             border-radius: 2px;
-            background: #050505;
+            background: var(--shop-frontline-color, #050505);
         }
         .frontline-preview-solid::after {
             top: 50%;
@@ -1928,7 +1932,7 @@
             top: 50%;
             transform: translateY(-50%);
             height: 4px;
-            background: repeating-linear-gradient(90deg, #050505 0 10px, transparent 10px 16px);
+            background: repeating-linear-gradient(90deg, var(--shop-frontline-color, #050505) 0 10px, transparent 10px 16px);
         }
         .frontline-preview-double::before { top: 46%; }
         .frontline-preview-double::after { top: 54%; }
@@ -1938,14 +1942,14 @@
             top: 56%;
             width: 72%;
             height: 0;
-            border-top: 3px solid #d4af37;
+            border-top: 3px solid var(--shop-command-color, #050505);
             transform: rotate(-10deg);
             transform-origin: left center;
         }
         .command-preview-dotted .cmd-prev-track {
             border-top: none;
             height: 3px;
-            background: repeating-linear-gradient(90deg, #d4af37 0 7px, transparent 7px 12px);
+            background: repeating-linear-gradient(90deg, var(--shop-command-color, #050505) 0 7px, transparent 7px 12px);
         }
         .command-preview-default .cmd-prev-track::after,
         .command-preview-dotted .cmd-prev-track::after {
@@ -1956,7 +1960,7 @@
             transform: translateY(-50%);
             border-top: 5px solid transparent;
             border-bottom: 5px solid transparent;
-            border-left: 9px solid #d4af37;
+            border-left: 9px solid var(--shop-command-color, #050505);
         }
 
         #shopPanel .skin-grid-scroll {
@@ -7543,8 +7547,8 @@
                 orderArrowsUsePathfinding: true,
                 frontlineStyle: 'solid',
                 commandArrowStyle: 'default',
-                frontlineColor: 'gold',
-                commandArrowColor: 'gold',
+                frontlineColor: 'black',
+                commandArrowColor: 'black',
                 mapSkin: 'default'
             },
             mp: null,
@@ -7567,8 +7571,10 @@
             if(u.lineColor && !u.frontlineColor) u.frontlineColor = u.lineColor === 'yellow' ? 'gold' : u.lineColor;
             if(u.lineColor && !u.commandArrowColor) u.commandArrowColor = u.lineColor === 'yellow' ? 'gold' : u.lineColor;
             if(typeof u.commandArrowColor === 'string' && u.commandArrowColor === 'yellow') u.commandArrowColor = 'gold';
-            if(!['gold', 'black', 'white', 'silver'].includes(u.frontlineColor)) u.frontlineColor = 'gold';
-            if(!['gold', 'black', 'white', 'silver'].includes(u.commandArrowColor)) u.commandArrowColor = 'gold';
+            if(u.frontlineColor === 'silver') u.frontlineColor = 'black';
+            if(u.commandArrowColor === 'silver') u.commandArrowColor = 'black';
+            if(!['gold', 'black', 'white', 'red', 'blue'].includes(u.frontlineColor)) u.frontlineColor = 'black';
+            if(!['gold', 'black', 'white', 'red', 'blue'].includes(u.commandArrowColor)) u.commandArrowColor = 'black';
             if(!u.mapSkin) u.mapSkin = 'default';
         }
 
@@ -22127,219 +22133,81 @@
             return null;
         }
 
-        function wodRtwEmblemSetup(ctx, fillCol, strokeCol, r) {
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.fillStyle = fillCol;
-            ctx.strokeStyle = strokeCol;
-            ctx.lineWidth = Math.max(1.15, r * 0.055);
-        }
-
-        function wodPaintRomanEagleEmblem(ctx, r, fillCol, strokeCol, hiCol) {
-            hiCol = hiCol || fillCol;
-            ctx.save();
-            wodRtwEmblemSetup(ctx, fillCol, strokeCol, r);
-            let sh = Math.max(1.2, r * 0.04);
-            ctx.save();
-            ctx.translate(sh, sh);
-            ctx.globalAlpha = 0.42;
-            ctx.fillStyle = strokeCol;
-            ctx.beginPath();
-            ctx.moveTo(0, r * 0.5);
-            ctx.bezierCurveTo(r * 0.12, r * 0.32, r * 0.1, -r * 0.08, 0, -r * 0.3);
-            ctx.bezierCurveTo(-r * 0.1, -r * 0.08, -r * 0.12, r * 0.32, 0, r * 0.5);
-            ctx.fill();
-            ctx.restore();
-            wodRtwEmblemSetup(ctx, fillCol, strokeCol, r);
-            for(let side = -1; side <= 1; side += 2) {
-                ctx.beginPath();
-                ctx.moveTo(0, r * 0.02);
-                ctx.bezierCurveTo(side * r * 0.18, -r * 0.12, side * r * 0.62, -r * 0.48, side * r * 0.98, -r * 0.22);
-                ctx.bezierCurveTo(side * r * 0.88, r * 0.02, side * r * 0.42, r * 0.14, 0, r * 0.08);
-                ctx.closePath();
-                ctx.fill();
-                ctx.stroke();
-                ctx.fillStyle = hiCol;
-                ctx.globalAlpha = 0.55;
-                ctx.beginPath();
-                ctx.moveTo(side * r * 0.2, -r * 0.06);
-                ctx.bezierCurveTo(side * r * 0.48, -r * 0.28, side * r * 0.72, -r * 0.18, side * r * 0.58, -r * 0.02);
-                ctx.bezierCurveTo(side * r * 0.38, r * 0.04, side * r * 0.22, r * 0.06, 0, r * 0.05);
-                ctx.closePath();
-                ctx.fill();
-                ctx.globalAlpha = 1;
-                ctx.fillStyle = fillCol;
+        const WOD_ANCIENT_CIV_SVG = {
+            civRome: {
+                ox: 256, oy: 268, size: 512,
+                paths: [
+                    'M256 36 C272 54 292 50 302 68 C310 82 322 86 314 102 C300 128 278 122 256 134 C234 122 212 128 198 102 C190 86 202 82 210 68 C220 50 240 54 256 36 Z',
+                    'M256 134 C168 88 48 108 78 228 C98 210 158 192 228 206 C242 210 256 218 256 218 C256 218 270 210 284 206 C354 192 414 210 434 228 C464 108 344 88 256 134 Z',
+                    'M244 218 L244 392 C240 418 272 418 268 392 L268 218 Z',
+                    'M214 376 L256 448 L298 376 L282 390 L256 432 L230 390 Z'
+                ]
+            },
+            civCarthage: {
+                ox: 256, oy: 262, size: 500,
+                paths: [
+                    'M256 456 L108 188 L168 156 L256 120 L344 156 L404 188 Z',
+                    'M256 112 m-60 0 a60 60 0 1 0 120 0 a60 60 0 1 0 -120 0',
+                    'M56 112 L456 112',
+                    'M44 112 L62 74 M468 112 L450 74',
+                    'M256 48 L256 104',
+                    'M198 78 A58 40 0 1 1 314 78 A46 32 0 1 0 198 78 Z'
+                ]
+            },
+            civGaul: {
+                ox: 256, oy: 256, size: 512,
+                arm: 'M256 256 C256 252 262 132 368 96 C404 84 428 112 408 148 C338 218 292 246 256 256 Z',
+                ring: 'M256 256 m-158 0 a158 158 0 1 0 316 0 a158 158 0 1 0 -316 0'
             }
-            ctx.beginPath();
-            ctx.moveTo(0, r * 0.5);
-            ctx.bezierCurveTo(r * 0.11, r * 0.34, r * 0.09, r * 0.06, 0, -r * 0.08);
-            ctx.bezierCurveTo(-r * 0.09, r * 0.06, -r * 0.11, r * 0.34, 0, r * 0.5);
-            ctx.fill();
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(-r * 0.16, r * 0.36);
-            ctx.lineTo(0, r * 0.5);
-            ctx.lineTo(r * 0.16, r * 0.36);
-            ctx.lineTo(r * 0.1, r * 0.42);
-            ctx.lineTo(0, r * 0.46);
-            ctx.lineTo(-r * 0.1, r * 0.42);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.ellipse(0, -r * 0.3, r * 0.13, r * 0.15, 0, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(r * 0.1, -r * 0.3);
-            ctx.lineTo(r * 0.28, -r * 0.26);
-            ctx.lineTo(r * 0.12, -r * 0.22);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = strokeCol;
-            ctx.beginPath();
-            ctx.arc(r * 0.04, -r * 0.32, r * 0.028, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = fillCol;
-            ctx.lineWidth = Math.max(0.9, r * 0.04);
-            ctx.strokeStyle = strokeCol;
-            ctx.beginPath();
-            ctx.ellipse(0, -r * 0.02, r * 0.72, r * 0.14, 0, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.restore();
-        }
+        };
 
-        function wodPaintCarthageTanitEmblem(ctx, r, fillCol, strokeCol, hiCol) {
-            hiCol = hiCol || fillCol;
-            ctx.save();
-            wodRtwEmblemSetup(ctx, fillCol, strokeCol, r);
-            let lw = Math.max(1.2, r * 0.065);
-            ctx.lineWidth = lw;
-            ctx.beginPath();
-            ctx.moveTo(0, r * 0.54);
-            ctx.lineTo(-r * 0.4, r * 0.02);
-            ctx.lineTo(-r * 0.34, -r * 0.08);
-            ctx.lineTo(0, -r * 0.14);
-            ctx.lineTo(r * 0.34, -r * 0.08);
-            ctx.lineTo(r * 0.4, r * 0.02);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(0, r * 0.54);
-            ctx.lineTo(0, -r * 0.14);
-            ctx.stroke();
-            ctx.fillStyle = hiCol;
-            ctx.globalAlpha = 0.35;
-            ctx.beginPath();
-            ctx.moveTo(0, r * 0.48);
-            ctx.lineTo(-r * 0.22, r * 0.04);
-            ctx.lineTo(0, -r * 0.08);
-            ctx.lineTo(r * 0.22, r * 0.04);
-            ctx.closePath();
-            ctx.fill();
-            ctx.globalAlpha = 1;
-            ctx.fillStyle = fillCol;
-            ctx.lineWidth = lw * 1.15;
-            ctx.beginPath();
-            ctx.arc(0, -r * 0.38, r * 0.17, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(-r * 0.72, -r * 0.38);
-            ctx.lineTo(r * 0.72, -r * 0.38);
-            ctx.stroke();
-            ctx.lineWidth = lw * 0.85;
-            ctx.beginPath();
-            ctx.moveTo(-r * 0.72, -r * 0.38);
-            ctx.lineTo(-r * 0.58, -r * 0.48);
-            ctx.moveTo(r * 0.72, -r * 0.38);
-            ctx.lineTo(r * 0.58, -r * 0.48);
-            ctx.stroke();
-            ctx.lineWidth = lw;
-            ctx.beginPath();
-            ctx.moveTo(0, -r * 0.55);
-            ctx.lineTo(0, -r * 0.21);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(0, -r * 0.56, r * 0.06, Math.PI * 0.15, Math.PI * 0.85);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(-r * 0.1, r * 0.22);
-            ctx.lineTo(r * 0.1, r * 0.22);
-            ctx.stroke();
-            ctx.fillStyle = strokeCol;
-            ctx.beginPath();
-            ctx.arc(0, -r * 0.38, r * 0.05, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-        }
-
-        function wodPaintGaulTriskelionEmblem(ctx, r, fillCol, strokeCol, hiCol) {
-            hiCol = hiCol || fillCol;
-            ctx.save();
-            wodRtwEmblemSetup(ctx, fillCol, strokeCol, r);
-            ctx.lineWidth = Math.max(2.4, r * 0.16);
-            let drawSpiralArm = (startA) => {
-                ctx.beginPath();
-                let px = 0, py = 0;
-                for(let i = 0; i <= 28; i++) {
-                    let t = i / 28;
-                    let a = startA + t * Math.PI * 1.62;
-                    let rad = r * (0.1 + t * 0.52);
-                    let x = Math.cos(a) * rad;
-                    let y = Math.sin(a) * rad;
-                    if(i === 0) { ctx.moveTo(x, y); px = x; py = y; }
-                    else ctx.lineTo(x, y);
-                }
-                ctx.stroke();
-                ctx.fillStyle = hiCol;
-                ctx.globalAlpha = 0.45;
-                ctx.lineWidth = Math.max(1.2, r * 0.08);
-                ctx.beginPath();
-                for(let i = 4; i <= 22; i++) {
-                    let t = i / 28;
-                    let a = startA + t * Math.PI * 1.62;
-                    let rad = r * (0.1 + t * 0.46);
-                    let x = Math.cos(a) * rad;
-                    let y = Math.sin(a) * rad;
-                    if(i === 4) ctx.moveTo(x, y);
-                    else ctx.lineTo(x, y);
-                }
-                ctx.stroke();
-                ctx.globalAlpha = 1;
-                ctx.fillStyle = fillCol;
-                ctx.lineWidth = Math.max(2.4, r * 0.16);
-            };
-            for(let arm = 0; arm < 3; arm++) {
-                drawSpiralArm(arm * Math.PI * 2 / 3 - Math.PI / 2);
+        function wodPaintSvgPathSet(ctx, paths, stroke) {
+            for(let d of paths) {
+                let path = new Path2D(d);
+                ctx.fill(path);
+                if(stroke) ctx.stroke(path);
             }
-            ctx.strokeStyle = strokeCol;
-            ctx.lineWidth = Math.max(1.1, r * 0.06);
-            ctx.beginPath();
-            ctx.arc(0, 0, r * 0.62, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.arc(0, 0, r * 0.54, 0, Math.PI * 2);
-            ctx.stroke();
-            ctx.fillStyle = strokeCol;
-            ctx.beginPath();
-            ctx.arc(0, 0, r * 0.1, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = hiCol;
-            ctx.beginPath();
-            ctx.arc(0, 0, r * 0.05, 0, Math.PI * 2);
-            ctx.fill();
+        }
+
+        function wodPaintAncientCivSvgEmblem(ctx, civId, radius, fill, stroke) {
+            let def = WOD_ANCIENT_CIV_SVG[civId];
+            if(!def) return;
+            let sc = (radius * 1.92) / def.size;
+            ctx.save();
+            ctx.scale(sc, sc);
+            ctx.translate(-def.ox, -def.oy);
+            ctx.fillStyle = fill || '#f5e6a8';
+            if(stroke) {
+                ctx.strokeStyle = stroke;
+                ctx.lineWidth = Math.max(2, 4 / sc);
+                ctx.lineJoin = 'round';
+            }
+            if(civId === 'civGaul') {
+                for(let i = 0; i < 3; i++) {
+                    ctx.save();
+                    ctx.translate(def.ox, def.oy);
+                    ctx.rotate(i * Math.PI * 2 / 3 - Math.PI / 2);
+                    ctx.translate(-def.ox, -def.oy);
+                    let arm = new Path2D(def.arm);
+                    ctx.fill(arm);
+                    if(stroke) ctx.stroke(arm);
+                    ctx.restore();
+                }
+                if(def.ring) {
+                    let ring = new Path2D(def.ring);
+                    ctx.strokeStyle = stroke || fill;
+                    ctx.lineWidth = Math.max(3, 8 / sc);
+                    ctx.stroke(ring);
+                }
+            } else {
+                wodPaintSvgPathSet(ctx, def.paths, stroke);
+            }
             ctx.restore();
         }
 
         function wodPaintAncientCivEmblem(ctx, civId, r, pal) {
             if(!pal) return;
-            let hi = pal.emblemHi || pal.emblem;
-            if(civId === 'civRome') wodPaintRomanEagleEmblem(ctx, r, pal.emblem, pal.emblemStroke, hi);
-            else if(civId === 'civCarthage') wodPaintCarthageTanitEmblem(ctx, r, pal.emblem, pal.emblemStroke, hi);
-            else if(civId === 'civGaul') wodPaintGaulTriskelionEmblem(ctx, r, pal.emblem, pal.emblemStroke, hi);
+            wodPaintAncientCivSvgEmblem(ctx, civId, r, pal.emblem, pal.emblemStroke);
         }
 
         function drawPeriodCounter(ctx, unit, radius, color, period, civSkinId) {
@@ -23439,10 +23307,11 @@
         }
 
         const WOD_LINE_COLOR_PRESETS = [
-            { id: 'gold', label: 'Gold', rgb: [212, 175, 55], shopId: null },
-            { id: 'black', label: 'Black', rgb: [5, 5, 5], shopId: 'viz_color_black' },
+            { id: 'black', label: 'Black', rgb: [5, 5, 5], shopId: null },
+            { id: 'gold', label: 'Gold', rgb: [212, 175, 55], shopId: 'viz_color_gold' },
             { id: 'white', label: 'White', rgb: [236, 240, 241], shopId: 'viz_color_white' },
-            { id: 'silver', label: 'Silver', rgb: [189, 195, 199], shopId: 'viz_color_silver' }
+            { id: 'red', label: 'Red', rgb: [192, 57, 43], shopId: 'viz_color_red' },
+            { id: 'blue', label: 'Blue', rgb: [41, 128, 185], shopId: 'viz_color_blue' }
         ];
 
         const WOD_SHOP_VISUAL_COST = 100;
@@ -23521,9 +23390,22 @@
             syncShopVisualOptionsUi();
         }
 
+        function wodRgbToHex(rgb) {
+            return '#' + rgb.map(v => Math.min(255, Math.max(0, v | 0)).toString(16).padStart(2, '0')).join('');
+        }
+
+        function wodApplyShopLinePreviewColors() {
+            wodEnsureUiShopDefaults();
+            let pane = document.getElementById('shopTabCommand');
+            if(!pane) return;
+            pane.style.setProperty('--shop-frontline-color', wodRgbToHex(wodShopColorRgb('frontlineColor')));
+            pane.style.setProperty('--shop-command-color', wodRgbToHex(wodShopColorRgb('commandArrowColor')));
+        }
+
         function wodBuildShopColorSwatchGrid(hostId, settingKey) {
             let swatchHost = document.getElementById(hostId);
-            if(!swatchHost || swatchHost.childElementCount) return;
+            if(!swatchHost) return;
+            swatchHost.innerHTML = '';
             for(let c of WOD_LINE_COLOR_PRESETS) {
                 let b = document.createElement('button');
                 b.type = 'button';
@@ -23532,9 +23414,11 @@
                 b.setAttribute('data-color-setting', settingKey);
                 if(c.shopId) b.setAttribute('data-shop-visual', c.shopId);
                 b.title = c.label;
-                let hex = '#' + c.rgb.map(v => Math.min(255, v).toString(16).padStart(2, '0')).join('');
-                b.innerHTML = '<span class="shop-swatch-row"><span class="swatch-dot" style="--swatch:' + hex + '"></span><span>' + c.label + '</span></span>' +
-                    (c.shopId ? '<span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">100g</span></span>' : '');
+                let hex = wodRgbToHex(c.rgb);
+                let footer = c.shopId
+                    ? '<span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">100g</span></span>'
+                    : '<span class="shop-option-badge">Default</span>';
+                b.innerHTML = '<span class="shop-swatch-row"><span class="swatch-dot" style="--swatch:' + hex + '"></span><span>' + c.label + '</span></span>' + footer;
                 b.addEventListener('click', () => wodSelectShopColor(c.id, settingKey));
                 swatchHost.appendChild(b);
             }
@@ -23615,10 +23499,11 @@
             if(!wodOwnsShopVisual('viz_arrow_dotted') && u.commandArrowStyle === 'dotted') { u.commandArrowStyle = 'default'; changed = true; }
             if(!wodOwnsShopVisual('viz_arrow_line') && u.commandArrowStyle === 'line') { u.commandArrowStyle = 'default'; changed = true; }
             for(let c of WOD_LINE_COLOR_PRESETS) {
-                if(c.shopId && !wodOwnsShopVisual(c.shopId) && u.frontlineColor === c.id) { u.frontlineColor = 'gold'; changed = true; }
-                if(c.shopId && !wodOwnsShopVisual(c.shopId) && u.commandArrowColor === c.id) { u.commandArrowColor = 'gold'; changed = true; }
+                if(c.shopId && !wodOwnsShopVisual(c.shopId) && u.frontlineColor === c.id) { u.frontlineColor = 'black'; changed = true; }
+                if(c.shopId && !wodOwnsShopVisual(c.shopId) && u.commandArrowColor === c.id) { u.commandArrowColor = 'black'; changed = true; }
             }
             if(changed) saveUiSettings();
+            wodApplyShopLinePreviewColors();
         }
 
         function setShopMapSkin(skinId) {
