@@ -14528,69 +14528,64 @@
             });
         }
 
-        /** One-time sync read of localStorage (legacy); IndexedDB replaces this once hydrated. */
+        function wodMigrateLegacyEditorMapsArray(arr) {
+            return (Array.isArray(arr) ? arr : []).map((m, i) => ({
+                id: 'mig_' + (Date.now() + i) + '_' + i,
+                name: m.name || 'Imported map',
+                savedAt: m.date || new Date().toISOString(),
+                thumb: m.thumbnail || '',
+                mapSize: m.data && m.data.mapSize,
+                data: m.data
+            }));
+        }
+
+        /** Sync read of localStorage (v2 + legacy editor key). Keeps the largest list found. */
         function wodReadLegacySavedMapsFromLocalStorageSync() {
             try {
+                let best = [];
                 let raw = localStorage.getItem(WOD_SAVED_MAPS_V2_KEY);
-                if(!raw) {
-                    let old = localStorage.getItem(WOD_SAVED_MAPS_LEGACY_EDITOR);
-                    if(old) {
-                        let arr = JSON.parse(old);
-                        let mig = (Array.isArray(arr) ? arr : []).map((m, i) => ({
-                            id: 'mig_' + (Date.now() + i),
-                            name: m.name || 'Imported map',
-                            savedAt: m.date || new Date().toISOString(),
-                            thumb: m.thumbnail || '',
-                            mapSize: m.data && m.data.mapSize,
-                            data: m.data
-                        }));
-                        localStorage.setItem(WOD_SAVED_MAPS_V2_KEY, JSON.stringify(mig));
-                        localStorage.removeItem(WOD_SAVED_MAPS_LEGACY_EDITOR);
-                        return mig;
-                    }
-                    return [];
+                if(raw) {
+                    let p = JSON.parse(raw);
+                    if(Array.isArray(p) && p.length > best.length) best = p;
                 }
-                let p = JSON.parse(raw);
-                return Array.isArray(p) ? p : [];
+                let old = localStorage.getItem(WOD_SAVED_MAPS_LEGACY_EDITOR);
+                if(old) {
+                    let mig = wodMigrateLegacyEditorMapsArray(JSON.parse(old));
+                    if(mig.length > best.length) {
+                        best = mig;
+                        try {
+                            localStorage.setItem(WOD_SAVED_MAPS_V2_KEY, JSON.stringify(mig));
+                            localStorage.removeItem(WOD_SAVED_MAPS_LEGACY_EDITOR);
+                        } catch(eW) {}
+                    }
+                }
+                return best;
             } catch(e) {
                 return [];
             }
+        }
+
+        function wodPickBestSavedMapsList() {
+            let mem = Array.isArray(_wodSavedMapsCache) ? _wodSavedMapsCache : [];
+            let ls = wodReadLegacySavedMapsFromLocalStorageSync();
+            let best = mem;
+            if(ls.length > best.length) best = ls;
+            return best;
         }
 
         async function wodHydrateSavedMapsFromIdb() {
             if(!window.indexedDB) return;
             try {
                 let idbVal = await wodIdbGetSavedMapsList();
-                let mem = Array.isArray(_wodSavedMapsCache) ? _wodSavedMapsCache : [];
-                try {
-                    if((!mem || mem.length === 0) && typeof localStorage !== 'undefined') {
-                        let raw = localStorage.getItem(WOD_SAVED_MAPS_V2_KEY);
-                        if(raw) {
-                            let p = JSON.parse(raw);
-                            if(Array.isArray(p) && p.length) mem = p;
-                        }
-                    }
-                } catch(eLS) {}
-                if(idbVal === undefined) {
-                    let mig = wodStripThumbsForPersist(mem);
-                    await wodIdbPutSavedMapsList(mig);
-                    _wodSavedMapsCache = mig;
-                    if(mig.length > 0) {
-                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
-                    }
-                } else if(Array.isArray(idbVal)) {
-                    if(idbVal.length > 0) {
-                        _wodSavedMapsCache = idbVal;
-                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
-                    } else if(mem.length > 0) {
-                        let mig = wodStripThumbsForPersist(mem);
-                        await wodIdbPutSavedMapsList(mig);
-                        _wodSavedMapsCache = mig;
-                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
-                    } else {
-                        _wodSavedMapsCache = [];
-                        try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
-                    }
+                let mem = wodPickBestSavedMapsList();
+                let idbArr = Array.isArray(idbVal) ? idbVal : [];
+                let best = mem;
+                if(idbArr.length > best.length) best = idbArr;
+                let stripped = wodStripThumbsForPersist(best);
+                _wodSavedMapsCache = stripped;
+                if(stripped.length > 0 || idbVal === undefined) {
+                    await wodIdbPutSavedMapsList(stripped);
+                    try { localStorage.setItem(WOD_SAVED_MAPS_V2_KEY, JSON.stringify(stripped)); } catch(eLS) {}
                 }
             } catch(e) {
                 console.warn('wodHydrateSavedMapsFromIdb', e);
@@ -14606,22 +14601,22 @@
 
         async function wodFlushSavedMapsToDisk() {
             let stripped = wodStripThumbsForPersist(_wodSavedMapsCache || []);
+            let ok = false;
             if(window.indexedDB) {
                 try {
                     await wodIdbPutSavedMapsList(stripped);
-                    try { localStorage.removeItem(WOD_SAVED_MAPS_V2_KEY); } catch(e) {}
-                    return true;
+                    ok = true;
                 } catch(e) {
                     console.warn('IndexedDB save failed, trying localStorage', e);
                 }
             }
             try {
                 localStorage.setItem(WOD_SAVED_MAPS_V2_KEY, JSON.stringify(stripped));
-                return true;
+                ok = true;
             } catch(e2) {
                 console.warn('wodFlushSavedMapsToDisk localStorage failed', e2);
-                return false;
             }
+            return ok;
         }
 
         function wodSchedulePersistSavedMaps() {

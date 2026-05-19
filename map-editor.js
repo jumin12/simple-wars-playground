@@ -1414,6 +1414,18 @@
           <h3>Legend</h3>
           <div id="editorMapKey"></div>
         </section>
+        <section class="editor-card">
+          <h3>Saved maps (browser)</h3>
+          <p class="editor-hint" style="margin-top:0">Stored in this browser only. Click a row to load; Del removes it from the library. Also available via <strong>Browse library…</strong> and Play setup <strong>Load Map</strong>.</p>
+          <div class="map-browser-stack">
+            <div id="mapBrowser" class="map-browser"></div>
+            <div class="map-browser-pager" id="mapBrowserPager" hidden>
+              <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserPrev" aria-label="Previous page">←</button>
+              <span id="mapBrowserPageLabel" class="map-browser-page-label"></span>
+              <button type="button" class="editor-btn map-browser-page-btn" id="mapBrowserNext" aria-label="Next page">→</button>
+            </div>
+          </div>
+        </section>
       </div>
       <div id="editorCanvasWrap">
         <canvas id="editorCanvas"></canvas>
