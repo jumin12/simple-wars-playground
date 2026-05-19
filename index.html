@@ -1905,7 +1905,8 @@
             overflow: hidden;
         }
         #shopTabCommand .shop-option-preview {
-            background: linear-gradient(180deg, #3d6a94 0%, #5dade2 100%);
+            background: linear-gradient(180deg, rgba(52, 152, 219, 0.32) 0%, rgba(93, 173, 226, 0.14) 100%);
+            border: 1px solid rgba(93, 173, 226, 0.35);
         }
         .map-skin-preview-default {
             background: linear-gradient(135deg, #2d6a4f 0%, #40916c 40%, #74c69d 70%, #1b4332 100%);
@@ -6299,7 +6300,7 @@
                 <h2>Settings</h2>
                 <div class="settings-section">
                     <h3 style="color:#e74c3c;margin-top:0;">Reset progress</h3>
-                    <p>Clear all saved data for this browser: achievements, lifetime stats, gold, and unlocked unit skins. This cannot be undone.</p>
+                    <p>Clear all progress for this browser: achievements, lifetime stats, gold, and unlocked unit skins. This cannot be undone.</p>
                     <button type="button" class="menu-btn danger-btn" onclick="resetAllGameProgress()">Reset all progress</button>
                 </div>
                 <div class="settings-section hidden" id="settingsGamePeriodSection">
@@ -7420,7 +7421,7 @@
         let wodPowWorkers = [];
         let wodPowWUrl = null;
         let wodPowParts = new Array(WOD_POW_PARTS).fill(null);
-        const WOD_TERRAIN_WORKER_COUNT = 4;
+        const WOD_MAP_GEN_SHARDS = 4;
         let wodMapGenWorkers = [];
         let wodMapGenJobId = 0;
 
@@ -7432,10 +7433,10 @@
             }
             wodMapGenWorkers = [];
         }
-        function wodEnsureMapGenWorkerPool() {
-            if(wodMapGenWorkers.length > 0 || typeof Worker === 'undefined') return wodMapGenWorkers;
+        function wodEnsureMapGenWorkers() {
+            if(wodMapGenWorkers.length >= WOD_MAP_GEN_SHARDS || typeof Worker === 'undefined') return wodMapGenWorkers;
             try {
-                for(let i = 0; i < WOD_TERRAIN_WORKER_COUNT; i++) {
+                while(wodMapGenWorkers.length < WOD_MAP_GEN_SHARDS) {
                     wodMapGenWorkers.push(new Worker('map-gen-worker.js'));
                 }
             } catch(_) {
@@ -7443,52 +7444,53 @@
             }
             return wodMapGenWorkers;
         }
-        function wodGenerateTerrainCellsInWorker(payload) {
-            let pool = wodEnsureMapGenWorkerPool();
-            if(pool.length === 0) return Promise.reject(new Error('no worker'));
-            let rows = payload.rows;
-            let rLo = -rows;
-            let rHi = rows;
-            let span = rHi - rLo + 1;
-            let chunk = Math.ceil(span / pool.length);
-            let jobs = [];
-            for(let p = 0; p < pool.length; p++) {
-                let rMin = rLo + p * chunk;
-                let rMax = Math.min(rHi, rMin + chunk - 1);
-                if(rMin > rHi) break;
-                let w = pool[p];
-                let jobId = ++wodMapGenJobId;
-                jobs.push(new Promise(function(resolve, reject) {
-                    let settled = false;
-                    function finish(err, hexList) {
-                        if(settled) return;
-                        settled = true;
-                        w.removeEventListener('message', onMsg);
-                        w.removeEventListener('error', onErr);
-                        if(err) reject(err);
-                        else resolve(hexList);
-                    }
-                    function onMsg(ev) {
-                        let d = ev.data;
-                        if(!d || d.jobId !== jobId) return;
-                        if(d.ok) finish(null, d.hexList);
-                        else finish(new Error(d.err || 'terrain worker failed'));
-                    }
-                    function onErr(e) { finish(e || new Error('terrain worker error')); }
-                    w.addEventListener('message', onMsg);
-                    w.addEventListener('error', onErr);
-                    try {
-                        w.postMessage(Object.assign({ cmd: 'terrain', jobId: jobId, rMin: rMin, rMax: rMax }, payload));
-                    } catch(e) { finish(e); }
-                }));
-            }
-            return Promise.all(jobs).then(function(parts) {
-                let out = [];
-                for(let i = 0; i < parts.length; i++) {
-                    if(parts[i] && parts[i].length) out = out.concat(parts[i]);
+        function wodGenerateTerrainShardInWorker(worker, payload, jobId, shard) {
+            return new Promise(function(resolve, reject) {
+                if(!worker) {
+                    reject(new Error('no worker'));
+                    return;
                 }
-                return out;
+                let settled = false;
+                function finish(err, hexList) {
+                    if(settled) return;
+                    settled = true;
+                    worker.removeEventListener('message', onMsg);
+                    worker.removeEventListener('error', onErr);
+                    if(err) reject(err);
+                    else resolve(hexList);
+                }
+                function onMsg(ev) {
+                    let d = ev.data;
+                    if(!d || d.jobId !== jobId || d.shard !== shard) return;
+                    if(d.ok) finish(null, d.hexList);
+                    else finish(new Error(d.err || 'terrain worker failed'));
+                }
+                function onErr(e) { finish(e || new Error('terrain worker error')); }
+                worker.addEventListener('message', onMsg);
+                worker.addEventListener('error', onErr);
+                try {
+                    worker.postMessage(Object.assign({ cmd: 'terrain', jobId: jobId, shard: shard }, payload));
+                } catch(e) { finish(e); }
             });
+        }
+        async function wodGenerateTerrainCellsInWorker(payload) {
+            let workers = wodEnsureMapGenWorkers();
+            if(workers.length === 0) throw new Error('no worker');
+            let rows = payload.rows;
+            let rowSpan = rows * 2 + 1;
+            let jobId = ++wodMapGenJobId;
+            let shardCount = Math.min(WOD_MAP_GEN_SHARDS, workers.length);
+            let jobs = [];
+            for(let s = 0; s < shardCount; s++) {
+                let rMin = -rows + Math.floor((rowSpan * s) / shardCount);
+                let rMax = -rows + Math.floor((rowSpan * (s + 1)) / shardCount) - 1;
+                if(s === shardCount - 1) rMax = rows;
+                jobs.push(wodGenerateTerrainShardInWorker(workers[s], Object.assign({}, payload, { rMin, rMax }), jobId, s));
+            }
+            let parts = await Promise.all(jobs);
+            let merged = [];
+            for(let p = 0; p < parts.length; p++) merged = merged.concat(parts[p]);
+            return merged;
         }
 
         function wodTerminatePowWorkers() {
@@ -8982,6 +8984,50 @@
         }
 
         /** Reject procgen layouts where land or city totals are not within ±1 of perfect split. */
+        /** Reorder candidates so each faction picks towns at the same radial depth (fair spacing). */
+        function wodOrderCityCandidatesByRadialPercentile(candidates, centroid, pct) {
+            if(!candidates || candidates.length === 0 || !centroid) return candidates || [];
+            let p = Math.max(0.05, Math.min(0.95, pct));
+            let scored = candidates.map(h => {
+                let dx = h.x - centroid.x, dy = h.y - centroid.y;
+                return { h, d2: dx * dx + dy * dy };
+            });
+            scored.sort((a, b) => a.d2 - b.d2);
+            let pivot = scored[Math.min(scored.length - 1, Math.floor(p * scored.length))];
+            let pivotD2 = pivot ? pivot.d2 : 0;
+            scored.sort((a, b) => {
+                let da = Math.abs(a.d2 - pivotD2);
+                let db = Math.abs(b.d2 - pivotD2);
+                if(da !== db) return da - db;
+                if(a.h.q !== b.h.q) return a.h.q - b.h.q;
+                return a.h.r - b.h.r;
+            });
+            return scored.map(s => s.h);
+        }
+
+        function wodVerifyCityPlacementBalance(ownerIds, kpf) {
+            if(!ownerIds || ownerIds.length < 2 || kpf < 2) return true;
+            let distLists = {};
+            for(let ow of ownerIds) {
+                let caps = gameData.cities.filter(c => c && c.owner === ow);
+                if(caps.length !== kpf) return false;
+                let cx = 0, cy = 0, n = 0;
+                for(let c of caps) { cx += c.x; cy += c.y; n++; }
+                if(!n) return false;
+                cx /= n; cy /= n;
+                let ds = caps.map(c => Math.sqrt((c.x - cx) ** 2 + (c.y - cy) ** 2)).sort((a, b) => a - b);
+                distLists[ow] = ds;
+            }
+            let ref = distLists[ownerIds[0]];
+            for(let i = 1; i < ownerIds.length; i++) {
+                let cur = distLists[ownerIds[i]];
+                for(let j = 0; j < kpf; j++) {
+                    if(Math.abs((cur[j] || 0) - (ref[j] || 0)) > gameData.hexRadius * 5.5) return false;
+                }
+            }
+            return true;
+        }
+
         function wodVerifyFairFactionStart(ownerIds) {
             if(!ownerIds || ownerIds.length < 2) return true;
             let sorted = [...ownerIds].sort((a, b) => a - b);
@@ -9004,28 +9050,6 @@
             }
             for(let o of sorted) {
                 if(cityCounts[o] !== cityTgt[o]) return false;
-            }
-            if(f >= 2 && n >= f * 2) {
-                let rings = {};
-                for(let o of sorted) rings[o] = [];
-                for(let c of gameData.cities) {
-                    if(!c || !rings[c.owner]) continue;
-                    let cent = wodFactionPoliticalCentroid(c.owner);
-                    if(!cent) continue;
-                    let dx = c.x - cent.x, dy = c.y - cent.y;
-                    rings[c.owner].push(Math.sqrt(dx * dx + dy * dy));
-                }
-                let medians = sorted.map(o => {
-                    let arr = rings[o].slice().sort((a, b) => a - b);
-                    if(!arr.length) return 0;
-                    return arr[(arr.length / 2) | 0];
-                });
-                let land = gameData.hexList.filter(h => h && !isWaterHex(h) && h.type !== 'mountain');
-                let maxR = wodLandCentroidMaxRadius(land).maxR || gameData.hexRadius * 12;
-                let ref = medians[0];
-                for(let i = 1; i < medians.length; i++) {
-                    if(Math.abs(medians[i] - ref) > maxR * 0.14) return false;
-                }
             }
             return true;
         }
@@ -12127,7 +12151,7 @@
         window.wodImportSaveFromInput = wodImportSaveFromInput;
 
         function resetAllGameProgress() {
-            if(!confirm('Reset ALL progress — achievements, stats, gold, skins, and saved slots? This cannot be undone.')) return;
+            if(!confirm('Reset ALL progress — achievements, stats, gold, and skins? This cannot be undone.')) return;
             wodProgress = defaultWodProgress();
             try {
                 localStorage.removeItem(SL_PROGRESS_LS_KEY);
@@ -12139,7 +12163,6 @@
             persistWodProgressNow();
             updateSkinShop();
             renderAchievementsUi();
-            wodRefreshBrowserSaveList();
             showNotification('Progress reset.');
         }
 
@@ -17220,13 +17243,6 @@
             for(let ow of ownersSorted) factionTerritoryGeom[ow] = wodFactionTerritoryCentroidMaxSq(ow);
             let interiorDepthMap = wodBuildInteriorDepthFromFrontlineMap(ownersSorted);
 
-            function wodTargetCityDistSqFromCentroid(level, kpf) {
-                let frac = 0.26 + ((level + 1) / Math.max(2, kpf + 1)) * 0.24;
-                if(wodMapShapeUsesRectanglePipeline(mapShape)) frac *= 0.88;
-                let r = lcm.maxR * frac;
-                return r * r;
-            }
-
             function buildCandidateList(owner, level) {
                 let cent = wodFactionPoliticalCentroid(owner);
                 let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionTerritoryGeom);
@@ -17240,11 +17256,6 @@
                 }
                 let ax = cent ? cent.x : lcm.cx,
                     ay = cent ? cent.y : lcm.cy;
-                let targetDistSq = wodTargetCityDistSqFromCentroid(level, kUpper);
-                function cityDistErr(h) {
-                    let dx = h.x - ax, dy = h.y - ay;
-                    return Math.abs(dx * dx + dy * dy - targetDistSq);
-                }
                 if(wodMapShapeUsesRectanglePipeline(mapShape)) {
                     let sectors = 10;
                     let lvAlt = level & 1;
@@ -17258,8 +17269,6 @@
                         let sb = Math.min(sectors - 1, Math.floor(ub * sectors));
                         if(sa !== sb) return sa - sb;
                         if(ua !== ub && Math.abs(ua - ub) > 1e-10) return ua - ub;
-                        let ea = cityDistErr(a), eb = cityDistErr(b);
-                        if(ea !== eb) return ea - eb;
                         let d2a = (a.x - ax) * (a.x - ax) + (a.y - ay) * (a.y - ay),
                             d2b = (b.x - ax) * (b.x - ax) + (b.y - ay) * (b.y - ay);
                         if(d2a !== d2b) return lvAlt ? d2b - d2a : d2a - d2b;
@@ -17271,8 +17280,6 @@
                         let da = interiorDepthMap.get(getHexKey(a)) ?? 0;
                         let db = interiorDepthMap.get(getHexKey(b)) ?? 0;
                         if(da !== db) return db - da;
-                        let ea = cityDistErr(a), eb = cityDistErr(b);
-                        if(ea !== eb) return ea - eb;
                         let ca = Math.atan2(a.y - ay, a.x - ax);
                         let cb = Math.atan2(b.y - ay, b.x - ax);
                         let caOff = ca + level * (0.18 + owner * 0.011),
@@ -17313,13 +17320,15 @@
                     let ord = ownersSorted.slice();
                     if(lv % 2 === 1) ord.reverse();
                     for(let ow of ord) {
-                        if((++tryTick & 31) === 0) await wodMapGenYieldSlice();
+                        if((++tryTick & 63) === 0 && !gameData._wodFastMapGen) await wodMapGenYieldSlice();
                         let cand = buildCandidateList(ow, lv);
-                        let tried = cand.length > 960 ? cand.slice(0, 960) : cand;
+                        let cent = wodFactionPoliticalCentroid(ow) || lcm;
+                        cand = wodOrderCityCandidatesByRadialPercentile(cand, cent, (lv + 0.5) / Math.max(1, kpf));
+                        let tried = cand.length > 640 ? cand.slice(0, 640) : cand;
                         let placedHere = false;
                         let hTick = 0;
                         tries: for(let hTry of tried) {
-                            if((++hTick & 127) === 0) await wodMapGenYieldSlice();
+                            if((++hTick & 255) === 0 && !gameData._wodFastMapGen) await wodMapGenYieldSlice();
                             let qc = hTry.q,
                                 rc = hTry.r;
                             for(let o2 of ownersSorted)
@@ -17416,6 +17425,7 @@
             wodNormalizeStartingCityEconomy(ownersSorted);
 
             if(!wodVerifyFairFactionStart(ownersSorted)) return false;
+            if(!wodVerifyCityPlacementBalance(ownersSorted, kpf)) return false;
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
@@ -17773,7 +17783,7 @@
             if(!st) return;
             if(gameData._wodFastMapGen) {
                 st.fastTick = (st.fastTick || 0) + 1;
-                if((st.fastTick & 1023) !== 0) return;
+                if((st.fastTick & 511) !== 0) return;
             }
             let now = performance.now();
             if(now < st.due) return;
@@ -22306,7 +22316,7 @@
         function wodPaintAncientCivSvgEmblem(ctx, civId, radius, fill, stroke) {
             let def = WOD_ANCIENT_CIV_SVG[civId];
             if(!def) return;
-            let sc = (radius * (def.emblemScale != null ? def.emblemScale : 2.45)) / def.size;
+            let sc = (radius * 1.88) / def.size;
             ctx.save();
             ctx.scale(sc, sc);
             ctx.translate(-def.ox, -def.oy);
@@ -23214,10 +23224,8 @@
             };
             let col = factionColors[1];
             ctx.translate(w / 2, h / 2);
-            let civThumb = WOD_ANCIENT_CIV_SKIN_IDS.includes(skinId);
-            let unitScale = civThumb ? m / 42 : m / 50;
-            ctx.scale(unitScale, unitScale);
-            let rDraw = civThumb ? 19 : 15;
+            ctx.scale(m / 50, m / 50);
+            let rDraw = 15;
             let drawn = drawUnitSkin(ctx, u, rDraw, col);
             if(!drawn) {
                 ctx.beginPath();
@@ -23231,9 +23239,7 @@
             ctx.restore();
         }
 
-        function wodSkinCardPreviewSize(skinId) {
-            if(skinId && WOD_ANCIENT_CIV_SKIN_IDS.includes(skinId))
-                return { w: 256, h: 160 };
+        function wodSkinCardPreviewSize() {
             if(window.matchMedia('(orientation: portrait)').matches && window.innerWidth <= 640)
                 return { w: 168, h: 105 };
             if(window.matchMedia('(max-width: 900px)').matches)
@@ -23242,6 +23248,7 @@
         }
 
         function renderSkinShopGridCanvases() {
+            let dim = wodSkinCardPreviewSize();
             [
                 ['skinNatoPreview', 'nato'],
                 ['skinUsaPreview', 'usa'],
@@ -23270,7 +23277,6 @@
             ].forEach(([cid, sid]) => {
                 let c = document.getElementById(cid);
                 if(!c) return;
-                let dim = wodSkinCardPreviewSize(sid);
                 if(c.width !== dim.w || c.height !== dim.h) {
                     c.width = dim.w;
                     c.height = dim.h;

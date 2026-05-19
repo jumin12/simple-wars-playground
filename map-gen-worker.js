@@ -269,9 +269,9 @@
         if (!d || d.cmd !== 'terrain') return;
         try {
             let hexList = generateTerrainCells(d);
-            self.postMessage({ ok: true, hexList, jobId: d.jobId });
+            self.postMessage({ ok: true, hexList, jobId: d.jobId, shard: d.shard });
         } catch (err) {
-            self.postMessage({ ok: false, err: String(err && err.message ? err.message : err), jobId: d.jobId });
+            self.postMessage({ ok: false, err: String(err && err.message ? err.message : err), jobId: d.jobId, shard: d.shard });
         }
     };
 })();
