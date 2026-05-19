@@ -6693,6 +6693,7 @@
     })();
     </script>
     <script src="multiplayer-client.js"></script>
+    <script src="ancient-civ-emblems.js"></script>
     <script>
         // --- Core UI & State ---
         const UI = {
@@ -7435,6 +7436,55 @@
         let wodPowWorkers = [];
         let wodPowWUrl = null;
         let wodPowParts = new Array(WOD_POW_PARTS).fill(null);
+        let wodMapGenWorker = null;
+        let wodMapGenJobId = 0;
+
+        function wodTerminateMapGenWorker() {
+            if(wodMapGenWorker) {
+                try { wodMapGenWorker.terminate(); } catch(_) {}
+                wodMapGenWorker = null;
+            }
+        }
+        function wodEnsureMapGenWorker() {
+            if(wodMapGenWorker || typeof Worker === 'undefined') return wodMapGenWorker;
+            try {
+                wodMapGenWorker = new Worker('map-gen-worker.js');
+            } catch(_) {
+                wodMapGenWorker = null;
+            }
+            return wodMapGenWorker;
+        }
+        function wodGenerateTerrainCellsInWorker(payload) {
+            return new Promise(function(resolve, reject) {
+                let w = wodEnsureMapGenWorker();
+                if(!w) {
+                    reject(new Error('no worker'));
+                    return;
+                }
+                let jobId = ++wodMapGenJobId;
+                let settled = false;
+                function finish(err, hexList) {
+                    if(settled) return;
+                    settled = true;
+                    w.removeEventListener('message', onMsg);
+                    w.removeEventListener('error', onErr);
+                    if(err) reject(err);
+                    else resolve(hexList);
+                }
+                function onMsg(ev) {
+                    let d = ev.data;
+                    if(!d || d.jobId !== jobId) return;
+                    if(d.ok) finish(null, d.hexList);
+                    else finish(new Error(d.err || 'terrain worker failed'));
+                }
+                function onErr(e) { finish(e || new Error('terrain worker error')); }
+                w.addEventListener('message', onMsg);
+                w.addEventListener('error', onErr);
+                try {
+                    w.postMessage(Object.assign({ cmd: 'terrain', jobId: jobId }, payload));
+                } catch(e) { finish(e); }
+            });
+        }
 
         function wodTerminatePowWorkers() {
             for(let i = 0; i < wodPowWorkers.length; i++) {
@@ -8813,9 +8863,8 @@
                 ? gameData._wodCitySplitAnglePhase
                 : Math.random() * Math.PI * 2;
             function splitScore(pt) {
-                let noiseValue = (fbm(pt.x * 0.0025 + 123, pt.y * 0.0025 + 456, 4) - 0.5) * 0.12;
                 let twoPi = Math.PI * 2;
-                let v = Math.atan2(pt.y - cy, pt.x - cx) - angleOffset + noiseValue + twoPi * 4;
+                let v = Math.atan2(pt.y - cy, pt.x - cx) - angleOffset + twoPi * 4;
                 v = ((v % twoPi) + twoPi) % twoPi;
                 return v;
             }
@@ -8925,6 +8974,33 @@
                 }
                 donor.owner = poor;
             }
+        }
+
+        /** Reject procgen layouts where land or city totals are not within ±1 of perfect split. */
+        function wodVerifyFairFactionStart(ownerIds) {
+            if(!ownerIds || ownerIds.length < 2) return true;
+            let sorted = [...ownerIds].sort((a, b) => a - b);
+            let target = wodBuildLandBalanceTargets(sorted);
+            let counts = wodCountBalancedLandByOwner(sorted);
+            for(let o of sorted) {
+                if(Math.abs((counts[o] || 0) - target[o]) > 1) return false;
+            }
+            let n = gameData.cities.length;
+            let f = sorted.length;
+            if(n < f * 2) return false;
+            let base = Math.floor(n / f);
+            let rem = n % f;
+            let cityTgt = {};
+            for(let i = 0; i < f; i++) cityTgt[sorted[i]] = base + (i < rem ? 1 : 0);
+            let cityCounts = {};
+            for(let o of sorted) cityCounts[o] = 0;
+            for(let c of gameData.cities) {
+                if(c && cityCounts[c.owner] !== undefined) cityCounts[c.owner]++;
+            }
+            for(let o of sorted) {
+                if(cityCounts[o] !== cityTgt[o]) return false;
+            }
+            return true;
         }
 
         function wodNormalizeStartingCityEconomy(ownerIds) {
@@ -17234,8 +17310,8 @@
 
             let winnerPlan = null;
             let kpf = 0;
-            let sepLo = mapShape === 'archipelago' ? 5 : 8;
-            outerFind: for(let kk = kUpper; kk >= 2; kk--) {
+            let sepLo = mapShape === 'archipelago' ? 4 : 6;
+            outerFind: for(let kk = 2; kk <= kUpper; kk++) {
                 for(let sepTry = 14; sepTry >= sepLo; sepTry--) {
                     await wodMapGenYieldSlice();
                     anchorChebSep = sepTry;
@@ -17295,6 +17371,8 @@
             wodSyncUrbanFootprintOwners();
             await wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
             wodNormalizeStartingCityEconomy(ownersSorted);
+
+            if(!wodVerifyFairFactionStart(ownersSorted)) return false;
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
@@ -17650,10 +17728,14 @@
         async function wodMapGenYieldSlice() {
             let st = _wodMapGenYieldState;
             if(!st) return;
+            if(gameData._wodFastMapGen) {
+                st.fastTick = (st.fastTick || 0) + 1;
+                if((st.fastTick & 127) !== 0) return;
+            }
             let now = performance.now();
             if(now < st.due) return;
             await wodYieldToMainThread();
-            st.due = performance.now() + st.budget;
+            st.due = performance.now() + (gameData._wodFastMapGen ? 6 : st.budget);
         }
 
         function wodYieldToMainThread() {
@@ -17681,7 +17763,8 @@
                 }
             }
             try {
-            wodMapGenYieldingStart(26);
+            gameData._wodFastMapGen = true;
+            wodMapGenYieldingStart(8);
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 10000;
             gameData.income = 10;             gameData.selection = [];
@@ -17692,7 +17775,7 @@
             let mapR = gameData.mapRadius;
             let hr = gameData.hexRadius;
             let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed);
-            const PROCMAP_ACCEPT_TRIES_MAX = wodFingerReuseMapSeed ? 1 : Math.min(38, Math.max(12, 20 + Math.floor(mapR / 15)));
+            const PROCMAP_ACCEPT_TRIES_MAX = wodFingerReuseMapSeed ? 1 : Math.min(28, Math.max(10, 14 + Math.floor(mapR / 18)));
             let procSucceeded = false;
 
             let mog = gameData._mapGenOptions;
@@ -17744,9 +17827,26 @@
             let cols = mapR;
             let rows = Math.floor(mapR * 0.8);
             let spacing = hr * 1.35;
+            let terrainAppliedFromWorker = false;
+            try {
+                let workerHexList = await wodGenerateTerrainCellsInWorker({
+                    mapR, hr, mapShape, genProfile: gameData._genProfile, seedOffset, cols, rows, spacing
+                });
+                if(workerHexList && workerHexList.length > 0) {
+                    for(let ci = 0; ci < workerHexList.length; ci++) {
+                        let cell = workerHexList[ci];
+                        let hex = { q: cell.q, r: cell.r, x: cell.x, y: cell.y, type: cell.type, owner: 0, baseColor: '', renderColor: '' };
+                        hex.baseColor = getTerrainColor(hex.type);
+                        setHexOwner(hex, 0);
+                        gameData.hexes[`${cell.q},${cell.r}`] = hex;
+                        gameData.hexList.push(hex);
+                    }
+                    terrainAppliedFromWorker = true;
+                }
+            } catch(_) {}
+
             let terrainCellIx = 0;
-            
-            for(let r = -rows; r <= rows; r++) {
+            if(!terrainAppliedFromWorker) for(let r = -rows; r <= rows; r++) {
                 for(let q = -cols; q <= cols; q++) {
                     let x = q * spacing;
                     let y = r * spacing;
@@ -18019,10 +18119,16 @@
                     procSucceeded = true;
                     break outerProcTerrain;
                 }
+                continue outerProcTerrain;
             } else {
                 procSucceeded = false;
                 break outerProcTerrain;
             }
+            }
+
+            if(!procSucceeded && wantCities && wantTerritory) {
+                let relaxedProc = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+                if(relaxedProc) procSucceeded = true;
             }
 
             if(!procSucceeded && wantCities) {
@@ -18151,6 +18257,7 @@
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
+                gameData._wodFastMapGen = false;
                 wodMapGenYieldingStop();
                 if(showMapGenOverlay && mapGenOverlayEl) {
                     mapGenOverlayEl.classList.add('hidden');
@@ -22132,40 +22239,7 @@
             return null;
         }
 
-        const WOD_ANCIENT_CIV_SVG = {
-            civRome: {
-                ox: 256, oy: 272, size: 512,
-                paths: [
-                    'M256 248 C188 232 72 178 58 268 C54 312 104 338 172 314 C210 302 238 276 256 262 Z',
-                    'M256 248 C324 232 440 178 454 268 C458 312 408 338 340 314 C302 302 274 276 256 262 Z',
-                    'M246 262 L248 378 C246 400 266 400 264 378 L266 262 Z',
-                    'M256 196 C276 182 298 198 296 222 C294 242 276 256 256 254 C236 256 218 242 216 222 C214 198 236 182 256 196 Z',
-                    'M294 218 L322 208 L298 236 Z',
-                    'M246 378 L256 428 L266 378 L256 404 Z',
-                    'M256 412 m-92 0 a92 38 0 1 0 184 0 a92 38 0 1 0 -184 0'
-                ]
-            },
-            civCarthage: {
-                ox: 256, oy: 272, size: 512,
-                paths: [
-                    'M256 468 L96 204 L184 168 L256 136 L328 168 L416 204 Z',
-                    'M256 162 m-54 0 a54 54 0 1 0 108 0 a54 54 0 1 0 -108 0',
-                    'M44 152 L468 152 L468 174 L44 174 Z',
-                    'M44 152 L44 106 L64 106 L64 152 Z',
-                    'M468 152 L468 106 L448 106 L448 152 Z',
-                    'M200 92 A58 36 0 1 1 312 92 A46 28 0 1 0 200 92 Z'
-                ],
-                strokes: [
-                    'M256 72 L256 136'
-                ]
-            },
-            civGaul: {
-                ox: 256, oy: 256, size: 512,
-                arm: 'M256 256 C248 186 268 96 372 62 C418 48 442 92 422 142 C368 228 310 252 256 256 Z',
-                ring: 'M256 256 m-160 0 a160 160 0 1 0 320 0 a160 160 0 1 0 -320 0',
-                hub: 'M256 256 m-22 0 a22 22 0 1 0 44 0 a22 22 0 1 0 -44 0'
-            }
-        };
+        const WOD_ANCIENT_CIV_SVG = (typeof globalThis !== 'undefined' && globalThis.WOD_ANCIENT_CIV_SVG) || {};
 
         function wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw, strokeOnly) {
             let path = new Path2D(d);
@@ -22207,8 +22281,8 @@
                     ctx.restore();
                 }
                 if(def.hub) wodPaintAncientCivSvgPath(ctx, def.hub, stroke || fill, null, 0, false);
-            } else if(civId === 'civCarthage') {
-                for(let d of def.paths) wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw * 0.85, false);
+            } else if(civId === 'civCarthage' || civId === 'civRome') {
+                for(let d of def.paths) wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw * 0.9, false);
                 if(def.strokes) {
                     for(let d of def.strokes) wodPaintAncientCivSvgPath(ctx, d, null, stroke, Math.max(2.2, 5.5 / sc), true);
                 }
