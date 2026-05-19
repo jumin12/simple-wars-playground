@@ -3011,67 +3011,53 @@
             color: #bdc3c7;
         }
 
-        .help-unit-effects-grid {
+        .help-effects-catalog {
             margin-top: 12px;
             display: flex;
             flex-direction: column;
-            gap: 16px;
+            gap: 12px;
         }
-        .help-unit-effect-card {
+        .help-effect-card {
             display: flex;
-            flex-direction: row;
-            align-items: flex-start;
             gap: 14px;
-            padding: 14px 16px;
+            align-items: flex-start;
+            padding: 12px 14px;
             border-radius: 12px;
             background: rgba(8, 14, 24, 0.72);
             border: 1px solid rgba(127, 140, 141, 0.45);
             box-sizing: border-box;
         }
-        .help-unit-effect-card canvas.help-unit-effect-portrait {
+        .help-effect-card-visual {
             flex-shrink: 0;
-            width: 76px;
-            height: 76px;
-            border-radius: 10px;
+        }
+        .help-effect-card-visual canvas {
+            display: block;
+            width: 88px;
+            height: 56px;
+            border-radius: 8px;
             border: 1px solid rgba(255, 255, 255, 0.12);
             background: #0f1823;
         }
-        .help-unit-effect-body {
+        .help-effect-card-body {
             flex: 1;
             min-width: 0;
         }
-        .help-unit-effect-body h5 {
+        .help-effect-card-body h5 {
             margin: 0 0 6px 0;
             font-size: 14px;
-            color: #f1c40f;
+            color: #ecf0f1;
         }
-        .help-unit-effect-body .esc-help-prose {
-            margin: 0 0 10px 0;
-            font-size: 0.86rem;
+        .help-effect-card-note {
+            margin: 8px 0 0 0;
+            font-size: 12px;
+            line-height: 1.45;
+            color: rgba(189, 195, 199, 0.92);
         }
-        .help-unit-effect-overhead {
-            margin: 0 0 10px 0;
-            padding: 8px 10px;
-            border-radius: 8px;
-            background: rgba(0, 0, 0, 0.28);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-        }
-        .help-unit-effect-overhead canvas {
-            display: block;
-            width: 100%;
-            max-width: 220px;
-            height: auto;
-            margin: 0 auto;
-        }
-        .help-unit-effect-overhead-label {
-            margin: 6px 0 0 0;
-            font-size: 10px;
-            line-height: 1.35;
-            color: rgba(189, 195, 199, 0.88);
-            text-align: center;
-        }
-        .help-unit-effect-body .effect-list {
+        .help-effect-card-body .effect-list {
             margin-top: 0;
+        }
+        .help-effect-card-body .effect-pill--block {
+            flex: 1 1 100%;
         }
 
         #mapLibraryPanel.overlay {
@@ -5572,8 +5558,8 @@
 
                 <div class="esc-help-block">
                     <h4>Unit status effects</h4>
-                    <p class="esc-help-prose">Each unit type can show <strong>icons above the marker</strong> while a condition is active. Select that unit to see matching <strong>detail pills</strong> on the unit sheet — numbers match live combat math.</p>
-                    <div class="wod-help-unit-effects-mount help-unit-effects-grid" aria-label="Unit status effects by type"></div>
+                    <p class="esc-help-prose">While a condition is active, units show an <strong>icon above the marker</strong> when applicable, plus matching <strong>detail pills</strong> on the unit sheet. Each card below uses your <strong>equipped unit skin</strong> (trade convoys always use gold markers).</p>
+                    <div class="wod-help-effects-mount help-effects-catalog" aria-label="Unit status effect examples"></div>
                 </div>
 
                 <div class="esc-help-block">
@@ -6766,7 +6752,7 @@
             menu.classList.toggle('hidden', !shouldOpen);
         }
 
-        const WOD_ESC_HELP_VERSION = '5';
+        const WOD_ESC_HELP_VERSION = '6';
 
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
@@ -6782,13 +6768,17 @@
         }
 
         function showEscSection(sectionId) {
-            for(let section of document.querySelectorAll('.esc-section')) section.classList.remove('visible');
+            if(gameState === 'PLAYING' && UI.escMenu && UI.escMenu.classList.contains('hidden'))
+                toggleEscMenu(true);
+            let menu = UI.escMenu;
+            if(menu) menu.querySelectorAll('.esc-section').forEach(function(s) { s.classList.remove('visible'); });
             let section = document.getElementById(sectionId);
-            if(section) section.classList.add('visible');
+            if(section && menu && menu.contains(section)) section.classList.add('visible');
             if(sectionId === 'helpSection') {
                 try {
                     populateEscHelpGuide();
-                    updateTerrainKey();
+                    if(typeof updateTerrainKey === 'function') updateTerrainKey();
+                    if(typeof renderHelpMiniDiagrams === 'function') renderHelpMiniDiagrams();
                 } catch(err) {
                     console.error('helpSection', err);
                 }
@@ -10688,7 +10678,7 @@
                 if(menuCompact) menuCompact.innerHTML = compactRows;
             }
 
-            fillHelpUnitEffectsGuide();
+            fillHelpEffectsGuide();
             renderHelpMiniDiagrams();
             fillTerrainCombatHelpTables();
         }
@@ -13353,173 +13343,87 @@
             for(let mount of document.querySelectorAll('.wod-help-terrain-combat-mount')) mount.innerHTML = tbl;
         }
 
-        const WOD_HELP_UNIT_EFFECT_GUIDES = [
-            {
-                id: 'light',
-                drawType: 'light',
-                title: 'Light infantry',
-                intro: 'Your standard land fighters — flexible on most terrain, with full overhead warnings when conditions apply.',
-                overheadKinds: ['combat', 'fort', 'encircled', 'unpaid', 'heal', 'water'],
-                overheadLabel: 'Icons above marker: fighting · fort · encircled · unpaid · healing · deep water',
-                effects: [
-                    { label: 'Forest', render: 'terrainCombat', atkPct: 85, defPct: 90, block: true, terrain: true, detail: 'Example tile combat tilt.' },
-                    { label: 'Encircled', stats: '−3.5% max HP/s · No heal until pocket breaks', block: true, warn: true, detail: 'Cut off behind enemy lines.' },
-                    { label: 'Deep water', stats: '−2% max HP/s', block: true, warn: true, detail: 'Stranded in ocean hexes.' },
-                    { label: '+ Healing', stats: '+3.5% max HP/s', detail: 'Safe friendly territory.' },
-                    { label: 'Fighting', stats: 'Active combat stance', detail: 'Engaged and firing.' }
-                ]
-            },
-            {
-                id: 'heavy',
-                drawType: 'heavy',
-                title: 'Armor',
-                intro: 'Heavy breakthrough units — strong on open ground, clumsy in rough terrain, and especially vulnerable if caught drowning.',
-                overheadKinds: ['combat', 'fort', 'encircled', 'unpaid', 'water'],
-                overheadLabel: 'Icons above marker: fighting · fort · encircled · unpaid · deep water',
-                effects: [
-                    { label: 'Forest', render: 'terrainCombat', atkPct: 70, defPct: 95, block: true, terrain: true, detail: 'Armor struggles attacking into woods.' },
-                    { label: 'Fortified', render: 'fortDmg', fortDmgPct: 80, block: true, detail: 'Friendly fort aura.' },
-                    { label: 'Deep water', stats: '−2% max HP/s', block: true, warn: true, detail: 'Drowning hazard in ocean.' },
-                    { label: 'March', stats: '×70%', detail: 'Slowed by terrain or morale.' }
-                ]
-            },
-            {
-                id: 'marine',
-                drawType: 'marine',
-                title: 'Marines',
-                intro: 'Amphibious troops — fight at full strength on water tiles; show the wave badge instead of drowning when embarked.',
-                overheadKinds: ['combat', 'fort', 'encircled', 'unpaid', 'heal'],
-                overheadLabel: 'Icons above marker: fighting · fort · encircled · unpaid · healing',
-                effects: [
-                    { label: 'Ocean', render: 'terrainCombat', atkPct: 100, defPct: 100, block: true, terrain: true, detail: 'Full strength on water.' },
-                    { label: '∿ Amphib', stats: 'March ×62%', detail: 'Embarked in deep water — no drowning chip.' },
-                    { label: 'Sand', render: 'terrainCombat', atkPct: 100, defPct: 95, block: true, terrain: true, detail: 'Strong on coastal sand.' },
-                    { label: 'Grass', render: 'terrainCombat', atkPct: 85, defPct: 100, block: true, terrain: true, detail: 'Weaker on dry inland tiles.' }
-                ]
-            },
-            {
-                id: 'ship',
-                drawType: 'ship',
-                drawExtra: { x: 0, y: 0, target: { x: 28, y: -9 } },
-                title: 'Warships',
-                intro: 'Hull combat only on water — terrain pills reflect ocean combat; no drowning or land-march chips.',
-                overheadKinds: ['combat', 'unpaid'],
-                overheadLabel: 'Icons above marker: fighting · unpaid upkeep',
-                effects: [
-                    { label: 'Ocean', render: 'terrainCombat', atkPct: 100, defPct: 100, block: true, terrain: true, detail: 'Naval combat baseline on water.' },
-                    { label: 'Fighting', stats: 'Active combat stance', detail: 'Engaged at sea.' }
-                ]
-            },
-            {
-                id: 'convoyLand',
-                drawType: 'convoy',
-                drawExtra: { convoySeaRoute: false },
-                title: 'Trade convoy (overland)',
-                intro: 'Unarmed gold-square haulers — no combat overhead row; the unit sheet lists the terrain tile and trade value only.',
-                overheadKinds: [],
-                overheadLabel: '',
-                effects: [
-                    { label: 'Grass', terrain: true, detail: 'Terrain under the convoy (tile label only).' }
-                ]
-            },
-            {
-                id: 'convoySea',
-                drawType: 'convoy',
-                drawExtra: { convoySeaRoute: true, target: { x: 34, y: -8 }, x: 0, y: 0 },
-                title: 'Trade convoy (sea lane)',
-                intro: 'Same civilian unit on an ocean route — gold ship wedge; may show deep-water hazard if pathing through open sea.',
-                overheadKinds: ['water'],
-                overheadLabel: 'Icon above marker: deep water hazard',
-                effects: [
-                    { label: 'Ocean', terrain: true, detail: 'Terrain under the convoy.' },
-                    { label: 'Deep water hazard', stats: '−2% max HP/s', block: true, warn: true, detail: 'If stranded in deep water.' }
-                ]
-            }
+        const WOD_HELP_EFFECT_ENTRIES = [
+            { id: 'fighting', title: 'Fighting', overhead: 'combat', drawType: 'light', note: 'Burst icon while the unit is actively trading fire.', effect: { label: 'Fighting', stats: 'Active combat stance · Applies terrain/armor morale effects above while firing', detail: 'Engaged and trading fire.' } },
+            { id: 'fort', title: 'Fortified', overhead: 'fort', drawType: 'heavy', note: 'Shield icon inside a friendly fort combat aura.', effect: { label: 'Fortified', render: 'fortDmg', fortDmgPct: 80, block: true, detail: 'Incoming combat damage resolves at about 80% of normal.' } },
+            { id: 'encircled', title: 'Encircled', overhead: 'encircled', drawType: 'light', note: 'Red exclamation when the hex is cut off behind enemy lines.', effect: { label: 'Encircled', stats: '−3.5% max HP/s · No heal until pocket breaks', block: true, warn: true, detail: 'Hex is cut off behind enemy lines.' } },
+            { id: 'deepwater', title: 'Deep water', overhead: 'water', drawType: 'light', note: 'Blue tilde when a land unit is stranded in ocean tiles.', effect: { label: 'Deep water', stats: '−2% max HP/s', block: true, warn: true, detail: 'Land units stranded in deep ocean tiles.' } },
+            { id: 'unpaid', title: 'Unpaid upkeep', overhead: 'unpaid', drawType: 'light', note: 'Gold dollar sign when treasury cannot cover upkeep.', effect: { label: '$ Unpaid', stats: '−2.5% max HP/s', block: true, warn: true, detail: 'Treasury cannot cover upkeep.' } },
+            { id: 'healing', title: 'Healing', overhead: 'heal', drawType: 'light', note: 'Green plus while regenerating on safe friendly ground.', effect: { label: '+ Healing', stats: '+3.5% max HP/s', detail: 'Regenerating on safe friendly territory.' } },
+            { id: 'forest', title: 'Forest cover', overhead: null, drawType: 'light', note: 'Terrain tilt on the unit sheet — no overhead icon for tile cover alone.', effect: { label: 'Forest', render: 'terrainCombat', atkPct: 85, defPct: 90, block: true, terrain: true, detail: 'Example: light infantry in forest — weaker attacks, softer incoming hits.' } },
+            { id: 'amphib', title: 'Amphibious march', overhead: null, drawType: 'marine', note: 'Marines embarked in deep water — pill only (no drowning chip).', effect: { label: '∿ Amphib', stats: 'March ×62%', detail: 'Marines embarked in deep water — no drowning chip.' } },
+            { id: 'march', title: 'Slow march', overhead: null, drawType: 'heavy', note: 'Morale, rough ground, or a hostile fort zone is slowing orders.', effect: { label: 'March', stats: '×70%', detail: 'Morale, rough ground, or a hostile fort zone is slowing orders.' } },
+            { id: 'routed', title: 'Routed', overhead: null, drawType: 'light', note: 'Morale broken — cannot attack until rallied on safe ground.', effect: { label: 'Routed', stats: 'Cannot attack until rallied · Recover while healing off contact', block: true, warn: true, detail: 'Morale broken — fleeing.' } },
+            { id: 'shaken', title: 'Shaken', overhead: null, drawType: 'light', note: 'Below-peak morale throttles effective attack output.', effect: { label: 'Shaken', stats: '~Below-peak morale throttles effective attack output', detail: 'Morale below peak — reduced combat power.' } },
+            { id: 'convoyhazard', title: 'Convoy · deep water', overhead: 'water', drawType: 'convoy', drawExtra: { convoySeaRoute: true, target: { x: 20, y: -6 }, x: 0, y: 0 }, note: 'Gold sea convoy with deep-water hazard icon if stranded.', effect: { label: 'Deep water hazard', stats: '−2% max HP/s', block: true, warn: true, detail: 'Trade convoy stranded in deep water.' } }
         ];
 
-        function fillHelpUnitEffectsGuide() {
-            if(typeof wodFmtInfoEffectMarkup !== 'function') return;
-            let html = WOD_HELP_UNIT_EFFECT_GUIDES.map(g => {
-                let pills = (g.effects || []).map(wodFmtInfoEffectMarkup).join('');
-                let oh = '';
-                if(g.overheadKinds && g.overheadKinds.length) {
-                    oh = '<div class="help-unit-effect-overhead">'
-                        + '<canvas class="help-unit-effect-oh" data-help-oh="' + g.id + '" width="220" height="40" aria-hidden="true"></canvas>'
-                        + '<p class="help-unit-effect-overhead-label">' + wodEscapeEffectInner(g.overheadLabel || '') + '</p>'
-                        + '</div>';
-                }
-                return '<article class="help-unit-effect-card" data-help-unit="' + g.id + '">'
-                    + '<canvas class="help-unit-effect-portrait" data-help-portrait="' + g.id + '" width="76" height="76" aria-hidden="true"></canvas>'
-                    + '<div class="help-unit-effect-body">'
-                    + '<h5>' + wodEscapeEffectInner(g.title) + '</h5>'
-                    + '<p class="esc-help-prose">' + wodEscapeEffectInner(g.intro) + '</p>'
-                    + oh
-                    + '<div class="effect-list">' + pills + '</div>'
-                    + '</div></article>';
-            }).join('');
-            document.querySelectorAll('.wod-help-unit-effects-mount').forEach(el => { el.innerHTML = html; });
+        function wodHelpEquippedSkin() {
+            let s = 'nato';
+            if(typeof gameData !== 'undefined' && gameData && gameData.unitSkin) s = gameData.unitSkin;
+            else if(typeof wodProgress !== 'undefined' && wodProgress && wodProgress.profile && wodProgress.profile.unitSkin) s = wodProgress.profile.unitSkin;
+            if(!s || s === 'default') return 'nato';
+            return s;
         }
 
-        function renderHelpUnitEffectGuides() {
+        function drawHelpUnitMarker(ctx, unit, ur, col) {
+            if(unit.type === 'convoy') {
+                drawClassicUnitShape(ctx, unit.type, ur, col, unit);
+                return;
+            }
+            unit.skinOverride = wodHelpEquippedSkin();
+            if(!drawUnitSkin(ctx, unit, ur, col)) drawClassicUnitShape(ctx, unit.type, ur, col, unit);
+            delete unit.skinOverride;
+        }
+
+        function drawHelpFxOverheadIcon(ctx, kind, cx, cy) {
+            let glyphR = 4.41;
+            if(kind === 'combat') drawCombatBurstIcon(ctx, cx, cy, 5.21);
+            else if(kind === 'fort') drawWodFortShieldBadge(ctx, cx, cy, glyphR);
+            else if(kind === 'encircled') drawWodOverheadTextBadge(ctx, cx, cy, '!', '#e74c3c');
+            else if(kind === 'unpaid') drawWodOverheadTextBadge(ctx, cx, cy, '$', '#f39c12');
+            else if(kind === 'heal') drawWodOverheadTextBadge(ctx, cx, cy, '+', '#2ecc71');
+            else if(kind === 'water') drawWodOverheadTextBadge(ctx, cx, cy, '~', '#3498db');
+        }
+
+        function fillHelpEffectsGuide() {
+            if(typeof wodFmtInfoEffectMarkup !== 'function') return;
+            let html = WOD_HELP_EFFECT_ENTRIES.map(function(e) {
+                return '<article class="help-effect-card" data-help-fx="' + e.id + '">'
+                    + '<div class="help-effect-card-visual"><canvas data-help-fx-canvas="' + e.id + '" width="88" height="56" aria-hidden="true"></canvas></div>'
+                    + '<div class="help-effect-card-body"><h5>' + wodEscapeEffectInner(e.title) + '</h5>'
+                    + '<div class="effect-list">' + wodFmtInfoEffectMarkup(e.effect) + '</div>'
+                    + '<p class="help-effect-card-note">' + wodEscapeEffectInner(e.note) + '</p></div></article>';
+            }).join('');
+            document.querySelectorAll('.wod-help-effects-mount').forEach(function(el) { el.innerHTML = html; });
+        }
+
+        function renderHelpEffectCards() {
             let col = factionColors[1] || '#2ecc71';
-            for(let g of WOD_HELP_UNIT_EFFECT_GUIDES) {
-                for(let portrait of document.querySelectorAll('canvas[data-help-portrait="' + g.id + '"]')) {
-                    if(!portrait.getContext) continue;
-                    let ctx = portrait.getContext('2d');
+            for(let e of WOD_HELP_EFFECT_ENTRIES) {
+                for(let canvas of document.querySelectorAll('canvas[data-help-fx-canvas="' + e.id + '"]')) {
+                    if(!canvas.getContext) continue;
+                    let ctx = canvas.getContext('2d');
                     ctx.fillStyle = '#0f1823';
-                    ctx.fillRect(0, 0, portrait.width, portrait.height);
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
                     ctx.save();
-                    ctx.translate(portrait.width / 2, portrait.height / 2);
-                    let eu = Object.assign({
-                        type: g.drawType, owner: 1,
-                        hp: 100, maxHp: 100, manpower: 1000, tanks: 0,
-                    }, g.drawExtra || {});
-                    drawClassicUnitShape(ctx, g.drawType, 22, col, eu);
-                    ctx.restore();
-                }
-                if(!g.overheadKinds || !g.overheadKinds.length) continue;
-                for(let ohCanvas of document.querySelectorAll('canvas[data-help-oh="' + g.id + '"]')) {
-                if(!ohCanvas.getContext) continue;
-                let ctx = ohCanvas.getContext('2d');
-                ctx.fillStyle = '#0f1823';
-                ctx.fillRect(0, 0, ohCanvas.width, ohCanvas.height);
-                let kinds = g.overheadKinds;
-                let glyphR = 4.41;
-                let gap = 1.68;
-                let burstSlotW = 5.21 * 1.64;
-                let slots = [];
-                for(let k of kinds) {
-                    if(k === 'combat') slots.push({ k: 'combat', w: burstSlotW });
-                    else if(k === 'fort') slots.push({ k: 'fort', w: glyphR * 2.06 });
-                    else slots.push({ k: k, w: glyphR * 1.54 });
-                }
-                let tw = slots.reduce(function(a, s) { return a + s.w; }, 0) + (slots.length > 1 ? gap * (slots.length - 1) : 0);
-                ctx.save();
-                ctx.translate(ohCanvas.width / 2, ohCanvas.height / 2 + 2);
-                ctx.direction = 'ltr';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.imageSmoothingEnabled = true;
-                let x = -tw / 2;
-                let rowY = -4;
-                for(let si = 0; si < slots.length; si++) {
-                    let s = slots[si];
-                    let cx = x + s.w * 0.5;
-                    if(s.k === 'combat') drawCombatBurstIcon(ctx, cx, rowY, 5.21);
-                    else if(s.k === 'fort') drawWodFortShieldBadge(ctx, cx, rowY, glyphR);
-                    else {
-                        let ch = s.k === 'encircled' ? '!' : s.k === 'unpaid' ? '$' : s.k === 'heal' ? '+' : '~';
-                        let fill = s.k === 'encircled' ? '#e74c3c' : s.k === 'unpaid' ? '#f39c12' : s.k === 'heal' ? '#2ecc71' : '#3498db';
-                        drawWodOverheadTextBadge(ctx, cx, rowY, ch, fill);
+                    ctx.translate(canvas.width / 2, canvas.height / 2 + 6);
+                    let eu = Object.assign({ type: e.drawType, owner: 1, hp: 100, maxHp: 100, manpower: 1000, tanks: 0 }, e.drawExtra || {});
+                    let ur = e.drawType === 'convoy' ? 11 : 13;
+                    drawHelpUnitMarker(ctx, eu, ur, col);
+                    if(e.overhead) {
+                        ctx.direction = 'ltr';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.imageSmoothingEnabled = true;
+                        drawHelpFxOverheadIcon(ctx, e.overhead, 0, -ur - 8);
                     }
-                    x += s.w + (si < slots.length - 1 ? gap : 0);
-                }
-                ctx.restore();
+                    ctx.restore();
                 }
             }
         }
 
-        function getUnitSpeedMultiplier(unit) {
+                function getUnitSpeedMultiplier(unit) {
             let waterSlow = unit.amphibInWater ? 0.62 : (unit.inWater ? 0.28 : 1);
             let water = waterSlow;
             if(unit.type === 'convoy') return water;
@@ -21367,7 +21271,7 @@
                     hp: 100, maxHp: 100, manpower: 1000, tanks: 0,
                 }, extra || {});
                 let ur = 13;
-                drawClassicUnitShape(ctx, type, ur, col, eu);
+                drawHelpUnitMarker(ctx, eu, ur, col);
                 ctx.restore();
             }
             function fillMoveCanvas(id) {
@@ -21435,7 +21339,7 @@
                 fillMoveCanvas(prefix + 'Move');
                 fillFormationCanvas(prefix + 'Formation');
             }
-            renderHelpUnitEffectGuides();
+            renderHelpEffectCards();
         }
 
         function drawUnitSkin(ctx, unit, radius, color) {
