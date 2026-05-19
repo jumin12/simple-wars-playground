@@ -206,9 +206,11 @@
                         }
                         if (gp.islandMode === 'wide') mask += 0.055 - Math.abs(sy) * 0.11;
                     }
-                    let radialFrac = Math.sqrt((q / Math.max(cols, 1)) ** 2 + (r / Math.max(rows, 1)) ** 2);
-                    let rimNoise = (fbm(x * 0.009 + seedOffset + 6601, y * 0.009 + seedOffset + 6601, 3) - 0.5) * 0.08;
-                    mask -= Math.pow(Math.max(0, radialFrac + rimNoise - 0.8), 1.35) * 0.68;
+                    let boxFrac = Math.max(Math.abs(q) / Math.max(cols, 1), Math.abs(r) / Math.max(rows, 1));
+                    let edgeWobble =
+                        fbm(x * scale * 2.8 + seedOffset + 8800, y * scale * 2.8 + seedOffset + 8800, 4) - 0.5;
+                    mask -= Math.pow(Math.max(0, boxFrac - 0.62 + edgeWobble * 0.08), 1.35) * 1.08;
+                    if (boxFrac > 0.78) mask -= (boxFrac - 0.78) * (1.05 + edgeWobble * 0.35);
                 }
 
                 let continent = fbm((x + warpX) * scale + seedOffset, (y + warpY) * scale + seedOffset, 6);
