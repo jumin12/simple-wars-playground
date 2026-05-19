@@ -2654,6 +2654,45 @@
             line-height: 1.45;
             margin-bottom: 12px;
         }
+        .settings-section.wod-local-save-section {
+            border-color: rgba(52, 152, 219, 0.45);
+            background: rgba(12, 28, 42, 0.35);
+        }
+        .wod-save-folder-status {
+            font-size: 0.9rem;
+            color: #bdc3c7;
+            margin: 0 0 10px 0;
+        }
+        .wod-save-folder-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .wod-save-file-list {
+            max-height: 220px;
+            overflow-y: auto;
+            border: 1px solid rgba(127, 140, 141, 0.4);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.22);
+            padding: 6px;
+        }
+        .wod-save-file-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            font-size: 0.88rem;
+        }
+        .wod-save-file-row:last-child { border-bottom: none; }
+        .wod-save-file-row .menu-btn { padding: 6px 12px; font-size: 0.82rem; }
+        .wod-save-list-empty {
+            margin: 8px;
+            font-size: 0.88rem;
+            color: #95a5a6;
+        }
 
         .terrain-key {
             position: absolute;
@@ -5792,6 +5831,23 @@
         <div id="settingsPanel" class="overlay hidden">
             <div class="panel panel-wide">
                 <h2>Settings</h2>
+                <div class="settings-section wod-local-save-section" id="wodLocalSaveSection">
+                    <h3 style="color:#3498db;margin-top:0;">Save files (this computer)</h3>
+                    <p>Keep a copy of your progress as JSON in a folder you choose. Gold, skins, achievements, and lifetime stats are included. In-progress battles are not saved.</p>
+                    <p id="wodSaveFolderStatus" class="wod-save-folder-status">Checking save folder…</p>
+                    <div class="wod-save-folder-actions">
+                        <button type="button" class="menu-btn" onclick="wodPickSaveFolder()">Choose saves folder</button>
+                        <button type="button" class="menu-btn" onclick="wodSaveToFolder()">Save now</button>
+                        <button type="button" class="menu-btn" onclick="wodRefreshSaveFolderList()">Refresh list</button>
+                    </div>
+                    <div id="wodSaveFolderList" class="wod-save-file-list" aria-label="Save files in folder"></div>
+                    <p style="margin:14px 0 8px 0;font-size:0.9rem;color:#bdc3c7;">Any browser — pick a file manually:</p>
+                    <div class="wod-save-folder-actions">
+                        <button type="button" class="menu-btn" onclick="wodExportSaveDownload()">Export save file</button>
+                        <button type="button" class="menu-btn" onclick="document.getElementById('wodSaveFileImport').click()">Import save file</button>
+                        <input type="file" id="wodSaveFileImport" accept=".json,application/json" style="display:none" onchange="wodImportSaveFromInput(this)" />
+                    </div>
+                </div>
                 <div class="settings-section">
                     <h3 style="color:#e74c3c;margin-top:0;">Reset progress</h3>
                     <p>Clear all saved data for this browser: achievements, lifetime stats, gold, and unlocked unit skins. This cannot be undone.</p>
@@ -6638,6 +6694,8 @@
                 syncOrderArrowsPathfindingCheckbox();
                 wodInitPeriodSettingsBinding();
                 wodSyncAllPeriodSelects();
+                wodInitLocalSaveFolder();
+                wodRefreshSaveFolderUi();
             }
             if(panelId === 'multiplayer') {
                 wodMpWireLobbyUi();
@@ -11111,6 +11169,272 @@
             if(sbtn) { sbtn.classList.toggle('active', !isBadges); }
             renderAchievementsUi();
         }
+
+
+        const WOD_SAVE_BUNDLE_VERSION = 1;
+        const WOD_SAVE_FILE_PREFIX = 'simplewars_';
+        const WOD_IDB_SAVE_FOLDER_KEY = 'wodSaveFolderHandle';
+        let _wodSaveFolderHandle = null;
+        let _wodSaveFolderLabel = '';
+
+        function wodFsDirPickerSupported() {
+            return typeof window.showDirectoryPicker === 'function';
+        }
+
+        function wodBuildSaveBundle() {
+            flushGameProfileToWod();
+            return {
+                format: 'simplewars_save',
+                version: WOD_SAVE_BUNDLE_VERSION,
+                savedAt: new Date().toISOString(),
+                progress: JSON.parse(JSON.stringify(wodProgress)),
+                uiSettings: {
+                    showOrdersWhenDeselected: gameData.uiSettings.showOrdersWhenDeselected !== false,
+                    orderArrowsUsePathfinding: !!gameData.uiSettings.orderArrowsUsePathfinding
+                }
+            };
+        }
+
+        function wodApplySaveBundle(bundle, opts) {
+            opts = opts || {};
+            if(!bundle || bundle.format !== 'simplewars_save') throw new Error('Not a Simple Wars save file.');
+            let o = bundle.progress;
+            if(!o || typeof o !== 'object') throw new Error('Save file missing progress.');
+            let base = defaultWodProgress();
+            wodProgress = {
+                achievements: Object.assign({}, base.achievements, o.achievements || {}),
+                lifetime: Object.assign({}, base.lifetime, o.lifetime || {}),
+                lifetimeByPeriod: Object.assign({}, base.lifetimeByPeriod, o.lifetimeByPeriod || {}),
+                profile: Object.assign({}, base.profile, o.profile || {}),
+                multiplayer: Object.assign({}, base.multiplayer, o.multiplayer || {})
+            };
+            if(bundle.uiSettings) {
+                if(typeof bundle.uiSettings.showOrdersWhenDeselected === 'boolean')
+                    gameData.uiSettings.showOrdersWhenDeselected = bundle.uiSettings.showOrdersWhenDeselected;
+                if(typeof bundle.uiSettings.orderArrowsUsePathfinding === 'boolean')
+                    gameData.uiSettings.orderArrowsUsePathfinding = bundle.uiSettings.orderArrowsUsePathfinding;
+                saveUiSettings();
+            }
+            applyWodProfileToGame();
+            scheduleSaveWodProgress();
+            updateSkinShop();
+            if(typeof renderAchievementsUi === 'function') renderAchievementsUi();
+            if(!opts.silent) showNotification('Save loaded.');
+        }
+
+        function wodSaveFilenameStamp() {
+            let d = new Date();
+            let pad = function(n) { return String(n).padStart(2, '0'); };
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + pad(d.getHours()) + pad(d.getMinutes());
+        }
+
+        function wodIdbPutSaveFolderHandle(handle) {
+            if(!handle || !window.indexedDB) return Promise.resolve(false);
+            return wodOpenSavedMapsIdb().then(function(db) {
+                return new Promise(function(resolve, reject) {
+                    let tx = db.transaction(WOD_IDB_STORE, 'readwrite');
+                    tx.oncomplete = function() { resolve(true); };
+                    tx.onerror = function() { reject(tx.error); };
+                    tx.objectStore(WOD_IDB_STORE).put(handle, WOD_IDB_SAVE_FOLDER_KEY);
+                });
+            });
+        }
+
+        function wodIdbGetSaveFolderHandle() {
+            if(!window.indexedDB) return Promise.resolve(null);
+            return wodOpenSavedMapsIdb().then(function(db) {
+                return new Promise(function(resolve, reject) {
+                    let tx = db.transaction(WOD_IDB_STORE, 'readonly');
+                    let g = tx.objectStore(WOD_IDB_STORE).get(WOD_IDB_SAVE_FOLDER_KEY);
+                    g.onsuccess = function() { resolve(g.result || null); };
+                    g.onerror = function() { reject(g.error); };
+                });
+            }).catch(function() { return null; });
+        }
+
+        async function wodRestoreSaveFolderFromIdb() {
+            let h = await wodIdbGetSaveFolderHandle();
+            if(!h) return false;
+            try {
+                let perm = await h.queryPermission({ mode: 'readwrite' });
+                if(perm !== 'granted') perm = await h.requestPermission({ mode: 'readwrite' });
+                if(perm !== 'granted') return false;
+                _wodSaveFolderHandle = h;
+                _wodSaveFolderLabel = h.name || 'Saves folder';
+                return true;
+            } catch(e) {
+                return false;
+            }
+        }
+
+        async function wodEnsureSaveFolderReady() {
+            if(_wodSaveFolderHandle) {
+                try {
+                    let perm = await _wodSaveFolderHandle.queryPermission({ mode: 'readwrite' });
+                    if(perm === 'granted') return _wodSaveFolderHandle;
+                    if(perm === 'prompt') {
+                        perm = await _wodSaveFolderHandle.requestPermission({ mode: 'readwrite' });
+                        if(perm === 'granted') return _wodSaveFolderHandle;
+                    }
+                } catch(e) {}
+                _wodSaveFolderHandle = null;
+            }
+            if(await wodRestoreSaveFolderFromIdb()) return _wodSaveFolderHandle;
+            return null;
+        }
+
+        async function wodPickSaveFolder() {
+            if(!wodFsDirPickerSupported()) {
+                showNotification('This browser cannot pick a folder. Use Export / Import instead.');
+                return;
+            }
+            try {
+                let handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'simplewars-saves' });
+                _wodSaveFolderHandle = handle;
+                _wodSaveFolderLabel = handle.name || 'Saves folder';
+                await wodIdbPutSaveFolderHandle(handle);
+                await wodSaveToFolder({ silent: true });
+                wodRefreshSaveFolderUi();
+                showNotification('Saves folder: ' + _wodSaveFolderLabel);
+            } catch(e) {
+                if(e && e.name !== 'AbortError') showNotification('Could not open folder: ' + (e.message || e));
+            }
+        }
+
+        async function wodWriteJsonToFolder(name, obj) {
+            let dir = await wodEnsureSaveFolderReady();
+            if(!dir) throw new Error('No saves folder. Click Choose saves folder first.');
+            let fileHandle = await dir.getFileHandle(name, { create: true });
+            let w = await fileHandle.createWritable();
+            await w.write(JSON.stringify(obj, null, 2));
+            await w.close();
+            return name;
+        }
+
+        async function wodSaveToFolder(opts) {
+            opts = opts || {};
+            try {
+                let bundle = wodBuildSaveBundle();
+                let mainName = WOD_SAVE_FILE_PREFIX + 'current.json';
+                let stampName = WOD_SAVE_FILE_PREFIX + wodSaveFilenameStamp() + '.json';
+                if(await wodEnsureSaveFolderReady()) {
+                    await wodWriteJsonToFolder(mainName, bundle);
+                    await wodWriteJsonToFolder(stampName, bundle);
+                    if(!opts.silent) showNotification('Saved to folder (' + mainName + ').');
+                } else {
+                    wodExportSaveDownload(stampName + '.json', bundle);
+                    return;
+                }
+                wodRefreshSaveFolderUi();
+            } catch(e) {
+                showNotification('Save failed: ' + (e.message || e));
+            }
+        }
+
+        async function wodListSaveFilesInFolder() {
+            let dir = await wodEnsureSaveFolderReady();
+            if(!dir) return [];
+            let out = [];
+            for await (let entry of dir.values()) {
+                if(entry.kind === 'file' && entry.name.startsWith(WOD_SAVE_FILE_PREFIX) && entry.name.endsWith('.json'))
+                    out.push(entry.name);
+            }
+            out.sort().reverse();
+            return out;
+        }
+
+        async function wodLoadSaveFromFolder(name) {
+            let dir = await wodEnsureSaveFolderReady();
+            if(!dir) throw new Error('No saves folder.');
+            let fileHandle = await dir.getFileHandle(name);
+            let f = await fileHandle.getFile();
+            let bundle = JSON.parse(await f.text());
+            wodApplySaveBundle(bundle);
+        }
+
+        function wodLoadSaveFromFolderBtn(btn) {
+            let name = btn && btn.getAttribute('data-save-file');
+            if(!name) return;
+            void wodLoadSaveFromFolder(name).catch(function(e) {
+                showNotification('Load failed: ' + (e.message || e));
+            });
+        }
+
+        function wodRefreshSaveFolderUi() {
+            let status = document.getElementById('wodSaveFolderStatus');
+            let list = document.getElementById('wodSaveFolderList');
+            if(status) {
+                if(_wodSaveFolderHandle)
+                    status.textContent = 'Folder: ' + (_wodSaveFolderLabel || 'selected') + ' — files named ' + WOD_SAVE_FILE_PREFIX + '*.json';
+                else if(wodFsDirPickerSupported())
+                    status.textContent = 'No folder selected. Choose a folder on this PC to save and load.';
+                else
+                    status.textContent = 'Folder access is not supported here. Use Export / Import below.';
+            }
+            if(!list) return;
+            if(!wodFsDirPickerSupported()) {
+                list.innerHTML = '<p class="wod-save-list-empty">Use Export / Import, or open in Chrome or Edge for folder access.</p>';
+                return;
+            }
+            list.innerHTML = '<p class="wod-save-list-empty">Loading…</p>';
+            void wodListSaveFilesInFolder().then(function(files) {
+                if(!files.length) {
+                    list.innerHTML = '<p class="wod-save-list-empty">No save files yet. Choose a folder and click Save now.</p>';
+                    return;
+                }
+                list.innerHTML = files.map(function(fn) {
+                    let safe = fn.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+                    return '<div class="wod-save-file-row"><span>' + safe + '</span>'
+                        + '<button type="button" class="menu-btn" data-save-file=' + JSON.stringify(fn) + ' onclick="wodLoadSaveFromFolderBtn(this)">Load</button></div>';
+                }).join('');
+            }).catch(function() {
+                list.innerHTML = '<p class="wod-save-list-empty">Could not read folder. Choose the folder again.</p>';
+            });
+        }
+
+        function wodRefreshSaveFolderList() {
+            wodRefreshSaveFolderUi();
+        }
+
+        function wodExportSaveDownload(filename, bundle) {
+            bundle = bundle || wodBuildSaveBundle();
+            filename = filename || (WOD_SAVE_FILE_PREFIX + wodSaveFilenameStamp() + '.json');
+            let blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+            let a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(a.href);
+            showNotification('Downloaded ' + filename);
+        }
+
+        function wodImportSaveFromInput(input) {
+            let file = input && input.files && input.files[0];
+            if(!file) return;
+            let reader = new FileReader();
+            reader.onload = function() {
+                try {
+                    wodApplySaveBundle(JSON.parse(reader.result));
+                } catch(e) {
+                    showNotification('Import failed: ' + (e.message || e));
+                }
+                input.value = '';
+            };
+            reader.onerror = function() { showNotification('Could not read file.'); };
+            reader.readAsText(file);
+        }
+
+        function wodInitLocalSaveFolder() {
+            if(wodInitLocalSaveFolder._done) return;
+            wodInitLocalSaveFolder._done = true;
+            void wodRestoreSaveFolderFromIdb().then(function() { wodRefreshSaveFolderUi(); });
+        }
+        window.wodPickSaveFolder = wodPickSaveFolder;
+        window.wodSaveToFolder = wodSaveToFolder;
+        window.wodRefreshSaveFolderList = wodRefreshSaveFolderList;
+        window.wodExportSaveDownload = wodExportSaveDownload;
+        window.wodImportSaveFromInput = wodImportSaveFromInput;
+        window.wodLoadSaveFromFolderBtn = wodLoadSaveFromFolderBtn;
 
         function resetAllGameProgress() {
             if(!confirm('Reset ALL progress — achievements, stats, gold, and skins? This cannot be undone.')) return;
@@ -24656,6 +24980,7 @@
 
         loadWodProgress();
         applyWodProfileToGame();
+        wodInitLocalSaveFolder();
         checkWodAchievements();
         updateSkinShop();
         renderAchievementsUi();
