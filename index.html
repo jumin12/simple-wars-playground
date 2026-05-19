@@ -8524,6 +8524,8 @@
         /** Meandering rivers — walk down a distance field toward water; skip paths that split passable land. */
         async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
             if(!gameData.hexList || gameData.hexList.length === 0) return;
+            gameData._procgenRiverWaterKeys = new Set();
+            gameData._procgenRiverBridgeSites = [];
             let rowCount = Math.floor(rows) | 0;
             let colM = Math.max(1, cols | 0);
             let rowM = Math.max(1, rowCount);
@@ -8630,6 +8632,39 @@
                     }
                 } else {
                     carved++;
+                    for(let rk of riverFillKeys) {
+                        let hx = gameData.hexes[rk];
+                        if(hx && isWaterHex(hx)) gameData._procgenRiverWaterKeys.add(rk);
+                    }
+                    let spanLo = Math.floor(path.length * 0.28);
+                    let spanHi = Math.ceil(path.length * 0.72);
+                    let midPi = (spanLo + spanHi) * 0.5;
+                    for(let pi = spanLo; pi <= spanHi; pi++) {
+                        if(pi <= 0 || pi >= path.length - 1) continue;
+                        let center = gameData.hexes[getHexKey(path[pi])];
+                        if(!center || !isWaterHex(center)) continue;
+                        if(!gameData._procgenRiverWaterKeys.has(getHexKey(center))) continue;
+                        let waterAdj = 0,
+                            landNbs = [];
+                        for(let nb of getNeighborHexes(center)) {
+                            if(!nb) continue;
+                            if(isWaterHex(nb)) waterAdj++;
+                            else if(landOk(nb)) landNbs.push(nb);
+                        }
+                        if(waterAdj > 3 || landNbs.length !== 2) continue;
+                        let landA = landNbs[0],
+                            landB = landNbs[1];
+                        let bankDist = Math.abs(landA.q - landB.q) + Math.abs(landA.r - landB.r);
+                        if(bankDist < 2) continue;
+                        let score = 3.2 - Math.abs(pi - midPi) / Math.max(1, spanHi - spanLo + 1);
+                        score += fbm(center.x * 0.009 + seedOffset + 5521, center.y * 0.009 + seedOffset + 5521, 3) * 0.35;
+                        gameData._procgenRiverBridgeSites.push({
+                            water: center,
+                            landA,
+                            landB,
+                            score
+                        });
+                    }
                 }
                 await wodMapGenYieldSlice();
             }
@@ -8648,7 +8683,9 @@
             }
             if(ha && hb) {
                 br.x = (ha.x + hb.x) * 0.5;
-                br.y = (ha.y + hb.y) * 0.5 - (gameData.hexRadius || 20) * 0.14;
+                br.y = (ha.y + hb.y) * 0.5;
+                br.angle = Math.atan2(hb.y - ha.y, hb.x - ha.x);
+                br.span = Math.hypot(hb.x - ha.x, hb.y - ha.y);
             }
         }
         function wodBridgeLinkTargets(hex) {
@@ -8678,53 +8715,30 @@
             }
             return false;
         }
-        /** Up to maxBridges neutral river crossings (land shore to land shore, not ocean tiles). */
+        /** Up to maxBridges on carved procedural rivers only (never lakes or generic inland water). */
         async function wodPlaceProceduralRiverBridges(seedOffset, mapShape, cols, rows, maxBridges) {
             maxBridges = maxBridges == null ? 2 : Math.max(0, maxBridges | 0);
-            if(!maxBridges) return;
             if(!gameData.bridges) gameData.bridges = [];
             gameData.bridges.length = 0;
-            let rowCount = Math.floor(rows) | 0;
-            let colM = Math.max(1, cols | 0);
-            let rowM = Math.max(1, rowCount);
-            let rivShape = wodMapShapeUsesRadialIslandMask(mapShape);
-            let oceanKeys = rivShape ? wodBuildOceanConnectedWaterKeys(colM, rowM) : null;
+            if(!maxBridges) return;
+            let riverKeys = gameData._procgenRiverWaterKeys;
+            let sites = gameData._procgenRiverBridgeSites || [];
+            if(!riverKeys || !riverKeys.size || !sites.length) return;
             let landOk = (h) => h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban';
-            let edgeDistH = (h) => Math.min(colM - Math.abs(h.q), rowM - Math.abs(h.r));
-            let candidates = [];
-            let hi = 0;
-            for(let h of gameData.hexList) {
-                if(!isWaterHex(h)) continue;
-                let wk = getHexKey(h);
-                if(rivShape && oceanKeys && oceanKeys.has(wk)) continue;
-                let landNbs = [];
-                for(let nb of getNeighborHexes(h)) {
-                    if(landOk(nb)) landNbs.push(nb);
-                }
-                if(landNbs.length < 2) continue;
-                for(let i = 0; i < landNbs.length; i++) {
-                    for(let j = i + 1; j < landNbs.length; j++) {
-                        let a = landNbs[i],
-                            b = landNbs[j];
-                        let man = Math.abs(a.q - b.q) + Math.abs(a.r - b.r);
-                        if(man < 2 || man > 3) continue;
-                        let score = man === 2 ? 2.8 : 1.1;
-                        score += fbm(h.x * 0.011 + seedOffset + 4411, h.y * 0.011 + seedOffset + 4411, 3) * 0.55;
-                        if(edgeDistH(h) < 7) score -= 1.4;
-                        candidates.push({ water: h, landA: a, landB: b, score });
-                    }
-                }
-                if((++hi & 511) === 0) await wodMapGenYieldSlice();
-            }
-            candidates.sort((a, b) => b.score - a.score);
+            sites.sort((a, b) => b.score - a.score);
             let usedShore = new Set();
             let placed = 0;
-            for(let ci = 0; ci < candidates.length && placed < maxBridges; ci++) {
-                let c = candidates[ci];
-                if(!landOk(c.landA) || !landOk(c.landB) || !isWaterHex(c.water)) continue;
+            for(let ci = 0; ci < sites.length && placed < maxBridges; ci++) {
+                let c = sites[ci];
+                if(!c || !c.water || !c.landA || !c.landB) continue;
+                let wk = getHexKey(c.water);
+                if(!riverKeys.has(wk) || !isWaterHex(c.water)) continue;
+                if(!landOk(c.landA) || !landOk(c.landB)) continue;
                 let ak = getHexKey(c.landA),
                     bk = getHexKey(c.landB);
                 if(usedShore.has(ak) || usedShore.has(bk)) continue;
+                let bankDist = Math.abs(c.landA.q - c.landB.q) + Math.abs(c.landA.r - c.landB.r);
+                if(bankDist < 2) continue;
                 let br = {
                     id: 'br_' + placed + '_' + ((Math.random() * 1e7) | 0),
                     owner: 0,
@@ -8736,10 +8750,12 @@
                     y: 0
                 };
                 wodSyncBridgeWorldCoords(br);
+                if(!br.span || br.span < 10) continue;
                 gameData.bridges.push(br);
                 usedShore.add(ak);
                 usedShore.add(bk);
                 placed++;
+                if((placed & 1) === 0) await wodMapGenYieldSlice();
             }
         }
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
@@ -18128,6 +18144,8 @@
 
             gameData.hexes = {}; gameData.hexList = [];
             gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = []; gameData.bridges = [];
+            gameData._procgenRiverWaterKeys = null;
+            gameData._procgenRiverBridgeSites = null;
             gameData._wodCitySplitAnglePhase = null;
 
             let seedOffset = Math.random() * 10000;
@@ -26364,49 +26382,65 @@
             let ha = gameData.hexes[`${br.landA.q},${br.landA.r}`];
             let hb = gameData.hexes[`${br.landB.q},${br.landB.r}`];
             if(!ha || !hb) return;
-            let mx = (ha.x + hb.x) * 0.5,
-                my = (ha.y + hb.y) * 0.5;
-            let footprint = fxLite ? 34 : 44;
+            let ax = ha.x,
+                ay = ha.y,
+                bx = hb.x,
+                by = hb.y;
+            let mx = (ax + bx) * 0.5,
+                my = (ay + by) * 0.5;
+            let span = Math.hypot(bx - ax, by - ay);
+            if(span < 10) return;
+            let footprint = span * 0.55 + (fxLite ? 18 : 24);
             if(typeof culPadFn === 'function' && !culPadFn(mx, my, footprint)) return;
-            let ang = Math.atan2(hb.y - ha.y, hb.x - ha.x);
-            let span = Math.hypot(hb.x - ha.x, hb.y - ha.y);
-            let plankN = Math.max(4, Math.min(9, Math.round(span / (fxLite ? 11 : 9))));
+            let ang = br.angle != null ? br.angle : Math.atan2(by - ay, bx - ax);
+            let inset = Math.min(span * 0.14, (gameData.hexRadius || 20) * 0.55);
+            let deckLen = Math.max(14, span - inset * 2);
+            let deckH = fxLite ? 6.5 : 8.5;
+            let plankN = Math.max(5, Math.min(12, Math.round(deckLen / (fxLite ? 9 : 7))));
             ctx.save();
             ctx.translate(mx, my);
             ctx.rotate(ang);
-            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.fillStyle = 'rgba(0,0,0,0.24)';
             ctx.beginPath();
-            ctx.ellipse(0, fxLite ? 5 : 7, span * 0.42, fxLite ? 5 : 6.5, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, fxLite ? 6 : 8, deckLen * 0.48, fxLite ? 6 : 8, 0, 0, Math.PI * 2);
             ctx.fill();
-            let deckW = span * 0.82,
-                deckH = fxLite ? 5.5 : 7.2;
-            ctx.fillStyle = '#6b4f2f';
+            let railH = fxLite ? 3.2 : 4.2;
+            ctx.strokeStyle = '#5c4228';
+            ctx.lineWidth = fxLite ? 1.15 : 1.5;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(-deckLen * 0.5, -deckH * 0.5 - railH);
+            ctx.lineTo(deckLen * 0.5, -deckH * 0.5 - railH);
+            ctx.moveTo(-deckLen * 0.5, deckH * 0.5 + railH);
+            ctx.lineTo(deckLen * 0.5, deckH * 0.5 + railH);
+            ctx.stroke();
+            ctx.fillStyle = '#7a5a36';
             ctx.strokeStyle = '#3d2a18';
-            ctx.lineWidth = fxLite ? 1.1 : 1.45;
-            ctx.fillRect(-deckW * 0.5, -deckH * 0.5, deckW, deckH);
-            ctx.strokeRect(-deckW * 0.5, -deckH * 0.5, deckW, deckH);
-            ctx.strokeStyle = '#8a6540';
-            ctx.lineWidth = fxLite ? 0.75 : 0.95;
-            let step = deckW / plankN;
+            ctx.lineWidth = fxLite ? 1.05 : 1.35;
+            ctx.fillRect(-deckLen * 0.5, -deckH * 0.5, deckLen, deckH);
+            ctx.strokeRect(-deckLen * 0.5, -deckH * 0.5, deckLen, deckH);
+            ctx.strokeStyle = '#9a7048';
+            ctx.lineWidth = fxLite ? 0.7 : 0.9;
+            let step = deckLen / plankN;
             for(let pi = 1; pi < plankN; pi++) {
-                let px = -deckW * 0.5 + pi * step;
+                let px = -deckLen * 0.5 + pi * step;
                 ctx.beginPath();
                 ctx.moveTo(px, -deckH * 0.5);
                 ctx.lineTo(px, deckH * 0.5);
                 ctx.stroke();
             }
-            let pierW = fxLite ? 4.2 : 5.4,
-                pierH = fxLite ? 7.5 : 9.5;
+            let postW = fxLite ? 4.5 : 5.8,
+                postH = fxLite ? 8.5 : 11;
             ctx.fillStyle = '#4a3828';
             ctx.strokeStyle = '#2a1e14';
-            ctx.lineWidth = fxLite ? 1 : 1.2;
-            for(let side = -1; side <= 1; side += 2) {
-                let px = side * deckW * 0.46;
-                ctx.fillRect(px - pierW * 0.5, deckH * 0.5, pierW, pierH);
-                ctx.strokeRect(px - pierW * 0.5, deckH * 0.5, pierW, pierH);
+            ctx.lineWidth = fxLite ? 1 : 1.25;
+            for(let end = -1; end <= 1; end += 2) {
+                let px = end * deckLen * 0.5;
+                ctx.fillRect(px - postW * 0.5, deckH * 0.5 - 1, postW, postH);
+                ctx.strokeRect(px - postW * 0.5, deckH * 0.5 - 1, postW, postH);
             }
-            ctx.fillStyle = 'rgba(210, 190, 150, 0.35)';
-            ctx.fillRect(-deckW * 0.46, -deckH * 0.35, deckW * 0.92, deckH * 0.42);
+            ctx.fillStyle = 'rgba(220, 200, 160, 0.28)';
+            ctx.fillRect(-deckLen * 0.44, -deckH * 0.32, deckLen * 0.88, deckH * 0.38);
             ctx.restore();
         }
         function wodFortPlacementRingRadiusSq() {
