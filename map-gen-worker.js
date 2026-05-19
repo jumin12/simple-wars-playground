@@ -35,6 +35,66 @@
         return mapShape === 'rectangle' || mapShape === 'forest' || mapShape === 'mountain' || mapShape === 'desert';
     }
 
+    const NEIGHBOR_DR = [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+        [1, 1],
+        [-1, -1],
+        [1, -1],
+        [-1, 1]
+    ];
+
+    /** Remove single-cell biome speckles and inland water dots (runs off-thread). */
+    function smoothTerrainHexList(hexList) {
+        let key = (q, r) => q + ',' + r;
+        let map = new Map();
+        for (let i = 0; i < hexList.length; i++) {
+            let h = hexList[i];
+            map.set(key(h.q, h.r), h);
+        }
+        for (let pass = 0; pass < 3; pass++) {
+            let changes = [];
+            for (let i = 0; i < hexList.length; i++) {
+                let h = hexList[i];
+                if (h.type === 'water') {
+                    let landN = 0;
+                    for (let d = 0; d < NEIGHBOR_DR.length; d++) {
+                        let nb = map.get(key(h.q + NEIGHBOR_DR[d][0], h.r + NEIGHBOR_DR[d][1]));
+                        if (nb && nb.type !== 'water' && nb.type !== 'mountain') landN++;
+                    }
+                    if (landN >= 6) changes.push([h, 'grass']);
+                    continue;
+                }
+                if (h.type === 'mountain') continue;
+                let counts = {};
+                let same = 0;
+                let landTotal = 0;
+                for (let d = 0; d < NEIGHBOR_DR.length; d++) {
+                    let nb = map.get(key(h.q + NEIGHBOR_DR[d][0], h.r + NEIGHBOR_DR[d][1]));
+                    if (!nb || nb.type === 'water' || nb.type === 'mountain') continue;
+                    landTotal++;
+                    counts[nb.type] = (counts[nb.type] || 0) + 1;
+                    if (nb.type === h.type) same++;
+                }
+                if (landTotal < 2) continue;
+                let best = h.type;
+                let bestC = 0;
+                for (let t in counts) {
+                    if (counts[t] > bestC) {
+                        bestC = counts[t];
+                        best = t;
+                    }
+                }
+                let need = pass === 0 ? 4 : 3;
+                if (same <= 1 && bestC >= 3) changes.push([h, best]);
+                else if (best !== h.type && bestC >= need && bestC >= landTotal - 2) changes.push([h, best]);
+            }
+            for (let c = 0; c < changes.length; c++) changes[c][0].type = changes[c][1];
+        }
+    }
+
     function generateTerrainCells(d) {
         let mapR = d.mapR;
         let hr = d.hr;
@@ -48,10 +108,8 @@
         let rect = usesRect(mapShape);
         let hexList = [];
         let scale = 0.004;
-        let rMin = d.rMin != null ? d.rMin : -rows;
-        let rMax = d.rMax != null ? d.rMax : rows;
 
-        for (let r = rMin; r <= rMax; r++) {
+        for (let r = -rows; r <= rows; r++) {
             for (let q = -cols; q <= cols; q++) {
                 let x = q * spacing;
                 let y = r * spacing;
@@ -154,7 +212,7 @@
 
                 let continent = fbm((x + warpX) * scale + seedOffset, (y + warpY) * scale + seedOffset, 6);
                 let detail = fbm(x * scale * 3 + seedOffset + 2000, y * scale * 3 + seedOffset + 2000, 4);
-                let elev = continent * 0.8 + detail * 0.2 + (mask - 0.55);
+                let elev = continent * 0.88 + detail * 0.12 + (mask - 0.55);
                 let moist = fbm((x + warpX) * scale + seedOffset + 5000, (y + warpY) * scale + seedOffset + 5000, 4);
                 let mo = moist + (gp.moistShift != null ? gp.moistShift : 0);
                 let fb = gp.forestMoistBoost != null ? gp.forestMoistBoost : 0;
@@ -167,13 +225,13 @@
                     let v = wy * scale;
                     let macro = continent;
                     let meso = fbm(wx * scale * 1.42 + seedOffset + 6110, wy * scale * 1.42 + seedOffset + 6110, 5);
-                    let heightCore = macro * 0.41 + meso * 0.38 + detail * 0.21;
+                    let heightCore = macro * 0.45 + meso * 0.42 + detail * 0.13;
                     let valleySoft = macro * meso + (1 - macro) * 0.06;
                     let heightLand = Math.max(0.02, Math.min(0.93, heightCore - valleySoft * 0.17));
                     let hiMicro =
-                        (fbm(wx * scale * 5.9 + seedOffset + 7211, wy * scale * 5.9 + seedOffset + 7211, 3) - 0.5) * 0.048;
+                        (fbm(wx * scale * 5.9 + seedOffset + 7211, wy * scale * 5.9 + seedOffset + 7211, 3) - 0.5) * 0.028;
                     let hiMeso =
-                        (fbm(wx * scale * 8.4 + seedOffset + 1122, wy * scale * 8.4 + seedOffset + 1122, 2) - 0.5) * 0.032;
+                        (fbm(wx * scale * 8.4 + seedOffset + 1122, wy * scale * 8.4 + seedOffset + 1122, 2) - 0.5) * 0.018;
                     heightLand = Math.max(0.02, Math.min(0.93, heightLand + hiMicro + hiMeso));
                     let edgePad = Math.max(Math.abs(q) / Math.max(mapR, 1), Math.abs(r) / Math.max(rows, 1));
                     let interior = Math.max(0.08, 1 - edgePad * 0.72);
@@ -211,10 +269,10 @@
                     else {
                         let bioJ =
                             (fbm(wx * scale * 4.35 + seedOffset + 9120, wy * scale * 4.35 + seedOffset + 9120, 4) - 0.5) *
-                            0.095;
+                            0.045;
                         let patch = fbm(wx * scale * 2.12 + seedOffset + 8140, wy * scale * 2.12 + seedOffset + 8140, 5);
                         let bio =
-                            moist * 0.67 + (heightLand - 0.38) * 0.33 + (interior - 0.5) * 0.095 + patch * 0.07 + bioJ;
+                            moist * 0.72 + (heightLand - 0.38) * 0.28 + (interior - 0.5) * 0.08 + patch * 0.04 + bioJ;
                         let acc = gp.biomeAccent;
                         if (acc === 'marsh') bio += 0.072 + edgePad * 0.038;
                         else if (acc === 'dry') bio -= 0.078;
@@ -261,6 +319,7 @@
                 hexList.push({ q, r, x, y, type });
             }
         }
+        smoothTerrainHexList(hexList);
         return hexList;
     }
 
@@ -269,9 +328,9 @@
         if (!d || d.cmd !== 'terrain') return;
         try {
             let hexList = generateTerrainCells(d);
-            self.postMessage({ ok: true, hexList, jobId: d.jobId, shard: d.shard });
+            self.postMessage({ ok: true, hexList, jobId: d.jobId });
         } catch (err) {
-            self.postMessage({ ok: false, err: String(err && err.message ? err.message : err), jobId: d.jobId, shard: d.shard });
+            self.postMessage({ ok: false, err: String(err && err.message ? err.message : err), jobId: d.jobId });
         }
     };
 })();

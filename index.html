@@ -8142,6 +8142,46 @@
             hex.baseColor = getTerrainColor(type);
             hex.renderColor = hex.baseColor;
         }
+        /** Merge orphan land/water cells into neighboring regions (fixes one-off hex speckles). */
+        async function wodCoalesceTerrainSpeckles(passesOpt) {
+            let passes = passesOpt == null ? 3 : passesOpt;
+            let fast = !!gameData._wodFastMapGen;
+            for(let pass = 0; pass < passes; pass++) {
+                let changes = [];
+                for(let h of gameData.hexList) {
+                    if(!h || h.type === 'urban') continue;
+                    if(isWaterHex(h)) {
+                        let landN = 0;
+                        for(let nb of getNeighborHexes(h)) {
+                            if(nb && !isWaterHex(nb) && nb.type !== 'mountain') landN++;
+                        }
+                        if(landN >= 6) changes.push({ h, type: 'grass' });
+                        continue;
+                    }
+                    if(h.type === 'mountain') continue;
+                    let counts = {}, same = 0, landTotal = 0;
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!nb || isWaterHex(nb) || nb.type === 'urban' || nb.type === 'mountain') continue;
+                        landTotal++;
+                        counts[nb.type] = (counts[nb.type] || 0) + 1;
+                        if(nb.type === h.type) same++;
+                    }
+                    if(landTotal < 2) continue;
+                    let best = h.type, bestC = 0;
+                    for(let t in counts) {
+                        if(counts[t] > bestC) {
+                            bestC = counts[t];
+                            best = t;
+                        }
+                    }
+                    let need = pass === 0 ? 4 : 3;
+                    if(same <= 1 && bestC >= 3) changes.push({ h, type: best });
+                    else if(best !== h.type && bestC >= need && bestC >= landTotal - 2) changes.push({ h, type: best });
+                }
+                for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
+                if(!fast && pass + 1 < passes) await wodMapGenYieldSlice();
+            }
+        }
         async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
             if(!wodMapShapeUsesRadialIslandMask(gameData.mapShape)) return;
             let pad = Math.max(1, bufferTiles || 5);
@@ -8155,10 +8195,10 @@
                 }
                 if(edgeDist < feather) {
                     let t = (feather - edgeDist) / Math.max(1, feather - pad);
-                    let n = fbm(h.x * 0.018 + seedOffset + 8120, h.y * 0.018 + seedOffset + 8120, 4);
-                    if(n < 0.35 + t * 0.42) wodSetGeneratedTerrainType(h, 'water');
+                    if(t > 0.42) wodSetGeneratedTerrainType(h, 'water');
+                    else if(t > 0.22 && h.type === 'sand') wodSetGeneratedTerrainType(h, 'sand');
                 }
-                if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                if((++hi & 1023) === 0) await wodMapGenYieldSlice();
             }
         }
         async function wodNormalizeRectangleWaterFeatures(seedOffset) {
@@ -8522,7 +8562,8 @@
             }
         }
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
-            for(let pass = 0; pass < 2; pass++) {
+            let blendPasses = gameData._wodFastMapGen ? 1 : 2;
+            for(let pass = 0; pass < blendPasses; pass++) {
                 let changes = [];
                 let hi = 0;
                 for(let h of gameData.hexList) {
@@ -8546,12 +8587,11 @@
                         }
                     }
                     if(waterAdj >= 2 && h.type !== 'sand' && h.type !== 'swamp') {
-                        let wet = fbm(h.x * 0.011 + seedOffset + 4410, h.y * 0.011 + seedOffset + 4410, 4);
-                        changes.push({ h, type: wet > 0.58 ? 'swamp' : 'sand' });
-                    } else if(bestType !== h.type && bestCount >= (pass === 0 ? 5 : 4)) {
+                        changes.push({ h, type: 'sand' });
+                    } else if(bestType !== h.type && bestCount >= (pass === 0 ? 4 : 3)) {
                         changes.push({ h, type: bestType });
                     }
-                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                    if((++hi & 1023) === 0) await wodMapGenYieldSlice();
                 }
                 for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
             }
@@ -8559,15 +8599,21 @@
             let hi2 = 0;
             for(let h of gameData.hexList) {
                 if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
-                let wet = fbm(h.x * 0.0065 + seedOffset + 4700, h.y * 0.0065 + seedOffset + 4700, 5);
-                let heat = fbm(h.x * 0.0042 + seedOffset + 4800, h.y * 0.0042 + seedOffset + 4800, 3);
+                let wet = fbm(h.x * 0.0048 + seedOffset + 4700, h.y * 0.0048 + seedOffset + 4700, 4);
                 let coast = getNeighborHexes(h).some(nb => nb && isWaterHex(nb));
                 if(coast) continue;
-                if(wet > 0.78 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'forest');
-                else if(wet > 0.68 && heat < 0.42 && h.type === 'grass') wodSetGeneratedTerrainType(h, 'swamp');
-                else if(wet < 0.22 && (h.type === 'grass' || h.type === 'hill')) wodSetGeneratedTerrainType(h, 'sand');
-                else if(wet > 0.36 && wet < 0.62 && h.type === 'sand' && !wodMapShapeUsesRadialIslandMask(mapShape)) wodSetGeneratedTerrainType(h, 'grass');
-                if((++hi2 & 255) === 0) await wodMapGenYieldSlice();
+                let nForest = 0, nGrass = 0, nSand = 0;
+                for(let nb of getNeighborHexes(h)) {
+                    if(!nb || isWaterHex(nb) || nb.type === 'mountain') continue;
+                    if(nb.type === 'forest') nForest++;
+                    else if(nb.type === 'grass') nGrass++;
+                    else if(nb.type === 'sand') nSand++;
+                }
+                if(wet > 0.72 && h.type === 'grass' && nForest >= 3) wodSetGeneratedTerrainType(h, 'forest');
+                else if(wet < 0.28 && h.type === 'grass' && nSand >= 3) wodSetGeneratedTerrainType(h, 'sand');
+                else if(wet > 0.58 && wet < 0.7 && h.type === 'sand' && nGrass >= 4 && !wodMapShapeUsesRadialIslandMask(mapShape))
+                    wodSetGeneratedTerrainType(h, 'grass');
+                if((++hi2 & 1023) === 0) await wodMapGenYieldSlice();
             }
         }
         /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
@@ -17765,12 +17811,12 @@
             if(!st) return;
             if(gameData._wodFastMapGen) {
                 st.fastTick = (st.fastTick || 0) + 1;
-                if((st.fastTick & 127) !== 0) return;
+                if((st.fastTick & 1023) !== 0) return;
             }
             let now = performance.now();
             if(now < st.due) return;
             await wodYieldToMainThread();
-            st.due = performance.now() + (gameData._wodFastMapGen ? 6 : st.budget);
+            st.due = performance.now() + (gameData._wodFastMapGen ? 4 : st.budget);
         }
 
         function wodYieldToMainThread() {
@@ -17799,7 +17845,7 @@
             }
             try {
             gameData._wodFastMapGen = true;
-            wodMapGenYieldingStart(8);
+            wodMapGenYieldingStart(4);
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 10000;
             gameData.income = 10;             gameData.selection = [];
@@ -17989,7 +18035,7 @@
                     
                     let continent = fbm((x + warpX) * scale + seedOffset, (y + warpY) * scale + seedOffset, 6);
                     let detail = fbm(x * scale * 3 + seedOffset + 2000, y * scale * 3 + seedOffset + 2000, 4);
-                    let elev = (continent * 0.8 + detail * 0.2) + (mask - 0.55);
+                    let elev = (continent * 0.88 + detail * 0.12) + (mask - 0.55);
                     let moist = fbm((x + warpX) * scale + seedOffset + 5000, (y + warpY) * scale + seedOffset + 5000, 4);
                     let gp2 = gameData._genProfile || {};
                     let mo = moist + (gp2.moistShift != null ? gp2.moistShift : 0);
@@ -18003,13 +18049,13 @@
                         let v = wy * scale;
                         let macro = continent;
                         let meso = fbm(wx * scale * 1.42 + seedOffset + 6110, wy * scale * 1.42 + seedOffset + 6110, 5);
-                        let heightCore = macro * 0.41 + meso * 0.38 + detail * 0.21;
+                        let heightCore = macro * 0.45 + meso * 0.42 + detail * 0.13;
                         let valleySoft = macro * meso + (1 - macro) * 0.06;
                         let heightLand = Math.max(0.02, Math.min(0.93, heightCore - valleySoft * 0.17));
                         let hiMicro =
-                            (fbm(wx * scale * 5.9 + seedOffset + 7211, wy * scale * 5.9 + seedOffset + 7211, 3) - 0.5) * 0.048;
+                            (fbm(wx * scale * 5.9 + seedOffset + 7211, wy * scale * 5.9 + seedOffset + 7211, 3) - 0.5) * 0.028;
                         let hiMeso =
-                            (fbm(wx * scale * 8.4 + seedOffset + 1122, wy * scale * 8.4 + seedOffset + 1122, 2) - 0.5) * 0.032;
+                            (fbm(wx * scale * 8.4 + seedOffset + 1122, wy * scale * 8.4 + seedOffset + 1122, 2) - 0.5) * 0.018;
                         heightLand = Math.max(0.02, Math.min(0.93, heightLand + hiMicro + hiMeso));
 
                         let edgePad = Math.max(Math.abs(q) / Math.max(mapR, 1), Math.abs(r) / Math.max(rows, 1));
@@ -18045,13 +18091,13 @@
                         else if (heightLand < 0.34 && ridge < 0.48 && macro < 0.46) type = 'swamp';
                         else {
                             let bioJ =
-                                (fbm(wx * scale * 4.35 + seedOffset + 9120, wy * scale * 4.35 + seedOffset + 9120, 4) - 0.5) * 0.095;
+                                (fbm(wx * scale * 4.35 + seedOffset + 9120, wy * scale * 4.35 + seedOffset + 9120, 4) - 0.5) * 0.045;
                             let patch = fbm(wx * scale * 2.12 + seedOffset + 8140, wy * scale * 2.12 + seedOffset + 8140, 5);
                             let bio =
-                                moist * 0.67 +
-                                (heightLand - 0.38) * 0.33 +
-                                (interior - 0.5) * 0.095 +
-                                patch * 0.07 +
+                                moist * 0.72 +
+                                (heightLand - 0.38) * 0.28 +
+                                (interior - 0.5) * 0.08 +
+                                patch * 0.04 +
                                 bioJ;
                             let acc = gPrm.biomeAccent;
                             if(acc === 'marsh') bio += 0.072 + edgePad * 0.038;
@@ -18109,6 +18155,7 @@
 
             await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
             await wodNaturalizeBiomeBlends(seedOffset, mapShape);
+            await wodCoalesceTerrainSpeckles(2);
             await wodPaintRectangleMapPerimeterWater(cols, rows);
             await wodNormalizeRectangleWaterFeatures(seedOffset);
             limitRectangleMountainDensity(mapShape, seedOffset);
@@ -18117,10 +18164,11 @@
             // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
             await ensureMountainPasses();
             await softenLandFullyBlockedByMountainRing();
-            await ensureMountainPasses();
+            if(!gameData._wodFastMapGen) await ensureMountainPasses();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
             await wodCarveProceduralRivers(seedOffset, mapShape, cols, rows);
             await wodPaintCoastalSandAllLand();
+            await wodCoalesceTerrainSpeckles(2);
             wodCaptureTerrainPoliticsBase();
 
             await wodMapGenYieldSlice();
