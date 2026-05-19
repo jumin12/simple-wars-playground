@@ -1822,6 +1822,20 @@
             border-color: #f1c40f;
             box-shadow: 0 0 0 1px rgba(241, 196, 15, 0.35);
         }
+        .shop-option-card.shop-visual-locked {
+            opacity: 0.82;
+        }
+        .shop-option-card .shop-visual-footer {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            margin-top: 4px;
+            font-size: 0.72rem;
+        }
+        .shop-option-card .shop-visual-state { color: #95a5a6; font-weight: 700; }
+        .shop-option-card:not(.shop-visual-locked) .shop-visual-state { color: #2ecc71; }
+        .shop-option-card .shop-visual-price { color: #f1c40f; font-weight: 700; }
+        .shop-option-card:not(.shop-visual-locked) .shop-visual-price { display: none; }
         .shop-option-title { font-weight: 700; }
         .shop-option-desc { font-size: 0.78rem; color: #95a5a6; }
         .shop-option-badge {
@@ -1837,8 +1851,9 @@
         }
         .shop-color-swatch {
             display: flex;
-            align-items: center;
-            gap: 8px;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 6px;
             padding: 10px 10px;
             border-radius: 8px;
             border: 2px solid rgba(255, 255, 255, 0.2);
@@ -1860,6 +1875,16 @@
             border-color: #f1c40f;
             box-shadow: 0 0 0 1px rgba(241, 196, 15, 0.4);
         }
+        .shop-color-swatch .shop-swatch-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .shop-color-swatch .shop-visual-footer {
+            width: 100%;
+        }
+        .shop-color-swatch.shop-visual-locked .shop-visual-state { color: #95a5a6; }
+        .shop-color-swatch:not(.shop-visual-locked) .shop-visual-footer { display: none; }
         .shop-empty-state {
             padding: 28px 16px;
             text-align: center;
@@ -1883,21 +1908,32 @@
             background: linear-gradient(135deg, #2d6a4f 0%, #40916c 40%, #74c69d 70%, #1b4332 100%);
         }
         .frontline-preview-solid::after,
-        .frontline-preview-dotted::after {
+        .frontline-preview-dotted::after,
+        .frontline-preview-double::before,
+        .frontline-preview-double::after {
             content: '';
             position: absolute;
             left: 8%;
             right: 8%;
-            top: 50%;
-            height: 4px;
-            transform: translateY(-50%);
+            height: 3px;
             border-radius: 2px;
+            background: #050505;
         }
-        .frontline-preview-solid::after { background: #050505; }
+        .frontline-preview-solid::after {
+            top: 50%;
+            transform: translateY(-50%);
+            height: 4px;
+        }
         .frontline-preview-dotted::after {
+            top: 50%;
+            transform: translateY(-50%);
+            height: 4px;
             background: repeating-linear-gradient(90deg, #050505 0 10px, transparent 10px 16px);
         }
+        .frontline-preview-double::before { top: 38%; }
+        .frontline-preview-double::after { top: 58%; }
         .command-preview-default::after,
+        .command-preview-dotted::after,
         .command-preview-line::after {
             content: '';
             position: absolute;
@@ -1905,7 +1941,7 @@
             right: 18%;
             top: 58%;
             height: 3px;
-            background: #f1c40f;
+            background: #d4af37;
             transform: rotate(-8deg);
             transform-origin: left center;
             border-radius: 2px;
@@ -1919,10 +1955,26 @@
             height: 0;
             border-top: 7px solid transparent;
             border-bottom: 7px solid transparent;
-            border-left: 12px solid #f1c40f;
+            border-left: 12px solid #d4af37;
             transform: rotate(-8deg);
         }
+        .command-preview-line::after { background: #d4af37; }
         .command-preview-line::before { display: none; }
+        .command-preview-dotted::after {
+            background: repeating-linear-gradient(90deg, #d4af37 0 8px, transparent 8px 13px);
+        }
+        .command-preview-dotted::before {
+            content: '';
+            position: absolute;
+            right: 14%;
+            top: 48%;
+            width: 0;
+            height: 0;
+            border-top: 7px solid transparent;
+            border-bottom: 7px solid transparent;
+            border-left: 12px solid #d4af37;
+            transform: rotate(-8deg);
+        }
 
         #shopPanel .skin-grid-scroll {
             max-height: none;
@@ -6123,41 +6175,57 @@
                     </div>
                 </div>
 
-                <div id="shopTabCommand" class="shop-tab-pane" data-shop-pane="command" role="tabpanel" hidden>
-                    <p class="shop-tab-lead">Customize frontline borders and movement command arrows.</p>
+                <motion id="shopTabCommand" class="shop-tab-pane" data-shop-pane="command" role="tabpanel" hidden>
+                    <p class="shop-tab-lead">Spend <strong>100 gold</strong> to unlock frontline and command styles. Colors apply to both.</p>
 
                     <div class="shop-subsection">
                         <h3 class="shop-subsection-title">Frontline</h3>
                         <p class="shop-tab-lead" style="margin-top:0">Border between painted territory zones.</p>
                         <div class="shop-option-grid" id="shopFrontlineOptions">
-                            <button type="button" class="shop-option-card active" data-frontline-style="solid" onclick="setShopFrontlineStyle('solid')">
+                            <button type="button" class="shop-option-card active" data-frontline-style="solid" onclick="wodSelectShopVisual(null, 'frontlineStyle', 'solid')">
                                 <span class="shop-option-preview frontline-preview-solid" aria-hidden="true"></span>
-                                <span class="shop-option-title">Solid black</span>
+                                <span class="shop-option-title">Solid</span>
                                 <span class="shop-option-badge">Default</span>
                             </button>
-                            <button type="button" class="shop-option-card" data-frontline-style="dotted" onclick="setShopFrontlineStyle('dotted')">
+                            <button type="button" class="shop-option-card shop-visual-locked" data-shop-visual="viz_frontline_dotted" data-frontline-style="dotted" onclick="wodSelectShopVisual('viz_frontline_dotted', 'frontlineStyle', 'dotted')">
                                 <span class="shop-option-preview frontline-preview-dotted" aria-hidden="true"></span>
-                                <span class="shop-option-title">Dotted line</span>
+                                <span class="shop-option-title">Dotted</span>
+                                <span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">100g</span></span>
+                            </button>
+                            <button type="button" class="shop-option-card shop-visual-locked" data-shop-visual="viz_frontline_double" data-frontline-style="double" onclick="wodSelectShopVisual('viz_frontline_double', 'frontlineStyle', 'double')">
+                                <span class="shop-option-preview frontline-preview-double" aria-hidden="true"></span>
+                                <span class="shop-option-title">Double line</span>
+                                <span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">100g</span></span>
                             </button>
                         </div>
                     </div>
 
                     <div class="shop-subsection">
                         <h3 class="shop-subsection-title">Command arrow</h3>
-                        <p class="shop-tab-lead" style="margin-top:0">Style and color for movement orders on the map.</p>
+                        <p class="shop-tab-lead" style="margin-top:0">Movement order style on the map.</p>
                         <div class="shop-option-grid" id="shopCommandStyleOptions">
-                            <button type="button" class="shop-option-card active" data-command-style="default" onclick="setShopCommandArrowStyle('default')">
+                            <button type="button" class="shop-option-card active" data-command-style="default" onclick="wodSelectShopVisual(null, 'commandArrowStyle', 'default')">
                                 <span class="shop-option-preview command-preview-default" aria-hidden="true"></span>
-                                <span class="shop-option-title">Default arrow</span>
+                                <span class="shop-option-title">Arrow</span>
                                 <span class="shop-option-badge">Default</span>
                             </button>
-                            <button type="button" class="shop-option-card" data-command-style="line" onclick="setShopCommandArrowStyle('line')">
+                            <button type="button" class="shop-option-card shop-visual-locked" data-shop-visual="viz_arrow_dotted" data-command-style="dotted" onclick="wodSelectShopVisual('viz_arrow_dotted', 'commandArrowStyle', 'dotted')">
+                                <span class="shop-option-preview command-preview-dotted" aria-hidden="true"></span>
+                                <span class="shop-option-title">Dotted arrow</span>
+                                <span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">100g</span></span>
+                            </button>
+                            <button type="button" class="shop-option-card shop-visual-locked" data-shop-visual="viz_arrow_line" data-command-style="line" onclick="wodSelectShopVisual('viz_arrow_line', 'commandArrowStyle', 'line')">
                                 <span class="shop-option-preview command-preview-line" aria-hidden="true"></span>
-                                <span class="shop-option-title">Line only</span>
+                                <span class="shop-option-title">Line</span>
+                                <span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">100g</span></span>
                             </button>
                         </div>
-                        <p class="shop-mini-label">Arrow color</p>
-                        <div class="shop-color-grid" id="shopCommandColorSwatches" role="group" aria-label="Command arrow color"></div>
+                    </div>
+
+                    <div class="shop-subsection">
+                        <h3 class="shop-subsection-title">Line color</h3>
+                        <p class="shop-tab-lead" style="margin-top:0">Shared by frontlines and command arrows.</p>
+                        <div class="shop-color-grid" id="shopLineColorSwatches" role="group" aria-label="Line color"></div>
                     </div>
                 </div>
 
@@ -7439,6 +7507,7 @@
             unitSkin: 'nato',
             aiUnitSkin: 'nato',
             ownedUnitSkins: { nato: true },
+            ownedShopVisuals: {},
             gamePeriod: 'modern',
             terrainViewMode: 'natural',
             menuAttractMode: false,
@@ -7449,7 +7518,7 @@
                 orderArrowsUsePathfinding: true,
                 frontlineStyle: 'solid',
                 commandArrowStyle: 'default',
-                commandArrowColor: 'yellow',
+                lineColor: 'gold',
                 mapSkin: 'default'
             },
             mp: null,
@@ -7465,10 +7534,25 @@
             let u = gameData.uiSettings;
             if(!u) gameData.uiSettings = {};
             u = gameData.uiSettings;
-            if(u.frontlineStyle !== 'solid' && u.frontlineStyle !== 'dotted') u.frontlineStyle = 'solid';
-            if(u.commandArrowStyle !== 'default' && u.commandArrowStyle !== 'line') u.commandArrowStyle = 'default';
-            if(!u.commandArrowColor) u.commandArrowColor = 'yellow';
+            if(u.frontlineStyle !== 'solid' && u.frontlineStyle !== 'dotted' && u.frontlineStyle !== 'double')
+                u.frontlineStyle = 'solid';
+            if(u.commandArrowStyle !== 'default' && u.commandArrowStyle !== 'dotted' && u.commandArrowStyle !== 'line')
+                u.commandArrowStyle = 'default';
+            if(u.commandArrowColor && !u.lineColor) {
+                u.lineColor = u.commandArrowColor === 'yellow' ? 'gold' : u.commandArrowColor;
+            }
+            if(!['gold', 'black', 'white', 'silver'].includes(u.lineColor)) u.lineColor = 'gold';
             if(!u.mapSkin) u.mapSkin = 'default';
+        }
+
+        function wodEnsureOwnedShopVisuals() {
+            if(!gameData.ownedShopVisuals) gameData.ownedShopVisuals = {};
+        }
+
+        function wodOwnsShopVisual(shopId) {
+            if(!shopId) return true;
+            wodEnsureOwnedShopVisuals();
+            return !!gameData.ownedShopVisuals[shopId];
         }
 
         function loadUiSettingsFromStorage() {
@@ -7480,12 +7564,14 @@
                         gameData.uiSettings.showOrdersWhenDeselected = s.showOrdersWhenDeselected;
                     gameData.uiSettings.orderArrowsUsePathfinding = typeof s.orderArrowsUsePathfinding === 'boolean'
                         ? s.orderArrowsUsePathfinding : true;
-                    if(s.frontlineStyle === 'solid' || s.frontlineStyle === 'dotted')
+                    if(s.frontlineStyle === 'solid' || s.frontlineStyle === 'dotted' || s.frontlineStyle === 'double')
                         gameData.uiSettings.frontlineStyle = s.frontlineStyle;
-                    if(s.commandArrowStyle === 'default' || s.commandArrowStyle === 'line')
+                    if(s.commandArrowStyle === 'default' || s.commandArrowStyle === 'dotted' || s.commandArrowStyle === 'line')
                         gameData.uiSettings.commandArrowStyle = s.commandArrowStyle;
-                    if(typeof s.commandArrowColor === 'string')
-                        gameData.uiSettings.commandArrowColor = s.commandArrowColor;
+                    if(typeof s.lineColor === 'string')
+                        gameData.uiSettings.lineColor = s.lineColor;
+                    else if(typeof s.commandArrowColor === 'string')
+                        gameData.uiSettings.lineColor = s.commandArrowColor === 'yellow' ? 'gold' : s.commandArrowColor;
                     if(typeof s.mapSkin === 'string')
                         gameData.uiSettings.mapSkin = s.mapSkin;
                 }
@@ -7500,7 +7586,7 @@
                     orderArrowsUsePathfinding: !!gameData.uiSettings.orderArrowsUsePathfinding,
                     frontlineStyle: gameData.uiSettings.frontlineStyle,
                     commandArrowStyle: gameData.uiSettings.commandArrowStyle,
-                    commandArrowColor: gameData.uiSettings.commandArrowColor,
+                    lineColor: gameData.uiSettings.lineColor,
                     mapSkin: gameData.uiSettings.mapSkin
                 }));
             } catch(e) {}
@@ -11341,7 +11427,7 @@
                     unitsBuiltMarine: 0,
                     gamesStarted: 0
                 },
-                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, gamePeriod: 'modern', mpDisplayName: '' },
+                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '' },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 }
             };
         }
@@ -11413,6 +11499,7 @@
             gameData.unitSkin = us;
             gameData.aiUnitSkin = as;
             gameData.ownedUnitSkins = Object.assign({ nato: true }, p.ownedUnitSkins || {});
+            gameData.ownedShopVisuals = Object.assign({}, p.ownedShopVisuals || {});
             if(gameData.ownedUnitSkins.default) delete gameData.ownedUnitSkins.default;
             if(gameData.ownedUnitSkins.goldenChip && wodProgress.achievements) wodProgress.achievements.goldenChipMaster = true;
             for(let pid of ['napoleonic', 'medieval', 'ancient']) {
@@ -11454,6 +11541,7 @@
                 aiUnitSkin: gameData.aiUnitSkin || 'nato',
                 mpDisplayName: (wodProgress.profile && wodProgress.profile.mpDisplayName) || '',
                 ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { nato: true }),
+                ownedShopVisuals: Object.assign({}, gameData.ownedShopVisuals || {}),
                 gamePeriod: 'modern'
             };
         }
@@ -11650,7 +11738,7 @@
                     orderArrowsUsePathfinding: !!gameData.uiSettings.orderArrowsUsePathfinding,
                     frontlineStyle: gameData.uiSettings.frontlineStyle,
                     commandArrowStyle: gameData.uiSettings.commandArrowStyle,
-                    commandArrowColor: gameData.uiSettings.commandArrowColor,
+                    lineColor: gameData.uiSettings.lineColor,
                     mapSkin: gameData.uiSettings.mapSkin
                 }
             };
@@ -11667,12 +11755,14 @@
                     gameData.uiSettings.showOrdersWhenDeselected = bundle.uiSettings.showOrdersWhenDeselected;
                 if(typeof bundle.uiSettings.orderArrowsUsePathfinding === 'boolean')
                     gameData.uiSettings.orderArrowsUsePathfinding = bundle.uiSettings.orderArrowsUsePathfinding;
-                if(bundle.uiSettings.frontlineStyle === 'solid' || bundle.uiSettings.frontlineStyle === 'dotted')
+                if(bundle.uiSettings.frontlineStyle === 'solid' || bundle.uiSettings.frontlineStyle === 'dotted' || bundle.uiSettings.frontlineStyle === 'double')
                     gameData.uiSettings.frontlineStyle = bundle.uiSettings.frontlineStyle;
-                if(bundle.uiSettings.commandArrowStyle === 'default' || bundle.uiSettings.commandArrowStyle === 'line')
+                if(bundle.uiSettings.commandArrowStyle === 'default' || bundle.uiSettings.commandArrowStyle === 'dotted' || bundle.uiSettings.commandArrowStyle === 'line')
                     gameData.uiSettings.commandArrowStyle = bundle.uiSettings.commandArrowStyle;
-                if(typeof bundle.uiSettings.commandArrowColor === 'string')
-                    gameData.uiSettings.commandArrowColor = bundle.uiSettings.commandArrowColor;
+                if(typeof bundle.uiSettings.lineColor === 'string')
+                    gameData.uiSettings.lineColor = bundle.uiSettings.lineColor;
+                else if(typeof bundle.uiSettings.commandArrowColor === 'string')
+                    gameData.uiSettings.lineColor = bundle.uiSettings.commandArrowColor === 'yellow' ? 'gold' : bundle.uiSettings.commandArrowColor;
                 if(typeof bundle.uiSettings.mapSkin === 'string')
                     gameData.uiSettings.mapSkin = bundle.uiSettings.mapSkin;
                 wodEnsureUiShopDefaults();
@@ -20356,31 +20446,61 @@
             return out;
         }
 
+        function wodOffsetBorderPoints(pts, closed, offsetPx) {
+            if(!pts || pts.length === 0) return pts;
+            let out = [];
+            for(let i = 0; i < pts.length; i++) {
+                let prev = pts[i - 1];
+                let next = pts[i + 1];
+                if(i === 0) prev = closed ? pts[pts.length - 1] : pts[0];
+                if(i === pts.length - 1) next = closed ? pts[0] : pts[pts.length - 1];
+                let dx = next.x - prev.x;
+                let dy = next.y - prev.y;
+                let len = Math.hypot(dx, dy) || 1;
+                let nx = -dy / len * offsetPx;
+                let ny = dx / len * offsetPx;
+                out.push({ x: pts[i].x + nx, y: pts[i].y + ny });
+            }
+            return out;
+        }
+
         function drawPaintedTerritoryBorders(ctx, offsetX, offsetY) {
             if(!gameData.layers.diplomacy) return;
             let spacing = gameData.hexRadius * 1.35;
             let paintChains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
 
             wodEnsureUiShopDefaults();
-            let dotted = gameData.uiSettings.frontlineStyle === 'dotted';
+            let style = gameData.uiSettings.frontlineStyle;
+            let strokeCol = wodLineColorRgba(1);
+            let fillCol = wodLineColorRgba(1);
 
-            ctx.strokeStyle = '#050505';
-            ctx.fillStyle = '#050505';
-            ctx.lineWidth = 8;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            if(dotted) ctx.setLineDash([spacing * 0.42, spacing * 0.34]);
-            else ctx.setLineDash([]);
-
-            for(let { closed, pts } of paintChains) {
-                drawPaintStroke(ctx, pts, spacing, {
-                    closedLoop: closed,
-                    suppressDegenerate: true,
-                    openLineCap: 'round',
-                    hybridBorder: true
-                });
+            function strokeChains(lineWidth, dash, offsetPx) {
+                ctx.strokeStyle = strokeCol;
+                ctx.fillStyle = fillCol;
+                ctx.lineWidth = lineWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.setLineDash(dash || []);
+                for(let { closed, pts } of paintChains) {
+                    let drawPts = offsetPx ? wodOffsetBorderPoints(pts, closed, offsetPx) : pts;
+                    drawPaintStroke(ctx, drawPts, spacing, {
+                        closedLoop: closed,
+                        suppressDegenerate: true,
+                        openLineCap: 'round',
+                        hybridBorder: true
+                    });
+                }
+                ctx.setLineDash([]);
             }
-            ctx.setLineDash([]);
+
+            if(style === 'double') {
+                strokeChains(4, [], spacing * 0.22);
+                strokeChains(4, [], -spacing * 0.22);
+            } else if(style === 'dotted') {
+                strokeChains(8, [spacing * 0.42, spacing * 0.34], 0);
+            } else {
+                strokeChains(8, [], 0);
+            }
         }
 
         function splitBorderComponents(points, maxDist) {
@@ -22808,36 +22928,82 @@
             }
         }
 
-        const WOD_COMMAND_ARROW_COLOR_PRESETS = [
-            { id: 'yellow', label: 'Yellow', rgb: [241, 196, 15] },
-            { id: 'black', label: 'Black', rgb: [5, 5, 5] },
-            { id: 'white', label: 'White', rgb: [236, 240, 241] },
-            { id: 'red', label: 'Red', rgb: [231, 76, 60] },
-            { id: 'blue', label: 'Blue', rgb: [52, 152, 219] },
-            { id: 'green', label: 'Green', rgb: [46, 204, 113] },
-            { id: 'orange', label: 'Orange', rgb: [230, 126, 34] },
-            { id: 'purple', label: 'Purple', rgb: [155, 89, 182] }
+        const WOD_LINE_COLOR_PRESETS = [
+            { id: 'gold', label: 'Gold', rgb: [212, 175, 55], shopId: null },
+            { id: 'black', label: 'Black', rgb: [5, 5, 5], shopId: 'viz_color_black' },
+            { id: 'white', label: 'White', rgb: [236, 240, 241], shopId: 'viz_color_white' },
+            { id: 'silver', label: 'Silver', rgb: [189, 195, 199], shopId: 'viz_color_silver' }
         ];
+
+        const WOD_SHOP_VISUAL_COST = 100;
 
         let wodShopTabsBound = false;
 
-        function wodCommandArrowStrokeRgba(unit, alpha) {
+        function wodLineColorRgb() {
             wodEnsureUiShopDefaults();
-            let colorId = gameData.uiSettings.commandArrowColor || 'yellow';
-            let preset = WOD_COMMAND_ARROW_COLOR_PRESETS.find(c => c.id === colorId) || WOD_COMMAND_ARROW_COLOR_PRESETS[0];
-            let rgb = preset.rgb;
-            if(unit && unit.type === 'convoy') {
-                if(unit.convoySeaRoute) return 'rgba(52, 152, 219, ' + alpha + ')';
-                return 'rgba(241, 196, 15, ' + alpha + ')';
-            }
-            if(unit && unit.inWater && colorId === 'yellow')
-                return 'rgba(52, 152, 219, ' + alpha + ')';
+            let preset = WOD_LINE_COLOR_PRESETS.find(c => c.id === gameData.uiSettings.lineColor) || WOD_LINE_COLOR_PRESETS[0];
+            return preset.rgb;
+        }
+
+        function wodLineColorRgba(alpha) {
+            let rgb = wodLineColorRgb();
             return 'rgba(' + rgb[0] + ',' + rgb[1] + ',' + rgb[2] + ',' + alpha + ')';
+        }
+
+        function wodCommandArrowStrokeRgba(unit, alpha) {
+            return wodLineColorRgba(alpha);
+        }
+
+        function wodCommandArrowDashPattern(unit) {
+            wodEnsureUiShopDefaults();
+            let style = gameData.uiSettings.commandArrowStyle;
+            if(style === 'dotted') return [10, 6];
+            if(style === 'line') return [];
+            if(unit && unit.type === 'convoy') return [7, 6];
+            return [];
         }
 
         function wodCommandArrowShowsHead() {
             wodEnsureUiShopDefaults();
-            return gameData.uiSettings.commandArrowStyle !== 'line';
+            let style = gameData.uiSettings.commandArrowStyle;
+            return style === 'default' || style === 'dotted';
+        }
+
+        function purchaseShopVisual(shopId) {
+            if(!shopId || wodOwnsShopVisual(shopId)) return true;
+            if((gameData.gold || 0) < WOD_SHOP_VISUAL_COST) {
+                showNotification('Not enough gold!');
+                return false;
+            }
+            gameData.gold -= WOD_SHOP_VISUAL_COST;
+            wodEnsureOwnedShopVisuals();
+            gameData.ownedShopVisuals[shopId] = true;
+            showNotification('Unlocked!');
+            updateSkinShop();
+            scheduleSaveWodProgress();
+            return true;
+        }
+
+        function wodSelectShopVisual(shopId, settingKey, value) {
+            if(shopId && !wodOwnsShopVisual(shopId)) {
+                if(!purchaseShopVisual(shopId)) return;
+            }
+            wodEnsureUiShopDefaults();
+            gameData.uiSettings[settingKey] = value;
+            saveUiSettings();
+            syncShopVisualOptionsUi();
+        }
+
+        function wodSelectShopLineColor(colorId) {
+            let preset = WOD_LINE_COLOR_PRESETS.find(c => c.id === colorId);
+            if(!preset) return;
+            if(preset.shopId && !wodOwnsShopVisual(preset.shopId)) {
+                if(!purchaseShopVisual(preset.shopId)) return;
+            }
+            wodEnsureUiShopDefaults();
+            gameData.uiSettings.lineColor = colorId;
+            saveUiSettings();
+            syncShopVisualOptionsUi();
         }
 
         function wodStrokeCommandArrowHead(ctx, end, prev, size) {
@@ -22856,17 +23022,19 @@
                 document.querySelectorAll('#shopPanel .shop-tab').forEach(btn => {
                     btn.addEventListener('click', () => switchShopTab(btn.getAttribute('data-shop-tab')));
                 });
-                let swatchHost = document.getElementById('shopCommandColorSwatches');
+                let swatchHost = document.getElementById('shopLineColorSwatches');
                 if(swatchHost && !swatchHost.childElementCount) {
-                    for(let c of WOD_COMMAND_ARROW_COLOR_PRESETS) {
+                    for(let c of WOD_LINE_COLOR_PRESETS) {
                         let b = document.createElement('button');
                         b.type = 'button';
                         b.className = 'shop-color-swatch';
-                        b.setAttribute('data-command-color', c.id);
+                        b.setAttribute('data-line-color', c.id);
+                        if(c.shopId) b.setAttribute('data-shop-visual', c.shopId);
                         b.title = c.label;
-                        b.innerHTML = '<span class="swatch-dot" style="--swatch:#' +
-                            c.rgb.map(v => v.toString(16).padStart(2, '0')).join('') + '"></span><span>' + c.label + '</span>';
-                        b.addEventListener('click', () => setShopCommandArrowColor(c.id));
+                        let hex = '#' + c.rgb.map(v => Math.min(255, v).toString(16).padStart(2, '0')).join('');
+                        b.innerHTML = '<span class="shop-swatch-row"><span class="swatch-dot" style="--swatch:' + hex + '"></span><span>' + c.label + '</span></span>' +
+                            (c.shopId ? '<span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">100g</span></span>' : '');
+                        b.addEventListener('click', () => wodSelectShopLineColor(c.id));
                         swatchHost.appendChild(b);
                     }
                 }
@@ -22892,43 +23060,43 @@
 
         function syncShopVisualOptionsUi() {
             wodEnsureUiShopDefaults();
+            wodEnsureOwnedShopVisuals();
             let u = gameData.uiSettings;
+            document.querySelectorAll('#shopFrontlineOptions .shop-option-card, #shopCommandStyleOptions .shop-option-card').forEach(btn => {
+                let shopId = btn.getAttribute('data-shop-visual');
+                let owned = wodOwnsShopVisual(shopId);
+                btn.classList.toggle('shop-visual-locked', !!shopId && !owned);
+                let st = btn.querySelector('.shop-visual-state');
+                let pr = btn.querySelector('.shop-visual-price');
+                if(st) st.textContent = shopId ? (owned ? 'Unlocked' : 'Locked') : '';
+                if(pr) pr.textContent = shopId && !owned ? '100g' : '';
+            });
+            document.querySelectorAll('#shopLineColorSwatches .shop-color-swatch').forEach(btn => {
+                let shopId = btn.getAttribute('data-shop-visual');
+                let owned = wodOwnsShopVisual(shopId);
+                btn.classList.toggle('shop-visual-locked', !!shopId && !owned);
+                let st = btn.querySelector('.shop-visual-state');
+                if(st) st.textContent = shopId ? (owned ? 'Unlocked' : 'Locked') : '';
+                btn.classList.toggle('active', btn.getAttribute('data-line-color') === u.lineColor);
+            });
             document.querySelectorAll('#shopFrontlineOptions .shop-option-card').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-frontline-style') === u.frontlineStyle);
             });
             document.querySelectorAll('#shopCommandStyleOptions .shop-option-card').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-command-style') === u.commandArrowStyle);
             });
-            document.querySelectorAll('#shopCommandColorSwatches .shop-color-swatch').forEach(btn => {
-                btn.classList.toggle('active', btn.getAttribute('data-command-color') === u.commandArrowColor);
-            });
             document.querySelectorAll('#shopMapSkinOptions .shop-option-card').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-map-skin') === u.mapSkin);
             });
-        }
-
-        function setShopFrontlineStyle(style) {
-            if(style !== 'solid' && style !== 'dotted') return;
-            wodEnsureUiShopDefaults();
-            gameData.uiSettings.frontlineStyle = style;
-            saveUiSettings();
-            syncShopVisualOptionsUi();
-        }
-
-        function setShopCommandArrowStyle(style) {
-            if(style !== 'default' && style !== 'line') return;
-            wodEnsureUiShopDefaults();
-            gameData.uiSettings.commandArrowStyle = style;
-            saveUiSettings();
-            syncShopVisualOptionsUi();
-        }
-
-        function setShopCommandArrowColor(colorId) {
-            if(!WOD_COMMAND_ARROW_COLOR_PRESETS.some(c => c.id === colorId)) return;
-            wodEnsureUiShopDefaults();
-            gameData.uiSettings.commandArrowColor = colorId;
-            saveUiSettings();
-            syncShopVisualOptionsUi();
+            let changed = false;
+            if(!wodOwnsShopVisual('viz_frontline_dotted') && u.frontlineStyle === 'dotted') { u.frontlineStyle = 'solid'; changed = true; }
+            if(!wodOwnsShopVisual('viz_frontline_double') && u.frontlineStyle === 'double') { u.frontlineStyle = 'solid'; changed = true; }
+            if(!wodOwnsShopVisual('viz_arrow_dotted') && u.commandArrowStyle === 'dotted') { u.commandArrowStyle = 'default'; changed = true; }
+            if(!wodOwnsShopVisual('viz_arrow_line') && u.commandArrowStyle === 'line') { u.commandArrowStyle = 'default'; changed = true; }
+            for(let c of WOD_LINE_COLOR_PRESETS) {
+                if(c.shopId && !wodOwnsShopVisual(c.shopId) && u.lineColor === c.id) { u.lineColor = 'gold'; changed = true; }
+            }
+            if(changed) saveUiSettings();
         }
 
         function setShopMapSkin(skinId) {
@@ -23113,7 +23281,7 @@
                 let pts = previewPts.map(p => ({x: p.x + ox, y: p.y + oy}));
                 ctx.strokeStyle = wodCommandArrowStrokeRgba(unit, 0.88);
                 ctx.lineWidth = lw;
-                ctx.setLineDash([10, 6]);
+                ctx.setLineDash(wodCommandArrowDashPattern(unit));
                 ctx.beginPath();
                 ctx.moveTo(pts[0].x, pts[0].y);
                 for(let i = 1; i < pts.length; i++)
@@ -23135,7 +23303,7 @@
             ctx.save();
             let isConvoy = unit.type === 'convoy';
             let strokeCol = wodCommandArrowStrokeRgba(unit, isConvoy ? 0.92 : 0.85);
-            let dashPat = isConvoy ? [7, 6] : (unit.inWater ? [8, 6] : []);
+            let dashPat = wodCommandArrowDashPattern(unit);
             let showHead = wodCommandArrowShowsHead();
             ctx.lineWidth = isConvoy ? 3.5 : 4;
             ctx.lineCap = 'round';
