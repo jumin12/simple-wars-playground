@@ -6656,6 +6656,7 @@
                 wodRefreshMapLibraryPanel();
             }
             if(panelId === 'setup') {
+                wodApplyGamePeriod('modern', { saveProfile: false });
                 syncSetupPlayerColorRow();
                 initSetupPanelBindings();
                 syncSetupVictoryDetail();
@@ -6750,7 +6751,8 @@
             }
         }
 
-        function toggleEscMenu(forceOpen) {
+        function toggleEscMenu(forceOpen, opts) {
+            opts = opts || {};
             if(gameState !== 'PLAYING') return;
             let menu = UI.escMenu;
             if(!menu) return;
@@ -6760,6 +6762,8 @@
                 for(let section of menu.querySelectorAll('.esc-section')) section.classList.remove('visible');
             }
             menu.classList.toggle('hidden', !shouldOpen);
+            if(shouldOpen && opts.skipDefaultSection !== true)
+                showEscSection(opts.defaultSection || 'helpSection');
         }
 
         const WOD_ESC_HELP_VERSION = '6';
@@ -6800,7 +6804,7 @@
         }
 
         function openSurrenderMenu() {
-            toggleEscMenu(true);
+            toggleEscMenu(true, { skipDefaultSection: true });
             showEscSection('surrenderSection');
         }
 
@@ -6812,7 +6816,6 @@
 
         function openHelpFromGame() {
             openMenuFromGame();
-            showEscSection('helpSection');
         }
 
         window.toggleEscMenu = toggleEscMenu;
@@ -10895,9 +10898,10 @@
                 if(gameData.ownedUnitSkins[pid] && wodProgress.achievements)
                     wodProgress.achievements['period' + pid.charAt(0).toUpperCase() + pid.slice(1)] = true;
             }
-            gameData.gamePeriod = (p.gamePeriod && wodIsPeriodUnlocked(p.gamePeriod)) ? p.gamePeriod : 'modern';
+            gameData.gamePeriod = 'modern';
+            if(wodProgress.profile) wodProgress.profile.gamePeriod = 'modern';
             syncGoldenChipUnlockFromAchievements();
-            wodRefreshUrbanHexColorsForPeriod(gameData.gamePeriod);
+            wodRefreshUrbanHexColorsForPeriod('modern');
             wodSyncAllPeriodSelects();
             wodRefreshPeriodSelectorVisibility();
         }
@@ -10929,7 +10933,7 @@
                 aiUnitSkin: gameData.aiUnitSkin || 'nato',
                 mpDisplayName: (wodProgress.profile && wodProgress.profile.mpDisplayName) || '',
                 ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { nato: true }),
-                gamePeriod: gameData.gamePeriod || 'modern'
+                gamePeriod: 'modern'
             };
         }
 
