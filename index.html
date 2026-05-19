@@ -6049,14 +6049,14 @@
                         Napoleonic
                         <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
                     </button>
-                    <button type="button" class="skin-card skin-missing locked" id="skinMedieval" onclick="purchaseUnitSkin('medieval')">
-                        <canvas class="skin-preview" id="skinMedievalPreview" width="120" height="80" aria-hidden="true"></canvas>
-                        Medieval era
-                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
-                    </button>
                     <button type="button" class="skin-card skin-missing locked" id="skinAncient" onclick="purchaseUnitSkin('ancient')">
                         <canvas class="skin-preview" id="skinAncientPreview" width="120" height="80" aria-hidden="true"></canvas>
                         Ancient era
+                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
+                    </button>
+                    <button type="button" class="skin-card skin-missing locked" id="skinMedieval" onclick="purchaseUnitSkin('medieval')">
+                        <canvas class="skin-preview" id="skinMedievalPreview" width="120" height="80" aria-hidden="true"></canvas>
+                        Medieval era
                         <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
                     </button>
                     <button type="button" class="skin-card skin-no-buy locked skin-missing" id="skinGoldenChip" onclick="purchaseUnitSkin('goldenChip')">
@@ -21409,7 +21409,7 @@
             } else if(skin === 'china') {
                 ctx.fillStyle = '#de2910';
                 ctx.fillRect(-r, -r, r * 2, r * 2);
-                wodRusePaintFivePointStar(ctx, 0, 0, r * 0.5, '#ffde00');
+                wodPaintChinaFlagStars(ctx, 0, 0, r * 0.52);
             }
         }
 
@@ -22111,87 +22111,136 @@
             }
         }
 
-        /* Ancient civilization counters — emblem paths adapted from public-domain heraldic / archaeological symbol geometry (Tanit, triskelion, imperial aquila). */
-        const WOD_ANCIENT_CIV_ART = {
-            civRome: {
-                vb: 100,
-                fillBase: '#f3e8d4',
-                stroke: '#7a1428',
-                innerRing: 'rgba(201,162,39,0.5)',
-                emblemFill: '#c9a227',
-                emblemStroke: '#4a0818',
-                paths: [{
-                    d: 'M50 6 C34 10 24 24 26 38 C18 40 10 48 8 58 C6 70 14 80 24 78 L18 92 L30 86 L34 98 L50 92 L66 98 L70 86 L82 92 L76 78 C86 80 94 70 92 58 C90 48 82 40 74 38 C76 24 66 10 50 6 Z M42 40 C40 46 44 52 50 54 C56 52 60 46 58 40 C56 34 44 34 42 40 Z',
-                    fill: '#c9a227'
-                }, {
-                    d: 'M44 88 L50 82 L56 88 L53 94 H47 Z',
-                    fill: '#7a1428'
-                }]
-            },
-            civCarthage: {
-                vb: 64,
-                fillBase: '#ead8f0',
-                stroke: '#4a1260',
-                innerRing: 'rgba(107,58,140,0.45)',
-                emblemFill: '#f2e2b8',
-                paths: [{
-                    d: 'M32 94 L8 34 L56 34 Z M32 42 A11 11 0 1 1 32 20 A11 11 0 1 1 32 42 Z M12 16 H52 V22 H12 Z',
-                    fill: '#f2e2b8'
-                }]
-            },
-            civGaul: {
-                vb: 100,
-                fillBase: '#dcecd4',
-                stroke: '#1a5c38',
-                innerRing: 'rgba(212,175,55,0.48)',
-                emblemFill: '#d4af37',
-                triskelionArm: 'M50 50 C50 20 82 22 80 46 C78 68 58 76 50 68 C42 60 44 48 50 50'
-            }
-        };
-
-        function wodGetAncientCivStyle(civId) {
-            return WOD_ANCIENT_CIV_ART[civId] || null;
+        function wodAncientCivPalette(civId) {
+            if(civId === 'civRome') return {
+                fill: '#7a1814', fillHi: '#a82820', rim: '#d4af37', rimInner: '#5c0e0a',
+                emblem: '#f4d878', emblemStroke: '#3d0806'
+            };
+            if(civId === 'civCarthage') return {
+                fill: '#c4a06a', fillHi: '#dcc890', rim: '#4a2860', rimInner: '#8a6840',
+                emblem: '#2e1438', emblemStroke: '#f0e6c8'
+            };
+            if(civId === 'civGaul') return {
+                fill: '#2a5c38', fillHi: '#3a7848', rim: '#c9a832', rimInner: '#1a3d28',
+                emblem: '#f0d050', emblemStroke: '#143322'
+            };
+            return null;
         }
 
-        function wodPaintAncientCivSvgEmblem(ctx, civId, drawR) {
-            let art = WOD_ANCIENT_CIV_ART[civId];
-            if(!art) return;
-            let vb = art.vb || 100;
-            let sc = (drawR * 2) / vb;
+        function wodPaintRomanEagleEmblem(ctx, r, fillCol, strokeCol) {
             ctx.save();
-            ctx.translate(-vb * 0.5 * sc, -vb * 0.5 * sc);
-            ctx.scale(sc, sc);
-            if(art.triskelionArm) {
-                let fill = art.emblemFill || '#d4af37';
-                for(let i = 0; i < 3; i++) {
-                    ctx.save();
-                    ctx.translate(vb * 0.5, vb * 0.5);
-                    ctx.rotate(i * Math.PI * 2 / 3);
-                    ctx.translate(-vb * 0.5, -vb * 0.5);
-                    let p = new Path2D(art.triskelionArm);
-                    ctx.fillStyle = fill;
-                    ctx.fill(p);
-                    ctx.restore();
-                }
-            } else if(art.paths) {
-                for(let spec of art.paths) {
-                    let p = new Path2D(spec.d);
-                    if(spec.fill) {
-                        ctx.fillStyle = spec.fill;
-                        ctx.fill(p, spec.fillRule || 'nonzero');
-                    }
-                    if(spec.stroke) {
-                        ctx.strokeStyle = spec.stroke;
-                        ctx.lineWidth = spec.lw || 2;
-                        ctx.stroke(p);
-                    }
+            ctx.fillStyle = fillCol;
+            ctx.strokeStyle = strokeCol;
+            ctx.lineWidth = Math.max(1.1, r * 0.07);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(0, r * 0.55);
+            ctx.lineTo(0, -r * 0.12);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.ellipse(0, -r * 0.26, r * 0.11, r * 0.13, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, r * 0.08);
+            ctx.lineTo(r * 0.06, -r * 0.18);
+            ctx.lineTo(r * 0.14, -r * 0.22);
+            ctx.stroke();
+            for(let side = -1; side <= 1; side += 2) {
+                ctx.beginPath();
+                ctx.moveTo(0, -r * 0.02);
+                ctx.bezierCurveTo(side * r * 0.35, -r * 0.22, side * r * 0.88, -r * 0.38, side * r * 0.62, r * 0.02);
+                ctx.bezierCurveTo(side * r * 0.48, r * 0.12, side * r * 0.22, r * 0.08, 0, r * 0.06);
+                ctx.fill();
+                ctx.stroke();
+                for(let f = 0; f < 4; f++) {
+                    let t0 = 0.18 + f * 0.16;
+                    let t1 = t0 + 0.1;
+                    let x0 = side * r * (0.2 + t0 * 0.55);
+                    let y0 = -r * (0.08 + t0 * 0.28);
+                    let x1 = side * r * (0.26 + t1 * 0.5);
+                    let y1 = -r * (0.02 + t1 * 0.22);
+                    ctx.beginPath();
+                    ctx.moveTo(x0, y0);
+                    ctx.lineTo(x1, y1);
+                    ctx.stroke();
                 }
             }
+            ctx.beginPath();
+            ctx.moveTo(-r * 0.14, r * 0.38);
+            ctx.lineTo(0, r * 0.52);
+            ctx.lineTo(r * 0.14, r * 0.38);
+            ctx.lineTo(0, r * 0.44);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
             ctx.restore();
         }
 
-        function wodPaintAncientCivEmblem(ctx, civId, r) {
-            wodPaintAncientCivSvgEmblem(ctx, civId, r * 0.88);
+        function wodPaintCarthageTanitEmblem(ctx, r, fillCol, strokeCol) {
+            ctx.save();
+            ctx.fillStyle = fillCol;
+            ctx.strokeStyle = strokeCol;
+            ctx.lineWidth = Math.max(1.4, r * 0.085);
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(0, r * 0.52);
+            ctx.lineTo(-r * 0.38, -r * 0.05);
+            ctx.lineTo(r * 0.38, -r * 0.05);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(0, -r * 0.36, r * 0.15, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.lineWidth = Math.max(1.8, r * 0.1);
+            ctx.beginPath();
+            ctx.moveTo(-r * 0.62, -r * 0.36);
+            ctx.lineTo(r * 0.62, -r * 0.36);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, -r * 0.52);
+            ctx.lineTo(0, -r * 0.2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(-r * 0.08, r * 0.18);
+            ctx.lineTo(r * 0.08, r * 0.18);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function wodPaintGaulTriskelionEmblem(ctx, r, fillCol, strokeCol) {
+            ctx.save();
+            ctx.strokeStyle = strokeCol;
+            ctx.fillStyle = fillCol;
+            ctx.lineWidth = Math.max(2.2, r * 0.14);
+            ctx.lineCap = 'round';
+            for(let arm = 0; arm < 3; arm++) {
+                let base = arm * Math.PI * 2 / 3 - Math.PI / 2;
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                for(let t = 0; t <= 1; t += 0.08) {
+                    let a = base + t * Math.PI * 1.35;
+                    let rad = r * (0.06 + t * 0.46);
+                    ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+                }
+                ctx.stroke();
+            }
+            ctx.fillStyle = strokeCol;
+            ctx.beginPath();
+            ctx.arc(0, 0, r * 0.09, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function wodPaintAncientCivEmblem(ctx, civId, r, pal) {
+            if(!pal) return;
+            if(civId === 'civRome') wodPaintRomanEagleEmblem(ctx, r, pal.emblem, pal.emblemStroke);
+            else if(civId === 'civCarthage') wodPaintCarthageTanitEmblem(ctx, r, pal.emblem, pal.emblemStroke);
+            else if(civId === 'civGaul') wodPaintGaulTriskelionEmblem(ctx, r, pal.emblem, pal.emblemStroke);
         }
 
         function drawPeriodCounter(ctx, unit, radius, color, period, civSkinId) {
@@ -22200,19 +22249,24 @@
                 return;
             }
             if(civSkinId) period = 'ancient';
-            let civArt = civSkinId ? wodGetAncientCivStyle(civSkinId) : null;
+            let civPal = civSkinId ? wodAncientCivPalette(civSkinId) : null;
             let w = radius * 2.15, h = radius * 1.38, x = -w / 2, y = -h / 2;
             let rr = Math.max(2, radius * 0.22);
             if(period === 'ancient') { w = radius * 2.22; h = radius * 2.22; x = -w / 2; y = -h / 2; rr = w * 0.5; }
             if(period === 'medieval') { w = radius * 2.18; h = radius * 1.48; x = -w / 2; y = -h / 2; rr = Math.max(2, radius * 0.1); }
             let fillBase = '#f7fafc';
-            if(civArt) fillBase = civArt.fillBase;
-            else if(period === 'ancient') fillBase = '#ebe4d4';
+            if(period === 'ancient') fillBase = '#ebe4d4';
             else if(period === 'medieval') fillBase = '#d5d0c4';
+            if(civPal) fillBase = civPal.fill;
             let fillCol = unit.owner === 1 ? blendColorsFast(fillBase, color, period === 'medieval' ? 0.14 : 0.08)
                 : blendColorsFast(fillBase, factionColors[unit.owner] || color, 0.42);
+            if(civPal) {
+                fillCol = unit.owner === 1
+                    ? blendColorsFast(civPal.fillHi, color, 0.1)
+                    : blendColorsFast(civPal.fill, factionColors[unit.owner] || color, 0.32);
+            }
             let strokeCol = color;
-            if(civArt) strokeCol = blendColorsFast(civArt.stroke, color, unit.owner === 1 ? 0.22 : 0.38);
+            if(civPal) strokeCol = civPal.rim;
             else if(period === 'ancient') strokeCol = blendColorsFast('#6b4a1e', color, 0.28);
             else if(period === 'medieval') strokeCol = blendColorsFast('#3d3028', color, 0.32);
             ctx.save();
@@ -22248,7 +22302,7 @@
                 ctx.arc(0, 0, w * 0.5, 0, Math.PI * 2);
                 ctx.stroke();
                 ctx.lineWidth = Math.max(1.2, radius * 0.1);
-                ctx.strokeStyle = civArt ? civArt.innerRing : 'rgba(90,62,28,0.55)';
+                ctx.strokeStyle = civPal ? civPal.rimInner : 'rgba(90,62,28,0.55)';
                 ctx.beginPath();
                 ctx.arc(0, 0, w * 0.38, 0, Math.PI * 2);
                 ctx.stroke();
@@ -22256,7 +22310,7 @@
                 roundRect(ctx, x, y, w, h, rr);
                 ctx.stroke();
             }
-            let symCol = unit.owner !== 1 ? blendColorsFast('#243040', factionColors[unit.owner] || color, 0.42) : '#1a2634';
+            let symCol = civPal ? civPal.emblem : (unit.owner !== 1 ? blendColorsFast('#243040', factionColors[unit.owner] || color, 0.42) : '#1a2634');
             ctx.strokeStyle = symCol;
             ctx.lineWidth = Math.max(2, radius * 0.13);
             ctx.lineCap = 'round';
@@ -22277,7 +22331,7 @@
                 }
             } else if(period === 'ancient') {
                 if(civSkinId) {
-                    wodPaintAncientCivEmblem(ctx, civSkinId, r);
+                    wodPaintAncientCivEmblem(ctx, civSkinId, r, civPal);
                 } else if(unit.type === 'heavy') {
                     ctx.arc(0, 0, r * 0.42, 0, Math.PI * 2);
                     ctx.moveTo(-r * 0.55, 0); ctx.lineTo(r * 0.55, 0);
@@ -22532,6 +22586,10 @@
             ctx.fill();
         }
 
+        function wodPaintChinaFlagStars(ctx, cx, cy, scale) {
+            wodRusePaintFivePointStar(ctx, cx, cy, scale * 0.62, '#ffde00');
+        }
+
         function wodRuseEmblemSpan(emblemR) {
             return emblemR * 1.92;
         }
@@ -22577,7 +22635,7 @@
                 ctx.beginPath();
                 ctx.arc(0, 0, discR, 0, Math.PI * 2);
                 ctx.fill();
-                wodRusePaintFivePointStar(ctx, 0, 0, half * 0.72, '#ffde00');
+                wodPaintChinaFlagStars(ctx, 0, 0, discR * 0.78);
             }
         }
 
@@ -22960,6 +23018,9 @@
                 { id: 'napoleonic', label: 'Napoleonic' },
                 { id: 'medieval', label: 'Medieval era' },
                 { id: 'ancient', label: 'Ancient era' },
+                { id: 'civRome', label: 'Rome — Imperial eagle' },
+                { id: 'civCarthage', label: 'Carthage — Tanit' },
+                { id: 'civGaul', label: 'Gaul — Triskelion' },
                 { id: 'usa', label: 'USA countryball' },
                 { id: 'uk', label: 'UK countryball' },
                 { id: 'germany', label: 'Germany countryball' },
@@ -22968,9 +23029,6 @@
                 { id: 'ussr', label: 'Soviet Union countryball' },
                 { id: 'italy', label: 'Italy countryball' },
                 { id: 'china', label: 'China countryball' },
-                { id: 'civRome', label: 'Rome — Imperial eagle' },
-                { id: 'civCarthage', label: 'Carthage — Tanit' },
-                { id: 'civGaul', label: 'Gaul — Triskelion' },
                 { id: 'ruseUsa', label: 'RUSE — USA' },
                 { id: 'ruseUk', label: 'RUSE — United Kingdom' },
                 { id: 'ruseFrance', label: 'RUSE — France' },
