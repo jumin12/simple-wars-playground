@@ -20263,69 +20263,93 @@
             let r = radius;
             let w, h;
             if(unit.type === 'heavy') {
-                w = r * 1.92;
-                h = r * 1.92;
+                w = r * 1.88;
+                h = r * 1.88;
             } else if(unit.type === 'ship') {
-                w = r * 2.28;
-                h = r * 1.42;
+                w = r * 2.15;
+                h = r * 1.22;
             } else if(unit.type === 'convoy') {
-                w = r * 1.55;
-                h = r * 1.55;
+                w = r * 1.48;
+                h = r * 1.48;
+            } else if(unit.type === 'marine') {
+                w = r * 2.05;
+                h = r * 1.28;
             } else {
-                w = r * 2.32;
-                h = r * 1.38;
+                w = r * 2.12;
+                h = r * 1.32;
             }
             let x = -w / 2, y = -h / 2;
-            let blockCol = unit.owner === 1
-                ? blendColorsFast(color, '#1a1208', 0.12)
-                : blendColorsFast(factionColors[unit.owner] || color, '#1a1208', 0.18);
-            let paperEdge = blendColorsFast('#e8dcc4', blockCol, 0.22);
+            let blockCol = blendColorsFast(factionColors[unit.owner] || color, '#000000', unit.owner === wodLocalPlayerOwner() ? 0.06 : 0.14);
             ctx.save();
-            ctx.shadowColor = 'rgba(0,0,0,0.32)';
-            ctx.shadowBlur = Math.max(2, r * 0.18);
-            ctx.shadowOffsetY = r * 0.06;
-            ctx.fillStyle = paperEdge;
-            ctx.fillRect(x - 0.5, y - 0.5, w + 1, h + 1);
-            ctx.shadowColor = 'transparent';
+            ctx.shadowColor = 'rgba(0,0,0,0.28)';
+            ctx.shadowBlur = Math.max(2, r * 0.14);
+            ctx.shadowOffsetY = r * 0.05;
             ctx.fillStyle = blockCol;
             ctx.fillRect(x, y, w, h);
-            ctx.lineWidth = Math.max(2.2, r * 0.2);
-            ctx.strokeStyle = '#0c0a08';
+            ctx.shadowColor = 'transparent';
+            ctx.lineWidth = Math.max(1.4, r * 0.11);
+            ctx.strokeStyle = 'rgba(0,0,0,0.82)';
             ctx.strokeRect(x, y, w, h);
-            ctx.lineWidth = Math.max(1, r * 0.085);
-            ctx.strokeStyle = 'rgba(255,248,230,0.35)';
-            ctx.strokeRect(x + r * 0.1, y + r * 0.1, w - r * 0.2, h - r * 0.2);
-            let ink = '#f5f0e4';
-            if(unit.owner !== 1) ink = blendColorsFast('#f0ebe0', '#ffffff', 0.35);
-            ctx.strokeStyle = ink;
-            ctx.fillStyle = ink;
-            ctx.lineWidth = Math.max(1.8, r * 0.14);
-            ctx.lineCap = 'square';
-            ctx.lineJoin = 'miter';
-            ctx.beginPath();
-            if(unit.type === 'heavy') {
-                ctx.moveTo(-r * 0.58, -r * 0.58); ctx.lineTo(r * 0.58, r * 0.58);
-                ctx.moveTo(r * 0.58, -r * 0.58); ctx.lineTo(-r * 0.58, r * 0.58);
-            } else if(unit.type === 'marine') {
-                ctx.moveTo(-r * 0.62, -r * 0.08); ctx.lineTo(r * 0.62, -r * 0.08);
-                ctx.moveTo(-r * 0.38, r * 0.32); ctx.quadraticCurveTo(0, r * 0.52, r * 0.38, r * 0.32);
-            } else if(unit.type === 'ship') {
-                ctx.moveTo(-r * 0.65, r * 0.22); ctx.lineTo(0, -r * 0.48); ctx.lineTo(r * 0.65, r * 0.22); ctx.closePath();
-            } else if(unit.type === 'convoy') {
-                ctx.fillRect(-r * 0.22, -r * 0.22, r * 0.44, r * 0.44);
-            } else {
-                for(let i = -1; i <= 1; i++) {
-                    ctx.moveTo(i * r * 0.24, -r * 0.5);
-                    ctx.lineTo(i * r * 0.24, r * 0.46);
-                }
-                ctx.moveTo(-r * 0.68, -r * 0.02); ctx.lineTo(r * 0.68, -r * 0.02);
-            }
-            if(unit.type === 'ship' || unit.type === 'convoy') ctx.fill();
-            else ctx.stroke();
-            ctx.lineWidth = Math.max(1.15, r * 0.09);
-            ctx.strokeStyle = '#050403';
-            ctx.strokeRect(x - 0.8, y - 0.8, w + 1.6, h + 1.6);
             ctx.restore();
+        }
+
+        function wodNatoIsFriendlyUnit(unit) {
+            return unit.owner === wodLocalPlayerOwner();
+        }
+
+        function wodNatoFramePath(ctx, w, h, friendly) {
+            if(friendly) {
+                ctx.rect(-w / 2, -h / 2, w, h);
+            } else {
+                let hw = w * 0.5, hh = h * 0.5;
+                ctx.moveTo(0, -hh);
+                ctx.lineTo(hw, 0);
+                ctx.lineTo(0, hh);
+                ctx.lineTo(-hw, 0);
+                ctx.closePath();
+            }
+        }
+
+        function wodNatoDrawIcon(ctx, unit, r) {
+            let lw = Math.max(1.35, r * 0.11);
+            ctx.strokeStyle = '#000000';
+            ctx.fillStyle = '#000000';
+            ctx.lineWidth = lw;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            let ut = unit.type;
+            if(ut === 'heavy') {
+                ctx.beginPath();
+                ctx.ellipse(0, 0, r * 0.56, r * 0.3, 0, 0, Math.PI * 2);
+                ctx.stroke();
+            } else if(ut === 'marine') {
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.5, -r * 0.36); ctx.lineTo(r * 0.5, r * 0.36);
+                ctx.moveTo(r * 0.5, -r * 0.36); ctx.lineTo(-r * 0.5, r * 0.36);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.42, r * 0.38);
+                ctx.bezierCurveTo(-r * 0.2, r * 0.5, r * 0.2, r * 0.26, r * 0.42, r * 0.38);
+                ctx.stroke();
+            } else if(ut === 'ship') {
+                ctx.beginPath();
+                ctx.arc(0, -r * 0.14, r * 0.11, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(0, -r * 0.02); ctx.lineTo(0, r * 0.44);
+                ctx.moveTo(-r * 0.36, r * 0.2); ctx.quadraticCurveTo(0, r * 0.52, r * 0.36, r * 0.2);
+                ctx.moveTo(-r * 0.26, -r * 0.06); ctx.lineTo(r * 0.26, -r * 0.06);
+                ctx.stroke();
+            } else if(ut === 'convoy') {
+                ctx.beginPath();
+                ctx.rect(-r * 0.18, -r * 0.18, r * 0.36, r * 0.36);
+                ctx.stroke();
+            } else {
+                ctx.beginPath();
+                ctx.moveTo(-r * 0.52, -r * 0.4); ctx.lineTo(r * 0.52, r * 0.4);
+                ctx.moveTo(r * 0.52, -r * 0.4); ctx.lineTo(-r * 0.52, r * 0.4);
+                ctx.stroke();
+            }
         }
 
         function drawPeriodCounter(ctx, unit, radius, color, period) {
@@ -20437,62 +20461,33 @@
         }
 
         function drawNatoCounter(ctx, unit, radius, color) {
-            let w = radius * 2.15;
-            let h = radius * 1.38;
-            let x = -w / 2;
-            let y = -h / 2;
-            let rr = Math.max(2, radius * 0.22);
-            let fillCol = '#f7fafc';
-            if(unit.owner === 1) {
-                fillCol = blendColorsFast('#ffffff', color, 0.1);
-            } else {
-                fillCol = blendColorsFast('#e8ecf2', factionColors[unit.owner] || color, 0.48);
+            let r = radius;
+            let friendly = wodNatoIsFriendlyUnit(unit);
+            let w = r * 2.05;
+            let h = r * 1.55;
+            if(unit.type === 'ship') {
+                w = r * 2.12;
+                h = r * 1.42;
+            } else if(unit.type === 'convoy') {
+                w = r * 1.72;
+                h = r * 1.38;
+            }
+            let frameCol = friendly ? '#0055a4' : '#b30000';
+            let fillCol = friendly ? 'rgba(127, 178, 230, 0.55)' : 'rgba(230, 130, 130, 0.5)';
+            if(!friendly && factionColors[unit.owner]) {
+                fillCol = blendColorsFast('rgba(230, 130, 130, 0.45)', factionColors[unit.owner], 0.22);
+            } else if(friendly) {
+                fillCol = blendColorsFast('rgba(127, 178, 230, 0.5)', color, 0.18);
             }
             ctx.save();
-            ctx.shadowColor = 'rgba(0,0,0,0.38)';
-            ctx.shadowBlur = Math.max(3, radius * 0.25);
-            ctx.shadowOffsetY = radius * 0.08;
-            ctx.fillStyle = fillCol;
-            roundRect(ctx, x, y, w, h, rr);
-            ctx.fill();
-            ctx.shadowColor = 'transparent';
-            ctx.lineWidth = Math.max(2, radius * 0.22);
-            ctx.strokeStyle = color;
-            roundRect(ctx, x, y, w, h, rr);
-            ctx.stroke();
-            ctx.lineWidth = Math.max(1.5, radius * 0.12);
-            ctx.strokeStyle = 'rgba(5,5,5,0.55)';
-            roundRect(ctx, x + radius * 0.12, y + radius * 0.12, w - radius * 0.24, h - radius * 0.24, rr * 0.65);
-            ctx.stroke();
-            let symCol = '#1a2634';
-            if(unit.owner !== 1) symCol = blendColorsFast('#243040', factionColors[unit.owner] || color, 0.42);
-            ctx.strokeStyle = symCol;
-            ctx.lineWidth = Math.max(2, radius * 0.13);
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
             ctx.beginPath();
-            if(unit.type === 'heavy') {
-                ctx.moveTo(-radius * 0.62, -radius * 0.42); ctx.lineTo(radius * 0.62, radius * 0.42);
-                ctx.moveTo(radius * 0.62, -radius * 0.42); ctx.lineTo(-radius * 0.62, radius * 0.42);
-            } else if(unit.type === 'marine') {
-                ctx.moveTo(-radius * 0.55, radius * 0.32);
-                ctx.quadraticCurveTo(-radius * 0.28, radius * 0.52, 0, radius * 0.34);
-                ctx.quadraticCurveTo(radius * 0.28, radius * 0.2, radius * 0.55, radius * 0.32);
-                ctx.moveTo(-radius * 0.68, -radius * 0.12); ctx.lineTo(radius * 0.68, -radius * 0.12);
-                ctx.moveTo(-radius * 0.55, -radius * 0.36); ctx.lineTo(radius * 0.55, -radius * 0.36);
-            } else if(unit.type === 'ship') {
-                ctx.moveTo(-radius * 0.62, radius * 0.18); ctx.lineTo(0, -radius * 0.42); ctx.lineTo(radius * 0.62, radius * 0.18);
-                ctx.closePath();
-            } else {
-                ctx.moveTo(-radius * 0.68, -0.2); ctx.lineTo(radius * 0.68, -0.2);
-                ctx.moveTo(-radius * 0.68, 0.25); ctx.lineTo(radius * 0.68, 0.25);
-            }
+            wodNatoFramePath(ctx, w, h, friendly);
+            ctx.fillStyle = fillCol;
+            ctx.fill();
+            ctx.lineWidth = Math.max(2, r * 0.17);
+            ctx.strokeStyle = frameCol;
             ctx.stroke();
-            let outRm = Math.max(0.74, radius * 0.052);
-            ctx.lineWidth = Math.max(1.12, radius * 0.084);
-            ctx.strokeStyle = 'rgba(10, 12, 18, 0.96)';
-            roundRect(ctx, x - outRm, y - outRm, w + outRm * 2, h + outRm * 2, rr + outRm * 0.52);
-            ctx.stroke();
+            wodNatoDrawIcon(ctx, unit, r);
             ctx.restore();
         }
 
