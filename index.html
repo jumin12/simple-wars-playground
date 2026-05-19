@@ -6382,7 +6382,8 @@
 
         let gameState = 'MENU'; 
         let menuDemoSeeded = false;
-        let menuBattleSnapshot = null;
+        /** Frozen copy of the first menu background map — never overwritten after initial boot. */
+        let menuBattleOriginal = null;
         let menuDemoAnimId = 0;
         let menuDemoLastTime = 0;
 
@@ -6708,7 +6709,6 @@
                 showNotification('Map is still generating...');
                 return;
             }
-            saveMenuBattleSnapshot();
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             menuDemoSeeded = false;
@@ -6744,9 +6744,11 @@
             UI.mainMenu.classList.remove('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             stopGame();
-            if(!restoreMenuBattleFromSnapshot()) {
+            if(!resetMenuBattleToOriginal()) {
                 menuDemoSeeded = false;
                 void bootstrapMenuBackgroundBattle();
+            } else {
+                resumeMenuBackgroundBattle();
             }
         }
 
@@ -9750,7 +9752,6 @@
                             ? Object.assign({}, meta.playerPublic)
                             : {}
                     };
-                    saveMenuBattleSnapshot();
                     hidePanels();
                     gameState = 'PLAYING';
                     pauseMenuBackgroundBattle();
@@ -17361,13 +17362,12 @@
             gameData.camera.y = sy * z - vh / 2;
         }
 
-        function saveMenuBattleSnapshot() {
-            if(!menuDemoSeeded || gameState !== 'MENU' || !gameData.hexList || !gameData.hexList.length) return;
-            menuBattleSnapshot = {
+        function cloneMenuBattleState() {
+            return {
                 hexList: gameData.hexList.map(h => Object.assign({}, h)),
                 cities: gameData.cities.map(c => Object.assign({}, c)),
                 roads: gameData.roads.map(r => Object.assign({}, r)),
-                entities: gameData.entities.map(e => Object.assign({}, e)),
+                entities: gameData.entities.map(e => Object.assign({}, e, e.target ? { target: Object.assign({}, e.target) } : {})),
                 forts: (gameData.forts || []).map(f => Object.assign({}, f)),
                 mapRadius: gameData.mapRadius,
                 mapShape: gameData.mapShape,
@@ -17376,31 +17376,28 @@
             };
         }
 
-        function restoreMenuBattleFromSnapshot() {
-            if(!menuBattleSnapshot) return false;
-            let s = menuBattleSnapshot;
+        function captureMenuBattleOriginal() {
+            if(!gameData.hexList || !gameData.hexList.length) return;
+            menuBattleOriginal = cloneMenuBattleState();
+        }
+
+        function resetMenuBattleToOriginal() {
+            if(!menuBattleOriginal) return false;
+            let s = menuBattleOriginal;
             gameData.hexes = {};
-            gameData.hexList = s.hexList;
+            gameData.hexList = s.hexList.map(h => Object.assign({}, h));
             for(let h of gameData.hexList) gameData.hexes[`${h.q},${h.r}`] = h;
-            gameData.cities = s.cities;
-            gameData.roads = s.roads;
-            gameData.entities = s.entities;
-            gameData.forts = s.forts || [];
+            gameData.cities = s.cities.map(c => Object.assign({}, c));
+            gameData.roads = s.roads.map(r => Object.assign({}, r));
+            gameData.entities = s.entities.map(e => Object.assign({}, e, e.target ? { target: Object.assign({}, e.target) } : {}));
+            gameData.forts = (s.forts || []).map(f => Object.assign({}, f));
             gameData.mapRadius = s.mapRadius;
             gameData.mapShape = s.mapShape;
             Object.assign(gameData.camera, s.camera);
             gameData.layers = Object.assign({}, s.layers);
-            menuDemoSeeded = true;
-            gameData.menuAttractMode = true;
+            gameData.selection = [];
+            gameData.buildMode = null;
             wodMarkTerrainFullDirty();
-            UI.canvas.style.display = 'block';
-            UI.canvas.classList.add('menu-bg-active');
-            wodCenterCameraOnLandmassForMenu();
-            kickstartMenuAttractSim();
-            draw();
-            menuDemoLastTime = performance.now();
-            if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
-            menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
             return true;
         }
 
@@ -17414,15 +17411,17 @@
 
         function resumeMenuBackgroundBattle() {
             if(gameState === 'PLAYING') return;
-            if(!menuDemoSeeded) {
+            if(menuBattleOriginal) resetMenuBattleToOriginal();
+            if(!menuDemoSeeded && !menuBattleOriginal) {
                 void bootstrapMenuBackgroundBattle();
                 return;
             }
+            menuDemoSeeded = true;
             gameData.menuAttractMode = true;
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
-            kickstartMenuAttractSim();
+            draw();
             menuDemoLastTime = performance.now();
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
@@ -17447,10 +17446,7 @@
                 menuDemoAnimId = 0;
                 return;
             }
-            let dt = (time - menuDemoLastTime) / 1000;
-            if(dt > 0.1) dt = 0.1;
             menuDemoLastTime = time;
-            if(UI.escMenu.classList.contains('hidden') && gameData.speed > 0) update(dt * gameData.speed);
             draw();
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
         }
@@ -17569,6 +17565,10 @@
 
         async function bootstrapMenuBackgroundBattle() {
             pauseMenuBackgroundBattle();
+            if(menuBattleOriginal) {
+                resumeMenuBackgroundBattle();
+                return;
+            }
             let _wodPrevSkipLoader = gameData._wodSkipMapGenLoader;
             gameData._wodSkipMapGenLoader = true;
             try {
@@ -17596,6 +17596,7 @@
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
             kickstartMenuAttractSim();
+            captureMenuBattleOriginal();
             draw();
             menuDemoLastTime = performance.now();
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
