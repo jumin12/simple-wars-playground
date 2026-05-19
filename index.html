@@ -8524,8 +8524,6 @@
         /** Meandering rivers — walk down a distance field toward water; skip paths that split passable land. */
         async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
             if(!gameData.hexList || gameData.hexList.length === 0) return;
-            gameData._procgenRiverWaterKeys = new Set();
-            gameData._procgenRiverBridgeSites = [];
             let rowCount = Math.floor(rows) | 0;
             let colM = Math.max(1, cols | 0);
             let rowM = Math.max(1, rowCount);
@@ -8536,6 +8534,8 @@
             let maxSteps = rivShape ? 46 : 54;
             let riverTargets = rivShape ? 1 + ((Math.random() > 0.52) ? 1 : 0) : 2 + ((Math.random() > 0.38) ? 1 : 0);
             let oceanKeys = rivShape ? wodBuildOceanConnectedWaterKeys(colM, rowM) : null;
+            if(!gameData._procgenRiverKeys) gameData._procgenRiverKeys = new Set();
+            else gameData._procgenRiverKeys.clear();
             let carved = 0;
             let attempt = 0;
             while(carved < riverTargets && attempt < riverTargets + 5) {
@@ -8634,129 +8634,126 @@
                     carved++;
                     for(let rk of riverFillKeys) {
                         let hx = gameData.hexes[rk];
-                        if(hx && isWaterHex(hx)) gameData._procgenRiverWaterKeys.add(rk);
-                    }
-                    let spanLo = Math.floor(path.length * 0.28);
-                    let spanHi = Math.ceil(path.length * 0.72);
-                    let midPi = (spanLo + spanHi) * 0.5;
-                    for(let pi = spanLo; pi <= spanHi; pi++) {
-                        if(pi <= 0 || pi >= path.length - 1) continue;
-                        let center = gameData.hexes[getHexKey(path[pi])];
-                        if(!center || !isWaterHex(center)) continue;
-                        if(!gameData._procgenRiverWaterKeys.has(getHexKey(center))) continue;
-                        let waterAdj = 0,
-                            landNbs = [];
-                        for(let nb of getNeighborHexes(center)) {
-                            if(!nb) continue;
-                            if(isWaterHex(nb)) waterAdj++;
-                            else if(landOk(nb)) landNbs.push(nb);
-                        }
-                        if(waterAdj > 3 || landNbs.length !== 2) continue;
-                        let landA = landNbs[0],
-                            landB = landNbs[1];
-                        let bankDist = Math.abs(landA.q - landB.q) + Math.abs(landA.r - landB.r);
-                        if(bankDist < 2) continue;
-                        let score = 3.2 - Math.abs(pi - midPi) / Math.max(1, spanHi - spanLo + 1);
-                        score += fbm(center.x * 0.009 + seedOffset + 5521, center.y * 0.009 + seedOffset + 5521, 3) * 0.35;
-                        gameData._procgenRiverBridgeSites.push({
-                            water: center,
-                            landA,
-                            landB,
-                            score
-                        });
+                        if(hx && isWaterHex(hx)) gameData._procgenRiverKeys.add(rk);
                     }
                 }
                 await wodMapGenYieldSlice();
             }
         }
-        function wodSyncBridgeWorldCoords(br) {
-            if(!br || !br.landA || !br.landB) return;
-            let ha = gameData.hexes[`${br.landA.q},${br.landA.r}`];
-            let hb = gameData.hexes[`${br.landB.q},${br.landB.r}`];
-            if(ha) {
-                br.landA.x = ha.x;
-                br.landA.y = ha.y;
+        function wodNormalizeBridgeRecord(b) {
+            if(!b) return null;
+            let o = Object.assign({}, b);
+            if(o.q == null && o.waterQ != null) {
+                o.q = o.waterQ;
+                o.r = o.waterR;
             }
-            if(hb) {
-                br.landB.x = hb.x;
-                br.landB.y = hb.y;
-            }
-            if(ha && hb) {
-                br.x = (ha.x + hb.x) * 0.5;
-                br.y = (ha.y + hb.y) * 0.5;
-                br.angle = Math.atan2(hb.y - ha.y, hb.x - ha.x);
-                br.span = Math.hypot(hb.x - ha.x, hb.y - ha.y);
-            }
-        }
-        function wodBridgeLinkTargets(hex) {
-            if(!hex || !gameData.bridges || !gameData.bridges.length) return [];
-            let out = [];
-            let q = hex.q,
-                r = hex.r;
-            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
-                let br = gameData.bridges[bi];
-                if(!br || !br.landA || !br.landB) continue;
-                if(br.landA.q === q && br.landA.r === r) {
-                    let t = gameData.hexes[`${br.landB.q},${br.landB.r}`];
-                    if(t) out.push(t);
-                } else if(br.landB.q === q && br.landB.r === r) {
-                    let t = gameData.hexes[`${br.landA.q},${br.landA.r}`];
-                    if(t) out.push(t);
+            if(o.q == null && o.landA && o.landB) {
+                let la = gameData.hexes[`${o.landA.q},${o.landA.r}`];
+                if(la) {
+                    for(let nb of getNeighborHexes(la)) {
+                        if(nb && isWaterHex(nb)) {
+                            o.q = nb.q;
+                            o.r = nb.r;
+                            break;
+                        }
+                    }
                 }
             }
-            return out;
+            if(o.q == null) return null;
+            o.owner = o.owner || 0;
+            return o;
         }
-        function bridgeShoreHexKey(q, r) {
-            if(!gameData.bridges) return false;
-            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
-                let br = gameData.bridges[bi];
-                if(!br || !br.landA || !br.landB) continue;
-                if((br.landA.q === q && br.landA.r === r) || (br.landB.q === q && br.landB.r === r)) return true;
+        function wodRebuildBridgeHexIndex() {
+            gameData._bridgeByHexKey = {};
+            let list = gameData.bridges || [];
+            for(let bi = 0; bi < list.length; bi++) {
+                let br = wodNormalizeBridgeRecord(list[bi]);
+                if(!br) continue;
+                list[bi] = br;
+                gameData._bridgeByHexKey[`${br.q},${br.r}`] = br;
             }
-            return false;
         }
-        /** Up to maxBridges on carved procedural rivers only (never lakes or generic inland water). */
+        function bridgeAtHex(hex) {
+            if(!hex || !gameData._bridgeByHexKey) return null;
+            return gameData._bridgeByHexKey[getHexKey(hex)] || null;
+        }
+        function isBridgeHex(hex) {
+            return !!bridgeAtHex(hex);
+        }
+        function wodSyncBridgeWorldCoords(br) {
+            br = wodNormalizeBridgeRecord(br);
+            if(!br) return;
+            let h = gameData.hexes[`${br.q},${br.r}`];
+            if(!h) return;
+            br.x = h.x;
+            br.y = h.y;
+            let hr = gameData.hexRadius || 20;
+            let sp = hr * 1.35;
+            br.w = sp * 0.92;
+            br.h = sp * 0.38;
+            let lands = [];
+            for(let nb of getNeighborHexes(h)) {
+                if(nb && !isWaterHex(nb) && nb.type !== 'mountain' && nb.type !== 'urban') lands.push(nb);
+            }
+            if(lands.length >= 2) {
+                let dx = lands[1].x - lands[0].x;
+                let dy = lands[1].y - lands[0].y;
+                if(Math.abs(dx) + Math.abs(dy) > 0.01) br.angle = Math.atan2(dy, dx);
+                else br.angle = 0;
+            } else br.angle = 0;
+        }
+        /** Up to maxBridges on carved procedural river tiles only (never lakes). */
         async function wodPlaceProceduralRiverBridges(seedOffset, mapShape, cols, rows, maxBridges) {
             maxBridges = maxBridges == null ? 2 : Math.max(0, maxBridges | 0);
             if(!gameData.bridges) gameData.bridges = [];
             gameData.bridges.length = 0;
-            if(!maxBridges) return;
-            let riverKeys = gameData._procgenRiverWaterKeys;
-            let sites = gameData._procgenRiverBridgeSites || [];
-            if(!riverKeys || !riverKeys.size || !sites.length) return;
+            let riverKeys = gameData._procgenRiverKeys;
+            if(!riverKeys || !riverKeys.size || !maxBridges) {
+                wodRebuildBridgeHexIndex();
+                return;
+            }
             let landOk = (h) => h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban';
-            sites.sort((a, b) => b.score - a.score);
-            let usedShore = new Set();
+            let candidates = [];
+            let hi = 0;
+            for(let wk of riverKeys) {
+                let h = gameData.hexes[wk];
+                if(!h || !isWaterHex(h)) continue;
+                let lands = [];
+                for(let nb of getNeighborHexes(h)) {
+                    if(landOk(nb)) lands.push(nb);
+                }
+                if(lands.length !== 2) continue;
+                let man = Math.abs(lands[0].q - lands[1].q) + Math.abs(lands[0].r - lands[1].r);
+                if(man !== 2) continue;
+                let score = 2.5 + fbm(h.x * 0.011 + seedOffset + 4411, h.y * 0.011 + seedOffset + 4411, 3) * 0.55;
+                candidates.push({ h, score });
+                if((++hi & 511) === 0) await wodMapGenYieldSlice();
+            }
+            candidates.sort((a, b) => b.score - a.score);
+            let usedRiver = new Set();
             let placed = 0;
-            for(let ci = 0; ci < sites.length && placed < maxBridges; ci++) {
-                let c = sites[ci];
-                if(!c || !c.water || !c.landA || !c.landB) continue;
-                let wk = getHexKey(c.water);
-                if(!riverKeys.has(wk) || !isWaterHex(c.water)) continue;
-                if(!landOk(c.landA) || !landOk(c.landB)) continue;
-                let ak = getHexKey(c.landA),
-                    bk = getHexKey(c.landB);
-                if(usedShore.has(ak) || usedShore.has(bk)) continue;
-                let bankDist = Math.abs(c.landA.q - c.landB.q) + Math.abs(c.landA.r - c.landB.r);
-                if(bankDist < 2) continue;
+            for(let ci = 0; ci < candidates.length && placed < maxBridges; ci++) {
+                let c = candidates[ci];
+                let hk = getHexKey(c.h);
+                if(usedRiver.has(hk)) continue;
+                if(!riverKeys.has(hk) || !isWaterHex(c.h)) continue;
                 let br = {
                     id: 'br_' + placed + '_' + ((Math.random() * 1e7) | 0),
                     owner: 0,
-                    landA: { q: c.landA.q, r: c.landA.r, x: c.landA.x, y: c.landA.y },
-                    landB: { q: c.landB.q, r: c.landB.r, x: c.landB.x, y: c.landB.y },
-                    waterQ: c.water.q,
-                    waterR: c.water.r,
-                    x: 0,
-                    y: 0
+                    q: c.h.q,
+                    r: c.h.r,
+                    x: c.h.x,
+                    y: c.h.y,
+                    w: 0,
+                    h: 0,
+                    angle: 0
                 };
                 wodSyncBridgeWorldCoords(br);
-                if(!br.span || br.span < 10) continue;
                 gameData.bridges.push(br);
-                usedShore.add(ak);
-                usedShore.add(bk);
+                usedRiver.add(hk);
                 placed++;
-                if((placed & 1) === 0) await wodMapGenYieldSlice();
             }
+            wodRebuildBridgeHexIndex();
         }
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
             let blendPasses = gameData._wodFastMapGen ? 1 : 2;
@@ -9460,11 +9457,10 @@
                 factionColors: factionColors.slice(),
                 roads: gameData.roads.map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r })),
                 forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                bridges: (gameData.bridges || []).map(b => ({
-                    id: b.id, owner: b.owner || 0,
-                    landA: { q: b.landA.q, r: b.landA.r }, landB: { q: b.landB.q, r: b.landB.r },
-                    waterQ: b.waterQ, waterR: b.waterR, x: b.x, y: b.y
-                })),
+                bridges: (gameData.bridges || []).map(b => {
+                    let br = wodNormalizeBridgeRecord(b);
+                    return br ? { id: br.id, owner: br.owner || 0, q: br.q, r: br.r, x: br.x, y: br.y, w: br.w, h: br.h, angle: br.angle || 0 } : null;
+                }).filter(Boolean),
                 playerPublic: (window.wodMpRoomMeta && window.wodMpRoomMeta.playerPublic && typeof window.wodMpRoomMeta.playerPublic === 'object')
                     ? JSON.parse(JSON.stringify(window.wodMpRoomMeta.playerPublic))
                     : {}
@@ -9496,13 +9492,9 @@
                 }
                 return o;
             });
-            gameData.bridges = (p.bridges || []).map(b => {
-                let o = Object.assign({}, b);
-                o.landA = Object.assign({}, b.landA || {});
-                o.landB = Object.assign({}, b.landB || {});
-                wodSyncBridgeWorldCoords(o);
-                return o;
-            });
+            gameData.bridges = (p.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+            for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+            wodRebuildBridgeHexIndex();
             gameData.entities = [];
             for(let ed of p.entities) {
                 let u = wodEntityFromNet(ed);
@@ -9700,13 +9692,9 @@
                 }
             }
             if(Array.isArray(s.bridges)) {
-                gameData.bridges = s.bridges.map(b => {
-                    let o = Object.assign({}, b);
-                    o.landA = Object.assign({}, b.landA || {});
-                    o.landB = Object.assign({}, b.landB || {});
-                    wodSyncBridgeWorldCoords(o);
-                    return o;
-                });
+                gameData.bridges = s.bridges.map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+                for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+                wodRebuildBridgeHexIndex();
             }
             if(s.entities) {
                 let byUid = new Map(gameData.entities.map(e => [e.uid, e]));
@@ -9828,11 +9816,10 @@
                 hexOwners: owners,
                 cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp })),
                 forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                bridges: (gameData.bridges || []).map(b => ({
-                    id: b.id, owner: b.owner || 0,
-                    landA: { q: b.landA.q, r: b.landA.r }, landB: { q: b.landB.q, r: b.landB.r },
-                    waterQ: b.waterQ, waterR: b.waterR, x: b.x, y: b.y
-                })),
+                bridges: (gameData.bridges || []).map(b => {
+                    let br = wodNormalizeBridgeRecord(b);
+                    return br ? { id: br.id, owner: br.owner || 0, q: br.q, r: br.r, x: br.x, y: br.y, w: br.w, h: br.h, angle: br.angle || 0 } : null;
+                }).filter(Boolean),
                 encircledKeys,
                 cityWarKeys,
                 matchEnd: gameData._mpMatchEnd || undefined
@@ -10092,6 +10079,7 @@
             gameData.forts = [];
             gameData.bridges = (gameData._wodTerrainPoliticsBridges || []).map(b => JSON.parse(JSON.stringify(b)));
             for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+            wodRebuildBridgeHexIndex();
             gameData._wodProcgenBorderFirstApplied = false;
             return true;
         }
@@ -12436,11 +12424,13 @@
                     if (!isWaterHex(hex)) return false;
                     return true;
                 }
+                if (isBridgeHex(hex)) return hex.owner === 0 || hex.owner === unit.owner;
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
             }
-            // Light / heavy: no mountains; may enter water (slow / drowning) when path or orders require it.
+            // Light / heavy: no mountains; river bridges are walkable like grass.
             if (hex.type === 'mountain') return false;
+            if (isBridgeHex(hex)) return true;
             if (isWaterHex(hex)) return true;
             return isClaimableLand(hex);
         }
@@ -13913,6 +13903,7 @@
                     return h0 + mp * 0.012;
                 }
                 function movementCost(a, b) {
+                    if(isBridgeHex(b)) return 1;
                     let terrain = 0;
                     if(b.type === 'forest') terrain = 0.5;
                     else if(b.type === 'swamp') terrain = 1.2;
@@ -13925,7 +13916,7 @@
                     if(unit.type === 'ship' || seaConvoy) {
                         if(isWaterHex(b)) terrain -= 0.35;
                     }
-                    if(unit.type !== 'ship' && !pathSeaConvoy && isWaterHex(b)) terrain += pathMarine ? 2.65 : 62;
+                    if(unit.type !== 'ship' && !pathSeaConvoy && isWaterHex(b) && !isBridgeHex(b)) terrain += pathMarine ? 2.65 : 62;
                     if((unit.type === 'ship' || seaConvoy) && !isWaterHex(b)) terrain += 80;
                     // Route land units away from mountain edges and one-tile mountain moats.
                     if(unit.type !== 'ship' && !seaConvoy && b.type !== 'mountain') {
@@ -14010,7 +14001,7 @@
 
                 function neighborOk(nHex) {
                     if(!canUseHexForMovement(unit, nHex)) return false;
-                    if(forbidWater && (unit.type === 'light' || unit.type === 'heavy') && isWaterHex(nHex)) return false;
+                    if(forbidWater && (unit.type === 'light' || unit.type === 'heavy') && isWaterHex(nHex) && !isBridgeHex(nHex)) return false;
                     return true;
                 }
 
@@ -14058,19 +14049,6 @@
                         let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
                         if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
 
-                        cameFrom[nKey] = current;
-                        gScore[nKey] = tentativeG;
-                        fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
-                        heapPush(open, nHex, fScore);
-                    }
-                    let bridgeNbs = wodBridgeLinkTargets(current);
-                    for(let bi = 0; bi < bridgeNbs.length; bi++) {
-                        let nHex = bridgeNbs[bi];
-                        if(!nHex) continue;
-                        let nKey = key(nHex);
-                        if(visited.has(nKey) || !neighborOk(nHex)) continue;
-                        let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex) * 1.05;
-                        if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
                         cameFrom[nKey] = current;
                         gScore[nKey] = tentativeG;
                         fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
@@ -14509,7 +14487,7 @@
 
         function applyTerrainUnitEffects(unit, dt) {
             let hex = getNearestHexToPoint(unit.x, unit.y);
-            let sea = !!(hex && isWaterHex(hex) && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
+            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             unit.inWater = !!(sea && unit.type !== 'marine');
             if(unit.inWater) {
@@ -14522,6 +14500,7 @@
 
         function getTerrainAttackModifier(unit, hex) {
             if(!hex || !unit) return 1;
+            if(isBridgeHex(hex)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 1;
@@ -14550,6 +14529,7 @@
 
         function getTerrainDefenseModifier(unit, hex) {
             if(!hex || !unit) return 1;
+            if(isBridgeHex(hex)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 0.92;
@@ -14751,6 +14731,13 @@
         /** Tile type only — combat modifiers are listed separately ("Combat in this terrain"). */
         function getTerrainTileEffect(hex) {
             if(!hex) return null;
+            if(isBridgeHex(hex)) {
+                return {
+                    label: 'Bridge',
+                    detail: 'River crossing — moves like open ground.',
+                    terrain: true
+                };
+            }
             let nm = terrainLabel(hex.type);
             return {
                 label: nm,
@@ -18144,8 +18131,6 @@
 
             gameData.hexes = {}; gameData.hexList = [];
             gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = []; gameData.bridges = [];
-            gameData._procgenRiverWaterKeys = null;
-            gameData._procgenRiverBridgeSites = null;
             gameData._wodCitySplitAnglePhase = null;
 
             let seedOffset = Math.random() * 10000;
@@ -18985,13 +18970,9 @@
             gameData.roads = s.roads.map(r => Object.assign({}, r));
             gameData.entities = s.entities.map(e => Object.assign({}, e, e.target ? { target: Object.assign({}, e.target) } : {}));
             gameData.forts = (s.forts || []).map(f => Object.assign({}, f));
-            gameData.bridges = (s.bridges || []).map(b => {
-                let o = Object.assign({}, b);
-                if(o.landA) o.landA = Object.assign({}, o.landA);
-                if(o.landB) o.landB = Object.assign({}, o.landB);
-                wodSyncBridgeWorldCoords(o);
-                return o;
-            });
+            gameData.bridges = (s.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+            for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+            wodRebuildBridgeHexIndex();
             gameData.mapRadius = s.mapRadius;
             gameData.mapShape = s.mapShape;
             Object.assign(gameData.camera, s.camera);
@@ -26378,69 +26359,21 @@
             ctx.restore();
         }
         function drawBridgeSticker(ctx, br, fxLite, culPadFn) {
-            if(!br || !br.landA || !br.landB) return;
-            let ha = gameData.hexes[`${br.landA.q},${br.landA.r}`];
-            let hb = gameData.hexes[`${br.landB.q},${br.landB.r}`];
-            if(!ha || !hb) return;
-            let ax = ha.x,
-                ay = ha.y,
-                bx = hb.x,
-                by = hb.y;
-            let mx = (ax + bx) * 0.5,
-                my = (ay + by) * 0.5;
-            let span = Math.hypot(bx - ax, by - ay);
-            if(span < 10) return;
-            let footprint = span * 0.55 + (fxLite ? 18 : 24);
-            if(typeof culPadFn === 'function' && !culPadFn(mx, my, footprint)) return;
-            let ang = br.angle != null ? br.angle : Math.atan2(by - ay, bx - ax);
-            let inset = Math.min(span * 0.14, (gameData.hexRadius || 20) * 0.55);
-            let deckLen = Math.max(14, span - inset * 2);
-            let deckH = fxLite ? 6.5 : 8.5;
-            let plankN = Math.max(5, Math.min(12, Math.round(deckLen / (fxLite ? 9 : 7))));
+            br = wodNormalizeBridgeRecord(br);
+            if(!br) return;
+            wodSyncBridgeWorldCoords(br);
+            let footprint = Math.max(br.w || 24, br.h || 12) * 0.65;
+            if(typeof culPadFn === 'function' && !culPadFn(br.x, br.y, footprint)) return;
+            let w = br.w || (gameData.hexRadius || 20) * 1.2;
+            let h = br.h || (gameData.hexRadius || 20) * 0.45;
             ctx.save();
-            ctx.translate(mx, my);
-            ctx.rotate(ang);
-            ctx.fillStyle = 'rgba(0,0,0,0.24)';
-            ctx.beginPath();
-            ctx.ellipse(0, fxLite ? 6 : 8, deckLen * 0.48, fxLite ? 6 : 8, 0, 0, Math.PI * 2);
-            ctx.fill();
-            let railH = fxLite ? 3.2 : 4.2;
-            ctx.strokeStyle = '#5c4228';
-            ctx.lineWidth = fxLite ? 1.15 : 1.5;
-            ctx.lineCap = 'round';
-            ctx.beginPath();
-            ctx.moveTo(-deckLen * 0.5, -deckH * 0.5 - railH);
-            ctx.lineTo(deckLen * 0.5, -deckH * 0.5 - railH);
-            ctx.moveTo(-deckLen * 0.5, deckH * 0.5 + railH);
-            ctx.lineTo(deckLen * 0.5, deckH * 0.5 + railH);
-            ctx.stroke();
-            ctx.fillStyle = '#7a5a36';
-            ctx.strokeStyle = '#3d2a18';
-            ctx.lineWidth = fxLite ? 1.05 : 1.35;
-            ctx.fillRect(-deckLen * 0.5, -deckH * 0.5, deckLen, deckH);
-            ctx.strokeRect(-deckLen * 0.5, -deckH * 0.5, deckLen, deckH);
-            ctx.strokeStyle = '#9a7048';
-            ctx.lineWidth = fxLite ? 0.7 : 0.9;
-            let step = deckLen / plankN;
-            for(let pi = 1; pi < plankN; pi++) {
-                let px = -deckLen * 0.5 + pi * step;
-                ctx.beginPath();
-                ctx.moveTo(px, -deckH * 0.5);
-                ctx.lineTo(px, deckH * 0.5);
-                ctx.stroke();
-            }
-            let postW = fxLite ? 4.5 : 5.8,
-                postH = fxLite ? 8.5 : 11;
-            ctx.fillStyle = '#4a3828';
-            ctx.strokeStyle = '#2a1e14';
+            ctx.translate(br.x, br.y);
+            if(br.angle) ctx.rotate(br.angle);
+            ctx.fillStyle = '#9a8468';
+            ctx.strokeStyle = '#4a3828';
             ctx.lineWidth = fxLite ? 1 : 1.25;
-            for(let end = -1; end <= 1; end += 2) {
-                let px = end * deckLen * 0.5;
-                ctx.fillRect(px - postW * 0.5, deckH * 0.5 - 1, postW, postH);
-                ctx.strokeRect(px - postW * 0.5, deckH * 0.5 - 1, postW, postH);
-            }
-            ctx.fillStyle = 'rgba(220, 200, 160, 0.28)';
-            ctx.fillRect(-deckLen * 0.44, -deckH * 0.32, deckLen * 0.88, deckH * 0.38);
+            ctx.fillRect(-w * 0.5, -h * 0.5, w, h);
+            ctx.strokeRect(-w * 0.5, -h * 0.5, w, h);
             ctx.restore();
         }
         function wodFortPlacementRingRadiusSq() {
@@ -26956,13 +26889,9 @@
                 gameData.roads = mapData.roads || [];
                 gameData.entities = mapData.entities || [];
                 gameData.forts = (mapData.forts || []).map(f => Object.assign({}, f));
-                gameData.bridges = (mapData.bridges || []).map(b => {
-                    let o = Object.assign({}, b);
-                    if(o.landA) o.landA = Object.assign({}, o.landA);
-                    if(o.landB) o.landB = Object.assign({}, o.landB);
-                    wodSyncBridgeWorldCoords(o);
-                    return o;
-                });
+                gameData.bridges = (mapData.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+                for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+                wodRebuildBridgeHexIndex();
                 gameData.hexes = {};
                 for(let hex of gameData.hexList) {
                     hex.baseColor = getTerrainColor(hex.type);
@@ -26997,12 +26926,10 @@
                     roads: gameData.roads,
                     entities: gameData.entities,
                     forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                    bridges: (gameData.bridges || []).map(b => ({
-                        id: b.id, owner: b.owner || 0,
-                        landA: { q: b.landA.q, r: b.landA.r, x: b.landA.x, y: b.landA.y },
-                        landB: { q: b.landB.q, r: b.landB.r, x: b.landB.x, y: b.landB.y },
-                        waterQ: b.waterQ, waterR: b.waterR, x: b.x, y: b.y
-                    })),
+                    bridges: (gameData.bridges || []).map(b => {
+                        let br = wodNormalizeBridgeRecord(b);
+                        return br ? { id: br.id, owner: br.owner || 0, q: br.q, r: br.r, x: br.x, y: br.y, w: br.w, h: br.h, angle: br.angle || 0 } : null;
+                    }).filter(Boolean),
                     factionColors: factionColors.slice(),
                     savedStartEconomy: true,
                     money: gameData.money,
