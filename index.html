@@ -6537,6 +6537,7 @@
         let menuBattleOriginal = null;
         let menuDemoAnimId = 0;
         let menuDemoLastTime = 0;
+        let menuDemoPausedByVisibility = false;
 
         /** Applies to per-city income & manpower (/s); global economic slowdown multiplier. */
         const WOD_CITY_ECON_TICK_MULT = 2 / 3;
@@ -17988,7 +17989,34 @@
             return true;
         }
 
+        function wodIsMainMenuAttractEligible() {
+            if(gameState !== 'MENU') return false;
+            if(!UI.mainMenu || UI.mainMenu.classList.contains('hidden')) return false;
+            for(let p of UI.panels) {
+                if(p && !p.classList.contains('hidden')) return false;
+            }
+            return true;
+        }
+
+        function pauseMenuBackgroundBattleVisibility() {
+            if(!gameData.menuAttractMode || gameState !== 'MENU') return;
+            menuDemoPausedByVisibility = true;
+            if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
+            menuDemoAnimId = 0;
+        }
+
+        function resumeMenuBackgroundBattleVisibility() {
+            if(!menuDemoPausedByVisibility) return;
+            menuDemoPausedByVisibility = false;
+            if(!gameData.menuAttractMode || gameState !== 'MENU') return;
+            if(!wodIsMainMenuAttractEligible()) return;
+            menuDemoLastTime = performance.now();
+            if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
+            menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
+        }
+
         function pauseMenuBackgroundBattle() {
+            menuDemoPausedByVisibility = false;
             gameData.menuAttractMode = false;
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
             menuDemoAnimId = 0;
@@ -17998,6 +18026,8 @@
 
         function resumeMenuBackgroundBattle() {
             if(gameState === 'PLAYING') return;
+            if(!wodIsMainMenuAttractEligible()) return;
+            menuDemoPausedByVisibility = false;
             if(menuBattleOriginal) resetMenuBattleToOriginal();
             if(!menuDemoSeeded && !menuBattleOriginal) {
                 void bootstrapMenuBackgroundBattle();
@@ -18005,9 +18035,11 @@
             }
             menuDemoSeeded = true;
             gameData.menuAttractMode = true;
+            gameData.speed = Math.max(1, gameData.speed || 1);
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
+            kickstartMenuAttractSim();
             draw();
             menuDemoLastTime = performance.now();
             if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);
@@ -18029,11 +18061,20 @@
         }
 
         function menuBackgroundLoop(time) {
-            if(!gameData.menuAttractMode || gameState !== 'MENU') {
+            if(!gameData.menuAttractMode || gameState !== 'MENU' || menuDemoPausedByVisibility) {
                 menuDemoAnimId = 0;
                 return;
             }
+            if(typeof document !== 'undefined' && document.hidden) {
+                pauseMenuBackgroundBattleVisibility();
+                return;
+            }
+            if(!menuDemoLastTime) menuDemoLastTime = time;
+            let dt = (time - menuDemoLastTime) / 1000;
+            if(dt > 0.1) dt = 0.1;
             menuDemoLastTime = time;
+            let speed = gameData.speed > 0 ? gameData.speed : 1;
+            update(dt * speed);
             draw();
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
         }
@@ -18092,6 +18133,7 @@
                             ov.setAttribute('aria-busy', 'false');
                         }
                         if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                        if(menuDemoSeeded) resumeMenuBackgroundBattle();
                     }
                     gameData._wodSkipMapGenLoader = false;
                 });
@@ -18153,7 +18195,12 @@
         async function bootstrapMenuBackgroundBattle() {
             pauseMenuBackgroundBattle();
             if(menuBattleOriginal) {
-                resumeMenuBackgroundBattle();
+                if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
+                else {
+                    menuDemoSeeded = true;
+                    gameData.menuAttractMode = true;
+                    resetMenuBattleToOriginal();
+                }
                 return;
             }
             let _wodPrevSkipLoader = gameData._wodSkipMapGenLoader;
@@ -18192,6 +18239,11 @@
                 gameData._wodSkipMapGenLoader = _wodPrevSkipLoader;
             }
         }
+
+        document.addEventListener('visibilitychange', () => {
+            if(document.hidden) pauseMenuBackgroundBattleVisibility();
+            else resumeMenuBackgroundBattleVisibility();
+        });
 
         // --- Web Worker & WebGPU for Simulation ---
         async function initWebGPU() {
