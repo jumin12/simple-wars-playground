@@ -22134,92 +22134,86 @@
 
         const WOD_ANCIENT_CIV_SVG = {
             civRome: {
-                ox: 256, oy: 280, size: 512,
+                ox: 256, oy: 272, size: 512,
                 paths: [
-                    'M292 108 C312 96 338 102 344 124 C348 140 334 154 314 152 C300 150 290 138 292 124 L318 118 L338 126 L322 140 Z',
-                    'M262 152 L268 328 C264 352 248 352 244 328 L250 152 Z',
-                    'M250 168 C108 88 28 168 72 272 C112 248 176 218 250 208 Z',
-                    'M262 168 C404 88 484 168 440 272 C400 248 336 218 262 208 Z',
-                    'M238 328 L256 396 L274 328 L256 364 Z',
-                    'M256 388 m-96 0 a96 44 0 1 0 192 0 a96 44 0 1 0 -192 0'
+                    'M256 248 C188 232 72 178 58 268 C54 312 104 338 172 314 C210 302 238 276 256 262 Z',
+                    'M256 248 C324 232 440 178 454 268 C458 312 408 338 340 314 C302 302 274 276 256 262 Z',
+                    'M246 262 L248 378 C246 400 266 400 264 378 L266 262 Z',
+                    'M256 196 C276 182 298 198 296 222 C294 242 276 256 256 254 C236 256 218 242 216 222 C214 198 236 182 256 196 Z',
+                    'M294 218 L322 208 L298 236 Z',
+                    'M246 378 L256 428 L266 378 L256 404 Z',
+                    'M256 412 m-92 0 a92 38 0 1 0 184 0 a92 38 0 1 0 -184 0'
                 ]
             },
             civCarthage: {
-                ox: 256, oy: 268, size: 512,
+                ox: 256, oy: 272, size: 512,
                 paths: [
-                    'M256 468 L84 168 L168 124 L256 88 L344 124 L428 168 Z',
-                    'M256 122 m-56 0 a56 56 0 1 0 112 0 a56 56 0 1 0 -112 0',
-                    'M36 108 L476 108 L476 132 L36 132 Z',
-                    'M36 108 L36 72 L52 72 L52 108 Z',
-                    'M476 108 L476 72 L460 72 L460 108 Z',
-                    'M196 76 A64 38 0 1 1 316 76 A50 30 0 1 0 196 76 Z'
+                    'M256 468 L96 204 L184 168 L256 136 L328 168 L416 204 Z',
+                    'M256 162 m-54 0 a54 54 0 1 0 108 0 a54 54 0 1 0 -108 0',
+                    'M44 152 L468 152 L468 174 L44 174 Z',
+                    'M44 152 L44 106 L64 106 L64 152 Z',
+                    'M468 152 L468 106 L448 106 L448 152 Z',
+                    'M200 92 A58 36 0 1 1 312 92 A46 28 0 1 0 200 92 Z'
                 ],
                 strokes: [
-                    'M256 52 L256 108'
+                    'M256 72 L256 136'
                 ]
             },
             civGaul: {
                 ox: 256, oy: 256, size: 512,
-                arm: 'M256 256 C258 168 272 72 368 48 C412 38 432 78 412 118 C360 198 308 232 256 256 Z',
-                ring: 'M256 256 m-162 0 a162 162 0 1 0 324 0 a162 162 0 1 0 -324 0',
-                ringInner: 'M256 256 m-138 0 a138 138 0 1 0 276 0 a138 138 0 1 0 -276 0'
+                arm: 'M256 256 C248 186 268 96 372 62 C418 48 442 92 422 142 C368 228 310 252 256 256 Z',
+                ring: 'M256 256 m-160 0 a160 160 0 1 0 320 0 a160 160 0 1 0 -320 0',
+                hub: 'M256 256 m-22 0 a22 22 0 1 0 44 0 a22 22 0 1 0 -44 0'
             }
         };
 
-        function wodPaintSvgPathSet(ctx, paths, stroke, strokeOnly) {
-            for(let d of paths) {
-                let path = new Path2D(d);
-                if(strokeOnly) {
-                    if(stroke) ctx.stroke(path);
-                } else {
-                    ctx.fill(path);
-                    if(stroke) ctx.stroke(path);
+        function wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw, strokeOnly) {
+            let path = new Path2D(d);
+            if(strokeOnly) {
+                if(stroke) {
+                    ctx.strokeStyle = stroke;
+                    ctx.lineWidth = lw;
+                    ctx.stroke(path);
                 }
+                return;
+            }
+            ctx.fillStyle = fill;
+            ctx.fill(path);
+            if(stroke) {
+                ctx.strokeStyle = stroke;
+                ctx.lineWidth = lw;
+                ctx.stroke(path);
             }
         }
 
         function wodPaintAncientCivSvgEmblem(ctx, civId, radius, fill, stroke) {
             let def = WOD_ANCIENT_CIV_SVG[civId];
             if(!def) return;
-            let sc = (radius * 1.92) / def.size;
+            let sc = (radius * 1.88) / def.size;
             ctx.save();
             ctx.scale(sc, sc);
             ctx.translate(-def.ox, -def.oy);
-            ctx.fillStyle = fill || '#f5e6a8';
-            ctx.strokeStyle = stroke || fill;
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
+            let lw = Math.max(1.4, 2.8 / sc);
             if(civId === 'civGaul') {
-                if(def.ring) {
-                    ctx.lineWidth = Math.max(3, 10 / sc);
-                    ctx.stroke(new Path2D(def.ring));
-                }
-                if(def.ringInner) {
-                    ctx.lineWidth = Math.max(2, 5 / sc);
-                    ctx.stroke(new Path2D(def.ringInner));
-                }
+                wodPaintAncientCivSvgPath(ctx, def.ring, null, stroke || fill, Math.max(2.5, 7 / sc), true);
                 for(let i = 0; i < 3; i++) {
                     ctx.save();
                     ctx.translate(def.ox, def.oy);
                     ctx.rotate(i * Math.PI * 2 / 3 - Math.PI / 2);
                     ctx.translate(-def.ox, -def.oy);
-                    let arm = new Path2D(def.arm);
-                    ctx.fill(arm);
-                    if(stroke) {
-                        ctx.lineWidth = Math.max(1.5, 3.5 / sc);
-                        ctx.stroke(arm);
-                    }
+                    wodPaintAncientCivSvgPath(ctx, def.arm, fill, stroke, lw, false);
                     ctx.restore();
                 }
+                if(def.hub) wodPaintAncientCivSvgPath(ctx, def.hub, stroke || fill, null, 0, false);
             } else if(civId === 'civCarthage') {
-                wodPaintSvgPathSet(ctx, def.paths, stroke, false);
+                for(let d of def.paths) wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw * 0.85, false);
                 if(def.strokes) {
-                    ctx.lineWidth = Math.max(2.5, 6 / sc);
-                    wodPaintSvgPathSet(ctx, def.strokes, stroke, true);
+                    for(let d of def.strokes) wodPaintAncientCivSvgPath(ctx, d, null, stroke, Math.max(2.2, 5.5 / sc), true);
                 }
             } else {
-                ctx.lineWidth = Math.max(1.2, 2.5 / sc);
-                wodPaintSvgPathSet(ctx, def.paths, stroke, false);
+                for(let d of def.paths) wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw, false);
             }
             ctx.restore();
         }
