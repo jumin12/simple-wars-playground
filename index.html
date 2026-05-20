@@ -5864,7 +5864,7 @@
 
                 <div class="esc-help-block">
                     <h4>Terrain, movement & combat tilt</h4>
-                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Light infantry</strong> and <strong>armor</strong> path on land in all eight hex directions (no corner-cutting through peaks or open water) and use bridges when they are the shortest route. <strong>Marines</strong> thrive on ocean hexes while amphibious; land regiments stranded in deep ocean hexes (<code>inWater</code> in code) suffer drowning upkeep about <strong>−2%</strong> max HP per second and severe march slowdown plus morale linkage. <strong>Ships</strong> fight only from water.</p>
+                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Light infantry</strong> and <strong>armor</strong> path on land in all eight hex directions (no corner-cutting through peaks) and use bridges when they are the shortest route; you may also order them into open water (slow, drowning upkeep). <strong>Marines</strong> thrive on ocean hexes while amphibious; land regiments stranded in deep ocean hexes (<code>inWater</code> in code) suffer drowning upkeep about <strong>−2%</strong> max HP per second and severe march slowdown plus morale linkage. <strong>Ships</strong> fight only from water.</p>
                     <p class="esc-help-prose"><strong>Attack %</strong> scales outgoing strikes vs the same regiment on baseline <strong>grass</strong>; <strong>Dmg taken %</strong> scales how hostile hits resolve on you (<strong>below 100%</strong> absorbs better; above 100% means more exposed).</p>
                     <p class="esc-help-prose esc-help-matrix-footnote"><strong>Ocean headers:</strong> <em>Ocean M/S</em> = marines &amp; ships on ocean (amphib for marines); <em>Ocean drown ΔI</em> / <em>ΔA</em> = light infantry vs armor caught drowning in ocean—same wording as unit cards (<strong>Atk</strong> + <strong>Dmg taken</strong> rows).</p>
                     <div class="wod-help-terrain-combat-mount"></div>
@@ -9672,7 +9672,12 @@
         }
         function wodStripEntityForNet(u) {
             let tgt = u.target ? { x: u.target.x, y: u.target.y, isCity: !!u.target.isCity, pathPrepared: !!u.target.pathPrepared } : null;
-            let ot = u.orderTarget ? { x: u.orderTarget.x, y: u.orderTarget.y, isCity: !!u.orderTarget.isCity } : null;
+            let ot = u.orderTarget ? {
+                x: u.orderTarget.x,
+                y: u.orderTarget.y,
+                isCity: !!u.orderTarget.isCity,
+                intoWater: !!u.orderTarget.intoWater
+            } : null;
             let pth = u.path ? u.path.map(p => ({ x: p.x, y: p.y })) : null;
             let fmw = u.fullMarchWaypoints ? u.fullMarchWaypoints.map(p => ({ x: p.x, y: p.y })) : null;
             return {
@@ -9693,6 +9698,7 @@
             if(d.orderTarget) u.orderTarget = Object.assign({}, d.orderTarget);
             if(d.path) u.path = d.path.map(p => Object.assign({}, p));
             if(d.fullMarchWaypoints) u.fullMarchWaypoints = d.fullMarchWaypoints.map(p => Object.assign({}, p));
+            if(u.orderTarget && u.orderTarget.intoWater) u._wodOrderIntoWater = true;
             u.selected = false;
             return u;
         }
@@ -12696,11 +12702,46 @@
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
             }
-            // Light / heavy: no mountains; river bridges are walkable like grass.
+            // Light / heavy: mountains blocked; may enter open water when explicitly ordered.
             if (hex.type === 'mountain') return false;
             if (isBridgeHex(hex)) return true;
             if (isWaterHex(hex)) return true;
             return isClaimableLand(hex);
+        }
+
+        /** Tiles land armies may use in A* — land + bridge; open water only when allowOpenWater. */
+        function wodHexWalkableForLandPath(unit, hex, allowOpenWater) {
+            if(!hex || !unit) return false;
+            if(unit.type === 'ship') return isWaterHex(hex);
+            if(unit.type === 'marine') {
+                if(hex.type === 'mountain') return false;
+                return isWaterHex(hex) || isClaimableLand(hex);
+            }
+            if(unit.type === 'convoy' && unit.convoySeaRoute) return isWaterHex(hex);
+            if(unit.type === 'convoy') {
+                if(isBridgeHex(hex)) return hex.owner === 0 || hex.owner === unit.owner;
+                if(!isClaimableLand(hex) || hex.type === 'mountain') return false;
+                return hex.owner === 0 || hex.owner === unit.owner;
+            }
+            if(hex.type === 'mountain') return false;
+            if(isBridgeHex(hex)) return true;
+            if(isWaterHex(hex)) return !!allowOpenWater;
+            return isClaimableLand(hex);
+        }
+
+        function wodPathTileWalkable(unit, hex, allowOpenWater) {
+            if(wodUnitPrefersLandOnlyPath(unit)) return wodHexWalkableForLandPath(unit, hex, allowOpenWater);
+            return canUnitEnterHex(unit, hex);
+        }
+
+        function wodOrderIntoWater(unit, targetHex) {
+            if(!wodUnitPrefersLandOnlyPath(unit)) return false;
+            if(unit._wodOrderIntoWater || (unit.orderTarget && unit.orderTarget.intoWater)) return true;
+            return !!(targetHex && isWaterHex(targetHex) && !isBridgeHex(targetHex));
+        }
+
+        function wodSetMarchOrderFlags(unit, resolved) {
+            unit._wodOrderIntoWater = !!(resolved && resolved.intoWater);
         }
 
         function isLandArmyUnit(unit) {
@@ -13791,9 +13832,59 @@
         }
 
         function canUseHexForMovement(unit, hex) {
-            /* Align with canUnitEnterHex: land armies may path through water when ordered
-               (costly in A*). Land-only marches still use runPathAst(true) which forbids water. */
-            return canUnitEnterHex(unit, hex);
+            return wodPathTileWalkable(unit, hex, wodOrderIntoWater(unit, hex));
+        }
+
+        /** Resolve land-army move orders: honor water clicks; otherwise snap to shore/bridge. */
+        function wodResolveLandMarchHex(unit, x, y, startHexOpt) {
+            if(!wodUnitPrefersLandOnlyPath(unit)) return null;
+            if(wodPointOnBridgeForUnit(unit, x, y, 1.08)) {
+                let bh = wodNearestBridgeHexForUnit(unit, x, y);
+                if(bh) return { hex: bh, exactX: x, exactY: y, intoWater: false };
+            }
+            let coord = pixelToHex(x, y);
+            let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            if(direct && isWaterHex(direct) && !isBridgeHex(direct) && direct.type !== 'mountain') {
+                let bestW = null,
+                    bestWd = Infinity;
+                for(let pt of getHexesInRadius(coord.q, coord.r, 10)) {
+                    let wh = gameData.hexes[`${pt.q},${pt.r}`];
+                    if(!wh || !isWaterHex(wh) || isBridgeHex(wh) || wh.type === 'mountain') continue;
+                    let dx = x - wh.x,
+                        dy = y - wh.y;
+                    let d = dx * dx + dy * dy;
+                    if(d < bestWd) {
+                        bestWd = d;
+                        bestW = wh;
+                    }
+                }
+                let waterHex = bestW || direct;
+                return { hex: waterHex, exactX: x, exactY: y, intoWater: true };
+            }
+            if(direct && wodHexWalkableForLandPath(unit, direct, false))
+                return { hex: direct, exactX: x, exactY: y, intoWater: false };
+            let startHex = startHexOpt || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+            let best = null,
+                bestScore = Infinity;
+            for(let pt of getHexesInRadius(coord.q, coord.r, 24)) {
+                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                if(!wodHexWalkableForLandPath(unit, hex, false)) continue;
+                let dx = x - hex.x,
+                    dy = y - hex.y;
+                let score = dx * dx + dy * dy;
+                if(startHex) {
+                    let sx = hex.x - startHex.x,
+                        sy = hex.y - startHex.y;
+                    score += (sx * sx + sy * sy) * 0.18;
+                }
+                if(isBridgeHex(hex)) score *= 0.92;
+                else score += hexMountainProximityScore(hex) * 420;
+                if(score < bestScore) {
+                    bestScore = score;
+                    best = hex;
+                }
+            }
+            return best ? { hex: best, exactX: best.x, exactY: best.y, intoWater: false } : null;
         }
 
         function wodHexStepDistance(fromHex, toHex) {
@@ -13805,7 +13896,8 @@
 
         function wodLandHexBlocksStep(unit, hex, forbidWater) {
             if(!hex) return true;
-            if(!canUseHexForMovement(unit, hex)) return true;
+            let allowWater = !forbidWater && wodUnitPrefersLandOnlyPath(unit);
+            if(!wodPathTileWalkable(unit, hex, allowWater)) return true;
             if(forbidWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
                 isWaterHex(hex) && !isBridgeHex(hex)) return true;
             return false;
@@ -13813,7 +13905,8 @@
 
         function wodCanStepBetweenHexes(unit, fromHex, toHex, forbidWater) {
             if(!fromHex || !toHex) return false;
-            if(!canUseHexForMovement(unit, toHex)) return false;
+            let allowWater = !forbidWater && wodUnitPrefersLandOnlyPath(unit);
+            if(!wodPathTileWalkable(unit, toHex, allowWater)) return false;
             if(forbidWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
                 isWaterHex(toHex) && !isBridgeHex(toHex)) return false;
             let dq = toHex.q - fromHex.q;
@@ -13834,25 +13927,34 @@
         function wodForEachBridgePathPortal(unit, hex, fn) {
             if(!hex || !wodUnitUsesLandBridges(unit) || unit.type === 'marine' || !fn) return;
             let hk = getHexKey(hex);
+            let seen = new Set();
+            function emit(nHex) {
+                if(!nHex) return;
+                let nk = getHexKey(nHex);
+                if(seen.has(nk)) return;
+                seen.add(nk);
+                fn(nHex);
+            }
             if(!isBridgeHex(hex) && gameData._bridgeLandEntry) {
                 let entries = gameData._bridgeLandEntry[hk];
                 if(entries) {
-                    for(let bk of entries) {
-                        let nHex = gameData.hexes[bk];
-                        if(nHex) fn(nHex);
-                    }
+                    for(let bk of entries) emit(gameData.hexes[bk]);
+                }
+                for(let di = 0; di < hexDirections.length; di++) {
+                    let d = hexDirections[di];
+                    let nb = gameData.hexes[`${hex.q + d.q},${hex.r + d.r}`];
+                    if(!nb || !isBridgeHex(nb)) continue;
+                    let linkNbs = wodBridgeLinkedHexes(nb);
+                    for(let li = 0; li < linkNbs.length; li++) emit(linkNbs[li]);
                 }
             }
             if(isBridgeHex(hex)) {
                 let linkNbs = wodBridgeLinkedHexes(hex);
-                for(let li = 0; li < linkNbs.length; li++) fn(linkNbs[li]);
+                for(let li = 0; li < linkNbs.length; li++) emit(linkNbs[li]);
                 if(gameData._bridgeExitLand) {
                     let exits = gameData._bridgeExitLand[hk];
                     if(exits) {
-                        for(let lk of exits) {
-                            let nHex = gameData.hexes[lk];
-                            if(nHex) fn(nHex);
-                        }
+                        for(let lk of exits) emit(gameData.hexes[lk]);
                     }
                 }
             }
@@ -13870,15 +13972,16 @@
             else if(unit && unit.type === 'ship') ring = Math.max(ring, 10);
             let onBridge = wodNearestBridgeHexForUnit(unit, x, y);
             if(onBridge) return onBridge;
+            let allowWater = wodOrderIntoWater(unit, null);
             let primary = getNearestHexToPoint(x, y);
-            if(primary && canUseHexForMovement(unit, primary)) return primary;
+            if(primary && wodPathTileWalkable(unit, primary, allowWater)) return primary;
             let center = pixelToHex(x, y);
             let best = null;
             let bestD = Infinity;
             for(let dq = -ring; dq <= ring; dq++) {
                 for(let dr = -ring; dr <= ring; dr++) {
                     let h = gameData.hexes[`${center.q + dq},${center.r + dr}`];
-                    if(!canUseHexForMovement(unit, h)) continue;
+                    if(!wodPathTileWalkable(unit, h, allowWater)) continue;
                     let dx = h.x - x;
                     let dy = h.y - y;
                     let d = dx * dx + dy * dy;
@@ -13902,6 +14005,14 @@
             if(wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15)) return;
             let ring = ringMax != null ? ringMax : 12;
             let h = getNearestHexToPoint(unit.x, unit.y);
+            if(h && wodUnitPrefersLandOnlyPath(unit) && isWaterHex(h) && !isBridgeHex(h) && !wodOrderIntoWater(unit, h)) {
+                let shore = wodResolveLandMarchHex(unit, unit.x, unit.y);
+                if(shore && !shore.intoWater) {
+                    unit.x = shore.exactX;
+                    unit.y = shore.exactY;
+                    return;
+                }
+            }
             if(h && canUnitEnterHex(unit, h)) return;
             let safe = getNearestWalkableHexForUnit(unit, unit.x, unit.y, ring);
             if(!safe) return;
@@ -13920,13 +14031,14 @@
             if(wodPointOnBridgeForUnit(unit, px, py, 1.18)) return true;
             let h = getNearestHexToPoint(px, py);
             if(h && wodUnitUsesLandBridges(unit) && isBridgeHex(h)) return true;
-            if(h && canUseHexForMovement(unit, h)) return true;
+            if(h && wodPathTileWalkable(unit, h, wodOrderIntoWater(unit, h))) return true;
             if(!h) return false;
             let hr = gameData.hexRadius || 20;
             let thresh2 = (hr * 1.14) * (hr * 1.14);
+            let allowWater = wodOrderIntoWater(unit, h);
             for(let d of hexDirections) {
                 let n = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
-                if(!n || !canUseHexForMovement(unit, n)) continue;
+                if(!n || !wodPathTileWalkable(unit, n, allowWater)) continue;
                 let dx = n.x - px, dy = n.y - py;
                 if(dx * dx + dy * dy <= thresh2) return true;
             }
@@ -14029,11 +14141,12 @@
             let best = null;
             let bestScore = Infinity;
             let forbidWater = wodUnitPrefersLandOnlyPath(unit);
+            let allowWater = wodOrderIntoWater(unit, null);
             function consider(nHex, portal) {
                 if(!nHex) return;
                 if(portal) {
-                    if(!canUseHexForMovement(unit, nHex)) return;
-                    if(forbidWater && isWaterHex(nHex) && !isBridgeHex(nHex)) return;
+                    if(!wodPathTileWalkable(unit, nHex, allowWater)) return;
+                    if(!allowWater && isWaterHex(nHex) && !isBridgeHex(nHex)) return;
                 } else if(!wodCanStepBetweenHexes(unit, currentHex, nHex, forbidWater)) return;
                 let dx = targetX - nHex.x;
                 let dy = targetY - nHex.y;
@@ -14077,6 +14190,10 @@
         }
 
         function findReachableOrderHex(unit, x, y) {
+            if(wodUnitPrefersLandOnlyPath(unit)) {
+                let land = wodResolveLandMarchHex(unit, x, y);
+                if(land) return land;
+            }
             if(wodPointOnBridgeForUnit(unit, x, y)) {
                 let bh = wodNearestBridgeHexForUnit(unit, x, y);
                 if(bh) return { hex: bh, exactX: x, exactY: y };
@@ -14124,7 +14241,7 @@
                     best = hex;
                 }
             }
-            if(best) return best;
+            if(best || wodUnitPrefersLandOnlyPath(unit)) return best;
             for(let hex of gameData.hexList) {
                 if(!canUseHexForMovement(unit, hex)) continue;
                 let targetDx = x - hex.x;
@@ -14232,10 +14349,11 @@
             return extra;
         }
 
-        function findPathAroundTerrain(unit, targetHex, startHexOpt) {
+        function findPathAroundTerrain(unit, targetHex, startHexOpt, skipBridgeCompose) {
             let startHex = startHexOpt || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             if(!startHex || !targetHex) return [];
-            if(!canUseHexForMovement(unit, startHex) || !canUseHexForMovement(unit, targetHex)) return [];
+            let pathAllowWater = wodOrderIntoWater(unit, targetHex);
+            if(!wodPathTileWalkable(unit, startHex, pathAllowWater) || !wodPathTileWalkable(unit, targetHex, pathAllowWater)) return [];
             if(startHex === targetHex) return [startHex];
 
             if((unit.type === 'marine' || unit.type === 'ship') && isWaterHex(startHex) && isWaterHex(targetHex)) {
@@ -14244,6 +14362,7 @@
             }
 
             function runPathAst(forbidWater) {
+                let useOpenWater = pathAllowWater || (!forbidWater && !wodUnitPrefersLandOnlyPath(unit));
                 let convoyHexExtraCost = (unit.type === 'convoy') ? buildConvoyFrontlineAvoidanceCost(unit) : null;
                 let pathSeaConvoy = unit.type === 'convoy' && unit.convoySeaRoute;
                 let pathMarine = unit.type === 'marine';
@@ -14266,7 +14385,8 @@
                 }
                 function movementCost(a, b) {
                     let stepDist = wodHexStepDistance(a, b);
-                    if(isBridgeHex(b)) return stepDist;
+                    if(isBridgeHex(a) && isBridgeHex(b)) return stepDist * 0.85;
+                    if(isBridgeHex(b) || isBridgeHex(a)) return stepDist * 0.92;
                     let terrain = 0;
                     if(b.type === 'forest') terrain = 0.5;
                     else if(b.type === 'swamp') terrain = 1.2;
@@ -14367,8 +14487,8 @@
                     let nKey = key(nHex);
                     if(visited.has(nKey)) return;
                     if(bridgeLink) {
-                        if(!canUseHexForMovement(unit, nHex)) return;
-                        if(forbidWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
+                        if(!wodPathTileWalkable(unit, nHex, useOpenWater)) return;
+                        if(forbidWater && !pathAllowWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
                             isWaterHex(nHex) && !isBridgeHex(nHex)) return;
                     } else if(!wodCanStepBetweenHexes(unit, current, nHex, forbidWater)) {
                         return;
@@ -14393,9 +14513,12 @@
                 let mapCells = Math.max(400, gameData.hexList.length || 0);
                 let maxVisits = unit.type === 'ship' ? 20000 : ((unit.type === 'convoy' && unit.convoySeaRoute) ? 17000 : (unit.type === 'convoy' ? 15000 : 12000));
                 if(unit.type === 'convoy') maxVisits = Math.floor(maxVisits * 1.35);
-                if(forbidWater && (unit.type === 'light' || unit.type === 'heavy')) {
-                    maxVisits = Math.floor(16000 + mapCells * 0.52);
-                    maxVisits = Math.min(52000, Math.max(24000, maxVisits));
+                if(pathAllowWater && wodUnitPrefersLandOnlyPath(unit)) {
+                    maxVisits = Math.floor(3800 + mapCells * 0.1);
+                    maxVisits = Math.min(8200, Math.max(3200, maxVisits));
+                } else if(forbidWater && (unit.type === 'light' || unit.type === 'heavy' || unit.type === 'convoy')) {
+                    maxVisits = Math.floor(5200 + mapCells * 0.22);
+                    maxVisits = Math.min(14000, Math.max(7000, maxVisits));
                 } else {
                     let heavy = (gameData.hexList.length > 9000 ? 5800 / gameData.hexList.length : 1) * (gameData.entities.length > 380 ? 320 / gameData.entities.length : 1);
                     maxVisits = Math.max(900, Math.floor(maxVisits * heavy));
@@ -14427,10 +14550,89 @@
             }
 
             if(wodUnitPrefersLandOnlyPath(unit)) {
+                if(pathAllowWater) {
+                    let amphR = runPathAst(false);
+                    return amphR.path;
+                }
                 let landR = runPathAst(true);
+                if(landR.path.length > 1) return landR.path;
+                if(!skipBridgeCompose && gameData.bridges && gameData.bridges.length) {
+                    let via = wodFindPathThroughNearestBridge(unit, startHex, targetHex);
+                    if(via.length > 1) return via;
+                }
                 return landR.path;
             }
             return runPathAst(false).path;
+        }
+
+        /** When A* cannot cross a river, march to the nearest bridge entry then exit toward the goal. */
+        function wodFindPathThroughNearestBridge(unit, startHex, targetHex) {
+            if(!startHex || !targetHex || !gameData._bridgeExitLand || !gameData.bridges || !gameData.bridges.length)
+                return [];
+            let sk = getHexKey(startHex),
+                tk = getHexKey(targetHex);
+            let bestSeg = null,
+                bestScore = Infinity;
+            for(let bi = 0; bi < gameData.bridges.length; bi++) {
+                let br = gameData.bridges[bi];
+                if(!br || !br.hexKeys || !br.hexKeys.length) continue;
+                let shores = [],
+                    seenShore = new Set();
+                for(let ki = 0; ki < br.hexKeys.length; ki++) {
+                    let ex = gameData._bridgeExitLand[br.hexKeys[ki]];
+                    if(!ex) continue;
+                    for(let lk of ex) {
+                        if(seenShore.has(lk)) continue;
+                        let lh = gameData.hexes[lk];
+                        if(!lh || !wodHexWalkableForLandPath(unit, lh) || isBridgeHex(lh)) continue;
+                        seenShore.add(lk);
+                        shores.push(lh);
+                    }
+                }
+                if(shores.length < 1) continue;
+                let nearEntry = null,
+                    nearEntryD = Infinity,
+                    nearExit = null,
+                    nearExitD = Infinity;
+                for(let si = 0; si < shores.length; si++) {
+                    let sh = shores[si];
+                    let sk2 = getHexKey(sh);
+                    let dStart = (sk2 === sk) ? 0 : ((sh.x - startHex.x) ** 2 + (sh.y - startHex.y) ** 2);
+                    let dGoal = (sk2 === tk) ? 0 : ((sh.x - targetHex.x) ** 2 + (sh.y - targetHex.y) ** 2);
+                    if(dStart < nearEntryD) {
+                        nearEntryD = dStart;
+                        nearEntry = sh;
+                    }
+                    if(dGoal < nearExitD) {
+                        nearExitD = dGoal;
+                        nearExit = sh;
+                    }
+                }
+                if(!nearEntry || !nearExit) continue;
+                let score = nearEntryD + nearExitD;
+                if(score >= bestScore) continue;
+                let legA = findPathAroundTerrain(unit, nearEntry, startHex, true);
+                let legB = findPathAroundTerrain(unit, targetHex, nearExit, true);
+                if(legA.length <= 1 && getHexKey(nearEntry) !== sk) continue;
+                if(legB.length <= 1 && getHexKey(nearExit) !== tk && getHexKey(nearEntry) !== getHexKey(nearExit)) continue;
+                let deck = [];
+                for(let ki = 0; ki < br.hexKeys.length; ki++) {
+                    let bh = gameData.hexes[br.hexKeys[ki]];
+                    if(bh) deck.push(bh);
+                }
+                if(!deck.length) continue;
+                let merged = legA.slice();
+                if(merged.length && getHexKey(merged[merged.length - 1]) === getHexKey(deck[0])) merged.pop();
+                merged.push(...deck);
+                if(merged.length && legB.length && getHexKey(merged[merged.length - 1]) === getHexKey(legB[0])) legB = legB.slice(1);
+                merged.push(...legB);
+                merged = smoothGridPath(merged);
+                if(merged.length > 1) {
+                    bestScore = score;
+                    bestSeg = merged;
+                }
+            }
+            return bestSeg || [];
         }
 
         function findGreedyWaterStep(unit, targetHex, opt) {
@@ -14481,9 +14683,10 @@
             let forbidWater = wodUnitPrefersLandOnlyPath(unit);
             function consider(nHex, portal) {
                 if(!nHex) return;
+                let allowWater = wodOrderIntoWater(unit, targetHex);
                 if(portal) {
-                    if(!canUseHexForMovement(unit, nHex)) return;
-                    if(forbidWater && isWaterHex(nHex) && !isBridgeHex(nHex)) return;
+                    if(!wodPathTileWalkable(unit, nHex, allowWater)) return;
+                    if(!allowWater && isWaterHex(nHex) && !isBridgeHex(nHex)) return;
                 } else if(!wodCanStepBetweenHexes(unit, curHex, nHex, forbidWater)) return;
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
@@ -14566,9 +14769,12 @@
             invalidateUnitOrderArrowCache(unit);
             unit.blockedTimer = 0;
             unit.stuckTimer = 0;
+            unit._wodPathGiveUpUntil = 0;
+            unit._wodReplanLandUntil = 0;
             if(!opt || !opt.retainMoraleBroken) unit.moraleBroken = false;
 
             let fromAdvance = !!(opt && opt.fromLegAdvance);
+            if(!fromAdvance) unit._wodOrderIntoWater = false;
             let marchPts;
             let cursor;
             if(fromAdvance) {
@@ -14592,7 +14798,10 @@
 
             let reachLast = findReachableOrderHex(unit, lastWp.x, lastWp.y);
             let exactLast = reachLast ? {x: reachLast.exactX, y: reachLast.exactY} : {x: lastWp.x, y: lastWp.y};
-            unit.orderTarget = exactLast;
+            unit.orderTarget = reachLast
+                ? { x: exactLast.x, y: exactLast.y, intoWater: !!reachLast.intoWater }
+                : exactLast;
+            wodSetMarchOrderFlags(unit, reachLast || { intoWater: false });
 
             if(!fromAdvance) {
                 unit.fullMarchWaypoints = marchPts;
@@ -14743,23 +14952,50 @@
 
         function preparePathTarget(unit) {
             if(!unit.target || unit.target.pathPrepared || unit.target.detour) return;
+            if(unit._wodPathGiveUpUntil && performance.now() < unit._wodPathGiveUpUntil) {
+                unit.target.pathPrepared = true;
+                return;
+            }
             let desired = unit.orderTarget ? {x: unit.orderTarget.x, y: unit.orderTarget.y} : {x: unit.target.x, y: unit.target.y};
             if(unit.orderTarget && unit.orderTarget.isCity) desired.isCity = true;
+            let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let targetHex = getNearestHexToPoint(desired.x, desired.y);
             if(unit.type === 'convoy' && unit.convoySeaRoute && desired.isCity) {
                 let destCity = findCityNearPointForOwner(desired.x, desired.y, unit.owner);
                 let wh = resolveTradeConvoyPathHex(unit, destCity);
                 if(wh) targetHex = wh;
             }
-            if(!canUseHexForMovement(unit, targetHex)) {
+            if(wodUnitPrefersLandOnlyPath(unit)) {
+                let resolved = (unit.orderTarget && unit.orderTarget.intoWater)
+                    ? { hex: targetHex, exactX: desired.x, exactY: desired.y, intoWater: true }
+                    : wodResolveLandMarchHex(unit, desired.x, desired.y, startHex);
+                if(resolved) {
+                    targetHex = resolved.hex;
+                    desired = { x: resolved.exactX, y: resolved.exactY, ...(desired.isCity ? { isCity: true } : {}) };
+                    unit.orderTarget = {
+                        x: resolved.exactX,
+                        y: resolved.exactY,
+                        intoWater: !!resolved.intoWater,
+                        ...(unit.orderTarget && unit.orderTarget.isCity ? { isCity: true } : {})
+                    };
+                    wodSetMarchOrderFlags(unit, resolved);
+                } else {
+                    unit.target = null;
+                    unit.path = null;
+                    unit.orderTarget = null;
+                    unit._wodPathGiveUpUntil = performance.now() + 1200;
+                    invalidateUnitOrderArrowCache(unit);
+                    return;
+                }
+            } else if(!canUseHexForMovement(unit, targetHex)) {
                 let reachable = findReachableOrderHex(unit, desired.x, desired.y);
                 targetHex = reachable ? reachable.hex : null;
                 desired = reachable ? {x: reachable.exactX, y: reachable.exactY, ...(desired.isCity ? {isCity: true} : {})} : desired;
                 unit.orderTarget = reachable ? {x: reachable.exactX, y: reachable.exactY, ...(unit.orderTarget && unit.orderTarget.isCity ? {isCity: true} : {})} : unit.orderTarget;
             }
-            let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let path = findPathAroundTerrain(unit, targetHex, startHex);
             if(path.length > 1) {
+                unit._wodPathGiveUpUntil = 0;
                 let endNode = {x: desired.x, y: desired.y};
                 if(desired.isCity) endNode.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endNode);
@@ -14769,9 +15005,9 @@
                 let spacing = gameData.hexRadius * 1.35;
                 let minChainDist2 = spacing * spacing * 2.8;
                 let dxFar = startHex.x - targetHex.x, dyFar = startHex.y - targetHex.y;
-                if((unit.type === 'light' || unit.type === 'heavy' || unit.type === 'marine') &&
+                if(unit.type === 'marine' &&
                     dxFar * dxFar + dyFar * dyFar > minChainDist2) {
-                    let maxSteps = unit.type === 'marine' ? 48 : 100;
+                    let maxSteps = 48;
                     let chain = buildGreedyLandHexChain(unit, startHex, targetHex, maxSteps);
                     if(chain.length > 1) {
                         unit.path = chain.slice(1).map(h => ({x: h.x, y: h.y}));
@@ -14807,7 +15043,16 @@
                 else if(unit.type === 'convoy') greedy = findGreedyLandStep(unit, targetHex);
                 if(greedy) {
                     unit.target = {x: greedy.x, y: greedy.y, pathPrepared: true, convoyGreedy: true};
-                } else if(unit.type === 'light' || unit.type === 'heavy' || unit.type === 'marine') {
+                } else if(wodUnitPrefersLandOnlyPath(unit)) {
+                    unit.path = null;
+                    unit.target = {
+                        x: desired.x,
+                        y: desired.y,
+                        pathPrepared: true,
+                        ...(desired.isCity ? { isCity: true } : {})
+                    };
+                    unit._wodPathGiveUpUntil = performance.now() + 900;
+                } else if(unit.type === 'marine') {
                     unit.path = null;
                     let reach = findReachableOrderHex(unit, desired.x, desired.y);
                     if(reach) {
@@ -15983,6 +16228,7 @@
         }
 
         function replanUnitOrder(unit) {
+            if(unit._wodPathGiveUpUntil && performance.now() < unit._wodPathGiveUpUntil) return false;
             let shThrottle = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             if(shThrottle && isWaterHex(shThrottle) && (unit.type === 'marine' || unit.type === 'ship')) {
                 let nowPf = performance.now();
@@ -15990,8 +16236,7 @@
                 unit._wodReplanPfUntil = nowPf + 120;
             }
             let nowLand = performance.now();
-            if((unit.type === 'light' || unit.type === 'heavy') &&
-                unit._wodReplanLandUntil && nowLand < unit._wodReplanLandUntil)
+            if(wodUnitPrefersLandOnlyPath(unit) && unit._wodReplanLandUntil && nowLand < unit._wodReplanLandUntil)
                 return false;
             if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
                 return assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true});
@@ -15999,13 +16244,28 @@
             let finalTarget = unit.orderTarget || (unit.target && unit.target.finalTarget) || unit.target;
             if(!finalTarget) return false;
             let convoyCity = unit.type === 'convoy' && finalTarget.isCity;
+            let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let targetHex = getNearestHexToPoint(finalTarget.x, finalTarget.y);
             if(unit.type === 'convoy' && unit.convoySeaRoute && convoyCity) {
                 let destCity = findCityNearPointForOwner(finalTarget.x, finalTarget.y, unit.owner);
                 let wh = resolveTradeConvoyPathHex(unit, destCity);
                 if(wh) targetHex = wh;
             }
-            if(!canUseHexForMovement(unit, targetHex)) {
+            if(wodUnitPrefersLandOnlyPath(unit)) {
+                let resolved = (unit.orderTarget && unit.orderTarget.intoWater)
+                    ? { hex: targetHex, exactX: finalTarget.x, exactY: finalTarget.y, intoWater: true }
+                    : wodResolveLandMarchHex(unit, finalTarget.x, finalTarget.y, startHex);
+                if(!resolved) return false;
+                targetHex = resolved.hex;
+                finalTarget = {
+                    x: resolved.exactX,
+                    y: resolved.exactY,
+                    intoWater: !!resolved.intoWater,
+                    ...(convoyCity ? { isCity: true } : {})
+                };
+                unit.orderTarget = finalTarget;
+                wodSetMarchOrderFlags(unit, resolved);
+            } else if(!canUseHexForMovement(unit, targetHex)) {
                 let reachable = findReachableOrderHex(unit, finalTarget.x, finalTarget.y);
                 if(!reachable) return false;
                 targetHex = reachable.hex;
@@ -16013,7 +16273,6 @@
                 if(convoyCity) finalTarget.isCity = true;
                 unit.orderTarget = finalTarget;
             }
-            let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let path = findPathAroundTerrain(unit, targetHex, startHex);
             if(path.length <= 1 && unit.type === 'ship' && targetHex) {
                 let hop = findGreedyWaterStep(unit, targetHex);
@@ -16048,8 +16307,17 @@
                 unit._wodReplanLandUntil = 0;
                 return true;
             }
-            if((unit.type === 'light' || unit.type === 'heavy') && path.length <= 1)
-                unit._wodReplanLandUntil = performance.now() + 200;
+            if(wodUnitPrefersLandOnlyPath(unit) && path.length <= 1) {
+                unit._wodReplanLandUntil = performance.now() + 650;
+                unit._wodPathGiveUpUntil = performance.now() + 900;
+            }
+            if(targetHex && wodUnitPrefersLandOnlyPath(unit)) {
+                unit.path = null;
+                let t = {x: targetHex.x, y: targetHex.y, pathPrepared: true};
+                if(convoyCity) t.isCity = true;
+                unit.target = t;
+                return true;
+            }
             if(targetHex) {
                 unit.path = null;
                 let t = {x: finalTarget.x, y: finalTarget.y, pathPrepared: true};
