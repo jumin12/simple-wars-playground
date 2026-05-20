@@ -6473,7 +6473,7 @@
                         <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city without a factory.">Build Factory ($2k)</button>
                         <button class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City must border water without a harbor.">Build Harbor ($1k)</button>
                         <button class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned land (not city cores). Forts may be built near each other; defense bonuses do not stack.">Build Fort ($1.5k)</button>
-                        <button class="build-btn" onclick="beginBridgeBuild()" title="Costs $1200. Place over water; R or Q/E to rotate before clicking.">Build Bridge ($1.2k)</button>
+                        <button class="build-btn" onclick="beginBridgeBuild()" title="Costs $2000. Place over water; mouse wheel or Q/E rotates before clicking.">Build Bridge ($2k)</button>
                     </div>
                 </div>
             </div>
@@ -6500,7 +6500,7 @@
                             <button type="button" class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city.">Build Factory ($2k)</button>
                             <button type="button" class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City bordering water.">Build Harbor ($1k)</button>
                             <button type="button" class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned terrain. Forts can be built close together; aura bonuses do not stack.">Build Fort ($1.5k)</button>
-                            <button type="button" class="build-btn" onclick="beginBridgeBuild()" title="Costs $1200. Span a river; R or Q/E to rotate.">Build Bridge ($1.2k)</button>
+                            <button type="button" class="build-btn" onclick="beginBridgeBuild()" title="Costs $2000. Span a river; mouse wheel or Q/E rotates.">Build Bridge ($2k)</button>
                         </div>
                         <div class="wod-pc-prod-pane" data-wod-pc-pane="units" role="tabpanel">
                             <button type="button" class="build-btn" onclick="buyUnit('light')" title="Train light infantry ($500).">Train Light Infantry ($500, 1k MP)</button>
@@ -6983,7 +6983,7 @@
         const WOD_PRICE_FACTORY = 2000;
         const WOD_PRICE_HARBOR = 1000;
         const WOD_PRICE_FORT = 1500;
-        const WOD_PRICE_BRIDGE = 1200;
+        const WOD_PRICE_BRIDGE = 2000;
         const WOD_BRIDGE_ROT_STEP = Math.PI / 12;
         const WOD_PRICE_LIGHT = 500;
         const WOD_PRICE_MARINE = 500;
@@ -8754,6 +8754,56 @@
         }
         function isBridgeHex(hex) {
             return !!bridgeAtHex(hex);
+        }
+        function wodUnitUsesLandBridges(unit) {
+            return !!unit && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute);
+        }
+        function wodPointOnBridgeForUnit(unit, px, py) {
+            if(!wodUnitUsesLandBridges(unit) || !gameData.bridges || !gameData.bridges.length) return false;
+            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                if(wodPointInBridgeRect(px, py, gameData.bridges[bi])) return true;
+            }
+            return false;
+        }
+        function wodNearestBridgeHexForUnit(unit, x, y) {
+            if(!wodUnitUsesLandBridges(unit) || !gameData.bridges || !gameData.bridges.length) return null;
+            let best = null,
+                bestD = Infinity;
+            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                let br = gameData.bridges[bi];
+                if(!br || !wodPointInBridgeRect(x, y, br)) continue;
+                let keys = br.hexKeys;
+                if(!keys || !keys.length) {
+                    wodSyncBridgeWorldCoords(br);
+                    keys = br.hexKeys;
+                }
+                if(!keys) continue;
+                for(let ki = 0; ki < keys.length; ki++) {
+                    let h = gameData.hexes[keys[ki]];
+                    if(!h || !isBridgeHex(h)) continue;
+                    let dx = h.x - x,
+                        dy = h.y - y;
+                    let d = dx * dx + dy * dy;
+                    if(d < bestD) {
+                        bestD = d;
+                        best = h;
+                    }
+                }
+            }
+            return best;
+        }
+        function wodBridgeLinkedHexes(hex) {
+            let br = bridgeAtHex(hex);
+            if(!br) return [];
+            if(!br.hexKeys || !br.hexKeys.length) wodSyncBridgeWorldCoords(br);
+            let keys = br.hexKeys;
+            if(!keys || !keys.length) return [hex];
+            let out = [];
+            for(let ki = 0; ki < keys.length; ki++) {
+                let h = gameData.hexes[keys[ki]];
+                if(h) out.push(h);
+            }
+            return out.length ? out : [hex];
         }
         function wodBridgePlacementError(br, owner) {
             if(!br) return 'Invalid bridge.';
@@ -13551,6 +13601,8 @@
             if(unit && unit.type === 'convoy' && unit.convoySeaRoute) ring = Math.max(ring, 12);
             else if(unit && unit.type === 'convoy') ring = Math.max(ring, 14);
             else if(unit && unit.type === 'ship') ring = Math.max(ring, 10);
+            let onBridge = wodNearestBridgeHexForUnit(unit, x, y);
+            if(onBridge) return onBridge;
             let primary = getNearestHexToPoint(x, y);
             if(primary && canUseHexForMovement(unit, primary)) return primary;
             let center = pixelToHex(x, y);
@@ -13597,6 +13649,7 @@
 
         /** Pixel chord samples can land on the wrong hex between land/water/mountain corners; accept nearby cardinal tiles. */
         function wodSamplePosOnWalkableTerrain(unit, px, py) {
+            if(wodPointOnBridgeForUnit(unit, px, py)) return true;
             let h = getNearestHexToPoint(px, py);
             if(h && canUseHexForMovement(unit, h)) return true;
             if(!h) return false;
@@ -14071,6 +14124,21 @@
                         gScore[nKey] = tentativeG;
                         fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
                         heapPush(open, nHex, fScore);
+                    }
+                    if(wodUnitUsesLandBridges(unit) && isBridgeHex(current)) {
+                        let linkNbs = wodBridgeLinkedHexes(current);
+                        for(let li = 0; li < linkNbs.length; li++) {
+                            let nHex = linkNbs[li];
+                            if(!nHex) continue;
+                            let nKey = key(nHex);
+                            if(visited.has(nKey) || !neighborOk(nHex)) continue;
+                            let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
+                            if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
+                            cameFrom[nKey] = current;
+                            gScore[nKey] = tentativeG;
+                            fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
+                            heapPush(open, nHex, fScore);
+                        }
                     }
                 }
                 return {path: [], cost: Infinity};
@@ -25909,6 +25977,13 @@
 
         canvas.addEventListener('wheel', (e) => {
             if (gameState !== 'PLAYING') return;
+            if(gameData.buildMode === 'bridge' && gameData.bridgePlacement) {
+                e.preventDefault();
+                let p = gameData.bridgePlacement;
+                let step = e.deltaY > 0 ? WOD_BRIDGE_ROT_STEP : -WOD_BRIDGE_ROT_STEP;
+                p.angle = (p.angle || 0) + step;
+                return;
+            }
             e.preventDefault();
             wodBumpCamInteract(220);
             if(wodUsesVisualViewportLayout()) {
@@ -26561,6 +26636,17 @@
             br.owner = owner || 0;
             gameData.bridges.push(br);
             wodRebuildBridgeHexIndex();
+            if(!opts.editor) {
+                for(let ui = 0, el = gameData.entities.length; ui < el; ui++) {
+                    let u = gameData.entities[ui];
+                    if(!u || u.hp <= 0 || !wodUnitUsesLandBridges(u)) continue;
+                    if(u.path) u.path = null;
+                    if(u.target && u.target.pathPrepared) {
+                        u.target.pathPrepared = false;
+                        u._wodReplanLandUntil = performance.now() + 120;
+                    }
+                }
+            }
             if(noisy) showNotification('Bridge built — troops cross it like open ground.');
             return true;
         }
@@ -26726,7 +26812,7 @@
                 return;
             }
             gameData.buildMode = mode;
-            if(mode === 'bridge') showNotification('Place bridge over water. Q/E or R rotates · Esc cancels.');
+            if(mode === 'bridge') showNotification('Place bridge over water. Mouse wheel or Q/E rotates · Esc cancels.');
             if(UI.wrapper) UI.wrapper.style.cursor = 'crosshair';
             syncBuildPlacementMobileUi();
         }
