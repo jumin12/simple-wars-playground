@@ -13826,6 +13826,7 @@
         /** Pixel chord samples can land on the wrong hex between land/water/mountain corners; accept nearby cardinal tiles. */
         function wodSamplePosOnWalkableTerrain(unit, px, py) {
             if(wodPointOnBridgeForUnit(unit, px, py)) return true;
+            if(wodUnitUsesLandBridges(unit) && wodNearestBridgeHexForUnit(unit, px, py)) return true;
             let h = getNearestHexToPoint(px, py);
             if(h && canUseHexForMovement(unit, h)) return true;
             if(!h) return false;
@@ -14772,7 +14773,7 @@
 
         function getTerrainAttackModifier(unit, hex) {
             if(!hex || !unit) return 1;
-            if(isBridgeHex(hex)) return 1;
+            if(isBridgeHex(hex) || wodUnitOnBridgeDeck(unit)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 1;
@@ -14801,7 +14802,7 @@
 
         function getTerrainDefenseModifier(unit, hex) {
             if(!hex || !unit) return 1;
-            if(isBridgeHex(hex)) return 1;
+            if(isBridgeHex(hex) || wodUnitOnBridgeDeck(unit)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 0.92;
