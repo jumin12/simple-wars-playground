@@ -8642,6 +8642,35 @@
                 }
                 await wodMapGenYieldSlice();
             }
+            wodFinalizeRiverKeyTags();
+        }
+        /** Grow carved-river tags along thin connected water (never into lakes). */
+        function wodFinalizeRiverKeyTags() {
+            if(!gameData._procgenRiverKeys) gameData._procgenRiverKeys = new Set();
+            let ocean = wodMapShapeUsesRadialIslandMask(gameData.mapShape) ? wodEnsureOceanWaterKeys() : null;
+            let guard = 0;
+            let grew = true;
+            while(grew && guard++ < 12) {
+                grew = false;
+                for(let k of [...gameData._procgenRiverKeys]) {
+                    let h = gameData.hexes[k];
+                    if(!h) continue;
+                    for(let nb of getNeighborHexes(h)) {
+                        if(!nb || !isWaterHex(nb)) continue;
+                        let nk = getHexKey(nb);
+                        if(gameData._procgenRiverKeys.has(nk)) continue;
+                        if(ocean && ocean.has(nk)) continue;
+                        if(wodIsLakeWaterHex(nb)) continue;
+                        let c = wodWaterComponentStats(nb, 72);
+                        if(!c || c.size > 20) continue;
+                        let aspect = Math.max(c.spanQ, c.spanR) / Math.max(1, Math.min(c.spanQ, c.spanR));
+                        if(aspect >= 1.22 || c.size <= 4) {
+                            gameData._procgenRiverKeys.add(nk);
+                            grew = true;
+                        }
+                    }
+                }
+            }
         }
         function wodStripBridgeForNet(b) {
             let br = wodNormalizeBridgeRecord(b);
@@ -8737,7 +8766,7 @@
                 : new Set();
             return gameData._wodOceanWaterKeys;
         }
-        function wodWaterComponentFrom(start, maxCells) {
+        function wodWaterComponentStats(start, maxCells) {
             if(!start || !isWaterHex(start)) return null;
             let queue = [start],
                 qi = 0,
@@ -8746,6 +8775,7 @@
                 minR = start.r,
                 maxR = start.r;
             let seen = new Set([getHexKey(start)]);
+            let landTouches = 0;
             while(qi < queue.length && qi < (maxCells || 96)) {
                 let cur = queue[qi++];
                 minQ = Math.min(minQ, cur.q);
@@ -8753,25 +8783,60 @@
                 minR = Math.min(minR, cur.r);
                 maxR = Math.max(maxR, cur.r);
                 for(let nb of getNeighborHexes(cur)) {
-                    if(!nb || !isWaterHex(nb)) continue;
+                    if(!nb) continue;
+                    if(!isWaterHex(nb)) {
+                        landTouches++;
+                        continue;
+                    }
                     let nk = getHexKey(nb);
                     if(seen.has(nk)) continue;
                     seen.add(nk);
                     queue.push(nb);
                 }
             }
-            return { size: seen.size, span: Math.max(maxQ - minQ, maxR - minR) + 1 };
+            return {
+                size: seen.size,
+                spanQ: maxQ - minQ + 1,
+                spanR: maxR - minR + 1,
+                landTouches
+            };
+        }
+        function wodIsLakeWaterHex(hex) {
+            if(!hex || !isWaterHex(hex)) return false;
+            let k = getHexKey(hex);
+            let ocean = wodEnsureOceanWaterKeys();
+            if(ocean && ocean.size && ocean.has(k)) return false;
+            if(gameData._procgenRiverKeys && gameData._procgenRiverKeys.has(k)) return false;
+            let c = wodWaterComponentStats(hex, 110);
+            if(!c) return false;
+            if(c.size > 28) return true;
+            let aspect = Math.max(c.spanQ, c.spanR) / Math.max(1, Math.min(c.spanQ, c.spanR));
+            if(c.size >= 8 && aspect < 1.5) return true;
+            if(c.size >= 5 && c.landTouches >= c.size * 1.25) return true;
+            return false;
         }
         function wodIsRiverWaterHex(hex) {
             if(!hex || !isWaterHex(hex)) return false;
             let k = getHexKey(hex);
+            let ocean = wodEnsureOceanWaterKeys();
+            if(ocean && ocean.size && ocean.has(k)) return false;
+            if(wodIsLakeWaterHex(hex)) return false;
             if(gameData._procgenRiverKeys && gameData._procgenRiverKeys.has(k)) return true;
-            if(wodMapShapeUsesRadialIslandMask(gameData.mapShape)) return !wodEnsureOceanWaterKeys().has(k);
-            let comp = wodWaterComponentFrom(hex, 96);
-            if(!comp) return false;
-            if(comp.size > 34) return false;
-            let elong = comp.span / Math.max(1, Math.sqrt(comp.size));
-            return comp.size <= 9 || elong >= 1.28;
+            let c = wodWaterComponentStats(hex, 88);
+            if(!c || c.size > 24) return false;
+            let aspect = Math.max(c.spanQ, c.spanR) / Math.max(1, Math.min(c.spanQ, c.spanR));
+            if(aspect >= 1.55 && c.size >= 2) return true;
+            if(c.size <= 5 && aspect >= 1.18) return true;
+            let lands = [];
+            for(let nb of getNeighborHexes(hex)) {
+                if(nb && !isWaterHex(nb) && nb.type !== 'mountain' && nb.type !== 'urban') lands.push(nb);
+            }
+            if(lands.length === 2) {
+                let man = Math.abs(lands[0].q - lands[1].q) + Math.abs(lands[0].r - lands[1].r);
+                if(man === 2) return true;
+            }
+            if(c.size >= 2 && c.size <= 16 && aspect >= 1.28) return true;
+            return false;
         }
         function wodBridgeRiverHexKeysBetween(landA, landB) {
             if(!landA || !landB) return [];
@@ -8791,7 +8856,7 @@
                 keys.add(ck);
                 if(getNeighborHexes(cur).some(n => n && n.q === landB.q && n.r === landB.r)) reachedB = true;
                 for(let nb of getNeighborHexes(cur)) {
-                    if(nb && isWaterHex(nb)) queue.push(nb);
+                    if(nb && wodIsRiverWaterHex(nb)) queue.push(nb);
                 }
             }
             if(!reachedB || !keys.size) return [];
@@ -8822,7 +8887,9 @@
             if(sep < 2) return { ok: false, msg: 'Banks must be on opposite sides of the river.' };
             if(sep > 18) return { ok: false, msg: 'River crossing is too far apart.' };
             let hexKeys = wodBridgeRiverHexKeysBetween(landA, landB);
-            if(!hexKeys.length) return { ok: false, msg: 'No river channel connects those banks.' };
+            if(!hexKeys.length) return { ok: false, msg: 'No river connects those banks (lakes and sea cannot be bridged).' };
+            let riverOnly = hexKeys.every(k => wodIsRiverWaterHex(gameData.hexes[k]));
+            if(!riverOnly) return { ok: false, msg: 'Crossing must be a river, not a lake.' };
             if(hexKeys.length > 16) return { ok: false, msg: 'River is too wide for a bridge here.' };
             for(let ki = 0; ki < hexKeys.length; ki++) {
                 if(bridgeAtHex(gameData.hexes[hexKeys[ki]])) return { ok: false, msg: 'A bridge already crosses this river.' };
@@ -8846,11 +8913,15 @@
             if(shores) {
                 br.landA = { q: shores.landA.q, r: shores.landA.r };
                 br.landB = { q: shores.landB.q, r: shores.landB.r };
-                let hexKeys = br.hexKeys && br.hexKeys.length ? br.hexKeys : wodBridgeRiverHexKeysBetween(shores.landA, shores.landB);
+                let hexKeys = wodBridgeRiverHexKeysBetween(shores.landA, shores.landB);
+                if(!hexKeys.length && br.hexKeys && br.hexKeys.length) hexKeys = br.hexKeys.slice();
                 br.hexKeys = hexKeys;
-                if(hexKeys.length && h) {
-                    br.q = gameData.hexes[hexKeys[0]].q;
-                    br.r = gameData.hexes[hexKeys[0]].r;
+                if(hexKeys.length) {
+                    let wh0 = gameData.hexes[hexKeys[0]];
+                    if(wh0) {
+                        br.q = wh0.q;
+                        br.r = wh0.r;
+                    }
                 }
                 let sx = shores.landA.x + shores.landB.x,
                     sy = shores.landA.y + shores.landB.y,
@@ -24818,7 +24889,8 @@
             if(structsOn && gameData.bridges && gameData.bridges.length) {
                 for(let bri = 0, brl = gameData.bridges.length; bri < brl; bri++) {
                     let brg = gameData.bridges[bri];
-                    if(wodCull && !wodInView(brg.x, brg.y, 48)) continue;
+                    let culR = Math.max(72, (brg.w || 48) * 0.65);
+                    if(wodCull && brg.x != null && !wodInView(brg.x, brg.y, culR)) continue;
                     drawBridgeSticker(ctx, brg, gfxLite, null);
                 }
             }
@@ -26579,42 +26651,50 @@
             wodSyncBridgeWorldCoords(br);
             let hr = gameData.hexRadius || 20;
             let sp = hr * 1.35;
-            let deckW = sp * 0.94;
-            let deckH = sp * 0.76;
-            let ang = br.angle || 0;
-            let keys = br.hexKeys && br.hexKeys.length ? br.hexKeys : (br.q != null ? [`${br.q},${br.r}`] : []);
-            let anyDrawn = false;
             let la = br.landA ? gameData.hexes[`${br.landA.q},${br.landA.r}`] : null;
             let lb = br.landB ? gameData.hexes[`${br.landB.q},${br.landB.r}`] : null;
-            if(la && lb) {
-                let dx = lb.x - la.x,
-                    dy = lb.y - la.y;
-                let span = Math.hypot(dx, dy) || 1;
-                ang = Math.atan2(dy, dx);
-                let rampW = deckW * 0.62,
-                    rampH = deckH * 0.92;
-                let ux = dx / span,
-                    uy = dy / span;
-                let pads = [
-                    { x: la.x + ux * sp * 0.22, y: la.y + uy * sp * 0.22 },
-                    { x: lb.x - ux * sp * 0.22, y: lb.y - uy * sp * 0.22 }
-                ];
-                for(let pi = 0; pi < pads.length; pi++) {
-                    let pad = pads[pi];
-                    if(typeof culPadFn === 'function' && !culPadFn(pad.x, pad.y, Math.max(rampW, rampH) * 0.55)) continue;
-                    wodDrawBridgeDeckRect(ctx, pad.x, pad.y, ang, rampW, rampH, fxLite);
-                    anyDrawn = true;
-                }
+            if(!la || !lb) {
+                if(br.x != null) wodDrawBridgeDeckRect(ctx, br.x, br.y, br.angle || 0, br.w || sp, br.h || sp * 0.7, fxLite);
+                return;
             }
+            let dx = lb.x - la.x,
+                dy = lb.y - la.y;
+            let len = Math.hypot(dx, dy) || sp;
+            let ang = Math.atan2(dy, dx);
+            let deckH = Math.max(sp * 0.82, br.h || sp * 0.78);
+            let midX = (la.x + lb.x) * 0.5,
+                midY = (la.y + lb.y) * 0.5;
+            if(typeof culPadFn === 'function' && !culPadFn(midX, midY, Math.max(len, deckH) * 0.55)) return;
+            ctx.save();
+            ctx.translate(midX, midY);
+            ctx.rotate(ang);
+            ctx.fillStyle = 'rgba(0,0,0,0.22)';
+            ctx.beginPath();
+            ctx.ellipse(0, deckH * 0.38, len * 0.48, deckH * 0.3, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#c9ad82';
+            ctx.strokeStyle = '#2a1a0c';
+            ctx.lineWidth = fxLite ? 2 : 2.6;
+            ctx.fillRect(-len * 0.5 - sp * 0.38, -deckH * 0.5, len + sp * 0.76, deckH);
+            ctx.strokeRect(-len * 0.5 - sp * 0.38, -deckH * 0.5, len + sp * 0.76, deckH);
+            ctx.strokeStyle = '#5c452e';
+            ctx.lineWidth = fxLite ? 0.9 : 1.15;
+            let planks = Math.max(4, Math.min(16, Math.round(len / (fxLite ? 11 : 9))));
+            let step = (len + sp * 0.76) / planks;
+            for(let pi = 1; pi < planks; pi++) {
+                let px = -len * 0.5 - sp * 0.38 + pi * step;
+                ctx.beginPath();
+                ctx.moveTo(px, -deckH * 0.5);
+                ctx.lineTo(px, deckH * 0.5);
+                ctx.stroke();
+            }
+            ctx.restore();
+            let keys = br.hexKeys && br.hexKeys.length ? br.hexKeys : [];
+            let deckW = sp * 0.88;
             for(let ki = 0; ki < keys.length; ki++) {
                 let wh = gameData.hexes[keys[ki]];
                 if(!wh) continue;
-                if(typeof culPadFn === 'function' && !culPadFn(wh.x, wh.y, Math.max(deckW, deckH) * 0.55)) continue;
-                wodDrawBridgeDeckRect(ctx, wh.x, wh.y, ang, deckW, deckH, fxLite);
-                anyDrawn = true;
-            }
-            if(!anyDrawn && br.x != null) {
-                wodDrawBridgeDeckRect(ctx, br.x, br.y, ang, br.w || deckW, br.h || deckH, fxLite);
+                wodDrawBridgeDeckRect(ctx, wh.x, wh.y, ang, deckW, deckH * 0.92, fxLite);
             }
         }
         function wodFortPlacementRingRadiusSq() {
