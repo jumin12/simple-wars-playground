@@ -5631,7 +5631,7 @@
                 </div>
                 <button class="menu-btn" id="setupBtnStartAi" onclick="startGame('ai')">Start Game</button>
                 <button class="menu-btn" id="setupBtnMpReturn" type="button" style="display:none" onclick="wodMpFinishSetupFromHost()">Return to lobby</button>
-                <button class="menu-btn" onclick="hidePanels()">Back</button>
+                <button class="menu-btn" id="setupBtnBack" onclick="hidePanels()">Back</button>
             </div>
         </div>
 
@@ -7253,6 +7253,10 @@
         }
 
         function hidePanels(resumeMenuDemo) {
+            if(wodIsMapPreviewGenerating()) {
+                showNotification('Map is still generating…');
+                return;
+            }
             wodMpCloseHostMapDlg();
             wodMpCloseHostRulesDlg();
             wodMpClosePlayerProfileDlg();
@@ -8981,6 +8985,12 @@
             }
             return false;
         }
+        function wodUnitOnBridgeSurface(unit) {
+            if(!unit || !wodUnitUsesLandBridges(unit)) return false;
+            if(wodPointOnBridgeForUnit(unit, unit.x, unit.y)) return true;
+            let hex = getNearestHexToPoint(unit.x, unit.y);
+            return isBridgeHex(hex);
+        }
         function wodNearestBridgeHexForUnit(unit, x, y) {
             if(!wodUnitUsesLandBridges(unit) || !gameData.bridges || !gameData.bridges.length) return null;
             let best = null,
@@ -10422,8 +10432,9 @@
             _wodMpLobbyPreviewLastTerrainFp = '';
             wodRefreshMapPreviewGeneratingUi();
         }
+        let _wodMapGenRunning = 0;
         function wodIsMapPreviewGenerating() {
-            return !!(gameData._soloPreviewGenerating || _wodMpLobbyPreviewBusy);
+            return !!(_wodMapGenRunning || gameData._soloPreviewGenerating || _wodMpLobbyPreviewBusy);
         }
         function wodSetElementDisabled(el, on) {
             if(!el) return;
@@ -10433,7 +10444,7 @@
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
             for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupMoney', 'setupPlayerColor',
-                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn']) {
+                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch', 'mpGlMaxHumans',
@@ -14805,9 +14816,13 @@
         }
 
         function applyTerrainUnitEffects(unit, dt) {
-            let onBridge = wodPointOnBridgeForUnit(unit, unit.x, unit.y);
-            let hex = onBridge ? (wodNearestBridgeHexForUnit(unit, unit.x, unit.y) || getNearestHexToPoint(unit.x, unit.y)) : getNearestHexToPoint(unit.x, unit.y);
-            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
+            if(wodUnitOnBridgeSurface(unit)) {
+                unit.inWater = false;
+                if(unit.waterFlash) unit.waterFlash = Math.max(0, unit.waterFlash - dt * 4);
+                return;
+            }
+            let hex = getNearestHexToPoint(unit.x, unit.y);
+            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             unit.inWater = !!(sea && unit.type !== 'marine');
             if(unit.inWater) {
@@ -14820,7 +14835,7 @@
 
         function getTerrainAttackModifier(unit, hex) {
             if(!hex || !unit) return 1;
-            if(wodPointOnBridgeForUnit(unit, unit.x, unit.y) || isBridgeHex(hex)) return 1;
+            if(wodUnitOnBridgeSurface(unit) || isBridgeHex(hex)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 1;
@@ -14834,7 +14849,7 @@
                 if(hex.type === 'swamp') return 0.45;
                 if(hex.type === 'urban') return 0.7;
                 if(hex.type === 'mountain') return 0.5;
-                if(unit.inWater) return 0.4;
+                if(unit.inWater && !wodUnitOnBridgeSurface(unit)) return 0.4;
                 return 1;
             }
             // Light infantry
@@ -14843,13 +14858,13 @@
             if(hex.type === 'swamp') return 0.85;
             if(hex.type === 'urban') return 0.95;
             if(hex.type === 'mountain') return 0.8;
-            if(unit.inWater) return 0.55;
+            if(unit.inWater && !wodUnitOnBridgeSurface(unit)) return 0.55;
             return 1;
         }
 
         function getTerrainDefenseModifier(unit, hex) {
             if(!hex || !unit) return 1;
-            if(wodPointOnBridgeForUnit(unit, unit.x, unit.y) || isBridgeHex(hex)) return 1;
+            if(wodUnitOnBridgeSurface(unit) || isBridgeHex(hex)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 0.92;
@@ -14868,7 +14883,7 @@
                 if(hex.type === 'swamp') return 1.25;
                 if(hex.type === 'urban') return 0.8;
                 if(hex.type === 'mountain') return 1.3;
-                if(unit.inWater) return 1.6;
+                if(unit.inWater && !wodUnitOnBridgeSurface(unit)) return 1.6;
                 return 1;
             }
             // Light infantry
@@ -14877,7 +14892,7 @@
             if(hex.type === 'swamp') return 0.85;
             if(hex.type === 'urban') return 0.5;
             if(hex.type === 'mountain') return 0.55;
-            if(unit.inWater) return 1.4;
+            if(unit.inWater && !wodUnitOnBridgeSurface(unit)) return 1.4;
             return 1;
         }
 
@@ -15038,8 +15053,9 @@
         }
 
                 function getUnitSpeedMultiplier(unit) {
-            let onBridge = wodPointOnBridgeForUnit(unit, unit.x, unit.y);
-            let waterSlow = unit.amphibInWater ? 0.62 : ((unit.inWater && !onBridge) ? 0.28 : 1);
+            let waterSlow = 1;
+            if(!wodUnitOnBridgeSurface(unit))
+                waterSlow = unit.amphibInWater ? 0.62 : (unit.inWater ? 0.28 : 1);
             let water = waterSlow;
             if(unit.type === 'convoy') return water;
             let m = unit.morale != null ? unit.morale : WOD_MORALE_MAX;
@@ -15124,7 +15140,7 @@
                         warn: true
                     });
                 }
-                if(!unit.amphibInWater && !wodPointOnBridgeForUnit(unit, unit.x, unit.y) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
+                if(!unit.amphibInWater && !wodUnitOnBridgeSurface(unit) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
                     effects.push({
                         label: 'Deep water',
                         detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
@@ -15157,7 +15173,7 @@
                 stats: 'March ×62%',
                 detail: 'Marines: no drowning damage while embarked in deep water'
             });
-            else if(hex && unit.type === 'convoy' && !wodPointOnBridgeForUnit(unit, unit.x, unit.y) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
+            else if(hex && unit.type === 'convoy' && !wodUnitOnBridgeSurface(unit) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
                 effects.push({
                     label: 'Deep water hazard',
                     detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
@@ -18393,6 +18409,8 @@
                 }
             }
             try {
+            _wodMapGenRunning++;
+            wodRefreshMapPreviewGeneratingUi();
             gameData._wodFastMapGen = true;
             wodMapGenYieldingStart(4);
             let startMoneyInput = document.getElementById('setupMoney');
@@ -18906,6 +18924,8 @@
             } finally {
                 gameData._wodFastMapGen = false;
                 wodMapGenYieldingStop();
+                if(_wodMapGenRunning > 0) _wodMapGenRunning--;
+                wodRefreshMapPreviewGeneratingUi();
                 if(showMapGenOverlay && mapGenOverlayEl) {
                     mapGenOverlayEl.classList.add('hidden');
                     mapGenOverlayEl.setAttribute('aria-busy', 'false');
@@ -26502,7 +26522,7 @@
             if((unit.encircledFlash || 0) > 0) kinds.push('encircled');
             if((unit.unpaidFlash || 0) > 0) kinds.push('unpaid');
             if((unit.healingFlash || 0) > 0) kinds.push('heal');
-            if((unit.waterFlash || 0) > 0) kinds.push('water');
+            if((unit.waterFlash || 0) > 0 && !wodUnitOnBridgeSurface(unit)) kinds.push('water');
             let hasAny = combatBurstOn || kinds.length > 0;
             if(!hasAny) return;
             let glyphR = gfxLite ? 3.59 : 4.41;
