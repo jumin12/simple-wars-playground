@@ -8757,6 +8757,46 @@
                 for(let ki = 0; ki < keys.length; ki++) gameData._bridgeByHexKey[keys[ki]] = br;
             }
             wodRebuildBridgeLandLinks();
+            wodRebuildBridgeDeckAdj();
+        }
+        function wodBridgeSortDeckHexes(br) {
+            if(!br || !br.hexKeys || !br.hexKeys.length) return [];
+            let ang = br.angle || 0;
+            let cos = Math.cos(ang),
+                sin = Math.sin(ang);
+            let hexes = [];
+            for(let ki = 0; ki < br.hexKeys.length; ki++) {
+                let h = gameData.hexes[br.hexKeys[ki]];
+                if(h) hexes.push(h);
+            }
+            hexes.sort((a, b) => {
+                let ta = (a.x - br.x) * cos + (a.y - br.y) * sin;
+                let tb = (b.x - br.x) * cos + (b.y - br.y) * sin;
+                return ta - tb;
+            });
+            return hexes;
+        }
+        function wodRebuildBridgeDeckAdj() {
+            gameData._bridgeDeckAdj = {};
+            let list = gameData.bridges || [];
+            for(let bi = 0; bi < list.length; bi++) {
+                let br = list[bi];
+                if(!br) continue;
+                if(!br.hexKeys || !br.hexKeys.length) wodSyncBridgeWorldCoords(br);
+                let sorted = wodBridgeSortDeckHexes(br);
+                for(let si = 0; si < sorted.length; si++) {
+                    let h = sorted[si];
+                    let hk = getHexKey(h);
+                    if(!gameData._bridgeDeckAdj[hk]) gameData._bridgeDeckAdj[hk] = new Set();
+                    for(let di = 0; di < hexDirections.length; di++) {
+                        let d = hexDirections[di];
+                        let n = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                        if(n && bridgeAtHex(n) === br) gameData._bridgeDeckAdj[hk].add(getHexKey(n));
+                    }
+                    if(si > 0) gameData._bridgeDeckAdj[hk].add(getHexKey(sorted[si - 1]));
+                    if(si < sorted.length - 1) gameData._bridgeDeckAdj[hk].add(getHexKey(sorted[si + 1]));
+                }
+            }
         }
         function wodBridgeCapPoint(br, endSign) {
             wodSyncBridgeWorldCoords(br);
@@ -8823,6 +8863,26 @@
                 }
             }
         }
+        function wodBridgeDeckWaypointsForCrossing(br, fromLandH, bridgeRun, toLandH) {
+            if(!br) return [];
+            let sorted = wodBridgeSortDeckHexes(br);
+            if(!sorted.length) return [];
+            let ang = br.angle || 0;
+            let cos = Math.cos(ang),
+                sin = Math.sin(ang);
+            let proj = (h) => (h.x - br.x) * cos + (h.y - br.y) * sin;
+            let enterProj = fromLandH ? proj(fromLandH) : proj(sorted[0]);
+            let exitProj = toLandH ? proj(toLandH) : proj(sorted[sorted.length - 1]);
+            let forward = exitProj >= enterProj;
+            let ordered = forward ? sorted : sorted.slice().reverse();
+            let pts = [];
+            for(let si = 0; si < ordered.length; si++) {
+                let prev = si > 0 ? ordered[si - 1] : fromLandH;
+                let next = si < ordered.length - 1 ? ordered[si + 1] : toLandH;
+                pts.push(wodBridgeDeckPointForHex(ordered[si], br, prev, next));
+            }
+            return pts;
+        }
         function wodBridgeDeckPointForHex(h, br, prevH, nextH) {
             if(!h || !br) return h ? { x: h.x, y: h.y } : null;
             wodSyncBridgeWorldCoords(br);
@@ -8866,13 +8926,28 @@
             for(let i = 1; i < hexPath.length; i++) {
                 let h = hexPath[i];
                 let prevH = hexPath[i - 1];
-                let nextH = i + 1 < hexPath.length ? hexPath[i + 1] : null;
                 let prevBridge = useBridges && isBridgeHex(prevH);
                 let curBridge = useBridges && isBridgeHex(h);
                 if(useBridges && curBridge && !prevBridge) {
                     let br = bridgeAtHex(h);
-                    if(br) out.push(wodBridgeCapPoint(br, wodBridgeCapSignForApproach(br, prevH.x, prevH.y)));
+                    if(br) {
+                        let runEnd = i;
+                        while(runEnd < hexPath.length && isBridgeHex(hexPath[runEnd]) && bridgeAtHex(hexPath[runEnd]) === br)
+                            runEnd++;
+                        let exitH = runEnd < hexPath.length ? hexPath[runEnd] : null;
+                        out.push(wodBridgeCapPoint(br, wodBridgeCapSignForApproach(br, prevH.x, prevH.y)));
+                        out.push(...wodBridgeDeckWaypointsForCrossing(br, prevH, hexPath.slice(i, runEnd), exitH));
+                        if(exitH && !isBridgeHex(exitH)) {
+                            out.push(wodBridgeCapPoint(br, wodBridgeCapSignForApproach(br, exitH.x, exitH.y)));
+                            out.push({ x: exitH.x, y: exitH.y });
+                            i = runEnd + 1;
+                        } else {
+                            i = runEnd;
+                        }
+                        continue;
+                    }
                 }
+                let nextH = i + 1 < hexPath.length ? hexPath[i + 1] : null;
                 if(curBridge) {
                     let br = bridgeAtHex(h);
                     if(br) {
@@ -13928,6 +14003,23 @@
             }
         }
 
+        /** True when a pixel is on the bridge deck or on land the unit may enter (for bridge entry/exit chords). */
+        function wodSamplePosOnBridgeOrLand(unit, px, py) {
+            if(wodPointOnBridgeForUnit(unit, px, py, 1.28)) return true;
+            let h = getNearestHexToPoint(px, py);
+            if(h && wodUnitUsesLandBridges(unit) && isBridgeHex(h)) return true;
+            if(h && canUseHexForMovement(unit, h) && !isWaterHex(h)) return true;
+            if(!h) return false;
+            let hr = gameData.hexRadius || 20;
+            let thresh2 = (hr * 1.1) * (hr * 1.1);
+            for(let d of hexDirections) {
+                let n = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                if(!n || isWaterHex(n) || !canUseHexForMovement(unit, n)) continue;
+                let dx = n.x - px, dy = n.y - py;
+                if(dx * dx + dy * dy <= thresh2) return true;
+            }
+            return false;
+        }
         /** Pixel chord samples can land on the wrong hex between land/water/mountain corners; accept nearby tiles. */
         function wodSamplePosOnWalkableTerrain(unit, px, py) {
             if(wodPointOnBridgeForUnit(unit, px, py, 1.18)) return true;
@@ -13969,10 +14061,25 @@
 
         /** Furthest point from (ox,oy) toward (nx,ny) that stays on terrain the unit may occupy (no corner-cutting through mountains). */
         function wodClampStepToWalkableTerrain(unit, ox, oy, nx, ny, subdiv) {
-            if(wodUnitUsesLandBridges(unit) &&
-                wodPointOnBridgeForUnit(unit, ox, oy, 1.12) &&
-                wodPointOnBridgeForUnit(unit, nx, ny, 1.12))
-                return { x: nx, y: ny };
+            if(wodUnitUsesLandBridges(unit)) {
+                let onDeckA = wodPointOnBridgeForUnit(unit, ox, oy, 1.22);
+                let onDeckB = wodPointOnBridgeForUnit(unit, nx, ny, 1.22);
+                if(onDeckA && onDeckB) return { x: nx, y: ny };
+                if(onDeckA || onDeckB) {
+                    let n = Math.max(8, Math.min(40, subdiv | 0));
+                    let lastGood = 0;
+                    for(let s = 1; s <= n; s++) {
+                        let t = s / n;
+                        let px = ox + (nx - ox) * t;
+                        let py = oy + (ny - oy) * t;
+                        if(!wodSamplePosOnBridgeOrLand(unit, px, py)) break;
+                        lastGood = s;
+                    }
+                    if(lastGood === 0) return null;
+                    let t = lastGood / n;
+                    return { x: ox + (nx - ox) * t, y: oy + (ny - oy) * t };
+                }
+            }
             let n = Math.max(6, Math.min(40, subdiv | 0));
             let lastGood = 0;
             for(let s = 1; s <= n; s++) {
@@ -14384,10 +14491,18 @@
                                 for(let bk of entries) relaxPathNeighbor(gameData.hexes[bk], current, currentKey, true);
                             }
                         }
-                        if(isBridgeHex(current) && gameData._bridgeExitLand) {
-                            let exits = gameData._bridgeExitLand[currentKey];
-                            if(exits) {
-                                for(let lk of exits) relaxPathNeighbor(gameData.hexes[lk], current, currentKey, true);
+                        if(isBridgeHex(current)) {
+                            if(gameData._bridgeDeckAdj) {
+                                let deck = gameData._bridgeDeckAdj[currentKey];
+                                if(deck) {
+                                    for(let dk of deck) relaxPathNeighbor(gameData.hexes[dk], current, currentKey, true);
+                                }
+                            }
+                            if(gameData._bridgeExitLand) {
+                                let exits = gameData._bridgeExitLand[currentKey];
+                                if(exits) {
+                                    for(let lk of exits) relaxPathNeighbor(gameData.hexes[lk], current, currentKey, true);
+                                }
                             }
                         }
                     }
@@ -14624,6 +14739,17 @@
                 unit.target = unit.path.shift();
                 unit.target.pathPrepared = true;
                 return true;
+            }
+            if(path.length <= 1 && wodUnitUsesLandBridges(unit) && startHex && isBridgeHex(startHex) &&
+                reachNext.hex && !isBridgeHex(reachNext.hex)) {
+                let br = bridgeAtHex(startHex);
+                if(br) {
+                    let cap = wodBridgeCapPoint(br, wodBridgeCapSignForApproach(br, reachNext.hex.x, reachNext.hex.y));
+                    unit.path = [{ x: cap.x, y: cap.y }, { x: reachNext.exactX, y: reachNext.exactY }];
+                    unit.target = unit.path.shift();
+                    unit.target.pathPrepared = true;
+                    return true;
+                }
             }
             unit.path = null;
             unit.target = {x: reachNext.exactX, y: reachNext.exactY, pathPrepared: true};
