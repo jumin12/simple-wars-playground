@@ -8681,33 +8681,13 @@
                 minY = Math.min(minY, wy);
                 maxY = Math.max(maxY, wy);
             }
-            let pad = (gameData.hexRadius || 20) * 0.92;
+            let pad = (gameData.hexRadius || 20) * 0.72;
             let keys = new Set();
-            let addIfInRect = (h, rectPad) => {
-                if(!h) return;
-                if(h.x < minX - pad || h.x > maxX + pad || h.y < minY - pad || h.y > maxY + pad) return;
-                if(wodPointInBridgeRect(h.x, h.y, br, rectPad)) keys.add(getHexKey(h));
-            };
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                 let h = gameData.hexList[hi];
                 if(!h) continue;
-                addIfInRect(h, 1);
-            }
-            for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
-                let h = gameData.hexList[hi];
-                if(!h || !isWaterHex(h)) continue;
-                addIfInRect(h, 1.34);
-            }
-            let ringSnap = [...keys];
-            for(let ri = 0; ri < ringSnap.length; ri++) {
-                let bh = gameData.hexes[ringSnap[ri]];
-                if(!bh) continue;
-                for(let di = 0; di < hexDirections.length; di++) {
-                    let d = hexDirections[di];
-                    let n = gameData.hexes[`${bh.q + d.q},${bh.r + d.r}`];
-                    if(!n || !isWaterHex(n) || n.type === 'mountain') continue;
-                    addIfInRect(n, 1.5);
-                }
+                if(h.x < minX - pad || h.x > maxX + pad || h.y < minY - pad || h.y > maxY + pad) continue;
+                if(wodPointInBridgeRect(h.x, h.y, br)) keys.add(getHexKey(h));
             }
             return [...keys];
         }
@@ -8913,16 +8893,12 @@
         function isBridgeHex(hex) {
             return !!bridgeAtHex(hex);
         }
-        /** Bridge deck + under/approach water count as land for land-army A* (forbidWater) routing. */
-        function wodHexCountsAsLandForPath(hex) {
-            return hex && (!isWaterHex(hex) || isBridgeHex(hex));
-        }
         function wodUnitUsesLandBridges(unit) {
             return !!unit && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute);
         }
         function wodPointOnBridgeForUnit(unit, px, py, padScale) {
             if(!wodUnitUsesLandBridges(unit) || !gameData.bridges || !gameData.bridges.length) return false;
-            let pad = padScale == null ? 1.12 : padScale;
+            let pad = padScale == null ? 1 : padScale;
             for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
                 if(wodPointInBridgeRect(px, py, gameData.bridges[bi], pad)) return true;
             }
@@ -14189,7 +14165,7 @@
             }
 
             let landArmyDual = wodUnitUsesLandBridges(unit)
-                && wodHexCountsAsLandForPath(startHex) && wodHexCountsAsLandForPath(targetHex)
+                && !isWaterHex(startHex) && !isWaterHex(targetHex)
                 && (unit.type === 'light' || unit.type === 'heavy' || (unit.type === 'convoy' && !unit.convoySeaRoute));
 
             function runPathAst(forbidWater) {
@@ -14823,8 +14799,7 @@
         function applyTerrainUnitEffects(unit, dt) {
             let hex = getNearestHexToPoint(unit.x, unit.y);
             let onBridge = wodUnitOnBridgeDeck(unit);
-            let bridgeTile = !!(hex && isBridgeHex(hex));
-            let sea = !!(hex && isWaterHex(hex) && !bridgeTile && !onBridge && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
+            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             unit.inWater = !!(sea && unit.type !== 'marine');
             if(unit.inWater) {
