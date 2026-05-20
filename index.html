@@ -6467,12 +6467,13 @@
                 <div class="wod-m-sheet wod-m-sheet--build">
                     <div class="wod-m-sheet-banner">
                         <span class="wod-m-sheet-title">Structures</span>
-                        <span class="wod-m-sheet-sub">Factories · harbors · forts · tap qualifying towns / owned land.</span>
+                        <span class="wod-m-sheet-sub">Factories · harbors · forts · bridges · tap towns or riverbanks.</span>
                     </div>
                     <div class="bottom-bar" id="buildStructuresBarMobile">
                         <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city without a factory.">Build Factory ($2k)</button>
                         <button class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City must border water without a harbor.">Build Harbor ($1k)</button>
                         <button class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned land (not city cores). Forts may be built near each other; defense bonuses do not stack.">Build Fort ($1.5k)</button>
+                        <button class="build-btn" onclick="beginBridgeBuild()" title="Costs $1200. Click one riverbank on your land, then the opposite bank.">Build Bridge ($1.2k)</button>
                     </div>
                 </div>
             </div>
@@ -6499,6 +6500,7 @@
                             <button type="button" class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city.">Build Factory ($2k)</button>
                             <button type="button" class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City bordering water.">Build Harbor ($1k)</button>
                             <button type="button" class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned terrain. Forts can be built close together; aura bonuses do not stack.">Build Fort ($1.5k)</button>
+                            <button type="button" class="build-btn" onclick="beginBridgeBuild()" title="Costs $1200. Click a riverbank on your land, then the opposite bank.">Build Bridge ($1.2k)</button>
                         </div>
                         <div class="wod-pc-prod-pane" data-wod-pc-pane="units" role="tabpanel">
                             <button type="button" class="build-btn" onclick="buyUnit('light')" title="Train light infantry ($500).">Train Light Infantry ($500, 1k MP)</button>
@@ -6981,6 +6983,7 @@
         const WOD_PRICE_FACTORY = 2000;
         const WOD_PRICE_HARBOR = 1000;
         const WOD_PRICE_FORT = 1500;
+        const WOD_PRICE_BRIDGE = 1200;
         const WOD_PRICE_LIGHT = 500;
         const WOD_PRICE_MARINE = 500;
         const WOD_PRICE_HEAVY = 4000;
@@ -8725,12 +8728,57 @@
             }
             return best;
         }
+        function wodEnsureOceanWaterKeys() {
+            if(gameData._wodOceanWaterKeys) return gameData._wodOceanWaterKeys;
+            let cols = gameData.mapRadius || 40;
+            let rows = Math.floor(cols * ((gameData._mapSizePreset && gameData._mapSizePreset.rowsMul) || 0.8));
+            gameData._wodOceanWaterKeys = wodMapShapeUsesRadialIslandMask(gameData.mapShape)
+                ? wodBuildOceanConnectedWaterKeys(cols, rows)
+                : new Set();
+            return gameData._wodOceanWaterKeys;
+        }
+        function wodWaterComponentFrom(start, maxCells) {
+            if(!start || !isWaterHex(start)) return null;
+            let queue = [start],
+                qi = 0,
+                minQ = start.q,
+                maxQ = start.q,
+                minR = start.r,
+                maxR = start.r;
+            let seen = new Set([getHexKey(start)]);
+            while(qi < queue.length && qi < (maxCells || 96)) {
+                let cur = queue[qi++];
+                minQ = Math.min(minQ, cur.q);
+                maxQ = Math.max(maxQ, cur.q);
+                minR = Math.min(minR, cur.r);
+                maxR = Math.max(maxR, cur.r);
+                for(let nb of getNeighborHexes(cur)) {
+                    if(!nb || !isWaterHex(nb)) continue;
+                    let nk = getHexKey(nb);
+                    if(seen.has(nk)) continue;
+                    seen.add(nk);
+                    queue.push(nb);
+                }
+            }
+            return { size: seen.size, span: Math.max(maxQ - minQ, maxR - minR) + 1 };
+        }
+        function wodIsRiverWaterHex(hex) {
+            if(!hex || !isWaterHex(hex)) return false;
+            let k = getHexKey(hex);
+            if(gameData._procgenRiverKeys && gameData._procgenRiverKeys.has(k)) return true;
+            if(wodMapShapeUsesRadialIslandMask(gameData.mapShape)) return !wodEnsureOceanWaterKeys().has(k);
+            let comp = wodWaterComponentFrom(hex, 96);
+            if(!comp) return false;
+            if(comp.size > 34) return false;
+            let elong = comp.span / Math.max(1, Math.sqrt(comp.size));
+            return comp.size <= 9 || elong >= 1.28;
+        }
         function wodBridgeRiverHexKeys(waterHex, landA, landB) {
             if(!waterHex) return [];
             if(!landA || !landB) return [getHexKey(waterHex)];
             let ak = getHexKey(landA),
                 bk = getHexKey(landB);
-            let riverKeys = gameData._procgenRiverKeys;
+            let ocean = wodMapShapeUsesRadialIslandMask(gameData.mapShape) ? wodEnsureOceanWaterKeys() : null;
             let keys = new Set();
             let queue = [waterHex];
             let qi = 0;
@@ -8739,7 +8787,7 @@
                 let ck = getHexKey(cur);
                 if(keys.has(ck)) continue;
                 if(!isWaterHex(cur)) continue;
-                if(riverKeys && riverKeys.size && !riverKeys.has(ck)) continue;
+                if(ocean && ocean.size && ocean.has(ck)) continue;
                 keys.add(ck);
                 for(let nb of getNeighborHexes(cur)) {
                     if(!nb) continue;
@@ -8750,6 +8798,29 @@
             }
             if(!keys.size) keys.add(getHexKey(waterHex));
             return [...keys];
+        }
+        function wodFindRiverWaterBetweenShores(landA, landB) {
+            if(!landA || !landB) return null;
+            for(let nb of getNeighborHexes(landA)) {
+                if(!nb || !isWaterHex(nb)) continue;
+                if(getNeighborHexes(nb).some(n2 => n2 && n2.q === landB.q && n2.r === landB.r)) return nb;
+            }
+            return null;
+        }
+        function wodValidateBridgePlacement(landA, landB, owner) {
+            if(!landA || !landB) return { ok: false, msg: 'Select two riverbanks.' };
+            if(landA.q === landB.q && landA.r === landB.r) return { ok: false, msg: 'Pick the opposite bank, not the same tile.' };
+            if(!hexEligibleForBridgeShoreHex(landA, owner) || !hexEligibleForBridgeShoreHex(landB, owner))
+                return { ok: false, msg: 'Both banks must be your land beside a river (not lakes or sea).' };
+            let man = Math.abs(landA.q - landB.q) + Math.abs(landA.r - landB.r);
+            if(man !== 2) return { ok: false, msg: 'Banks must face each other across a narrow river.' };
+            let waterHex = wodFindRiverWaterBetweenShores(landA, landB);
+            if(!waterHex || !wodIsRiverWaterHex(waterHex)) return { ok: false, msg: 'Must cross a river — not a lake or open water.' };
+            let hexKeys = wodBridgeRiverHexKeys(waterHex, landA, landB);
+            for(let ki = 0; ki < hexKeys.length; ki++) {
+                if(bridgeAtHex(gameData.hexes[hexKeys[ki]])) return { ok: false, msg: 'A bridge already crosses this river.' };
+            }
+            return { ok: true, landA, landB, waterHex, hexKeys };
         }
         function wodSyncBridgeWorldCoords(br) {
             br = wodNormalizeBridgeRecord(br);
@@ -8785,65 +8856,6 @@
                 br.h = sp * 0.62;
                 br.hexKeys = [getHexKey(h)];
             }
-        }
-        /** Up to maxBridges on carved procedural river tiles only (never lakes). */
-        async function wodPlaceProceduralRiverBridges(seedOffset, mapShape, cols, rows, maxBridges) {
-            maxBridges = maxBridges == null ? 2 : Math.max(0, maxBridges | 0);
-            if(!gameData.bridges) gameData.bridges = [];
-            gameData.bridges.length = 0;
-            let riverKeys = gameData._procgenRiverKeys;
-            if(!riverKeys || !riverKeys.size || !maxBridges) {
-                wodRebuildBridgeHexIndex();
-                return;
-            }
-            let candidates = [];
-            let hi = 0;
-            for(let wk of riverKeys) {
-                let h = gameData.hexes[wk];
-                if(!h || !isWaterHex(h)) continue;
-                let shores = wodBridgeOppositeShores(h);
-                if(!shores) continue;
-                let span = Math.hypot(shores.landB.x - shores.landA.x, shores.landB.y - shores.landA.y);
-                let score = span * 0.04 + 2.5 + fbm(h.x * 0.011 + seedOffset + 4411, h.y * 0.011 + seedOffset + 4411, 3) * 0.55;
-                candidates.push({ h, shores, score, hexKeys: wodBridgeRiverHexKeys(h, shores.landA, shores.landB) });
-                if((++hi & 511) === 0) await wodMapGenYieldSlice();
-            }
-            candidates.sort((a, b) => b.score - a.score);
-            let usedRiver = new Set();
-            let placed = 0;
-            for(let ci = 0; ci < candidates.length && placed < maxBridges; ci++) {
-                let c = candidates[ci];
-                let hk = getHexKey(c.h);
-                if(usedRiver.has(hk)) continue;
-                if(!riverKeys.has(hk) || !isWaterHex(c.h)) continue;
-                let overlap = false;
-                for(let rk of c.hexKeys) {
-                    if(usedRiver.has(rk)) {
-                        overlap = true;
-                        break;
-                    }
-                }
-                if(overlap) continue;
-                let br = {
-                    id: 'br_' + placed + '_' + ((Math.random() * 1e7) | 0),
-                    owner: 0,
-                    q: c.h.q,
-                    r: c.h.r,
-                    landA: { q: c.shores.landA.q, r: c.shores.landA.r },
-                    landB: { q: c.shores.landB.q, r: c.shores.landB.r },
-                    hexKeys: c.hexKeys.slice(),
-                    x: 0,
-                    y: 0,
-                    w: 0,
-                    h: 0,
-                    angle: 0
-                };
-                wodSyncBridgeWorldCoords(br);
-                gameData.bridges.push(br);
-                for(let rk of br.hexKeys) usedRiver.add(rk);
-                placed++;
-            }
-            wodRebuildBridgeHexIndex();
         }
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
             let blendPasses = gameData._wodFastMapGen ? 1 : 2;
@@ -11211,6 +11223,13 @@
                         let hex = gameData.hexes[`${d.cmd.hq},${d.cmd.hr}`];
                         if(!hex || hex.owner !== d.fromSlot) return;
                         attemptFortPlacementForOwner(hex, d.fromSlot, true);
+                        return;
+                    }
+                    if(mode === 'bridge') {
+                        let landA = gameData.hexes[`${d.cmd.aq},${d.cmd.ar}`];
+                        let landB = gameData.hexes[`${d.cmd.bq},${d.cmd.brr}`];
+                        if(!landA || !landB || landA.owner !== d.fromSlot || landB.owner !== d.fromSlot) return;
+                        attemptBridgePlacementForOwner(landA, landB, d.fromSlot, true);
                         return;
                     }
                     let city = gameData.cities.find(c => c.q === d.cmd.cq && c.r === d.cmd.cr);
@@ -18489,7 +18508,9 @@
             if(!gameData._wodFastMapGen) await ensureMountainPasses();
             wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
             await wodCarveProceduralRivers(seedOffset, mapShape, cols, rows);
-            await wodPlaceProceduralRiverBridges(seedOffset, mapShape, cols, rows, 2);
+            gameData.bridges = [];
+            wodRebuildBridgeHexIndex();
+            gameData._wodOceanWaterKeys = null;
             await wodPaintCoastalSandAllLand();
             await wodCoalesceTerrainSpeckles(2);
             wodCaptureTerrainPoliticsBase();
@@ -24570,6 +24591,7 @@
             }
 
             let fortPlacementPick = gameState === 'PLAYING' && gameData.buildMode === 'fort' && gameData.hexList && gameData.hexList.length;
+            let bridgePlacementPick = gameState === 'PLAYING' && gameData.buildMode === 'bridge' && gameData.hexList && gameData.hexList.length;
             let fortPickEligible = null;
             if(fortPlacementPick) {
                 fortPickEligible = new Set();
@@ -24598,8 +24620,52 @@
                 ctx.restore();
             }
 
+            let bridgeShoreEligible = null;
+            if(bridgePlacementPick) {
+                bridgeShoreEligible = new Set();
+                let blo = wodLocalPlayerOwner();
+                for(let bhi = 0, bhl = gameData.hexList.length; bhi < bhl; bhi++) {
+                    let bhx = gameData.hexList[bhi];
+                    if(hexEligibleForBridgeShoreHex(bhx, blo)) bridgeShoreEligible.add(`${bhx.q},${bhx.r}`);
+                }
+            }
+            if(bridgeShoreEligible && bridgeShoreEligible.size) {
+                ctx.save();
+                let ringR = Math.max(14, (gameData.hexRadius || 10) * 0.42);
+                let pickedA = gameData.bridgeBuildPick && gameData.bridgeBuildPick.shoreA;
+                for(let bhi = 0, bhl = gameData.hexList.length; bhi < bhl; bhi++) {
+                    let bhh = gameData.hexList[bhi];
+                    let bk = `${bhh.q},${bhh.r}`;
+                    if(!bridgeShoreEligible.has(bk)) continue;
+                    if(wodCull && !wodInView(bhh.x, bhh.y, culPad)) continue;
+                    let isA = pickedA && pickedA.q === bhh.q && pickedA.r === bhh.r;
+                    ctx.strokeStyle = isA ? 'rgba(46, 204, 113, 0.95)' : 'rgba(52, 152, 219, 0.92)';
+                    ctx.lineWidth = gfxLite ? 2 : 2.75;
+                    ctx.setLineDash(isA ? [] : [7, 6]);
+                    ctx.beginPath();
+                    ctx.arc(bhh.x, bhh.y, gfxLite ? Math.min(16, ringR) : ringR, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+            if(bridgePlacementPick && gameData.bridgeBuildGhost && gameData.bridgeBuildGhost.preview) {
+                let gb = gameData.bridgeBuildGhost.preview;
+                let ghostBr = {
+                    landA: { q: gb.landA.q, r: gb.landA.r },
+                    landB: { q: gb.landB.q, r: gb.landB.r },
+                    q: gb.waterHex.q,
+                    r: gb.waterHex.r
+                };
+                wodSyncBridgeWorldCoords(ghostBr);
+                ctx.save();
+                ctx.globalAlpha = gameData.bridgeBuildGhost.valid ? 0.58 : 0.32;
+                drawBridgeSticker(ctx, ghostBr, gfxLite, null);
+                ctx.restore();
+            }
+
             // Draw Cities
-            let bmPick = gameState === 'PLAYING' && gameData.buildMode && gameData.layers && gameData.layers.cities && gameData.buildMode !== 'fort';
+            let bmPick = gameState === 'PLAYING' && gameData.buildMode && gameData.layers && gameData.layers.cities && gameData.buildMode !== 'fort' && gameData.buildMode !== 'bridge';
             let bmPickEligible = null;
             if(bmPick) {
                 bmPickEligible = new Set();
@@ -25504,6 +25570,8 @@
                 let dy = e.clientY - panStart.y;
                 gameData.camera.x = cameraStart.x - dx;
                 gameData.camera.y = cameraStart.y - dy;
+            } else if(gameState === 'PLAYING' && gameData.buildMode === 'bridge') {
+                updateBridgeBuildGhost(getMouseWorldPos(e));
             }
         });
 
@@ -26085,6 +26153,8 @@
 
         function exitBuildPlacementMode() {
             gameData.buildMode = null;
+            gameData.bridgeBuildPick = null;
+            gameData.bridgeBuildGhost = null;
             if(UI.wrapper) UI.wrapper.style.cursor = 'default';
             let root = document.getElementById('inGameUI');
             if(root) {
@@ -26552,11 +26622,147 @@
             return true;
         }
 
+        function hexEligibleForBridgeShoreHex(hex, owner) {
+            if(!hex || !owner || hex.owner !== owner) return false;
+            if(isWaterHex(hex) || hex.type === 'mountain' || hex.type === 'urban') return false;
+            if(!isClaimableLand(hex)) return false;
+            return getNeighborHexes(hex).some(nb => wodIsRiverWaterHex(nb));
+        }
+        function wodAnyBridgeShoreForOwner(owner) {
+            if(!gameData.hexList || !gameData.hexList.length) return false;
+            for(let i = 0; i < gameData.hexList.length; i++) {
+                if(hexEligibleForBridgeShoreHex(gameData.hexList[i], owner)) return true;
+            }
+            return false;
+        }
+        function pickBridgeShoreHexAtWorld(worldPos, owner) {
+            let hex = getNearestHexToPoint(worldPos.x, worldPos.y);
+            if(!hex) return null;
+            let tol = Math.max(10, gameData.hexRadius || 15) * 0.92;
+            let dx = worldPos.x - hex.x,
+                dy = worldPos.y - hex.y;
+            if(dx * dx + dy * dy > tol * tol) return null;
+            if(!hexEligibleForBridgeShoreHex(hex, owner)) return null;
+            return hex;
+        }
+        function updateBridgeBuildGhost(worldPos) {
+            if(gameData.buildMode !== 'bridge') {
+                gameData.bridgeBuildGhost = null;
+                return;
+            }
+            let lo = wodLocalPlayerOwner();
+            let hover = pickBridgeShoreHexAtWorld(worldPos, lo);
+            let bp = gameData.bridgeBuildPick;
+            if(!bp || !bp.shoreA) {
+                gameData.bridgeBuildGhost = { valid: !!hover, stage: 'pickA', hover };
+                return;
+            }
+            let landA = gameData.hexes[`${bp.shoreA.q},${bp.shoreA.r}`];
+            if(!landA) {
+                gameData.bridgeBuildPick = null;
+                gameData.bridgeBuildGhost = null;
+                return;
+            }
+            if(!hover) {
+                gameData.bridgeBuildGhost = { valid: false, stage: 'pickB', landA };
+                return;
+            }
+            let v = wodValidateBridgePlacement(landA, hover, lo);
+            gameData.bridgeBuildGhost = { valid: v.ok, stage: 'pickB', landA, landB: hover, preview: v.ok ? v : null };
+        }
+        let wodBridgePlacementSeq = 0;
+        function attemptBridgePlacementForOwner(landA, landB, owner, suppressNotes) {
+            return placeBridgeBetweenShores(landA, landB, owner, { suppressNotes: !!suppressNotes });
+        }
+        function placeBridgeBetweenShores(landA, landB, owner, opts) {
+            opts = opts || {};
+            let noisy = !opts.suppressNotes;
+            let v = wodValidateBridgePlacement(landA, landB, owner);
+            if(!v.ok) {
+                if(noisy) showNotification(v.msg);
+                return false;
+            }
+            if(!opts.editor && !opts.skipCost) {
+                if(wodPlayerTreasury(owner) < WOD_PRICE_BRIDGE) {
+                    if(noisy) showNotification('Not enough money for a bridge ($1.2k).');
+                    return false;
+                }
+                wodDeductPlayerMoney(owner, WOD_PRICE_BRIDGE);
+            }
+            if(!gameData.bridges) gameData.bridges = [];
+            let br = {
+                id: 'br_' + (++wodBridgePlacementSeq) + '_' + ((Math.random() * 1e7) | 0),
+                owner: owner || 0,
+                q: v.waterHex.q,
+                r: v.waterHex.r,
+                landA: { q: landA.q, r: landA.r },
+                landB: { q: landB.q, r: landB.r },
+                hexKeys: v.hexKeys.slice()
+            };
+            wodSyncBridgeWorldCoords(br);
+            gameData.bridges.push(br);
+            wodRebuildBridgeHexIndex();
+            if(noisy) showNotification('Bridge built across the river.');
+            return true;
+        }
+        function tryApplyBridgeBuildAtWorld(worldPos) {
+            let lo = wodLocalPlayerOwner();
+            let pick = pickBridgeShoreHexAtWorld(worldPos, lo);
+            if(!gameData.bridgeBuildPick) gameData.bridgeBuildPick = { shoreA: null };
+            let bp = gameData.bridgeBuildPick;
+            if(!bp.shoreA) {
+                if(!pick) {
+                    showNotification('Click a riverbank on your territory.');
+                    return true;
+                }
+                bp.shoreA = { q: pick.q, r: pick.r };
+                showNotification('Select the opposite riverbank.');
+                updateBridgeBuildGhost(worldPos);
+                return true;
+            }
+            if(!pick) {
+                showNotification('Click the opposite riverbank.');
+                return true;
+            }
+            if(pick.q === bp.shoreA.q && pick.r === bp.shoreA.r) {
+                gameData.bridgeBuildPick = { shoreA: null };
+                gameData.bridgeBuildGhost = null;
+                showNotification('Bridge placement cancelled.');
+                return true;
+            }
+            let landA = gameData.hexes[`${bp.shoreA.q},${bp.shoreA.r}`];
+            if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
+                if(typeof WodMultiplayer !== 'undefined')
+                    WodMultiplayer.sendCmd({
+                        kind: 'build',
+                        mode: 'bridge',
+                        aq: landA.q,
+                        ar: landA.r,
+                        bq: pick.q,
+                        brr: pick.r
+                    });
+                gameData.bridgeBuildPick = null;
+                gameData.bridgeBuildGhost = null;
+                exitBuildPlacementMode();
+                return true;
+            }
+            if(attemptBridgePlacementForOwner(landA, pick, lo)) {
+                gameData.bridgeBuildPick = null;
+                gameData.bridgeBuildGhost = null;
+                exitBuildPlacementMode();
+            }
+            return true;
+        }
+
         function wodHandleProductionPlacementClick(worldPos) {
             let mode = gameData.buildMode;
             if(!mode) return false;
             if(mode === 'fort') {
                 tryApplyFortBuildAtWorld(worldPos);
+                return true;
+            }
+            if(mode === 'bridge') {
+                tryApplyBridgeBuildAtWorld(worldPos);
                 return true;
             }
             let city = pickPlayerCityAtWorld(worldPos);
@@ -26727,6 +26933,29 @@
 
         function beginFortBuild() {
             enterBuildPlacementMode('fort');
+        }
+
+        function beginBridgeBuild() {
+            if(gameState !== 'PLAYING') return;
+            if(gameData.buildMode === 'bridge') {
+                exitBuildPlacementMode();
+                return;
+            }
+            let lo = wodLocalPlayerOwner();
+            if(wodPlayerTreasury(lo) < WOD_PRICE_BRIDGE) {
+                showNotification('Not enough money for a bridge ($1.2k).');
+                return;
+            }
+            if(!wodAnyBridgeShoreForOwner(lo)) {
+                showNotification('No riverbank on your territory is ready for a bridge.');
+                return;
+            }
+            gameData.buildMode = 'bridge';
+            gameData.bridgeBuildPick = { shoreA: null };
+            gameData.bridgeBuildGhost = null;
+            if(UI.wrapper) UI.wrapper.style.cursor = 'crosshair';
+            syncBuildPlacementMobileUi();
+            showNotification('Click a riverbank, then the opposite bank.');
         }
 
         function buyUnit(type) {
