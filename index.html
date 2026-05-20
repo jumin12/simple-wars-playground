@@ -8802,7 +8802,78 @@
                         gameData._bridgeExitLand[bk].add(lk);
                     }
                 }
+                for(let ki = 0; ki < bridgeKeys.length; ki++) {
+                    let bh = gameData.hexes[bridgeKeys[ki]];
+                    if(!bh) continue;
+                    for(let di = 0; di < hexDirections.length; di++) {
+                        let d = hexDirections[di];
+                        let nh = gameData.hexes[`${bh.q + d.q},${bh.r + d.r}`];
+                        if(!nh || isWaterHex(nh) || nh.type === 'mountain' || nh.type === 'urban') continue;
+                        let lk = getHexKey(nh);
+                        if(!gameData._bridgeLandEntry[lk]) gameData._bridgeLandEntry[lk] = new Set();
+                        for(let bj = 0; bj < bridgeKeys.length; bj++) {
+                            let bk = bridgeKeys[bj];
+                            gameData._bridgeLandEntry[lk].add(bk);
+                            if(!gameData._bridgeExitLand[bk]) gameData._bridgeExitLand[bk] = new Set();
+                            gameData._bridgeExitLand[bk].add(lk);
+                        }
+                    }
+                }
             }
+        }
+        function wodUsesDiagonalPathDirs(unit, current, currentKey) {
+            if(!wodUnitUsesLandBridges(unit) || !current) return false;
+            if(isBridgeHex(current)) return true;
+            if(gameData._bridgeLandEntry && gameData._bridgeLandEntry[currentKey] && gameData._bridgeLandEntry[currentKey].size) return true;
+            for(let di = 0; di < hexDirections.length; di++) {
+                let d = hexDirections[di];
+                let nHex = gameData.hexes[`${current.q + d.q},${current.r + d.r}`];
+                if(nHex && isBridgeHex(nHex)) return true;
+            }
+            return false;
+        }
+        function wodWorldWaypointForHexStep(unit, h, prevH, nextH) {
+            if(!h) return null;
+            if(wodUnitUsesLandBridges(unit) && isBridgeHex(h)) {
+                let br = bridgeAtHex(h);
+                if(br) return wodBridgeDeckPointForHex(h, br, prevH, nextH);
+            }
+            let wx = h.x,
+                wy = h.y;
+            let hr = gameData.hexRadius || 20;
+            if(nextH) {
+                let dx = nextH.x - h.x,
+                    dy = nextH.y - h.y;
+                let len = Math.hypot(dx, dy) || 1;
+                let step = hr * 0.28;
+                wx = h.x + dx / len * step;
+                wy = h.y + dy / len * step;
+            } else if(prevH) {
+                let dx = h.x - prevH.x,
+                    dy = h.y - prevH.y;
+                let len = Math.hypot(dx, dy) || 1;
+                let step = hr * 0.22;
+                wx = h.x + dx / len * step;
+                wy = h.y + dy / len * step;
+            }
+            return { x: wx, y: wy };
+        }
+        function wodWorldPointForOrderHex(unit, hex, towardX, towardY) {
+            if(!hex) return null;
+            let fakeNext = (towardX != null && towardY != null) ? { x: towardX, y: towardY } : null;
+            return wodWorldWaypointForHexStep(unit, hex, null, fakeNext);
+        }
+        function wodHexPathToWorldWaypoints(unit, hexPath, exactEnd) {
+            if(!hexPath || hexPath.length <= 1) return [];
+            let out = [];
+            for(let i = 1; i < hexPath.length; i++) {
+                let h = hexPath[i];
+                let prevH = hexPath[i - 1];
+                let nextH = i + 1 < hexPath.length ? hexPath[i + 1] : null;
+                out.push(wodWorldWaypointForHexStep(unit, h, prevH, nextH));
+            }
+            if(exactEnd && out.length) out[out.length - 1] = exactEnd;
+            return out;
         }
         function wodBridgeDeckPointForHex(h, br, prevH, nextH) {
             if(!h || !br) return h ? { x: h.x, y: h.y } : null;
@@ -8831,25 +8902,6 @@
                 x: br.x + lx * cos - ly * sin,
                 y: br.y + lx * sin + ly * cos
             };
-        }
-        function wodHexPathToWorldWaypoints(unit, hexPath, exactEnd) {
-            if(!hexPath || hexPath.length <= 1) return [];
-            let out = [];
-            for(let i = 1; i < hexPath.length; i++) {
-                let h = hexPath[i];
-                let prevH = hexPath[i - 1];
-                let nextH = i + 1 < hexPath.length ? hexPath[i + 1] : null;
-                if(wodUnitUsesLandBridges(unit) && isBridgeHex(h)) {
-                    let br = bridgeAtHex(h);
-                    if(br) {
-                        out.push(wodBridgeDeckPointForHex(h, br, prevH, nextH));
-                        continue;
-                    }
-                }
-                out.push({ x: h.x, y: h.y });
-            }
-            if(exactEnd && out.length) out[out.length - 1] = exactEnd;
-            return out;
         }
         function bridgeAtHex(hex) {
             if(!hex || !gameData._bridgeByHexKey) return null;
@@ -13876,26 +13928,36 @@
         }
 
         function findLocalDetourHex(unit, targetX, targetY) {
-            let currentHex = getNearestHexToPoint(unit.x, unit.y);
+            let currentHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y) || getNearestHexToPoint(unit.x, unit.y);
             if(!currentHex) return null;
             let best = null;
             let bestScore = Infinity;
-            let onBridge = wodUnitUsesLandBridges(unit) && (isBridgeHex(currentHex) || wodPointOnBridgeForUnit(unit, unit.x, unit.y));
-            let detourDirs = onBridge ? hexDirections : cardinalHexDirections;
-            for(let dir of detourDirs) {
-                let nHex = gameData.hexes[`${currentHex.q + dir.q},${currentHex.r + dir.r}`];
+            let seaConvoy = unit.type === 'convoy' && unit.convoySeaRoute;
+            let landStep = unit.type !== 'ship' && !seaConvoy;
+            let firstCands = landStep ? wodCollectGreedyLandStepCandidates(unit, currentHex) : [];
+            if(!landStep) {
+                for(let dir of cardinalHexDirections) {
+                    let nHex = gameData.hexes[`${currentHex.q + dir.q},${currentHex.r + dir.r}`];
+                    if(nHex) firstCands.push(nHex);
+                }
+            }
+            for(let ci = 0; ci < firstCands.length; ci++) {
+                let nHex = firstCands[ci];
                 if(!canUseHexForMovement(unit, nHex)) continue;
                 let dx = targetX - nHex.x;
                 let dy = targetY - nHex.y;
                 let frontPenalty = isFrontlineHex(nHex, unit.owner) ? 0 : 2500;
-                let mtn = (unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute)) ? hexMountainProximityScore(nHex) * 28 : 0;
-                let score = dx * dx + dy * dy + frontPenalty + mtn + Math.random() * 280;
+                let mtn = landStep ? hexMountainProximityScore(nHex) * 28 : 0;
+                let bridgeBonus = (landStep && isBridgeHex(nHex)) ? -1800 : 0;
+                let score = dx * dx + dy * dy + frontPenalty + mtn + bridgeBonus + Math.random() * 280;
                 if(score < bestScore) {
                     bestScore = score;
                     best = nHex;
                 }
             }
-            if(best || unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) return best;
+            if(best || unit.type === 'ship' || seaConvoy) return best;
+            let onBridge = wodUnitUsesLandBridges(unit) && (isBridgeHex(currentHex) || wodPointOnBridgeForUnit(unit, unit.x, unit.y));
+            let detourDirs = onBridge ? hexDirections : cardinalHexDirections;
             // Wider escape search when hugging mountain seams (pathfinding + pixel coords disagree).
             let queue = [{hex: currentHex, d: 0}];
             let seen = new Set([getHexKey(currentHex)]);
@@ -14262,7 +14324,7 @@
                     }
                     visited.add(currentKey);
 
-                    pathDirs = (wodUnitUsesLandBridges(unit) && isBridgeHex(current)) ? hexDirections : cardinalHexDirections;
+                    pathDirs = wodUsesDiagonalPathDirs(unit, current, currentKey) ? hexDirections : cardinalHexDirections;
 
                     for(let di = 0; di < pathDirs.length; di++) {
                         let dir = pathDirs[di];
@@ -14294,7 +14356,13 @@
 
             if(landArmyDual) {
                 let landR = runPathAst(true);
-                return landR.path;
+                if(landR.path.length > 1) return landR.path;
+                if(gameData.bridges && gameData.bridges.length) {
+                    wodRebuildBridgeLandLinks();
+                    landR = runPathAst(true);
+                    if(landR.path.length > 1) return landR.path;
+                }
+                return [];
             }
             return runPathAst(false).path;
         }
@@ -14337,6 +14405,37 @@
             return chain;
         }
 
+        function wodCollectGreedyLandStepCandidates(unit, curHex) {
+            if(!curHex) return [];
+            let out = [];
+            let seen = new Set();
+            function add(h) {
+                if(!h || !canUseHexForMovement(unit, h)) return;
+                let k = getHexKey(h);
+                if(seen.has(k)) return;
+                seen.add(k);
+                out.push(h);
+            }
+            let ck = getHexKey(curHex);
+            let dirs = wodUsesDiagonalPathDirs(unit, curHex, ck) ? hexDirections : cardinalHexDirections;
+            for(let di = 0; di < dirs.length; di++) {
+                let dir = dirs[di];
+                add(gameData.hexes[`${curHex.q + dir.q},${curHex.r + dir.r}`]);
+            }
+            if(wodUnitUsesLandBridges(unit)) {
+                if(isBridgeHex(curHex)) {
+                    let linkNbs = wodBridgeLinkedHexes(curHex);
+                    for(let li = 0; li < linkNbs.length; li++) add(linkNbs[li]);
+                    if(gameData._bridgeExitLand && gameData._bridgeExitLand[ck]) {
+                        for(let lk of gameData._bridgeExitLand[ck]) add(gameData.hexes[lk]);
+                    }
+                } else if(!isWaterHex(curHex) && gameData._bridgeLandEntry && gameData._bridgeLandEntry[ck]) {
+                    for(let bk of gameData._bridgeLandEntry[ck]) add(gameData.hexes[bk]);
+                }
+            }
+            return out;
+        }
+
         function findGreedyLandStepFromHex(unit, curHex, targetHex) {
             if(!curHex || !targetHex) return null;
             let seaConvoy = unit.type === 'convoy' && unit.convoySeaRoute;
@@ -14344,14 +14443,15 @@
             let best = null;
             let bestScore = Infinity;
             let tb = ((targetHex.q * 2654435761) ^ (targetHex.r * 1597334677) ^ (curHex.q * 2246822519)) >>> 0;
-            for(let dir of cardinalHexDirections) {
-                let nHex = gameData.hexes[`${curHex.q + dir.q},${curHex.r + dir.r}`];
-                if(!canUseHexForMovement(unit, nHex)) continue;
+            let cands = wodCollectGreedyLandStepCandidates(unit, curHex);
+            for(let ci = 0; ci < cands.length; ci++) {
+                let nHex = cands[ci];
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
                 let d = dx * dx + dy * dy;
+                let bridgeBonus = isBridgeHex(nHex) ? -420 : 0;
                 let tie = (((nHex.q * 374761393) ^ (nHex.r * 668265263) ^ tb) >>> 0) * 2.287e-9;
-                let score = d + hexMountainProximityScore(nHex) * 18 + tie;
+                let score = d + hexMountainProximityScore(nHex) * 18 + bridgeBonus + tie;
                 if(score < bestScore) {
                     bestScore = score;
                     best = nHex;
@@ -14383,6 +14483,9 @@
 
         function smoothGridPath(path) {
             if(path.length <= 2) return path;
+            for(let i = 0; i < path.length; i++) {
+                if(isBridgeHex(path[i])) return path.slice();
+            }
             let smoothed = [path[0]];
             let lastDir = null;
             for(let i = 1; i < path.length; i++) {
@@ -14413,6 +14516,22 @@
                 prevHex = reach.hex;
             }
             return smoothGridPath(full);
+        }
+
+        function wodAssignAutoMoveTarget(unit, wx, wy, opt) {
+            opt = opt || {};
+            invalidateUnitOrderArrowCache(unit);
+            unit.blockedTimer = 0;
+            unit.stuckTimer = 0;
+            unit.path = null;
+            unit.fullMarchWaypoints = null;
+            unit.marchWpCursor = 0;
+            if(opt.clearOrderTarget) unit.orderTarget = null;
+            else unit.orderTarget = opt.isCity ? { x: wx, y: wy, isCity: true } : { x: wx, y: wy };
+            if(!opt.retainMoraleBroken) unit.moraleBroken = false;
+            if(!assignUnitMoveAlongWaypoints(unit, [{ x: wx, y: wy }], opt)) {
+                unit.target = { x: wx, y: wy, pathPrepared: true, ...(opt.isCity ? { isCity: true } : {}) };
+            }
         }
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
@@ -14486,8 +14605,9 @@
             if(path.length <= 1 && unit.type === 'convoy' && !unit.convoySeaRoute && reachNext.hex) {
                 let hop = findGreedyLandStep(unit, reachNext.hex);
                 if(hop) {
+                    let pt = wodWorldPointForOrderHex(unit, hop, reachNext.exactX, reachNext.exactY);
                     unit.path = null;
-                    unit.target = {x: hop.x, y: hop.y, pathPrepared: true, convoyGreedy: true};
+                    unit.target = {x: pt.x, y: pt.y, pathPrepared: true, convoyGreedy: true};
                     return true;
                 }
             }
@@ -14628,10 +14748,9 @@
                     let maxSteps = unit.type === 'marine' ? 48 : 100;
                     let chain = buildGreedyLandHexChain(unit, startHex, targetHex, maxSteps);
                     if(chain.length > 1) {
-                        unit.path = chain.slice(1).map(h => ({x: h.x, y: h.y}));
                         let endNode = {x: desired.x, y: desired.y};
                         if(desired.isCity) endNode.isCity = true;
-                        unit.path[unit.path.length - 1] = endNode;
+                        unit.path = wodHexPathToWorldWaypoints(unit, chain, endNode);
                         unit.target = unit.path.shift();
                         unit.target.pathPrepared = true;
                         invalidateUnitOrderArrowCache(unit);
@@ -14660,7 +14779,8 @@
                 if(unit.type === 'convoy' && unit.convoySeaRoute) greedy = findGreedyWaterStep(unit, targetHex);
                 else if(unit.type === 'convoy') greedy = findGreedyLandStep(unit, targetHex);
                 if(greedy) {
-                    unit.target = {x: greedy.x, y: greedy.y, pathPrepared: true, convoyGreedy: true};
+                    let pt = wodWorldPointForOrderHex(unit, greedy, desired.x, desired.y);
+                    unit.target = {x: pt.x, y: pt.y, pathPrepared: true, convoyGreedy: true};
                 } else if(unit.type === 'light' || unit.type === 'heavy' || unit.type === 'marine') {
                     unit.path = null;
                     let reach = findReachableOrderHex(unit, desired.x, desired.y);
@@ -15888,8 +16008,9 @@
             if(path.length <= 1 && unit.type === 'convoy' && !unit.convoySeaRoute && targetHex) {
                 let hop = findGreedyLandStep(unit, targetHex);
                 if(hop) {
+                    let pt = wodWorldPointForOrderHex(unit, hop, finalTarget.x, finalTarget.y);
                     unit.path = null;
-                    unit.target = {x: hop.x, y: hop.y, pathPrepared: true, convoyGreedy: true};
+                    unit.target = {x: pt.x, y: pt.y, pathPrepared: true, convoyGreedy: true};
                     return true;
                 }
             }
@@ -15925,16 +16046,16 @@
             }
             let path = findPathAroundTerrain(convoy, destHex, startHex);
             if(path.length > 1) {
-                convoy.path = path.slice(1).map(h => ({x: h.x, y: h.y}));
                 let endPt = {x: destHex.x, y: destHex.y, isCity: true};
-                convoy.path.push(endPt);
+                convoy.path = wodHexPathToWorldWaypoints(convoy, path, endPt);
                 convoy.target = convoy.path.shift();
                 convoy.target.pathPrepared = true;
             } else {
                 let hop = convoy.convoySeaRoute ? findGreedyWaterStep(convoy, destHex) : findGreedyLandStep(convoy, destHex);
                 if(hop) {
+                    let pt = wodWorldPointForOrderHex(convoy, hop, destCity.x, destCity.y);
                     convoy.path = null;
-                    convoy.target = {x: hop.x, y: hop.y, pathPrepared: true, convoyGreedy: true};
+                    convoy.target = {x: pt.x, y: pt.y, pathPrepared: true, convoyGreedy: true};
                 } else {
                     convoy.path = null;
                     convoy.target = {x: destCity.x, y: destCity.y, isCity: true, pathPrepared: true};
@@ -16089,9 +16210,10 @@
                 let detour = findLocalDetourHex(unit, unit.target.x, unit.target.y);
                 if(detour) {
                     let finalTarget = unit.orderTarget || unit.target.finalTarget || {x: unit.target.x, y: unit.target.y};
+                    let pt = wodWorldPointForOrderHex(unit, detour, finalTarget.x, finalTarget.y);
                     unit.fullMarchWaypoints = null;
                     unit.marchWpCursor = 0;
-                    unit.target = {x: detour.x, y: detour.y, detour: true, finalTarget};
+                    unit.target = {x: pt.x, y: pt.y, detour: true, finalTarget};
                 } else {
                     unit.fullMarchWaypoints = null;
                     unit.marchWpCursor = 0;
@@ -16113,9 +16235,10 @@
                 let detour = findLocalDetourHex(unit, unit.target.x, unit.target.y);
                 if(detour) {
                     let finalTarget = unit.orderTarget || unit.target.finalTarget || {x: unit.target.x, y: unit.target.y};
+                    let pt = wodWorldPointForOrderHex(unit, detour, finalTarget.x, finalTarget.y);
                     unit.fullMarchWaypoints = null;
                     unit.marchWpCursor = 0;
-                    unit.target = {x: detour.x, y: detour.y, detour: true, finalTarget};
+                    unit.target = {x: pt.x, y: pt.y, detour: true, finalTarget};
                 }
                 return;
             }
@@ -19707,8 +19830,6 @@
                 let sector = sectors[idx % sectors.length];
                 let spread = (idx % 7) * (gameData.hexRadius * 0.42);
                 let jitter = (Math.random() - 0.5) * gameData.hexRadius * 0.45;
-                unit.path = null;
-                unit.orderTarget = null;
 
                 let support = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 195);
                 let enemies = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 215, true);
@@ -19721,17 +19842,17 @@
                 let px = -ny, py = nx;
 
                 if(support < neededSupport && (unit.hp / unit.maxHp) < 0.9) {
-                    unit.target = {
-                        x: sector.holdHex.x - nx * gameData.hexRadius * 0.92 + px * jitter + py * spread * 0.45,
-                        y: sector.holdHex.y - ny * gameData.hexRadius * 0.92 + py * jitter - px * spread * 0.45
-                    };
+                    wodAssignAutoMoveTarget(unit,
+                        sector.holdHex.x - nx * gameData.hexRadius * 0.92 + px * jitter + py * spread * 0.45,
+                        sector.holdHex.y - ny * gameData.hexRadius * 0.92 + py * jitter - px * spread * 0.45,
+                        { clearOrderTarget: true, retainMoraleBroken: true });
                     unit.holding = true;
                 } else {
                     let push = canBreakthrough ? 1.18 : 0.22;
-                    unit.target = {
-                        x: sector.holdHex.x + nx * gameData.hexRadius * push + px * (spread * 0.28) + nx * (jitter * 0.22),
-                        y: sector.holdHex.y + ny * gameData.hexRadius * push + py * (spread * 0.28) + ny * (jitter * 0.22)
-                    };
+                    wodAssignAutoMoveTarget(unit,
+                        sector.holdHex.x + nx * gameData.hexRadius * push + px * (spread * 0.28) + nx * (jitter * 0.22),
+                        sector.holdHex.y + ny * gameData.hexRadius * push + py * (spread * 0.28) + ny * (jitter * 0.22),
+                        { clearOrderTarget: true, retainMoraleBroken: true });
                     unit.holding = false;
                 }
                 unit.aiFormationSerial = serial;
@@ -20050,11 +20171,7 @@
                     if(hpRatio < 0.35) {
                         let retreatPoint = findRetreatPoint(unit);
                         if(retreatPoint) {
-                            unit.path = null;
-                            unit.orderTarget = null;
-                            unit.fullMarchWaypoints = null;
-                            unit.marchWpCursor = 0;
-                            unit.target = retreatPoint;
+                            wodAssignAutoMoveTarget(unit, retreatPoint.x, retreatPoint.y, { clearOrderTarget: true, retainMoraleBroken: true });
                             unit.retreating = true;
                             unit.holding = false;
                         }
@@ -20073,11 +20190,7 @@
                     if(!assignment) {
                         let fallback = findNearestOwnedHex(unit.owner, unit.x, unit.y, true);
                         if(fallback) {
-                            unit.path = null;
-                            unit.orderTarget = null;
-                            unit.fullMarchWaypoints = null;
-                            unit.marchWpCursor = 0;
-                            unit.target = {x: fallback.x, y: fallback.y};
+                            wodAssignAutoMoveTarget(unit, fallback.x, fallback.y, { clearOrderTarget: true, retainMoraleBroken: true });
                         }
                         continue;
                     }
@@ -20098,25 +20211,17 @@
                     let localRatio = (support + 1) / (enemies + 1);
                     let neededSupport = canOverwhelm ? Math.max(3, Math.ceil(enemies * 1.05) + 1) : Math.max(6, Math.ceil(enemies * 1.4) + 3);
                     if((!canOverwhelm || localRatio < 1.25) && support < neededSupport && hpRatio < 0.9) {
-                        unit.path = null;
-                        unit.orderTarget = null;
-                        unit.fullMarchWaypoints = null;
-                        unit.marchWpCursor = 0;
-                        unit.target = {
-                            x: assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.95 + spread,
-                            y: assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.95 - spread
-                        };
+                        wodAssignAutoMoveTarget(unit,
+                            assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.95 + spread,
+                            assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.95 - spread,
+                            { clearOrderTarget: true, retainMoraleBroken: true });
                         unit.holding = true;
                     } else {
                         let depth = canOverwhelm && localRatio >= 1.35 ? 1.05 : 0.28;
-                        unit.path = null;
-                        unit.orderTarget = null;
-                        unit.fullMarchWaypoints = null;
-                        unit.marchWpCursor = 0;
-                        unit.target = {
-                            x: assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.45,
-                            y: assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth - spread * 0.45
-                        };
+                        wodAssignAutoMoveTarget(unit,
+                            assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.45,
+                            assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth - spread * 0.45,
+                            { clearOrderTarget: true, retainMoraleBroken: true });
                         unit.holding = false;
                     }
                 }
