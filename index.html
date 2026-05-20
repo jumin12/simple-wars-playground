@@ -8794,9 +8794,9 @@
             }
             return best;
         }
-        function wodBridgeBetweenBanks(startHex, targetHex, br) {
+        function wodBridgeBetweenBanks(startHex, targetHex, br, unit) {
             if(!startHex || !targetHex || !br) return false;
-            let shores = wodBridgeShoreHexes(br);
+            let shores = wodBridgeShoreHexes(br, unit);
             if(shores.length < 2) return false;
             let startSide = null,
                 targetSide = null,
@@ -8927,16 +8927,18 @@
             return best;
         }
         /** If a smoothed path jumps from shore to shore, pick the bridge that connects both banks. */
-        function wodInferBridgeCrossingBetween(prev, cur) {
+        function wodInferBridgeCrossingBetween(prev, cur, unit) {
             if(!prev || !cur || !gameData.bridges || !gameData.bridges.length) return null;
             if(isBridgeHex(prev) || isBridgeHex(cur)) return null;
-            if(!wodBridgeLandOk(prev) || !wodBridgeLandOk(cur)) return null;
+            if(!wodBridgeLandOk(prev) && !isBridgeHex(prev)) return null;
+            if(!wodBridgeLandOk(cur) && !isBridgeHex(cur)) return null;
             let best = null,
                 bestSpan = -1;
             for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
                 let br = gameData.bridges[bi];
                 if(!br) continue;
-                if(!wodLandHexCanReachBridge(prev, br) || !wodLandHexCanReachBridge(cur, br)) continue;
+                if(!wodBridgeBetweenBanks(prev, cur, br, unit) &&
+                    (!wodLandHexCanReachBridge(prev, br) || !wodLandHexCanReachBridge(cur, br))) continue;
                 let ordered = wodOrderBridgeHexesAlongBridge(br);
                 if(ordered.length < 2) continue;
                 let i0 = wodClosestBridgeIndexAlong(ordered, prev);
@@ -9063,7 +9065,7 @@
             for(let bi = 0; bi < gameData.bridges.length; bi++) {
                 let br = gameData.bridges[bi];
                 if(!br) continue;
-                if(!wodBridgeBetweenBanks(startHex, targetHex, br) && !wodInferBridgeCrossingBetween(startHex, targetHex)) continue;
+                if(!wodBridgeBetweenBanks(startHex, targetHex, br, unit) && !wodInferBridgeCrossingBetween(startHex, targetHex, unit)) continue;
                 let ordered = wodOrderBridgeHexesAlongBridge(br);
                 if(ordered.length < 2) continue;
                 let i0 = wodClosestBridgeIndexAlong(ordered, startHex);
@@ -14555,7 +14557,8 @@
                             if(!nHex) continue;
                             let nKey = key(nHex);
                             if(visited.has(nKey) || !neighborOk(nHex)) continue;
-                            let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
+                            let portalCost = isBridgeHex(current) && isBridgeHex(nHex) ? 1 : movementCost(current, nHex);
+                            let tentativeG = (gScore[currentKey] ?? Infinity) + portalCost;
                             if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
                             cameFrom[nKey] = current;
                             gScore[nKey] = tentativeG;
