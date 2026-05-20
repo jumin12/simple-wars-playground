@@ -8759,7 +8759,7 @@
                         let bh = gameData.hexes[keys[ki]];
                         if(!bh) continue;
                         let man = Math.abs(hex.q - bh.q) + Math.abs(hex.r - bh.r);
-                        if(man <= 1) {
+                        if(man <= 2) {
                             attach = true;
                             break;
                         }
@@ -8799,7 +8799,7 @@
                 ey = Math.sin(ang);
             let hw = (br.w || 0) * 0.5;
             let capA = { x: br.x - ex * hw * 0.94, y: br.y - ey * hw * 0.94 };
-            let capB = { x: br.x + ex * hw * 0.94, y: br.y - ey * hw * 0.94 };
+            let capB = { x: br.x + ex * hw * 0.94, y: br.y + ey * hw * 0.94 };
             let hr = gameData.hexRadius || 20;
             let capR2 = Math.pow(hr * 1.85, 2);
             let shoresA = [],
@@ -8851,6 +8851,80 @@
             });
             return hexes;
         }
+        function wodBridgePortalHexForShore(shore, br) {
+            if(!shore || !br) return null;
+            wodSyncBridgeWorldCoords(br);
+            let keys = br.hexKeys;
+            if(!keys || !keys.length) return null;
+            let bestAdj = null,
+                bestAdjD = Infinity,
+                bestNear = null,
+                bestNearD = Infinity;
+            for(let ki = 0; ki < keys.length; ki++) {
+                let bh = gameData.hexes[keys[ki]];
+                if(!bh || !isBridgeHex(bh)) continue;
+                let man = Math.abs(shore.q - bh.q) + Math.abs(shore.r - bh.r);
+                if(man > 2) continue;
+                let dx = shore.x - bh.x,
+                    dy = shore.y - bh.y;
+                let d = dx * dx + dy * dy;
+                if(man <= 1 && d < bestAdjD) {
+                    bestAdjD = d;
+                    bestAdj = bh;
+                } else if(man === 2 && d < bestNearD) {
+                    bestNearD = d;
+                    bestNear = bh;
+                }
+            }
+            return bestAdj || bestNear;
+        }
+        function wodSliceBridgeMid(mid, entryBridge, exitBridge) {
+            if(!mid || !mid.length) return [];
+            if(!entryBridge && !exitBridge) return mid;
+            let ek = entryBridge ? getHexKey(entryBridge) : null;
+            let xk = exitBridge ? getHexKey(exitBridge) : null;
+            let i0 = 0,
+                i1 = mid.length - 1;
+            if(ek) {
+                for(let i = 0; i < mid.length; i++) {
+                    if(getHexKey(mid[i]) === ek) {
+                        i0 = i;
+                        break;
+                    }
+                }
+            }
+            if(xk) {
+                for(let i = mid.length - 1; i >= 0; i--) {
+                    if(getHexKey(mid[i]) === xk) {
+                        i1 = i;
+                        break;
+                    }
+                }
+            }
+            if(i0 > i1) {
+                let t = i0;
+                i0 = i1;
+                i1 = t;
+            }
+            return mid.slice(i0, i1 + 1);
+        }
+        function wodPathUsesAnyBridgeHex(path) {
+            if(!path || !path.length) return false;
+            for(let i = 0; i < path.length; i++) {
+                if(isBridgeHex(path[i])) return true;
+            }
+            return false;
+        }
+        function wodPathPixelLength(path) {
+            if(!path || path.length < 2) return 0;
+            let len = 0;
+            for(let i = 1; i < path.length; i++) {
+                let dx = path[i].x - path[i - 1].x;
+                let dy = path[i].y - path[i - 1].y;
+                len += Math.sqrt(dx * dx + dy * dy);
+            }
+            return len;
+        }
         function wodPathThroughBridge(unit, br, startHex, targetHex, runPathAstFn) {
             if(!br || !startHex || !targetHex || !runPathAstFn) return null;
             let caps = wodBridgeCapShoreHexes(br);
@@ -8893,9 +8967,13 @@
                         let exit = att.exits[xi];
                         let leg3 = runPathAstFn(true, exit, targetHex);
                         if(!leg3.path || !leg3.path.length) continue;
-                        let merged = wodMergeHexPaths(leg1.path, att.mid, leg3.path);
+                        let bridgeOn = wodBridgePortalHexForShore(entry, br);
+                        let bridgeOff = wodBridgePortalHexForShore(exit, br);
+                        let midSeg = wodSliceBridgeMid(att.mid, bridgeOn, bridgeOff);
+                        if(!midSeg.length) midSeg = att.mid;
+                        let merged = wodMergeHexPaths(leg1.path, bridgeOn, midSeg, bridgeOff, leg3.path);
                         if(!merged || merged.length < 2) continue;
-                        let cost = (leg1.cost || 0) + att.mid.length * 0.75 + (leg3.cost || 0);
+                        let cost = (leg1.cost || 0) + midSeg.length * 0.75 + (leg3.cost || 0);
                         if(!best || cost < best.cost) best = { path: merged, cost: cost };
                     }
                 }
@@ -13865,6 +13943,9 @@
         function wodSamplePosOnWalkableTerrain(unit, px, py) {
             if(wodPointOnBridgeForUnit(unit, px, py)) return true;
             let h = getNearestHexToPoint(px, py);
+            if(h && wodUnitUsesLandBridges(unit) && isWaterHex(h) && !isBridgeHex(h)) {
+                h = null;
+            }
             if(h && canUseHexForMovement(unit, h)) return true;
             if(!h) return false;
             let hr = gameData.hexRadius || 20;
@@ -14158,7 +14239,7 @@
             let startHex = startHexOpt || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             if(!startHex || !targetHex) return [];
             if(!canUseHexForMovement(unit, startHex) || !canUseHexForMovement(unit, targetHex)) return [];
-            if(startHex === targetHex) return [startHex];
+            if(getHexKey(startHex) === getHexKey(targetHex)) return [startHex];
 
             if((unit.type === 'marine' || unit.type === 'ship') && isWaterHex(startHex) && isWaterHex(targetHex)) {
                 let g = buildGreedyWaterHexChain(unit, startHex, targetHex, unit.type === 'ship' ? 170 : 120);
@@ -14326,7 +14407,7 @@
                     let current = heapPop(open, fScore);
                     let currentKey = key(current);
                     if(visited.has(currentKey)) continue;
-                    if(current === g0) {
+                    if(getHexKey(current) === getHexKey(g0)) {
                         let tk = key(g0);
                         return {path: rebuildPath(current, cameFrom), cost: gScore[tk] ?? Infinity};
                     }
@@ -14368,13 +14449,28 @@
 
             if(landArmyDual || convoyLandMarch) {
                 let best = runPathAst(true);
+                let bestVia = null;
                 if(wodUnitUsesLandBridges(unit) && gameData.bridges && gameData.bridges.length) {
                     for(let bri = 0, brl = gameData.bridges.length; bri < brl; bri++) {
                         let via = wodPathThroughBridge(unit, gameData.bridges[bri], startHex, targetHex, runPathAst);
-                        if(via && via.path && via.path.length && via.cost < best.cost) best = via;
+                        if(via && via.path && via.path.length && (!bestVia || via.cost < bestVia.cost)) bestVia = via;
                     }
                 }
+                if(bestVia) {
+                    let chord = Math.sqrt(
+                        (startHex.x - targetHex.x) * (startHex.x - targetHex.x) +
+                        (startHex.y - targetHex.y) * (startHex.y - targetHex.y)
+                    );
+                    let pickVia = bestVia.cost < best.cost;
+                    if(!pickVia && best.path && best.path.length && !wodPathUsesAnyBridgeHex(best.path) && chord > 1) {
+                        let directLen = wodPathPixelLength(best.path);
+                        let viaLen = wodPathPixelLength(bestVia.path);
+                        if(directLen > chord * 1.42 && viaLen < directLen * 0.78) pickVia = true;
+                    }
+                    if(pickVia) best = bestVia;
+                }
                 if(best.path && best.path.length) return best.path;
+                if(bestVia && bestVia.path && bestVia.path.length) return bestVia.path;
                 return [];
             }
             return runPathAst(false).path;
@@ -14428,6 +14524,7 @@
             for(let dir of cardinalHexDirections) {
                 let nHex = gameData.hexes[`${curHex.q + dir.q},${curHex.r + dir.r}`];
                 if(!canUseHexForMovement(unit, nHex)) continue;
+                if(wodUnitUsesLandBridges(unit) && isWaterHex(nHex) && !isBridgeHex(nHex)) continue;
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
                 let d = dx * dx + dy * dy;
