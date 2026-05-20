@@ -9083,6 +9083,39 @@
             }
             return best;
         }
+        function wodUnitOnBridge(unit) {
+            if(!wodUnitUsesLandBridges(unit)) return false;
+            if(wodPointOnBridgeForUnit(unit, unit.x, unit.y)) return true;
+            let h = getNearestHexToPoint(unit.x, unit.y);
+            if(h && isBridgeHex(h)) return true;
+            return !!wodNearestBridgeHexForUnit(unit, unit.x, unit.y);
+        }
+        /** Hex used for terrain/combat while marching — prefers indexed bridge tiles under the deck. */
+        function wodUnitStandingHex(unit) {
+            if(!unit) return null;
+            let bridgeH = wodNearestBridgeHexForUnit(unit, unit.x, unit.y);
+            if(bridgeH) return bridgeH;
+            let h = getNearestHexToPoint(unit.x, unit.y);
+            if(h && isBridgeHex(h)) return h;
+            if(wodPointOnBridgeForUnit(unit, unit.x, unit.y) && gameData.bridges) {
+                for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                    let br = gameData.bridges[bi];
+                    if(!br || !wodPointInBridgeRect(unit.x, unit.y, br)) continue;
+                    if(!br.hexKeys || !br.hexKeys.length) wodSyncBridgeWorldCoords(br);
+                    let keys = br.hexKeys;
+                    if(!keys) continue;
+                    for(let ki = 0; ki < keys.length; ki++) {
+                        let bh = gameData.hexes[keys[ki]];
+                        if(bh) return bh;
+                    }
+                }
+            }
+            return h;
+        }
+        /** Bridge footprint tiles (including river water) count as open grass for gameplay. */
+        function wodHexIsGrassLike(hex) {
+            return !!(hex && (hex.type === 'grass' || isBridgeHex(hex)));
+        }
         function wodBridgeLinkedHexes(hex) {
             let br = bridgeAtHex(hex);
             if(!br) return [];
@@ -14898,10 +14931,16 @@
         }
 
         function applyTerrainUnitEffects(unit, dt) {
-            let hex = getNearestHexToPoint(unit.x, unit.y);
-            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
+            let onBridge = wodUnitOnBridge(unit);
+            let hex = wodUnitStandingHex(unit) || getNearestHexToPoint(unit.x, unit.y);
+            let sea = !!(hex && isWaterHex(hex) && !onBridge && !isBridgeHex(hex)
+                && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             unit.inWater = !!(sea && unit.type !== 'marine');
+            if(onBridge) {
+                unit.inWater = false;
+                unit.amphibInWater = false;
+            }
             if(unit.inWater) {
                 applyDamage(unit, unit.maxHp * 0.02 * dt, 0);
                 unit.waterFlash = 0.35;
@@ -14912,7 +14951,7 @@
 
         function getTerrainAttackModifier(unit, hex) {
             if(!hex || !unit) return 1;
-            if(isBridgeHex(hex)) return 1;
+            if(isBridgeHex(hex) || wodUnitOnBridge(unit)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 1;
@@ -14941,7 +14980,7 @@
 
         function getTerrainDefenseModifier(unit, hex) {
             if(!hex || !unit) return 1;
-            if(isBridgeHex(hex)) return 1;
+            if(isBridgeHex(hex) || wodUnitOnBridge(unit)) return 1;
             if(unit.type === 'ship') return 1;
             if(unit.type === 'marine') {
                 if(isWaterHex(hex)) return 0.92;
@@ -15145,8 +15184,8 @@
             if(!hex) return null;
             if(isBridgeHex(hex)) {
                 return {
-                    label: 'Bridge',
-                    detail: 'River crossing — moves like open ground.',
+                    label: 'Grass',
+                    detail: 'Bridge deck — same march and combat as open grassland.',
                     terrain: true
                 };
             }
@@ -15161,6 +15200,17 @@
         /** Live combat tilt on this hex — pill uses chart-style Atk/Dmg rows (tooltip = prose). */
         function getTerrainCombatEffect(unit, hex) {
             if(!hex || !unit || unit.type === 'convoy') return null;
+            if(isBridgeHex(hex) || wodUnitOnBridge(unit)) {
+                return {
+                    label: 'Grass',
+                    detail: 'Bridge crossing — open ground like grassland (no water penalties).',
+                    render: 'terrainCombat',
+                    atkPct: 100,
+                    defPct: 100,
+                    block: true,
+                    terrain: true
+                };
+            }
             let atk = getTerrainAttackModifier(unit, hex);
             let def = getTerrainDefenseModifier(unit, hex);
             let atkPct = Math.round(atk * 100);
@@ -15200,7 +15250,7 @@
 
         function getUnitEffects(unit) {
             let effects = [];
-            let hex = getNearestHexToPoint(unit.x, unit.y);
+            let hex = wodUnitStandingHex(unit) || getNearestHexToPoint(unit.x, unit.y);
             if(hex && unit.type !== 'convoy') {
                 let terrCombat = getTerrainCombatEffect(unit, hex);
                 if(terrCombat) effects.push(terrCombat);
@@ -20673,8 +20723,8 @@
                 });
                 
                 if(enemy && unit.damage > 0 && !unit.retreating && !unit.moraleBroken) {
-                    let attackerHex = getNearestHexToPoint(unit.x, unit.y);
-                    let defenderHex = getNearestHexToPoint(enemy.x, enemy.y);
+                    let attackerHex = wodUnitStandingHex(unit) || getNearestHexToPoint(unit.x, unit.y);
+                    let defenderHex = wodUnitStandingHex(enemy) || getNearestHexToPoint(enemy.x, enemy.y);
                     let atkMod = getTerrainAttackModifier(unit, attackerHex);
                     let defMod = getTerrainDefenseModifier(enemy, defenderHex);
                     let m = unit.morale != null ? unit.morale : WOD_MORALE_MAX;
