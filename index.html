@@ -8711,7 +8711,18 @@
             br = wodNormalizeBridgeRecord(br);
             if(!br) return;
             br.hexKeys = wodBridgeFootprintHexKeys(br);
-            if(br.hexKeys.length) {
+            br.waterKeys = [];
+            for(let ki = 0; ki < br.hexKeys.length; ki++) {
+                let h = gameData.hexes[br.hexKeys[ki]];
+                if(h && isWaterHex(h)) br.waterKeys.push(br.hexKeys[ki]);
+            }
+            if(br.waterKeys.length) {
+                let anchor = gameData.hexes[br.waterKeys[0]];
+                if(anchor) {
+                    br.q = anchor.q;
+                    br.r = anchor.r;
+                }
+            } else if(br.hexKeys.length) {
                 let anchor = gameData.hexes[br.hexKeys[0]];
                 if(anchor) {
                     br.q = anchor.q;
@@ -8729,6 +8740,7 @@
                 q: br.q,
                 r: br.r,
                 hexKeys: br.hexKeys ? br.hexKeys.slice() : null,
+                waterKeys: br.waterKeys ? br.waterKeys.slice() : null,
                 x: br.x,
                 y: br.y,
                 w: br.w,
@@ -8744,7 +8756,7 @@
                 if(!br) continue;
                 wodSyncBridgeWorldCoords(br);
                 list[bi] = br;
-                let keys = br.hexKeys && br.hexKeys.length ? br.hexKeys : [];
+                let keys = br.waterKeys && br.waterKeys.length ? br.waterKeys : [];
                 for(let ki = 0; ki < keys.length; ki++) gameData._bridgeByHexKey[keys[ki]] = br;
             }
         }
@@ -8772,10 +8784,10 @@
             for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
                 let br = gameData.bridges[bi];
                 if(!br || !wodPointInBridgeRect(x, y, br)) continue;
-                let keys = br.hexKeys;
+                let keys = br.waterKeys;
                 if(!keys || !keys.length) {
                     wodSyncBridgeWorldCoords(br);
-                    keys = br.hexKeys;
+                    keys = br.waterKeys;
                 }
                 if(!keys) continue;
                 for(let ki = 0; ki < keys.length; ki++) {
@@ -8795,33 +8807,123 @@
         function wodBridgeLinkedHexes(hex) {
             let br = bridgeAtHex(hex);
             if(!br) return [];
-            if(!br.hexKeys || !br.hexKeys.length) wodSyncBridgeWorldCoords(br);
-            let keys = br.hexKeys;
-            if(!keys || !keys.length) return [hex];
+            if(!br.waterKeys || !br.waterKeys.length) wodSyncBridgeWorldCoords(br);
+            let keys = br.waterKeys;
+            if(!keys || !keys.length) return hex ? [hex] : [];
             let out = [];
             for(let ki = 0; ki < keys.length; ki++) {
                 let h = gameData.hexes[keys[ki]];
                 if(h) out.push(h);
             }
-            return out.length ? out : [hex];
+            return out.length ? out : (hex ? [hex] : []);
+        }
+        function wodBridgeCapTouchesLand(br, endSign) {
+            let hw = (br.w || 0) * 0.5;
+            let hh = (br.h || 0) * 0.5;
+            if(hw < 4 || hh < 2) return false;
+            let ang = br.angle || 0;
+            let cos = Math.cos(ang),
+                sin = Math.sin(ang);
+            let lx0 = endSign * hw * 0.94;
+            let land = 0;
+            let samples = 5;
+            for(let si = 0; si < samples; si++) {
+                let t = samples === 1 ? 0 : (si / (samples - 1)) * 2 - 1;
+                let ly = t * hh * 0.88;
+                let wx = br.x + lx0 * cos - ly * sin;
+                let wy = br.y + lx0 * sin + ly * cos;
+                let h = getNearestHexToPoint(wx, wy);
+                if(h && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') land++;
+            }
+            return land >= 2;
+        }
+        function wodBridgeInteriorWaterCount(waterKeys) {
+            if(!waterKeys || !waterKeys.length) return 0;
+            let ocean = null;
+            if(wodMapShapeUsesRadialIslandMask(gameData.mapShape)) {
+                let cols = gameData.mapRadius || 40;
+                let rows = Math.floor(cols * ((gameData._mapSizePreset && gameData._mapSizePreset.rowsMul) || 0.8));
+                ocean = wodBuildOceanConnectedWaterKeys(cols, rows);
+            }
+            let interior = 0;
+            for(let ki = 0; ki < waterKeys.length; ki++) {
+                if(ocean && ocean.has(waterKeys[ki])) continue;
+                interior++;
+            }
+            return interior;
+        }
+        function wodBridgePortalNeighborsFromLand(hex) {
+            if(!hex || isWaterHex(hex) || isBridgeHex(hex) || !gameData.bridges || !gameData.bridges.length) return [];
+            let out = [];
+            let seen = new Set();
+            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                let br = gameData.bridges[bi];
+                if(!br.waterKeys || !br.waterKeys.length) wodSyncBridgeWorldCoords(br);
+                let keys = br.waterKeys;
+                if(!keys) continue;
+                for(let ki = 0; ki < keys.length; ki++) {
+                    let bh = gameData.hexes[keys[ki]];
+                    if(!bh || !isBridgeHex(bh)) continue;
+                    let man = Math.abs(hex.q - bh.q) + Math.abs(hex.r - bh.r);
+                    if(man !== 1) continue;
+                    let bk = getHexKey(bh);
+                    if(seen.has(bk)) continue;
+                    seen.add(bk);
+                    out.push(bh);
+                    let linked = wodBridgeLinkedHexes(bh);
+                    for(let li = 0; li < linked.length; li++) {
+                        let lh = linked[li];
+                        if(!lh) continue;
+                        let lk = getHexKey(lh);
+                        if(seen.has(lk)) continue;
+                        seen.add(lk);
+                        out.push(lh);
+                    }
+                }
+            }
+            return out;
+        }
+        function wodBridgeExitLandNeighbors(hex) {
+            if(!hex || !isBridgeHex(hex)) return [];
+            let out = [];
+            for(let di = 0; di < cardinalHexDirections.length; di++) {
+                let dir = cardinalHexDirections[di];
+                let nb = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                if(!nb || isWaterHex(nb) || nb.type === 'mountain' || nb.type === 'urban') continue;
+                out.push(nb);
+            }
+            return out;
         }
         function wodBridgePlacementError(br, owner) {
             if(!br) return 'Invalid bridge.';
             let probe = wodNormalizeBridgeRecord(Object.assign({}, br));
             if(!probe) return 'Invalid bridge.';
-            let keys = wodBridgeFootprintHexKeys(probe);
+            wodSyncBridgeWorldCoords(probe);
+            let keys = probe.hexKeys || [];
             if(!keys.length) return 'Bridge must cover map tiles.';
+            if(!wodBridgeCapTouchesLand(probe, -1)) return 'Bridge must touch land on both ends (near side).';
+            if(!wodBridgeCapTouchesLand(probe, 1)) return 'Bridge must touch land on both ends (far side).';
             let water = 0,
+                land = 0,
                 blocked = 0;
             for(let ki = 0; ki < keys.length; ki++) {
                 let h = gameData.hexes[keys[ki]];
                 if(!h) continue;
                 if(isWaterHex(h)) water++;
+                else land++;
                 if(h.type === 'mountain' || h.type === 'urban') blocked++;
-                if(gameData._bridgeByHexKey && gameData._bridgeByHexKey[keys[ki]]) return 'Another bridge is in the way.';
             }
-            if(water < 1) return 'Bridges must cross water.';
+            if(probe.waterKeys) {
+                for(let wi = 0; wi < probe.waterKeys.length; wi++) {
+                    if(gameData._bridgeByHexKey && gameData._bridgeByHexKey[probe.waterKeys[wi]])
+                        return 'Another bridge is in the way.';
+                }
+            }
+            if(water < 2) return 'Bridge must span a river or lake (at least two water tiles).';
+            if(water < Math.max(2, Math.floor(keys.length * 0.22))) return 'Bridge must cross open water, not sit on land.';
+            if(land > Math.floor(keys.length * 0.42)) return 'Bridge deck covers too much land — center it on the water.';
             if(blocked > 0) return 'Cannot build on mountains or city tiles.';
+            if(wodBridgeInteriorWaterCount(probe.waterKeys) < 2) return 'Bridge must cross inland water (river or lake), not open ocean.';
             if(owner && wodPlayerTreasury(owner) < WOD_PRICE_BRIDGE) return 'Not enough money for a bridge.';
             return null;
         }
@@ -13949,8 +14051,12 @@
                 if(g.length > 1) return smoothGridPath(g);
             }
 
-            let landArmyDual = (unit.type === 'light' || unit.type === 'heavy')
-                && !isWaterHex(startHex) && !isWaterHex(targetHex);
+            let landArmyDual =
+                (unit.type === 'light' || unit.type === 'heavy') &&
+                !isWaterHex(startHex) &&
+                !isWaterHex(targetHex) &&
+                !isBridgeHex(startHex) &&
+                !isBridgeHex(targetHex);
 
             function runPathAst(forbidWater) {
                 let convoyHexExtraCost = (unit.type === 'convoy') ? buildConvoyFrontlineAvoidanceCost(unit) : null;
@@ -14071,9 +14177,22 @@
                 }
 
                 function neighborOk(nHex) {
+                    if(!nHex) return false;
+                    if(forbidWater && wodUnitUsesLandBridges(unit) && isWaterHex(nHex)) return isBridgeHex(nHex);
                     if(!canUseHexForMovement(unit, nHex)) return false;
                     if(forbidWater && (unit.type === 'light' || unit.type === 'heavy') && isWaterHex(nHex) && !isBridgeHex(nHex)) return false;
                     return true;
+                }
+                function wodPushAstNeighbor(current, currentKey, nHex) {
+                    if(!nHex) return;
+                    let nKey = key(nHex);
+                    if(visited.has(nKey) || !neighborOk(nHex)) return;
+                    let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
+                    if(tentativeG >= (gScore[nKey] ?? Infinity)) return;
+                    cameFrom[nKey] = current;
+                    gScore[nKey] = tentativeG;
+                    fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
+                    heapPush(open, nHex, fScore);
                 }
 
                 let open = [];
@@ -14113,32 +14232,21 @@
                     for(let di = 0; di < pathDirs.length; di++) {
                         let dir = pathDirs[di];
                         let nHex = gameData.hexes[`${current.q + dir.q},${current.r + dir.r}`];
-                        if(!nHex) continue;
-                        let nKey = key(nHex);
-                        if(visited.has(nKey) || !neighborOk(nHex)) continue;
-
-                        let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
-                        if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
-
-                        cameFrom[nKey] = current;
-                        gScore[nKey] = tentativeG;
-                        fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
-                        heapPush(open, nHex, fScore);
+                        wodPushAstNeighbor(current, currentKey, nHex);
                     }
-                    if(wodUnitUsesLandBridges(unit) && isBridgeHex(current)) {
-                        let linkNbs = wodBridgeLinkedHexes(current);
-                        for(let li = 0; li < linkNbs.length; li++) {
-                            let nHex = linkNbs[li];
-                            if(!nHex) continue;
-                            let nKey = key(nHex);
-                            if(visited.has(nKey) || !neighborOk(nHex)) continue;
-                            let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
-                            if(tentativeG >= (gScore[nKey] ?? Infinity)) continue;
-                            cameFrom[nKey] = current;
-                            gScore[nKey] = tentativeG;
-                            fScore[nKey] = tentativeG + heuristic(nHex, targetHex);
-                            heapPush(open, nHex, fScore);
+                    if(forbidWater && wodUnitUsesLandBridges(unit)) {
+                        if(isBridgeHex(current)) {
+                            let linkNbs = wodBridgeLinkedHexes(current);
+                            for(let li = 0; li < linkNbs.length; li++) wodPushAstNeighbor(current, currentKey, linkNbs[li]);
+                            let landOut = wodBridgeExitLandNeighbors(current);
+                            for(let li = 0; li < landOut.length; li++) wodPushAstNeighbor(current, currentKey, landOut[li]);
+                        } else if(!isWaterHex(current)) {
+                            let portals = wodBridgePortalNeighborsFromLand(current);
+                            for(let pi = 0; pi < portals.length; pi++) wodPushAstNeighbor(current, currentKey, portals[pi]);
                         }
+                    } else if(wodUnitUsesLandBridges(unit) && isBridgeHex(current)) {
+                        let linkNbs = wodBridgeLinkedHexes(current);
+                        for(let li = 0; li < linkNbs.length; li++) wodPushAstNeighbor(current, currentKey, linkNbs[li]);
                     }
                 }
                 return {path: [], cost: Infinity};
@@ -14146,7 +14254,8 @@
 
             if(landArmyDual) {
                 let landR = runPathAst(true);
-                return landR.path;
+                if(landR.path.length > 1) return landR.path;
+                if(gameData.bridges && gameData.bridges.length) return [];
             }
             return runPathAst(false).path;
         }
@@ -18217,6 +18326,7 @@
 
             gameData.hexes = {}; gameData.hexList = [];
             gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = []; gameData.bridges = [];
+            gameData._bridgeByHexKey = {};
             gameData._wodCitySplitAnglePhase = null;
 
             let seedOffset = Math.random() * 10000;
