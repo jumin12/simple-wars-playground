@@ -8746,6 +8746,17 @@
             }
             return [...keys];
         }
+        /** Every water tile under the bridge rect — deck counts as land for routing. */
+        function wodBridgeFillDeckHexKeys(br) {
+            if(!br || br.x == null) return [];
+            let keys = new Set(wodBridgeFootprintHexKeys(br));
+            for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
+                let h = gameData.hexList[hi];
+                if(!h || h.type === 'mountain' || !isWaterHex(h)) continue;
+                if(wodPointInBridgeRect(h.x, h.y, br, 1.48)) keys.add(getHexKey(h));
+            }
+            return [...keys];
+        }
         /** Land hexes on one bank of the bridge, near that end cap. */
         function wodBridgeBankLandHexes(br, endSign) {
             if(!br) return [];
@@ -8828,7 +8839,7 @@
         function wodSyncBridgeWorldCoords(br) {
             br = wodNormalizeBridgeRecord(br);
             if(!br) return;
-            br.hexKeys = wodBridgeFootprintHexKeys(br);
+            br.hexKeys = wodBridgeFillDeckHexKeys(br);
             if(br.hexKeys.length) {
                 let anchor = gameData.hexes[br.hexKeys[0]];
                 if(anchor) {
@@ -8869,13 +8880,17 @@
                 }
                 wodSyncBridgeWorldCoords(br);
                 list[bi] = br;
-                let keys = br.hexKeys && br.hexKeys.length ? br.hexKeys : [];
-                for(let ki = 0; ki < keys.length; ki++) gameData._bridgeByHexKey[keys[ki]] = br;
+                wodBridgeRegisterDeckHexes(br);
             }
             wodRebuildBridgeLandLinks();
             gameData._bridgeIndexSig = (list.length + ':' + list.map(b => b && b.id).join(','));
         }
-        const WOD_BRIDGE_INDEX_VERSION = 7;
+        function wodBridgeRegisterDeckHexes(br) {
+            if(!br || !br.hexKeys) return;
+            for(let ki = 0; ki < br.hexKeys.length; ki++)
+                gameData._bridgeByHexKey[br.hexKeys[ki]] = br;
+        }
+        const WOD_BRIDGE_INDEX_VERSION = 8;
         function wodEnsureBridgePathIndex() {
             if(!gameData.bridges || !gameData.bridges.length) {
                 gameData._bridgeByHexKey = {};
@@ -8980,6 +8995,8 @@
                 for(let ki = 0; ki < bridgeKeys.length; ki++) {
                     let bh = gameData.hexes[bridgeKeys[ki]];
                     if(!bh) continue;
+                    let blx = (bh.x - br.x) * cos + (bh.y - br.y) * sin;
+                    if(sideSign < 0 ? blx > hr * 0.75 : blx < -hr * 0.75) continue;
                     let dx = landHex.x - bh.x,
                         dy = landHex.y - bh.y;
                     let d = dx * dx + dy * dy;
@@ -9171,11 +9188,55 @@
             return out;
         }
         function bridgeAtHex(hex) {
-            if(!hex || !gameData._bridgeByHexKey) return null;
-            return gameData._bridgeByHexKey[getHexKey(hex)] || null;
+            if(!hex) return null;
+            if(gameData._bridgeByHexKey) {
+                let br = gameData._bridgeByHexKey[getHexKey(hex)];
+                if(br) return br;
+            }
+            if(!isWaterHex(hex) || !gameData.bridges || !gameData.bridges.length) return null;
+            for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                let br = gameData.bridges[bi];
+                if(!br) continue;
+                if(br.x == null) wodSyncBridgeWorldCoords(br);
+                if(wodPointInBridgeRect(hex.x, hex.y, br, 1.48)) return br;
+            }
+            return null;
         }
         function isBridgeHex(hex) {
             return !!bridgeAtHex(hex);
+        }
+        function wodBridgeWaterHexNearPoint(br, x, y) {
+            if(!br) return null;
+            if(br.x == null) wodSyncBridgeWorldCoords(br);
+            let best = null,
+                bestD = Infinity;
+            let keys = br.hexKeys;
+            if(keys && keys.length) {
+                for(let ki = 0; ki < keys.length; ki++) {
+                    let h = gameData.hexes[keys[ki]];
+                    if(!h || !isWaterHex(h)) continue;
+                    let dx = x - h.x,
+                        dy = y - h.y;
+                    let d = dx * dx + dy * dy;
+                    if(d < bestD) {
+                        bestD = d;
+                        best = h;
+                    }
+                }
+            }
+            for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
+                let h = gameData.hexList[hi];
+                if(!h || !isWaterHex(h)) continue;
+                if(!wodPointInBridgeRect(h.x, h.y, br, 1.48)) continue;
+                let dx = x - h.x,
+                    dy = y - h.y;
+                let d = dx * dx + dy * dy;
+                if(d < bestD) {
+                    bestD = d;
+                    best = h;
+                }
+            }
+            return best;
         }
         /** Bridge deck tiles count as land for routing (not open ocean). */
         function wodHexCountsAsLandForPath(hex) {
@@ -9222,6 +9283,16 @@
         /** Bridge deck tiles stay water terrain; resolve them as land march targets, not ocean orders. */
         function wodBridgeHexAtPoint(unit, x, y) {
             if(!wodUnitUsesLandBridges(unit)) return null;
+            if(gameData.bridges && gameData.bridges.length) {
+                for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                    let br = gameData.bridges[bi];
+                    if(!br) continue;
+                    if(br.x == null) wodSyncBridgeWorldCoords(br);
+                    if(!wodPointInBridgeRect(x, y, br, 1.42)) continue;
+                    let h = wodBridgeWaterHexNearPoint(br, x, y);
+                    if(h) return h;
+                }
+            }
             let coord = pixelToHex(x, y);
             let direct = gameData.hexes[`${coord.q},${coord.r}`];
             if(direct && isBridgeHex(direct)) return direct;
@@ -9236,30 +9307,6 @@
                 if(d < bestD) {
                     bestD = d;
                     best = h;
-                }
-            }
-            if(best) return best;
-            if(gameData.bridges && gameData.bridges.length) {
-                for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
-                    let br = gameData.bridges[bi];
-                    if(!br || !wodPointInBridgeRect(x, y, br, 1.32)) continue;
-                    let keys = br.hexKeys;
-                    if(!keys || !keys.length) {
-                        wodSyncBridgeWorldCoords(br);
-                        keys = br.hexKeys;
-                    }
-                    if(!keys) continue;
-                    for(let ki = 0; ki < keys.length; ki++) {
-                        let h = gameData.hexes[keys[ki]];
-                        if(!h || !isBridgeHex(h)) continue;
-                        let dx = x - h.x,
-                            dy = y - h.y;
-                        let d = dx * dx + dy * dy;
-                        if(d < bestD) {
-                            bestD = d;
-                            best = h;
-                        }
-                    }
                 }
             }
             return best;
@@ -14261,14 +14308,25 @@
         /** Resolve land-army move orders: honor water clicks; otherwise snap to shore/bridge. */
         function wodResolveLandMarchHex(unit, x, y, startHexOpt) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return null;
+            if(gameData.bridges && gameData.bridges.length) {
+                wodEnsureBridgePathIndex();
+                for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                    let br = gameData.bridges[bi];
+                    if(!br) continue;
+                    if(br.x == null) wodSyncBridgeWorldCoords(br);
+                    if(!wodPointInBridgeRect(x, y, br, 1.4)) continue;
+                    let bh = wodBridgeHexAtPoint(unit, x, y);
+                    if(bh) return { hex: bh, exactX: x, exactY: y, intoWater: false };
+                }
+            }
             let coord = pixelToHex(x, y);
             let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            if(direct && isBridgeHex(direct))
+                return { hex: direct, exactX: x, exactY: y, intoWater: false };
             if(direct && wodHexWalkableForLandPath(unit, direct, false) && !isBridgeHex(direct) && !isWaterHex(direct))
                 return { hex: direct, exactX: x, exactY: y, intoWater: false };
             let bridgeHex = wodBridgeHexAtPoint(unit, x, y);
             if(bridgeHex) return { hex: bridgeHex, exactX: x, exactY: y, intoWater: false };
-            if(direct && isBridgeHex(direct))
-                return { hex: direct, exactX: x, exactY: y, intoWater: false };
             if(direct && isWaterHex(direct) && !isBridgeHex(direct) && direct.type !== 'mountain') {
                 let bestW = null,
                     bestWd = Infinity;
@@ -14378,7 +14436,15 @@
             if(!path || !path.length) return false;
             if(path.length === 1) return true;
             for(let i = 1; i < path.length; i++) {
-                if(!wodCanStepBetweenHexes(unit, path[i - 1], path[i], true)) return false;
+                let a = path[i - 1],
+                    b = path[i];
+                if(wodCanStepBetweenHexes(unit, a, b, true)) continue;
+                if(isBridgeHex(a) && isBridgeHex(b)) {
+                    let ba = bridgeAtHex(a),
+                        bb = bridgeAtHex(b);
+                    if(ba && bb && ba.id === bb.id) continue;
+                }
+                return false;
             }
             return true;
         }
@@ -14390,6 +14456,11 @@
                 let bf = bridgeAtHex(fromHex),
                     bt = bridgeAtHex(toHex);
                 if(bf && bt && bf.id === bt.id) return true;
+            }
+            if(!isBridgeHex(fromHex) && isBridgeHex(toHex)) {
+                let dq = Math.abs(toHex.q - fromHex.q),
+                    dr = Math.abs(toHex.r - fromHex.r);
+                if(dq <= 1 && dr <= 1 && (dq + dr) > 0 && wodPathTileWalkable(unit, toHex, false)) return true;
             }
             let allowWater = !forbidWater && wodUnitPrefersLandOnlyPath(unit);
             if(!wodPathTileWalkable(unit, toHex, allowWater)) return false;
