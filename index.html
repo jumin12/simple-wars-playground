@@ -16048,6 +16048,14 @@
                     return true;
                 }
             }
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex) {
+                let hop = findGreedyLandStep(unit, reachNext.hex);
+                if(hop) {
+                    unit.path = null;
+                    unit.target = {x: hop.x, y: hop.y, pathPrepared: true, landGreedy: true};
+                    return true;
+                }
+            }
             if(path.length > 1) {
                 let exactNext = {x: reachNext.exactX, y: reachNext.exactY};
                 unit.path = wodHexPathToWorldWaypoints(unit, path, exactNext);
@@ -16240,9 +16248,9 @@
                 }
                 let greedy = null;
                 if(unit.type === 'convoy' && unit.convoySeaRoute) greedy = findGreedyWaterStep(unit, targetHex);
-                else if(unit.type === 'convoy') greedy = findGreedyLandStep(unit, targetHex);
+                else if(unit.type === 'convoy' || wodUnitPrefersLandOnlyPath(unit)) greedy = findGreedyLandStep(unit, targetHex);
                 if(greedy) {
-                    unit.target = {x: greedy.x, y: greedy.y, pathPrepared: true, convoyGreedy: true};
+                    unit.target = {x: greedy.x, y: greedy.y, pathPrepared: true, landGreedy: true};
                 } else if(wodUnitPrefersLandOnlyPath(unit)) {
                     unit.path = null;
                     unit.target = {
@@ -17493,6 +17501,14 @@
                 if(hop) {
                     unit.path = null;
                     unit.target = {x: hop.x, y: hop.y, pathPrepared: true, convoyGreedy: true};
+                    return true;
+                }
+            }
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex) {
+                let hop = findGreedyLandStep(unit, targetHex);
+                if(hop) {
+                    unit.path = null;
+                    unit.target = {x: hop.x, y: hop.y, pathPrepared: true, landGreedy: true};
                     return true;
                 }
             }
@@ -21317,34 +21333,15 @@
                     if(tdx * tdx + tdy * tdy > Math.pow(gameData.hexRadius * 3.2, 2)) return;
                 }
                 let sector = sectors[idx % sectors.length];
-                let spread = (idx % 7) * (gameData.hexRadius * 0.42);
-                let jitter = (Math.random() - 0.5) * gameData.hexRadius * 0.45;
-                unit.path = null;
-                unit.orderTarget = null;
 
                 let support = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 195);
                 let enemies = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 215, true);
                 let neededSupport = canBreakthrough ? Math.max(3, Math.ceil(enemies * 1.1)) : Math.max(5, Math.ceil(enemies * 1.35) + 3);
 
-                let dx = sector.attackHex.x - sector.holdHex.x;
-                let dy = sector.attackHex.y - sector.holdHex.y;
-                let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-                let nx = dx / len, ny = dy / len;
-                let px = -ny, py = nx;
-
                 if(support < neededSupport && (unit.hp / unit.maxHp) < 0.9) {
-                    unit.target = {
-                        x: sector.holdHex.x - nx * gameData.hexRadius * 0.92 + px * jitter + py * spread * 0.45,
-                        y: sector.holdHex.y - ny * gameData.hexRadius * 0.92 + py * jitter - px * spread * 0.45
-                    };
-                    unit.holding = true;
+                    wodAiMoveUnitTowardHex(unit, sector.holdHex, true, 0.35);
                 } else {
-                    let push = canBreakthrough ? 1.18 : 0.22;
-                    unit.target = {
-                        x: sector.holdHex.x + nx * gameData.hexRadius * push + px * (spread * 0.28) + nx * (jitter * 0.22),
-                        y: sector.holdHex.y + ny * gameData.hexRadius * push + py * (spread * 0.28) + ny * (jitter * 0.22)
-                    };
-                    unit.holding = false;
+                    wodAiMoveUnitTowardHex(unit, canBreakthrough ? sector.attackHex : sector.holdHex, false, 0.4);
                 }
                 unit.aiFormationSerial = serial;
             });
@@ -21662,11 +21659,7 @@
                     if(hpRatio < 0.35) {
                         let retreatPoint = findRetreatPoint(unit);
                         if(retreatPoint) {
-                            unit.path = null;
-                            unit.orderTarget = null;
-                            unit.fullMarchWaypoints = null;
-                            unit.marchWpCursor = 0;
-                            unit.target = retreatPoint;
+                            wodAiMoveUnitToward(unit, retreatPoint.x, retreatPoint.y, false);
                             unit.retreating = true;
                             unit.holding = false;
                         }
@@ -21684,13 +21677,7 @@
                     }
                     if(!assignment) {
                         let fallback = findNearestOwnedHex(unit.owner, unit.x, unit.y, true);
-                        if(fallback) {
-                            unit.path = null;
-                            unit.orderTarget = null;
-                            unit.fullMarchWaypoints = null;
-                            unit.marchWpCursor = 0;
-                            unit.target = {x: fallback.x, y: fallback.y};
-                        }
+                        if(fallback) wodAiMoveUnitTowardHex(unit, fallback, false, 0.15);
                         continue;
                     }
 
@@ -21710,26 +21697,16 @@
                     let localRatio = (support + 1) / (enemies + 1);
                     let neededSupport = canOverwhelm ? Math.max(3, Math.ceil(enemies * 1.05) + 1) : Math.max(6, Math.ceil(enemies * 1.4) + 3);
                     if((!canOverwhelm || localRatio < 1.25) && support < neededSupport && hpRatio < 0.9) {
-                        unit.path = null;
-                        unit.orderTarget = null;
-                        unit.fullMarchWaypoints = null;
-                        unit.marchWpCursor = 0;
-                        unit.target = {
-                            x: assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.95 + spread,
-                            y: assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.95 - spread
-                        };
-                        unit.holding = true;
+                        wodAiMoveUnitToward(unit,
+                            assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.75 + spread,
+                            assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.75 - spread * 0.45,
+                            true);
                     } else {
-                        let depth = canOverwhelm && localRatio >= 1.35 ? 1.05 : 0.28;
-                        unit.path = null;
-                        unit.orderTarget = null;
-                        unit.fullMarchWaypoints = null;
-                        unit.marchWpCursor = 0;
-                        unit.target = {
-                            x: assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.45,
-                            y: assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth - spread * 0.45
-                        };
-                        unit.holding = false;
+                        let depth = canOverwhelm && localRatio >= 1.35 ? 0.85 : 0.22;
+                        wodAiMoveUnitToward(unit,
+                            assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.35,
+                            assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth - spread * 0.35,
+                            false);
                     }
                 }
                 if(w.ei < ents.length) return;
@@ -27041,6 +27018,36 @@
             let target = findReachableOrderHex(unit, x, y);
             if(!target) return;
             assignUnitMoveAlongWaypoints(unit, [{x: target.exactX, y: target.exactY}]);
+        }
+
+        /** AI move orders: snap to walkable land/bridge and run full pathfinding (never raw water pixels). */
+        function wodAiMoveUnitToward(unit, x, y, holdingOpt) {
+            if(!unit || unit.hp <= 0) return false;
+            if(unit.type === 'ship') {
+                unit.path = null;
+                unit.orderTarget = null;
+                unit.fullMarchWaypoints = null;
+                unit.marchWpCursor = 0;
+                unit.target = { x, y, pathPrepared: false };
+                unit.holding = !!holdingOpt;
+                return true;
+            }
+            let reach = findReachableOrderHex(unit, x, y);
+            if(!reach) {
+                let hx = getNearestHexToPoint(x, y);
+                if(hx && wodHexWalkableForLandPath(unit, hx, false))
+                    reach = { hex: hx, exactX: hx.x, exactY: hx.y, intoWater: false };
+            }
+            if(!reach) return false;
+            unit.holding = !!holdingOpt;
+            return assignUnitMoveAlongWaypoints(unit, [{ x: reach.exactX, y: reach.exactY }]);
+        }
+
+        function wodAiMoveUnitTowardHex(unit, hex, holdingOpt, jitterScale) {
+            if(!hex) return false;
+            let js = jitterScale == null ? 0.22 : jitterScale;
+            let j = gameData.hexRadius * js;
+            return wodAiMoveUnitToward(unit, hex.x + (Math.random() - 0.5) * j, hex.y + (Math.random() - 0.5) * j, holdingOpt);
         }
 
         function seedPlayerShiftWaypointsFromActiveMarch(units) {
