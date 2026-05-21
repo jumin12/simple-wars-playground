@@ -8875,7 +8875,7 @@
             wodRebuildBridgeLandLinks();
             gameData._bridgeIndexSig = (list.length + ':' + list.map(b => b && b.id).join(','));
         }
-        const WOD_BRIDGE_INDEX_VERSION = 5;
+        const WOD_BRIDGE_INDEX_VERSION = 6;
         function wodEnsureBridgePathIndex() {
             if(!gameData.bridges || !gameData.bridges.length) {
                 gameData._bridgeByHexKey = {};
@@ -8965,9 +8965,9 @@
                 for(let ki = 0; ki < bridgeKeys.length; ki++) {
                     let bh = gameData.hexes[bridgeKeys[ki]];
                     if(!bh) continue;
-                    for(let dq = -4; dq <= 4; dq++) {
-                        for(let dr = -4; dr <= 4; dr++) {
-                            if(Math.abs(dq) + Math.abs(dr) > 4) continue;
+                    for(let dq = -6; dq <= 6; dq++) {
+                        for(let dr = -6; dr <= 6; dr++) {
+                            if(Math.abs(dq) + Math.abs(dr) > 6) continue;
                             let h = gameData.hexes[`${bh.q + dq},${bh.r + dr}`];
                             if(!h || isWaterHex(h) || h.type === 'mountain' || isBridgeHex(h)) continue;
                             wodLinkBridgeLandHex(getHexKey(h), bridgeKeys[ki]);
@@ -8997,22 +8997,21 @@
                 let deck = wodGetOrderedBridgeDeck(br);
                 for(let endSign of [-1, 1]) {
                     let deckEnd = wodBridgeDeckHexNearCap(br, deck, endSign);
-                    let bankLand = wodBridgeBankLandHexes(br, endSign);
-                    if(!deckEnd || !bankLand.length) continue;
+                    if(!deckEnd) continue;
                     let endKey = getHexKey(deckEnd);
-                    let ang = br.angle || 0;
-                    let cos = Math.cos(ang),
-                        sin = Math.sin(ang);
+                    let bankLand = wodBridgeBankLandHexes(br, endSign);
                     for(let si = 0; si < bankLand.length; si++) {
                         let sh = bankLand[si];
                         wodLinkBridgeLandHex(getHexKey(sh), endKey);
-                        for(let ki = 0; ki < bridgeKeys.length; ki++) {
-                            let bh = gameData.hexes[bridgeKeys[ki]];
-                            if(!bh || !isBridgeHex(bh)) continue;
-                            let blx = (bh.x - br.x) * cos + (bh.y - br.y) * sin;
-                            if(endSign < 0 ? blx > hr * 0.35 : blx < -hr * 0.35) continue;
+                        for(let ki = 0; ki < bridgeKeys.length; ki++)
                             wodLinkBridgeLandHex(getHexKey(sh), bridgeKeys[ki]);
-                        }
+                    }
+                    let perpLand = wodBridgePerpBankLandHexes(br, endSign);
+                    for(let pi = 0; pi < perpLand.length; pi++) {
+                        let ph = perpLand[pi];
+                        wodLinkBridgeLandHex(getHexKey(ph), endKey);
+                        for(let ki = 0; ki < bridgeKeys.length; ki++)
+                            wodLinkBridgeLandHex(getHexKey(ph), bridgeKeys[ki]);
                     }
                 }
             }
@@ -14322,6 +14321,23 @@
             return false;
         }
 
+        function wodHexHasBridgePortal(hex) {
+            if(!hex || !gameData._bridgeLandEntry) return false;
+            let entries = gameData._bridgeLandEntry[getHexKey(hex)];
+            if(!entries) return false;
+            if(entries instanceof Set) return entries.size > 0;
+            return entries.length > 0;
+        }
+
+        function wodStartCanReachBridgeDeck(startHex, deckEntry, enterRef) {
+            if(!startHex) return false;
+            if(isBridgeHex(startHex)) return true;
+            if(wodHexHasBridgePortal(startHex)) return true;
+            if(deckEntry && wodBridgePortalLinked(startHex, deckEntry)) return true;
+            if(enterRef && wodBridgePortalLinked(startHex, enterRef)) return true;
+            return false;
+        }
+
         function wodCanStepBetweenHexes(unit, fromHex, toHex, forbidWater) {
             if(!fromHex || !toHex) return false;
             if(wodBridgePortalLinked(fromHex, toHex)) return true;
@@ -15332,9 +15348,15 @@
                 }
             }
             if(legA.length <= 1 && !wodHexKeysEqual(startHex, enterRef) && !isBridgeHex(startHex) &&
-                !(isBridgeHex(enterRef) && gameData._bridgeLandEntry && gameData._bridgeLandEntry[getHexKey(startHex)]))
+                !wodStartCanReachBridgeDeck(startHex, deckEntry, enterRef))
                 return null;
-            if(legA.length <= 1 && (wodHexKeysEqual(startHex, enterRef) || isBridgeHex(enterRef))) legA = [startHex];
+            if(legA.length <= 1 && (wodHexKeysEqual(startHex, enterRef) || isBridgeHex(startHex) ||
+                wodStartCanReachBridgeDeck(startHex, deckEntry, enterRef)))
+                legA = [startHex];
+            if(legA.length === 1 && deckEntry && !isBridgeHex(legA[0]) &&
+                !wodHexKeysEqual(legA[0], deckEntry) &&
+                wodBridgePortalLinked(legA[0], deckEntry))
+                legA.push(deckEntry);
 
             let deckSlice = wodSliceBridgeDeckBetween(deck, deckEntry, deckExit);
             if(!deckSlice.length) return null;
@@ -15389,7 +15411,9 @@
             if(!deckSlice.length) return null;
 
             let legA = wodResolveBridgePathLeg(unit, startHex, endsPick.enter, 26000);
-            if(legA.length <= 1 && !wodHexKeysEqual(startHex, endsPick.enter) && !isBridgeHex(startHex)) return null;
+            if(legA.length <= 1 && !wodHexKeysEqual(startHex, endsPick.enter) && !isBridgeHex(startHex) &&
+                !wodStartCanReachBridgeDeck(startHex, deckEntry, endsPick.enter))
+                return null;
             if(legA.length <= 1) legA = [startHex];
 
             let legB = wodResolveBridgeExitLeg(unit, br, deck, deckExit, targetHex, isBridgeHex(endsPick.exit) ? null : endsPick.exit);
@@ -15550,6 +15574,29 @@
             return best;
         }
 
+        /** Last-resort bridge routing when composed paths fail but portals exist. */
+        function wodTryPortalBridgeMarchPath(unit, startHex, targetHex) {
+            if(!unit || !startHex || !targetHex || !wodUnitUsesLandBridges(unit)) return [];
+            wodEnsureBridgePathIndex();
+            let blocked = wodMarchBlockedWithoutBridge(unit, startHex, targetHex);
+            if(!blocked && !wodBridgeUsefulForMarch(unit, startHex, targetHex)) return [];
+            let bridgePath = wodFindBestBridgePath(unit, startHex, targetHex);
+            if(bridgePath.length > 1 && wodPathReachesTarget(bridgePath, targetHex)) return bridgePath;
+            let portalPath = smoothGridPath(wodLandBfsPath(unit, startHex, targetHex, 28000, true));
+            if(portalPath.length > 1 && wodPathReachesTarget(portalPath, targetHex)) return portalPath;
+            if(blocked && gameData.bridges && gameData.bridges.length) {
+                for(let bi = 0; bi < gameData.bridges.length; bi++) {
+                    let br = gameData.bridges[bi];
+                    if(!br) continue;
+                    let deck = wodGetOrderedBridgeDeck(br);
+                    if(!deck.length) continue;
+                    let forced = wodForceBridgeCrossingPath(unit, startHex, targetHex, br, deck);
+                    if(forced && forced.length > 1 && wodPathReachesTarget(forced, targetHex)) return forced;
+                }
+            }
+            return [];
+        }
+
         function wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex) {
             if(!startHex || !targetHex) return Infinity;
             if(wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(targetHex))
@@ -15626,6 +15673,8 @@
                     if(wodHexPathLength(forced) > 1 && wodPathReachesTarget(forced, targetHex)) return forced;
                 }
                 if(landOk && wodPathCrossesBridge(landPath) && wodPathReachesTarget(landPath, targetHex)) return landPath;
+                let portalPath = smoothGridPath(wodLandBfsPath(unit, startHex, targetHex, 28000, true));
+                if(portalPath.length > 1 && wodPathReachesTarget(portalPath, targetHex)) return portalPath;
                 return [];
             }
 
@@ -16103,6 +16152,14 @@
                 }
             }
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex) {
+                let alt = wodTryPortalBridgeMarchPath(unit, startHex, reachNext.hex);
+                if(alt.length > 1) {
+                    let exactNext = { x: reachNext.exactX, y: reachNext.exactY };
+                    unit.path = wodHexPathToWorldWaypoints(unit, alt, exactNext);
+                    unit.target = unit.path.shift();
+                    unit.target.pathPrepared = true;
+                    return true;
+                }
                 let hop = findGreedyLandStep(unit, reachNext.hex);
                 if(hop) {
                     unit.path = null;
@@ -16302,7 +16359,20 @@
                 }
                 let greedy = null;
                 if(unit.type === 'convoy' && unit.convoySeaRoute) greedy = findGreedyWaterStep(unit, targetHex);
-                else if(unit.type === 'convoy' || wodUnitPrefersLandOnlyPath(unit)) greedy = findGreedyLandStep(unit, targetHex);
+                else if(unit.type === 'convoy' || wodUnitPrefersLandOnlyPath(unit)) {
+                    let alt = wodTryPortalBridgeMarchPath(unit, startHex, targetHex);
+                    if(alt.length > 1) {
+                        unit._wodPathGiveUpUntil = 0;
+                        let endNode = { x: desired.x, y: desired.y };
+                        if(desired.isCity) endNode.isCity = true;
+                        unit.path = wodHexPathToWorldWaypoints(unit, alt, endNode);
+                        unit.target = unit.path.shift();
+                        unit.target.pathPrepared = true;
+                        invalidateUnitOrderArrowCache(unit);
+                        return;
+                    }
+                    greedy = findGreedyLandStep(unit, targetHex);
+                }
                 if(greedy) {
                     unit.target = {x: greedy.x, y: greedy.y, pathPrepared: true, landGreedy: true};
                 } else if(wodUnitPrefersLandOnlyPath(unit)) {
@@ -17559,6 +17629,16 @@
                 }
             }
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex) {
+                let alt = wodTryPortalBridgeMarchPath(unit, startHex, targetHex);
+                if(alt.length > 1) {
+                    let endPt = { x: finalTarget.x, y: finalTarget.y };
+                    if(convoyCity) endPt.isCity = true;
+                    unit.path = wodHexPathToWorldWaypoints(unit, alt, endPt);
+                    unit.target = unit.path.shift();
+                    unit.target.pathPrepared = true;
+                    unit._wodReplanLandUntil = 0;
+                    return true;
+                }
                 let hop = findGreedyLandStep(unit, targetHex);
                 if(hop) {
                     unit.path = null;
@@ -17580,6 +17660,19 @@
                 unit._wodPathGiveUpUntil = performance.now() + 900;
             }
             if(targetHex && wodUnitPrefersLandOnlyPath(unit)) {
+                if(wodMarchBlockedWithoutBridge(unit, startHex, targetHex)) {
+                    let alt = wodTryPortalBridgeMarchPath(unit, startHex, targetHex);
+                    if(alt.length > 1) {
+                        let endPt = { x: finalTarget.x, y: finalTarget.y };
+                        if(convoyCity) endPt.isCity = true;
+                        unit.path = wodHexPathToWorldWaypoints(unit, alt, endPt);
+                        unit.target = unit.path.shift();
+                        unit.target.pathPrepared = true;
+                        unit._wodReplanLandUntil = 0;
+                        return true;
+                    }
+                    return false;
+                }
                 unit.path = null;
                 let t = {x: targetHex.x, y: targetHex.y, pathPrepared: true};
                 if(convoyCity) t.isCity = true;
@@ -27099,10 +27192,10 @@
                 return true;
             }
             let reach = findReachableOrderHex(unit, x, y);
-            if(!reach) {
-                let hx = getNearestHexToPoint(x, y);
-                if(hx && wodHexWalkableForLandPath(unit, hx, false))
-                    reach = { hex: hx, exactX: hx.x, exactY: hx.y, intoWater: false };
+            if(!reach && wodUnitPrefersLandOnlyPath(unit)) {
+                let resolved = wodResolveLandMarchHex(unit, x, y);
+                if(resolved && !resolved.intoWater)
+                    reach = { hex: resolved.hex, exactX: resolved.exactX, exactY: resolved.exactY, intoWater: false };
             }
             if(!reach) return false;
             unit.holding = !!holdingOpt;
