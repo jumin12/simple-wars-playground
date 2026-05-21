@@ -14091,6 +14091,15 @@
             return (dq && dr) ? 1.41421356237 : 1;
         }
 
+        function wodDiagonalCornerBlocksLandStep(unit, hex, forbidWater) {
+            if(!hex) return true;
+            if(hex.type === 'mountain') return true;
+            if(isBridgeHex(hex)) return false;
+            if(isWaterHex(hex)) return false;
+            if(!wodPathTileWalkable(unit, hex, false)) return true;
+            return false;
+        }
+
         function wodLandHexBlocksStep(unit, hex, forbidWater) {
             if(!hex) return true;
             if(isBridgeHex(hex)) return false;
@@ -14119,8 +14128,8 @@
                 if(!bridgeStep) {
                     let sideA = gameData.hexes[`${fromHex.q + dq},${fromHex.r}`];
                     let sideB = gameData.hexes[`${fromHex.q},${fromHex.r + dr}`];
-                    if(wodLandHexBlocksStep(unit, sideA, forbidWater) ||
-                        wodLandHexBlocksStep(unit, sideB, forbidWater)) return false;
+                    if(wodDiagonalCornerBlocksLandStep(unit, sideA, forbidWater) ||
+                        wodDiagonalCornerBlocksLandStep(unit, sideB, forbidWater)) return false;
                 }
             }
             return true;
@@ -14293,6 +14302,16 @@
             return false;
         }
 
+        function wodLandChordBetweenWalkableLand(unit, ox, oy, nx, ny) {
+            if(!wodUnitPrefersLandOnlyPath(unit) || wodOrderIntoWater(unit, null)) return false;
+            let h0 = getNearestHexToPoint(ox, oy);
+            let h1 = getNearestHexToPoint(nx, ny);
+            if(!h0 || !h1) return false;
+            if(isWaterHex(h0) || isWaterHex(h1)) return false;
+            if(isBridgeHex(h0) || isBridgeHex(h1)) return false;
+            return wodHexWalkableForLandPath(unit, h0, false) && wodHexWalkableForLandPath(unit, h1, false);
+        }
+
         function wodClampStepToWalkableTerrain(unit, ox, oy, nx, ny, subdiv) {
             if(wodUnitUsesLandBridges(unit) &&
                 wodPointOnBridgeForUnit(unit, ox, oy, 1.15) &&
@@ -14302,6 +14321,7 @@
                 (wodPointOnBridgeForUnit(unit, ox, oy, 1.38) || wodPointOnBridgeForUnit(unit, nx, ny, 1.38) ||
                     wodBridgeHexAtPoint(unit, nx, ny)))
                 return { x: nx, y: ny };
+            let landChord = wodLandChordBetweenWalkableLand(unit, ox, oy, nx, ny);
             let nearBridge = wodUnitUsesLandBridges(unit) &&
                 (wodPointOnBridgeForUnit(unit, ox, oy, 1.22) || wodPointOnBridgeForUnit(unit, nx, ny, 1.22));
             let n = Math.max(6, Math.min(40, subdiv | 0));
@@ -14313,6 +14333,13 @@
                 if(wodSamplePosOnWalkableTerrain(unit, px, py)) {
                     lastGood = s;
                     continue;
+                }
+                if(landChord) {
+                    let sh = getNearestHexToPoint(px, py);
+                    if(sh && isWaterHex(sh) && !isBridgeHex(sh)) {
+                        lastGood = s;
+                        continue;
+                    }
                 }
                 if(nearBridge && wodPointOnBridgeForUnit(unit, px, py, 1.24)) {
                     lastGood = s;
@@ -15019,6 +15046,7 @@
                     let forced = wodForceBridgeCrossingPath(unit, startHex, targetHex, br, deck);
                     if(wodHexPathLength(forced) > 1) return forced;
                 }
+                if(landOk) return landPath;
                 return [];
             }
 
