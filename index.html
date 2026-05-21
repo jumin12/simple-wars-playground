@@ -9481,6 +9481,59 @@
         function wodBridgeBothEndsTouchLand(br) {
             return wodBridgeEndTouchesLand(br, -1) && wodBridgeEndTouchesLand(br, 1);
         }
+        function wodBridgeOverlapSamplePoints(br, padScale) {
+            padScale = padScale == null ? 1 : padScale;
+            let pts = [{ x: br.x, y: br.y }];
+            let ang = br.angle || 0;
+            let cos = Math.cos(ang),
+                sin = Math.sin(ang);
+            let hw = (br.w || 0) * 0.5 * padScale,
+                hh = (br.h || 0) * 0.5 * padScale;
+            let corners = [
+                [-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh],
+                [0, -hh], [0, hh], [-hw, 0], [hw, 0]
+            ];
+            for(let ci = 0; ci < corners.length; ci++) {
+                let lx = corners[ci][0],
+                    ly = corners[ci][1];
+                pts.push({ x: br.x + lx * cos - ly * sin, y: br.y + lx * sin + ly * cos });
+            }
+            return pts;
+        }
+        function wodBridgeRectsOverlap(a, b, padScale) {
+            if(!a || !b) return false;
+            padScale = padScale == null ? 1.04 : padScale;
+            if(wodPointInBridgeRect(a.x, a.y, b, padScale)) return true;
+            if(wodPointInBridgeRect(b.x, b.y, a, padScale)) return true;
+            let ptsA = wodBridgeOverlapSamplePoints(a, padScale);
+            for(let pi = 0; pi < ptsA.length; pi++) {
+                if(wodPointInBridgeRect(ptsA[pi].x, ptsA[pi].y, b, padScale)) return true;
+            }
+            let ptsB = wodBridgeOverlapSamplePoints(b, padScale);
+            for(let pi = 0; pi < ptsB.length; pi++) {
+                if(wodPointInBridgeRect(ptsB[pi].x, ptsB[pi].y, a, padScale)) return true;
+            }
+            let hr = gameData.hexRadius || 20;
+            let dx = a.x - b.x,
+                dy = a.y - b.y;
+            return dx * dx + dy * dy < Math.pow(hr * 2.75, 2);
+        }
+        function wodBridgeOverlapsExisting(br) {
+            let probe = wodNormalizeBridgeRecord(Object.assign({}, br));
+            if(!probe) return false;
+            wodEnsureBridgePathIndex();
+            let keys = wodBridgeFootprintHexKeys(probe);
+            for(let ki = 0; ki < keys.length; ki++) {
+                if(gameData._bridgeByHexKey && gameData._bridgeByHexKey[keys[ki]]) return true;
+            }
+            let list = gameData.bridges || [];
+            for(let bi = 0; bi < list.length; bi++) {
+                let other = list[bi];
+                if(!other) continue;
+                if(wodBridgeRectsOverlap(probe, other)) return true;
+            }
+            return false;
+        }
         function wodUnitOnBridgeDeck(unit) {
             if(!wodUnitUsesLandBridges(unit)) return false;
             if(wodPointOnBridgeForUnit(unit, unit.x, unit.y)) return true;
@@ -9500,8 +9553,8 @@
                 if(!h) continue;
                 if(isWaterHex(h)) water++;
                 if(h.type === 'mountain' || h.type === 'urban') blocked++;
-                if(gameData._bridgeByHexKey && gameData._bridgeByHexKey[keys[ki]]) return 'Another bridge is in the way.';
             }
+            if(wodBridgeOverlapsExisting(probe)) return 'Another bridge is in the way.';
             if(water < 1) return 'Bridges must cross water.';
             if(!wodBridgeBothEndsTouchLand(probe)) return 'Both bridge ends must touch land.';
             if(blocked > 0) return 'Cannot build on mountains or city tiles.';
@@ -17265,6 +17318,19 @@
             return best;
         }
 
+        function nearestFriendlyLandArmyDistSq(x, y, owner) {
+            let best = Infinity;
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.owner !== owner) continue;
+                if(u.type !== 'light' && u.type !== 'heavy') continue;
+                let dx = u.x - x,
+                    dy = u.y - y;
+                let d = dx * dx + dy * dy;
+                if(d < best) best = d;
+            }
+            return best;
+        }
+
         function isArmyStartSpawnHex(unit, hex) {
             if(!hex || !unit) return false;
             if(hex.owner !== unit.owner) return false;
@@ -21754,6 +21820,14 @@
             return false;
         }
 
+        function wodAiFortHasNearbyDefenders(hex, ownerId) {
+            if(!hex || !ownerId) return false;
+            let hr = gameData.hexRadius || 20;
+            let tilePx = hr * 1.35;
+            let guardR2 = Math.pow(tilePx * 8.5, 2);
+            return nearestFriendlyLandArmyDistSq(hex.x, hex.y, ownerId) <= guardR2;
+        }
+
         function wodAiCityNeedsFortGuard(city, ownerId) {
             if(!city || city.owner !== ownerId) return false;
             let cityHex = gameData.hexes[`${city.q},${city.r}`];
@@ -21822,6 +21896,7 @@
 
         function wodAiScoreFortHex(hex, ownerId) {
             if(!hexEligibleForFortPlacementForOwner(hex, ownerId)) return -1e9;
+            if(isFrontlineHex(hex, ownerId) && !wodAiFortHasNearbyDefenders(hex, ownerId)) return -1e9;
             let score = 0;
             let hr = gameData.hexRadius || 10;
             let tilePx = hr * 1.35;
@@ -21893,7 +21968,167 @@
                 }
             }
             if(!bestHex || bestScore < MIN_SCORE) return false;
+            if(isFrontlineHex(bestHex, ownerId) && !wodAiFortHasNearbyDefenders(bestHex, ownerId)) return false;
             return attemptFortPlacementForOwner(bestHex, ownerId, true);
+        }
+
+        function wodAiWaterSeparatesOwnedShores(a, b, ownerId) {
+            if(!a || !b || !ownerId) return false;
+            let samples = 7;
+            let water = 0,
+                blocked = 0;
+            for(let si = 1; si < samples; si++) {
+                let t = si / samples;
+                let px = a.x + (b.x - a.x) * t;
+                let py = a.y + (b.y - a.y) * t;
+                let h = getNearestHexToPoint(px, py);
+                if(!h) {
+                    blocked++;
+                    continue;
+                }
+                if(isBridgeHex(h)) {
+                    blocked++;
+                    continue;
+                }
+                if(isWaterHex(h)) water++;
+                else if(h.type === 'mountain' || h.type === 'urban') blocked++;
+                else if(h.owner !== ownerId) blocked++;
+                else blocked++;
+            }
+            return water >= 2 && blocked === 0;
+        }
+
+        function wodAiBridgeAlreadyServesShores(a, b) {
+            let hr = gameData.hexRadius || 20;
+            let midX = (a.x + b.x) * 0.5,
+                midY = (a.y + b.y) * 0.5;
+            for(let bi = 0, bl = (gameData.bridges || []).length; bi < bl; bi++) {
+                let br = gameData.bridges[bi];
+                if(!br) continue;
+                if(wodDistToBridgeRect(a.x, a.y, br) <= hr * 4.2 &&
+                    wodDistToBridgeRect(b.x, b.y, br) <= hr * 4.2) return true;
+                if(wodDistToBridgeRect(midX, midY, br) <= hr * 3.6) return true;
+            }
+            return false;
+        }
+
+        function wodAiCollectBridgeCandidateSites(ownerId) {
+            let hr = gameData.hexRadius || 20;
+            let spacing = hr * 1.35;
+            let minDist2 = Math.pow(spacing * 2.35, 2);
+            let maxDist2 = Math.pow(spacing * 5.1, 2);
+            let coastal = [];
+            let coastalSeen = new Set();
+            function addCoastal(h) {
+                if(!h || h.owner !== ownerId || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') return;
+                if(!getNeighborHexes(h).some(n => n && isWaterHex(n) && !isBridgeHex(n))) return;
+                let k = getHexKey(h);
+                if(coastalSeen.has(k)) return;
+                coastalSeen.add(k);
+                coastal.push(h);
+            }
+            for(let h of getOwnerFrontlineHexes(ownerId)) {
+                addCoastal(h);
+                for(let n of getNeighborHexes(h)) addCoastal(n);
+            }
+            for(let city of gameData.cities) {
+                if(city.owner !== ownerId) continue;
+                for(let pt of getHexesInRadius(city.q, city.r, 4))
+                    addCoastal(gameData.hexes[`${pt.q},${pt.r}`]);
+            }
+            if(coastal.length > 96) coastal.length = 96;
+            let out = [];
+            let pairSeen = new Set();
+            for(let i = 0; i < coastal.length; i++) {
+                for(let j = i + 1; j < coastal.length; j++) {
+                    let a = coastal[i],
+                        b = coastal[j];
+                    let dx = b.x - a.x,
+                        dy = b.y - a.y;
+                    let dist2 = dx * dx + dy * dy;
+                    if(dist2 < minDist2 || dist2 > maxDist2) continue;
+                    let pk = getHexKey(a) + '|' + getHexKey(b);
+                    if(pairSeen.has(pk)) continue;
+                    pairSeen.add(pk);
+                    if(!wodAiWaterSeparatesOwnedShores(a, b, ownerId)) continue;
+                    if(wodAiBridgeAlreadyServesShores(a, b)) continue;
+                    let dist = Math.sqrt(dist2);
+                    let dims = wodBridgeDefaultDims();
+                    let w = Math.min(dims.w * 1.18, Math.max(dims.w * 0.92, dist * 1.06));
+                    out.push({
+                        x: (a.x + b.x) * 0.5,
+                        y: (a.y + b.y) * 0.5,
+                        angle: Math.atan2(dy, dx),
+                        w: w,
+                        h: dims.h,
+                        shoreA: a,
+                        shoreB: b,
+                        span: dist
+                    });
+                }
+            }
+            return out;
+        }
+
+        function wodAiScoreBridgeSite(site, ownerId) {
+            if(!site) return -1e9;
+            let br = { x: site.x, y: site.y, angle: site.angle, w: site.w, h: site.h };
+            if(wodBridgePlacementError(br, ownerId)) return -1e9;
+            let hr = gameData.hexRadius || 20;
+            let tilePx = hr * 1.35;
+            let score = 40;
+            if(isFrontlineHex(site.shoreA, ownerId) || isFrontlineHex(site.shoreB, ownerId)) score += 72;
+            for(let n of getNeighborHexes(site.shoreB)) {
+                if(n && n.owner > 0 && n.owner !== ownerId) {
+                    score += 38;
+                    break;
+                }
+            }
+            let nearestBridgeSq = Infinity;
+            for(let bi = 0, bl = (gameData.bridges || []).length; bi < bl; bi++) {
+                let other = gameData.bridges[bi];
+                if(!other) continue;
+                let dx = other.x - site.x,
+                    dy = other.y - site.y;
+                nearestBridgeSq = Math.min(nearestBridgeSq, dx * dx + dy * dy);
+            }
+            if(nearestBridgeSq < Math.pow(tilePx * 11, 2)) score -= 220;
+            else if(nearestBridgeSq < Math.pow(tilePx * 18, 2)) score -= 55;
+            if(nearestFriendlyLandArmyDistSq(site.shoreA.x, site.shoreA.y, ownerId) > Math.pow(tilePx * 13, 2)) score -= 85;
+            score -= site.span * 0.018;
+            return score;
+        }
+
+        function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey) {
+            if(!gameData.hexList || !gameData.hexList.length) return false;
+            if(wodPlayerTreasury(ownerId) < WOD_PRICE_BRIDGE * 3.1) return false;
+            let aiCities = gameData.cities.filter(c => c && c.owner === ownerId).length;
+            let aiBridges = (gameData.bridges || []).filter(b => b && b.owner === ownerId).length;
+            let bridgeCap = Math.max(1, Math.min(4, Math.floor(aiCities * 0.42) + 1));
+            if(aiBridges >= bridgeCap) return false;
+            let now = performance.now();
+            if(!gameData._aiBridgeCooldown) gameData._aiBridgeCooldown = {};
+            if(now - (gameData._aiBridgeCooldown[ownerId] || 0) < 82000) return false;
+            let sites = wodAiCollectBridgeCandidateSites(ownerId);
+            if(!sites.length) return false;
+            let best = null,
+                bestScore = 0;
+            const MIN_SCORE = 58;
+            let limit = Math.min(sites.length, 28);
+            for(let si = 0; si < limit; si++) {
+                let sc = wodAiScoreBridgeSite(sites[si], ownerId);
+                if(sc > bestScore) {
+                    bestScore = sc;
+                    best = sites[si];
+                }
+            }
+            if(!best || bestScore < MIN_SCORE) return false;
+            if(Math.random() > 0.13) return false;
+            if(placeBridgeAt(ownerId, best.x, best.y, best.angle, best.w, best.h, { suppressNotes: true })) {
+                gameData._aiBridgeCooldown[ownerId] = now;
+                return true;
+            }
+            return false;
         }
 
         /** Runs one faction's econ/build/spawn work for a periodic AI pulse (spread across frames). */
@@ -21929,6 +22164,9 @@
                 if((gameData.aiMoneyByOwner[ownerKey] || 0) >= reserve && Math.random() < (aiForts === 0 ? 0.28 : 0.16))
                     wodAiTryFortForOwner(ownerId, ownerKey);
             }
+
+            if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_BRIDGE * 3.1 && Math.random() < 0.22)
+                wodAiTryBridgeForOwner(ownerId, ownerKey);
 
             let spawnCap = wodUsesVisualViewportLayout() ? 4 : 5;
             let spawnsThisTick = Math.min(spawnCap, Math.max(2, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(180, WOD_PRICE_LIGHT))));
