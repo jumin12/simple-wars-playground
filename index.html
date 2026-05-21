@@ -15209,8 +15209,9 @@
                 bestScore = Infinity;
             let queue = [{ hex: fromHex, d: 0 }];
             let seen = new Set([getHexKey(fromHex)]);
-            while(queue.length > 0) {
-                let { hex, d } = queue.shift();
+            let qi = 0;
+            while(qi < queue.length) {
+                let { hex, d } = queue[qi++];
                 if(d > maxRing) continue;
                 if(wodIsOpenWaterHex(hex)) {
                     let dx = towardHex.x - hex.x,
@@ -15235,6 +15236,56 @@
                 }
             }
             return best;
+        }
+
+        /** Land tile beside open water for stepping between a land approach and a water goal. */
+        function wodFindAmphibiousShoreCrossing(unit, landBiasHex, waterBiasHex, maxRing) {
+            if(!unit || !landBiasHex || !waterBiasHex) return null;
+            maxRing = maxRing == null ? 18 : maxRing;
+            let best = null,
+                bestScore = Infinity;
+            let pts = getHexesInRadius(waterBiasHex.q, waterBiasHex.r, maxRing);
+            for(let pi = 0; pi < pts.length; pi++) {
+                let land = gameData.hexes[`${pts[pi].q},${pts[pi].r}`];
+                if(!land || isWaterHex(land) || isBridgeHex(land) || land.type === 'mountain') continue;
+                if(!wodHexWalkableForLandPath(unit, land, false)) continue;
+                let waterHex = null,
+                    waterScore = Infinity;
+                for(let di = 0; di < hexDirections.length; di++) {
+                    let d = hexDirections[di];
+                    let w = gameData.hexes[`${land.q + d.q},${land.r + d.r}`];
+                    if(!wodIsOpenWaterHex(w)) continue;
+                    let dx = waterBiasHex.x - w.x,
+                        dy = waterBiasHex.y - w.y;
+                    let s = dx * dx + dy * dy;
+                    if(s < waterScore) {
+                        waterScore = s;
+                        waterHex = w;
+                    }
+                }
+                if(!waterHex) continue;
+                let dxL = land.x - landBiasHex.x,
+                    dyL = land.y - landBiasHex.y;
+                let dxW = waterHex.x - waterBiasHex.x,
+                    dyW = waterHex.y - waterBiasHex.y;
+                let score = dxL * dxL + dyL * dyL + (dxW * dxW + dyW * dyW) * 0.42;
+                if(score < bestScore) {
+                    bestScore = score;
+                    best = { landHex: land, waterHex: waterHex };
+                }
+            }
+            return best;
+        }
+
+        /** Land-only approach leg for amphibious routing — never re-enters full army/water compose. */
+        function wodFindLandApproachPath(unit, fromHex, toLandHex) {
+            if(!fromHex || !toLandHex) return [];
+            if(wodHexKeysEqual(fromHex, toLandHex)) return [fromHex];
+            let path = findPathAroundTerrain(unit, toLandHex, fromHex, true, 'land');
+            if(path.length > 1 && wodPathReachesTarget(path, toLandHex)) return path;
+            let portal = smoothGridPath(wodLandBfsPath(unit, fromHex, toLandHex, 9000, true));
+            if(portal.length > 1 && wodPathReachesTarget(portal, toLandHex)) return portal;
+            return path.length > 1 ? path : [];
         }
 
         function wodHexPathLength(path) {
@@ -15783,6 +15834,7 @@
 
         function wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return false;
+            if(wodOrderIntoWater(unit, targetHex) && wodIsOpenWaterHex(targetHex)) return false;
             if(wodHexPathLength(bridgePath) > 1) return false;
             if(wodOrderIntoWater(unit, targetHex)) return true;
             let bestLand = wodHexPathLength(landPath);
@@ -15830,9 +15882,11 @@
         }
 
         function wodPickLandArmyMarchPath(unit, startHex, targetHex) {
-            wodEnsureBridgePathIndex();
             if(!startHex || !targetHex) return [];
             if(wodHexKeysEqual(startHex, targetHex)) return [startHex];
+            if(wodOrderIntoWater(unit, targetHex) && wodIsOpenWaterHex(targetHex))
+                return findAmphibiousMarchPath(unit, startHex, targetHex);
+            wodEnsureBridgePathIndex();
 
             let landPath = findPathAroundTerrain(unit, targetHex, startHex, true, 'land');
             let landOk = wodHexPathLength(landPath) > 1 && wodPathReachesTarget(landPath, targetHex);
@@ -15883,20 +15937,21 @@
             let startW = wodIsOpenWaterHex(startHex);
             let tgtW = wodIsOpenWaterHex(targetHex);
             if(startW && tgtW) {
-                let chain = buildGreedyAmphibiousWaterChain(unit, startHex, targetHex, 88);
+                let chain = buildGreedyAmphibiousWaterChain(unit, startHex, targetHex, 72);
                 out = chain.length > 1 ? smoothGridPath(chain) : chain;
             } else if(!startW && tgtW) {
-                let shore = wodNearestOpenWaterHex(unit, startHex, targetHex, 8);
-                if(shore) {
-                    let landLeg = findPathAroundTerrain(unit, shore, startHex, true, 'land');
-                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, shore, targetHex, 88);
+                let crossing = wodFindAmphibiousShoreCrossing(unit, startHex, targetHex, 20);
+                if(crossing) {
+                    let landLeg = wodFindLandApproachPath(unit, startHex, crossing.landHex);
+                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, crossing.waterHex, targetHex, 72);
+                    if(wodHexKeysEqual(crossing.waterHex, targetHex)) waterLeg = [crossing.waterHex];
                     out = wodMergeHexPaths(landLeg, waterLeg);
                 }
             } else if(startW && !tgtW) {
-                let shore = wodNearestOpenWaterHex(unit, targetHex, startHex, 8);
-                if(shore) {
-                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, startHex, shore, 88);
-                    let landLeg = findPathAroundTerrain(unit, targetHex, shore, true, 'land');
+                let crossing = wodFindAmphibiousShoreCrossing(unit, targetHex, startHex, 20);
+                if(crossing) {
+                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, startHex, crossing.waterHex, 72);
+                    let landLeg = wodFindLandApproachPath(unit, crossing.landHex, targetHex);
                     out = wodMergeHexPaths(waterLeg, landLeg);
                 }
             }
@@ -15908,8 +15963,6 @@
         function findPathAroundTerrain(unit, targetHex, startHexOpt, skipBridgeCompose, pathMode) {
             let startHex = startHexOpt || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             if(!startHex || !targetHex) return [];
-            if(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length)
-                wodEnsureBridgePathIndex();
             pathMode = pathMode || 'auto';
             if(pathMode === 'auto') {
                 if(wodOrderIntoWater(unit, targetHex)) pathMode = 'water';
@@ -15917,6 +15970,8 @@
                 else pathMode = 'full';
             }
             if(pathMode === 'water') return findAmphibiousMarchPath(unit, startHex, targetHex);
+            if(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length)
+                wodEnsureBridgePathIndex();
             let pathAllowWater = false;
             if(isBridgeHex(startHex) || wodBridgeHexAtPoint(unit, startHex.x, startHex.y))
                 startHex = isBridgeHex(startHex) ? startHex : wodBridgeHexAtPoint(unit, startHex.x, startHex.y) || startHex;
@@ -16337,6 +16392,14 @@
                 }
             }
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex) {
+                if(wodOrderIntoWater(unit, reachNext.hex) && startHex && wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(reachNext.hex)) {
+                    let hop = findGreedyAmphibiousWaterStep(unit, reachNext.hex, { fromHex: startHex });
+                    if(hop) {
+                        unit.path = null;
+                        unit.target = {x: hop.x, y: hop.y, pathPrepared: true, ampGreedy: true};
+                        return true;
+                    }
+                }
                 let hop = findGreedyLandStep(unit, reachNext.hex);
                 if(hop) {
                     unit.path = null;
@@ -17735,6 +17798,13 @@
             let nowLand = performance.now();
             if(wodUnitPrefersLandOnlyPath(unit) && unit._wodReplanLandUntil && nowLand < unit._wodReplanLandUntil)
                 return false;
+            if(wodOrderIntoWater(unit, null)) {
+                let ampHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+                if(ampHex && wodIsOpenWaterHex(ampHex)) {
+                    if(unit._wodReplanAmpUntil && nowLand < unit._wodReplanAmpUntil) return false;
+                    unit._wodReplanAmpUntil = nowLand + 200;
+                }
+            }
             if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
                 return assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true});
             }
@@ -17794,15 +17864,25 @@
                 }
             }
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex) {
-                let alt = wodTryPortalBridgeMarchPath(unit, startHex, targetHex);
-                if(alt.length > 1) {
-                    let endPt = { x: finalTarget.x, y: finalTarget.y };
-                    if(convoyCity) endPt.isCity = true;
-                    unit.path = wodHexPathToWorldWaypoints(unit, alt, endPt);
-                    unit.target = unit.path.shift();
-                    unit.target.pathPrepared = true;
-                    unit._wodReplanLandUntil = 0;
-                    return true;
+                if(wodOrderIntoWater(unit, targetHex) && startHex && wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(targetHex)) {
+                    let hop = findGreedyAmphibiousWaterStep(unit, targetHex, { fromHex: startHex });
+                    if(hop) {
+                        unit.path = null;
+                        unit.target = {x: hop.x, y: hop.y, pathPrepared: true, ampGreedy: true};
+                        unit._wodReplanAmpUntil = 0;
+                        return true;
+                    }
+                } else if(!wodOrderIntoWater(unit, targetHex)) {
+                    let alt = wodTryPortalBridgeMarchPath(unit, startHex, targetHex);
+                    if(alt.length > 1) {
+                        let endPt = { x: finalTarget.x, y: finalTarget.y };
+                        if(convoyCity) endPt.isCity = true;
+                        unit.path = wodHexPathToWorldWaypoints(unit, alt, endPt);
+                        unit.target = unit.path.shift();
+                        unit.target.pathPrepared = true;
+                        unit._wodReplanLandUntil = 0;
+                        return true;
+                    }
                 }
                 let hop = findGreedyLandStep(unit, targetHex);
                 if(hop) {
@@ -17818,6 +17898,7 @@
                 unit.target = unit.path.shift();
                 unit.target.pathPrepared = true;
                 unit._wodReplanLandUntil = 0;
+                unit._wodReplanAmpUntil = 0;
                 return true;
             }
             if(wodUnitPrefersLandOnlyPath(unit) && path.length <= 1) {
