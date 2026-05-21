@@ -8733,7 +8733,7 @@
                 maxY = Math.max(maxY, wy);
             }
             let pad = hr * 0.85;
-            let deckReach = hr * 1.12;
+            let deckReach = hr * 1.38;
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                 let h = gameData.hexList[hi];
                 if(!h || h.type === 'mountain') continue;
@@ -14679,7 +14679,7 @@
             while(queue.length > 0 && limit-- > 0) {
                 let { hex, path } = queue.shift();
                 if(wodHexKeysEqual(hex, toHex)) return path;
-                if(path.length > 220) continue;
+                if(path.length > 480) continue;
                 function tryStep(nHex, portal) {
                     if(!nHex) return;
                     let nk = getHexKey(nHex);
@@ -14700,18 +14700,74 @@
             return [];
         }
 
-        /** Compose start → shore → full bridge deck → shore → goal for each constructed bridge. */
-        function wodFindBestBridgePath(unit, startHex, targetHex) {
-            if(!startHex || !targetHex || !gameData.bridges || !gameData.bridges.length) return [];
+        function wodComposeBridgeCrossingPath(unit, startHex, targetHex, deck, enterRef, exitRef) {
+            if(!deck || !deck.length || !enterRef || !exitRef) return null;
             let sk = getHexKey(startHex),
                 tk = getHexKey(targetHex);
+            let legA = wodLandBfsPath(unit, startHex, enterRef, 18000);
+            let legB = wodLandBfsPath(unit, exitRef, targetHex, 18000);
+            if(legA.length <= 1 && getHexKey(enterRef) !== sk) return null;
+            if(legB.length <= 1 && getHexKey(exitRef) !== tk && getHexKey(enterRef) !== getHexKey(exitRef)) return null;
+            let deckEntry = wodNearestHexOnBridgeDeck(deck, enterRef);
+            let deckExit = wodNearestHexOnBridgeDeck(deck, exitRef);
+            let deckSlice = wodSliceBridgeDeckBetween(deck, deckEntry, deckExit);
+            if(!deckSlice.length) return null;
+            let merged = legA.slice();
+            if(merged.length && wodHexKeysEqual(merged[merged.length - 1], deckSlice[0])) merged.pop();
+            merged.push(...deckSlice);
+            if(legB.length) {
+                if(merged.length && wodHexKeysEqual(merged[merged.length - 1], legB[0])) legB = legB.slice(1);
+                merged.push(...legB);
+            }
+            merged = smoothGridPath(merged);
+            return merged.length > 1 ? merged : null;
+        }
+
+        /** Compose start → shore/deck → bridge deck → shore/deck → goal for each constructed bridge. */
+        function wodFindBestBridgePath(unit, startHex, targetHex) {
+            if(!startHex || !targetHex || !gameData.bridges || !gameData.bridges.length) return [];
             let best = [],
                 bestLen = Infinity;
+            function consider(merged) {
+                if(!merged || merged.length <= 1) return;
+                let wlen = wodPathWorldLength(merged);
+                if(wlen < bestLen) {
+                    bestLen = wlen;
+                    best = merged;
+                }
+            }
             for(let bi = 0; bi < gameData.bridges.length; bi++) {
                 let br = gameData.bridges[bi];
                 if(!br) continue;
                 let deck = wodGetOrderedBridgeDeck(br);
                 if(!deck.length) continue;
+
+                let deckEnter = null,
+                    deckEnterCost = Infinity,
+                    deckExit = null,
+                    deckExitCost = Infinity;
+                for(let di = 0; di < deck.length; di++) {
+                    let dh = deck[di];
+                    let pIn = wodLandBfsPath(unit, startHex, dh, 18000);
+                    if(pIn.length > 1) {
+                        let c = wodPathWorldLength(pIn);
+                        if(c < deckEnterCost) {
+                            deckEnterCost = c;
+                            deckEnter = dh;
+                        }
+                    }
+                    let pOut = wodLandBfsPath(unit, dh, targetHex, 18000);
+                    if(pOut.length > 1) {
+                        let c = wodPathWorldLength(pOut);
+                        if(c < deckExitCost) {
+                            deckExitCost = c;
+                            deckExit = dh;
+                        }
+                    }
+                }
+                if(deckEnter && deckExit)
+                    consider(wodComposeBridgeCrossingPath(unit, startHex, targetHex, deck, deckEnter, deckExit));
+
                 let ends = wodBridgeShoreEnds(br);
                 let shores = ends.neg.concat(ends.pos);
                 if(!shores.length) continue;
@@ -14742,30 +14798,8 @@
                         exit = sh;
                     }
                 }
-                if(!entry || !exit) continue;
-                let legA = wodLandBfsPath(unit, startHex, entry, 12000);
-                let legB = wodLandBfsPath(unit, exit, targetHex, 12000);
-                if(legA.length <= 1 && getHexKey(entry) !== sk) continue;
-                if(legB.length <= 1 && getHexKey(exit) !== tk && getHexKey(entry) !== getHexKey(exit)) continue;
-                let deckEntry = wodNearestHexOnBridgeDeck(deck, entry);
-                let deckExit = wodNearestHexOnBridgeDeck(deck, exit);
-                let deckSlice = wodSliceBridgeDeckBetween(deck, deckEntry, deckExit);
-                if(!deckSlice.length) continue;
-                let merged = legA.slice();
-                if(merged.length && wodHexKeysEqual(merged[merged.length - 1], deckSlice[0])) merged.pop();
-                merged.push(...deckSlice);
-                if(legB.length) {
-                    if(merged.length && wodHexKeysEqual(merged[merged.length - 1], legB[0])) legB = legB.slice(1);
-                    merged.push(...legB);
-                }
-                merged = smoothGridPath(merged);
-                if(merged.length > 1) {
-                    let wlen = wodPathWorldLength(merged);
-                    if(wlen < bestLen) {
-                        bestLen = wlen;
-                        best = merged;
-                    }
-                }
+                if(entry && exit)
+                    consider(wodComposeBridgeCrossingPath(unit, startHex, targetHex, deck, entry, exit));
             }
             return best;
         }
@@ -14785,8 +14819,9 @@
 
         function wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return false;
+            if(wodHexPathLength(bridgePath) > 1) return false;
             if(wodOrderIntoWater(unit, targetHex)) return true;
-            let bestLand = Math.min(wodHexPathLength(landPath), wodHexPathLength(bridgePath));
+            let bestLand = wodHexPathLength(landPath);
             if(bestLand <= 1) return true;
             let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex);
             if(!isFinite(est) || est < 2) return false;
@@ -14796,30 +14831,23 @@
         function wodPickLandArmyMarchPath(unit, startHex, targetHex) {
             let bridgePath = wodFindBestBridgePath(unit, startHex, targetHex);
             let landPath = findPathAroundTerrain(unit, targetHex, startHex, true, 'land');
-            let landReach = wodLandBfsPath(unit, startHex, targetHex, 14000);
             let landOk = wodHexPathLength(landPath) > 1;
-            let landReachOk = wodHexPathLength(landReach) > 1;
             let bridgeOk = wodHexPathLength(bridgePath) > 1;
-            if(bridgeOk && (!landReachOk || !landOk)) return bridgePath;
-            if(bridgeOk && landOk && wodPathCrossesBridge(bridgePath) && !wodPathCrossesBridge(landPath))
-                return bridgePath;
-            if(bridgeOk && landOk) {
+            if(bridgeOk) {
+                if(!landOk) return bridgePath;
+                if(!wodPathCrossesBridge(landPath)) return bridgePath;
                 let lw = wodPathWorldLength(landPath);
                 let bw = wodPathWorldLength(bridgePath);
-                if(bw < lw * 0.98 || lw < 1) return bridgePath;
+                if(bw <= lw * 1.15) return bridgePath;
             }
-            let best = landOk ? landPath : (landReachOk ? landReach : []);
-            if(bridgeOk && (!best.length || wodPathWorldLength(bridgePath) < wodPathWorldLength(best) * 0.98))
-                best = bridgePath;
+            if(landOk && !wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath))
+                return landPath;
+            if(bridgeOk) return bridgePath;
             if(wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath)) {
                 let waterPath = findAmphibiousMarchPath(unit, startHex, targetHex);
-                if(wodHexPathLength(waterPath) > 1) {
-                    let ww = wodPathWorldLength(waterPath);
-                    let bw2 = wodPathWorldLength(best);
-                    if(!best.length || ww < bw2 * 0.84) return waterPath;
-                }
+                if(wodHexPathLength(waterPath) > 1) return waterPath;
             }
-            return best.length > 1 ? best : (landOk ? landPath : bridgePath);
+            return landOk ? landPath : [];
         }
 
         /** Lightweight water march for explicit ocean orders — never runs full-map land A*. */
@@ -14898,8 +14926,8 @@
                 }
                 function movementCost(a, b) {
                     let stepDist = wodHexStepDistance(a, b);
-                    if(isBridgeHex(a) && isBridgeHex(b)) return stepDist * 0.35;
-                    if(isBridgeHex(b) || isBridgeHex(a)) return stepDist * 0.45;
+                    if(isBridgeHex(a) && isBridgeHex(b)) return stepDist * 0.12;
+                    if(isBridgeHex(b) || isBridgeHex(a)) return stepDist * 0.18;
                     let terrain = 0;
                     if(b.type === 'forest') terrain = 0.5;
                     else if(b.type === 'swamp') terrain = 1.2;
