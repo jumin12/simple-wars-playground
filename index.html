@@ -8850,7 +8850,7 @@
             let list = gameData.bridges || [];
             if(!list.length || !gameData.hexList) return;
             let hr = gameData.hexRadius || 20;
-            let reach = hr * 2.85;
+            let reach = hr * 3.35;
             let reach2 = reach * reach;
             for(let bi = 0; bi < list.length; bi++) {
                 let br = list[bi];
@@ -8862,9 +8862,9 @@
                 for(let ki = 0; ki < bridgeKeys.length; ki++) {
                     let bh = gameData.hexes[bridgeKeys[ki]];
                     if(!bh) continue;
-                    for(let dq = -2; dq <= 2; dq++) {
-                        for(let dr = -2; dr <= 2; dr++) {
-                            if(Math.abs(dq) + Math.abs(dr) > 2) continue;
+                    for(let dq = -3; dq <= 3; dq++) {
+                        for(let dr = -3; dr <= 3; dr++) {
+                            if(Math.abs(dq) + Math.abs(dr) > 3) continue;
                             let h = gameData.hexes[`${bh.q + dq},${bh.r + dr}`];
                             if(!h || isWaterHex(h) || h.type === 'mountain' || isBridgeHex(h)) continue;
                             wodLinkBridgeLandHex(getHexKey(h), bridgeKeys[ki]);
@@ -8874,7 +8874,7 @@
                 for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                     let h = gameData.hexList[hi];
                     if(!h || isWaterHex(h) || h.type === 'mountain') continue;
-                    let near = wodDistToBridgeRect(h.x, h.y, br) <= hr * 3.2;
+                    let near = wodDistToBridgeRect(h.x, h.y, br) <= hr * 3.65;
                     if(!near) {
                         for(let ci = 0; ci < caps.length; ci++) {
                             let cap = caps[ci];
@@ -14095,7 +14095,7 @@
             if(!hex) return true;
             if(hex.type === 'mountain') return true;
             if(isBridgeHex(hex)) return false;
-            if(isWaterHex(hex)) return false;
+            if(isWaterHex(hex)) return !!forbidWater;
             if(!wodPathTileWalkable(unit, hex, false)) return true;
             return false;
         }
@@ -14877,10 +14877,20 @@
             return merged.length > 1 ? merged : null;
         }
 
+        function wodBridgePathBeatsLandPath(bridgePath, landPath, blocked) {
+            if(!bridgePath || wodHexPathLength(bridgePath) <= 1) return false;
+            if(!landPath || wodHexPathLength(landPath) <= 1) return true;
+            if(blocked || wodPathCrossesBridge(bridgePath)) return true;
+            if(!wodPathCrossesBridge(landPath))
+                return wodPathWorldLength(bridgePath) < wodPathWorldLength(landPath) * 0.97;
+            return wodPathWorldLength(bridgePath) <= wodPathWorldLength(landPath);
+        }
+
         /** Compose start → shore/deck → bridge deck → shore/deck → goal for each constructed bridge. */
-        function wodFindBestBridgePath(unit, startHex, targetHex) {
+        function wodFindBestBridgePath(unit, startHex, targetHex, blockedOpt) {
             if(!startHex || !targetHex || !gameData.bridges || !gameData.bridges.length) return [];
             wodEnsureBridgePathIndex();
+            let blocked = !!blockedOpt || wodMarchBlockedWithoutBridge(unit, startHex, targetHex);
             let best = [],
                 bestLen = Infinity;
             function consider(merged) {
@@ -14896,7 +14906,7 @@
                 if(!br) continue;
                 let deck = wodGetOrderedBridgeDeck(br);
                 if(!deck.length) continue;
-                if(!wodBridgeSpansMarch(unit, startHex, targetHex, br, deck, null)) continue;
+                if(!blocked && !wodBridgeSpansMarch(unit, startHex, targetHex, br, deck, blocked)) continue;
 
                 consider(wodForceBridgeCrossingPath(unit, startHex, targetHex, br, deck));
 
@@ -15024,20 +15034,18 @@
                     let br = gameData.bridges[bi];
                     if(!br) continue;
                     let deck = wodGetOrderedBridgeDeck(br);
-                    if(!deck.length || !wodBridgeSpansMarch(unit, startHex, targetHex, br, deck, blocked)) continue;
+                    if(!deck.length || (!blocked && !wodBridgeSpansMarch(unit, startHex, targetHex, br, deck, blocked))) continue;
                     let forced = wodForceBridgeCrossingPath(unit, startHex, targetHex, br, deck);
                     if(wodHexPathLength(forced) > 1) return forced;
                 }
             }
 
-            let bridgePath = wodFindBestBridgePath(unit, startHex, targetHex);
-            if(wodHexPathLength(bridgePath) > 1) return bridgePath;
-
             let landPath = findPathAroundTerrain(unit, targetHex, startHex, true, 'land');
             let landOk = wodHexPathLength(landPath) > 1;
+            let bridgePath = wodFindBestBridgePath(unit, startHex, targetHex, blocked);
 
             if(blocked) {
-                if(wodHexPathLength(bridgePath) > 1) return bridgePath;
+                if(wodBridgePathBeatsLandPath(bridgePath, landPath, true)) return bridgePath;
                 for(let bi = 0; bi < (gameData.bridges || []).length; bi++) {
                     let br = gameData.bridges[bi];
                     if(!br) continue;
@@ -15055,12 +15063,13 @@
                     let br = gameData.bridges[bi];
                     if(!br) continue;
                     let deck = wodGetOrderedBridgeDeck(br);
-                    if(!deck.length || !wodBridgeSpansMarch(unit, startHex, targetHex, br, deck, blocked)) continue;
+                    if(!deck.length || (!blocked && !wodBridgeSpansMarch(unit, startHex, targetHex, br, deck, blocked))) continue;
                     let forced = wodForceBridgeCrossingPath(unit, startHex, targetHex, br, deck);
                     if(wodHexPathLength(forced) > 1) return forced;
                 }
             }
             if(landOk && wodPathCrossesBridge(landPath)) return landPath;
+            if(wodBridgePathBeatsLandPath(bridgePath, landPath, false)) return bridgePath;
             if(landOk && !wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath))
                 return landPath;
             if(wodHexPathLength(bridgePath) > 1) return bridgePath;
