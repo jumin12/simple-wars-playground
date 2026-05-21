@@ -8999,6 +8999,54 @@
             }
             return best;
         }
+        /** Bridge deck tiles stay water terrain; resolve them as land march targets, not ocean orders. */
+        function wodBridgeHexAtPoint(unit, x, y) {
+            if(!wodUnitUsesLandBridges(unit)) return null;
+            let coord = pixelToHex(x, y);
+            let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            if(direct && isBridgeHex(direct)) return direct;
+            let best = null,
+                bestD = Infinity;
+            for(let pt of getHexesInRadius(coord.q, coord.r, 3)) {
+                let h = gameData.hexes[`${pt.q},${pt.r}`];
+                if(!h || !isBridgeHex(h)) continue;
+                let dx = x - h.x,
+                    dy = y - h.y;
+                let d = dx * dx + dy * dy;
+                if(d < bestD) {
+                    bestD = d;
+                    best = h;
+                }
+            }
+            if(best) return best;
+            if(gameData.bridges && gameData.bridges.length) {
+                for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                    let br = gameData.bridges[bi];
+                    if(!br || !wodPointInBridgeRect(x, y, br, 1.32)) continue;
+                    let keys = br.hexKeys;
+                    if(!keys || !keys.length) {
+                        wodSyncBridgeWorldCoords(br);
+                        keys = br.hexKeys;
+                    }
+                    if(!keys) continue;
+                    for(let ki = 0; ki < keys.length; ki++) {
+                        let h = gameData.hexes[keys[ki]];
+                        if(!h || !isBridgeHex(h)) continue;
+                        let dx = x - h.x,
+                            dy = y - h.y;
+                        let d = dx * dx + dy * dy;
+                        if(d < bestD) {
+                            bestD = d;
+                            best = h;
+                        }
+                    }
+                }
+            }
+            return best;
+        }
+        function wodPointOnBridgeDeck(unit, x, y) {
+            return !!wodBridgeHexAtPoint(unit, x, y);
+        }
         function wodBridgeLinkedHexes(hex) {
             let br = bridgeAtHex(hex);
             if(!br) return [];
@@ -12887,6 +12935,10 @@
 
         function wodOrderIntoWater(unit, targetHex) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return false;
+            if(unit.orderTarget && unit.orderTarget.x != null && unit.orderTarget.y != null &&
+                wodBridgeHexAtPoint(unit, unit.orderTarget.x, unit.orderTarget.y))
+                return false;
+            if(targetHex && isBridgeHex(targetHex)) return false;
             if(unit._wodOrderIntoWater || (unit.orderTarget && unit.orderTarget.intoWater)) return true;
             return !!(targetHex && isWaterHex(targetHex) && !isBridgeHex(targetHex));
         }
@@ -13989,12 +14041,12 @@
         /** Resolve land-army move orders: honor water clicks; otherwise snap to shore/bridge. */
         function wodResolveLandMarchHex(unit, x, y, startHexOpt) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return null;
-            if(wodPointOnBridgeForUnit(unit, x, y, 1.08)) {
-                let bh = wodNearestBridgeHexForUnit(unit, x, y);
-                if(bh) return { hex: bh, exactX: x, exactY: y, intoWater: false };
-            }
+            let bridgeHex = wodBridgeHexAtPoint(unit, x, y);
+            if(bridgeHex) return { hex: bridgeHex, exactX: x, exactY: y, intoWater: false };
             let coord = pixelToHex(x, y);
             let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            if(direct && isBridgeHex(direct))
+                return { hex: direct, exactX: x, exactY: y, intoWater: false };
             if(direct && isWaterHex(direct) && !isBridgeHex(direct) && direct.type !== 'mountain') {
                 let bestW = null,
                     bestWd = Infinity;
@@ -14127,7 +14179,7 @@
             if(unit && unit.type === 'convoy' && unit.convoySeaRoute) ring = Math.max(ring, 12);
             else if(unit && unit.type === 'convoy') ring = Math.max(ring, 14);
             else if(unit && unit.type === 'ship') ring = Math.max(ring, 10);
-            let onBridge = wodNearestBridgeHexForUnit(unit, x, y);
+            let onBridge = wodBridgeHexAtPoint(unit, x, y);
             if(onBridge) return onBridge;
             let allowWater = wodOrderIntoWater(unit, null);
             let primary = getNearestHexToPoint(x, y);
@@ -14185,6 +14237,7 @@
 
         /** Pixel chord samples can land on the wrong hex between land/water/mountain corners; accept nearby tiles. */
         function wodSamplePosOnWalkableTerrain(unit, px, py) {
+            if(wodBridgeHexAtPoint(unit, px, py)) return true;
             if(wodPointOnBridgeForUnit(unit, px, py, 1.18)) return true;
             let h = getNearestHexToPoint(px, py);
             if(h && wodUnitUsesLandBridges(unit) && isBridgeHex(h)) return true;
@@ -14351,10 +14404,8 @@
                 let land = wodResolveLandMarchHex(unit, x, y);
                 if(land) return land;
             }
-            if(wodPointOnBridgeForUnit(unit, x, y)) {
-                let bh = wodNearestBridgeHexForUnit(unit, x, y);
-                if(bh) return { hex: bh, exactX: x, exactY: y };
-            }
+            let bh = wodBridgeHexAtPoint(unit, x, y);
+            if(bh) return { hex: bh, exactX: x, exactY: y, intoWater: false };
             let targetCoord = pixelToHex(x, y);
             let targetHex = gameData.hexes[`${targetCoord.q},${targetCoord.r}`];
             if(canUseHexForMovement(unit, targetHex)) return {hex: targetHex, exactX: x, exactY: y};
@@ -15349,9 +15400,7 @@
                 if(wh) targetHex = wh;
             }
             if(wodUnitPrefersLandOnlyPath(unit)) {
-                let resolved = (unit.orderTarget && unit.orderTarget.intoWater)
-                    ? { hex: targetHex, exactX: desired.x, exactY: desired.y, intoWater: true }
-                    : wodResolveLandMarchHex(unit, desired.x, desired.y, startHex);
+                let resolved = wodResolveLandMarchHex(unit, desired.x, desired.y, startHex);
                 if(resolved) {
                     targetHex = resolved.hex;
                     desired = { x: resolved.exactX, y: resolved.exactY, ...(desired.isCity ? { isCity: true } : {}) };
@@ -16635,9 +16684,7 @@
                 if(wh) targetHex = wh;
             }
             if(wodUnitPrefersLandOnlyPath(unit)) {
-                let resolved = (unit.orderTarget && unit.orderTarget.intoWater)
-                    ? { hex: targetHex, exactX: finalTarget.x, exactY: finalTarget.y, intoWater: true }
-                    : wodResolveLandMarchHex(unit, finalTarget.x, finalTarget.y, startHex);
+                let resolved = wodResolveLandMarchHex(unit, finalTarget.x, finalTarget.y, startHex);
                 if(!resolved) return false;
                 targetHex = resolved.hex;
                 finalTarget = {
