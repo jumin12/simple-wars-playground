@@ -24751,48 +24751,37 @@
         }
 
         /**
-         * World-space midpoints of faction–faction diplomacy edges (shared by main map renderer and lobby/setup previews).
+         * World-space diplomacy border strokes (shared by main map renderer and lobby/setup previews).
+         * Each hostile hex adjacency becomes one thick edge segment; round caps + overlap remove chain gaps.
          * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
-            let bordersByPair = {};
-
+            let out = [];
+            let seen = new Set();
+            let halfLen = spacing * 0.62;
             for(let hex of hexList) {
                 if(hex.owner === 0) continue;
                 for(let dir of hexDirections) {
                     let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
-                    let owners = [hex.owner, nHex.owner].sort((a, b) => a - b);
-                    let pairKey = owners.join(':');
                     let ek = hexPairBorderKey(hex, nHex);
-                    if(!bordersByPair[pairKey]) bordersByPair[pairKey] = new Map();
-                    if(bordersByPair[pairKey].has(ek)) continue;
-                    let mx = (hex.x + nHex.x) / 2 + offsetX;
-                    let my = (hex.y + nHex.y) / 2 + offsetY;
-                    bordersByPair[pairKey].set(ek, { x: mx, y: my, hex, nHex, dir });
-                }
-            }
-
-            let out = [];
-            for(let pairKey in bordersByPair) {
-                let edgeMap = bordersByPair[pairKey];
-                let midpointByEdge = new Map();
-                let cornerMap = new Map();
-
-                for(let [ek, meta] of edgeMap) {
-                    midpointByEdge.set(ek, { x: meta.x, y: meta.y });
-                    registerBorderCornersForPair(cornerMap, meta.hex, meta.nHex, meta.dir, ek, meta.x, meta.y, spacing);
-                }
-
-                let adj = linkBorderEdgesAroundCorners(cornerMap);
-                bridgeBorderChainGaps(adj, midpointByEdge, spacing);
-                let chains = walkBorderEdgeChains(adj, midpointByEdge);
-                chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
-
-                for(let { keys, closed } of chains) {
-                    let pts = keys.map(k => midpointByEdge.get(k)).filter(Boolean);
-                    if(pts.length < 2) continue;
-                    out.push({ closed, pts });
+                    if(seen.has(ek)) continue;
+                    seen.add(ek);
+                    let mx = (hex.x + nHex.x) * 0.5 + offsetX;
+                    let my = (hex.y + nHex.y) * 0.5 + offsetY;
+                    let dx = nHex.x - hex.x;
+                    let dy = nHex.y - hex.y;
+                    let len = Math.hypot(dx, dy) || 1;
+                    let tx = -dy / len;
+                    let ty = dx / len;
+                    let edgeHalf = Math.max(halfLen, len * 0.44);
+                    out.push({
+                        closed: false,
+                        pts: [
+                            { x: mx - tx * edgeHalf, y: my - ty * edgeHalf },
+                            { x: mx + tx * edgeHalf, y: my + ty * edgeHalf }
+                        ]
+                    });
                 }
             }
             return out;
@@ -24921,15 +24910,24 @@
                     ctx.lineCap = capRestore;
                     return;
                 }
-                let maxDist2 = Math.pow(spacing * 2.05, 2);
+                let maxDist2 = Math.pow(spacing * 4.5, 2);
                 let run = [points[0]];
                 function flushHybridOpen() {
                     if(run.length === 1) {
                         if(!suppressDegenerate) {
                             ctx.beginPath();
-                            ctx.arc(run[0].x, run[0].y, 3.8, 0, Math.PI * 2);
+                            ctx.arc(run[0].x, run[0].y, Math.max(3.8, (ctx.lineWidth || 8) * 0.48), 0, Math.PI * 2);
                             ctx.fill();
                         }
+                        return;
+                    }
+                    if(run.length === 2) {
+                        ctx.beginPath();
+                        ctx.moveTo(run[0].x, run[0].y);
+                        ctx.lineTo(run[1].x, run[1].y);
+                        ctx.lineCap = (opts && opts.openLineCap) ? opts.openLineCap : 'round';
+                        ctx.stroke();
+                        ctx.lineCap = capRestore;
                         return;
                     }
                     let smooth = run.length <= 4 ? run : averagePaintStrokePoints(run, hybridBin);
