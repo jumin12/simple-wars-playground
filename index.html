@@ -7430,6 +7430,8 @@
         let wodSepWUrl = null;
         let wodSepBusy = false;
         let wodSepGen = 0;
+        let wodPfBudgetMs = 4.5;
+        let wodPfSpentMs = 0;
         let wodMapGenWorker = null;
         let wodMapGenJobId = 0;
 
@@ -7667,6 +7669,18 @@
                 });
             }
         }
+        function wodBeginSimPfBudget(entCount) {
+            wodPfSpentMs = 0;
+            let n = entCount | 0;
+            wodPfBudgetMs = n > 200 ? 2.2 : (n > 120 ? 3.0 : (n > 70 ? 3.8 : 4.8));
+            if(wodUsesVisualViewportLayout()) wodPfBudgetMs *= 0.75;
+        }
+        function wodCanSpendPf() {
+            return wodPfSpentMs < wodPfBudgetMs;
+        }
+        function wodPfChargeMs(ms) {
+            wodPfSpentMs += ms;
+        }
         function wodRunUnitSeparation(wodSkipSep, sepPad, cellSize) {
             if(wodSkipSep) return;
             if(gameData._wodSepApply) {
@@ -7675,7 +7689,7 @@
             }
             wodEnsureSepWorker();
             let kicked = wodKickSepWorker(sepPad, cellSize);
-            if(!kicked || gameData.entities.length < 120) wodRunUnitSeparationSync(sepPad);
+            if(!kicked) wodRunUnitSeparationSync(sepPad);
         }
 
         let gameData = {
@@ -16153,7 +16167,6 @@
                 else if(wodUnitPrefersLandOnlyPath(unit)) pathMode = 'army';
                 else pathMode = 'full';
             }
-            if(pathMode === 'water') return findAmphibiousMarchPath(unit, startHex, targetHex);
             if(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length)
                 wodEnsureBridgePathIndex();
             let pathAllowWater = false;
@@ -16172,6 +16185,10 @@
                     if(hit) return hit.slice();
                 }
             }
+            if(!wodCanSpendPf()) return [];
+            let pfT0 = performance.now();
+            try {
+            if(pathMode === 'water') return findAmphibiousMarchPath(unit, startHex, targetHex);
             function wodStorePfPath(path) {
                 if(pfKey && path && path.length > 1) {
                     if(!gameData._wodPfCache) gameData._wodPfCache = new Map();
@@ -16375,6 +16392,9 @@
             if(pathMode === 'army') return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex));
             if(wodUnitPrefersLandOnlyPath(unit)) return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex));
             return wodStorePfPath(runPathAst(false).path);
+            } finally {
+                wodPfChargeMs(performance.now() - pfT0);
+            }
         }
 
         function findGreedyWaterStep(unit, targetHex, opt) {
@@ -17918,6 +17938,17 @@
             gameData._aiStratPowByOwner = by;
         }
 
+        function wodCachedFrontlineHexes(owner) {
+            let serial = gameData.aiStrategySerial || 0;
+            if(!gameData._aiFrontlineHexCache) gameData._aiFrontlineHexCache = {};
+            let ck = owner + '|' + serial;
+            let hit = gameData._aiFrontlineHexCache[ck];
+            if(hit) return hit;
+            hit = getOwnerFrontlineHexes(owner);
+            gameData._aiFrontlineHexCache[ck] = hit;
+            return hit;
+        }
+
         function findAiFrontlineAssignment(unit) {
             let best = null;
             let bestScore = Infinity;
@@ -17927,10 +17958,9 @@
             let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[unit.owner];
             if(myPower === undefined) myPower = getOwnerTroopManpower(unit.owner);
             let aggression = myPower / Math.max(1, playerPower);
-            for(let i = 0, LH = gameData.hexList.length; i < LH; i++) {
-                let hex = gameData.hexList[i];
-                if(hex.owner !== unit.owner || !isClaimableLand(hex) || hex.type === 'mountain') continue;
-                if(!getNeighborHexes(hex).some(nHex => isClaimableLand(nHex) && nHex.owner !== unit.owner)) continue;
+            let frontHexes = wodCachedFrontlineHexes(unit.owner);
+            for(let i = 0, LH = frontHexes.length; i < LH; i++) {
+                let hex = frontHexes[i];
                 if(!canUnitEnterHex(unit, hex)) continue;
                 let attackHex = null;
                 let enemyPressure = 0;
@@ -19541,6 +19571,7 @@
             gameData._aiSpawnBurst = null;
             gameData._aiStratWork = null;
             wodTerrainBakeNextMs = 0;
+            wodTerrainPolWork = null;
             // Apply Setup variables
             let mapSizeEl = document.getElementById('setupMapSize');
             let sizePreset = wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
@@ -22390,7 +22421,7 @@
                 let mobMemo = w.mobMemo;
                 let assignByOwner = w.assignByOwner;
                 // Keep AI pulses incremental on every platform; a full-faction pulse was the source of periodic hitches.
-                let BATCH = wodUsesVisualViewportLayout() ? 22 : 74;
+                let BATCH = wodUsesVisualViewportLayout() ? 22 : 52;
                 let nExamined = 0;
                 while(w.ei < ents.length && nExamined < BATCH) {
                     let unit = ents[w.ei++];
@@ -22453,10 +22484,10 @@
                     if(unit.aiFormationSerial === w.serial) continue;
                     if(unit.target && !unit.holding) continue;
 
-                    let assignment = mobMemo ? assignByOwner[unit.owner] : undefined;
+                    let assignment = assignByOwner[unit.owner + '|' + (unit.type || 'light')];
                     if(assignment === undefined) {
                         assignment = findAiFrontlineAssignment(unit);
-                        if(mobMemo) assignByOwner[unit.owner] = assignment;
+                        assignByOwner[unit.owner + '|' + (unit.type || 'light')] = assignment;
                     }
                     if(!assignment) {
                         let fallback = findNearestOwnedHex(unit.owner, unit.x, unit.y, true);
@@ -22534,7 +22565,7 @@
                 aiGroups,
                 serial: gameData.aiStrategySerial,
                 mobMemo,
-                assignByOwner: mobMemo ? {} : null,
+                assignByOwner: {},
                 ei: 0
             };
             wodDrainAiStratFormationAndUnits();
@@ -22543,6 +22574,7 @@
         function update(dt) {
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
+            wodBeginSimPfBudget(gameData.entities.length);
 
             // Economy (one pass over cities + one over units — avoids triple city scans)
             let incomeTick = getOwnerIncome(1);
@@ -22941,16 +22973,179 @@
         let wodTerrainNeedFullRebuild = true;
         let wodTerrainBaseBuilt = false;
         let wodTerrainLastBakeCostMs = 0;
+        let wodTerrainPolWork = null;
+
+        function wodFinishTerrainPoliticalBake(costMs) {
+            wodTerrainPoliticalDirty = false;
+            wodTerrainNeedFullRebuild = false;
+            terrainNeedsUpdate = false;
+            wodTerrainPolWork = null;
+            if(costMs > 0) wodTerrainLastBakeCostMs = costMs;
+        }
+
+        function wodEnsureTerritoryOverlayCtx(w, h) {
+            if(!territoryOverlayCanvas) territoryOverlayCanvas = document.createElement('canvas');
+            if(territoryOverlayCanvas.width !== w || territoryOverlayCanvas.height !== h) {
+                territoryOverlayCanvas.width = w;
+                territoryOverlayCanvas.height = h;
+            }
+            return territoryOverlayCanvas.getContext('2d');
+        }
+
+        function wodTerritoryOverlayChunk(w, batchSize) {
+            let list = gameData.hexList;
+            let spacing = gameData.hexRadius * 1.35;
+            let discR = spacing * 0.78;
+            let overlayCtx = w.overlayCtx;
+            let ox = w.offsetX, oy = w.offsetY;
+            let end = Math.min(list.length, w.hi + batchSize);
+            for(let i = w.hi; i < end; i++) {
+                let hex = list[i];
+                let owner = hex.owner;
+                if(owner <= 0) continue;
+                overlayCtx.fillStyle = factionColors[owner];
+                overlayCtx.strokeStyle = factionColors[owner];
+                overlayCtx.lineWidth = spacing * 1.32;
+                overlayCtx.lineCap = 'round';
+                overlayCtx.lineJoin = 'round';
+                for(let dir of hexDirections) {
+                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    if(!nHex || nHex.owner !== owner) continue;
+                    overlayCtx.beginPath();
+                    overlayCtx.moveTo(hex.x + ox, hex.y + oy);
+                    overlayCtx.lineTo(nHex.x + ox, nHex.y + oy);
+                    overlayCtx.stroke();
+                }
+                overlayCtx.beginPath();
+                overlayCtx.arc(hex.x + ox, hex.y + oy, discR, 0, Math.PI * 2);
+                overlayCtx.fill();
+            }
+            w.hi = end;
+            return w.hi >= list.length;
+        }
+
+        function wodCompositeTerritoryOverlayToTerrain() {
+            if(!gameData.layers.territory || !territoryOverlayCanvas) return;
+            terrainCtx.save();
+            terrainCtx.globalAlpha = 0.32;
+            terrainCtx.drawImage(territoryOverlayCanvas, 0, 0);
+            terrainCtx.restore();
+        }
+
+        function wodDiplomacyBorderChunk(w, maxChains) {
+            if(!gameData.layers.diplomacy) return true;
+            let spacing = gameData.hexRadius * 1.35;
+            let strokeCol = wodFrontlineColorRgba(1);
+            let fillCol = wodFrontlineColorRgba(1);
+            let style = w.style || gameData.uiSettings.frontlineStyle;
+            let chains = w.chains;
+            if(!chains || !chains.length) return true;
+            let ctx = terrainCtx;
+            let drawn = 0;
+            function strokeOne(lineWidth, dash, offsetPx, chain) {
+                ctx.strokeStyle = strokeCol;
+                ctx.fillStyle = fillCol;
+                ctx.lineWidth = lineWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.setLineDash(dash || []);
+                let drawPts = offsetPx ? wodOffsetBorderPoints(chain.pts, chain.closed, offsetPx) : chain.pts;
+                drawPaintStroke(ctx, drawPts, spacing, {
+                    closedLoop: chain.closed,
+                    suppressDegenerate: true,
+                    openLineCap: 'round',
+                    hybridBorder: true
+                });
+                ctx.setLineDash([]);
+            }
+            while(w.ci < chains.length && drawn < maxChains) {
+                let chain = chains[w.ci];
+                if(style === 'double') {
+                    strokeOne(4, [], spacing * 0.13, chain);
+                    strokeOne(4, [], -spacing * 0.13, chain);
+                } else if(style === 'dotted') {
+                    strokeOne(8, [spacing * 0.42, spacing * 0.34], 0, chain);
+                } else {
+                    strokeOne(8, [], 0, chain);
+                }
+                w.ci++;
+                drawn++;
+            }
+            return w.ci >= chains.length;
+        }
+
+        function wodStepTerrainPoliticalBake(budgetMs) {
+            if(wodTerrainNeedFullRebuild || !wodTerrainBaseBuilt) {
+                updateTerrainCache();
+                return;
+            }
+            if(!gameData.layers.diplomacy && !gameData.layers.territory) {
+                terrainCtx.setTransform(1, 0, 0, 1, 0, 0);
+                terrainCtx.fillStyle = '#154360';
+                terrainCtx.fillRect(0, 0, terrainCanvas.width, terrainCanvas.height);
+                terrainCtx.drawImage(terrainBaseCanvas, 0, 0);
+                wodFinishTerrainPoliticalBake(0.5);
+                return;
+            }
+            let bakeStartMs = performance.now();
+            let w = wodTerrainPolWork;
+            if(!w) {
+                terrainCtx.setTransform(1, 0, 0, 1, 0, 0);
+                terrainCtx.fillStyle = '#154360';
+                terrainCtx.fillRect(0, 0, terrainCanvas.width, terrainCanvas.height);
+                terrainCtx.drawImage(terrainBaseCanvas, 0, 0);
+                w = wodTerrainPolWork = {
+                    offsetX: -terrainBounds.minX,
+                    offsetY: -terrainBounds.minY,
+                    phase: gameData.layers.territory ? 'territory' : 'diplomacy',
+                    hi: 0,
+                    ci: 0,
+                    chains: null,
+                    style: null,
+                    overlayCtx: null
+                };
+                if(w.phase === 'territory') {
+                    w.overlayCtx = wodEnsureTerritoryOverlayCtx(terrainCanvas.width, terrainCanvas.height);
+                    w.overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
+                    w.overlayCtx.clearRect(0, 0, terrainCanvas.width, terrainCanvas.height);
+                }
+            }
+            let batchHex = wodUsesVisualViewportLayout() ? 36 : 52;
+            let chainBatch = wodUsesVisualViewportLayout() ? 2 : 4;
+            while(performance.now() - bakeStartMs < budgetMs) {
+                if(w.phase === 'territory') {
+                    if(wodTerritoryOverlayChunk(w, batchHex)) {
+                        wodCompositeTerritoryOverlayToTerrain();
+                        w.phase = gameData.layers.diplomacy ? 'diplomacy' : 'done';
+                        w.hi = 0;
+                    }
+                } else if(w.phase === 'diplomacy') {
+                    if(!w.chains) {
+                        let spacing = gameData.hexRadius * 1.35;
+                        w.chains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, w.offsetX, w.offsetY, spacing);
+                        w.style = gameData.uiSettings.frontlineStyle;
+                        w.ci = 0;
+                    }
+                    if(wodDiplomacyBorderChunk(w, chainBatch)) w.phase = 'done';
+                } else {
+                    break;
+                }
+            }
+            if(w.phase === 'done')
+                wodFinishTerrainPoliticalBake(performance.now() - bakeStartMs);
+        }
 
         function wodMarkTerrainPoliticalDirty() {
             wodTerrainPoliticalDirty = true;
             terrainNeedsUpdate = true;
+            wodTerrainPolWork = null;
         }
         function wodMarkTerrainFullDirty() {
             wodTerrainNeedFullRebuild = true;
             wodTerrainPoliticalDirty = true;
             wodTerrainBaseBuilt = false;
             terrainNeedsUpdate = true;
+            wodTerrainPolWork = null;
         }
 
         function updateTerrainCache() {
@@ -23969,9 +24164,16 @@
                 else gap = livePlay ? (wodUsesVisualViewportLayout() ? 240 : 160) : (wodUsesVisualViewportLayout() ? 92 : 72);
                 if(livePlay && !forceImmediate && wodTerrainLastBakeCostMs > 14)
                     gap = Math.max(gap, Math.min(420, wodTerrainLastBakeCostMs * 9));
-                if(now >= wodTerrainBakeNextMs) {
-                    wodTerrainBakeNextMs = now + gap;
-                    updateTerrainCache();
+                if(forceImmediate) {
+                    if(now >= wodTerrainBakeNextMs) {
+                        wodTerrainBakeNextMs = now + gap;
+                        updateTerrainCache();
+                    }
+                } else if(now >= wodTerrainBakeNextMs || wodTerrainPolWork) {
+                    let budget = wodUsesVisualViewportLayout() ? 2.4 : 3.4;
+                    wodStepTerrainPoliticalBake(budget);
+                    if(!terrainNeedsUpdate)
+                        wodTerrainBakeNextMs = now + gap;
                 }
             }
             ctx.drawImage(terrainCanvas, terrainBounds.minX, terrainBounds.minY);
