@@ -1339,7 +1339,7 @@
             min-width: 0;
             flex: 1 1 auto;
             min-height: 0;
-            overflow: hidden;
+            overflow: visible;
             display: flex;
             flex-direction: column;
         }
@@ -1519,46 +1519,51 @@
 
         .info-effects-scroll {
             margin-top: 8px;
-            height: 76px;
-            flex: 0 0 76px;
-            overflow-x: hidden;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
+            flex: 0 0 auto;
+            overflow: visible;
             border: 1px solid rgba(212, 175, 55, 0.28);
             border-radius: 8px;
             background: rgba(0, 0, 0, 0.24);
             padding: 6px;
             box-sizing: border-box;
+        }
+
+        .info-effects-scroll > .effect-list {
+            max-height: 64px;
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
             scrollbar-width: thin;
             scrollbar-color: rgba(212, 175, 55, 0.45) rgba(0, 0, 0, 0.2);
         }
 
-        .info-effects-scroll::-webkit-scrollbar {
-            width: 9px;
+        .info-effects-scroll > .effect-list::-webkit-scrollbar {
+            width: 8px;
         }
 
-        .info-effects-scroll::-webkit-scrollbar-track {
+        .info-effects-scroll > .effect-list::-webkit-scrollbar-track {
             background: rgba(0, 0, 0, 0.2);
-            border-radius: 8px;
+            border-radius: 6px;
         }
 
-        .info-effects-scroll::-webkit-scrollbar-thumb {
-            background: rgba(212, 175, 55, 0.4);
-            border-radius: 8px;
+        .info-effects-scroll > .effect-list::-webkit-scrollbar-thumb {
+            background: rgba(212, 175, 55, 0.42);
+            border-radius: 6px;
             border: 2px solid transparent;
             background-clip: padding-box;
         }
 
-        .info-effects-scroll .effect-pill--has-tip:hover,
-        .info-effects-scroll .effect-pill--has-tip:focus-visible {
-            z-index: 2;
+        .info-effects-scroll .effect-pill-tip {
+            display: none;
         }
 
-        .wod-effect-tip-layer {
+        #wodFxTip {
             position: fixed;
-            z-index: 120000;
+            left: 0;
+            top: 0;
+            transform: translateX(-50%);
             min-width: 168px;
-            max-width: min(260px, calc(100vw - 16px));
+            max-width: min(260px, calc(100vw - 24px));
             padding: 8px 10px;
             border-radius: 8px;
             border: 1px solid rgba(212, 175, 55, 0.55);
@@ -1571,10 +1576,21 @@
             white-space: normal;
             box-shadow: 0 8px 22px rgba(0, 0, 0, 0.48);
             pointer-events: none;
+            z-index: 20050;
         }
 
-        .wod-effect-tip-layer[hidden] {
+        #wodFxTip[hidden] {
             display: none !important;
+        }
+
+        #wodFxTip::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            bottom: 100%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-bottom-color: rgba(212, 175, 55, 0.55);
         }
 
         .info-name-row {
@@ -5297,9 +5313,10 @@
                 line-height: 14px;
             }
             #inGameUI .info-card .info-effects-scroll {
-                height: 68px;
-                flex: 0 0 68px;
                 padding: 5px;
+            }
+            #inGameUI .info-card .info-effects-scroll > .effect-list {
+                max-height: 56px;
             }
             #inGameUI .info-card .effect-list {
                 margin-top: 0;
@@ -5438,9 +5455,8 @@
                 flex: 0 0 26px;
                 font-size: 12px;
             }
-            #inGameUI .info-card .info-effects-scroll {
-                height: 62px;
-                flex: 0 0 62px;
+            #inGameUI .info-card .info-effects-scroll > .effect-list {
+                max-height: 50px;
             }
             #inGameUI .info-card .effect-list { margin-top: 0; }
         }
@@ -5586,9 +5602,8 @@
                 flex: 0 0 32px;
                 font-size: 15px;
             }
-            #inGameUI .info-card .info-effects-scroll {
-                height: 72px;
-                flex: 0 0 72px;
+            #inGameUI .info-card .info-effects-scroll > .effect-list {
+                max-height: 60px;
             }
             #inGameUI .info-card .effect-list { margin-top: 0; }
         }
@@ -6130,14 +6145,11 @@
                 font-size: 11px;
             }
             #inGameUI .info-card .info-effects-scroll {
-                height: 56px;
-                flex: 0 0 56px;
                 padding: 4px;
             }
-            #inGameUI .info-card .effect-list {
+            #inGameUI .info-card .info-effects-scroll > .effect-list {
+                max-height: 44px;
                 margin-top: 0;
-                max-height: none;
-                overflow: visible;
             }
         }
         @media (max-height: 520px) and (orientation: landscape) and (max-width: 700px) {
@@ -6565,7 +6577,7 @@
 
                 <div class="esc-help-block">
                     <h4>Healing</h4>
-                    <p class="esc-help-prose">Regeneration ticks only when the hex is <strong>yours</strong>, the tile is <strong>not encircled</strong>, and there are <strong>no hostile combat units threatening the area</strong>. Each soldier restored costs <strong>1 manpower</strong> from your pool; HP and manpower recover together, shown with the small green <strong>+</strong> pulse when a tick lands.</p>
+                    <p class="esc-help-prose">Regeneration ticks only when the hex is <strong>yours</strong>, the tile is <strong>not encircled</strong>, and there are <strong>no hostile combat units threatening the area</strong>. HP, manpower, and morale all inch back together, shown with the small green <strong>+</strong> pulse when a tick lands.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -7689,8 +7701,8 @@
         /** Applies to per-city income & manpower (/s); global economic slowdown multiplier. */
         const WOD_CITY_ECON_TICK_MULT = 2 / 3;
         const WOD_LAND_INCOME_PER_HEX = 0.004;
-        /** Halves all passive cash and manpower growth rates. */
-        const WOD_GLOBAL_ECON_MULT = 0.5;
+        /** Global multiplier on all money and manpower income rates. */
+        const WOD_INCOME_MULT = 0.5;
         /** Match production menu / economy balance. */
         const WOD_PRICE_FACTORY = 2000;
         const WOD_PRICE_HARBOR = 1000;
@@ -8547,15 +8559,6 @@
             else {
                 if(!gameData.aiMoneyByOwner) gameData.aiMoneyByOwner = {};
                 gameData.aiMoneyByOwner[owner] = Math.max(0, wodPlayerTreasury(owner) - amt);
-            }
-        }
-        function wodDeductPlayerMp(owner, amt) {
-            amt = Math.max(0, +amt || 0);
-            if(amt <= 0) return;
-            if(owner === 1) gameData.manpower = Math.max(0, (gameData.manpower || 0) - amt);
-            else {
-                if(!gameData.aiManpowerByOwner) gameData.aiManpowerByOwner = {};
-                gameData.aiManpowerByOwner[owner] = Math.max(0, wodPlayerMpPool(owner) - amt);
             }
         }
         function wodSetMpMatchUiFlag(on) {
@@ -14754,7 +14757,7 @@
                 if(city.owner !== owner) continue;
                 total += getCityIncome(city);
             }
-            return Math.round((total + getOwnerLandIncome(owner)) * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
+            return Math.round((total + getOwnerLandIncome(owner)) * 1000) / 1000;
         }
 
         function getOwnerLandIncome(owner) {
@@ -14768,7 +14771,7 @@
                 gameData._landIncomeCacheDirty = false;
             }
             let tiles = (gameData._landIncomeCache && gameData._landIncomeCache[owner]) || 0;
-            return Math.round(tiles * WOD_LAND_INCOME_PER_HEX * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
+            return Math.round(tiles * WOD_LAND_INCOME_PER_HEX * WOD_INCOME_MULT * 1000) / 1000;
         }
 
         function getOwnerManpowerIncome(owner) {
@@ -14785,14 +14788,14 @@
             if(city.hasFactory) total += 10;
             if(city.hasHarbor) total += 3;
             total += city.incomeBonus || 0;
-            return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
+            return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT * 1000) / 1000;
         }
 
         function getCityManpowerIncome(city) {
             let total = 7;
             if(city.hasFactory) total += 2;
             total += city.manpowerBonus || 0;
-            return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
+            return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT * 1000) / 1000;
         }
 
         function getCityUrbanTerrainHexes(city) {
@@ -17593,8 +17596,29 @@
             return count ? {x: x / count, y: y / count} : null;
         }
 
+        function wodGetOwnerManpowerPool(owner) {
+            if(owner === 1) return gameData.manpower || 0;
+            return (gameData.aiManpowerByOwner && gameData.aiManpowerByOwner[owner]) || 0;
+        }
+
+        function wodSpendOwnerManpowerPool(owner, amount) {
+            if(!amount || amount <= 0) return 0;
+            let pool = wodGetOwnerManpowerPool(owner);
+            let spend = Math.min(amount, pool);
+            if(spend <= 0) return 0;
+            if(owner === 1) gameData.manpower = Math.max(0, pool - spend);
+            else {
+                if(!gameData.aiManpowerByOwner) gameData.aiManpowerByOwner = {};
+                gameData.aiManpowerByOwner[owner] = Math.max(0, pool - spend);
+            }
+            return spend;
+        }
+
         function canHealUnit(unit) {
-            if(unit.type === 'convoy' || unit.hp >= unit.maxHp) return false;
+            if(unit.type === 'convoy') return false;
+            let mpCap = unit.maxManpower || (unit.type === 'ship' ? WOD_MANPOWER_SHIP : WOD_MANPOWER_INFANTRY);
+            if(unit.manpower == null) unit.manpower = Math.round((unit.hp / unit.maxHp) * mpCap);
+            if(unit.hp >= unit.maxHp && unit.manpower >= mpCap) return false;
             let hex = getNearestHexToPoint(unit.x, unit.y);
             if(!hex || hex.owner !== unit.owner) return false;
             if(gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hex))) return false;
@@ -17603,24 +17627,25 @@
 
         function updateUnitHealing(unit, dt) {
             if(canHealUnit(unit)) {
-                if(unit.type === 'convoy') {
-                    unit.hp = Math.min(unit.maxHp, unit.hp + unit.maxHp * 0.035 * dt);
-                } else {
-                    let mpCap = unit.maxManpower || (unit.type === 'ship' ? WOD_MANPOWER_SHIP : WOD_MANPOWER_INFANTRY);
-                    let mpNow = unit.manpower != null ? unit.manpower : Math.round((unit.hp / unit.maxHp) * mpCap);
-                    let mpMissing = Math.max(0, mpCap - mpNow);
-                    if(mpMissing > 0) {
-                        let mpWant = Math.min(mpMissing, mpCap * 0.035 * dt);
-                        let pool = wodPlayerMpPool(unit.owner);
-                        let mpGain = Math.min(mpWant, pool);
-                        if(mpGain > 0) {
-                            wodDeductPlayerMp(unit.owner, mpGain);
-                            unit.manpower = mpNow + mpGain;
-                            unit.hp = Math.min(unit.maxHp, unit.maxHp * (unit.manpower / mpCap));
+                let mpCap = unit.maxManpower || (unit.type === 'ship' ? WOD_MANPOWER_SHIP : WOD_MANPOWER_INFANTRY);
+                if(unit.manpower == null) unit.manpower = Math.round((unit.hp / unit.maxHp) * mpCap);
+                let hpMissing = unit.maxHp - unit.hp;
+                let mpMissing = mpCap - unit.manpower;
+                if(hpMissing > 0.001 || mpMissing > 0) {
+                    let healFrac = Math.min(0.035 * dt, 1);
+                    let soldiersWant = Math.min(mpMissing, healFrac * mpCap);
+                    let soldiersAdded = wodSpendOwnerManpowerPool(unit.owner, soldiersWant);
+                    if(soldiersAdded > 0) {
+                        let fracAdded = soldiersAdded / mpCap;
+                        unit.manpower = Math.min(mpCap, unit.manpower + soldiersAdded);
+                        unit.hp = Math.min(unit.maxHp, unit.hp + fracAdded * unit.maxHp);
+                        if(unit.type === 'heavy') {
+                            let tankCap = unit.maxTanks || WOD_ARMOR_DIV_TANKS;
+                            unit.tanks = Math.min(tankCap, Math.round((unit.hp / unit.maxHp) * tankCap));
                         }
-                    } else if(unit.hp < unit.maxHp) {
-                        unit.hp = Math.min(unit.maxHp, unit.maxHp * (mpNow / mpCap));
                     }
+                }
+                if(unit.type !== 'convoy') {
                     unit.morale = Math.min(unit.maxMorale || WOD_MORALE_MAX, (unit.morale != null ? unit.morale : WOD_MORALE_MAX) + 11 * dt);
                     if(unit.moraleBroken && (unit.morale || 0) >= 44) {
                         unit.moraleBroken = false;
@@ -19124,9 +19149,12 @@
             let fortZoneSlow = wodFortEnemyMovementSlowdownMultiplier(unit);
             let stepSpeed = unit.speed * getUnitSpeedMultiplier(unit) * WOD_MOVE_SPEED_FACTOR * combatSlow * fortZoneSlow;
             if(dist <= stepSpeed * dt) {
+                let snapPrevX = unit.x;
+                let snapPrevY = unit.y;
                 unit.x = unit.target.x;
                 unit.y = unit.target.y;
                 ensureUnitPixelOnWalkableHex(unit, 10);
+                wodClaimTerritoryAlongMove(unit, snapPrevX, snapPrevY, unit.x, unit.y);
                 if(unit.path && unit.path.length > 0) {
                     unit.target = unit.path.shift();
                     unit.target.pathPrepared = true;
@@ -19226,6 +19254,7 @@
             unit.x = nx;
             unit.y = ny;
             ensureUnitPixelOnWalkableHex(unit, 10);
+            wodClaimTerritoryAlongMove(unit, prevX, prevY, unit.x, unit.y);
             unit.blockedTimer = 0;
             let movedSq = (unit.x - prevX) * (unit.x - prevX) + (unit.y - prevY) * (unit.y - prevY);
             if(movedSq < 0.04 && dist > Math.max(10, unit.radius || 10)) {
@@ -19287,16 +19316,32 @@
             gameData._wodClaimBatch = null;
         }
 
-        function claimTerritoryAroundUnit(unit) {
+        function wodTerritoryClaimAttach(unit, hex, standingHex) {
+            if(hasOwnerNeighbor(hex, unit.owner)) return true;
+            if(standingHex && standingHex.owner === unit.owner) return true;
+            let batch = gameData._wodClaimBatch;
+            if(batch) {
+                for(let nb of getNeighborHexes(hex)) {
+                    let rec = batch.get(getHexKey(nb));
+                    if(rec && rec.owner === unit.owner && !rec.contested) return true;
+                }
+            }
+            let standingKey = standingHex ? getHexKey(standingHex) : '';
+            if(standingKey && gameData.encircledHexes && gameData.encircledHexes.has(standingKey) &&
+                gameData.encircledHexes.has(getHexKey(hex))) return true;
+            return false;
+        }
+
+        function claimTerritoryAroundUnit(unit, atX, atY) {
             if(unit.type === 'convoy') return;
-            let standingHex = getNearestHexToPoint(unit.x, unit.y);
+            let px = atX != null ? atX : unit.x;
+            let py = atY != null ? atY : unit.y;
+            let standingHex = getNearestHexToPoint(px, py);
             if(!standingHex) return;
             let uHex = {q: standingHex.q, r: standingHex.r};
             let claimRadius = unit.type === 'heavy' ? 2 : 1;
             let claimH = getHexesInRadius(uHex.q, uHex.r, claimRadius);
             let claims = [];
-            let standingKey = getHexKey(standingHex);
-            let onEncircledTile = gameData.encircledHexes && gameData.encircledHexes.has(standingKey);
 
             if(standingHex.owner !== unit.owner && canUnitEnterHex(unit, standingHex)) {
                 claims.push({ hex: standingHex, standing: true });
@@ -19307,16 +19352,29 @@
                 if(!h || h.owner === unit.owner || !canUnitEnterHex(unit, h)) continue;
                 if(h === standingHex) continue;
                 if(h.owner > 0 && h.owner !== unit.owner) continue;
-                let attach = hasOwnerNeighbor(h, unit.owner) || standingHex.owner === unit.owner;
-                if(!attach && onEncircledTile && gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(h)))
-                    attach = true;
-                if(attach) claims.push({ hex: h, standing: false });
+                if(wodTerritoryClaimAttach(unit, h, standingHex)) claims.push({ hex: h, standing: false });
             }
 
             for(let c of claims) {
                 let h = c.hex;
                 if(wodHexOccupiedByEnemyCombat(h, unit.owner)) continue;
                 wodQueueTerritoryClaim(h, unit.owner, c.standing ? 2 : 1);
+            }
+        }
+
+        function wodClaimTerritoryAlongMove(unit, x0, y0, x1, y1) {
+            if(unit.type === 'convoy') return;
+            let spacing = (gameData.hexRadius || 20) * 1.35;
+            let dist = Math.hypot(x1 - x0, y1 - y0);
+            if(dist < 0.5) {
+                claimTerritoryAroundUnit(unit, x1, y1);
+                return;
+            }
+            let steps = Math.max(1, Math.ceil(dist / Math.max(8, spacing * 0.34)));
+            for(let i = 0; i <= steps; i++) {
+                let t = i / steps;
+                claimTerritoryAroundUnit(unit, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
+                if(i > 0 && i < steps && (i & 1) === 0) wodApplyTerritoryClaimBatch();
             }
         }
 
@@ -23904,7 +23962,6 @@
         let terrainBaseCanvas = document.createElement('canvas');
         let terrainBaseCtx = terrainBaseCanvas.getContext('2d', {alpha: false});
         let territoryOverlayCanvas = null;
-        let diplomacyOverlayCanvas = null;
         let terrainBounds = {minX: 0, maxX: 0, minY: 0, maxY: 0};
         let terrainNeedsUpdate = true;
         let wodTerrainBakeNextMs = 0;
@@ -23913,30 +23970,13 @@
         let wodTerrainBaseBuilt = false;
         let wodTerrainLastBakeCostMs = 0;
         let wodTerrainPolWork = null;
-        let wodTerrainPolPendingRedo = false;
 
         function wodFinishTerrainPoliticalBake(costMs) {
-            if(wodTerrainPolPendingRedo) {
-                wodTerrainPolPendingRedo = false;
-                wodTerrainPolWork = null;
-                terrainNeedsUpdate = true;
-                if(costMs > 0) wodTerrainLastBakeCostMs = costMs;
-                return;
-            }
             wodTerrainPoliticalDirty = false;
             wodTerrainNeedFullRebuild = false;
             terrainNeedsUpdate = false;
             wodTerrainPolWork = null;
             if(costMs > 0) wodTerrainLastBakeCostMs = costMs;
-        }
-
-        function wodEnsureDiplomacyOverlayCtx(w, h) {
-            if(!diplomacyOverlayCanvas) diplomacyOverlayCanvas = document.createElement('canvas');
-            if(diplomacyOverlayCanvas.width !== w || diplomacyOverlayCanvas.height !== h) {
-                diplomacyOverlayCanvas.width = w;
-                diplomacyOverlayCanvas.height = h;
-            }
-            return diplomacyOverlayCanvas.getContext('2d');
         }
 
         function wodEnsureTerritoryOverlayCtx(w, h) {
@@ -24076,8 +24116,13 @@
                         w.hi = 0;
                     }
                 } else if(w.phase === 'diplomacy') {
-                    wodCompositeDiplomacyOverlay(w);
-                    w.phase = 'done';
+                    if(!w.chains) {
+                        let spacing = gameData.hexRadius * 1.35;
+                        w.chains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, w.offsetX, w.offsetY, spacing);
+                        w.style = gameData.uiSettings.frontlineStyle;
+                        w.ci = 0;
+                    }
+                    if(wodDiplomacyBorderChunk(w, chainBatch)) w.phase = 'done';
                 } else {
                     break;
                 }
@@ -24089,17 +24134,13 @@
         function wodMarkTerrainPoliticalDirty() {
             wodTerrainPoliticalDirty = true;
             terrainNeedsUpdate = true;
-            if(wodTerrainPolWork) {
-                wodTerrainPolPendingRedo = true;
-                return;
-            }
+            wodTerrainPolWork = null;
         }
         function wodMarkTerrainFullDirty() {
             wodTerrainNeedFullRebuild = true;
             wodTerrainPoliticalDirty = true;
             wodTerrainBaseBuilt = false;
             terrainNeedsUpdate = true;
-            wodTerrainPolPendingRedo = false;
             wodTerrainPolWork = null;
         }
 
@@ -24436,18 +24477,6 @@
             } else if(dq === 0 && dr === -1) {
                 add(2 * q - 1, 2 * r - 1);
                 add(2 * q + 1, 2 * r - 1);
-            } else if(dq === 1 && dr === 1) {
-                add(2 * q + 1, 2 * r + 1);
-                add(2 * q, 2 * r + 2);
-            } else if(dq === -1 && dr === -1) {
-                add(2 * q - 1, 2 * r - 1);
-                add(2 * q, 2 * r - 2);
-            } else if(dq === 1 && dr === -1) {
-                add(2 * q + 1, 2 * r - 1);
-                add(2 * q + 2, 2 * r);
-            } else if(dq === -1 && dr === 1) {
-                add(2 * q - 1, 2 * r + 1);
-                add(2 * q - 2, 2 * r);
             }
         }
 
@@ -24523,10 +24552,10 @@
                     }
                 }
             }
-            bridgePass(0.44, 1.35, 4, 2);
-            bridgePass(0.32, 1.58, 6, 2);
-            bridgePass(0.26, 1.72, 4, 2);
-            let stitch2 = Math.pow(spacing * 1.58, 2);
+            bridgePass(0.44, 1.19, 4, 2);
+            bridgePass(0.32, 1.42, 6, 2);
+            bridgePass(0.26, 1.55, 4, 2);
+            let stitch2 = Math.pow(spacing * 1.42, 2);
             for(let ek of keys) {
                 if(deg(ek) !== 0) continue;
                 let p = midpointByEdge.get(ek);
@@ -24768,112 +24797,51 @@
         }
 
         /**
-         * Square-grid diplomacy edges: full cardinal edge spans plus corner caps where borders meet.
+         * World-space midpoints of faction–faction diplomacy edges (shared by main map renderer and lobby/setup previews).
          * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
-            let out = [];
-            let seen = new Set();
-            let half = spacing * 0.52;
+            let bordersByPair = {};
+
             for(let hex of hexList) {
                 if(hex.owner === 0) continue;
                 for(let dir of cardinalHexDirections) {
                     let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
+                    let owners = [hex.owner, nHex.owner].sort((a, b) => a - b);
+                    let pairKey = owners.join(':');
                     let ek = hexPairBorderKey(hex, nHex);
-                    if(seen.has(ek)) continue;
-                    seen.add(ek);
-                    let mx = (hex.x + nHex.x) * 0.5 + offsetX;
-                    let my = (hex.y + nHex.y) * 0.5 + offsetY;
-                    let pts = dir.q !== 0
-                        ? [{ x: mx, y: my - half }, { x: mx, y: my + half }]
-                        : [{ x: mx - half, y: my }, { x: mx + half, y: my }];
-                    out.push({ closed: false, pts });
+                    if(!bordersByPair[pairKey]) bordersByPair[pairKey] = new Map();
+                    if(bordersByPair[pairKey].has(ek)) continue;
+                    let mx = (hex.x + nHex.x) / 2 + offsetX;
+                    let my = (hex.y + nHex.y) / 2 + offsetY;
+                    bordersByPair[pairKey].set(ek, { x: mx, y: my, hex, nHex, dir });
+                }
+            }
+
+            let out = [];
+            for(let pairKey in bordersByPair) {
+                let edgeMap = bordersByPair[pairKey];
+                let midpointByEdge = new Map();
+                let cornerMap = new Map();
+
+                for(let [ek, meta] of edgeMap) {
+                    midpointByEdge.set(ek, { x: meta.x, y: meta.y });
+                    registerBorderCornersForPair(cornerMap, meta.hex, meta.nHex, meta.dir, ek, meta.x, meta.y, spacing);
+                }
+
+                let adj = linkBorderEdgesAroundCorners(cornerMap);
+                bridgeBorderChainGaps(adj, midpointByEdge, spacing);
+                let chains = walkBorderEdgeChains(adj, midpointByEdge);
+                chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
+
+                for(let { keys, closed } of chains) {
+                    let pts = keys.map(k => midpointByEdge.get(k)).filter(Boolean);
+                    if(pts.length < 2) continue;
+                    out.push({ closed, pts });
                 }
             }
             return out;
-        }
-
-        function wodCollectDiplomacyCornerCaps(hexList, hexLookup, offsetX, offsetY, spacing) {
-            let caps = [];
-            let seen = new Set();
-            let half = spacing * 0.52;
-            function borderAt(hex, dq, dr) {
-                let nHex = hexLookup[`${hex.q + dq},${hex.r + dr}`];
-                return !nHex || nHex.owner === 0 || nHex.owner !== hex.owner;
-            }
-            for(let hex of hexList) {
-                if(hex.owner === 0) continue;
-                let x = hex.x + offsetX;
-                let y = hex.y + offsetY;
-                let corners = [
-                    { x: x - half, y: y - half, d1: [-1, 0], d2: [0, -1] },
-                    { x: x + half, y: y - half, d1: [1, 0], d2: [0, -1] },
-                    { x: x - half, y: y + half, d1: [-1, 0], d2: [0, 1] },
-                    { x: x + half, y: y + half, d1: [1, 0], d2: [0, 1] }
-                ];
-                for(let c of corners) {
-                    if(!borderAt(hex, c.d1[0], c.d1[1]) && !borderAt(hex, c.d2[0], c.d2[1])) continue;
-                    let k = `${Math.round(c.x * 4)},${Math.round(c.y * 4)}`;
-                    if(seen.has(k)) continue;
-                    seen.add(k);
-                    caps.push({ x: c.x, y: c.y });
-                }
-            }
-            return caps;
-        }
-
-        function wodDrawDiplomacyBordersToCtx(ctx, offsetX, offsetY) {
-            if(!gameData.layers.diplomacy) return;
-            let spacing = gameData.hexRadius * 1.35;
-            let chains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
-            let caps = wodCollectDiplomacyCornerCaps(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
-            wodEnsureUiShopDefaults();
-            let style = gameData.uiSettings.frontlineStyle;
-            let strokeCol = wodFrontlineColorRgba(1);
-            let fillCol = wodFrontlineColorRgba(1);
-
-            function strokeBatch(lineWidth, dash, offsetPx) {
-                ctx.strokeStyle = strokeCol;
-                ctx.fillStyle = fillCol;
-                ctx.lineWidth = lineWidth;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.setLineDash(dash || []);
-                ctx.beginPath();
-                for(let { pts } of chains) {
-                    let drawPts = offsetPx ? wodOffsetBorderPoints(pts, false, offsetPx) : pts;
-                    if(!drawPts || drawPts.length < 2) continue;
-                    ctx.moveTo(drawPts[0].x, drawPts[0].y);
-                    ctx.lineTo(drawPts[1].x, drawPts[1].y);
-                }
-                ctx.stroke();
-                let capR = Math.max(4.2, lineWidth * 0.52);
-                for(let c of caps) {
-                    ctx.beginPath();
-                    ctx.arc(c.x, c.y, capR, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-                ctx.setLineDash([]);
-            }
-
-            if(style === 'double') {
-                strokeBatch(4, [], spacing * 0.13);
-                strokeBatch(4, [], -spacing * 0.13);
-            } else if(style === 'dotted') {
-                strokeBatch(8, [spacing * 0.42, spacing * 0.34], 0);
-            } else {
-                strokeBatch(8, [], 0);
-            }
-        }
-
-        function wodCompositeDiplomacyOverlay(w) {
-            if(!gameData.layers.diplomacy) return;
-            let dctx = wodEnsureDiplomacyOverlayCtx(terrainCanvas.width, terrainCanvas.height);
-            dctx.setTransform(1, 0, 0, 1, 0, 0);
-            dctx.clearRect(0, 0, terrainCanvas.width, terrainCanvas.height);
-            wodDrawDiplomacyBordersToCtx(dctx, w.offsetX, w.offsetY);
-            terrainCtx.drawImage(diplomacyOverlayCanvas, 0, 0);
         }
 
         function wodOffsetBorderPoints(pts, closed, offsetPx) {
@@ -24895,7 +24863,42 @@
         }
 
         function drawPaintedTerritoryBorders(ctx, offsetX, offsetY) {
-            wodDrawDiplomacyBordersToCtx(ctx, offsetX, offsetY);
+            if(!gameData.layers.diplomacy) return;
+            let spacing = gameData.hexRadius * 1.35;
+            let paintChains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
+
+            wodEnsureUiShopDefaults();
+            let style = gameData.uiSettings.frontlineStyle;
+            let strokeCol = wodFrontlineColorRgba(1);
+            let fillCol = wodFrontlineColorRgba(1);
+
+            function strokeChains(lineWidth, dash, offsetPx) {
+                ctx.strokeStyle = strokeCol;
+                ctx.fillStyle = fillCol;
+                ctx.lineWidth = lineWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.setLineDash(dash || []);
+                for(let { closed, pts } of paintChains) {
+                    let drawPts = offsetPx ? wodOffsetBorderPoints(pts, closed, offsetPx) : pts;
+                    drawPaintStroke(ctx, drawPts, spacing, {
+                        closedLoop: closed,
+                        suppressDegenerate: true,
+                        openLineCap: 'round',
+                        hybridBorder: true
+                    });
+                }
+                ctx.setLineDash([]);
+            }
+
+            if(style === 'double') {
+                strokeChains(4, [], spacing * 0.13);
+                strokeChains(4, [], -spacing * 0.13);
+            } else if(style === 'dotted') {
+                strokeChains(8, [spacing * 0.42, spacing * 0.34], 0);
+            } else {
+                strokeChains(8, [], 0);
+            }
         }
 
         function splitBorderComponents(points, maxDist) {
@@ -24964,24 +24967,15 @@
                     ctx.lineCap = capRestore;
                     return;
                 }
-                let maxDist2 = Math.pow(spacing * 4.5, 2);
+                let maxDist2 = Math.pow(spacing * 1.5, 2);
                 let run = [points[0]];
                 function flushHybridOpen() {
                     if(run.length === 1) {
                         if(!suppressDegenerate) {
                             ctx.beginPath();
-                            ctx.arc(run[0].x, run[0].y, Math.max(3.8, (ctx.lineWidth || 8) * 0.48), 0, Math.PI * 2);
+                            ctx.arc(run[0].x, run[0].y, 3.8, 0, Math.PI * 2);
                             ctx.fill();
                         }
-                        return;
-                    }
-                    if(run.length === 2) {
-                        ctx.beginPath();
-                        ctx.moveTo(run[0].x, run[0].y);
-                        ctx.lineTo(run[1].x, run[1].y);
-                        ctx.lineCap = (opts && opts.openLineCap) ? opts.openLineCap : 'round';
-                        ctx.stroke();
-                        ctx.lineCap = capRestore;
                         return;
                     }
                     let smooth = run.length <= 4 ? run : averagePaintStrokePoints(run, hybridBin);
@@ -28051,11 +28045,13 @@
 
         function getInfoCardDom() {
             if(_infoCardDomCache) return _infoCardDomCache;
+            let effects = document.getElementById('infoEffects');
+            wodBindEffectTooltipDelegation(effects);
             return _infoCardDomCache = {
                 card: document.getElementById('infoCard'),
                 emblem: document.getElementById('infoEmblem'),
                 veteranBadge: document.getElementById('infoVeteranBadge'),
-                effects: document.getElementById('infoEffects'),
+                effects: effects,
                 morale: document.getElementById('infoMorale'),
                 name: document.getElementById('infoName'),
                 type: document.getElementById('infoType'),
@@ -28119,61 +28115,48 @@
             els.recordRank.textContent = wodIsUnitVeteran(sel) ? 'Veteran (+10%)' : 'Regular';
         }
 
+        function wodEnsureFxTipEl() {
+            let el = document.getElementById('wodFxTip');
+            if(el) return el;
+            el = document.createElement('div');
+            el.id = 'wodFxTip';
+            el.setAttribute('role', 'tooltip');
+            el.hidden = true;
+            document.body.appendChild(el);
+            return el;
+        }
+
+        function wodBindEffectTooltipDelegation(root) {
+            if(!root || root._wodFxTipBound) return;
+            root._wodFxTipBound = true;
+            root.addEventListener('mouseover', (e) => {
+                let pill = e.target.closest('.effect-pill--has-tip');
+                if(!pill || !root.contains(pill)) return;
+                let tip = pill.querySelector('.effect-pill-tip');
+                if(!tip) return;
+                let floater = wodEnsureFxTipEl();
+                floater.textContent = tip.textContent;
+                floater.hidden = false;
+                let r = pill.getBoundingClientRect();
+                let left = Math.max(12, Math.min(window.innerWidth - 12, r.left + r.width * 0.5));
+                let top = Math.min(window.innerHeight - 12, r.bottom + 8);
+                floater.style.left = Math.round(left) + 'px';
+                floater.style.top = Math.round(top) + 'px';
+            });
+            root.addEventListener('mouseout', (e) => {
+                let pill = e.target.closest('.effect-pill--has-tip');
+                if(!pill || !root.contains(pill)) return;
+                let rel = e.relatedTarget;
+                if(rel && pill.contains(rel)) return;
+                wodEnsureFxTipEl().hidden = true;
+            });
+            root.addEventListener('scroll', () => {
+                wodEnsureFxTipEl().hidden = true;
+            }, { passive: true });
+        }
+
         function wodEscapeEffectInner(s) {
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        }
-
-        function wodEnsureEffectTipLayer() {
-            let layer = document.getElementById('wodEffectTipLayer');
-            if(!layer) {
-                layer = document.createElement('div');
-                layer.id = 'wodEffectTipLayer';
-                layer.className = 'wod-effect-tip-layer';
-                layer.hidden = true;
-                document.body.appendChild(layer);
-            }
-            return layer;
-        }
-
-        function wodPositionEffectTipLayer(pill, layer) {
-            let text = pill.getAttribute('data-effect-tip') || '';
-            if(!text) {
-                layer.hidden = true;
-                return;
-            }
-            layer.textContent = text;
-            layer.hidden = false;
-            let r = pill.getBoundingClientRect();
-            let margin = 8;
-            let left = r.left + r.width / 2 - layer.offsetWidth / 2;
-            left = Math.max(margin, Math.min(left, window.innerWidth - layer.offsetWidth - margin));
-            let top = r.top - layer.offsetHeight - margin;
-            if(top < margin) top = r.bottom + margin;
-            layer.style.left = left + 'px';
-            layer.style.top = top + 'px';
-        }
-
-        function wodWireEffectPillTips(scope) {
-            let layer = wodEnsureEffectTipLayer();
-            (scope || document).querySelectorAll('.effect-pill--has-tip').forEach(pill => {
-                if(pill._wodTipBound) return;
-                pill._wodTipBound = true;
-                let inline = pill.querySelector('.effect-pill-tip');
-                if(inline && !pill.getAttribute('data-effect-tip'))
-                    pill.setAttribute('data-effect-tip', inline.textContent || '');
-                if(inline) inline.setAttribute('aria-hidden', 'true');
-                function show() { wodPositionEffectTipLayer(pill, layer); }
-                function hide() {
-                    if(layer._wodTipPill === pill) {
-                        layer.hidden = true;
-                        layer._wodTipPill = null;
-                    }
-                }
-                pill.addEventListener('mouseenter', () => { layer._wodTipPill = pill; show(); });
-                pill.addEventListener('focus', () => { layer._wodTipPill = pill; show(); });
-                pill.addEventListener('mouseleave', hide);
-                pill.addEventListener('blur', hide);
-            });
         }
 
         function wodFmtInfoEffectMarkup(effect) {
@@ -28194,9 +28177,9 @@
                 inner = wodEscapeEffectInner(effect.label);
             }
             let tipHtml = tipText
-                ? '<span class="effect-pill-tip" role="tooltip" aria-hidden="true">' + wodEscapeEffectInner(tipText) + '</span>'
+                ? '<span class="effect-pill-tip" role="tooltip">' + wodEscapeEffectInner(tipText) + '</span>'
                 : '';
-            return '<span class="' + cls + '" tabindex="0"' + (tipText ? ' data-effect-tip="' + wodEscapeEffectInner(tipText).replace(/"/g, '&quot;') + '"' : '') + '>' + inner + tipHtml + '</span>';
+            return '<span class="' + cls + '" tabindex="0">' + inner + tipHtml + '</span>';
         }
 
         function syncInfoCardPanel() {
@@ -28280,7 +28263,6 @@
                     els.effects.innerHTML = effects.length
                         ? effects.map(wodFmtInfoEffectMarkup).join('')
                         : '<span class="effect-pill effect-pill--block">No active effects listed for this hex.</span>';
-                    wodWireEffectPillTips(els.effects);
                     wodSyncInfoCardServiceRecord(sel);
                 }
                 if(els.rename) {
