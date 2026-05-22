@@ -1596,7 +1596,20 @@
         #wodFxTip.wod-hud-tip-panel {
             min-width: 210px;
             max-width: min(320px, calc(100vw - 24px));
+            max-height: min(420px, calc(100vh - 24px));
+            overflow-y: auto;
             padding: 10px 12px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(212, 175, 55, 0.45) rgba(0, 0, 0, 0.2);
+        }
+
+        #wodFxTip.wod-hud-tip-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #wodFxTip.wod-hud-tip-panel::-webkit-scrollbar-thumb {
+            background: rgba(212, 175, 55, 0.42);
+            border-radius: 6px;
         }
 
         .wod-hud-tip-title {
@@ -14290,6 +14303,69 @@
             return false;
         }
 
+        /** True if any defender combat unit stands on this town's urban footprint. */
+        function wodCityUrbanHasDefenderCombat(city, defenderOwner) {
+            if(!city || defenderOwner == null) return false;
+            let tiles = getCityUrbanTerrainHexes(city);
+            if(!tiles.length) {
+                let ch = gameData.hexes[`${city.q},${city.r}`];
+                if(ch) tiles = [ch];
+            }
+            let tileKeys = new Set(tiles.map(uh => getHexKey(uh)));
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.type === 'convoy' || u.owner !== defenderOwner) continue;
+                let uh = getNearestHexToPoint(u.x, u.y);
+                if(uh && tileKeys.has(getHexKey(uh))) return true;
+            }
+            return false;
+        }
+
+        function wodExecuteCityCapture(city, newOwner) {
+            if(!city || newOwner <= 0 || city.owner === newOwner) return;
+            let prevCityOwner = city.owner;
+            city.owner = newOwner;
+            city.hasFactory = false;
+            city.hasHarbor = false;
+            let cityHex = gameData.hexes[`${city.q},${city.r}`];
+            if(cityHex) setHexOwner(cityHex, newOwner);
+            handleWodTownCaptureAndElimination(prevCityOwner, newOwner);
+            for(let uh of getCityUrbanTerrainHexes(city)) {
+                let hx = gameData.hexes[getHexKey(uh)];
+                if(hx && !isWaterHex(hx)) setHexOwner(hx, newOwner);
+            }
+            let area = getHexesInRadius(city.q, city.r, 2);
+            for(let ah of area) {
+                let hex = gameData.hexes[`${ah.q},${ah.r}`];
+                if(isClaimableLand(hex) && (hex.owner === newOwner || hasOwnerNeighbor(hex, newOwner)))
+                    setHexOwner(hex, newOwner);
+            }
+            wodMarkTerrainPoliticalDirty();
+        }
+
+        function wodEvaluateAllCityCaptures() {
+            for(let city of gameData.cities) {
+                if(!city || city.owner <= 0) continue;
+                let urban = getCityUrbanTerrainHexes(city);
+                if(urban.length === 0) {
+                    let ch = gameData.hexes[`${city.q},${city.r}`];
+                    if(!ch || ch.owner <= 0 || ch.owner === city.owner) continue;
+                    if(wodCityUrbanHasDefenderCombat(city, city.owner)) continue;
+                    wodExecuteCityCapture(city, ch.owner);
+                    continue;
+                }
+                let capturer = null;
+                for(let uh of urban) {
+                    let hx = gameData.hexes[getHexKey(uh)];
+                    if(!hx || hx.owner <= 0) { capturer = null; break; }
+                    if(capturer == null) capturer = hx.owner;
+                    else if(capturer !== hx.owner) { capturer = null; break; }
+                }
+                if(capturer == null || capturer <= 0 || capturer === city.owner) continue;
+                if(wodCityUrbanHasDefenderCombat(city, city.owner)) continue;
+                wodExecuteCityCapture(city, capturer);
+            }
+        }
+
         /** Capture flips only when every urban tile for this town is owned by the attacker. */
         function attackerControlsAllCityUrbanTerrain(city, attackerOwner) {
             if(!city || attackerOwner == null) return false;
@@ -14856,6 +14932,57 @@
             return total;
         }
 
+        function wodBuildTradeRouteLines(owner) {
+            let lines = [];
+            let cityByKey = {};
+            for(let c of gameData.cities) {
+                if(c.owner === owner) cityByKey[convoyCityKey(c)] = c;
+            }
+            for(let e of gameData.entities) {
+                if(e.type !== 'convoy' || e.hp <= 0 || e.owner !== owner) continue;
+                let fromCity = cityByKey[e.convoyFromKey];
+                let fromName = (fromCity && fromCity.name) ? fromCity.name : 'Town';
+                let destName = 'destination';
+                if(e.orderTarget && e.orderTarget.isCity) {
+                    let dest = findCityNearPointForOwner(e.orderTarget.x, e.orderTarget.y, owner);
+                    if(dest) destName = dest.name || 'Town';
+                }
+                let val = e.tradeValue || 150;
+                let kind = e.convoySeaRoute ? 'Sea trade' : 'Land trade';
+                lines.push({
+                    label: kind + ': ' + fromName + ' \u2192 ' + destName,
+                    value: '$' + formatFullCount(val),
+                    detail: 'One-time payout when this convoy docks. New convoys spawn about every 22s between linked cities.'
+                });
+            }
+            let owned = gameData.cities.filter(c => c.owner === owner);
+            if(owned.length >= 2 && lines.length === 0) {
+                lines.push({
+                    label: 'Trade network',
+                    value: owned.length + ' cities',
+                    detail: 'Land convoys auto-spawn between your cities (~every 22s). Sea convoys need harbors.'
+                });
+            }
+            return lines;
+        }
+
+        function wodPositionFxTip(anchorRect, floater) {
+            let pad = 10;
+            floater.hidden = false;
+            floater.style.visibility = 'hidden';
+            floater.style.left = Math.round(anchorRect.left + anchorRect.width * 0.5) + 'px';
+            floater.style.top = Math.round(anchorRect.bottom + pad) + 'px';
+            let fr = floater.getBoundingClientRect();
+            let left = anchorRect.left + anchorRect.width * 0.5;
+            let top = anchorRect.bottom + pad;
+            if(top + fr.height > window.innerHeight - pad)
+                top = Math.max(pad, anchorRect.top - fr.height - pad);
+            left = Math.max(pad + fr.width * 0.5, Math.min(window.innerWidth - pad - fr.width * 0.5, left));
+            floater.style.left = Math.round(left) + 'px';
+            floater.style.top = Math.round(top) + 'px';
+            floater.style.visibility = '';
+        }
+
         function wodBuildEconomyBreakdownHtml(owner) {
             let lines = [];
             let cityTotal = 0;
@@ -14873,6 +15000,8 @@
             }
             let land = getOwnerLandIncome(owner);
             lines.push({ label: 'Land tiles', value: formatSigned(land, '/s'), detail: 'Territory tile income.', expense: false });
+            let tradeLines = wodBuildTradeRouteLines(owner);
+            for(let tr of tradeLines) lines.push(Object.assign({ expense: false }, tr));
             let income = cityTotal + land;
             let upkeep = getOwnerExpenses(owner);
             let upkeepByType = { light: 0, marine: 0, heavy: 0, ship: 0 };
@@ -14931,12 +15060,7 @@
                     floater.innerHTML = kind === 'economy'
                         ? wodBuildEconomyBreakdownHtml(owner)
                         : wodBuildManpowerBreakdownHtml(owner);
-                    floater.hidden = false;
-                    let r = host.getBoundingClientRect();
-                    let left = Math.max(12, Math.min(window.innerWidth - 12, r.left + r.width * 0.5));
-                    let top = Math.min(window.innerHeight - 12, r.bottom + 8);
-                    floater.style.left = Math.round(left) + 'px';
-                    floater.style.top = Math.round(top) + 'px';
+                    wodPositionFxTip(host.getBoundingClientRect(), floater);
                 });
                 host.addEventListener('mouseleave', () => {
                     let floater = wodEnsureFxTipEl();
@@ -24048,8 +24172,6 @@
                 // Movement
                 moveUnitTowardTarget(unit, dt);
 
-                let standHexForCapture = getNearestHexToPoint(unit.x, unit.y);
-
                 if(unit.type === 'convoy') {
                     if((unit.convoyCaptureCd || 0) > 0) unit.convoyCaptureCd = Math.max(0, unit.convoyCaptureCd - dt);
                     if((unit.convoyCaptureCd || 0) <= 0) {
@@ -24112,37 +24234,6 @@
                     let dist2 = dx * dx + dy * dy;
                     if(dist2 < minDist2) { minDist2 = dist2; enemy = other; }
                 });
-                let touchR = (unit.radius || 10) + 15;
-                let touchR2 = touchR * touchR;
-                forEachNearbyCity(gameData.citySpatialGrid, unit.x, unit.y, touchR + 240, (city) => {
-                    if(city.owner === unit.owner) return;
-                    let udx = unit.x - city.x;
-                    let udy = unit.y - city.y;
-                    if(udx * udx + udy * udy >= touchR2) return;
-                        let cityHex = gameData.hexes[`${city.q},${city.r}`];
-                        if(!unitCanAssaultEnemyCityHex(unit, city, cityHex, standHexForCapture)) return;
-
-                        if(attackerControlsAllCityUrbanTerrain(city, unit.owner)) {
-                            let prevCityOwner = city.owner;
-                            city.owner = unit.owner;
-                            city.hasFactory = false;
-                            city.hasHarbor = false;
-                            setHexOwner(cityHex, unit.owner);
-                            handleWodTownCaptureAndElimination(prevCityOwner, unit.owner);
-
-                            let area = getHexesInRadius(city.q, city.r, 2);
-                            let cityClaims = [];
-                            for(let ah of area) {
-                                let hex = gameData.hexes[`${ah.q},${ah.r}`];
-                                if(isClaimableLand(hex) && (hex.owner === unit.owner || hasOwnerNeighbor(hex, unit.owner))) cityClaims.push(hex);
-                            }
-                            for(let hex of cityClaims) {
-                                setHexOwner(hex, unit.owner);
-                            }
-                        } else if(unit.target && unit.target.isCity) {
-                            unit.target = null;
-                        }
-                });
                 
                 if(enemy && unit.damage > 0 && !unit.retreating && !unit.moraleBroken) {
                     let attackerHex = getNearestHexToPoint(unit.x, unit.y);
@@ -24157,7 +24248,7 @@
                     let dmgPerSec = (unit.damage * atkMod * defMod * meanRng * moraleAtk * wodVeteranStatMult(unit)) / interval;
                     let prevEnemyTanks = enemy.type === 'heavy' ? (enemy.tanks || 0) : 0;
                     let dealtCas = applyDamage(enemy, dmgPerSec * dt * wodFortDefenseDamageMultiplier(enemy), unit.owner);
-                    if(enemy.type === 'heavy' && unit.type !== 'convoy') {
+                    if(enemy.type === 'heavy' && unit.type === 'heavy') {
                         let tk = Math.max(0, prevEnemyTanks - (enemy.tanks || 0));
                         if(tk > 0) unit.tankKills = (unit.tankKills || 0) + tk;
                     }
@@ -24201,6 +24292,7 @@
             }
 
             wodApplyTerritoryClaimBatch();
+            wodEvaluateAllCityCaptures();
 
             if(wodMobHexClaimBatch) {
                 let changedOwners = batchHexOwnerDirty;
@@ -28398,11 +28490,20 @@
             els.recordXp.textContent = formatFullCount(xp) + ' / ' + formatFullCount(WOD_VETERAN_XP_THRESHOLD);
             els.recordRank.textContent = wodIsUnitVeteran(sel) ? 'Veteran (+10%)' : 'Regular';
             let showTanks = sel.type === 'heavy';
-            if(els.recordTankKillsRow) els.recordTankKillsRow.hidden = !showTanks;
-            if(els.recordTankLossesRow) els.recordTankLossesRow.hidden = !showTanks;
+            if(els.recordTankKillsRow) {
+                els.recordTankKillsRow.hidden = !showTanks;
+                els.recordTankKillsRow.style.display = showTanks ? '' : 'none';
+            }
+            if(els.recordTankLossesRow) {
+                els.recordTankLossesRow.hidden = !showTanks;
+                els.recordTankLossesRow.style.display = showTanks ? '' : 'none';
+            }
             if(showTanks) {
                 if(els.recordTankKills) els.recordTankKills.textContent = formatFullCount(Math.round(sel.tankKills || 0));
                 if(els.recordTankLosses) els.recordTankLosses.textContent = formatFullCount(Math.round(sel.tankLosses || 0));
+            } else {
+                if(els.recordTankKills) els.recordTankKills.textContent = '0';
+                if(els.recordTankLosses) els.recordTankLosses.textContent = '0';
             }
         }
 
@@ -28428,12 +28529,7 @@
                 let floater = wodEnsureFxTipEl();
                 floater.classList.remove('wod-hud-tip-panel');
                 floater.textContent = tip.textContent;
-                floater.hidden = false;
-                let r = pill.getBoundingClientRect();
-                let left = Math.max(12, Math.min(window.innerWidth - 12, r.left + r.width * 0.5));
-                let top = Math.min(window.innerHeight - 12, r.bottom + 8);
-                floater.style.left = Math.round(left) + 'px';
-                floater.style.top = Math.round(top) + 'px';
+                wodPositionFxTip(pill.getBoundingClientRect(), floater);
             });
             root.addEventListener('mouseout', (e) => {
                 let pill = e.target.closest('.effect-pill--has-tip');
