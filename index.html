@@ -18405,11 +18405,52 @@
             }
         }
 
+        function wodHexOccupiedByEnemyCombat(hex, friendlyOwner) {
+            if(!hex || !gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return false;
+            let occ = false;
+            let pad = (gameData.hexRadius || 20) * 1.55;
+            forEachNearbyUnit(gameData.unitSpatialGrid, hex.x, hex.y, pad, (u) => {
+                if(occ || u.hp <= 0 || u.type === 'convoy' || u.owner === friendlyOwner) return;
+                let uh = getNearestHexToPoint(u.x, u.y);
+                if(uh && uh.q === hex.q && uh.r === hex.r) occ = true;
+            });
+            return occ;
+        }
+
+        function wodQueueTerritoryClaim(hex, owner, priority) {
+            if(!hex || owner <= 0) return;
+            if(!gameData._wodClaimBatch) gameData._wodClaimBatch = new Map();
+            let k = getHexKey(hex);
+            let cur = gameData._wodClaimBatch.get(k);
+            if(!cur) {
+                gameData._wodClaimBatch.set(k, { hex, owner, priority, contested: false });
+                return;
+            }
+            if(priority > cur.priority) {
+                gameData._wodClaimBatch.set(k, { hex, owner, priority, contested: false });
+                return;
+            }
+            if(priority < cur.priority) return;
+            if(owner !== cur.owner) cur.contested = true;
+        }
+
+        function wodApplyTerritoryClaimBatch() {
+            let batch = gameData._wodClaimBatch;
+            if(!batch || batch.size === 0) {
+                gameData._wodClaimBatch = null;
+                return;
+            }
+            for(let rec of batch.values()) {
+                if(!rec || rec.contested || rec.owner <= 0) continue;
+                if(rec.hex.owner === rec.owner) continue;
+                if(wodHexOccupiedByEnemyCombat(rec.hex, rec.owner)) continue;
+                setHexOwner(rec.hex, rec.owner);
+            }
+            gameData._wodClaimBatch = null;
+        }
+
         function claimTerritoryAroundUnit(unit) {
             if(unit.type === 'convoy') return;
-            let tick = gameData._wodSimTick | 0;
-            let stride = unit.type === 'heavy' ? 2 : 3;
-            if(((unit.uid ? unit.uid.length : 0) + tick) % stride !== 0) return;
             let standingHex = getNearestHexToPoint(unit.x, unit.y);
             if(!standingHex) return;
             let uHex = {q: standingHex.q, r: standingHex.r};
@@ -18419,23 +18460,25 @@
             let standingKey = getHexKey(standingHex);
             let onEncircledTile = gameData.encircledHexes && gameData.encircledHexes.has(standingKey);
 
-            // Always claim the hex the unit is standing on (helps encircled units re-establish ground).
             if(standingHex.owner !== unit.owner && canUnitEnterHex(unit, standingHex)) {
-                claims.push(standingHex);
+                claims.push({ hex: standingHex, standing: true });
             }
 
             for(let ch of claimH) {
                 let h = gameData.hexes[`${ch.q},${ch.r}`];
                 if(!h || h.owner === unit.owner || !canUnitEnterHex(unit, h)) continue;
                 if(h === standingHex) continue;
+                if(h.owner > 0 && h.owner !== unit.owner) continue;
                 let attach = hasOwnerNeighbor(h, unit.owner) || standingHex.owner === unit.owner;
                 if(!attach && onEncircledTile && gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(h)))
                     attach = true;
-                if(attach) claims.push(h);
+                if(attach) claims.push({ hex: h, standing: false });
             }
 
-            for(let h of claims) {
-                if(h.owner !== unit.owner) setHexOwner(h, unit.owner);
+            for(let c of claims) {
+                let h = c.hex;
+                if(wodHexOccupiedByEnemyCombat(h, unit.owner)) continue;
+                wodQueueTerritoryClaim(h, unit.owner, c.standing ? 2 : 1);
             }
         }
 
@@ -22755,6 +22798,7 @@
                 batchHexOwner = true;
                 batchHexOwnerDirty = false;
             }
+            gameData._wodClaimBatch = new Map();
 
             for (let i = gameData.entities.length - 1; i >= 0; i--) {
                 let unit = gameData.entities[i];
@@ -22925,6 +22969,8 @@
                 updateUnitHealing(unit, dt);
                 claimTerritoryAroundUnit(unit);
             }
+
+            wodApplyTerritoryClaimBatch();
 
             if(wodMobHexClaimBatch) {
                 let changedOwners = batchHexOwnerDirty;
