@@ -12942,7 +12942,9 @@
         function shouldDrawPlayerUnitOrderPath(unit) {
             let lo = wodLocalPlayerOwner();
             if(!unit || unit.owner !== lo || unit.type === 'convoy' || unit.hp <= 0) return false;
-            if(!unit.target && !(unit.path && unit.path.length) && !(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0)) return false;
+            if(!unit.target && !(unit.path && unit.path.length)) return false;
+            let pts = getDisplayedUnitOrderPathPoints(unit);
+            if(pts.length < 2) return false;
             if(unit.selected) return true;
             return gameData.uiSettings && gameData.uiSettings.showOrdersWhenDeselected !== false;
         }
@@ -18434,12 +18436,21 @@
 
         function wodEncirclementBorderHostileCounts(region, owner) {
             let counts = {};
+            let regionKeys = new Set(region.map(hex => getHexKey(hex)));
             for(let hex of region) {
                 for(let dir of hexDirections) {
                     let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
                     if(nHex.owner > 0 && nHex.owner !== owner)
                         counts[nHex.owner] = (counts[nHex.owner] || 0) + 1;
+                    else if(nHex.owner === 0) {
+                        for(let dir2 of hexDirections) {
+                            let nn = gameData.hexes[`${nHex.q + dir2.q},${nHex.r + dir2.r}`];
+                            if(!nn || isWaterHex(nn) || !isClaimableLand(nn)) continue;
+                            if(nn.owner > 0 && nn.owner !== owner && !regionKeys.has(getHexKey(nn)))
+                                counts[nn.owner] = (counts[nn.owner] || 0) + 1;
+                        }
+                    }
                 }
             }
             return counts;
@@ -18464,75 +18475,7 @@
                     }
                 }
             }
-            capturer = wodDominantEncircler(proxy);
-            if(capturer > 0) return capturer;
-            let loose = {};
-            for(let hex of region) {
-                for(let dir of hexDirections) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
-                    if(nHex.owner > 0 && nHex.owner !== owner)
-                        loose[nHex.owner] = (loose[nHex.owner] || 0) + 1;
-                }
-            }
-            return wodDominantEncircler(loose);
-        }
-
-        function wodHexHasOwnerCombatUnit(hex, owner) {
-            if(!hex || owner <= 0) return false;
-            let hk = getHexKey(hex);
-            for(let u of gameData.entities) {
-                if(u.hp <= 0 || u.type === 'convoy' || u.owner !== owner) continue;
-                let uh = getNearestHexToPoint(u.x, u.y);
-                if(!uh || getHexKey(uh) !== hk) continue;
-                let hr = gameData.hexRadius || 20;
-                let dx = u.x - uh.x;
-                let dy = u.y - uh.y;
-                if(dx * dx + dy * dy <= hr * hr * 2.8) return true;
-            }
-            return false;
-        }
-
-        /** Peel dangling owner appendices with no garrison so thin corridors do not delay empty-pocket capture. */
-        function wodPeelUnitlessOwnerAppendices(region, owner, w, requireHostileTouch) {
-            if(!region || region.length === 0) return;
-            if(requireHostileTouch) {
-                let hostile = false;
-                for(let hex of region) {
-                    for(let nb of getNeighborHexes(hex)) {
-                        if(nb && nb.owner > 0 && nb.owner !== owner) { hostile = true; break; }
-                    }
-                    if(hostile) break;
-                }
-                if(!hostile) return;
-            }
-            let keys = new Set(region.map(hex => getHexKey(hex)));
-            let removed = [];
-            let changed = true;
-            while(changed) {
-                changed = false;
-                let peel = [];
-                for(let hk of keys) {
-                    let hex = gameData.hexes[hk];
-                    if(!hex || wodHexHasOwnerCombatUnit(hex, owner)) continue;
-                    let deg = 0;
-                    for(let nb of getNeighborHexes(hex)) {
-                        if(nb && nb.owner === owner && keys.has(getHexKey(nb))) deg++;
-                    }
-                    if(deg <= 1) peel.push(hk);
-                }
-                if(peel.length) {
-                    changed = true;
-                    for(let hk of peel) {
-                        keys.delete(hk);
-                        removed.push(gameData.hexes[hk]);
-                    }
-                }
-            }
-            if(!removed.length) return;
-            let capturer = wodEncirclementCapturerForPocket(removed, owner);
-            if(capturer <= 0) return;
-            for(let hex of removed) w.changes.push({hex, owner: capturer});
+            return wodDominantEncircler(proxy);
         }
 
         function wodRegionHasOwnerCity(regionKeys, owner) {
@@ -18572,15 +18515,14 @@
                 return;
             }
             gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
-            let interval = 0.85 + Math.min(1.6, (gameData.hexList.length || 0) / 32000);
-            if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.45, 2.4);
+            let interval = 0.55 + Math.min(1.0, (gameData.hexList.length || 0) / 50000);
+            if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.35, 1.8);
             if(gameData.encirclementTimer < interval) return;
             gameData.encirclementTimer = 0;
             gameData._encircWork = {
                 visited: new Set(),
                 encircledHexes: new Set(),
                 encircledReliefHexes: new Set(),
-                changes: [],
                 idx: 0
             };
             wodEncirclementProcessChunk();
@@ -18652,33 +18594,15 @@
                         w.encircledHexes.add(hk);
                         if(supplyRelief) w.encircledReliefHexes.add(hk);
                     }
-                    if(!hasOwnerCombatUnit) {
+                    if(!hasOwnerCity && !hasOwnerCombatUnit) {
                         let capturer = wodEncirclementCapturerForPocket(region, owner);
                         if(capturer > 0) {
-                            for(let hex of region) w.changes.push({hex, owner: capturer});
-                        }
-                    } else {
-                        wodPeelUnitlessOwnerAppendices(region, owner, w, false);
-                    }
-                } else {
-                    let regionKeys = new Set(region.map(hex => getHexKey(hex)));
-                    let hasOwnerCombatUnit = false;
-                    for(let u of gameData.entities) {
-                        if(u.owner !== owner) continue;
-                        if(wodUnitInsideRegion(u, regionKeys)) {
-                            hasOwnerCombatUnit = true;
-                            break;
+                            for(let hex of region) setHexOwner(hex, capturer);
                         }
                     }
-                    if(!hasOwnerCombatUnit) wodPeelUnitlessOwnerAppendices(region, owner, w, true);
                 }
             }
             if(w.idx < list.length) return;
-            for(let change of w.changes) setHexOwner(change.hex, change.owner);
-            if(w.changes.length) {
-                wodMarkTerrainPoliticalDirty();
-                wodEvaluateAllCityCaptures();
-            }
             gameData.encircledHexes = w.encircledHexes;
             gameData.encircledReliefHexes = w.encircledReliefHexes;
             gameData._encircWork = null;
@@ -28309,9 +28233,22 @@
             }
             let sig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
             let pts = [{x: unit.x, y: unit.y}];
-            for(let wp of marchPts) pts.push({x: wp.x, y: wp.y});
+            for(let wi = 0; wi < marchPts.length; wi++)
+                pts.push({x: marchPts[wi].x, y: marchPts[wi].y});
             unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
             unit._routeArrowMarchSig = sig;
+        }
+
+        function wodWaypointOrderArrowPoints(unit) {
+            if(!unit || !unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0) return null;
+            let c = unit.marchWpCursor || 0;
+            let pts = [{x: unit.x, y: unit.y}];
+            for(let i = c; i < unit.fullMarchWaypoints.length; i++) {
+                let w = unit.fullMarchWaypoints[i];
+                pts.push({x: w.x, y: w.y});
+            }
+            let out = dedupeNearOrderPathPoints(pts);
+            return out.length >= 2 ? out : null;
         }
 
         function wodSliceFrozenOrderArrowPath(unit, frozenPts) {
@@ -28371,7 +28308,7 @@
                     if(sliced && sliced.length >= 2) return sliced;
                 }
 
-                return getUnitPathPoints(unit);
+                return wodWaypointOrderArrowPoints(unit);
             } catch(_) {
                 return null;
             }
@@ -29582,11 +29519,8 @@
                     let allIdle = units.every(u => !u.target && (!u.path || u.path.length === 0));
                     if(allIdle) gameData.playerShiftWaypoints = [];
                     if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
-                    else if(!allIdle) wodResyncPlayerShiftWaypointsFromUnits(units);
                     seedPlayerShiftWaypointsFromActiveMarch(units);
                     gameData.playerShiftWaypoints.push({x: worldPos.x, y: worldPos.y});
-                    if(gameData.playerShiftWaypoints.length > 28)
-                        gameData.playerShiftWaypoints = gameData.playerShiftWaypoints.slice(-28);
                     applyShiftWaypointMarch();
                 }
                 return;
@@ -29796,31 +29730,12 @@
             if(n) gameData.playerShiftWaypoints = [{x: sx / n, y: sy / n}];
         }
 
-        function wodResyncPlayerShiftWaypointsFromUnits(units) {
-            if(!units || units.length === 0) {
-                gameData.playerShiftWaypoints = [];
-                return;
-            }
-            let ref = units[0];
-            if(ref.fullMarchWaypoints && ref.fullMarchWaypoints.length > 0) {
-                let c = Math.max(0, ref.marchWpCursor || 0);
-                gameData.playerShiftWaypoints = ref.fullMarchWaypoints.slice(c).map(p => ({x: p.x, y: p.y}));
-                return;
-            }
-            if(ref.orderTarget) {
-                gameData.playerShiftWaypoints = [{x: ref.orderTarget.x, y: ref.orderTarget.y}];
-                return;
-            }
-            if(ref.target) gameData.playerShiftWaypoints = [{x: ref.target.x, y: ref.target.y}];
-        }
-
         function applyShiftWaypointMarch() {
             let units = getMovableSelectedUnits();
             if(units.length === 0) return;
             let wps = gameData.playerShiftWaypoints;
             if(!wps || wps.length === 0) return;
-            const WOD_SHIFT_WP_MAX = 28;
-            if(wps.length > WOD_SHIFT_WP_MAX) wps = wps.slice(-WOD_SHIFT_WP_MAX);
+            if(wps.length > 32) wps.splice(0, wps.length - 32);
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost && typeof WodMultiplayer !== 'undefined') {
                 WodMultiplayer.sendCmd({
                     kind: 'shiftMarch',
@@ -29853,7 +29768,6 @@
                 }
                 assignUnitMoveAlongWaypoints(unit, pathPts);
             });
-            wodResyncPlayerShiftWaypointsFromUnits(units);
             showNotification(wps.length === 1 ? 'Marching to waypoint' : `Marching via ${wps.length} waypoints`);
         }
 
@@ -30067,11 +29981,8 @@
                         let allIdle = units.every(u => !u.target && (!u.path || u.path.length === 0));
                         if(allIdle) gameData.playerShiftWaypoints = [];
                         if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
-                        else if(!allIdle) wodResyncPlayerShiftWaypointsFromUnits(units);
                         seedPlayerShiftWaypointsFromActiveMarch(units);
                         gameData.playerShiftWaypoints.push({x: worldPos.x, y: worldPos.y});
-                        if(gameData.playerShiftWaypoints.length > 28)
-                            gameData.playerShiftWaypoints = gameData.playerShiftWaypoints.slice(-28);
                         applyShiftWaypointMarch();
                     }
                 }
