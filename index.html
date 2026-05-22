@@ -14228,7 +14228,7 @@
                     if (!isWaterHex(hex)) return false;
                     return true;
                 }
-                if (isBridgeHex(hex)) return hex.owner === 0 || hex.owner === unit.owner;
+                if (isBridgeHex(hex)) return true;
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
             }
@@ -14249,7 +14249,7 @@
             }
             if(unit.type === 'convoy' && unit.convoySeaRoute) return isWaterHex(hex);
             if(unit.type === 'convoy') {
-                if(isBridgeHex(hex)) return hex.owner === 0 || hex.owner === unit.owner;
+                if(isBridgeHex(hex)) return true;
                 if(!isClaimableLand(hex) || hex.type === 'mountain') return false;
                 return hex.owner === 0 || hex.owner === unit.owner;
             }
@@ -17655,6 +17655,7 @@
             if(!fromAdvance) {
                 unit.fullMarchWaypoints = marchPts;
                 unit.marchWpCursor = 0;
+                wodFreezeOrderArrowPath(unit, marchPts);
                 if(unit.owner === 1) {
                     unit.combatEngaged = false;
                     unit.combatLockTimer = 0;
@@ -19427,10 +19428,13 @@
                 return;
             }
             let path = findPathAroundTerrain(convoy, destHex, startHex);
+            if(path.length <= 1 && !convoy.convoySeaRoute) {
+                let alt = wodTryPortalBridgeMarchPath(convoy, startHex, destHex);
+                if(alt.length > 1) path = alt;
+            }
             if(path.length > 1) {
-                convoy.path = path.slice(1).map(h => ({x: h.x, y: h.y}));
                 let endPt = {x: destHex.x, y: destHex.y, isCity: true};
-                convoy.path.push(endPt);
+                convoy.path = wodHexPathToWorldWaypoints(convoy, path, endPt);
                 convoy.target = convoy.path.shift();
                 convoy.target.pathPrepared = true;
             } else {
@@ -24248,7 +24252,7 @@
                     let dmgPerSec = (unit.damage * atkMod * defMod * meanRng * moraleAtk * wodVeteranStatMult(unit)) / interval;
                     let prevEnemyTanks = enemy.type === 'heavy' ? (enemy.tanks || 0) : 0;
                     let dealtCas = applyDamage(enemy, dmgPerSec * dt * wodFortDefenseDamageMultiplier(enemy), unit.owner);
-                    if(enemy.type === 'heavy' && unit.type === 'heavy') {
+                    if(enemy.type === 'heavy' && unit.type !== 'convoy') {
                         let tk = Math.max(0, prevEnemyTanks - (enemy.tanks || 0));
                         if(tk > 0) unit.tankKills = (unit.tankKills || 0) + tk;
                     }
@@ -28204,7 +28208,68 @@
             if(unit) {
                 unit._routeArrowSig = null;
                 unit._routeArrowThrottleUntil = 0;
+                unit._routeArrowFrozenPts = null;
+                unit._routeArrowMarchSig = null;
             }
+        }
+
+        function wodMarchArrowSignature(unit) {
+            if(!unit || !unit.fullMarchWaypoints || !unit.fullMarchWaypoints.length) return '';
+            return unit.fullMarchWaypoints.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+        }
+
+        function wodFreezeOrderArrowPath(unit, marchPts) {
+            if(!unit || !marchPts || marchPts.length === 0) {
+                unit._routeArrowFrozenPts = null;
+                unit._routeArrowMarchSig = null;
+                return;
+            }
+            let sig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+            try {
+                let seg = buildConcatenatedHexPath(unit, marchPts);
+                if(!seg.length) {
+                    unit._routeArrowFrozenPts = null;
+                    unit._routeArrowMarchSig = sig;
+                    return;
+                }
+                let pts = [{x: unit.x, y: unit.y}];
+                for(let i = 1; i < seg.length; i++)
+                    pts.push({x: seg[i].x, y: seg[i].y});
+                unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
+                unit._routeArrowMarchSig = sig;
+            } catch(_) {
+                unit._routeArrowFrozenPts = null;
+                unit._routeArrowMarchSig = sig;
+            }
+        }
+
+        function wodSliceFrozenOrderArrowPath(unit, frozenPts) {
+            if(!frozenPts || frozenPts.length < 2) return null;
+            let bestI = 0;
+            let bestD = Infinity;
+            for(let i = 0; i < frozenPts.length; i++) {
+                let p = frozenPts[i];
+                let dx = p.x - unit.x;
+                let dy = p.y - unit.y;
+                let d = dx * dx + dy * dy;
+                if(d < bestD) {
+                    bestD = d;
+                    bestI = i;
+                }
+            }
+            let pts = [{x: unit.x, y: unit.y}];
+            for(let i = bestI; i < frozenPts.length; i++) {
+                let p = frozenPts[i];
+                if(pts.length === 1) {
+                    pts.push(p);
+                    continue;
+                }
+                let q = pts[pts.length - 1];
+                let dx = p.x - q.x;
+                let dy = p.y - q.y;
+                if(dx * dx + dy * dy > 2) pts.push(p);
+            }
+            return pts.length >= 2 ? pts : null;
         }
 
         function dedupeNearOrderPathPoints(pts) {
@@ -28226,18 +28291,21 @@
         function computePathfindingOrderArrowPoints(unit) {
             if(!unit || unit.hp <= 0) return null;
             try {
-                // Regular moves already mirror pathfinding via unit.path — recomputing A* every frame destroys long-session FPS.
                 if(!unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0)
                     return null;
+
+                let marchSig = wodMarchArrowSignature(unit);
+                if(unit._routeArrowFrozenPts && unit._routeArrowMarchSig === marchSig) {
+                    let sliced = wodSliceFrozenOrderArrowPath(unit, unit._routeArrowFrozenPts);
+                    if(sliced && sliced.length >= 2) return sliced;
+                }
 
                 let c = unit.marchWpCursor || 0;
                 let wps = unit.fullMarchWaypoints.slice(c);
                 if(wps.length === 0) return null;
 
-                let now = performance.now();
                 let sig = 'm|' + c + '|' + wps.length + '|' + wps.map(w => Math.round(w.x / 12) + ',' + Math.round(w.y / 12)).join(';');
-                if(unit._routeArrowSig === sig && unit._routeArrowPts && unit._routeArrowPts.length >= 2 &&
-                    unit._routeArrowThrottleUntil && now < unit._routeArrowThrottleUntil)
+                if(unit._routeArrowSig === sig && unit._routeArrowPts && unit._routeArrowPts.length >= 2)
                     return unit._routeArrowPts;
 
                 let seg = buildConcatenatedHexPath(unit, wps);
@@ -28249,7 +28317,6 @@
                 if(out.length < 2) return null;
                 unit._routeArrowSig = sig;
                 unit._routeArrowPts = out;
-                unit._routeArrowThrottleUntil = now + 400;
                 return out;
             } catch(_) {
                 return null;
@@ -28489,22 +28556,22 @@
             els.recordLosses.textContent = formatFullCount(losses);
             els.recordXp.textContent = formatFullCount(xp) + ' / ' + formatFullCount(WOD_VETERAN_XP_THRESHOLD);
             els.recordRank.textContent = wodIsUnitVeteran(sel) ? 'Veteran (+10%)' : 'Regular';
-            let showTanks = sel.type === 'heavy';
+            let showTankKills = sel.type !== 'convoy';
+            let showTankLosses = sel.type === 'heavy';
             if(els.recordTankKillsRow) {
-                els.recordTankKillsRow.hidden = !showTanks;
-                els.recordTankKillsRow.style.display = showTanks ? '' : 'none';
+                els.recordTankKillsRow.hidden = !showTankKills;
+                els.recordTankKillsRow.style.display = showTankKills ? '' : 'none';
             }
             if(els.recordTankLossesRow) {
-                els.recordTankLossesRow.hidden = !showTanks;
-                els.recordTankLossesRow.style.display = showTanks ? '' : 'none';
+                els.recordTankLossesRow.hidden = !showTankLosses;
+                els.recordTankLossesRow.style.display = showTankLosses ? '' : 'none';
             }
-            if(showTanks) {
-                if(els.recordTankKills) els.recordTankKills.textContent = formatFullCount(Math.round(sel.tankKills || 0));
-                if(els.recordTankLosses) els.recordTankLosses.textContent = formatFullCount(Math.round(sel.tankLosses || 0));
-            } else {
-                if(els.recordTankKills) els.recordTankKills.textContent = '0';
-                if(els.recordTankLosses) els.recordTankLosses.textContent = '0';
-            }
+            if(showTankKills && els.recordTankKills)
+                els.recordTankKills.textContent = formatFullCount(Math.round(sel.tankKills || 0));
+            else if(els.recordTankKills) els.recordTankKills.textContent = '0';
+            if(showTankLosses && els.recordTankLosses)
+                els.recordTankLosses.textContent = formatFullCount(Math.round(sel.tankLosses || 0));
+            else if(els.recordTankLosses) els.recordTankLosses.textContent = '0';
         }
 
         function wodEnsureFxTipEl() {
