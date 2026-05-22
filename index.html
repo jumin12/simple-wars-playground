@@ -1529,6 +1529,24 @@
             background: rgba(0, 0, 0, 0.24);
             padding: 6px;
             box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(212, 175, 55, 0.45) rgba(0, 0, 0, 0.2);
+        }
+
+        .info-effects-scroll::-webkit-scrollbar {
+            width: 9px;
+        }
+
+        .info-effects-scroll::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px;
+        }
+
+        .info-effects-scroll::-webkit-scrollbar-thumb {
+            background: rgba(212, 175, 55, 0.4);
+            border-radius: 8px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
         }
 
         .info-effects-scroll .effect-pill--has-tip:hover,
@@ -1536,24 +1554,27 @@
             z-index: 2;
         }
 
-        .info-effects-scroll .effect-pill-tip {
-            bottom: auto;
-            top: calc(100% + 7px);
-            transform: translateX(-50%) translateY(-4px);
+        .wod-effect-tip-layer {
+            position: fixed;
+            z-index: 120000;
+            min-width: 168px;
+            max-width: min(260px, calc(100vw - 16px));
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(212, 175, 55, 0.55);
+            background: rgba(10, 18, 28, 0.98);
+            color: rgba(236, 240, 241, 0.96);
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.38;
+            text-align: left;
+            white-space: normal;
+            box-shadow: 0 8px 22px rgba(0, 0, 0, 0.48);
+            pointer-events: none;
         }
 
-        .info-effects-scroll .effect-pill-tip::after {
-            top: auto;
-            bottom: 100%;
-            border-top-color: transparent;
-            border-bottom-color: rgba(212, 175, 55, 0.55);
-        }
-
-        @media (hover: hover) and (pointer: fine) {
-            .info-effects-scroll .effect-pill--has-tip:hover .effect-pill-tip,
-            .info-effects-scroll .effect-pill--has-tip:focus-visible .effect-pill-tip {
-                transform: translateX(-50%) translateY(0);
-            }
+        .wod-effect-tip-layer[hidden] {
+            display: none !important;
         }
 
         .info-name-row {
@@ -6544,7 +6565,7 @@
 
                 <div class="esc-help-block">
                     <h4>Healing</h4>
-                    <p class="esc-help-prose">Regeneration ticks only when the hex is <strong>yours</strong>, the tile is <strong>not encircled</strong>, and there are <strong>no hostile combat units threatening the area</strong>. HP, manpower, and morale all inch back together, shown with the small green <strong>+</strong> pulse when a tick lands.</p>
+                    <p class="esc-help-prose">Regeneration ticks only when the hex is <strong>yours</strong>, the tile is <strong>not encircled</strong>, and there are <strong>no hostile combat units threatening the area</strong>. Each soldier restored costs <strong>1 manpower</strong> from your pool; HP and manpower recover together, shown with the small green <strong>+</strong> pulse when a tick lands.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -7668,6 +7689,8 @@
         /** Applies to per-city income & manpower (/s); global economic slowdown multiplier. */
         const WOD_CITY_ECON_TICK_MULT = 2 / 3;
         const WOD_LAND_INCOME_PER_HEX = 0.004;
+        /** Halves all passive cash and manpower growth rates. */
+        const WOD_GLOBAL_ECON_MULT = 0.5;
         /** Match production menu / economy balance. */
         const WOD_PRICE_FACTORY = 2000;
         const WOD_PRICE_HARBOR = 1000;
@@ -8524,6 +8547,15 @@
             else {
                 if(!gameData.aiMoneyByOwner) gameData.aiMoneyByOwner = {};
                 gameData.aiMoneyByOwner[owner] = Math.max(0, wodPlayerTreasury(owner) - amt);
+            }
+        }
+        function wodDeductPlayerMp(owner, amt) {
+            amt = Math.max(0, +amt || 0);
+            if(amt <= 0) return;
+            if(owner === 1) gameData.manpower = Math.max(0, (gameData.manpower || 0) - amt);
+            else {
+                if(!gameData.aiManpowerByOwner) gameData.aiManpowerByOwner = {};
+                gameData.aiManpowerByOwner[owner] = Math.max(0, wodPlayerMpPool(owner) - amt);
             }
         }
         function wodSetMpMatchUiFlag(on) {
@@ -14722,7 +14754,7 @@
                 if(city.owner !== owner) continue;
                 total += getCityIncome(city);
             }
-            return Math.round((total + getOwnerLandIncome(owner)) * 1000) / 1000;
+            return Math.round((total + getOwnerLandIncome(owner)) * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
         }
 
         function getOwnerLandIncome(owner) {
@@ -14736,7 +14768,7 @@
                 gameData._landIncomeCacheDirty = false;
             }
             let tiles = (gameData._landIncomeCache && gameData._landIncomeCache[owner]) || 0;
-            return Math.round(tiles * WOD_LAND_INCOME_PER_HEX * 1000) / 1000;
+            return Math.round(tiles * WOD_LAND_INCOME_PER_HEX * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
         }
 
         function getOwnerManpowerIncome(owner) {
@@ -14753,14 +14785,14 @@
             if(city.hasFactory) total += 10;
             if(city.hasHarbor) total += 3;
             total += city.incomeBonus || 0;
-            return Math.round(total * WOD_CITY_ECON_TICK_MULT * 1000) / 1000;
+            return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
         }
 
         function getCityManpowerIncome(city) {
             let total = 7;
             if(city.hasFactory) total += 2;
             total += city.manpowerBonus || 0;
-            return Math.round(total * WOD_CITY_ECON_TICK_MULT * 1000) / 1000;
+            return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_GLOBAL_ECON_MULT * 1000) / 1000;
         }
 
         function getCityUrbanTerrainHexes(city) {
@@ -17571,9 +17603,24 @@
 
         function updateUnitHealing(unit, dt) {
             if(canHealUnit(unit)) {
-                unit.hp = Math.min(unit.maxHp, unit.hp + unit.maxHp * 0.035 * dt);
-                unit.manpower = Math.min(1000, (unit.manpower || 0) + 18 * dt);
-                if(unit.type !== 'convoy') {
+                if(unit.type === 'convoy') {
+                    unit.hp = Math.min(unit.maxHp, unit.hp + unit.maxHp * 0.035 * dt);
+                } else {
+                    let mpCap = unit.maxManpower || (unit.type === 'ship' ? WOD_MANPOWER_SHIP : WOD_MANPOWER_INFANTRY);
+                    let mpNow = unit.manpower != null ? unit.manpower : Math.round((unit.hp / unit.maxHp) * mpCap);
+                    let mpMissing = Math.max(0, mpCap - mpNow);
+                    if(mpMissing > 0) {
+                        let mpWant = Math.min(mpMissing, mpCap * 0.035 * dt);
+                        let pool = wodPlayerMpPool(unit.owner);
+                        let mpGain = Math.min(mpWant, pool);
+                        if(mpGain > 0) {
+                            wodDeductPlayerMp(unit.owner, mpGain);
+                            unit.manpower = mpNow + mpGain;
+                            unit.hp = Math.min(unit.maxHp, unit.maxHp * (unit.manpower / mpCap));
+                        }
+                    } else if(unit.hp < unit.maxHp) {
+                        unit.hp = Math.min(unit.maxHp, unit.maxHp * (mpNow / mpCap));
+                    }
                     unit.morale = Math.min(unit.maxMorale || WOD_MORALE_MAX, (unit.morale != null ? unit.morale : WOD_MORALE_MAX) + 11 * dt);
                     if(unit.moraleBroken && (unit.morale || 0) >= 44) {
                         unit.moraleBroken = false;
@@ -24372,6 +24419,18 @@
             } else if(dq === 0 && dr === -1) {
                 add(2 * q - 1, 2 * r - 1);
                 add(2 * q + 1, 2 * r - 1);
+            } else if(dq === 1 && dr === 1) {
+                add(2 * q + 1, 2 * r + 1);
+                add(2 * q, 2 * r + 2);
+            } else if(dq === -1 && dr === -1) {
+                add(2 * q - 1, 2 * r - 1);
+                add(2 * q, 2 * r - 2);
+            } else if(dq === 1 && dr === -1) {
+                add(2 * q + 1, 2 * r - 1);
+                add(2 * q + 2, 2 * r);
+            } else if(dq === -1 && dr === 1) {
+                add(2 * q - 1, 2 * r + 1);
+                add(2 * q - 2, 2 * r);
             }
         }
 
@@ -24447,10 +24506,10 @@
                     }
                 }
             }
-            bridgePass(0.44, 1.19, 4, 2);
-            bridgePass(0.32, 1.42, 6, 2);
-            bridgePass(0.26, 1.55, 4, 2);
-            let stitch2 = Math.pow(spacing * 1.42, 2);
+            bridgePass(0.44, 1.35, 4, 2);
+            bridgePass(0.32, 1.58, 6, 2);
+            bridgePass(0.26, 1.72, 4, 2);
+            let stitch2 = Math.pow(spacing * 1.58, 2);
             for(let ek of keys) {
                 if(deg(ek) !== 0) continue;
                 let p = midpointByEdge.get(ek);
@@ -24700,7 +24759,7 @@
 
             for(let hex of hexList) {
                 if(hex.owner === 0) continue;
-                for(let dir of cardinalHexDirections) {
+                for(let dir of hexDirections) {
                     let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
                     let owners = [hex.owner, nHex.owner].sort((a, b) => a - b);
@@ -24862,7 +24921,7 @@
                     ctx.lineCap = capRestore;
                     return;
                 }
-                let maxDist2 = Math.pow(spacing * 1.5, 2);
+                let maxDist2 = Math.pow(spacing * 2.05, 2);
                 let run = [points[0]];
                 function flushHybridOpen() {
                     if(run.length === 1) {
@@ -28012,6 +28071,59 @@
             return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         }
 
+        function wodEnsureEffectTipLayer() {
+            let layer = document.getElementById('wodEffectTipLayer');
+            if(!layer) {
+                layer = document.createElement('div');
+                layer.id = 'wodEffectTipLayer';
+                layer.className = 'wod-effect-tip-layer';
+                layer.hidden = true;
+                document.body.appendChild(layer);
+            }
+            return layer;
+        }
+
+        function wodPositionEffectTipLayer(pill, layer) {
+            let text = pill.getAttribute('data-effect-tip') || '';
+            if(!text) {
+                layer.hidden = true;
+                return;
+            }
+            layer.textContent = text;
+            layer.hidden = false;
+            let r = pill.getBoundingClientRect();
+            let margin = 8;
+            let left = r.left + r.width / 2 - layer.offsetWidth / 2;
+            left = Math.max(margin, Math.min(left, window.innerWidth - layer.offsetWidth - margin));
+            let top = r.top - layer.offsetHeight - margin;
+            if(top < margin) top = r.bottom + margin;
+            layer.style.left = left + 'px';
+            layer.style.top = top + 'px';
+        }
+
+        function wodWireEffectPillTips(scope) {
+            let layer = wodEnsureEffectTipLayer();
+            (scope || document).querySelectorAll('.effect-pill--has-tip').forEach(pill => {
+                if(pill._wodTipBound) return;
+                pill._wodTipBound = true;
+                let inline = pill.querySelector('.effect-pill-tip');
+                if(inline && !pill.getAttribute('data-effect-tip'))
+                    pill.setAttribute('data-effect-tip', inline.textContent || '');
+                if(inline) inline.setAttribute('aria-hidden', 'true');
+                function show() { wodPositionEffectTipLayer(pill, layer); }
+                function hide() {
+                    if(layer._wodTipPill === pill) {
+                        layer.hidden = true;
+                        layer._wodTipPill = null;
+                    }
+                }
+                pill.addEventListener('mouseenter', () => { layer._wodTipPill = pill; show(); });
+                pill.addEventListener('focus', () => { layer._wodTipPill = pill; show(); });
+                pill.addEventListener('mouseleave', hide);
+                pill.addEventListener('blur', hide);
+            });
+        }
+
         function wodFmtInfoEffectMarkup(effect) {
             let cls = 'effect-pill';
             if(effect.block) cls += ' effect-pill--block';
@@ -28030,9 +28142,9 @@
                 inner = wodEscapeEffectInner(effect.label);
             }
             let tipHtml = tipText
-                ? '<span class="effect-pill-tip" role="tooltip">' + wodEscapeEffectInner(tipText) + '</span>'
+                ? '<span class="effect-pill-tip" role="tooltip" aria-hidden="true">' + wodEscapeEffectInner(tipText) + '</span>'
                 : '';
-            return '<span class="' + cls + '" tabindex="0">' + inner + tipHtml + '</span>';
+            return '<span class="' + cls + '" tabindex="0"' + (tipText ? ' data-effect-tip="' + wodEscapeEffectInner(tipText).replace(/"/g, '&quot;') + '"' : '') + '>' + inner + tipHtml + '</span>';
         }
 
         function syncInfoCardPanel() {
@@ -28116,6 +28228,7 @@
                     els.effects.innerHTML = effects.length
                         ? effects.map(wodFmtInfoEffectMarkup).join('')
                         : '<span class="effect-pill effect-pill--block">No active effects listed for this hex.</span>';
+                    wodWireEffectPillTips(els.effects);
                     wodSyncInfoCardServiceRecord(sel);
                 }
                 if(els.rename) {
