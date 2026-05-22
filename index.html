@@ -23904,6 +23904,7 @@
         let terrainBaseCanvas = document.createElement('canvas');
         let terrainBaseCtx = terrainBaseCanvas.getContext('2d', {alpha: false});
         let territoryOverlayCanvas = null;
+        let diplomacyOverlayCanvas = null;
         let terrainBounds = {minX: 0, maxX: 0, minY: 0, maxY: 0};
         let terrainNeedsUpdate = true;
         let wodTerrainBakeNextMs = 0;
@@ -23912,13 +23913,30 @@
         let wodTerrainBaseBuilt = false;
         let wodTerrainLastBakeCostMs = 0;
         let wodTerrainPolWork = null;
+        let wodTerrainPolPendingRedo = false;
 
         function wodFinishTerrainPoliticalBake(costMs) {
+            if(wodTerrainPolPendingRedo) {
+                wodTerrainPolPendingRedo = false;
+                wodTerrainPolWork = null;
+                terrainNeedsUpdate = true;
+                if(costMs > 0) wodTerrainLastBakeCostMs = costMs;
+                return;
+            }
             wodTerrainPoliticalDirty = false;
             wodTerrainNeedFullRebuild = false;
             terrainNeedsUpdate = false;
             wodTerrainPolWork = null;
             if(costMs > 0) wodTerrainLastBakeCostMs = costMs;
+        }
+
+        function wodEnsureDiplomacyOverlayCtx(w, h) {
+            if(!diplomacyOverlayCanvas) diplomacyOverlayCanvas = document.createElement('canvas');
+            if(diplomacyOverlayCanvas.width !== w || diplomacyOverlayCanvas.height !== h) {
+                diplomacyOverlayCanvas.width = w;
+                diplomacyOverlayCanvas.height = h;
+            }
+            return diplomacyOverlayCanvas.getContext('2d');
         }
 
         function wodEnsureTerritoryOverlayCtx(w, h) {
@@ -24058,13 +24076,8 @@
                         w.hi = 0;
                     }
                 } else if(w.phase === 'diplomacy') {
-                    if(!w.chains) {
-                        let spacing = gameData.hexRadius * 1.35;
-                        w.chains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, w.offsetX, w.offsetY, spacing);
-                        w.style = gameData.uiSettings.frontlineStyle;
-                        w.ci = 0;
-                    }
-                    if(wodDiplomacyBorderChunk(w, chainBatch)) w.phase = 'done';
+                    wodCompositeDiplomacyOverlay(w);
+                    w.phase = 'done';
                 } else {
                     break;
                 }
@@ -24076,13 +24089,17 @@
         function wodMarkTerrainPoliticalDirty() {
             wodTerrainPoliticalDirty = true;
             terrainNeedsUpdate = true;
-            wodTerrainPolWork = null;
+            if(wodTerrainPolWork) {
+                wodTerrainPolPendingRedo = true;
+                return;
+            }
         }
         function wodMarkTerrainFullDirty() {
             wodTerrainNeedFullRebuild = true;
             wodTerrainPoliticalDirty = true;
             wodTerrainBaseBuilt = false;
             terrainNeedsUpdate = true;
+            wodTerrainPolPendingRedo = false;
             wodTerrainPolWork = null;
         }
 
@@ -24751,17 +24768,16 @@
         }
 
         /**
-         * World-space diplomacy border strokes (shared by main map renderer and lobby/setup previews).
-         * Each hostile hex adjacency becomes one thick edge segment; round caps + overlap remove chain gaps.
+         * Square-grid diplomacy edges: full cardinal edge spans plus corner caps where borders meet.
          * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
             let out = [];
             let seen = new Set();
-            let halfLen = spacing * 0.62;
+            let half = spacing * 0.52;
             for(let hex of hexList) {
                 if(hex.owner === 0) continue;
-                for(let dir of hexDirections) {
+                for(let dir of cardinalHexDirections) {
                     let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
                     let ek = hexPairBorderKey(hex, nHex);
@@ -24769,22 +24785,95 @@
                     seen.add(ek);
                     let mx = (hex.x + nHex.x) * 0.5 + offsetX;
                     let my = (hex.y + nHex.y) * 0.5 + offsetY;
-                    let dx = nHex.x - hex.x;
-                    let dy = nHex.y - hex.y;
-                    let len = Math.hypot(dx, dy) || 1;
-                    let tx = -dy / len;
-                    let ty = dx / len;
-                    let edgeHalf = Math.max(halfLen, len * 0.44);
-                    out.push({
-                        closed: false,
-                        pts: [
-                            { x: mx - tx * edgeHalf, y: my - ty * edgeHalf },
-                            { x: mx + tx * edgeHalf, y: my + ty * edgeHalf }
-                        ]
-                    });
+                    let pts = dir.q !== 0
+                        ? [{ x: mx, y: my - half }, { x: mx, y: my + half }]
+                        : [{ x: mx - half, y: my }, { x: mx + half, y: my }];
+                    out.push({ closed: false, pts });
                 }
             }
             return out;
+        }
+
+        function wodCollectDiplomacyCornerCaps(hexList, hexLookup, offsetX, offsetY, spacing) {
+            let caps = [];
+            let seen = new Set();
+            let half = spacing * 0.52;
+            function borderAt(hex, dq, dr) {
+                let nHex = hexLookup[`${hex.q + dq},${hex.r + dr}`];
+                return !nHex || nHex.owner === 0 || nHex.owner !== hex.owner;
+            }
+            for(let hex of hexList) {
+                if(hex.owner === 0) continue;
+                let x = hex.x + offsetX;
+                let y = hex.y + offsetY;
+                let corners = [
+                    { x: x - half, y: y - half, d1: [-1, 0], d2: [0, -1] },
+                    { x: x + half, y: y - half, d1: [1, 0], d2: [0, -1] },
+                    { x: x - half, y: y + half, d1: [-1, 0], d2: [0, 1] },
+                    { x: x + half, y: y + half, d1: [1, 0], d2: [0, 1] }
+                ];
+                for(let c of corners) {
+                    if(!borderAt(hex, c.d1[0], c.d1[1]) && !borderAt(hex, c.d2[0], c.d2[1])) continue;
+                    let k = `${Math.round(c.x * 4)},${Math.round(c.y * 4)}`;
+                    if(seen.has(k)) continue;
+                    seen.add(k);
+                    caps.push({ x: c.x, y: c.y });
+                }
+            }
+            return caps;
+        }
+
+        function wodDrawDiplomacyBordersToCtx(ctx, offsetX, offsetY) {
+            if(!gameData.layers.diplomacy) return;
+            let spacing = gameData.hexRadius * 1.35;
+            let chains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
+            let caps = wodCollectDiplomacyCornerCaps(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
+            wodEnsureUiShopDefaults();
+            let style = gameData.uiSettings.frontlineStyle;
+            let strokeCol = wodFrontlineColorRgba(1);
+            let fillCol = wodFrontlineColorRgba(1);
+
+            function strokeBatch(lineWidth, dash, offsetPx) {
+                ctx.strokeStyle = strokeCol;
+                ctx.fillStyle = fillCol;
+                ctx.lineWidth = lineWidth;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.setLineDash(dash || []);
+                ctx.beginPath();
+                for(let { pts } of chains) {
+                    let drawPts = offsetPx ? wodOffsetBorderPoints(pts, false, offsetPx) : pts;
+                    if(!drawPts || drawPts.length < 2) continue;
+                    ctx.moveTo(drawPts[0].x, drawPts[0].y);
+                    ctx.lineTo(drawPts[1].x, drawPts[1].y);
+                }
+                ctx.stroke();
+                let capR = Math.max(4.2, lineWidth * 0.52);
+                for(let c of caps) {
+                    ctx.beginPath();
+                    ctx.arc(c.x, c.y, capR, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.setLineDash([]);
+            }
+
+            if(style === 'double') {
+                strokeBatch(4, [], spacing * 0.13);
+                strokeBatch(4, [], -spacing * 0.13);
+            } else if(style === 'dotted') {
+                strokeBatch(8, [spacing * 0.42, spacing * 0.34], 0);
+            } else {
+                strokeBatch(8, [], 0);
+            }
+        }
+
+        function wodCompositeDiplomacyOverlay(w) {
+            if(!gameData.layers.diplomacy) return;
+            let dctx = wodEnsureDiplomacyOverlayCtx(terrainCanvas.width, terrainCanvas.height);
+            dctx.setTransform(1, 0, 0, 1, 0, 0);
+            dctx.clearRect(0, 0, terrainCanvas.width, terrainCanvas.height);
+            wodDrawDiplomacyBordersToCtx(dctx, w.offsetX, w.offsetY);
+            terrainCtx.drawImage(diplomacyOverlayCanvas, 0, 0);
         }
 
         function wodOffsetBorderPoints(pts, closed, offsetPx) {
@@ -24806,42 +24895,7 @@
         }
 
         function drawPaintedTerritoryBorders(ctx, offsetX, offsetY) {
-            if(!gameData.layers.diplomacy) return;
-            let spacing = gameData.hexRadius * 1.35;
-            let paintChains = wodCollectDiplomacyBorderChains(gameData.hexList, gameData.hexes, offsetX, offsetY, spacing);
-
-            wodEnsureUiShopDefaults();
-            let style = gameData.uiSettings.frontlineStyle;
-            let strokeCol = wodFrontlineColorRgba(1);
-            let fillCol = wodFrontlineColorRgba(1);
-
-            function strokeChains(lineWidth, dash, offsetPx) {
-                ctx.strokeStyle = strokeCol;
-                ctx.fillStyle = fillCol;
-                ctx.lineWidth = lineWidth;
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.setLineDash(dash || []);
-                for(let { closed, pts } of paintChains) {
-                    let drawPts = offsetPx ? wodOffsetBorderPoints(pts, closed, offsetPx) : pts;
-                    drawPaintStroke(ctx, drawPts, spacing, {
-                        closedLoop: closed,
-                        suppressDegenerate: true,
-                        openLineCap: 'round',
-                        hybridBorder: true
-                    });
-                }
-                ctx.setLineDash([]);
-            }
-
-            if(style === 'double') {
-                strokeChains(4, [], spacing * 0.13);
-                strokeChains(4, [], -spacing * 0.13);
-            } else if(style === 'dotted') {
-                strokeChains(8, [spacing * 0.42, spacing * 0.34], 0);
-            } else {
-                strokeChains(8, [], 0);
-            }
+            wodDrawDiplomacyBordersToCtx(ctx, offsetX, offsetY);
         }
 
         function splitBorderComponents(points, maxDist) {
