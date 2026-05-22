@@ -12939,10 +12939,19 @@
             return ang;
         }
 
+        function unitHasActiveMoveOrder(unit) {
+            if(!unit || unit.hp <= 0) return false;
+            if(unit.target) return true;
+            if(unit.path && unit.path.length > 0) return true;
+            if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) return true;
+            if(unit.orderTarget && unit.orderTarget.x != null && unit.orderTarget.y != null) return true;
+            return false;
+        }
+
         function shouldDrawPlayerUnitOrderPath(unit) {
             let lo = wodLocalPlayerOwner();
             if(!unit || unit.owner !== lo || unit.type === 'convoy' || unit.hp <= 0) return false;
-            if(!unit.target && !(unit.path && unit.path.length)) return false;
+            if(!unitHasActiveMoveOrder(unit)) return false;
             let pts = getDisplayedUnitOrderPathPoints(unit);
             if(pts.length < 2) return false;
             if(unit.selected) return true;
@@ -17628,9 +17637,12 @@
 
         function wodEnqueueOrderArrowPathBuild(unit, marchPts) {
             if(!unit || !marchPts || marchPts.length === 0) return;
-            let sig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
-            unit._routeArrowMarchSig = sig;
+            let orderSig = (unit.fullMarchWaypoints && unit.fullMarchWaypoints.length)
+                ? unit.fullMarchWaypoints.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';')
+                : marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+            unit._routeArrowMarchSig = orderSig;
             unit._routeArrowBuildGen = (unit._routeArrowBuildGen || 0) + 1;
+            unit._routeArrowProgressIdx = 0;
             let gen = unit._routeArrowBuildGen;
             let uid = unit.uid;
             let startPt = {x: unit.x, y: unit.y};
@@ -17639,9 +17651,9 @@
             for(let wi = 0; wi < ptsCopy.length; wi++) fallback.push(ptsCopy[wi]);
             unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(fallback);
             wodOrderArrowBuildQueue = wodOrderArrowBuildQueue.filter(j => j.uid !== uid);
-            wodOrderArrowBuildQueue.push({uid, gen, startPt, ptsCopy, sig});
-            if(wodOrderArrowBuildQueue.length > 48)
-                wodOrderArrowBuildQueue.splice(0, wodOrderArrowBuildQueue.length - 48);
+            wodOrderArrowBuildQueue.push({uid, gen, startPt, ptsCopy, sig: orderSig});
+            if(wodOrderArrowBuildQueue.length > 160)
+                wodOrderArrowBuildQueue.splice(0, wodOrderArrowBuildQueue.length - 160);
             wodPumpOrderArrowBuildQueue();
         }
 
@@ -17652,7 +17664,7 @@
                 wodOrderArrowBuildPumpScheduled = false;
                 if(!wodOrderArrowBuildQueue.length) return;
                 let t0 = performance.now();
-                let budgetMs = wodUsesVisualViewportLayout() ? 2.5 : 5.5;
+                let budgetMs = wodUsesVisualViewportLayout() ? 3.5 : 8;
                 while(wodOrderArrowBuildQueue.length && performance.now() - t0 < budgetMs) {
                     let job = wodOrderArrowBuildQueue.shift();
                     let unit = null;
@@ -17664,8 +17676,15 @@
                         let seg = buildConcatenatedHexPath(unit, job.ptsCopy, job.startPt);
                         if(!seg.length) continue;
                         let out = wodWorldPointsFromHexMarchPath(unit, seg, job.startPt);
-                        if(out.length >= 2 && unit._routeArrowBuildGen === job.gen && unit._routeArrowMarchSig === job.sig)
+                        if(out.length >= 2 && unit._routeArrowBuildGen === job.gen && unit._routeArrowMarchSig === job.sig) {
+                            let oldPts = unit._routeArrowFrozenPts;
+                            let oldIdx = unit._routeArrowProgressIdx || 0;
                             unit._routeArrowFrozenPts = out;
+                            if(oldPts && oldPts.length > 1) {
+                                let ratio = oldIdx / (oldPts.length - 1);
+                                unit._routeArrowProgressIdx = Math.min(out.length - 1, Math.max(0, Math.round(ratio * (out.length - 1))));
+                            }
+                        }
                     } catch(_) {}
                 }
                 if(wodOrderArrowBuildQueue.length) wodPumpOrderArrowBuildQueue();
@@ -17674,14 +17693,14 @@
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
             if(!worldPoints || worldPoints.length === 0) return false;
-            invalidateUnitOrderArrowCache(unit);
+            let fromAdvance = !!(opt && opt.fromLegAdvance);
+            if(!fromAdvance) invalidateUnitOrderArrowCache(unit);
             unit.blockedTimer = 0;
             unit.stuckTimer = 0;
             unit._wodPathGiveUpUntil = 0;
             unit._wodReplanLandUntil = 0;
             if(!opt || !opt.retainMoraleBroken) unit.moraleBroken = false;
 
-            let fromAdvance = !!(opt && opt.fromLegAdvance);
             if(!fromAdvance) {
                 unit._wodOrderIntoWater = false;
                 unit._wodAmpPathKey = null;
@@ -28281,7 +28300,21 @@
                 unit._routeArrowThrottleUntil = 0;
                 unit._routeArrowFrozenPts = null;
                 unit._routeArrowMarchSig = null;
+                unit._routeArrowProgressIdx = 0;
             }
+        }
+
+        function wodEnsureOrderArrowFrozen(unit) {
+            if(!unit || !unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0) return;
+            let sig = wodMarchArrowSignature(unit);
+            if(unit._routeArrowFrozenPts && unit._routeArrowMarchSig === sig) return;
+            for(let qi = 0; qi < wodOrderArrowBuildQueue.length; qi++) {
+                if(wodOrderArrowBuildQueue[qi].uid === unit.uid && wodOrderArrowBuildQueue[qi].sig === sig) return;
+            }
+            let c = unit.marchWpCursor || 0;
+            let remaining = unit.fullMarchWaypoints.slice(c);
+            if(remaining.length === 0) return;
+            wodEnqueueOrderArrowPathBuild(unit, remaining);
         }
 
         function wodMarchArrowSignature(unit) {
@@ -28328,20 +28361,25 @@
 
         function wodSliceFrozenOrderArrowPath(unit, frozenPts) {
             if(!frozenPts || frozenPts.length < 2) return null;
-            let bestI = 0;
-            let bestD = Infinity;
-            for(let i = 0; i < frozenPts.length; i++) {
-                let p = frozenPts[i];
-                let dx = p.x - unit.x;
-                let dy = p.y - unit.y;
-                let d = dx * dx + dy * dy;
-                if(d < bestD) {
-                    bestD = d;
-                    bestI = i;
-                }
+            let idx = unit._routeArrowProgressIdx || 0;
+            if(idx >= frozenPts.length - 1) return null;
+            let closeR2 = Math.pow(Math.max(12, (gameData.hexRadius || 20) * 0.72), 2);
+            while(idx < frozenPts.length - 1) {
+                let p = frozenPts[idx];
+                let dx = unit.x - p.x;
+                let dy = unit.y - p.y;
+                if(dx * dx + dy * dy > closeR2) break;
+                idx++;
+            }
+            unit._routeArrowProgressIdx = idx;
+            if(idx >= frozenPts.length - 1) {
+                let end = frozenPts[frozenPts.length - 1];
+                let edx = unit.x - end.x;
+                let edy = unit.y - end.y;
+                if(edx * edx + edy * edy <= closeR2 * 2.5) return null;
             }
             let pts = [{x: unit.x, y: unit.y}];
-            for(let i = bestI; i < frozenPts.length; i++) {
+            for(let i = idx + 1; i < frozenPts.length; i++) {
                 let p = frozenPts[i];
                 if(pts.length === 1) {
                     pts.push(p);
@@ -28375,13 +28413,13 @@
             if(!unit || unit.hp <= 0) return null;
             try {
                 if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
+                    wodEnsureOrderArrowFrozen(unit);
                     let marchSig = wodMarchArrowSignature(unit);
                     if(unit._routeArrowFrozenPts && unit._routeArrowMarchSig === marchSig) {
                         let sliced = wodSliceFrozenOrderArrowPath(unit, unit._routeArrowFrozenPts);
                         if(sliced && sliced.length >= 2) return sliced;
+                        return null;
                     }
-                    let live = wodLiveMarchPathPoints(unit);
-                    if(live && live.length >= 2) return live;
                     return wodWaypointOrderArrowPoints(unit);
                 }
                 return wodLiveMarchPathPoints(unit);
