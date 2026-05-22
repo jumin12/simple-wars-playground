@@ -17592,9 +17592,11 @@
             return smoothed;
         }
 
-        function buildConcatenatedHexPath(unit, worldWaypoints) {
+        function buildConcatenatedHexPath(unit, worldWaypoints, startPt) {
             if(!worldWaypoints || worldWaypoints.length === 0) return [];
-            let prevHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+            let sx = startPt ? startPt.x : unit.x;
+            let sy = startPt ? startPt.y : unit.y;
+            let prevHex = getNearestWalkableHexForUnit(unit, sx, sy);
             let full = [];
             for(let wp of worldWaypoints) {
                 let reach = findReachableOrderHex(unit, wp.x, wp.y);
@@ -17607,6 +17609,67 @@
                 prevHex = reach.hex;
             }
             return smoothGridPath(full);
+        }
+
+        let wodOrderArrowBuildQueue = [];
+        let wodOrderArrowBuildPumpScheduled = false;
+
+        function wodWorldPointsFromHexMarchPath(unit, hexPath, startPt) {
+            if(!hexPath || hexPath.length <= 1) {
+                return startPt ? [{x: startPt.x, y: startPt.y}] : [];
+            }
+            let endHex = hexPath[hexPath.length - 1];
+            let endPt = {x: endHex.x, y: endHex.y};
+            let corridor = wodHexPathToWorldWaypoints(unit, hexPath, endPt);
+            let pts = [{x: startPt ? startPt.x : hexPath[0].x, y: startPt ? startPt.y : hexPath[0].y}];
+            for(let wi = 0; wi < corridor.length; wi++) pts.push(corridor[wi]);
+            return dedupeNearOrderPathPoints(pts);
+        }
+
+        function wodEnqueueOrderArrowPathBuild(unit, marchPts) {
+            if(!unit || !marchPts || marchPts.length === 0) return;
+            let sig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+            unit._routeArrowMarchSig = sig;
+            unit._routeArrowBuildGen = (unit._routeArrowBuildGen || 0) + 1;
+            let gen = unit._routeArrowBuildGen;
+            let uid = unit.uid;
+            let startPt = {x: unit.x, y: unit.y};
+            let ptsCopy = marchPts.map(w => ({x: w.x, y: w.y}));
+            let fallback = [{x: startPt.x, y: startPt.y}];
+            for(let wi = 0; wi < ptsCopy.length; wi++) fallback.push(ptsCopy[wi]);
+            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(fallback);
+            wodOrderArrowBuildQueue = wodOrderArrowBuildQueue.filter(j => j.uid !== uid);
+            wodOrderArrowBuildQueue.push({uid, gen, startPt, ptsCopy, sig});
+            if(wodOrderArrowBuildQueue.length > 48)
+                wodOrderArrowBuildQueue.splice(0, wodOrderArrowBuildQueue.length - 48);
+            wodPumpOrderArrowBuildQueue();
+        }
+
+        function wodPumpOrderArrowBuildQueue() {
+            if(wodOrderArrowBuildPumpScheduled) return;
+            wodOrderArrowBuildPumpScheduled = true;
+            requestAnimationFrame(() => {
+                wodOrderArrowBuildPumpScheduled = false;
+                if(!wodOrderArrowBuildQueue.length) return;
+                let t0 = performance.now();
+                let budgetMs = wodUsesVisualViewportLayout() ? 2.5 : 5.5;
+                while(wodOrderArrowBuildQueue.length && performance.now() - t0 < budgetMs) {
+                    let job = wodOrderArrowBuildQueue.shift();
+                    let unit = null;
+                    for(let u of gameData.entities) {
+                        if(u.uid === job.uid && u.hp > 0) { unit = u; break; }
+                    }
+                    if(!unit || unit._routeArrowBuildGen !== job.gen || unit._routeArrowMarchSig !== job.sig) continue;
+                    try {
+                        let seg = buildConcatenatedHexPath(unit, job.ptsCopy, job.startPt);
+                        if(!seg.length) continue;
+                        let out = wodWorldPointsFromHexMarchPath(unit, seg, job.startPt);
+                        if(out.length >= 2 && unit._routeArrowBuildGen === job.gen && unit._routeArrowMarchSig === job.sig)
+                            unit._routeArrowFrozenPts = out;
+                    } catch(_) {}
+                }
+                if(wodOrderArrowBuildQueue.length) wodPumpOrderArrowBuildQueue();
+            });
         }
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
@@ -17655,7 +17718,7 @@
             if(!fromAdvance) {
                 unit.fullMarchWaypoints = marchPts;
                 unit.marchWpCursor = 0;
-                wodFreezeOrderArrowPath(unit, marchPts);
+                wodEnqueueOrderArrowPathBuild(unit, marchPts);
                 if(unit.owner === 1) {
                     unit.combatEngaged = false;
                     unit.combatLockTimer = 0;
@@ -28213,6 +28276,7 @@
 
         function invalidateUnitOrderArrowCache(unit) {
             if(unit) {
+                unit._routeArrowBuildGen = (unit._routeArrowBuildGen || 0) + 1;
                 unit._routeArrowSig = null;
                 unit._routeArrowThrottleUntil = 0;
                 unit._routeArrowFrozenPts = null;
@@ -28225,18 +28289,29 @@
             return unit.fullMarchWaypoints.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
         }
 
-        function wodFreezeOrderArrowPath(unit, marchPts) {
-            if(!unit || !marchPts || marchPts.length === 0) {
-                unit._routeArrowFrozenPts = null;
-                unit._routeArrowMarchSig = null;
-                return;
-            }
-            let sig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+        function wodLiveMarchPathPoints(unit) {
+            if(!unit) return null;
             let pts = [{x: unit.x, y: unit.y}];
-            for(let wi = 0; wi < marchPts.length; wi++)
-                pts.push({x: marchPts[wi].x, y: marchPts[wi].y});
-            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
-            unit._routeArrowMarchSig = sig;
+            let tgt = unit.target;
+            if(tgt && tgt.x != null && tgt.y != null)
+                pts.push({x: tgt.x, y: tgt.y});
+            if(unit.path && unit.path.length > 0) {
+                for(let pi = 0; pi < unit.path.length; pi++) {
+                    let p = unit.path[pi];
+                    pts.push({x: p.x, y: p.y});
+                }
+            }
+            if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
+                let c = (unit.marchWpCursor || 0) + 1;
+                for(let i = c; i < unit.fullMarchWaypoints.length; i++) {
+                    let w = unit.fullMarchWaypoints[i];
+                    pts.push({x: w.x, y: w.y});
+                }
+            } else if(unit.orderTarget && unit.orderTarget.x != null && unit.orderTarget.y != null) {
+                pts.push({x: unit.orderTarget.x, y: unit.orderTarget.y});
+            }
+            let out = dedupeNearOrderPathPoints(pts);
+            return out.length >= 2 ? out : null;
         }
 
         function wodWaypointOrderArrowPoints(unit) {
@@ -28299,16 +28374,17 @@
         function computePathfindingOrderArrowPoints(unit) {
             if(!unit || unit.hp <= 0) return null;
             try {
-                if(!unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0)
-                    return null;
-
-                let marchSig = wodMarchArrowSignature(unit);
-                if(unit._routeArrowFrozenPts && unit._routeArrowMarchSig === marchSig) {
-                    let sliced = wodSliceFrozenOrderArrowPath(unit, unit._routeArrowFrozenPts);
-                    if(sliced && sliced.length >= 2) return sliced;
+                if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
+                    let marchSig = wodMarchArrowSignature(unit);
+                    if(unit._routeArrowFrozenPts && unit._routeArrowMarchSig === marchSig) {
+                        let sliced = wodSliceFrozenOrderArrowPath(unit, unit._routeArrowFrozenPts);
+                        if(sliced && sliced.length >= 2) return sliced;
+                    }
+                    let live = wodLiveMarchPathPoints(unit);
+                    if(live && live.length >= 2) return live;
+                    return wodWaypointOrderArrowPoints(unit);
                 }
-
-                return wodWaypointOrderArrowPoints(unit);
+                return wodLiveMarchPathPoints(unit);
             } catch(_) {
                 return null;
             }
