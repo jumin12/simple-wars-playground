@@ -7768,7 +7768,6 @@
         const WOD_PRICE_FORT = 1500;
         const WOD_PRICE_BRIDGE = 2000;
         const WOD_BRIDGE_ROT_STEP = Math.PI / 12;
-        const WOD_MAX_SHIFT_WAYPOINTS = 40;
         const WOD_PRICE_LIGHT = 500;
         const WOD_PRICE_MARINE = 500;
         const WOD_PRICE_HEAVY = 4000;
@@ -12943,9 +12942,7 @@
         function shouldDrawPlayerUnitOrderPath(unit) {
             let lo = wodLocalPlayerOwner();
             if(!unit || unit.owner !== lo || unit.type === 'convoy' || unit.hp <= 0) return false;
-            if(!unit.target && !(unit.path && unit.path.length)) return false;
-            let pts = getDisplayedUnitOrderPathPoints(unit);
-            if(pts.length < 2) return false;
+            if(!unit.target && !(unit.path && unit.path.length) && !(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0)) return false;
             if(unit.selected) return true;
             return gameData.uiSettings && gameData.uiSettings.showOrdersWhenDeselected !== false;
         }
@@ -17612,19 +17609,14 @@
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
             if(!worldPoints || worldPoints.length === 0) return false;
-            let fromAdvance = !!(opt && opt.fromLegAdvance);
-            if(fromAdvance) {
-                unit._routeArrowSig = null;
-                unit._routeArrowPts = null;
-            } else {
-                invalidateUnitOrderArrowCache(unit, true);
-            }
+            invalidateUnitOrderArrowCache(unit);
             unit.blockedTimer = 0;
             unit.stuckTimer = 0;
             unit._wodPathGiveUpUntil = 0;
             unit._wodReplanLandUntil = 0;
             if(!opt || !opt.retainMoraleBroken) unit.moraleBroken = false;
 
+            let fromAdvance = !!(opt && opt.fromLegAdvance);
             if(!fromAdvance) {
                 unit._wodOrderIntoWater = false;
                 unit._wodAmpPathKey = null;
@@ -17659,11 +17651,9 @@
             wodSetMarchOrderFlags(unit, reachLast || { intoWater: false });
 
             if(!fromAdvance) {
-                unit._routeArrowStartX = unit.x;
-                unit._routeArrowStartY = unit.y;
                 unit.fullMarchWaypoints = marchPts;
                 unit.marchWpCursor = 0;
-                wodQueueFrozenOrderArrowBuild(unit);
+                wodFreezeOrderArrowPath(unit, marchPts);
                 if(unit.owner === 1) {
                     unit.combatEngaged = false;
                     unit.combatLockTimer = 0;
@@ -17856,6 +17846,7 @@
                     unit.path = null;
                     unit.orderTarget = null;
                     unit._wodPathGiveUpUntil = performance.now() + 1200;
+                    invalidateUnitOrderArrowCache(unit);
                     return;
                 }
             } else if(!canUseHexForMovement(unit, targetHex)) {
@@ -17887,6 +17878,7 @@
                         unit.path[unit.path.length - 1] = endNode;
                         unit.target = unit.path.shift();
                         unit.target.pathPrepared = true;
+                        invalidateUnitOrderArrowCache(unit);
                         return;
                     }
                 }
@@ -17895,6 +17887,7 @@
                     if(hop) {
                         unit.path = null;
                         unit.target = {x: hop.x, y: hop.y, pathPrepared: true, marineGreedy: true};
+                        invalidateUnitOrderArrowCache(unit);
                         return;
                     }
                 }
@@ -17903,6 +17896,7 @@
                     if(hop) {
                         unit.path = null;
                         unit.target = {x: hop.x, y: hop.y, pathPrepared: true, shipGreedy: true};
+                        invalidateUnitOrderArrowCache(unit);
                         return;
                     }
                 }
@@ -17938,6 +17932,7 @@
             } else {
                 unit.target = null;
             }
+            invalidateUnitOrderArrowCache(unit);
         }
 
         function findFrontlineCentroid(owner) {
@@ -18451,28 +18446,93 @@
         }
 
         function wodEncirclementCapturerForPocket(region, owner) {
-            let counts = {};
+            let counts = wodEncirclementBorderHostileCounts(region, owner);
+            let capturer = wodDominantEncircler(counts);
+            if(capturer > 0) return capturer;
             let regionKeys = new Set(region.map(hex => getHexKey(hex)));
+            let proxy = {};
             for(let hex of region) {
                 for(let dir of hexDirections) {
                     let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
-                    let nk = getHexKey(nHex);
-                    if(regionKeys.has(nk)) continue;
-                    if(nHex.owner > 0 && nHex.owner !== owner) {
-                        counts[nHex.owner] = (counts[nHex.owner] || 0) + 1;
-                        continue;
-                    }
                     if(nHex.owner !== 0) continue;
                     for(let dir2 of hexDirections) {
                         let nn = gameData.hexes[`${nHex.q + dir2.q},${nHex.r + dir2.r}`];
                         if(!nn || isWaterHex(nn) || !isClaimableLand(nn)) continue;
                         if(nn.owner > 0 && nn.owner !== owner && !regionKeys.has(getHexKey(nn)))
-                            counts[nn.owner] = (counts[nn.owner] || 0) + 0.75;
+                            proxy[nn.owner] = (proxy[nn.owner] || 0) + 1;
                     }
                 }
             }
-            return wodDominantEncircler(counts);
+            capturer = wodDominantEncircler(proxy);
+            if(capturer > 0) return capturer;
+            let loose = {};
+            for(let hex of region) {
+                for(let dir of hexDirections) {
+                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
+                    if(nHex.owner > 0 && nHex.owner !== owner)
+                        loose[nHex.owner] = (loose[nHex.owner] || 0) + 1;
+                }
+            }
+            return wodDominantEncircler(loose);
+        }
+
+        function wodHexHasOwnerCombatUnit(hex, owner) {
+            if(!hex || owner <= 0) return false;
+            let hk = getHexKey(hex);
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.type === 'convoy' || u.owner !== owner) continue;
+                let uh = getNearestHexToPoint(u.x, u.y);
+                if(!uh || getHexKey(uh) !== hk) continue;
+                let hr = gameData.hexRadius || 20;
+                let dx = u.x - uh.x;
+                let dy = u.y - uh.y;
+                if(dx * dx + dy * dy <= hr * hr * 2.8) return true;
+            }
+            return false;
+        }
+
+        /** Peel dangling owner appendices with no garrison so thin corridors do not delay empty-pocket capture. */
+        function wodPeelUnitlessOwnerAppendices(region, owner, w, requireHostileTouch) {
+            if(!region || region.length === 0) return;
+            if(requireHostileTouch) {
+                let hostile = false;
+                for(let hex of region) {
+                    for(let nb of getNeighborHexes(hex)) {
+                        if(nb && nb.owner > 0 && nb.owner !== owner) { hostile = true; break; }
+                    }
+                    if(hostile) break;
+                }
+                if(!hostile) return;
+            }
+            let keys = new Set(region.map(hex => getHexKey(hex)));
+            let removed = [];
+            let changed = true;
+            while(changed) {
+                changed = false;
+                let peel = [];
+                for(let hk of keys) {
+                    let hex = gameData.hexes[hk];
+                    if(!hex || wodHexHasOwnerCombatUnit(hex, owner)) continue;
+                    let deg = 0;
+                    for(let nb of getNeighborHexes(hex)) {
+                        if(nb && nb.owner === owner && keys.has(getHexKey(nb))) deg++;
+                    }
+                    if(deg <= 1) peel.push(hk);
+                }
+                if(peel.length) {
+                    changed = true;
+                    for(let hk of peel) {
+                        keys.delete(hk);
+                        removed.push(gameData.hexes[hk]);
+                    }
+                }
+            }
+            if(!removed.length) return;
+            let capturer = wodEncirclementCapturerForPocket(removed, owner);
+            if(capturer <= 0) return;
+            for(let hex of removed) w.changes.push({hex, owner: capturer});
         }
 
         function wodRegionHasOwnerCity(regionKeys, owner) {
@@ -18512,7 +18572,7 @@
                 return;
             }
             gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
-            let interval = 0.75 + Math.min(1.4, (gameData.hexList.length || 0) / 32000);
+            let interval = 0.85 + Math.min(1.6, (gameData.hexList.length || 0) / 32000);
             if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.45, 2.4);
             if(gameData.encirclementTimer < interval) return;
             gameData.encirclementTimer = 0;
@@ -18520,6 +18580,7 @@
                 visited: new Set(),
                 encircledHexes: new Set(),
                 encircledReliefHexes: new Set(),
+                changes: [],
                 idx: 0
             };
             wodEncirclementProcessChunk();
@@ -18586,21 +18647,38 @@
                             break;
                         }
                     }
-                    if(!hasOwnerCity && !hasOwnerCombatUnit) {
-                        let capturer = wodEncirclementCapturerForPocket(region, owner);
-                        if(capturer > 0) {
-                            for(let hex of region) setHexOwner(hex, capturer);
-                            continue;
-                        }
-                    }
                     for(let hex of region) {
                         let hk = getHexKey(hex);
                         w.encircledHexes.add(hk);
                         if(supplyRelief) w.encircledReliefHexes.add(hk);
                     }
+                    if(!hasOwnerCombatUnit) {
+                        let capturer = wodEncirclementCapturerForPocket(region, owner);
+                        if(capturer > 0) {
+                            for(let hex of region) w.changes.push({hex, owner: capturer});
+                        }
+                    } else {
+                        wodPeelUnitlessOwnerAppendices(region, owner, w, false);
+                    }
+                } else {
+                    let regionKeys = new Set(region.map(hex => getHexKey(hex)));
+                    let hasOwnerCombatUnit = false;
+                    for(let u of gameData.entities) {
+                        if(u.owner !== owner) continue;
+                        if(wodUnitInsideRegion(u, regionKeys)) {
+                            hasOwnerCombatUnit = true;
+                            break;
+                        }
+                    }
+                    if(!hasOwnerCombatUnit) wodPeelUnitlessOwnerAppendices(region, owner, w, true);
                 }
             }
             if(w.idx < list.length) return;
+            for(let change of w.changes) setHexOwner(change.hex, change.owner);
+            if(w.changes.length) {
+                wodMarkTerrainPoliticalDirty();
+                wodEvaluateAllCityCaptures();
+            }
             gameData.encircledHexes = w.encircledHexes;
             gameData.encircledReliefHexes = w.encircledReliefHexes;
             gameData._encircWork = null;
@@ -23973,7 +24051,6 @@
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
             wodBeginSimPfBudget(gameData.entities.length);
-            wodProcessArrowBuildQueue();
 
             // Economy (one pass over cities + one over units — avoids triple city scans)
             let incomeTick = getOwnerIncome(1);
@@ -28210,52 +28287,12 @@
             return deduped;
         }
 
-        function invalidateUnitOrderArrowCache(unit, full) {
-            if(!unit) return;
-            unit._routeArrowSig = null;
-            unit._routeArrowPts = null;
-            unit._routeArrowThrottleUntil = 0;
-            if(full) {
+        function invalidateUnitOrderArrowCache(unit) {
+            if(unit) {
+                unit._routeArrowSig = null;
+                unit._routeArrowThrottleUntil = 0;
                 unit._routeArrowFrozenPts = null;
                 unit._routeArrowMarchSig = null;
-                unit._routeArrowBuildSig = null;
-                unit._routeArrowStartX = null;
-                unit._routeArrowStartY = null;
-                if(gameData._arrowBuildQueued) gameData._arrowBuildQueued.delete(unit.uid);
-                if(gameData._arrowBuildQueue && gameData._arrowBuildQueue.length) {
-                    gameData._arrowBuildQueue = gameData._arrowBuildQueue.filter(uid => uid !== unit.uid);
-                }
-            }
-        }
-
-        function wodQueueFrozenOrderArrowBuild(unit) {
-            if(!unit || !unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0) return;
-            if(!gameData._arrowBuildQueue) gameData._arrowBuildQueue = [];
-            let sig = unit.fullMarchWaypoints.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
-            unit._routeArrowBuildSig = sig;
-            if(!gameData._arrowBuildQueued) gameData._arrowBuildQueued = new Set();
-            if(gameData._arrowBuildQueued.has(unit.uid)) return;
-            gameData._arrowBuildQueued.add(unit.uid);
-            gameData._arrowBuildQueue.push(unit.uid);
-        }
-
-        function wodProcessArrowBuildQueue() {
-            let q = gameData._arrowBuildQueue;
-            if(!q || !q.length) return;
-            let t0 = performance.now();
-            let built = 0;
-            while(q.length && built < 2 && performance.now() - t0 < 3.5) {
-                let uid = q.shift();
-                if(gameData._arrowBuildQueued) gameData._arrowBuildQueued.delete(uid);
-                let unit = null;
-                for(let i = 0, el = gameData.entities.length; i < el; i++) {
-                    if(gameData.entities[i].uid === uid) { unit = gameData.entities[i]; break; }
-                }
-                if(!unit || !unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0) continue;
-                let sig = unit.fullMarchWaypoints.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
-                if(unit._routeArrowBuildSig !== sig) continue;
-                wodFreezeOrderArrowPath(unit, unit.fullMarchWaypoints);
-                built++;
             }
         }
 
@@ -28271,34 +28308,39 @@
                 return;
             }
             let sig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
-            try {
-                let seg = buildConcatenatedHexPath(unit, marchPts);
-                if(!seg.length) {
-                    unit._routeArrowFrozenPts = null;
-                    unit._routeArrowMarchSig = sig;
-                    return;
-                }
-                let startX = unit._routeArrowStartX != null ? unit._routeArrowStartX : unit.x;
-                let startY = unit._routeArrowStartY != null ? unit._routeArrowStartY : unit.y;
-                let pts = [{x: startX, y: startY}];
-                for(let i = 1; i < seg.length; i++)
-                    pts.push({x: seg[i].x, y: seg[i].y});
-                unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
-                unit._routeArrowMarchSig = sig;
-            } catch(_) {
-                unit._routeArrowFrozenPts = null;
-                unit._routeArrowMarchSig = sig;
-            }
+            let pts = [{x: unit.x, y: unit.y}];
+            for(let wp of marchPts) pts.push({x: wp.x, y: wp.y});
+            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
+            unit._routeArrowMarchSig = sig;
         }
 
-        function wodInterimOrderArrowPoints(unit) {
-            if(!unit || !unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0) return null;
-            let sx = unit._routeArrowStartX != null ? unit._routeArrowStartX : unit.x;
-            let sy = unit._routeArrowStartY != null ? unit._routeArrowStartY : unit.y;
-            let pts = [{x: sx, y: sy}];
-            for(let i = 0; i < unit.fullMarchWaypoints.length; i++)
-                pts.push({x: unit.fullMarchWaypoints[i].x, y: unit.fullMarchWaypoints[i].y});
-            return dedupeNearOrderPathPoints(pts);
+        function wodSliceFrozenOrderArrowPath(unit, frozenPts) {
+            if(!frozenPts || frozenPts.length < 2) return null;
+            let bestI = 0;
+            let bestD = Infinity;
+            for(let i = 0; i < frozenPts.length; i++) {
+                let p = frozenPts[i];
+                let dx = p.x - unit.x;
+                let dy = p.y - unit.y;
+                let d = dx * dx + dy * dy;
+                if(d < bestD) {
+                    bestD = d;
+                    bestI = i;
+                }
+            }
+            let pts = [{x: unit.x, y: unit.y}];
+            for(let i = bestI; i < frozenPts.length; i++) {
+                let p = frozenPts[i];
+                if(pts.length === 1) {
+                    pts.push(p);
+                    continue;
+                }
+                let q = pts[pts.length - 1];
+                let dx = p.x - q.x;
+                let dy = p.y - q.y;
+                if(dx * dx + dy * dy > 2) pts.push(p);
+            }
+            return pts.length >= 2 ? pts : null;
         }
 
         function dedupeNearOrderPathPoints(pts) {
@@ -28317,13 +28359,28 @@
             return deduped;
         }
 
+        function computePathfindingOrderArrowPoints(unit) {
+            if(!unit || unit.hp <= 0) return null;
+            try {
+                if(!unit.fullMarchWaypoints || unit.fullMarchWaypoints.length === 0)
+                    return null;
+
+                let marchSig = wodMarchArrowSignature(unit);
+                if(unit._routeArrowFrozenPts && unit._routeArrowMarchSig === marchSig) {
+                    let sliced = wodSliceFrozenOrderArrowPath(unit, unit._routeArrowFrozenPts);
+                    if(sliced && sliced.length >= 2) return sliced;
+                }
+
+                return getUnitPathPoints(unit);
+            } catch(_) {
+                return null;
+            }
+        }
+
         function getDisplayedUnitOrderPathPoints(unit) {
-            if(unit._routeArrowFrozenPts && unit._routeArrowMarchSig === wodMarchArrowSignature(unit) &&
-                unit._routeArrowFrozenPts.length >= 2)
-                return unit._routeArrowFrozenPts;
-            if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
-                let interim = wodInterimOrderArrowPoints(unit);
-                if(interim && interim.length >= 2) return interim;
+            if(gameData.uiSettings && gameData.uiSettings.orderArrowsUsePathfinding) {
+                let alt = computePathfindingOrderArrowPoints(unit);
+                if(alt && alt.length >= 2) return alt;
             }
             return getUnitPathPoints(unit);
         }
@@ -29525,8 +29582,11 @@
                     let allIdle = units.every(u => !u.target && (!u.path || u.path.length === 0));
                     if(allIdle) gameData.playerShiftWaypoints = [];
                     if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
+                    else if(!allIdle) wodResyncPlayerShiftWaypointsFromUnits(units);
                     seedPlayerShiftWaypointsFromActiveMarch(units);
-                    wodPushShiftWaypoint(worldPos.x, worldPos.y);
+                    gameData.playerShiftWaypoints.push({x: worldPos.x, y: worldPos.y});
+                    if(gameData.playerShiftWaypoints.length > 28)
+                        gameData.playerShiftWaypoints = gameData.playerShiftWaypoints.slice(-28);
                     applyShiftWaypointMarch();
                 }
                 return;
@@ -29668,15 +29728,6 @@
             return wodAiMoveUnitToward(unit, hex.x + (Math.random() - 0.5) * j, hex.y + (Math.random() - 0.5) * j, holdingOpt);
         }
 
-        function wodPushShiftWaypoint(x, y) {
-            if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
-            if(gameData.playerShiftWaypoints.length >= WOD_MAX_SHIFT_WAYPOINTS) {
-                gameData.playerShiftWaypoints.shift();
-                showNotification('Waypoint limit reached — oldest waypoint dropped');
-            }
-            gameData.playerShiftWaypoints.push({x: x, y: y});
-        }
-
         function seedPlayerShiftWaypointsFromActiveMarch(units) {
             let wq = gameData.playerShiftWaypoints;
             if(!units || units.length === 0) return;
@@ -29745,11 +29796,31 @@
             if(n) gameData.playerShiftWaypoints = [{x: sx / n, y: sy / n}];
         }
 
+        function wodResyncPlayerShiftWaypointsFromUnits(units) {
+            if(!units || units.length === 0) {
+                gameData.playerShiftWaypoints = [];
+                return;
+            }
+            let ref = units[0];
+            if(ref.fullMarchWaypoints && ref.fullMarchWaypoints.length > 0) {
+                let c = Math.max(0, ref.marchWpCursor || 0);
+                gameData.playerShiftWaypoints = ref.fullMarchWaypoints.slice(c).map(p => ({x: p.x, y: p.y}));
+                return;
+            }
+            if(ref.orderTarget) {
+                gameData.playerShiftWaypoints = [{x: ref.orderTarget.x, y: ref.orderTarget.y}];
+                return;
+            }
+            if(ref.target) gameData.playerShiftWaypoints = [{x: ref.target.x, y: ref.target.y}];
+        }
+
         function applyShiftWaypointMarch() {
             let units = getMovableSelectedUnits();
             if(units.length === 0) return;
             let wps = gameData.playerShiftWaypoints;
             if(!wps || wps.length === 0) return;
+            const WOD_SHIFT_WP_MAX = 28;
+            if(wps.length > WOD_SHIFT_WP_MAX) wps = wps.slice(-WOD_SHIFT_WP_MAX);
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost && typeof WodMultiplayer !== 'undefined') {
                 WodMultiplayer.sendCmd({
                     kind: 'shiftMarch',
@@ -29782,6 +29853,7 @@
                 }
                 assignUnitMoveAlongWaypoints(unit, pathPts);
             });
+            wodResyncPlayerShiftWaypointsFromUnits(units);
             showNotification(wps.length === 1 ? 'Marching to waypoint' : `Marching via ${wps.length} waypoints`);
         }
 
@@ -29995,8 +30067,11 @@
                         let allIdle = units.every(u => !u.target && (!u.path || u.path.length === 0));
                         if(allIdle) gameData.playerShiftWaypoints = [];
                         if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
+                        else if(!allIdle) wodResyncPlayerShiftWaypointsFromUnits(units);
                         seedPlayerShiftWaypointsFromActiveMarch(units);
-                        wodPushShiftWaypoint(worldPos.x, worldPos.y);
+                        gameData.playerShiftWaypoints.push({x: worldPos.x, y: worldPos.y});
+                        if(gameData.playerShiftWaypoints.length > 28)
+                            gameData.playerShiftWaypoints = gameData.playerShiftWaypoints.slice(-28);
                         applyShiftWaypointMarch();
                     }
                 }
