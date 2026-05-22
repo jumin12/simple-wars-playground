@@ -1531,6 +1531,31 @@
             box-sizing: border-box;
         }
 
+        .info-effects-scroll .effect-pill--has-tip:hover,
+        .info-effects-scroll .effect-pill--has-tip:focus-visible {
+            z-index: 2;
+        }
+
+        .info-effects-scroll .effect-pill-tip {
+            bottom: auto;
+            top: calc(100% + 7px);
+            transform: translateX(-50%) translateY(-4px);
+        }
+
+        .info-effects-scroll .effect-pill-tip::after {
+            top: auto;
+            bottom: 100%;
+            border-top-color: transparent;
+            border-bottom-color: rgba(212, 175, 55, 0.55);
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            .info-effects-scroll .effect-pill--has-tip:hover .effect-pill-tip,
+            .info-effects-scroll .effect-pill--has-tip:focus-visible .effect-pill-tip {
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
         .info-name-row {
             display: flex;
             align-items: center;
@@ -1643,6 +1668,55 @@
 
         .effect-pill--terrain .effect-pill-stat {
             color: rgba(213, 232, 245, 0.95);
+        }
+
+        .effect-pill--has-tip {
+            position: relative;
+            cursor: help;
+        }
+
+        .effect-pill-tip {
+            position: absolute;
+            left: 50%;
+            bottom: calc(100% + 7px);
+            transform: translateX(-50%) translateY(4px);
+            min-width: 168px;
+            max-width: min(240px, 70vw);
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(212, 175, 55, 0.55);
+            background: rgba(10, 18, 28, 0.98);
+            color: rgba(236, 240, 241, 0.96);
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.38;
+            text-align: left;
+            white-space: normal;
+            box-shadow: 0 8px 22px rgba(0, 0, 0, 0.48);
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            z-index: 30;
+            transition: opacity 0.16s ease, transform 0.16s ease, visibility 0.16s ease;
+        }
+
+        .effect-pill-tip::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 100%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: rgba(212, 175, 55, 0.55);
+        }
+
+        @media (hover: hover) and (pointer: fine) {
+            .effect-pill--has-tip:hover .effect-pill-tip,
+            .effect-pill--has-tip:focus-visible .effect-pill-tip {
+                opacity: 1;
+                visibility: visible;
+                transform: translateX(-50%) translateY(0);
+            }
         }
 
         .info-mobile-orders {
@@ -17838,13 +17912,28 @@
                     });
                 }
                 let spd = getUnitSpeedMultiplier(unit);
+                let fortMarch = wodFortEnemyMovementSlowdownMultiplier(unit);
+                spd *= fortMarch;
                 let spdPct = Math.round(spd * 100);
                 let spdKind = spd > 1.04 ? 'buff' : (spd < 0.96 ? 'debuff' : 'neutral');
                 if(spdKind !== 'neutral') {
+                    let marchDetail = spdKind === 'buff'
+                        ? 'Morale and tile effects are helping movement.'
+                        : (fortMarch < 0.995
+                            ? 'An enemy fort aura is slowing march speed by 20%.'
+                            : 'Morale penalty or rough ground is slowing orders.');
                     effects.push({
                         label: 'March',
                         stats: `×${spdPct}%`,
-                        detail: spdKind === 'buff' ? 'Morale and tile effects are helping movement.' : 'Morale penalty, shallow water/rough ground, or an enemy fort zone is slowing orders.'
+                        detail: marchDetail
+                    });
+                }
+                if(fortMarch < 0.995) {
+                    effects.push({
+                        label: 'Enemy fort zone',
+                        stats: 'March ×80%',
+                        detail: 'Hostile fort combat aura — allied forts never apply this penalty.',
+                        warn: true
                     });
                 }
             } else if(hex && unit.type === 'convoy') {
@@ -27842,7 +27931,8 @@
             if(effect.block) cls += ' effect-pill--block';
             if(effect.warn) cls += ' effect-pill--warn';
             if(effect.terrain) cls += ' effect-pill--terrain';
-            let title = (effect.detail || '').replace(/"/g, '&quot;').replace(/&/g, '&amp;');
+            let tipText = effect.detail || effect.stats || effect.label || '';
+            if(tipText) cls += ' effect-pill--has-tip';
             let inner;
             if(effect.render === 'terrainCombat' && effect.atkPct != null && effect.defPct != null) {
                 inner = '<span class="effect-pill-label">' + wodEscapeEffectInner(effect.label) + '</span><span class="effect-pill-stat effect-pill-stat-chart">' + wodChartCombatStatMarkup(effect.atkPct | 0, effect.defPct | 0) + '</span>';
@@ -27853,7 +27943,10 @@
             } else {
                 inner = wodEscapeEffectInner(effect.label);
             }
-            return '<span class="' + cls + '" title="' + title + '">' + inner + '</span>';
+            let tipHtml = tipText
+                ? '<span class="effect-pill-tip" role="tooltip">' + wodEscapeEffectInner(tipText) + '</span>'
+                : '';
+            return '<span class="' + cls + '" tabindex="0">' + inner + tipHtml + '</span>';
         }
 
         function syncInfoCardPanel() {
@@ -27997,7 +28090,7 @@
                         + '|e:' + ((hx && gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hx))) ? '1' : '0');
                     if(hx && s.type !== 'convoy') {
                         sig += '|td:' + Math.round(getTerrainAttackModifier(s, hx) * 100) + ':' + Math.round(getTerrainDefenseModifier(s, hx) * 100);
-                        sig += '|spd:' + Math.round(getUnitSpeedMultiplier(s) * 100);
+                        sig += '|spd:' + Math.round(getUnitSpeedMultiplier(s) * wodFortEnemyMovementSlowdownMultiplier(s) * 100);
                     }
                 }
             } else sig = 'n|' + sel.length;
@@ -28660,6 +28753,52 @@
         }
         window.deselectAllSelection = deselectAllSelection;
 
+        function wodCloseHudMenusForSelection() {
+            let root = document.getElementById('inGameUI');
+            if(root) {
+                root.removeAttribute('data-mtab');
+                root.removeAttribute('data-build-picking');
+            }
+            if(typeof exitBuildPlacementMode === 'function') exitBuildPlacementMode();
+            if(typeof wodStatsMenuOpen === 'function' && wodStatsMenuOpen() && typeof toggleWodStatsPanel === 'function')
+                toggleWodStatsPanel(false);
+            let pop = document.getElementById('wodSpeedPop');
+            let trig = document.getElementById('wodSpeedTrigger');
+            if(pop) pop.hidden = true;
+            if(trig) trig.setAttribute('aria-expanded', 'false');
+            document.querySelectorAll('.wod-m-tab').forEach(b => {
+                let id = b.getAttribute('data-wod-mtab');
+                let on = id === 'intel' && typeof wodStatsMenuOpen === 'function' ? wodStatsMenuOpen() : false;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
+            if(typeof wodSyncViewportAndCanvas === 'function') wodSyncViewportAndCanvas();
+        }
+
+        function wodApplyMapSelection(item) {
+            if(!item) return false;
+            wodCloseHudMenusForSelection();
+            item.selected = true;
+            gameData.selection.push(item);
+            _infoCardUiThrottle.s = null;
+            syncInfoCardPanel();
+            return true;
+        }
+
+        function wodApplyMapSelectionBatch(items) {
+            if(!items || !items.length) return false;
+            wodCloseHudMenusForSelection();
+            for(let i = 0; i < items.length; i++) {
+                let item = items[i];
+                if(!item) continue;
+                item.selected = true;
+                gameData.selection.push(item);
+            }
+            _infoCardUiThrottle.s = null;
+            syncInfoCardPanel();
+            return true;
+        }
+
         function initWodHudDeselectOnClick() {
             let root = document.getElementById('inGameUI');
             if(!root || root._wodHudDeselectWired) return;
@@ -29114,24 +29253,21 @@
                         return;
                     }
                     let pickSel = wodPickCityOrUnitForMapSelection(worldPos);
-                    if(pickSel.city) {
-                        pickSel.city.selected = true; gameData.selection.push(pickSel.city); return;
-                    }
-                    if(pickSel.unit) {
-                        pickSel.unit.selected = true; gameData.selection.push(pickSel.unit); return;
-                    }
+                    if(pickSel.city) { wodApplyMapSelection(pickSel.city); return; }
+                    if(pickSel.unit) { wodApplyMapSelection(pickSel.unit); return; }
                 } else {
                     const worldL = (Math.min(cx, dragStart.x) + gameData.camera.x) / gameData.camera.zoom;
                     const worldR = (Math.max(cx, dragStart.x) + gameData.camera.x) / gameData.camera.zoom;
                     const worldT = (Math.min(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
                     const worldB = (Math.max(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
 
+                    let lo = wodLocalPlayerOwner();
+                    let batch = [];
                     for(let unit of gameData.entities) {
-                        let lo = wodLocalPlayerOwner();
-                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB) {
-                            unit.selected = true; gameData.selection.push(unit);
-                        }
+                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB)
+                            batch.push(unit);
                     }
+                    if(batch.length) wodApplyMapSelectionBatch(batch);
                 }
             } else if (e.button === 2 && shiftWaypointDrag.active) {
                 shiftWaypointDrag.active = false;
@@ -29387,14 +29523,8 @@
                         return;
                     }
                     let pickSel = wodPickCityOrUnitForMapSelection(worldPos);
-                    if(pickSel.city) {
-                        pickSel.city.selected = true; gameData.selection.push(pickSel.city);
-                        return;
-                    }
-                    if(pickSel.unit) {
-                        pickSel.unit.selected = true; gameData.selection.push(pickSel.unit);
-                        return;
-                    }
+                    if(pickSel.city) { wodApplyMapSelection(pickSel.city); return; }
+                    if(pickSel.unit) { wodApplyMapSelection(pickSel.unit); return; }
                     tryMobileMapOrderTap(touch.clientX, touch.clientY);
                 }
                 return;
@@ -29425,26 +29555,21 @@
                         return;
                     }
                     let pickSel = wodPickCityOrUnitForMapSelection(worldPos);
-                    if(pickSel.city) {
-                        pickSel.city.selected = true; gameData.selection.push(pickSel.city);
-                        return;
-                    }
-                    if(pickSel.unit) {
-                        pickSel.unit.selected = true; gameData.selection.push(pickSel.unit);
-                        return;
-                    }
+                    if(pickSel.city) { wodApplyMapSelection(pickSel.city); return; }
+                    if(pickSel.unit) { wodApplyMapSelection(pickSel.unit); return; }
                     tryMobileMapOrderTap(touch.clientX, touch.clientY);
                 } else {
                     const worldL = (Math.min(cx, dragStart.x) + gameData.camera.x) / gameData.camera.zoom;
                     const worldR = (Math.max(cx, dragStart.x) + gameData.camera.x) / gameData.camera.zoom;
                     const worldT = (Math.min(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
                     const worldB = (Math.max(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
+                    let lo = wodLocalPlayerOwner();
+                    let batch = [];
                     for(let unit of gameData.entities) {
-                        let lo = wodLocalPlayerOwner();
-                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB) {
-                            unit.selected = true; gameData.selection.push(unit);
-                        }
+                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB)
+                            batch.push(unit);
                     }
+                    if(batch.length) wodApplyMapSelectionBatch(batch);
                 }
                 return;
             }
@@ -29726,10 +29851,20 @@
             return (gameData.hexRadius || 10) * WOD_FORT_DEFENSE_TILES;
         }
 
+        function wodEffectiveFortOwner(ft) {
+            if(!ft) return 0;
+            let h = gameData.hexes[`${ft.q},${ft.r}`];
+            if(h && typeof h.owner === 'number' && h.owner >= 1) {
+                ft.owner = h.owner | 0;
+                return h.owner | 0;
+            }
+            return ft.owner | 0;
+        }
+
         /** Same-side troops in any one friendly fort aura take ×0.8 damage (does not stack with multiple forts). */
         function wodFortDefenseDamageMultiplier(defenderUnit) {
             if(!defenderUnit || defenderUnit.hp <= 0 || defenderUnit.type === 'convoy') return 1;
-            let ox = defenderUnit.owner;
+            let ox = defenderUnit.owner | 0;
             if(ox <= 0) return 1;
             let list = gameData.forts;
             if(!list || !list.length) return 1;
@@ -29737,7 +29872,7 @@
                 r2 = radius * radius;
             for(let i = list.length - 1; i >= 0; i--) {
                 let ft = list[i];
-                if(!ft || ft.owner !== ox) continue;
+                if(!ft || wodEffectiveFortOwner(ft) !== ox) continue;
                 let dx = defenderUnit.x - ft.x,
                     dy = defenderUnit.y - ft.y;
                 if(dx * dx + dy * dy <= r2) return 0.8;
@@ -29745,10 +29880,10 @@
             return 1;
         }
 
-        /** Enemy units inside a hostile fort aura move 20% slower (×0.8). */
+        /** Enemy units inside a hostile fort aura move 20% slower (×0.8). Friendly forts never slow allies. */
         function wodFortEnemyMovementSlowdownMultiplier(mover) {
             if(!mover || mover.hp <= 0 || mover.type === 'convoy') return 1;
-            let ox = mover.owner;
+            let ox = mover.owner | 0;
             if(ox <= 0) return 1;
             let list = gameData.forts;
             if(!list || !list.length) return 1;
@@ -29756,7 +29891,9 @@
                 r2 = radius * radius;
             for(let i = list.length - 1; i >= 0; i--) {
                 let ft = list[i];
-                if(!ft || ft.owner <= 0 || ft.owner === ox) continue;
+                if(!ft) continue;
+                let fo = wodEffectiveFortOwner(ft);
+                if(fo <= 0 || fo === ox) continue;
                 let dx = mover.x - ft.x,
                     dy = mover.y - ft.y;
                 if(dx * dx + dy * dy <= r2) return 0.8;
@@ -29920,11 +30057,7 @@
         function wodSyncFortOwnershipFromTerrain() {
             let list = gameData.forts;
             if(!list || !list.length) return;
-            for(let ft of list) {
-                let h = gameData.hexes[`${ft.q},${ft.r}`];
-                if(!h) continue;
-                if(typeof h.owner === 'number' && h.owner >= 1) ft.owner = h.owner;
-            }
+            for(let ft of list) wodEffectiveFortOwner(ft);
         }
         function wodDrawFortBunkerCore(ctx, w, h, fxLite, pal) {
             ctx.fillStyle = pal.wall;
