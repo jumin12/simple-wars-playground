@@ -7426,6 +7426,10 @@
         let wodPowWorkers = [];
         let wodPowWUrl = null;
         let wodPowParts = new Array(WOD_POW_PARTS).fill(null);
+        let wodSepWorker = null;
+        let wodSepWUrl = null;
+        let wodSepBusy = false;
+        let wodSepGen = 0;
         let wodMapGenWorker = null;
         let wodMapGenJobId = 0;
 
@@ -7520,8 +7524,8 @@
             if(wodPowWorkers.length === 0) return;
             let ents = gameData.entities;
             let n = ents.length;
-            if(n < 130) return;
-            if(n < 360 && ((gameData._wodSimTick | 0) % 2)) return;
+            if(n < 64) return;
+            if(n < 220 && ((gameData._wodSimTick | 0) % 2)) return;
             let maxP = Math.max(512, n + 64);
             if(!gameData._wodPowOwnPacked || gameData._wodPowOwnPacked.length < maxP) {
                 gameData._wodPowOwnPacked = new Uint16Array(maxP);
@@ -7547,6 +7551,131 @@
                     wodPowWorkers[p].postMessage({ o: o, m: m, a: bounds[p], b: bounds[p + 1], part: p });
                 }
             } catch(_) {}
+        }
+
+        function wodTerminateSepWorker() {
+            if(wodSepWorker) {
+                try { wodSepWorker.terminate(); } catch(_) {}
+                wodSepWorker = null;
+            }
+            if(wodSepWUrl) {
+                try { URL.revokeObjectURL(wodSepWUrl); } catch(_) {}
+                wodSepWUrl = null;
+            }
+            wodSepBusy = false;
+            if(gameData) gameData._wodSepApply = null;
+        }
+        function wodOnSepWorkerResult(ev) {
+            wodSepBusy = false;
+            let d = ev.data;
+            if(!d || !d.idx || !d.xs || !d.ys) return;
+            if(d.gen !== gameData._wodSepGen) return;
+            gameData._wodSepApply = d;
+        }
+        function wodEnsureSepWorker() {
+            if(wodSepWorker || typeof Worker === 'undefined') return;
+            try {
+                let code = 'self.onmessage=function(e){var d=e.data,n=d.n,xs=d.xs,ys=d.ys,rs=d.rs,own=d.own,idx=d.idx,cellSize=d.cellSize,sepPad=d.sepPad,ox=new Float32Array(n),oy=new Float32Array(n),i,j,bi,bucket,ddx,ddy,dist,minDist,overlap,px,py,cx,cy,dx,dy,key,cells={};for(i=0;i<n;i++){ox[i]=xs[i];oy[i]=ys[i];}function ck(x,y){return((x/cellSize)|0)+\',\'+((y/cellSize)|0);}for(i=0;i<n;i++){key=ck(xs[i],ys[i]);if(!cells[key])cells[key]=[];cells[key].push(i);}for(i=0;i<n;i++){cx=(ox[i]/cellSize)|0;cy=(oy[i]/cellSize)|0;for(dx=-1;dx<=1;dx++){for(dy=-1;dy<=1;dy++){bucket=cells[(cx+dx)+\',\'+(cy+dy)];if(!bucket)continue;for(bi=0;bi<bucket.length;bi++){j=bucket[bi];if(j<=i)continue;ddx=ox[j]-ox[i];ddy=oy[j]-oy[i];dist=Math.sqrt(ddx*ddx+ddy*ddy);minDist=rs[i]+rs[j]+6;if(dist<minDist&&dist>0){overlap=minDist-dist;px=(ddx/dist)*overlap*(own[i]===own[j]?0.42:0.48);py=(ddy/dist)*overlap*(own[i]===own[j]?0.42:0.48);ox[i]-=px;oy[i]-=py;ox[j]+=px;oy[j]+=py;}}}}}}postMessage({idx:idx,xs:ox,ys:oy,gen:d.gen},[ox.buffer,oy.buffer]);};';
+                wodSepWUrl = URL.createObjectURL(new Blob([code], {type: 'application/javascript'}));
+                wodSepWorker = new Worker(wodSepWUrl);
+                wodSepWorker.onmessage = wodOnSepWorkerResult;
+            } catch(_) {
+                wodTerminateSepWorker();
+            }
+        }
+        function wodApplySepWorkerResult(d) {
+            let idx = d.idx,
+                xs = d.xs,
+                ys = d.ys;
+            for(let j = 0, jl = idx.length; j < jl; j++) {
+                let u = gameData.entities[idx[j]];
+                if(!u || u.hp <= 0) continue;
+                u.x = xs[j];
+                u.y = ys[j];
+            }
+        }
+        function wodKickSepWorker(sepPad, cellSize) {
+            if(wodSepBusy || !wodSepWorker) return false;
+            let ents = gameData.entities;
+            let k = 0;
+            for(let i = 0, el = ents.length; i < el; i++) {
+                let u = ents[i];
+                if(!u || u.hp <= 0 || u.type === 'convoy') continue;
+                k++;
+            }
+            if(k < 64) return false;
+            let idx = new Uint32Array(k);
+            let xs = new Float32Array(k);
+            let ys = new Float32Array(k);
+            let rs = new Float32Array(k);
+            let own = new Uint16Array(k);
+            let pi = 0;
+            for(let i = 0, el = ents.length; i < el; i++) {
+                let u = ents[i];
+                if(!u || u.hp <= 0 || u.type === 'convoy') continue;
+                idx[pi] = i;
+                xs[pi] = u.x;
+                ys[pi] = u.y;
+                rs[pi] = u.radius || 10;
+                own[pi] = u.owner | 0;
+                pi++;
+            }
+            wodSepGen++;
+            gameData._wodSepGen = wodSepGen;
+            wodSepBusy = true;
+            try {
+                wodSepWorker.postMessage({
+                    n: k,
+                    idx: idx,
+                    xs: xs,
+                    ys: ys,
+                    rs: rs,
+                    own: own,
+                    cellSize: cellSize,
+                    sepPad: sepPad,
+                    gen: wodSepGen
+                }, [xs.buffer, ys.buffer]);
+            } catch(_) {
+                wodSepBusy = false;
+                return false;
+            }
+            return true;
+        }
+        function wodRunUnitSeparationSync(sepPad) {
+            if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return;
+            for(let i = 0, el = gameData.entities.length; i < el; i++) {
+                let u1 = gameData.entities[i];
+                if(u1.hp <= 0) continue;
+                let searchRadius = (u1.radius || 10) + sepPad;
+                forEachNearbyUnit(gameData.unitSpatialGrid, u1.x, u1.y, searchRadius, (u2) => {
+                    if(u2 === u1 || u2.hp <= 0 || (u2._gridIndex !== undefined && u2._gridIndex <= i)) return;
+                    if(u1.type === 'convoy' || u2.type === 'convoy') return;
+                    let dx = u2.x - u1.x;
+                    let dy = u2.y - u1.y;
+                    let dist = Math.sqrt(dx * dx + dy * dy);
+                    let minDist = (u1.radius || 10) + (u2.radius || 10) + 6;
+                    if(dist < minDist && dist > 0) {
+                        let overlap = minDist - dist;
+                        let pushStrength = u1.owner === u2.owner ? 0.42 : 0.48;
+                        let pushX = (dx / dist) * overlap * pushStrength;
+                        let pushY = (dy / dist) * overlap * pushStrength;
+                        u1.x -= pushX;
+                        u1.y -= pushY;
+                        u2.x += pushX;
+                        u2.y += pushY;
+                    }
+                });
+            }
+        }
+        function wodRunUnitSeparation(wodSkipSep, sepPad, cellSize) {
+            if(wodSkipSep) return;
+            if(gameData._wodSepApply) {
+                wodApplySepWorkerResult(gameData._wodSepApply);
+                gameData._wodSepApply = null;
+            }
+            wodEnsureSepWorker();
+            let kicked = wodKickSepWorker(sepPad, cellSize);
+            if(!kicked || gameData.entities.length < 120) wodRunUnitSeparationSync(sepPad);
         }
 
         let gameData = {
@@ -8884,6 +9013,8 @@
             }
             wodRebuildBridgeLandLinks();
             gameData._bridgeIndexSig = (list.length + ':' + list.map(b => b && b.id).join(','));
+            gameData._wodPfVer = (gameData._wodPfVer | 0) + 1;
+            if(gameData._wodPfCache) gameData._wodPfCache.clear();
         }
         function wodBridgeRegisterDeckHexes(br) {
             if(!br || !br.hexKeys) return;
@@ -16032,10 +16163,27 @@
                 targetHex = isBridgeHex(targetHex) ? targetHex : wodBridgeHexAtPoint(unit, targetHex.x, targetHex.y) || targetHex;
             if(!wodPathTileWalkable(unit, startHex, pathAllowWater) || !wodPathTileWalkable(unit, targetHex, pathAllowWater)) return [];
             if(wodHexKeysEqual(startHex, targetHex)) return [startHex];
+            let pfKey = null;
+            if(!skipBridgeCompose) {
+                pfKey = (gameData._wodPfVer | 0) + '|' + getHexKey(startHex) + '>' + getHexKey(targetHex) + '|' +
+                    pathMode + '|' + (unit.type || '') + '|' + (wodOrderIntoWater(unit, targetHex) ? 1 : 0);
+                if(gameData._wodPfCache) {
+                    let hit = gameData._wodPfCache.get(pfKey);
+                    if(hit) return hit.slice();
+                }
+            }
+            function wodStorePfPath(path) {
+                if(pfKey && path && path.length > 1) {
+                    if(!gameData._wodPfCache) gameData._wodPfCache = new Map();
+                    if(gameData._wodPfCache.size > 900) gameData._wodPfCache.clear();
+                    gameData._wodPfCache.set(pfKey, path.slice());
+                }
+                return path;
+            }
 
             if((unit.type === 'marine' || unit.type === 'ship') && isWaterHex(startHex) && isWaterHex(targetHex)) {
                 let g = buildGreedyWaterHexChain(unit, startHex, targetHex, unit.type === 'ship' ? 170 : 120);
-                if(g.length > 1) return smoothGridPath(g);
+                if(g.length > 1) return wodStorePfPath(smoothGridPath(g));
             }
 
             function runPathAst(forbidWater) {
@@ -16223,10 +16371,10 @@
                 return {path: [], cost: Infinity};
             }
 
-            if(pathMode === 'land') return runPathAst(true).path;
-            if(pathMode === 'army') return wodPickLandArmyMarchPath(unit, startHex, targetHex);
-            if(wodUnitPrefersLandOnlyPath(unit)) return wodPickLandArmyMarchPath(unit, startHex, targetHex);
-            return runPathAst(false).path;
+            if(pathMode === 'land') return wodStorePfPath(runPathAst(true).path);
+            if(pathMode === 'army') return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex));
+            if(wodUnitPrefersLandOnlyPath(unit)) return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex));
+            return wodStorePfPath(runPathAst(false).path);
         }
 
         function findGreedyWaterStep(unit, targetHex, opt) {
@@ -18084,9 +18232,6 @@
         /** While exchanging fire at weapon range, move at one-third speed (orders are no longer halted). */
         function getCombatMovementSlowdownFactor(unit, grid) {
             if(!unit || unit.type === 'convoy' || !grid || unit.moraleBroken) return 1;
-            let now = performance.now();
-            if(unit._wodCombatSlowUntil && now < unit._wodCombatSlowUntil)
-                return unit._wodCombatSlowMul == null ? 1 : unit._wodCombatSlowMul;
             let minDist2 = unit.range * unit.range;
             let fighting = (unit.damage || 0) > 0;
             let engaged = false;
@@ -18097,21 +18242,7 @@
                 if(dx * dx + dy * dy > minDist2) return;
                 if(fighting || (other.damage || 0) > 0) engaged = true;
             });
-            let mul = engaged ? (1 / 3) : 1;
-            unit._wodCombatSlowMul = mul;
-            unit._wodCombatSlowUntil = now + 220;
-            return mul;
-        }
-
-        function wodFortEnemyMovementSlowdownCached(unit) {
-            if(!unit) return 1;
-            let now = performance.now();
-            if(unit._wodFortSlowUntil && now < unit._wodFortSlowUntil)
-                return unit._wodFortSlowMul == null ? 1 : unit._wodFortSlowMul;
-            let mul = wodFortEnemyMovementSlowdownMultiplier(unit);
-            unit._wodFortSlowMul = mul;
-            unit._wodFortSlowUntil = now + 220;
-            return mul;
+            return engaged ? (1 / 3) : 1;
         }
 
         function moveUnitTowardTarget(unit, dt) {
@@ -18122,7 +18253,7 @@
             let dy = unit.target.y - unit.y;
             let dist = Math.sqrt(dx*dx + dy*dy);
             let combatSlow = getCombatMovementSlowdownFactor(unit, gameData.unitSpatialGrid);
-            let fortZoneSlow = wodFortEnemyMovementSlowdownCached(unit);
+            let fortZoneSlow = wodFortEnemyMovementSlowdownMultiplier(unit);
             let stepSpeed = unit.speed * getUnitSpeedMultiplier(unit) * WOD_MOVE_SPEED_FACTOR * combatSlow * fortZoneSlow;
             if(dist <= stepSpeed * dt) {
                 unit.x = unit.target.x;
@@ -19528,6 +19659,7 @@
             touchCamGesture = null;
             if(gameData) gameData._encircWork = null;
             wodTerminatePowWorkers();
+            wodTerminateSepWorker();
             wodSetMpMatchUiFlag(false);
         }
 
@@ -22373,8 +22505,6 @@
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
             gameData.aiStrategyTimer += dt;
             let stratEvery = wodUsesVisualViewportLayout() ? 1.75 : 1.4;
-            if(gameData.speed >= 2) stratEvery *= 1.25;
-            if(gameData.speed >= 3) stratEvery *= 1.2;
             if(gameData.aiStrategyTimer < stratEvery) return;
             gameData.aiStrategyTimer = 0;
 
@@ -22410,65 +22540,27 @@
             wodDrainAiStratFormationAndUnits();
         }
 
-        function update(dt, opt) {
-            opt = opt || {};
-            if(!opt.skipCamera) updateCamera(dt);
-
+        function update(dt) {
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
 
-            gameData._wodSimTick = (gameData._wodSimTick | 0) + 1;
-            let entCount = gameData.entities.length;
-            let refreshEcon = !gameData._wodEconCache || (gameData._wodSimTick % 3) === 0 ||
-                gameData._wodEconCacheEnts !== entCount;
-            let incomeTick, manpowerTick, expensesTick, upkeepByOwner, aiCitiesByOwner, aiIncomeByOwner, aiManpowerIncomeByOwner;
-            if(refreshEcon) {
-                incomeTick = getOwnerIncome(1);
-                manpowerTick = 0;
-                for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
-                    let city = gameData.cities[ci];
-                    if(city.owner !== 1) continue;
-                    manpowerTick += getCityManpowerIncome(city);
-                }
-                upkeepByOwner = {};
-                for(let ei = 0, elen = gameData.entities.length; ei < elen; ei++) {
-                    let u = gameData.entities[ei];
-                    if(u.hp <= 0) continue;
-                    let ow = u.owner;
-                    let up = getUnitUpkeep(u);
-                    upkeepByOwner[ow] = (upkeepByOwner[ow] || 0) + up;
-                }
-                expensesTick = upkeepByOwner[1] || 0;
-                aiCitiesByOwner = {};
-                aiIncomeByOwner = {};
-                aiManpowerIncomeByOwner = {};
-                for(let city of gameData.cities) {
-                    if(city.owner > 1) {
-                        if(!aiCitiesByOwner[city.owner]) {
-                            aiCitiesByOwner[city.owner] = [];
-                            aiIncomeByOwner[city.owner] = 0;
-                            aiManpowerIncomeByOwner[city.owner] = 0;
-                        }
-                        aiManpowerIncomeByOwner[city.owner] += getCityManpowerIncome(city);
-                        aiCitiesByOwner[city.owner].push(city);
-                    }
-                }
-                for(let owner in aiCitiesByOwner) aiIncomeByOwner[owner] = getOwnerIncome(parseInt(owner, 10));
-                gameData._wodEconCache = {
-                    incomeTick, manpowerTick, expensesTick, upkeepByOwner,
-                    aiCitiesByOwner, aiIncomeByOwner, aiManpowerIncomeByOwner
-                };
-                gameData._wodEconCacheEnts = entCount;
-            } else {
-                let c = gameData._wodEconCache;
-                incomeTick = c.incomeTick;
-                manpowerTick = c.manpowerTick;
-                expensesTick = c.expensesTick;
-                upkeepByOwner = c.upkeepByOwner;
-                aiCitiesByOwner = c.aiCitiesByOwner;
-                aiIncomeByOwner = c.aiIncomeByOwner;
-                aiManpowerIncomeByOwner = c.aiManpowerIncomeByOwner;
+            // Economy (one pass over cities + one over units — avoids triple city scans)
+            let incomeTick = getOwnerIncome(1);
+            let manpowerTick = 0;
+            for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                let city = gameData.cities[ci];
+                if(city.owner !== 1) continue;
+                manpowerTick += getCityManpowerIncome(city);
             }
+            let upkeepByOwner = {};
+            for(let ei = 0, elen = gameData.entities.length; ei < elen; ei++) {
+                let u = gameData.entities[ei];
+                if(u.hp <= 0) continue;
+                let ow = u.owner;
+                let up = getUnitUpkeep(u);
+                upkeepByOwner[ow] = (upkeepByOwner[ow] || 0) + up;
+            }
+            let expensesTick = upkeepByOwner[1] || 0;
             gameData.income = incomeTick;
             gameData.expenses = expensesTick;
             gameData.manpowerIncome = manpowerTick;
@@ -22497,6 +22589,21 @@
             // AI Economy & Spawning
             if(!gameData.aiMoneyByOwner || typeof gameData.aiMoneyByOwner !== 'object') gameData.aiMoneyByOwner = {};
             if(!gameData.aiManpowerByOwner || typeof gameData.aiManpowerByOwner !== 'object') gameData.aiManpowerByOwner = {};
+            let aiCitiesByOwner = {};
+            let aiIncomeByOwner = {};
+            let aiManpowerIncomeByOwner = {};
+            for(let city of gameData.cities) {
+                if(city.owner > 1) {
+                    if(!aiCitiesByOwner[city.owner]) {
+                        aiCitiesByOwner[city.owner] = [];
+                        aiIncomeByOwner[city.owner] = 0;
+                        aiManpowerIncomeByOwner[city.owner] = 0;
+                    }
+                    aiManpowerIncomeByOwner[city.owner] += getCityManpowerIncome(city);
+                    aiCitiesByOwner[city.owner].push(city);
+                }
+            }
+            for(let owner in aiCitiesByOwner) aiIncomeByOwner[owner] = getOwnerIncome(parseInt(owner, 10));
             for(let owner in aiCitiesByOwner) {
                 if(gameData.aiMoneyByOwner[owner] === undefined) gameData.aiMoneyByOwner[owner] = 1000;
                 if(gameData.aiManpowerByOwner[owner] === undefined) gameData.aiManpowerByOwner[owner] = 5000;
@@ -22559,37 +22666,14 @@
             }
 
             // Unit Collision (Separation)
-            let wodHeavyEnts = gameData.entities.length > 140;
+            gameData._wodSimTick = (gameData._wodSimTick | 0) + 1;
+            let wodHeavyEnts = gameData.entities.length > 160;
             let wodMob = wodUsesVisualViewportLayout();
-            let wodSkipSep = wodHeavyEnts && (gameData._wodSimTick % 2 === 0);
+            let wodSkipSep = wodMob && wodHeavyEnts && (gameData._wodSimTick % 2 === 0);
             let sepPad = wodMob && wodHeavyEnts ? 32 : 42;
             if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells)
                 gameData.unitSpatialGrid = buildUnitSpatialGrid(wodMob ? 120 : 96);
-            if(!wodSkipSep) {
-            for(let i=0; i<gameData.entities.length; i++) {
-                let u1 = gameData.entities[i];
-                if(u1.hp <= 0) continue;
-                let searchRadius = (u1.radius || 10) + sepPad;
-                forEachNearbyUnit(gameData.unitSpatialGrid, u1.x, u1.y, searchRadius, (u2) => {
-                    if(u2 === u1 || u2.hp <= 0 || (u2._gridIndex !== undefined && u2._gridIndex <= i)) return;
-                    if(u1.type === 'convoy' || u2.type === 'convoy') return;
-                    let dx = u2.x - u1.x;
-                    let dy = u2.y - u1.y;
-                    let dist2 = dx * dx + dy * dy;
-                    let minDist = (u1.radius || 10) + (u2.radius || 10) + 6;
-                    let minDist2 = minDist * minDist;
-                    if(dist2 < minDist2 && dist2 > 0.0001) {
-                        let dist = Math.sqrt(dist2);
-                        let overlap = minDist - dist;
-                        let pushStrength = u1.owner === u2.owner ? 0.42 : 0.48;
-                        let pushX = (dx/dist) * overlap * pushStrength;
-                        let pushY = (dy/dist) * overlap * pushStrength;
-                        u1.x -= pushX; u1.y -= pushY;
-                        u2.x += pushX; u2.y += pushY;
-                    }
-                });
-            }
-            }
+            wodRunUnitSeparation(wodSkipSep, sepPad, wodMob ? 120 : 96);
             for(let ui = 0; ui < gameData.entities.length; ui++) {
                 let u = gameData.entities[ui];
                 if(!u || u.hp <= 0 || u.type === 'ship') continue;
@@ -22833,7 +22917,7 @@
                     gameData._uiShipCache = getOwnerShipCount(loHudSim);
                 }
             }
-            if((gameData._wodSimTick % 4) === 0) wodSyncFortOwnershipFromTerrain();
+            wodSyncFortOwnershipFromTerrain();
             wodKickParallelTroopPowIfEligible();
             checkCampaignEndConditions(dt);
             if(gameData.mp && gameData.mp.enabled && gameData.mp.isHost) {
@@ -27463,8 +27547,17 @@
             if(UI.escMenu.classList.contains('hidden') && gameData.speed > 0) {
                 updateCamera(dt * gameData.speed);
                 let simDt = dt * gameData.speed;
-                if(simDt > 0.056) simDt = 0.056;
-                update(simDt, { skipCamera: true });
+                if(gameData.speed <= 1 && simDt <= 0.06) {
+                    update(simDt);
+                } else {
+                    let simRemain = simDt;
+                    let simChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
+                    while(simRemain > 0.0001) {
+                        let step = Math.min(simRemain, simChunk);
+                        update(step);
+                        simRemain -= step;
+                    }
+                }
             }
             draw();
             animationFrameId = requestAnimationFrame(gameLoop);
