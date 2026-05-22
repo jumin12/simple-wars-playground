@@ -11164,6 +11164,7 @@
             wodMarkTerrainFullDirty();
             updateTerrainKey();
             gameData.encircledHexes = new Set();
+            gameData.encircledReliefHexes = new Set();
             gameData._mpSyncCityWarKeys = new Set();
         }
         function wodMpRecordLocalMultiplayerOutcome(oc) {
@@ -11415,6 +11416,7 @@
             }
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
                 if(s.encircledKeys != null) gameData.encircledHexes = new Set(s.encircledKeys);
+                if(s.encircledReliefKeys != null) gameData.encircledReliefHexes = new Set(s.encircledReliefKeys);
                 if(s.cityWarKeys != null) gameData._mpSyncCityWarKeys = new Set(s.cityWarKeys);
             }
             if(s.matchEnd) wodMpClientApplyMatchEnd(s.matchEnd);
@@ -11434,6 +11436,7 @@
                 cityWarKeys = [...m];
             } catch(err) { cityWarKeys = []; }
             let encircledKeys = gameData.encircledHexes && gameData.encircledHexes.size ? [...gameData.encircledHexes] : [];
+            let encircledReliefKeys = gameData.encircledReliefHexes && gameData.encircledReliefHexes.size ? [...gameData.encircledReliefHexes] : [];
             let hudByOwner = null;
             if(gameData.mp.humanSlots && gameData.mp.humanSlots.length) {
                 hudByOwner = {};
@@ -11462,6 +11465,7 @@
                 forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
                 bridges: (gameData.bridges || []).map(wodStripBridgeForNet).filter(Boolean),
                 encircledKeys,
+                encircledReliefKeys,
                 cityWarKeys,
                 matchEnd: gameData._mpMatchEnd || undefined
             });
@@ -17894,12 +17898,16 @@
                 let fortFx = getFortDefenseEffect(unit);
                 if(fortFx) effects.push(fortFx);
                 if(gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hex))) {
+                    let relief = gameData.encircledReliefHexes && gameData.encircledReliefHexes.has(getHexKey(hex));
+                    let ratePct = relief ? '1.75' : '3.5';
                     effects.push({
                         label: 'Encircled',
-                        detail: 'This hex is cut off behind enemy lines. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
-                        stats: '−3.5% max HP/s · No heal until pocket breaks',
+                        detail: relief
+                            ? 'This pocket is cut off but a friendly city or fort still supplies it. Attrition is halved until territory reconnects.'
+                            : 'This hex is cut off behind enemy lines. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
+                        stats: `−${ratePct}% max HP/s · No heal until pocket breaks`,
                         block: true,
-                        warn: true
+                        warn: !relief
                     });
                 }
                 if(!unit.amphibInWater && !wodUnitOnBridgeDeck(unit) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
@@ -18037,6 +18045,7 @@
             gameData._encircWork = {
                 visited: new Set(),
                 encircledHexes: new Set(),
+                encircledReliefHexes: new Set(),
                 changes: [],
                 idx: 0
             };
@@ -18091,6 +18100,19 @@
                             break;
                         }
                     }
+                    let hasOwnerFort = false;
+                    let fortList = gameData.forts;
+                    if(fortList && fortList.length) {
+                        for(let fi = 0, fl = fortList.length; fi < fl; fi++) {
+                            let ft = fortList[fi];
+                            if(!ft || wodEffectiveFortOwner(ft) !== owner) continue;
+                            if(regionKeys.has(`${ft.q},${ft.r}`)) {
+                                hasOwnerFort = true;
+                                break;
+                            }
+                        }
+                    }
+                    let supplyRelief = hasOwnerCity || hasOwnerFort;
                     let hasOwnerCombatUnit = false;
                     for(let u of gameData.entities) {
                         if(u.hp <= 0 || u.type === 'convoy' || u.owner !== owner) continue;
@@ -18100,13 +18122,15 @@
                             break;
                         }
                     }
-                    if(!hasOwnerCity) {
-                        for(let hex of region) w.encircledHexes.add(getHexKey(hex));
-                        if(!hasOwnerCombatUnit) {
-                            let capturer = wodDominantEncircler(wodEncirclementBorderHostileCounts(region, owner));
-                            if(capturer > 0) {
-                                for(let hex of region) w.changes.push({hex, owner: capturer});
-                            }
+                    for(let hex of region) {
+                        let hk = getHexKey(hex);
+                        w.encircledHexes.add(hk);
+                        if(supplyRelief) w.encircledReliefHexes.add(hk);
+                    }
+                    if(!hasOwnerCity && !hasOwnerCombatUnit) {
+                        let capturer = wodDominantEncircler(wodEncirclementBorderHostileCounts(region, owner));
+                        if(capturer > 0) {
+                            for(let hex of region) w.changes.push({hex, owner: capturer});
                         }
                     }
                 }
@@ -18114,6 +18138,7 @@
             if(w.idx < list.length) return;
             for(let change of w.changes) setHexOwner(change.hex, change.owner);
             gameData.encircledHexes = w.encircledHexes;
+            gameData.encircledReliefHexes = w.encircledReliefHexes;
             gameData._encircWork = null;
         }
 
@@ -18892,6 +18917,14 @@
                     unit.target = {x: hop.x, y: hop.y, pathPrepared: true, landGreedy: true};
                     return true;
                 }
+                if(!wodMpIsHumanOwner(unit.owner)) {
+                    let detour = findLocalDetourHex(unit, finalTarget.x, finalTarget.y);
+                    if(detour && (!startHex || detour.q !== startHex.q || detour.r !== startHex.r)) {
+                        unit.path = null;
+                        unit.target = {x: detour.x, y: detour.y, detour: true, finalTarget, pathPrepared: true};
+                        return true;
+                    }
+                }
             }
             if(path.length > 1) {
                 let endPt = {x: finalTarget.x, y: finalTarget.y};
@@ -19150,10 +19183,10 @@
             let movedSq = (unit.x - prevX) * (unit.x - prevX) + (unit.y - prevY) * (unit.y - prevY);
             if(movedSq < 0.04 && dist > Math.max(10, unit.radius || 10)) {
                 unit.stuckTimer = (unit.stuckTimer || 0) + dt;
-                let stuckLimit = 0.8;
+                let stuckLimit = wodMpIsHumanOwner(unit.owner) ? 0.8 : 0.52;
                 let ch = getNearestHexToPoint(unit.x, unit.y);
                 if(ch && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute) &&
-                    getNeighborHexes(ch).some(n => n && n.type === 'mountain')) stuckLimit = 0.9;
+                    getNeighborHexes(ch).some(n => n && n.type === 'mountain')) stuckLimit = wodMpIsHumanOwner(unit.owner) ? 0.9 : 0.38;
                 if(unit.stuckTimer > stuckLimit) {
                     unit.stuckTimer = 0;
                     replanUnitOrder(unit);
@@ -21713,6 +21746,7 @@
             await wodCarveProceduralRivers(seedOffset, mapShape, cols, rows);
             await wodPaintCoastalSandAllLand();
             await wodCoalesceTerrainSpeckles(2);
+            await wodEnsureMountainLandOutlets();
             wodCaptureTerrainPoliticsBase();
 
             if(!wodMapLandFractionAcceptable(mapShape)) {
@@ -22027,6 +22061,12 @@
                 }
                 if(!hit) break;
             }
+        }
+
+        /** Re-run pass carving after late terrain passes so no land pocket is fully ringed by mountains. */
+        async function wodEnsureMountainLandOutlets() {
+            await ensureMountainPasses();
+            await softenLandFullyBlockedByMountainRing();
         }
 
         /** BFS from each faction's towns so every owned infantry-passable tile can reach at least one friendly city footprint. */
@@ -22645,6 +22685,28 @@
             return findAiFrontlineAssignment({owner, type: 'light', x: focus.x, y: focus.y, range: 50});
         }
 
+        function wodPickAiSectorForUnit(unit, sectors) {
+            if(!sectors || !sectors.length) return null;
+            let best = null;
+            let bestScore = Infinity;
+            for(let i = 0; i < sectors.length; i++) {
+                let s = sectors[i];
+                if(!canUnitEnterHex(unit, s.holdHex)) continue;
+                let support = countNearbyUnits(unit.owner, s.holdHex.x, s.holdHex.y, 190);
+                let enemies = countNearbyUnits(unit.owner, s.holdHex.x, s.holdHex.y, 210, true);
+                let deficit = Math.max(0, (enemies + 1) * 1.25 - (support + 1));
+                let cityObj = gameData.cities.some(c => c.owner !== unit.owner && c.q === s.attackHex.q && c.r === s.attackHex.r) ? -420000 : 0;
+                let dx = s.holdHex.x - unit.x;
+                let dy = s.holdHex.y - unit.y;
+                let score = dx * dx + dy * dy + deficit * 92000 + i * 1800 - cityObj;
+                if(score < bestScore) {
+                    bestScore = score;
+                    best = { holdHex: s.holdHex, attackHex: s.attackHex, support, enemies };
+                }
+            }
+            return best;
+        }
+
         function buildAiFrontlineSectors(owner, want) {
             let fake = {type: 'light', owner};
             let candidates = [];
@@ -23220,7 +23282,6 @@
             if(w.phase === 'units') {
                 let ents = gameData.entities;
                 let mobMemo = w.mobMemo;
-                let assignByOwner = w.assignByOwner;
                 // Keep AI pulses incremental on every platform; a full-faction pulse was the source of periodic hitches.
                 let BATCH = wodUsesVisualViewportLayout() ? 22 : 52;
                 let nExamined = 0;
@@ -23283,13 +23344,36 @@
 
                     if(unit.retreating && hpRatio > 0.65) unit.retreating = false;
                     if(unit.aiFormationSerial === w.serial) continue;
-                    if(unit.target && !unit.holding) continue;
-
-                    let assignment = assignByOwner[unit.owner + '|' + (unit.type || 'light')];
-                    if(assignment === undefined) {
-                        assignment = findAiFrontlineAssignment(unit);
-                        assignByOwner[unit.owner + '|' + (unit.type || 'light')] = assignment;
+                    if(unit.target && !unit.holding) {
+                        let nearMtn = false;
+                        let chSt = getNearestHexToPoint(unit.x, unit.y);
+                        if(chSt && unit.type !== 'ship')
+                            nearMtn = getNeighborHexes(chSt).some(n => n && n.type === 'mountain');
+                        let stuckLim = nearMtn ? 0.22 : 0.42;
+                        let blkLim = nearMtn ? 0.18 : 0.32;
+                        if((unit.stuckTimer || 0) < stuckLim && (unit.blockedTimer || 0) < blkLim) continue;
+                        let ft = unit.orderTarget || (unit.target.finalTarget
+                            ? { x: unit.target.finalTarget.x, y: unit.target.finalTarget.y }
+                            : { x: unit.target.x, y: unit.target.y });
+                        unit.path = null;
+                        unit.orderTarget = ft;
+                        unit.target = null;
+                        unit.fullMarchWaypoints = null;
+                        unit.marchWpCursor = 0;
+                        unit.stuckTimer = 0;
+                        unit.blockedTimer = 0;
                     }
+
+                    let sectors = w.sectorsByOwner[unit.owner];
+                    if(!sectors) {
+                        let readyN = (w.aiGroups[unit.owner] || []).filter(u =>
+                            u.type !== 'convoy' && u.type !== 'ship' && u.hp > u.maxHp * 0.35 && !u.moraleBroken && !u.retreating
+                        ).length;
+                        sectors = buildAiFrontlineSectors(unit.owner, Math.min(24, Math.max(8, Math.ceil(readyN * 0.42))));
+                        w.sectorsByOwner[unit.owner] = sectors;
+                    }
+                    let assignment = wodPickAiSectorForUnit(unit, sectors);
+                    if(!assignment) assignment = findAiFrontlineAssignment(unit);
                     if(!assignment) {
                         let fallback = findNearestOwnedHex(unit.owner, unit.x, unit.y, true);
                         if(fallback) wodAiMoveUnitTowardHex(unit, fallback, false, 0.15);
@@ -23366,7 +23450,7 @@
                 aiGroups,
                 serial: gameData.aiStrategySerial,
                 mobMemo,
-                assignByOwner: {},
+                sectorsByOwner: {},
                 ei: 0
             };
             wodDrainAiStratFormationAndUnits();
@@ -23712,7 +23796,9 @@
 
                 let currentHex = getNearestHexToPoint(unit.x, unit.y);
                 if(gameData.encircledHexes && currentHex && gameData.encircledHexes.has(getHexKey(currentHex))) {
-                    applyDamage(unit, unit.maxHp * 0.035 * dt, 0);
+                    let encRate = 0.035;
+                    if(gameData.encircledReliefHexes && gameData.encircledReliefHexes.has(getHexKey(currentHex))) encRate *= 0.5;
+                    applyDamage(unit, unit.maxHp * encRate * dt, 0);
                     unit.encircledFlash = 0.35;
                 } else if(unit.encircledFlash) {
                     unit.encircledFlash = Math.max(0, unit.encircledFlash - dt);
