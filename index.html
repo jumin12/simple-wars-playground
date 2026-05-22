@@ -1593,6 +1593,50 @@
             border-bottom-color: rgba(212, 175, 55, 0.55);
         }
 
+        #wodFxTip.wod-hud-tip-panel {
+            min-width: 210px;
+            max-width: min(320px, calc(100vw - 24px));
+            padding: 10px 12px;
+        }
+
+        .wod-hud-tip-title {
+            font-size: 12px;
+            font-weight: 800;
+            color: #f1c40f;
+            margin-bottom: 6px;
+        }
+
+        .wod-hud-tip-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 11px;
+            line-height: 1.45;
+            color: rgba(236, 240, 241, 0.94);
+            padding: 2px 0;
+        }
+
+        .wod-hud-tip-row span:last-child {
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+
+        .wod-hud-tip-row--expense span:last-child {
+            color: #e74c3c;
+        }
+
+        .wod-hud-tip-row--total {
+            margin-top: 5px;
+            padding-top: 5px;
+            border-top: 1px solid rgba(212, 175, 55, 0.28);
+            font-weight: 800;
+        }
+
+        .wod-hud-tip-host {
+            cursor: help;
+        }
+
         .info-name-row {
             display: flex;
             align-items: center;
@@ -7097,12 +7141,12 @@
             </div>
             <div class="wod-hud-top">
                 <div class="wod-hud-compact" aria-label="Economy and manpower summary">
-                    <div class="wod-hud-compact-group">
+                    <div class="wod-hud-compact-group wod-hud-tip-host" data-hud-tip="economy">
                         <span class="wod-hud-compact-title">Economy</span>
                         <span class="wod-hud-compact-total" data-ui-sync="ui-money">0</span>
                         <span class="wod-hud-compact-rate" id="ui-economy-net" data-ui-sync="ui-economy-net">+0/s</span>
                     </div>
-                    <div class="wod-hud-compact-group">
+                    <div class="wod-hud-compact-group wod-hud-tip-host" data-hud-tip="manpower">
                         <span class="wod-hud-compact-title">Manpower</span>
                         <span class="wod-hud-compact-total" data-ui-sync="ui-manpower">0</span>
                         <span class="wod-hud-compact-rate" id="ui-manpower-net" data-ui-sync="ui-manpower-net">+0/s</span>
@@ -7252,6 +7296,8 @@
                     <div class="info-record-grid">
                         <div class="info-record-item"><span>Kills</span><strong id="infoRecordKills">0</strong></div>
                         <div class="info-record-item"><span>Losses</span><strong id="infoRecordLosses">0</strong></div>
+                        <div class="info-record-item" id="infoRecordTankKillsRow" hidden><span>Tanks killed</span><strong id="infoRecordTankKills">0</strong></div>
+                        <div class="info-record-item" id="infoRecordTankLossesRow" hidden><span>Tanks lost</span><strong id="infoRecordTankLosses">0</strong></div>
                         <div class="info-record-item info-record-item--wide"><span>Experience</span><strong id="infoRecordXp">0</strong></div>
                         <div class="info-record-item info-record-item--wide"><span>Status</span><strong id="infoRecordRank">Regular</strong></div>
                     </div>
@@ -7283,7 +7329,7 @@
                                 <span class="wod-m-sheet-sub">Economy · losses · standings</span>
                             </div>
                             <div class="resources">
-                            <div class="resource-section">
+                            <div class="resource-section wod-hud-tip-host" data-hud-tip="economy">
                                 <div class="resource-section-label">Economy</div>
                                 <div class="resource-section-chips">
                                     <div class="resource-chip">Cash <span class="chip-value" id="ui-money">0</span></div>
@@ -7293,7 +7339,7 @@
                                 </div>
                             </div>
                             <span class="resources-divider" aria-hidden="true"></span>
-                            <div class="resource-section">
+                            <div class="resource-section wod-hud-tip-host" data-hud-tip="manpower">
                                 <div class="resource-section-label">Manpower</div>
                                 <div class="resource-section-chips">
                                     <div class="resource-chip">Pool <span class="chip-value" id="ui-manpower">0</span></div>
@@ -13161,15 +13207,74 @@
             return name;
         }
 
-        function generateUnitName(type, convoySea) {
-            let num = Math.floor(Math.random() * 999) + 1;
+        function wodOrdinal(n) {
+            n = Math.floor(Math.abs(n));
+            let mod10 = n % 10;
+            let mod100 = n % 100;
+            if(mod100 >= 11 && mod100 <= 13) return n + 'th';
+            if(mod10 === 1) return n + 'st';
+            if(mod10 === 2) return n + 'nd';
+            if(mod10 === 3) return n + 'rd';
+            return n + 'th';
+        }
+
+        function wodUnitNameSerialKey(type) {
+            if(type === 'heavy') return 'armor';
+            if(type === 'ship') return 'ship';
+            if(type === 'convoy') return 'convoy';
+            if(type === 'light' || type === 'marine') return 'infantry';
+            return 'other';
+        }
+
+        function wodFormatUnitName(type, num, convoySea) {
             let f = wodPeriodFlavor(wodGetMatchPeriod());
             if(type === 'light') return f.unitLight(num);
             if(type === 'marine') return f.unitMarine(num);
             if(type === 'heavy') return f.unitHeavy(num);
             if(type === 'ship') return f.unitShip(num);
             if(type === 'convoy') return f.unitConvoy(num, convoySea);
-            return "Unit " + num;
+            return 'Unit ' + wodOrdinal(num);
+        }
+
+        function wodAllocateUnitName(type, owner, convoySea) {
+            owner = owner || 1;
+            if(!gameData._unitNameSerial) gameData._unitNameSerial = {};
+            if(!gameData._unitNameSerial[owner]) gameData._unitNameSerial[owner] = {};
+            let key = wodUnitNameSerialKey(type);
+            let n = (gameData._unitNameSerial[owner][key] || 0) + 1;
+            gameData._unitNameSerial[owner][key] = n;
+            return wodFormatUnitName(type, n, convoySea);
+        }
+
+        function wodRenumberOwnerUnits(owner) {
+            let groups = { infantry: [], armor: [], ship: [], convoy: [] };
+            for(let u of gameData.entities) {
+                if(u.owner !== owner || u.hp <= 0) continue;
+                if(u.type === 'convoy') groups.convoy.push(u);
+                else if(u.type === 'heavy') groups.armor.push(u);
+                else if(u.type === 'ship') groups.ship.push(u);
+                else if(u.type === 'light' || u.type === 'marine') groups.infantry.push(u);
+            }
+            if(!gameData._unitNameSerial) gameData._unitNameSerial = {};
+            if(!gameData._unitNameSerial[owner]) gameData._unitNameSerial[owner] = {};
+            for(let key of Object.keys(groups)) {
+                groups[key].sort((a, b) => String(a.uid || '').localeCompare(String(b.uid || '')));
+                gameData._unitNameSerial[owner][key] = groups[key].length;
+                for(let i = 0; i < groups[key].length; i++) {
+                    let u = groups[key][i];
+                    u.name = wodFormatUnitName(u.type, i + 1, !!u.convoySeaRoute);
+                }
+            }
+        }
+
+        function wodRenumberAllFactionUnits() {
+            let owners = new Set();
+            for(let u of gameData.entities) if(u.owner > 0 && u.hp > 0) owners.add(u.owner);
+            for(let owner of owners) wodRenumberOwnerUnits(owner);
+        }
+
+        function generateUnitName(type, convoySea, owner) {
+            return wodAllocateUnitName(type, owner || 1, convoySea);
         }
 
         // Simple hash-based 2D noise for terrain
@@ -14751,6 +14856,97 @@
             return total;
         }
 
+        function wodBuildEconomyBreakdownHtml(owner) {
+            let lines = [];
+            let cityTotal = 0;
+            for(let city of gameData.cities) {
+                if(city.owner !== owner) continue;
+                let inc = getCityIncome(city);
+                cityTotal += inc;
+                let bd = getCityIncomeBreakdown(city);
+                let label = city.name || 'Town';
+                let detail = `Base +${bd.base}/s`;
+                if(bd.factory > 0) detail += ` · Factory +${bd.factory}/s`;
+                if(bd.harbor > 0) detail += ` · Harbor +${bd.harbor}/s`;
+                if(bd.bonus > 0) detail += ` · Bonus +${bd.bonus}/s`;
+                lines.push({ label, value: formatSigned(inc, '/s'), detail, expense: false });
+            }
+            let land = getOwnerLandIncome(owner);
+            lines.push({ label: 'Land tiles', value: formatSigned(land, '/s'), detail: 'Territory tile income.', expense: false });
+            let income = cityTotal + land;
+            let upkeep = getOwnerExpenses(owner);
+            let upkeepByType = { light: 0, marine: 0, heavy: 0, ship: 0 };
+            for(let unit of gameData.entities) {
+                if(unit.owner !== owner || unit.hp <= 0 || unit.type === 'convoy') continue;
+                upkeepByType[unit.type] = (upkeepByType[unit.type] || 0) + getUnitUpkeep(unit);
+            }
+            let pf = wodPeriodFlavor(wodGetMatchPeriod());
+            if(upkeepByType.light > 0) lines.push({ label: pf.light + ' upkeep', value: formatSigned(-upkeepByType.light, '/s'), expense: true });
+            if(upkeepByType.marine > 0) lines.push({ label: pf.marine + ' upkeep', value: formatSigned(-upkeepByType.marine, '/s'), expense: true });
+            if(upkeepByType.heavy > 0) lines.push({ label: pf.heavy + ' upkeep', value: formatSigned(-upkeepByType.heavy, '/s'), expense: true });
+            if(upkeepByType.ship > 0) lines.push({ label: pf.ship + ' upkeep', value: formatSigned(-upkeepByType.ship, '/s'), expense: true });
+            let net = income - upkeep;
+            let html = '<div class="wod-hud-tip-title">Economy ' + formatSigned(net, '/s') + '</div>';
+            for(let row of lines) {
+                html += '<div class="wod-hud-tip-row' + (row.expense ? ' wod-hud-tip-row--expense' : '') + '" title="' + wodEscapeEffectInner(row.detail) + '"><span>' + wodEscapeEffectInner(row.label) + '</span><span>' + wodEscapeEffectInner(row.value) + '</span></div>';
+            }
+            html += '<div class="wod-hud-tip-row wod-hud-tip-row--total"><span>Net cash</span><span>' + wodEscapeEffectInner(formatSigned(net, '/s')) + '</span></div>';
+            return html;
+        }
+
+        function wodBuildManpowerBreakdownHtml(owner) {
+            let lines = [];
+            let growth = 0;
+            for(let city of gameData.cities) {
+                if(city.owner !== owner) continue;
+                let mp = getCityManpowerIncome(city);
+                growth += mp;
+                let bd = getCityManpowerBreakdown(city);
+                let label = city.name || 'Town';
+                let detail = `Base +${bd.base}/s`;
+                if(bd.factory > 0) detail += ` · Factory +${bd.factory}/s`;
+                if(bd.bonus > 0) detail += ` · Bonus +${bd.bonus}/s`;
+                lines.push({ label, value: formatSigned(mp, '/s'), detail, expense: false });
+            }
+            let html = '<div class="wod-hud-tip-title">Manpower ' + formatSigned(growth, '/s') + '</div>';
+            for(let row of lines) {
+                html += '<div class="wod-hud-tip-row" title="' + wodEscapeEffectInner(row.detail) + '"><span>' + wodEscapeEffectInner(row.label) + '</span><span>' + wodEscapeEffectInner(row.value) + '</span></div>';
+            }
+            html += '<div class="wod-hud-tip-row wod-hud-tip-row--total"><span>Reserve growth</span><span>' + wodEscapeEffectInner(formatSigned(growth, '/s')) + '</span></div>';
+            html += '<div class="wod-hud-tip-row"><span>Field troops</span><span>' + wodEscapeEffectInner(formatFullCount(getOwnerTroopManpower(owner))) + '</span></div>';
+            html += '<div class="wod-hud-tip-row"><span>Armor in field</span><span>' + wodEscapeEffectInner(formatTanks(getOwnerTanks(owner))) + '</span></div>';
+            return html;
+        }
+
+        function wodBindHudResourceTooltips() {
+            if(wodBindHudResourceTooltips._bound) return;
+            wodBindHudResourceTooltips._bound = true;
+            document.querySelectorAll('.wod-hud-tip-host[data-hud-tip]').forEach((host) => {
+                host.addEventListener('mouseenter', () => {
+                    let kind = host.getAttribute('data-hud-tip');
+                    if(!kind || gameState !== 'PLAYING') return;
+                    let owner = wodLocalPlayerOwner();
+                    let floater = wodEnsureFxTipEl();
+                    floater.classList.add('wod-hud-tip-panel');
+                    floater.innerHTML = kind === 'economy'
+                        ? wodBuildEconomyBreakdownHtml(owner)
+                        : wodBuildManpowerBreakdownHtml(owner);
+                    floater.hidden = false;
+                    let r = host.getBoundingClientRect();
+                    let left = Math.max(12, Math.min(window.innerWidth - 12, r.left + r.width * 0.5));
+                    let top = Math.min(window.innerHeight - 12, r.bottom + 8);
+                    floater.style.left = Math.round(left) + 'px';
+                    floater.style.top = Math.round(top) + 'px';
+                });
+                host.addEventListener('mouseleave', () => {
+                    let floater = wodEnsureFxTipEl();
+                    floater.hidden = true;
+                    floater.classList.remove('wod-hud-tip-panel');
+                    floater.textContent = '';
+                });
+            });
+        }
+
         function getOwnerIncome(owner) {
             let total = 0;
             for(let city of gameData.cities) {
@@ -14796,6 +14992,36 @@
             if(city.hasFactory) total += 2;
             total += city.manpowerBonus || 0;
             return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT * 1000) / 1000;
+        }
+
+        function getCityIncomeBreakdown(city) {
+            let mult = WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT;
+            let base = 5;
+            let factory = city.hasFactory ? 10 : 0;
+            let harbor = city.hasHarbor ? 3 : 0;
+            let bonus = city.incomeBonus || 0;
+            let round = (v) => Math.round(v * mult * 1000) / 1000;
+            return {
+                base: round(base),
+                factory: round(factory),
+                harbor: round(harbor),
+                bonus: round(bonus),
+                total: getCityIncome(city)
+            };
+        }
+
+        function getCityManpowerBreakdown(city) {
+            let mult = WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT;
+            let base = 7;
+            let factory = city.hasFactory ? 2 : 0;
+            let bonus = city.manpowerBonus || 0;
+            let round = (v) => Math.round(v * mult * 1000) / 1000;
+            return {
+                base: round(base),
+                factory: round(factory),
+                bonus: round(bonus),
+                total: getCityManpowerIncome(city)
+            };
         }
 
         function getCityUrbanTerrainHexes(city) {
@@ -15213,6 +15439,7 @@
                 tankLosses = Math.min(prevTanks, hpLossRatio * 500);
                 if(unit.hp <= 0) tankLosses = prevTanks;
                 unit.tanks = Math.max(0, prevTanks - tankLosses);
+                if(tankLosses > 0) unit.tankLosses = (unit.tankLosses || 0) + tankLosses;
                 addTankCasualties(unit.owner, tankLosses, source);
             }
             if(unit.type === 'ship' && prevHpAlive && unit.hp <= 0) {
@@ -18095,6 +18322,50 @@
             return counts;
         }
 
+        function wodEncirclementCapturerForPocket(region, owner) {
+            let counts = wodEncirclementBorderHostileCounts(region, owner);
+            let capturer = wodDominantEncircler(counts);
+            if(capturer > 0) return capturer;
+            let regionKeys = new Set(region.map(hex => getHexKey(hex)));
+            let proxy = {};
+            for(let hex of region) {
+                for(let dir of hexDirections) {
+                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
+                    if(nHex.owner !== 0) continue;
+                    for(let dir2 of hexDirections) {
+                        let nn = gameData.hexes[`${nHex.q + dir2.q},${nHex.r + dir2.r}`];
+                        if(!nn || isWaterHex(nn) || !isClaimableLand(nn)) continue;
+                        if(nn.owner > 0 && nn.owner !== owner && !regionKeys.has(getHexKey(nn)))
+                            proxy[nn.owner] = (proxy[nn.owner] || 0) + 1;
+                    }
+                }
+            }
+            return wodDominantEncircler(proxy);
+        }
+
+        function wodRegionHasOwnerCity(regionKeys, owner) {
+            for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                let city = gameData.cities[ci];
+                if(city.owner !== owner) continue;
+                if(regionKeys.has(`${city.q},${city.r}`)) return true;
+                for(let uh of getCityUrbanTerrainHexes(city)) {
+                    if(regionKeys.has(getHexKey(uh))) return true;
+                }
+            }
+            return false;
+        }
+
+        function wodUnitInsideRegion(unit, regionKeys) {
+            if(!unit || unit.hp <= 0 || unit.type === 'convoy' || unit.owner <= 0) return false;
+            let uh = getNearestHexToPoint(unit.x, unit.y);
+            if(!uh || !regionKeys.has(getHexKey(uh))) return false;
+            let hr = gameData.hexRadius || 20;
+            let dx = unit.x - uh.x;
+            let dy = unit.y - uh.y;
+            return dx * dx + dy * dy <= hr * hr * 2.8;
+        }
+
         function wodDominantEncircler(borderCounts) {
             let best = 0, bestC = 0;
             for(let ok in borderCounts) {
@@ -18163,15 +18434,7 @@
 
                 if(!touchesOpenEdge) {
                     let regionKeys = new Set(region.map(hex => getHexKey(hex)));
-                    let hasOwnerCity = false;
-                    for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
-                        let city = gameData.cities[ci];
-                        if(city.owner !== owner) continue;
-                        if(regionKeys.has(`${city.q},${city.r}`)) {
-                            hasOwnerCity = true;
-                            break;
-                        }
-                    }
+                    let hasOwnerCity = wodRegionHasOwnerCity(regionKeys, owner);
                     let hasOwnerFort = false;
                     let fortList = gameData.forts;
                     if(fortList && fortList.length) {
@@ -18187,9 +18450,8 @@
                     let supplyRelief = hasOwnerCity || hasOwnerFort;
                     let hasOwnerCombatUnit = false;
                     for(let u of gameData.entities) {
-                        if(u.hp <= 0 || u.type === 'convoy' || u.owner !== owner) continue;
-                        let uh = getNearestHexToPoint(u.x, u.y);
-                        if(uh && regionKeys.has(getHexKey(uh))) {
+                        if(u.owner !== owner) continue;
+                        if(wodUnitInsideRegion(u, regionKeys)) {
                             hasOwnerCombatUnit = true;
                             break;
                         }
@@ -18200,7 +18462,7 @@
                         if(supplyRelief) w.encircledReliefHexes.add(hk);
                     }
                     if(!hasOwnerCity && !hasOwnerCombatUnit) {
-                        let capturer = wodDominantEncircler(wodEncirclementBorderHostileCounts(region, owner));
+                        let capturer = wodEncirclementCapturerForPocket(region, owner);
                         if(capturer > 0) {
                             for(let hex of region) w.changes.push({hex, owner: capturer});
                         }
@@ -18230,6 +18492,8 @@
                 if(unit.xp == null) unit.xp = 0;
                 if(unit.kills == null) unit.kills = 0;
                 if(unit.losses == null) unit.losses = 0;
+                if(unit.tankKills == null) unit.tankKills = 0;
+                if(unit.tankLosses == null) unit.tankLosses = 0;
             }
             return unit.uid;
         }
@@ -19074,7 +19338,7 @@
                 let startHex = getNearestWalkableHexForUnit(probe, from.x, from.y);
                 if(startHex && destHex && findPathAroundTerrain(probe, destHex, startHex).length <= 1) continue;
                 let convoy = {
-                    type: 'convoy', owner: owner, convoySeaRoute: false, name: generateUnitName('convoy', false),
+                    type: 'convoy', owner: owner, convoySeaRoute: false, name: generateUnitName('convoy', false, owner),
                     x: from.x, y: from.y, target: null, path: null, orderTarget: null,
                     hp: 50, maxHp: 50, speed: 20, damage: 0, range: 0, attackCooldown: 10,
                     selected: false, shake: 0, radius: 6, tradeValue: 150,
@@ -19105,7 +19369,7 @@
                 let startHex = getNearestWalkableHexForUnit(probe, wFrom.x, wFrom.y);
                 if(!startHex || findPathAroundTerrain(probe, wTo, startHex).length <= 1) continue;
                 let convoy = {
-                    type: 'convoy', owner: owner, convoySeaRoute: true, name: generateUnitName('convoy', true),
+                    type: 'convoy', owner: owner, convoySeaRoute: true, name: generateUnitName('convoy', true, owner),
                     x: wFrom.x, y: wFrom.y, target: null, path: null, orderTarget: null,
                     hp: 50, maxHp: 50, speed: 20, damage: 0, range: 0, attackCooldown: 10,
                     selected: false, shake: 0, radius: 6, tradeValue: 150,
@@ -19319,6 +19583,13 @@
         function wodTerritoryClaimAttach(unit, hex, standingHex) {
             if(hasOwnerNeighbor(hex, unit.owner)) return true;
             if(standingHex && standingHex.owner === unit.owner) return true;
+            if(standingHex && getNeighborHexes(hex).some(n => n && n.q === standingHex.q && n.r === standingHex.r)) {
+                let batch = gameData._wodClaimBatch;
+                if(batch) {
+                    let standRec = batch.get(getHexKey(standingHex));
+                    if(standRec && standRec.owner === unit.owner && !standRec.contested) return true;
+                }
+            }
             let batch = gameData._wodClaimBatch;
             if(batch) {
                 for(let nb of getNeighborHexes(hex)) {
@@ -20593,6 +20864,8 @@
 
             syncHudObjectiveDisplay();
 
+            wodBindHudResourceTooltips();
+
             lastTime = performance.now();
             if(animationFrameId) cancelAnimationFrame(animationFrameId);
             gameLoop(lastTime);
@@ -21430,6 +21703,8 @@
 
             if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false))
                 spawnInitialFrontlineUnits(ownersList);
+
+            wodRenumberAllFactionUnits();
 
             wodMarkTerrainPoliticalDirty();
 
@@ -23792,7 +24067,7 @@
                         if(captor) {
                             let prevConvOwner = unit.owner;
                             unit.owner = captor.owner;
-                            unit.name = "Captured " + generateUnitName('convoy', !!unit.convoySeaRoute);
+                            unit.name = "Captured " + generateUnitName('convoy', !!unit.convoySeaRoute, unit.owner);
                             if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode && captor.owner === 1 && prevConvOwner > 1) {
                                 wodBumpLifetime('convoysCaptured', 1);
                                 checkWodAchievements();
@@ -23880,7 +24155,12 @@
                     if(interval < 0.05) interval = 0.05;
                     let meanRng = 0.95;
                     let dmgPerSec = (unit.damage * atkMod * defMod * meanRng * moraleAtk * wodVeteranStatMult(unit)) / interval;
+                    let prevEnemyTanks = enemy.type === 'heavy' ? (enemy.tanks || 0) : 0;
                     let dealtCas = applyDamage(enemy, dmgPerSec * dt * wodFortDefenseDamageMultiplier(enemy), unit.owner);
+                    if(enemy.type === 'heavy' && unit.type !== 'convoy') {
+                        let tk = Math.max(0, prevEnemyTanks - (enemy.tanks || 0));
+                        if(tk > 0) unit.tankKills = (unit.tankKills || 0) + tk;
+                    }
                     wodGrantUnitCombatXp(unit, dealtCas, dmgPerSec * dt);
                     wodStagingMarkCombatOnCityUrbanTile(unit, enemy);
                     if(shouldApplyCombatMeleeFx(unit, enemy, minDist2)) {
@@ -25889,9 +26169,9 @@
                     trainHeavy: 'Train Armor ($4k, 1k MP)', trainShip: 'Build Ship ($3.8k, 5k MP)',
                     factory: 'Factory', harbor: 'Harbor', fort: 'Fort',
                     cityTown: 'Town', cityPort: 'Port City', cityIndustrial: 'Industrial City', cityPortIndustrial: 'Industrial Port City',
-                    unitLight: (n) => n + 'th Infantry Div.',
-                    unitMarine: (n) => n + 'th Marine Regt.',
-                    unitHeavy: (n) => n + 'th Armored Div.',
+                    unitLight: (n) => wodOrdinal(n) + ' Infantry Div.',
+                    unitMarine: (n) => wodOrdinal(n) + ' Marine Regt.',
+                    unitHeavy: (n) => wodOrdinal(n) + ' Armored Div.',
                     unitShip: (n) => 'USS ' + cityStarts[Math.floor(Math.random() * cityStarts.length)],
                     unitConvoy: (n, sea) => (sea ? 'Sea trade convoy ' : 'Land trade convoy ') + n,
                     hudHeavy: 'Armor', hudShips: 'Ships', hudInfantryLost: 'Soldiers lost', hudHeavyLost: 'Tanks lost', hudShipsLost: 'Ships lost',
@@ -25937,9 +26217,9 @@
                     trainHeavy: 'Field chariots ($4k, 1k MP)', trainShip: 'Launch trireme ($3.8k, 5k MP)',
                     factory: 'Workshop', harbor: 'Emporion', fort: 'Palisade',
                     cityTown: 'Polis', cityPort: 'Emporion', cityIndustrial: 'Workshop polis', cityPortIndustrial: 'Great emporion',
-                    unitLight: (n) => n + 'th Hoplite Lochos',
-                    unitMarine: (n) => n + 'th Epibatai',
-                    unitHeavy: (n) => n + 'th Hippikon Tagma',
+                    unitLight: (n) => wodOrdinal(n) + ' Hoplite Lochos',
+                    unitMarine: (n) => wodOrdinal(n) + ' Epibatai',
+                    unitHeavy: (n) => wodOrdinal(n) + ' Hippikon Tagma',
                     unitShip: (n) => 'Trireme ' + cityStarts[Math.floor(Math.random() * cityStarts.length)],
                     unitConvoy: (n, sea) => (sea ? 'Nautikos konvoi ' : 'Chorēgía konvoi ') + n,
                     hudHeavy: 'Chariots', hudShips: 'Triremes', hudInfantryLost: 'Hoplites lost', hudHeavyLost: 'Chariots lost', hudShipsLost: 'Triremes lost',
@@ -25961,9 +26241,9 @@
                     trainHeavy: 'Muster knights ($4k, 1k MP)', trainShip: 'Build war galley ($3.8k, 5k MP)',
                     factory: 'Smithy', harbor: 'Quay', fort: 'Keep',
                     cityTown: 'Bailiwick', cityPort: 'Port town', cityIndustrial: 'Castle town', cityPortIndustrial: 'Castle port',
-                    unitLight: (n) => n + 'th Company of Foot',
-                    unitMarine: (n) => n + 'th Sea Company',
-                    unitHeavy: (n) => n + 'th Order of Knights',
+                    unitLight: (n) => wodOrdinal(n) + ' Company of Foot',
+                    unitMarine: (n) => wodOrdinal(n) + ' Sea Company',
+                    unitHeavy: (n) => wodOrdinal(n) + ' Order of Knights',
                     unitShip: (n) => 'Galley ' + cityStarts[Math.floor(Math.random() * cityStarts.length)],
                     unitConvoy: (n, sea) => (sea ? 'Sea pack train ' : 'Land pack train ') + n,
                     hudHeavy: 'Knights', hudShips: 'Galleys', hudInfantryLost: 'Foot lost', hudHeavyLost: 'Knights lost', hudShipsLost: 'Galleys lost',
@@ -28067,6 +28347,10 @@
                 page1: document.getElementById('infoCardPage1'),
                 recordKills: document.getElementById('infoRecordKills'),
                 recordLosses: document.getElementById('infoRecordLosses'),
+                recordTankKills: document.getElementById('infoRecordTankKills'),
+                recordTankLosses: document.getElementById('infoRecordTankLosses'),
+                recordTankKillsRow: document.getElementById('infoRecordTankKillsRow'),
+                recordTankLossesRow: document.getElementById('infoRecordTankLossesRow'),
                 recordXp: document.getElementById('infoRecordXp'),
                 recordRank: document.getElementById('infoRecordRank')
             };
@@ -28113,6 +28397,13 @@
             els.recordLosses.textContent = formatFullCount(losses);
             els.recordXp.textContent = formatFullCount(xp) + ' / ' + formatFullCount(WOD_VETERAN_XP_THRESHOLD);
             els.recordRank.textContent = wodIsUnitVeteran(sel) ? 'Veteran (+10%)' : 'Regular';
+            let showTanks = sel.type === 'heavy';
+            if(els.recordTankKillsRow) els.recordTankKillsRow.hidden = !showTanks;
+            if(els.recordTankLossesRow) els.recordTankLossesRow.hidden = !showTanks;
+            if(showTanks) {
+                if(els.recordTankKills) els.recordTankKills.textContent = formatFullCount(Math.round(sel.tankKills || 0));
+                if(els.recordTankLosses) els.recordTankLosses.textContent = formatFullCount(Math.round(sel.tankLosses || 0));
+            }
         }
 
         function wodEnsureFxTipEl() {
@@ -28135,6 +28426,7 @@
                 let tip = pill.querySelector('.effect-pill-tip');
                 if(!tip) return;
                 let floater = wodEnsureFxTipEl();
+                floater.classList.remove('wod-hud-tip-panel');
                 floater.textContent = tip.textContent;
                 floater.hidden = false;
                 let r = pill.getBoundingClientRect();
@@ -28210,10 +28502,26 @@
                     else if(sel.hasFactory) type = pf.cityIndustrial;
                     else if(sel.hasHarbor) type = pf.cityPort;
                     els.type.innerText = type;
-                    els.hp.innerText = `Income: +${getCityIncome(sel)}/s`;
-                    if(infoMorale) infoMorale.innerText = `Manpower: +${getCityManpowerIncome(sel)}/s`;
+                    let incBd = getCityIncomeBreakdown(sel);
+                    let mpBd = getCityManpowerBreakdown(sel);
+                    els.hp.innerText = `Income: +${incBd.total}/s`;
+                    if(infoMorale) infoMorale.innerText = `Manpower: +${mpBd.total}/s`;
                     els.action.innerText = sel.owner === lo ? "Player Controlled" : (sel.owner > 0 ? "Enemy Controlled" : "Neutral");
                     if(infoTanks) { infoTanks.innerText = ''; infoTanks.style.display = 'none'; infoTanks.setAttribute('aria-hidden', 'true'); }
+                    let cityEffects = [
+                        { label: 'Town base', stats: '+' + incBd.base + '/s', detail: 'Base cash income from this settlement.' },
+                        { label: 'Town base MP', stats: '+' + mpBd.base + '/s', detail: 'Base manpower growth from this settlement.' }
+                    ];
+                    if(sel.hasFactory) {
+                        cityEffects.push({ label: 'Factory', stats: '+' + incBd.factory + '/s', detail: 'Factory bonus to cash income.' });
+                        cityEffects.push({ label: 'Factory MP', stats: '+' + mpBd.factory + '/s', detail: 'Factory bonus to manpower growth.' });
+                    }
+                    if(sel.hasHarbor) {
+                        cityEffects.push({ label: 'Harbor', stats: '+' + incBd.harbor + '/s', detail: 'Harbor bonus to cash income.' });
+                    }
+                    if(incBd.bonus > 0) cityEffects.push({ label: 'Income bonus', stats: '+' + incBd.bonus + '/s', detail: 'Extra city income modifier.' });
+                    if(mpBd.bonus > 0) cityEffects.push({ label: 'Manpower bonus', stats: '+' + mpBd.bonus + '/s', detail: 'Extra city manpower modifier.' });
+                    els.effects.innerHTML = cityEffects.map(wodFmtInfoEffectMarkup).join('');
                 } else {
                     let emblem = sel.type === 'heavy' ? '■' : (sel.type === 'ship' ? '▲'
                         : (sel.type === 'marine' ? '⊙'
@@ -30823,7 +31131,7 @@
             opts = opts || {};
             let unit = {
                 type: type, owner: owner,
-                name: generateUnitName(type),
+                name: wodAllocateUnitName(type, owner, false),
                 x: x, y: y, target: null, hp: 100, maxHp: 100, manpower: 1000, maxManpower: 1000, tanks: 0, maxTanks: 0, selected: false,
                 shake: 0, activeCombatVisual: 0
             };
@@ -30845,6 +31153,8 @@
             unit.xp = 0;
             unit.kills = 0;
             unit.losses = 0;
+            unit.tankKills = 0;
+            unit.tankLosses = 0;
             unit.veteran = false;
             ensureUnitId(unit);
             if(type !== 'ship') {
