@@ -797,6 +797,187 @@
     }
   }
 
+  const EDITOR_IMAGE_LAND_THRESHOLD = 128;
+
+  function editorPixelLuminance(r, g, b, a) {
+    if (a !== undefined && a < 16) return 0;
+    return 0.299 * r + 0.587 * g + 0.114 * b;
+  }
+
+  function editorIsLandPixel(r, g, b, a) {
+    return editorPixelLuminance(r, g, b, a) >= EDITOR_IMAGE_LAND_THRESHOLD;
+  }
+
+  function editorReadImageFileAsBitmap(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(img);
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Could not load image."));
+      };
+      img.src = url;
+    });
+  }
+
+  function editorCropImageToLand(image) {
+    const w = image.naturalWidth || image.width;
+    const h = image.naturalHeight || image.height;
+    if (!w || !h) return null;
+    const src = document.createElement("canvas");
+    src.width = w;
+    src.height = h;
+    const sctx = src.getContext("2d", { willReadFrequently: true });
+    sctx.drawImage(image, 0, 0);
+    const full = sctx.getImageData(0, 0, w, h);
+    const d = full.data;
+    let minX = w;
+    let minY = h;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        if (editorIsLandPixel(d[i], d[i + 1], d[i + 2], d[i + 3])) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+    if (maxX < minX || maxY < minY) return null;
+    const pad = Math.max(1, Math.round(Math.max(maxX - minX + 1, maxY - minY + 1) * 0.02));
+    minX = Math.max(0, minX - pad);
+    minY = Math.max(0, minY - pad);
+    maxX = Math.min(w - 1, maxX + pad);
+    maxY = Math.min(h - 1, maxY + pad);
+    const cw = maxX - minX + 1;
+    const ch = maxY - minY + 1;
+    const crop = document.createElement("canvas");
+    crop.width = cw;
+    crop.height = ch;
+    const cctx = crop.getContext("2d", { willReadFrequently: true });
+    cctx.drawImage(src, minX, minY, cw, ch, 0, 0, cw, ch);
+    return { width: cw, height: ch, data: cctx.getImageData(0, 0, cw, ch) };
+  }
+
+  function editorApplyImageShapeToHexes(cropped, sizeVal) {
+    if (!window.WOD || typeof WOD.makeBlankMap !== "function") return false;
+    WOD.makeBlankMap(sizeVal);
+    const gd = WOD.gameData;
+    if (!gd || !gd.hexList || !gd.hexList.length) return false;
+    gd.mapShape = "custom";
+    gd.loadedCustomMap = true;
+
+    const mapRadius = gd.mapRadius || sizeVal || 60;
+    const rows = Math.floor(mapRadius * 0.8);
+    const gridAspect = mapRadius / Math.max(1, rows);
+    const imgW = cropped.width;
+    const imgH = cropped.height;
+    const imgAspect = imgW / imgH;
+    const data = cropped.data.data;
+    const getTerrainColor = WOD.getTerrainColor;
+
+    for (const hex of gd.hexList) {
+      const nx = hex.q / Math.max(1, mapRadius);
+      const ny = hex.r / Math.max(1, rows);
+      if (nx < -1 || nx > 1 || ny < -1 || ny > 1) {
+        hex.type = "water";
+      } else {
+        let u;
+        let v;
+        if (imgAspect > gridAspect) {
+          u = (nx + 1) * 0.5;
+          const scale = gridAspect / imgAspect;
+          v = (ny + 1) * 0.5 * scale + (1 - scale) * 0.5;
+        } else {
+          v = (ny + 1) * 0.5;
+          const scale = imgAspect / gridAspect;
+          u = (nx + 1) * 0.5 * scale + (1 - scale) * 0.5;
+        }
+        if (u < 0 || u > 1 || v < 0 || v > 1) {
+          hex.type = "water";
+        } else {
+          const px = Math.min(imgW - 1, Math.max(0, Math.floor(u * imgW)));
+          const py = Math.min(imgH - 1, Math.max(0, Math.floor(v * imgH)));
+          const i = (py * imgW + px) * 4;
+          hex.type = editorIsLandPixel(data[i], data[i + 1], data[i + 2], data[i + 3]) ? "grass" : "water";
+        }
+      }
+      if (typeof getTerrainColor === "function") {
+        hex.baseColor = getTerrainColor(hex.type);
+        hex.renderColor = hex.baseColor;
+      }
+      hex.owner = 0;
+    }
+
+    if (typeof WOD.updateTerrainKey === "function") WOD.updateTerrainKey();
+    if (typeof WOD.invalidateTerrain === "function") WOD.invalidateTerrain();
+    return true;
+  }
+
+  function editorAfterImportedMapReady() {
+    syncEditorTerritoryOverlayDefault();
+    syncMaxFactionSlotsFromGameData();
+    rebuildOwnerSelect();
+    rebuildUnitPalette();
+    state.selected = null;
+    state.viewPanX = 0;
+    state.viewPanY = 0;
+    state.viewZoom = 1;
+    markEditorMapChanged();
+    scheduleEditorRender();
+    renderSelection();
+    renderMapBrowser();
+    if (state.open) editorInitHistory();
+  }
+
+  async function editorImportImageMapFromFile(file) {
+    if (!file || !window.WOD) return;
+    try {
+      const img = await editorReadImageFileAsBitmap(file);
+      const cropped = editorCropImageToLand(img);
+      if (!cropped) {
+        alert("No land pixels found. Use a black-and-white image with white land on a dark background.");
+        return;
+      }
+      const sizeEl = document.getElementById("editorSize");
+      const sizeVal = parseInt(sizeEl && sizeEl.value, 10) || 60;
+      if (!editorApplyImageShapeToHexes(cropped, sizeVal)) {
+        alert("Could not build map from this image.");
+        return;
+      }
+      editorAfterImportedMapReady();
+      if (typeof window.showNotification === "function") {
+        window.showNotification("Image map imported — white = land, black = water.");
+      }
+    } catch (e) {
+      console.warn(e);
+      alert(e && e.message ? e.message : "Could not import this image as a map.");
+    }
+  }
+
+  function wireEditorImageImport(root) {
+    const fileIn = root.querySelector("#editorImportImageFile");
+    const pick = (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      ev.target.value = "";
+      if (f) editorImportImageMapFromFile(f);
+    };
+    if (fileIn) fileIn.addEventListener("change", pick);
+    root.querySelectorAll("[data-editor-import-image]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const inp = root.querySelector("#editorImportImageFile") || document.getElementById("editorImportImageFile");
+        if (inp) inp.click();
+      });
+    });
+  }
+
   function wireEditorGenerateStrip(root) {
     const setTab = (name) => {
       root.querySelectorAll("[data-gen-tab]").forEach(b => b.classList.toggle("active", b.dataset.genTab === name));
@@ -1329,8 +1510,10 @@
         <div id="editorGenPanelFiles" class="editor-gen-panel" data-gen-panel="files" style="display:none">
           <button type="button" class="editor-btn" id="editorExportJson">Export map JSON</button>
           <button type="button" class="editor-btn" id="editorImportJsonBtn">Import map JSON…</button>
+          <button type="button" class="editor-btn" id="editorImportImageBtn" data-editor-import-image>Import image map…</button>
           <input type="file" id="editorImportJsonFile" accept=".json,application/json" style="display:none" />
-          <p class="editor-gen-hint">JSON includes terrain, towns, roads, units, size, and shape. Import replaces the current editor map.</p>
+          <input type="file" id="editorImportImageFile" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,.png,.jpg,.jpeg,.webp,.gif,.bmp" style="display:none" />
+          <p class="editor-gen-hint">JSON includes terrain, towns, roads, units, size, and shape. <strong>Image map:</strong> black-and-white PNG/JPG — white = land, black = water — scaled to the hex radius (Small / Medium / Large).</p>
         </div>
       </div>
       <div class="editor-panel editor-left">
@@ -1343,6 +1526,7 @@
             <button type="button" class="editor-btn" id="editorRandom">Random gen</button>
             <button type="button" class="editor-btn" id="editorSave">Save to library…</button>
             <button type="button" class="editor-btn" id="editorBrowseLib">Browse library…</button>
+            <button type="button" class="editor-btn" id="editorImportImageLeft" data-editor-import-image style="grid-column:1/-1">Import image map…</button>
           </div>
         </section>
         <section class="editor-card">
@@ -1664,6 +1848,7 @@
     window.addEventListener("resize", resizeEditorCanvas);
 
     wireEditorGenerateStrip(app);
+    wireEditorImageImport(app);
     rebuildUnitPalette();
     wireEditorSaveDialog();
   }
