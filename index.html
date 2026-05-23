@@ -15794,10 +15794,10 @@
                     dr = Math.abs(toHex.r - fromHex.r);
                 if(dq <= 1 && dr <= 1 && (dq + dr) > 0 && wodPathTileWalkable(unit, toHex, false)) return true;
             }
-            let allowWater = !forbidWater && wodUnitPrefersLandOnlyPath(unit);
-            if(!wodPathTileWalkable(unit, toHex, allowWater)) return false;
+            let allowWater = !forbidWater && (wodOrderIntoWater(unit, toHex) || wodUnitPrefersLandOnlyPath(unit));
+            if(!wodPathTileWalkable(unit, toHex, allowWater || wodOrderIntoWater(unit, toHex))) return false;
             if(forbidWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
-                isWaterHex(toHex) && !isBridgeHex(toHex)) return false;
+                isWaterHex(toHex) && !isBridgeHex(toHex) && !wodOrderIntoWater(unit, toHex)) return false;
             let dq = toHex.q - fromHex.q;
             let dr = toHex.r - fromHex.r;
             if(dq !== 0 && dr !== 0) {
@@ -17149,11 +17149,13 @@
 
         function wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return false;
-            if(wodOrderIntoWater(unit, targetHex) && wodIsOpenWaterHex(targetHex)) return false;
-            if(wodHexPathLength(bridgePath) > 1) return false;
             if(wodOrderIntoWater(unit, targetHex)) return true;
+            if(wodHexPathLength(bridgePath) > 1) return false;
             let bestLand = wodHexPathLength(landPath);
-            if(bestLand <= 1) return true;
+            if(bestLand <= 1) {
+                let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex);
+                return isFinite(est) && est >= 2;
+            }
             let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex);
             if(!isFinite(est) || est < 2) return false;
             return est <= Math.floor(bestLand * 0.78);
@@ -17196,6 +17198,21 @@
             return wodDistToBridgeRect(midX, midY, br) <= pad * 1.35;
         }
 
+        function wodTryAmphibiousMarchFallback(unit, startHex, targetHex) {
+            if(!wodUnitPrefersLandOnlyPath(unit) || !startHex || !targetHex) return [];
+            let waterPath = findAmphibiousMarchPath(unit, startHex, targetHex);
+            return wodHexPathLength(waterPath) > 1 ? waterPath : [];
+        }
+
+        function wodPathCrossesOpenWater(path) {
+            if(!path || !path.length) return false;
+            for(let i = 0; i < path.length; i++) {
+                let h = path[i];
+                if(h && wodIsOpenWaterHex(h)) return true;
+            }
+            return false;
+        }
+
         function wodPickLandArmyMarchPath(unit, startHex, targetHex) {
             if(!startHex || !targetHex) return [];
             if(wodHexKeysEqual(startHex, targetHex)) return [startHex];
@@ -17225,6 +17242,8 @@
                 let portalPath = smoothGridPath(wodLandBfsPath(unit, startHex, targetHex, 14000, true));
                 if(portalPath.length > 1 && wodPathReachesTarget(portalPath, targetHex) && wodPathCrossesBridge(portalPath))
                     return portalPath;
+                let ampBlocked = wodTryAmphibiousMarchFallback(unit, startHex, targetHex);
+                if(ampBlocked.length) return ampBlocked;
                 return [];
             }
 
@@ -17238,6 +17257,8 @@
                 let waterPath = findAmphibiousMarchPath(unit, startHex, targetHex);
                 if(wodHexPathLength(waterPath) > 1) return waterPath;
             }
+            let ampFallback = wodTryAmphibiousMarchFallback(unit, startHex, targetHex);
+            if(ampFallback.length) return ampFallback;
             return landOk ? landPath : [];
         }
 
@@ -17269,6 +17290,17 @@
                     let landLeg = wodFindLandApproachPath(unit, crossing.landHex, targetHex);
                     out = wodMergeHexPaths(waterLeg, landLeg);
                 }
+            } else {
+                let crossA = wodFindAmphibiousShoreCrossing(unit, startHex, targetHex, 24);
+                let crossB = wodFindAmphibiousShoreCrossing(unit, targetHex, startHex, 24);
+                if(crossA && crossB) {
+                    let landA = wodFindLandApproachPath(unit, startHex, crossA.landHex);
+                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, crossA.waterHex, crossB.waterHex, 96);
+                    if(wodHexPathLength(waterLeg) > 1) {
+                        let landB = wodFindLandApproachPath(unit, crossB.landHex, targetHex);
+                        out = wodMergeHexPaths(wodMergeHexPaths(landA, waterLeg), landB);
+                    }
+                }
             }
             unit._wodAmpPathKey = cacheKey;
             unit._wodAmpPath = out.length ? out.slice() : [];
@@ -17286,7 +17318,8 @@
             }
             if(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length)
                 wodEnsureBridgePathIndex();
-            let pathAllowWater = false;
+            let pathAllowWater = pathMode === 'water' || wodOrderIntoWater(unit, targetHex) ||
+                wodOrderIntoWater(unit, startHex) || !!unit._wodOrderIntoWater;
             if(isBridgeHex(startHex) || wodBridgeHexAtPoint(unit, startHex.x, startHex.y))
                 startHex = isBridgeHex(startHex) ? startHex : wodBridgeHexAtPoint(unit, startHex.x, startHex.y) || startHex;
             if(isBridgeHex(targetHex) || wodBridgeHexAtPoint(unit, targetHex.x, targetHex.y))
@@ -17562,7 +17595,7 @@
             let forbidWater = wodUnitPrefersLandOnlyPath(unit);
             function consider(nHex, portal) {
                 if(!nHex) return;
-                let allowWater = wodOrderIntoWater(unit, targetHex);
+                let allowWater = wodOrderIntoWater(unit, null) || wodOrderIntoWater(unit, nHex) || wodOrderIntoWater(unit, targetHex);
                 if(portal) {
                     if(!wodPathTileWalkable(unit, nHex, allowWater)) return;
                     if(!allowWater && isWaterHex(nHex) && !isBridgeHex(nHex)) return;
@@ -17807,6 +17840,10 @@
 
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let path = findPathAroundTerrain(unit, reachNext.hex, startHex);
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex) {
+                let ampPath = findAmphibiousMarchPath(unit, startHex, reachNext.hex);
+                if(wodHexPathLength(ampPath) > 1) path = ampPath;
+            }
             if(path.length <= 1 && unit.type === 'marine' && reachNext.hex && startHex && isWaterHex(startHex) && isWaterHex(reachNext.hex)) {
                 let hop = findGreedyWaterStep(unit, reachNext.hex, { fromHex: startHex });
                 if(hop) {
@@ -17840,11 +17877,12 @@
                 }
             }
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex) {
-                if(wodOrderIntoWater(unit, reachNext.hex) && startHex && wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(reachNext.hex)) {
+                if(startHex && wodIsOpenWaterHex(startHex)) {
                     let hop = findGreedyAmphibiousWaterStep(unit, reachNext.hex, { fromHex: startHex });
                     if(hop) {
                         unit.path = null;
                         unit.target = {x: hop.x, y: hop.y, pathPrepared: true, ampGreedy: true};
+                        unit._wodOrderIntoWater = true;
                         return true;
                     }
                 }
@@ -17856,6 +17894,7 @@
                 }
             }
             if(path.length > 1) {
+                if(wodPathCrossesOpenWater(path)) unit._wodOrderIntoWater = true;
                 let exactNext = {x: reachNext.exactX, y: reachNext.exactY};
                 unit.path = wodHexPathToWorldWaypoints(unit, path, exactNext);
                 unit.target = unit.path.shift();
@@ -19501,6 +19540,10 @@
                 unit.orderTarget = finalTarget;
             }
             let path = findPathAroundTerrain(unit, targetHex, startHex);
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex && startHex) {
+                let ampPath = findAmphibiousMarchPath(unit, startHex, targetHex);
+                if(wodHexPathLength(ampPath) > 1) path = ampPath;
+            }
             if(path.length <= 1 && unit.type === 'ship' && targetHex) {
                 let hop = findGreedyWaterStep(unit, targetHex);
                 if(hop) {
@@ -19526,11 +19569,12 @@
                 }
             }
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex) {
-                if(wodOrderIntoWater(unit, targetHex) && startHex && wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(targetHex)) {
+                if(startHex && wodIsOpenWaterHex(startHex)) {
                     let hop = findGreedyAmphibiousWaterStep(unit, targetHex, { fromHex: startHex });
                     if(hop) {
                         unit.path = null;
                         unit.target = {x: hop.x, y: hop.y, pathPrepared: true, ampGreedy: true};
+                        unit._wodOrderIntoWater = true;
                         unit._wodReplanAmpUntil = 0;
                         return true;
                     }
@@ -19562,6 +19606,7 @@
                 }
             }
             if(path.length > 1) {
+                if(wodPathCrossesOpenWater(path)) unit._wodOrderIntoWater = true;
                 let endPt = {x: finalTarget.x, y: finalTarget.y};
                 if(convoyCity) endPt.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endPt);
@@ -26680,7 +26725,7 @@
                     unitConvoy: (n, sea) => (sea ? 'Sea trade convoy ' : 'Land trade convoy ') + n,
                     hudHeavy: 'Armor', hudShips: 'Ships', hudInfantryLost: 'Soldiers lost', hudHeavyLost: 'Tanks lost', hudShipsLost: 'Ships lost',
                     hudInfantryKills: 'Soldiers', hudHeavyKills: 'Tanks', hudShipsKills: 'Ships',
-                    heavyCount: 'Tanks', playerSummaryHeavy: 'Tanks', summaryHeavyDestroyed: 'Armor destroyed',
+                    heavyCount: 'Tanks', playerSummaryHeavy: 'Tanks', summaryHeavyDestroyed: 'Armor lost',
                     statOwnInfantry: 'Infantry lost', statOwnMarine: 'Marines lost', statOwnHeavy: 'Tanks lost', statOwnShips: 'Ships lost',
                     statEnemyInfantry: 'Infantry eliminated', statEnemyMarine: 'Marines eliminated', statEnemyHeavy: 'Tanks knocked out', statEnemyShips: 'Ships sunk',
                     statFactories: 'Factories built', statHarbors: 'Harbors built', statForts: 'Forts built',
@@ -26704,7 +26749,7 @@
                     unitConvoy: (n, sea) => (sea ? 'Convoi maritime ' : 'Convoi de vivres ') + n,
                     hudHeavy: 'Horses', hudShips: 'Men-of-war', hudInfantryLost: 'Line lost', hudHeavyLost: 'Horses lost', hudShipsLost: 'Ships lost',
                     hudInfantryKills: 'Line broken', hudHeavyKills: 'Horses', hudShipsKills: 'Ships',
-                    heavyCount: 'Horses', playerSummaryHeavy: 'Horses', summaryHeavyDestroyed: 'Cavalry routed',
+                    heavyCount: 'Horses', playerSummaryHeavy: 'Horses', summaryHeavyDestroyed: 'Horses lost',
                     statOwnInfantry: 'Line infantry lost', statOwnMarine: 'Naval infantry lost', statOwnHeavy: 'Horses lost', statOwnShips: 'Ships lost',
                     statEnemyInfantry: 'Line infantry broken', statEnemyMarine: 'Naval infantry broken', statEnemyHeavy: 'Horse regiments routed', statEnemyShips: 'Men-of-war sunk',
                     statFactories: 'Foundries built', statHarbors: 'Naval yards built', statForts: 'Redoubts built',
@@ -26728,7 +26773,7 @@
                     unitConvoy: (n, sea) => (sea ? 'Nautikos konvoi ' : 'Chorēgía konvoi ') + n,
                     hudHeavy: 'Chariots', hudShips: 'Triremes', hudInfantryLost: 'Hoplites lost', hudHeavyLost: 'Chariots lost', hudShipsLost: 'Triremes lost',
                     hudInfantryKills: 'Hoplites', hudHeavyKills: 'Chariots', hudShipsKills: 'Triremes',
-                    heavyCount: 'Chariots', playerSummaryHeavy: 'Chariots', summaryHeavyDestroyed: 'Chariots destroyed',
+                    heavyCount: 'Chariots', playerSummaryHeavy: 'Chariots', summaryHeavyDestroyed: 'Chariots lost',
                     statOwnInfantry: 'Hoplites lost', statOwnMarine: 'Marines lost', statOwnHeavy: 'Chariots lost', statOwnShips: 'Triremes lost',
                     statEnemyInfantry: 'Hoplites shattered', statEnemyMarine: 'Marines shattered', statEnemyHeavy: 'Chariots destroyed', statEnemyShips: 'Triremes sunk',
                     statFactories: 'Workshops built', statHarbors: 'Emporia built', statForts: 'Palisades built',
@@ -26752,7 +26797,7 @@
                     unitConvoy: (n, sea) => (sea ? 'Sea pack train ' : 'Land pack train ') + n,
                     hudHeavy: 'Knights', hudShips: 'Galleys', hudInfantryLost: 'Foot lost', hudHeavyLost: 'Knights lost', hudShipsLost: 'Galleys lost',
                     hudInfantryKills: 'Foot', hudHeavyKills: 'Knights', hudShipsKills: 'Galleys',
-                    heavyCount: 'Knights', playerSummaryHeavy: 'Knights', summaryHeavyDestroyed: 'Knights unhorsed',
+                    heavyCount: 'Knights', playerSummaryHeavy: 'Knights', summaryHeavyDestroyed: 'Knights lost',
                     statOwnInfantry: 'Men-at-arms lost', statOwnMarine: 'Sea raiders lost', statOwnHeavy: 'Knights lost', statOwnShips: 'Galleys lost',
                     statEnemyInfantry: 'Men-at-arms slain', statEnemyMarine: 'Sea raiders slain', statEnemyHeavy: 'Knights unhorsed', statEnemyShips: 'Galleys sunk',
                     statFactories: 'Smithies built', statHarbors: 'Quays built', statForts: 'Keeps built',
@@ -29342,22 +29387,88 @@
             return wodFogHexVisible(gameData.hexes[`${fort.q},${fort.r}`]);
         }
 
+        function wodCollectFogBorderChains(hexList, hexLookup, visibleSet, spacing) {
+            let edgeMap = new Map();
+            for(let hi = 0, hl = hexList.length; hi < hl; hi++) {
+                let hex = hexList[hi];
+                if(!visibleSet.has(getHexKey(hex))) continue;
+                for(let di = 0; di < cardinalHexDirections.length; di++) {
+                    let dir = cardinalHexDirections[di];
+                    let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    if(!nHex || visibleSet.has(getHexKey(nHex))) continue;
+                    let ek = hexPairBorderKey(hex, nHex);
+                    if(edgeMap.has(ek)) continue;
+                    edgeMap.set(ek, {
+                        x: (hex.x + nHex.x) / 2,
+                        y: (hex.y + nHex.y) / 2,
+                        hex, nHex, dir
+                    });
+                }
+            }
+            if(edgeMap.size === 0) return [];
+            let midpointByEdge = new Map();
+            let cornerMap = new Map();
+            for(let [ek, meta] of edgeMap) {
+                midpointByEdge.set(ek, { x: meta.x, y: meta.y });
+                registerBorderCornersForPair(cornerMap, meta.hex, meta.nHex, meta.dir, ek, meta.x, meta.y, spacing);
+            }
+            let adj = linkBorderEdgesAroundCorners(cornerMap);
+            bridgeBorderChainGaps(adj, midpointByEdge, spacing);
+            let chains = walkBorderEdgeChains(adj, midpointByEdge);
+            chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
+            let out = [];
+            for(let ci = 0; ci < chains.length; ci++) {
+                let c = chains[ci];
+                let pts = c.keys.map(k => midpointByEdge.get(k)).filter(Boolean);
+                if(pts.length >= 2) out.push({ closed: c.closed, pts });
+            }
+            return out;
+        }
+
+        function wodDrawFogHexTile(ctx, hex, fillStyle) {
+            let hr = gameData.hexRadius || 20;
+            let r = hr * 0.94;
+            ctx.beginPath();
+            for(let i = 0; i < 6; i++) {
+                let ang = Math.PI / 6 + i * Math.PI / 3;
+                let px = hex.x + Math.cos(ang) * r;
+                let py = hex.y + Math.sin(ang) * r;
+                if(i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fillStyle = fillStyle;
+            ctx.fill();
+        }
+
         function wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad) {
             let visible = gameData._fogVisible;
             let explored = gameData._fogExplored;
             if(!visible || !explored) return;
-            let hr = gameData.hexRadius || 20;
-            let r = hr * 0.95;
+            let spacing = gameData.hexRadius * 1.35;
             ctx.save();
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                 let h = gameData.hexList[hi];
                 if(h.x < camL - culPad || h.x > camR + culPad || h.y < camT - culPad || h.y > camB + culPad) continue;
                 let k = getHexKey(h);
                 if(visible.has(k)) continue;
-                ctx.beginPath();
-                ctx.arc(h.x, h.y, r, 0, Math.PI * 2);
-                ctx.fillStyle = explored.has(k) ? 'rgba(8, 12, 18, 0.74)' : 'rgba(2, 4, 8, 0.94)';
-                ctx.fill();
+                wodDrawFogHexTile(ctx, h, explored.has(k) ? 'rgba(8, 12, 18, 0.76)' : 'rgba(2, 4, 8, 0.94)');
+            }
+            let chains = wodCollectFogBorderChains(gameData.hexList, gameData.hexes, visible, spacing);
+            if(chains.length) {
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+                ctx.strokeStyle = 'rgba(2, 4, 8, 0.88)';
+                ctx.lineWidth = spacing * 1.42;
+                for(let ci = 0; ci < chains.length; ci++) {
+                    let c = chains[ci];
+                    drawPaintStroke(ctx, c.pts, spacing, {
+                        closedLoop: c.closed,
+                        suppressDegenerate: true,
+                        openLineCap: 'round',
+                        hybridBorder: true
+                    });
+                }
             }
             ctx.restore();
         }
