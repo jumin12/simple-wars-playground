@@ -804,29 +804,8 @@
     return 0.299 * r + 0.587 * g + 0.114 * b;
   }
 
-  function editorIsLandPixel(r, g, b, a, invert) {
-    const lum = editorPixelLuminance(r, g, b, a);
-    return invert ? lum < EDITOR_IMAGE_LAND_THRESHOLD : lum >= EDITOR_IMAGE_LAND_THRESHOLD;
-  }
-
-  function editorDetectInvertLand(data, w, h) {
-    let light = 0;
-    let dark = 0;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        const i = (y * w + x) * 4;
-        if (editorPixelLuminance(data[i], data[i + 1], data[i + 2], data[i + 3]) >= EDITOR_IMAGE_LAND_THRESHOLD) light++;
-        else dark++;
-      }
-    }
-    return dark > light;
-  }
-
-  function editorSampleImageLand(data, w, h, px, py, invert) {
-    const ix = Math.min(w - 1, Math.max(0, Math.round(px)));
-    const iy = Math.min(h - 1, Math.max(0, Math.round(py)));
-    const i = (iy * w + ix) * 4;
-    return editorIsLandPixel(data[i], data[i + 1], data[i + 2], data[i + 3], invert);
+  function editorIsLandPixel(r, g, b, a) {
+    return editorPixelLuminance(r, g, b, a) >= EDITOR_IMAGE_LAND_THRESHOLD;
   }
 
   function editorReadImageFileAsBitmap(file) {
@@ -856,7 +835,6 @@
     sctx.drawImage(image, 0, 0);
     const full = sctx.getImageData(0, 0, w, h);
     const d = full.data;
-    const invert = editorDetectInvertLand(d, w, h);
     let minX = w;
     let minY = h;
     let maxX = -1;
@@ -864,7 +842,7 @@
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = (y * w + x) * 4;
-        if (editorIsLandPixel(d[i], d[i + 1], d[i + 2], d[i + 3], invert)) {
+        if (editorIsLandPixel(d[i], d[i + 1], d[i + 2], d[i + 3])) {
           if (x < minX) minX = x;
           if (y < minY) minY = y;
           if (x > maxX) maxX = x;
@@ -885,23 +863,66 @@
     crop.height = ch;
     const cctx = crop.getContext("2d", { willReadFrequently: true });
     cctx.drawImage(src, minX, minY, cw, ch, 0, 0, cw, ch);
-    return { width: cw, height: ch, data: cctx.getImageData(0, 0, cw, ch), invert };
+    return { width: cw, height: ch, data: cctx.getImageData(0, 0, cw, ch) };
   }
 
-  function editorApplyImageShapeToHexes(cropped, sizeVal) {
-    if (!window.WOD || typeof WOD.makeBlankMap !== "function") return false;
-    WOD.makeBlankMap(sizeVal);
-    const gd = WOD.gameData;
-    if (!gd || !gd.hexList || !gd.hexList.length) return false;
-    gd.mapShape = "custom";
-    gd.loadedCustomMap = true;
+  function editorImageUvToWorld(u, v, bounds, imgAspect, gridAspect) {
+    let nx;
+    let ny;
+    if (imgAspect > gridAspect) {
+      nx = u;
+      const scale = gridAspect / imgAspect;
+      ny = (v - (1 - scale) * 0.5) / scale;
+    } else {
+      ny = v;
+      const scale = imgAspect / gridAspect;
+      nx = (u - (1 - scale) * 0.5) / scale;
+    }
+    return {
+      wx: bounds.minX + nx * bounds.worldW,
+      wy: bounds.minY + ny * bounds.worldH,
+    };
+  }
 
-    const imgW = cropped.width;
-    const imgH = cropped.height;
-    const data = cropped.data.data;
-    const invert = cropped.invert != null ? cropped.invert : editorDetectInvertLand(data, imgW, imgH);
-    const getTerrainColor = WOD.getTerrainColor;
+  function editorWorldToImageUv(wx, wy, bounds, imgAspect, gridAspect) {
+    const nx = (wx - bounds.minX) / bounds.worldW;
+    const ny = (wy - bounds.minY) / bounds.worldH;
+    let u;
+    let v;
+    if (imgAspect > gridAspect) {
+      u = nx;
+      const scale = gridAspect / imgAspect;
+      v = ny * scale + (1 - scale) * 0.5;
+    } else {
+      v = ny;
+      const scale = imgAspect / gridAspect;
+      u = nx * scale + (1 - scale) * 0.5;
+    }
+    return { u, v };
+  }
 
+  function editorSampleImageLuminance(data, imgW, imgH, u, v) {
+    if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+    const fx = u * (imgW - 1);
+    const fy = v * (imgH - 1);
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const x1 = Math.min(x0 + 1, imgW - 1);
+    const y1 = Math.min(y0 + 1, imgH - 1);
+    const tx = fx - x0;
+    const ty = fy - y0;
+    const lumAt = (x, y) => {
+      const i = (y * imgW + x) * 4;
+      return editorPixelLuminance(data[i], data[i + 1], data[i + 2], data[i + 3]);
+    };
+    const l00 = lumAt(x0, y0);
+    const l10 = lumAt(x1, y0);
+    const l01 = lumAt(x0, y1);
+    const l11 = lumAt(x1, y1);
+    return l00 * (1 - tx) * (1 - ty) + l10 * tx * (1 - ty) + l01 * (1 - tx) * ty + l11 * tx * ty;
+  }
+
+  function editorComputeImageImportBounds(gd) {
     let minX = Infinity;
     let maxX = -Infinity;
     let minY = Infinity;
@@ -912,22 +933,103 @@
       if (hex.y < minY) minY = hex.y;
       if (hex.y > maxY) maxY = hex.y;
     }
-    const gridW = Math.max(1, maxX - minX);
-    const gridH = Math.max(1, maxY - minY);
-    const scale = Math.min(gridW / imgW, gridH / imgH);
-    const drawW = imgW * scale;
-    const drawH = imgH * scale;
-    const offX = minX + (gridW - drawW) * 0.5;
-    const offY = minY + (gridH - drawH) * 0.5;
+    const spacing = gd.hexRadius * 1.35;
+    const pad = spacing * 0.78;
+    minX -= pad;
+    maxX += pad;
+    minY -= pad;
+    maxY += pad;
+    const worldW = Math.max(1, maxX - minX);
+    const worldH = Math.max(1, maxY - minY);
+    return { minX, minY, worldW, worldH, spacing, gridAspect: worldW / worldH };
+  }
+
+  const EDITOR_IMAGE_HEX_DIRS = [
+    { q: 1, r: 0 }, { q: -1, r: 0 }, { q: 0, r: 1 }, { q: 0, r: -1 },
+    { q: 1, r: 1 }, { q: -1, r: -1 }, { q: 1, r: -1 }, { q: -1, r: 1 },
+  ];
+
+  function editorHexKey(q, r) {
+    return `${q},${r}`;
+  }
+
+  function editorBuildHexSamplePoints(spacing) {
+    const pts = [{ x: 0, y: 0 }];
+    const rings = [0.34, 0.68, 0.96];
+    for (const ring of rings) {
+      const rad = spacing * ring;
+      for (let a = 0; a < 8; a++) {
+        const ang = (Math.PI / 4) * a;
+        pts.push({ x: Math.cos(ang) * rad, y: Math.sin(ang) * rad });
+      }
+    }
+    return pts;
+  }
+
+  function editorApplyImageShapeToHexes(cropped, sizeVal) {
+    if (!window.WOD || typeof WOD.makeBlankMap !== "function") return false;
+    WOD.makeBlankMap(sizeVal);
+    const gd = WOD.gameData;
+    if (!gd || !gd.hexList || !gd.hexList.length) return false;
+    gd.mapShape = "custom";
+    gd.loadedCustomMap = true;
+
+    const bounds = editorComputeImageImportBounds(gd);
+    const imgW = cropped.width;
+    const imgH = cropped.height;
+    const imgAspect = imgW / imgH;
+    const data = cropped.data.data;
+    const getTerrainColor = WOD.getTerrainColor;
+    const votes = new Map();
+    const bumpVote = (q, r, land) => {
+      const key = editorHexKey(q, r);
+      if (!gd.hexes[key]) return;
+      let v = votes.get(key);
+      if (!v) {
+        v = { land: 0, water: 0, sampleLand: 0, sampleTotal: 0 };
+        votes.set(key, v);
+      }
+      if (land) v.land++;
+      else v.water++;
+    };
+
+    for (let py = 0; py < imgH; py++) {
+      for (let px = 0; px < imgW; px++) {
+        const i = (py * imgW + px) * 4;
+        const isLand = editorIsLandPixel(data[i], data[i + 1], data[i + 2], data[i + 3]);
+        const u = (px + 0.5) / imgW;
+        const v = (py + 0.5) / imgH;
+        const { wx, wy } = editorImageUvToWorld(u, v, bounds, imgAspect, bounds.gridAspect);
+        const q = Math.round(wx / bounds.spacing);
+        const r = Math.round(wy / bounds.spacing);
+        bumpVote(q, r, isLand);
+      }
+    }
+
+    const samplePts = editorBuildHexSamplePoints(bounds.spacing);
+    for (const hex of gd.hexList) {
+      let sampleLand = 0;
+      for (const pt of samplePts) {
+        const { u, v } = editorWorldToImageUv(hex.x + pt.x, hex.y + pt.y, bounds, imgAspect, bounds.gridAspect);
+        if (editorSampleImageLuminance(data, imgW, imgH, u, v) >= EDITOR_IMAGE_LAND_THRESHOLD) sampleLand++;
+      }
+      const key = editorHexKey(hex.q, hex.r);
+      let v = votes.get(key);
+      if (!v) {
+        v = { land: 0, water: 0, sampleLand: 0, sampleTotal: samplePts.length };
+        votes.set(key, v);
+      }
+      v.sampleLand = sampleLand;
+      v.sampleTotal = samplePts.length;
+    }
 
     for (const hex of gd.hexList) {
-      const px = (hex.x - offX) / scale;
-      const py = (hex.y - offY) / scale;
-      if (px < 0 || px >= imgW || py < 0 || py >= imgH) {
-        hex.type = "water";
-      } else {
-        hex.type = editorSampleImageLand(data, imgW, imgH, px, py, invert) ? "grass" : "water";
-      }
+      const key = editorHexKey(hex.q, hex.r);
+      const v = votes.get(key) || { land: 0, water: 0, sampleLand: 0, sampleTotal: 1 };
+      const sampleRatio = v.sampleLand / Math.max(1, v.sampleTotal);
+      const voteLand = v.land > v.water || (v.land >= 1 && sampleRatio >= 0.18);
+      const isLand = voteLand || sampleRatio >= 0.34;
+      hex.type = isLand ? "grass" : "water";
       if (typeof getTerrainColor === "function") {
         hex.baseColor = getTerrainColor(hex.type);
         hex.renderColor = hex.baseColor;
@@ -935,21 +1037,38 @@
       hex.owner = 0;
     }
 
-    if (typeof WOD.invalidateTerrain === "function") WOD.invalidateTerrain();
-    if (typeof WOD.updateTerrainKey === "function") WOD.updateTerrainKey();
-    if (typeof WOD.syncTerrainCacheForEditorView === "function") {
-      try {
-        WOD.syncTerrainCacheForEditorView({
-          terrain: true,
-          territory: !!(gd.layers && gd.layers.territory),
-          diplomacy: !!(gd.layers && gd.layers.diplomacy),
-          terrainViewMode: gd.terrainViewMode,
-        });
-      } catch (_) {
-        /* ignore cache sync errors during import */
+    for (let pass = 0; pass < 2; pass++) {
+      const next = new Map();
+      for (const hex of gd.hexList) {
+        next.set(editorHexKey(hex.q, hex.r), hex.type);
+      }
+      for (const hex of gd.hexList) {
+        if (hex.type !== "water") continue;
+        let landNeighbors = 0;
+        for (const dir of EDITOR_IMAGE_HEX_DIRS) {
+          const n = gd.hexes[editorHexKey(hex.q + dir.q, hex.r + dir.r)];
+          if (n && n.type !== "water") landNeighbors++;
+        }
+        if (landNeighbors < 3) continue;
+        const { u, v } = editorWorldToImageUv(hex.x, hex.y, bounds, imgAspect, bounds.gridAspect);
+        if (editorSampleImageLuminance(data, imgW, imgH, u, v) >= 96) {
+          next.set(editorHexKey(hex.q, hex.r), "grass");
+        }
+      }
+      for (const hex of gd.hexList) {
+        const t = next.get(editorHexKey(hex.q, hex.r));
+        if (!t || t === hex.type) continue;
+        hex.type = t;
+        if (typeof getTerrainColor === "function") {
+          hex.baseColor = getTerrainColor(hex.type);
+          hex.renderColor = hex.baseColor;
+        }
       }
     }
-    return { ok: true, invert };
+
+    if (typeof WOD.updateTerrainKey === "function") WOD.updateTerrainKey();
+    if (typeof WOD.invalidateTerrain === "function") WOD.invalidateTerrain();
+    return true;
   }
 
   function editorAfterImportedMapReady() {
@@ -979,18 +1098,13 @@
       }
       const sizeEl = document.getElementById("editorSize");
       const sizeVal = parseInt(sizeEl && sizeEl.value, 10) || 60;
-      const applied = editorApplyImageShapeToHexes(cropped, sizeVal);
-      if (!applied || !applied.ok) {
+      if (!editorApplyImageShapeToHexes(cropped, sizeVal)) {
         alert("Could not build map from this image.");
         return;
       }
       editorAfterImportedMapReady();
       if (typeof window.showNotification === "function") {
-        window.showNotification(
-          applied.invert
-            ? "Image map imported — dark = land, light = water."
-            : "Image map imported — white = land, black = water.",
-        );
+        window.showNotification("Image map imported — white = land, black = water.");
       }
     } catch (e) {
       console.warn(e);
