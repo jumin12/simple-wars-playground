@@ -807,6 +807,7 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'player_mismatch', msg: 'Player ID mismatch.' }));
         return;
       }
+      if (!client.playerId) client.playerId = playerId;
       let rawSize = 0;
       try {
         rawSize = Buffer.byteLength(JSON.stringify(msg.progress || {}), 'utf8');

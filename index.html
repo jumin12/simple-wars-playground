@@ -7926,6 +7926,7 @@
                         </label>
                     </div>
                     <p id="wodBrowserSaveStatus" style="margin:10px 0 0;color:#95a5a6;font-size:0.88rem;"></p>
+                    <p id="wodSettingsPlayerId" style="margin:8px 0 0;color:#bdc3c7;font-size:0.88rem;word-break:break-all;"></p>
                 </div>
                 <div class="settings-section hidden" id="settingsGamePeriodSection">
                     <h3 style="color:#9b59b6;margin-top:0;">Time period</h3>
@@ -12856,6 +12857,9 @@
         function wodEnsurePlayerId() {
             if(!wodProgress) wodProgress = defaultWodProgress();
             if(!wodProgress.profile) wodProgress.profile = {};
+            let stored = '';
+            try { stored = wodMpNormalizePlayerId(localStorage.getItem(SL_PLAYER_ID_KEY)); } catch (e) {}
+            if(stored && !wodProgress.profile.playerId) wodProgress.profile.playerId = stored;
             if(!wodProgress.profile.playerId) {
                 wodProgress.profile.playerId = wodMpGeneratePlayerId();
                 wodPersistPlayerIdLocal(wodProgress.profile.playerId);
@@ -15930,11 +15934,11 @@
         function loadWodProgress() {
             wodProgress = defaultWodProgress();
             let playerId = '';
-            try { playerId = wodMpSanitizePlayerId(localStorage.getItem(SL_PLAYER_ID_KEY)); } catch (e) {}
+            try { playerId = wodMpNormalizePlayerId(localStorage.getItem(SL_PLAYER_ID_KEY)); } catch (e) {}
             if(!playerId) {
                 let legacy = wodReadLegacyLocalProgressObject();
                 if(legacy && legacy.profile && legacy.profile.playerId)
-                    playerId = wodMpSanitizePlayerId(legacy.profile.playerId);
+                    playerId = wodMpNormalizePlayerId(legacy.profile.playerId);
             }
             if(playerId) {
                 wodProgress.profile.playerId = playerId;
@@ -15943,17 +15947,26 @@
             window._wodLegacyLocalProgress = wodReadLegacyLocalProgressObject();
         }
 
+        function wodLegacyProgressMatchesPlayer(legacy, pid) {
+            if(!legacy || !pid) return false;
+            let legacyPid = wodMpNormalizePlayerId(legacy.profile && legacy.profile.playerId);
+            if(legacyPid && legacyPid !== pid) return false;
+            return true;
+        }
+
         function wodApplyServerProgressPayload(detail) {
             if(!detail) return;
-            let pid = wodProgress && wodProgress.profile && wodProgress.profile.playerId;
+            wodEnsurePlayerId();
+            let pid = wodProgress.profile.playerId;
+            if(detail.playerId && detail.playerId !== pid) return;
             if(detail.found && detail.progress) {
                 wodProgress = wodMergeProgressObject(detail.progress);
-            } else if(window._wodLegacyLocalProgress) {
+            } else if(window._wodLegacyLocalProgress && wodLegacyProgressMatchesPlayer(window._wodLegacyLocalProgress, pid)) {
                 wodProgress = wodMergeProgressObject(window._wodLegacyLocalProgress);
                 scheduleSaveWodProgress();
             }
-            if(pid) wodProgress.profile.playerId = pid;
-            wodPersistPlayerIdLocal(wodProgress.profile.playerId);
+            wodProgress.profile.playerId = pid;
+            wodPersistPlayerIdLocal(pid);
             wodClearLegacyLocalProgress();
             window._wodServerProgressHydrated = true;
             applyWodProfileToGame();
@@ -16012,6 +16025,8 @@
             let pid = wodProgress.profile.playerId;
             let payload;
             try { payload = JSON.parse(JSON.stringify(wodProgress)); } catch (e) { return false; }
+            if(!payload.profile) payload.profile = {};
+            payload.profile.playerId = pid;
             _wodProgressSaveInFlight = true;
             window._wodProgressSavePending = false;
             WodMultiplayer.progressSave(pid, payload);
@@ -16311,7 +16326,11 @@
             if(!bundle || bundle.format !== 'simplewars_save') throw new Error('Not a Simple Wars save file.');
             let o = bundle.progress;
             if(!o || typeof o !== 'object') throw new Error('Save file missing progress.');
+            wodEnsurePlayerId();
+            let keepPid = wodProgress.profile.playerId;
             wodProgress = wodMergeProgressObject(o);
+            wodProgress.profile.playerId = keepPid;
+            wodPersistPlayerIdLocal(keepPid);
             if(bundle.uiSettings) {
                 if(typeof bundle.uiSettings.showOrdersWhenDeselected === 'boolean')
                     gameData.uiSettings.showOrdersWhenDeselected = bundle.uiSettings.showOrdersWhenDeselected;
@@ -16456,6 +16475,11 @@
 
         function wodRefreshBrowserSaveStatus() {
             let status = document.getElementById('wodBrowserSaveStatus');
+            let idEl = document.getElementById('wodSettingsPlayerId');
+            if(idEl) {
+                wodEnsurePlayerId();
+                idEl.textContent = 'Your player ID (separate save per ID): ' + (wodProgress.profile.playerId || '—');
+            }
             if(!status) return;
             let online = typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen;
             status.textContent = online
@@ -25744,16 +25768,15 @@
                     wodSetBootSplashProgress(100);
                 }
                 requestAnimationFrame(() => {
-                    if(!bootErr) {
-                        if(ov) {
-                            ov.classList.add('hidden');
-                            ov.setAttribute('aria-busy', 'false');
-                        }
-                        if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
-                        if(menuDemoSeeded) resumeMenuBackgroundBattle();
+                    if(ov) {
+                        ov.classList.add('hidden');
+                        ov.setAttribute('aria-busy', 'false');
                     }
+                    if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                    if(!bootErr && menuDemoSeeded) resumeMenuBackgroundBattle();
                     gameData._wodSkipMapGenLoader = false;
                     window._wodBootSettledUntil = 0;
+                    void wodMpBackgroundConnect();
                 });
             }
 
@@ -25767,7 +25790,10 @@
                         normalizeTerrainHexes();
                         updateTerrainKey();
                     }, 48);
-                    await bootStage('Building menu battlefield…', 38, () => bootstrapMenuBackgroundBattle(), 28);
+                    await bootStage('Building menu battlefield…', 38, () => Promise.race([
+                        bootstrapMenuBackgroundBattle(),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('Menu preview timed out')), 28000))
+                    ]), 28);
                     await bootStage('Baking terrain and borders…', 62, () => {
                         updateTerrainCache();
                         draw();
@@ -25803,9 +25829,10 @@
                 } catch(err) {
                     bootErr = true;
                     console.error(err);
-                    if(caption) caption.textContent = 'Could not load. Try refreshing.';
+                    if(caption) caption.textContent = 'Menu preview skipped — you can still play.';
                     if(inner) inner.classList.remove('wod-boot-tween-suppress');
                     gameData._wodSkipMapGenLoader = false;
+                    revealMenu();
                 }
             })();
         }
@@ -35019,7 +35046,6 @@
         loadWodProgress();
         wodEnsurePlayerId();
         wodMpInitGlobalHandlers();
-        void wodMpBackgroundConnect();
         wodMpApplyFriendQueryFromUrl();
         applyWodProfileToGame();
         wodInitBrowserSaves();
