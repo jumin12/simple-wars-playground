@@ -8500,6 +8500,9 @@
             _fogVisible: null,
             _fogExplored: null,
             _fogVisionTimer: 0,
+            _fogCanvas: null,
+            _fogCtx: null,
+            _fogCanvasDirty: true,
             _campaignEnded: false,
             casualties: 0,
             enemyCasualties: 0,
@@ -21247,6 +21250,7 @@
             gameData._fogVisible = null;
             gameData._fogExplored = new Set();
             gameData._fogVisionTimer = 0;
+            gameData._fogCanvasDirty = true;
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
             let startMoney = document.getElementById('setupMoney');
@@ -25008,6 +25012,7 @@
             if(doFull) {
                 terrainCanvas.width = tw;
                 terrainCanvas.height = th;
+                gameData._fogCanvasDirty = true;
                 terrainBaseCanvas.width = tw;
                 terrainBaseCanvas.height = th;
 
@@ -29357,6 +29362,8 @@
                 }
             }
             gameData._fogVisible = visible;
+            gameData._fogCanvasDirty = true;
+            wodTryRebuildFogCanvas();
         }
 
         function wodFogHexVisible(hex) {
@@ -29387,20 +29394,9 @@
             return wodFogHexVisible(gameData.hexes[`${fort.q},${fort.r}`]);
         }
 
-        function wodAppendFogHexPath(ctx, hex, radius) {
-            for(let i = 0; i < 6; i++) {
-                let ang = Math.PI / 6 + i * Math.PI / 3;
-                let px = hex.x + Math.cos(ang) * radius;
-                let py = hex.y + Math.sin(ang) * radius;
-                if(i === 0) ctx.moveTo(px, py);
-                else ctx.lineTo(px, py);
-            }
-            ctx.closePath();
-        }
-
         function wodEnsureFogCloudPattern() {
             if(gameData._fogCloudPattern) return gameData._fogCloudPattern;
-            let sz = 192;
+            let sz = 128;
             let tile = document.createElement('canvas');
             tile.width = sz;
             tile.height = sz;
@@ -29409,15 +29405,14 @@
             let d = img.data;
             for(let y = 0; y < sz; y++) {
                 for(let x = 0; x < sz; x++) {
-                    let n = fbm(x * 0.038 + 11.7, y * 0.038 + 6.3, 5);
-                    let n2 = fbm(x * 0.085 + 29.1, y * 0.072 + 18.4, 3);
-                    let cloud = Math.min(1, n * 0.68 + n2 * 0.38);
+                    let n = fbm(x * 0.05 + 11.7, y * 0.05 + 6.3, 4);
+                    let cloud = Math.min(1, n * 0.82 + 0.12);
                     let idx = (y * sz + x) * 4;
-                    let bright = 245 + Math.floor(cloud * 10);
+                    let bright = 246 + Math.floor(cloud * 9);
                     d[idx] = bright;
-                    d[idx + 1] = bright - 3;
-                    d[idx + 2] = bright - 8;
-                    d[idx + 3] = Math.floor(24 + cloud * 105);
+                    d[idx + 1] = bright - 2;
+                    d[idx + 2] = bright - 7;
+                    d[idx + 3] = Math.floor(30 + cloud * 90);
                 }
             }
             tctx.putImageData(img, 0, 0);
@@ -29425,60 +29420,101 @@
             return tile;
         }
 
-        function wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad, gfxLite) {
+        function wodEnsureFogCanvas() {
+            if(!gameData._fogCanvas) {
+                gameData._fogCanvas = document.createElement('canvas');
+                gameData._fogCtx = gameData._fogCanvas.getContext('2d');
+            }
+            let tw = terrainCanvas.width;
+            let th = terrainCanvas.height;
+            if(tw <= 0 || th <= 0) return false;
+            if(gameData._fogCanvas.width !== tw || gameData._fogCanvas.height !== th) {
+                gameData._fogCanvas.width = tw;
+                gameData._fogCanvas.height = th;
+                gameData._fogCanvasDirty = true;
+            }
+            return true;
+        }
+
+        function wodTryRebuildFogCanvas() {
+            if(!gameData._fogCanvasDirty || !wodFogActive() || !gameData._fogVisible || !gameData._fogExplored) return;
+            wodRebuildFogCanvas();
+        }
+
+        function wodRebuildFogCanvas() {
+            if(!wodFogActive() || !gameData._fogVisible || !gameData._fogExplored) return;
+            if(!wodEnsureFogCanvas()) return;
+            let fc = gameData._fogCtx;
+            let w = gameData._fogCanvas.width;
+            let h = gameData._fogCanvas.height;
+            fc.clearRect(0, 0, w, h);
+            let spacing = gameData.hexRadius * 1.35;
+            let discR = spacing * 0.78;
+            let ox = -terrainBounds.minX;
+            let oy = -terrainBounds.minY;
             let visible = gameData._fogVisible;
             let explored = gameData._fogExplored;
-            if(!visible || !explored) return;
-            let hr = gameData.hexRadius || 20;
-            let r = hr * 1.04;
-            let pad = culPad + hr * 2.5;
-            let fogHexes = [];
+            let edgeSeen = new Set();
+            fc.lineCap = 'round';
+            fc.lineJoin = 'round';
+            fc.lineWidth = spacing * 1.34;
+            fc.strokeStyle = 'rgba(236, 240, 246, 0.9)';
+            fc.beginPath();
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
-                let h = gameData.hexList[hi];
-                if(h.x < camL - pad || h.x > camR + pad || h.y < camT - pad || h.y > camB + pad) continue;
-                let k = getHexKey(h);
+                let hex = gameData.hexList[hi];
+                let k = getHexKey(hex);
                 if(visible.has(k)) continue;
-                fogHexes.push({ hex: h, explored: explored.has(k) });
+                let px = hex.x + ox;
+                let py = hex.y + oy;
+                for(let di = 0; di < hexDirections.length; di++) {
+                    let dir = hexDirections[di];
+                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    if(!nHex || visible.has(getHexKey(nHex))) continue;
+                    let ek = hexPairBorderKey(hex, nHex);
+                    if(edgeSeen.has(ek)) continue;
+                    edgeSeen.add(ek);
+                    fc.moveTo(px, py);
+                    fc.lineTo(nHex.x + ox, nHex.y + oy);
+                }
             }
-            if(!fogHexes.length) return;
-
-            ctx.save();
-
-            ctx.beginPath();
-            for(let fi = 0; fi < fogHexes.length; fi++) {
-                if(!fogHexes[fi].explored) wodAppendFogHexPath(ctx, fogHexes[fi].hex, r);
+            fc.stroke();
+            fc.fillStyle = 'rgba(228, 232, 238, 0.9)';
+            for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
+                let hex = gameData.hexList[hi];
+                let k = getHexKey(hex);
+                if(visible.has(k) || explored.has(k)) continue;
+                fc.beginPath();
+                fc.arc(hex.x + ox, hex.y + oy, discR, 0, Math.PI * 2);
+                fc.fill();
             }
-            ctx.fillStyle = 'rgba(228, 232, 238, 0.9)';
-            ctx.fill();
-
-            ctx.beginPath();
-            for(let fi = 0; fi < fogHexes.length; fi++) {
-                if(fogHexes[fi].explored) wodAppendFogHexPath(ctx, fogHexes[fi].hex, r);
+            fc.fillStyle = 'rgba(236, 240, 246, 0.58)';
+            for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
+                let hex = gameData.hexList[hi];
+                let k = getHexKey(hex);
+                if(visible.has(k) || !explored.has(k)) continue;
+                fc.beginPath();
+                fc.arc(hex.x + ox, hex.y + oy, discR, 0, Math.PI * 2);
+                fc.fill();
             }
-            ctx.fillStyle = 'rgba(236, 240, 246, 0.62)';
-            ctx.fill();
-
-            ctx.beginPath();
-            for(let fi = 0; fi < fogHexes.length; fi++)
-                wodAppendFogHexPath(ctx, fogHexes[fi].hex, r);
-            ctx.clip();
-
             let tile = wodEnsureFogCloudPattern();
-            let pat = ctx.createPattern(tile, 'repeat');
+            let pat = fc.createPattern(tile, 'repeat');
             if(pat) {
-                ctx.save();
-                let drift = gfxLite ? 0 : performance.now() * 0.000024;
-                ctx.translate(-camL + drift * 110, -camT + drift * 48);
-                ctx.globalAlpha = gfxLite ? 0.58 : 0.74;
-                ctx.fillStyle = pat;
-                ctx.fillRect(camL - pad, camT - pad, camR - camL + pad * 2, camB - camT + pad * 2);
-                ctx.restore();
+                fc.save();
+                fc.globalCompositeOperation = 'source-atop';
+                fc.globalAlpha = 0.4;
+                fc.fillStyle = pat;
+                fc.fillRect(0, 0, w, h);
+                fc.restore();
             }
+            gameData._fogCanvasDirty = false;
+        }
 
-            ctx.globalAlpha = gfxLite ? 0.28 : 0.34;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-            ctx.fillRect(camL - pad, camT - pad, camR - camL + pad * 2, camB - camT + pad * 2);
-
+        function wodDrawFogOverlay(ctx) {
+            if(!wodFogActive() || !gameData._fogVisible) return;
+            if(gameData._fogCanvasDirty) wodTryRebuildFogCanvas();
+            if(!gameData._fogCanvas || gameData._fogCanvas.width <= 0) return;
+            ctx.save();
+            ctx.drawImage(gameData._fogCanvas, terrainBounds.minX, terrainBounds.minY);
             ctx.restore();
         }
 
@@ -29708,7 +29744,7 @@
                 ctx.restore();
             }
 
-            if(wodFogActive()) wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad, gfxLite);
+            if(wodFogActive()) wodDrawFogOverlay(ctx);
 
             // Draw Units
             if(gameData.layers.units) {
