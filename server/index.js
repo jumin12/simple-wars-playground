@@ -11,6 +11,55 @@ const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
 
 const rooms = new Map();
+/** @type {Map<string, import('ws').WebSocket & { _wodClient?: object }>} */
+const onlineByPlayerId = new Map();
+
+function sanitizePlayerId(id) {
+  const s = String(id || '').trim().slice(0, 32);
+  if (!/^WOD-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(s)) return '';
+  return s;
+}
+
+function sanitizeDisplayName(raw) {
+  return String(raw || '').trim().slice(0, 24) || 'Player';
+}
+
+function sanitizeUnitSkin(raw) {
+  const s = String(raw || 'nato').trim().slice(0, 32);
+  return s || 'nato';
+}
+
+function sanitizeMpStats(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const g = parseInt(obj.gamesPlayed, 10);
+  const w = parseInt(obj.wins, 10);
+  const l = parseInt(obj.losses, 10);
+  return {
+    gamesPlayed: Number.isFinite(g) ? Math.max(0, Math.min(99999, g)) : 0,
+    wins: Number.isFinite(w) ? Math.max(0, Math.min(99999, w)) : 0,
+    losses: Number.isFinite(l) ? Math.max(0, Math.min(99999, l)) : 0,
+  };
+}
+
+function registerClientPlayer(client, payload) {
+  if (!client || !payload || typeof payload !== 'object') return '';
+  const playerId = sanitizePlayerId(payload.playerId);
+  if (!playerId) return '';
+  if (client.playerId && client.playerId !== playerId) onlineByPlayerId.delete(client.playerId);
+  client.playerId = playerId;
+  client.displayName = sanitizeDisplayName(payload.displayName);
+  client.unitSkin = sanitizeUnitSkin(payload.unitSkin);
+  client.mpStats = sanitizeMpStats(payload.mpStats);
+  onlineByPlayerId.set(playerId, client);
+  return playerId;
+}
+
+function unregisterClientPlayer(client) {
+  if (!client || !client.playerId) return;
+  const cur = onlineByPlayerId.get(client.playerId);
+  if (cur === client) onlineByPlayerId.delete(client.playerId);
+  client.playerId = '';
+}
 
 function lobbyCap(room) {
   let mh = room.meta && room.meta.maxHumans != null ? parseInt(room.meta.maxHumans, 10) : MAX_PLAYERS;
@@ -219,7 +268,16 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server, maxPayload: MAX_INIT_BYTES });
 
 wss.on('connection', (ws) => {
-  const client = { ws, room: null, slot: 0, isHost: false };
+  const client = {
+    ws,
+    room: null,
+    slot: 0,
+    isHost: false,
+    playerId: '',
+    displayName: '',
+    unitSkin: 'nato',
+    mpStats: null,
+  };
   ws._wodClient = client;
 
   try {
@@ -241,6 +299,73 @@ wss.on('connection', (ws) => {
       return;
     }
     const t = msg && msg.t;
+
+    if (t === 'register_player') {
+      const playerId = registerClientPlayer(client, msg);
+      if (!playerId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Invalid player ID' }));
+        return;
+      }
+      ws.send(JSON.stringify({ t: 'registered', playerId }));
+      return;
+    }
+
+    if (t === 'friend_presence') {
+      const ids = Array.isArray(msg.friendIds) ? msg.friendIds.slice(0, 100) : [];
+      const online = [];
+      for (const rawId of ids) {
+        const pid = sanitizePlayerId(rawId);
+        if (!pid) continue;
+        const peer = onlineByPlayerId.get(pid);
+        if (!peer || peer.ws.readyState !== 1) continue;
+        online.push({
+          playerId: pid,
+          displayName: peer.displayName || '',
+          unitSkin: peer.unitSkin || 'nato',
+          inLobby: !!(peer.room && !peer.room.matchStarted),
+          lobbyId: peer.room ? peer.room.id : null,
+        });
+      }
+      ws.send(JSON.stringify({ t: 'friend_presence', online }));
+      return;
+    }
+
+    if (t === 'friend_invite') {
+      const targetId = sanitizePlayerId(msg.targetPlayerId);
+      if (!targetId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Invalid friend ID' }));
+        return;
+      }
+      if (!client.room || client.room.matchStarted) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'You must be in a lobby to invite friends' }));
+        return;
+      }
+      if (!client.isHost) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Only the host can invite friends to seats' }));
+        return;
+      }
+      const target = onlineByPlayerId.get(targetId);
+      if (!target || target.ws.readyState !== 1) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Friend is offline' }));
+        return;
+      }
+      const seat = parseInt(msg.seat, 10) || 0;
+      try {
+        target.ws.send(
+          JSON.stringify({
+            t: 'friend_invite',
+            fromPlayerId: client.playerId || '',
+            fromName: client.displayName || `Player ${client.slot}`,
+            lobbyId: client.room.id,
+            lobbyName: client.room.name,
+            locked: !!client.room.password,
+            seat,
+          }),
+        );
+      } catch (_) {}
+      ws.send(JSON.stringify({ t: 'friend_invite_sent', targetPlayerId: targetId }));
+      return;
+    }
 
     if (t === 'list_lobbies') {
       ws.send(
@@ -418,21 +543,22 @@ wss.on('connection', (ws) => {
     if (t === 'lobby_profile') {
       if (!client.room || client.room.matchStarted) return;
       const rawName = msg.displayName != null ? String(msg.displayName) : '';
-      const displayName = rawName.trim().slice(0, 24) || `Player ${client.slot}`;
-      let mpStats = null;
-      if (msg.mpStats && typeof msg.mpStats === 'object') {
-        const g = parseInt(msg.mpStats.gamesPlayed, 10);
-        const w = parseInt(msg.mpStats.wins, 10);
-        const l = parseInt(msg.mpStats.losses, 10);
-        mpStats = {
-          gamesPlayed: Number.isFinite(g) ? Math.max(0, Math.min(99999, g)) : 0,
-          wins: Number.isFinite(w) ? Math.max(0, Math.min(99999, w)) : 0,
-          losses: Number.isFinite(l) ? Math.max(0, Math.min(99999, l)) : 0,
-        };
-      }
+      const displayName = sanitizeDisplayName(rawName || client.displayName || `Player ${client.slot}`);
+      const unitSkin = sanitizeUnitSkin(msg.unitSkin != null ? msg.unitSkin : client.unitSkin);
+      const mpStats = sanitizeMpStats(msg.mpStats) || client.mpStats;
+      const playerId = sanitizePlayerId(msg.playerId != null ? msg.playerId : client.playerId);
+      client.displayName = displayName;
+      client.unitSkin = unitSkin;
+      client.mpStats = mpStats;
+      if (playerId) registerClientPlayer(client, { playerId, displayName, unitSkin, mpStats });
       if (!client.room.meta.playerPublic || typeof client.room.meta.playerPublic !== 'object')
         client.room.meta.playerPublic = {};
-      client.room.meta.playerPublic[String(client.slot)] = { displayName, mpStats };
+      client.room.meta.playerPublic[String(client.slot)] = {
+        displayName,
+        mpStats,
+        unitSkin,
+        playerId: playerId || client.playerId || '',
+      };
       broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
       broadcastLobbyList();
       return;
@@ -474,6 +600,7 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     leaveRoom(client);
+    unregisterClientPlayer(client);
     broadcastLobbyList();
   });
 });

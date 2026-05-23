@@ -86,6 +86,25 @@
           api.lobbies = msg.lobbies || [];
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
+        case 'registered':
+          emit('Registered', { playerId: msg.playerId || '' });
+          break;
+        case 'friend_presence':
+          emit('FriendPresence', { online: msg.online || [] });
+          break;
+        case 'friend_invite':
+          emit('FriendInvite', {
+            fromPlayerId: msg.fromPlayerId || '',
+            fromName: msg.fromName || 'Friend',
+            lobbyId: msg.lobbyId || '',
+            lobbyName: msg.lobbyName || 'Game',
+            locked: !!msg.locked,
+            seat: msg.seat | 0,
+          });
+          break;
+        case 'friend_invite_sent':
+          emit('FriendInviteSent', { targetPlayerId: msg.targetPlayerId || '' });
+          break;
         case 'joined':
           api.code = msg.code;
           api.slot = msg.slot;
@@ -271,7 +290,25 @@
         t: 'lobby_profile',
         displayName: p.displayName != null ? String(p.displayName) : '',
         mpStats: p.mpStats && typeof p.mpStats === 'object' ? p.mpStats : null,
+        unitSkin: p.unitSkin != null ? String(p.unitSkin) : '',
+        playerId: p.playerId != null ? String(p.playerId) : '',
       });
+    },
+    registerPlayer(payload) {
+      const p = payload && typeof payload === 'object' ? payload : {};
+      send({
+        t: 'register_player',
+        playerId: p.playerId != null ? String(p.playerId) : '',
+        displayName: p.displayName != null ? String(p.displayName) : '',
+        unitSkin: p.unitSkin != null ? String(p.unitSkin) : 'nato',
+        mpStats: p.mpStats && typeof p.mpStats === 'object' ? p.mpStats : null,
+      });
+    },
+    queryFriendPresence(friendIds) {
+      send({ t: 'friend_presence', friendIds: Array.isArray(friendIds) ? friendIds : [] });
+    },
+    sendFriendInvite(targetPlayerId, seat) {
+      send({ t: 'friend_invite', targetPlayerId: String(targetPlayerId || ''), seat: seat | 0 });
     },
     kickPlayer(slot) {
       send({ t: 'kick_player', slot: slot | 0 });
