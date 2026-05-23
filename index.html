@@ -17152,6 +17152,7 @@
 
         function wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return false;
+            if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex)) return false;
             if(wodOrderIntoWater(unit, targetHex)) return true;
             if(wodHexPathLength(bridgePath) > 1) return false;
             let bestLand = wodHexPathLength(landPath);
@@ -17203,6 +17204,7 @@
 
         function wodTryAmphibiousMarchFallback(unit, startHex, targetHex) {
             if(!wodUnitPrefersLandOnlyPath(unit) || !startHex || !targetHex) return [];
+            if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex)) return [];
             let waterPath = findAmphibiousMarchPath(unit, startHex, targetHex);
             return wodHexPathLength(waterPath) > 1 ? waterPath : [];
         }
@@ -17668,15 +17670,33 @@
             let sy = startPt ? startPt.y : unit.y;
             let prevHex = getNearestWalkableHexForUnit(unit, sx, sy);
             let full = [];
-            for(let wp of worldWaypoints) {
-                let reach = findReachableOrderHex(unit, wp.x, wp.y);
-                if(!reach) continue;
-                let seg = findPathAroundTerrain(unit, reach.hex, prevHex, false, 'auto', allowOverBudget);
-                if(seg.length === 0) continue;
-                if(full.length > 0 && getHexKey(seg[0]) === getHexKey(full[full.length - 1]))
-                    seg = seg.slice(1);
-                full.push(...seg);
-                prevHex = reach.hex;
+            let savedWater = unit._wodOrderIntoWater;
+            let savedOrder = unit.orderTarget;
+            let savedAmpKey = unit._wodAmpPathKey;
+            let savedAmpPath = unit._wodAmpPath;
+            let savedArrowBuild = unit._wodArrowPathBuild;
+            unit.orderTarget = null;
+            unit._wodAmpPathKey = null;
+            unit._wodAmpPath = null;
+            unit._wodArrowPathBuild = true;
+            try {
+                for(let wp of worldWaypoints) {
+                    let reach = findReachableOrderHex(unit, wp.x, wp.y);
+                    if(!reach) continue;
+                    unit._wodOrderIntoWater = !!reach.intoWater;
+                    let seg = findPathAroundTerrain(unit, reach.hex, prevHex, false, 'auto', allowOverBudget);
+                    if(seg.length === 0) continue;
+                    if(full.length > 0 && getHexKey(seg[0]) === getHexKey(full[full.length - 1]))
+                        seg = seg.slice(1);
+                    full.push(...seg);
+                    prevHex = reach.hex;
+                }
+            } finally {
+                unit._wodOrderIntoWater = savedWater;
+                unit.orderTarget = savedOrder;
+                unit._wodAmpPathKey = savedAmpKey;
+                unit._wodAmpPath = savedAmpPath;
+                unit._wodArrowPathBuild = savedArrowBuild;
             }
             return smoothGridPath(full);
         }
@@ -17766,9 +17786,9 @@
                 wodOrderArrowBuildPumpScheduled = false;
                 if(!wodOrderArrowBuildQueue.length) return;
                 wodPfSpentMs = 0;
-                wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, 16);
+                wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, wodFogActive() ? 22 : 16);
                 let t0 = performance.now();
-                let budgetMs = wodUsesVisualViewportLayout() ? 3.5 : 8;
+                let budgetMs = wodUsesVisualViewportLayout() ? 3.5 : (wodFogActive() ? 12 : 8);
                 while(wodOrderArrowBuildQueue.length && performance.now() - t0 < budgetMs)
                     wodProcessOrderArrowBuildJob(wodOrderArrowBuildQueue.shift());
                 if(wodOrderArrowBuildQueue.length) wodPumpOrderArrowBuildQueue();
@@ -28791,11 +28811,9 @@
                             if(sliced && sliced.length >= 2) return sliced;
                             return null;
                         }
-                        let live = wodLiveMarchPathPoints(unit);
-                        if(live && live.length >= 2) return live;
                         let sliced = wodSliceFrozenOrderArrowPath(unit, unit._routeArrowFrozenPts);
                         if(sliced && sliced.length >= 2) return sliced;
-                        return null;
+                        return wodWaypointOrderArrowPoints(unit);
                     }
                     return wodWaypointOrderArrowPoints(unit);
                 }
@@ -29363,7 +29381,6 @@
             }
             gameData._fogVisible = visible;
             gameData._fogCanvasDirty = true;
-            wodTryRebuildFogCanvas();
         }
 
         function wodFogHexVisible(hex) {
