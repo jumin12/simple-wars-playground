@@ -17660,6 +17660,51 @@
             wodPumpOrderArrowBuildQueue();
         }
 
+        function wodProcessOneOrderArrowBuildJob(job) {
+            let unit = null;
+            for(let u of gameData.entities) {
+                if(u.uid === job.uid && u.hp > 0) { unit = u; break; }
+            }
+            if(!unit || unit._routeArrowBuildGen !== job.gen || unit._routeArrowMarchSig !== job.sig) return;
+            try {
+                let seg = buildConcatenatedHexPath(unit, job.ptsCopy, job.startPt, true);
+                if(!seg.length) {
+                    job.retries = (job.retries || 0) + 1;
+                    if(job.retries < 5) wodOrderArrowBuildQueue.push(job);
+                    return;
+                }
+                let out = wodWorldPointsFromHexMarchPath(unit, seg, job.startPt);
+                if(out.length >= 2 && unit._routeArrowBuildGen === job.gen && unit._routeArrowMarchSig === job.sig) {
+                    let oldPts = unit._routeArrowFrozenPts;
+                    let oldIdx = unit._routeArrowProgressIdx || 0;
+                    unit._routeArrowFrozenPts = out;
+                    unit._routeArrowFrozenReady = true;
+                    if(oldPts && oldPts.length > 1) {
+                        let ratio = oldIdx / (oldPts.length - 1);
+                        unit._routeArrowProgressIdx = Math.min(out.length - 1, Math.max(0, Math.round(ratio * (out.length - 1))));
+                    }
+                }
+            } catch(_) {}
+        }
+
+        function wodFlushOrderArrowBuildQueue(maxMs) {
+            if(!wodOrderArrowBuildQueue.length) return;
+            wodOrderArrowBuildPumpScheduled = false;
+            wodPfSpentMs = 0;
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, 32);
+            let t0 = performance.now();
+            let limit = maxMs != null ? maxMs : 32;
+            while(wodOrderArrowBuildQueue.length && performance.now() - t0 < limit) {
+                let job = wodOrderArrowBuildQueue.shift();
+                wodProcessOneOrderArrowBuildJob(job);
+            }
+            if(wodOrderArrowBuildQueue.length) wodPumpOrderArrowBuildQueue();
+        }
+
+        function wodBulkOrderArrowFlushBudget(unitCount) {
+            return Math.min(48, 10 + Math.max(0, (unitCount || 1) - 1) * 1.6);
+        }
+
         function wodPumpOrderArrowBuildQueue() {
             if(wodOrderArrowBuildPumpScheduled) return;
             wodOrderArrowBuildPumpScheduled = true;
@@ -17669,33 +17714,13 @@
                 wodPfSpentMs = 0;
                 wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, 16);
                 let t0 = performance.now();
-                let budgetMs = wodUsesVisualViewportLayout() ? 3.5 : 8;
+                let qLen = wodOrderArrowBuildQueue.length;
+                let budgetMs = wodUsesVisualViewportLayout()
+                    ? (qLen > 8 ? 12 : 3.5)
+                    : (qLen > 8 ? 28 : 8);
                 while(wodOrderArrowBuildQueue.length && performance.now() - t0 < budgetMs) {
                     let job = wodOrderArrowBuildQueue.shift();
-                    let unit = null;
-                    for(let u of gameData.entities) {
-                        if(u.uid === job.uid && u.hp > 0) { unit = u; break; }
-                    }
-                    if(!unit || unit._routeArrowBuildGen !== job.gen || unit._routeArrowMarchSig !== job.sig) continue;
-                    try {
-                        let seg = buildConcatenatedHexPath(unit, job.ptsCopy, job.startPt, true);
-                        if(!seg.length) {
-                            job.retries = (job.retries || 0) + 1;
-                            if(job.retries < 5) wodOrderArrowBuildQueue.push(job);
-                            continue;
-                        }
-                        let out = wodWorldPointsFromHexMarchPath(unit, seg, job.startPt);
-                        if(out.length >= 2 && unit._routeArrowBuildGen === job.gen && unit._routeArrowMarchSig === job.sig) {
-                            let oldPts = unit._routeArrowFrozenPts;
-                            let oldIdx = unit._routeArrowProgressIdx || 0;
-                            unit._routeArrowFrozenPts = out;
-                            unit._routeArrowFrozenReady = true;
-                            if(oldPts && oldPts.length > 1) {
-                                let ratio = oldIdx / (oldPts.length - 1);
-                                unit._routeArrowProgressIdx = Math.min(out.length - 1, Math.max(0, Math.round(ratio * (out.length - 1))));
-                            }
-                        }
-                    } catch(_) {}
+                    wodProcessOneOrderArrowBuildJob(job);
                 }
                 if(wodOrderArrowBuildQueue.length) wodPumpOrderArrowBuildQueue();
             });
@@ -17890,6 +17915,7 @@
                 }
                 assignUnitMoveAlongWaypoints(unit, pathPts);
             });
+            wodFlushOrderArrowBuildQueue(wodBulkOrderArrowFlushBudget(units.length));
         }
 
         function findMoraleRoutPoint(unit) {
@@ -19825,6 +19851,7 @@
             if(hasOwnerNeighbor(hex, unit.owner)) return true;
             if(standingHex && standingHex.owner === unit.owner) return true;
             if(standingHex && getNeighborHexes(hex).some(n => n && n.q === standingHex.q && n.r === standingHex.r)) {
+                if(canUnitEnterHex(unit, standingHex)) return true;
                 let batch = gameData._wodClaimBatch;
                 if(batch) {
                     let standRec = batch.get(getHexKey(standingHex));
@@ -19844,15 +19871,35 @@
             return false;
         }
 
+        function wodHexesWithinSteps8(cq, cr, maxSteps) {
+            if(maxSteps <= 0) return [];
+            let out = [];
+            let seen = new Set();
+            let queue = [{q: cq, r: cr, s: 0}];
+            let qi = 0;
+            while(qi < queue.length) {
+                let cur = queue[qi++];
+                let k = cur.q + ',' + cur.r;
+                if(seen.has(k)) continue;
+                seen.add(k);
+                if(cur.s > 0) out.push({q: cur.q, r: cur.r});
+                if(cur.s >= maxSteps) continue;
+                for(let di = 0; di < hexDirections.length; di++) {
+                    let dir = hexDirections[di];
+                    queue.push({q: cur.q + dir.q, r: cur.r + dir.r, s: cur.s + 1});
+                }
+            }
+            return out;
+        }
+
         function claimTerritoryAroundUnit(unit, atX, atY) {
             if(unit.type === 'convoy') return;
             let px = atX != null ? atX : unit.x;
             let py = atY != null ? atY : unit.y;
             let standingHex = getNearestHexToPoint(px, py);
             if(!standingHex) return;
-            let uHex = {q: standingHex.q, r: standingHex.r};
             let claimRadius = unit.type === 'heavy' ? 2 : 1;
-            let claimH = getHexesInRadius(uHex.q, uHex.r, claimRadius);
+            let claimH = wodHexesWithinSteps8(standingHex.q, standingHex.r, claimRadius);
             let claims = [];
 
             if(standingHex.owner !== unit.owner && canUnitEnterHex(unit, standingHex)) {
@@ -19863,8 +19910,8 @@
                 let h = gameData.hexes[`${ch.q},${ch.r}`];
                 if(!h || h.owner === unit.owner || !canUnitEnterHex(unit, h)) continue;
                 if(h === standingHex) continue;
-                if(h.owner > 0 && h.owner !== unit.owner) continue;
-                if(wodTerritoryClaimAttach(unit, h, standingHex)) claims.push({ hex: h, standing: false });
+                if(!wodTerritoryClaimAttach(unit, h, standingHex)) continue;
+                claims.push({ hex: h, standing: false });
             }
 
             for(let c of claims) {
@@ -29917,6 +29964,7 @@
                 assignUnitMoveAlongWaypoints(unit, pathPts);
             });
             showNotification(wps.length === 1 ? 'Marching to waypoint' : `Marching via ${wps.length} waypoints`);
+            wodFlushOrderArrowBuildQueue(wodBulkOrderArrowFlushBudget(units.length));
         }
 
         function issueMoveOrder(worldPos) {
@@ -29935,6 +29983,7 @@
                 if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost)
                     assignUnitMoveAlongWaypoints(unit, [{ x: tx, y: ty }]);
             });
+            wodFlushOrderArrowBuildQueue(wodBulkOrderArrowFlushBudget(units.length));
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost && typeof WodMultiplayer !== 'undefined')
                 WodMultiplayer.sendCmd({ kind: 'move', uids: units.map(u => u.uid), x: worldPos.x, y: worldPos.y });
             showNotification(units.length === 1 ? 'Marching' : `Marching (${units.length} units)`);
