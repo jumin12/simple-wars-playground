@@ -4,17 +4,23 @@
  * Lobby browser: list open games, optional password, online count.
  */
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 const { WebSocketServer } = require('ws');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
+const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
+const LEADERBOARD_ACTIVE_MS = 30 * 24 * 60 * 60 * 1000;
+const LEADERBOARD_SAVE_DEBOUNCE_MS = 2000;
 
 const rooms = new Map();
 /** @type {Map<string, object>} */
 const onlineByPlayerId = new Map();
 /** @type {Map<string, object>} */
 const leaderboard = new Map();
+let leaderboardSaveTimer = null;
 const friendRequestCooldown = new Map();
 const lobbyInviteCooldown = new Map();
 const recentLobbyInvites = new Map();
@@ -51,6 +57,50 @@ function sanitizeCombinedStats(obj) {
   };
 }
 
+function pruneInactiveLeaderboardEntries() {
+  const cutoff = Date.now() - LEADERBOARD_ACTIVE_MS;
+  for (const [id, row] of leaderboard) {
+    if (!row || (row.updatedAt || 0) < cutoff) leaderboard.delete(id);
+  }
+}
+
+function loadLeaderboardFromDisk() {
+  try {
+    if (!fs.existsSync(LEADERBOARD_FILE)) return;
+    const raw = fs.readFileSync(LEADERBOARD_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return;
+    for (const [id, row] of Object.entries(data)) {
+      const playerId = sanitizePlayerId(id);
+      if (!playerId || !row || typeof row !== 'object') continue;
+      leaderboard.set(playerId, {
+        playerId,
+        displayName: sanitizeDisplayName(row.displayName),
+        unitSkin: sanitizeUnitSkin(row.unitSkin),
+        stats: sanitizeCombinedStats(row.stats),
+        updatedAt: Math.max(0, parseInt(row.updatedAt, 10) || 0),
+      });
+    }
+    pruneInactiveLeaderboardEntries();
+  } catch (err) {
+    console.warn('[leaderboard] load failed:', err.message);
+  }
+}
+
+function scheduleLeaderboardSave() {
+  if (leaderboardSaveTimer) return;
+  leaderboardSaveTimer = setTimeout(() => {
+    leaderboardSaveTimer = null;
+    try {
+      pruneInactiveLeaderboardEntries();
+      const data = Object.fromEntries(leaderboard);
+      fs.writeFileSync(LEADERBOARD_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[leaderboard] save failed:', err.message);
+    }
+  }, LEADERBOARD_SAVE_DEBOUNCE_MS);
+}
+
 function updateLeaderboardEntry(client, combinedStats) {
   if (!client || !client.playerId) return;
   leaderboard.set(client.playerId, {
@@ -60,6 +110,7 @@ function updateLeaderboardEntry(client, combinedStats) {
     stats: sanitizeCombinedStats(combinedStats),
     updatedAt: Date.now(),
   });
+  scheduleLeaderboardSave();
 }
 
 function cooldownBlocked(map, key, ms) {
@@ -75,10 +126,11 @@ function buildLeaderboardRows(sortKey, filterIds) {
   const key = ['wins', 'kills', 'losses', 'defeats', 'gamesPlayed'].includes(sortKey)
     ? sortKey
     : 'wins';
-  let rows = [...leaderboard.values()];
+  const cutoff = Date.now() - LEADERBOARD_ACTIVE_MS;
+  let rows = [...leaderboard.values()].filter((r) => r && r.playerId && (r.updatedAt || 0) >= cutoff);
   if (Array.isArray(filterIds) && filterIds.length) {
     const set = new Set(filterIds);
-    rows = rows.filter((r) => r.playerId && set.has(r.playerId));
+    rows = rows.filter((r) => set.has(r.playerId));
   }
   return rows
     .sort((a, b) => {
@@ -86,7 +138,15 @@ function buildLeaderboardRows(sortKey, filterIds) {
       const bv = (b.stats && b.stats[key]) || 0;
       if (bv !== av) return bv - av;
       return (b.updatedAt || 0) - (a.updatedAt || 0);
-    });
+    })
+    .map((r) => ({
+      playerId: r.playerId,
+      displayName: r.displayName,
+      unitSkin: r.unitSkin,
+      stats: r.stats,
+      updatedAt: r.updatedAt,
+      online: onlineByPlayerId.has(r.playerId),
+    }));
 }
 
 function sanitizeMpStats(obj) {
@@ -795,6 +855,8 @@ wss.on('connection', (ws) => {
     broadcastLobbyList();
   });
 });
+
+loadLeaderboardFromDisk();
 
 server.listen(PORT, () => {
   console.log(`simple-wars-mp listening on ${PORT} (max ${MAX_PLAYERS} players / room)`);

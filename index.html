@@ -1675,6 +1675,16 @@
             font-size: 12px;
             opacity: 0.85;
         }
+        .mp-lb-status {
+            font-size: 11px;
+            margin-top: 2px;
+        }
+        .mp-lb-status.online {
+            color: #7bed9f;
+        }
+        .mp-lb-status.offline {
+            opacity: 0.65;
+        }
         .mp-friend-row.pending-in {
             border-color: rgba(52, 152, 219, 0.45);
         }
@@ -12481,27 +12491,33 @@
             for(let r of (serverRows || [])) {
                 if(r && r.playerId) byId[r.playerId] = r;
             }
+            let presence = wodMpFriendPresenceMap();
             wodEnsurePlayerId();
             let out = [];
             for(let f of wodMpGetFriendsList()) {
                 if(!f || !f.playerId) continue;
                 if(byId[f.playerId]) {
-                    out.push(byId[f.playerId]);
+                    let row = byId[f.playerId];
+                    if(row.online == null) row.online = !!presence[f.playerId];
+                    out.push(row);
                     continue;
                 }
+                let online = !!presence[f.playerId];
                 if(f.playerId === wodProgress.profile.playerId) {
                     out.push({
                         playerId: f.playerId,
                         displayName: wodProgress.profile.mpDisplayName || f.displayName || f.playerId,
                         unitSkin: gameData.unitSkin || f.unitSkin || 'nato',
-                        stats: wodMpCombinedStats()
+                        stats: wodMpCombinedStats(),
+                        online: true
                     });
                 } else {
                     out.push({
                         playerId: f.playerId,
                         displayName: f.displayName || f.playerId,
                         unitSkin: f.unitSkin || 'nato',
-                        stats: { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 }
+                        stats: { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 },
+                        online: online
                     });
                 }
             }
@@ -12523,7 +12539,7 @@
                 let scope = window._wodMpLbScope || 'global';
                 host.innerHTML = '<p class="mp-hub-pane-lead">' + (scope === 'friends'
                     ? 'No friend stats yet — add friends and play to compare rankings.'
-                    : 'No rankings yet — stay connected after playing to appear here.') + '</p>';
+                    : 'No rankings in the last 30 days — play while connected to appear here.') + '</p>';
                 if(pager) pager.hidden = true;
                 return;
             }
@@ -12548,7 +12564,9 @@
                 meta.innerHTML =
                     '<div class="mp-lb-name">' + wodMpEscapeHtml(row.displayName || row.playerId || 'Player') + '</div>' +
                     '<div class="mp-lb-val">' + wodMpEscapeHtml(lab) + ': ' + formatLifetimeBig(st[sortKey] | 0) +
-                    ' · Kills ' + formatLifetimeBig(st.kills | 0) + ' · Wins ' + formatLifetimeBig(st.wins | 0) + '</div>';
+                    ' · Kills ' + formatLifetimeBig(st.kills | 0) + ' · Wins ' + formatLifetimeBig(st.wins | 0) + '</div>' +
+                    '<div class="mp-lb-status ' + (row.online ? 'online' : 'offline') + '">' +
+                    (row.online ? 'Online' : 'Offline') + '</div>';
                 let rank = document.createElement('span');
                 rank.className = 'mp-lb-rank';
                 rank.textContent = String(start + i + 1);
