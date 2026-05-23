@@ -19838,15 +19838,14 @@
         }
 
         function wodTerritoryClaimAttach(unit, hex, standingHex) {
-            if(hasOwnerNeighborForClaim(hex, unit.owner)) return true;
-            if(standingHex && wodHexOwnedByForClaim(standingHex, unit.owner)) return true;
+            if(hasOwnerNeighbor(hex, unit.owner)) return true;
+            if(standingHex && standingHex.owner === unit.owner) return true;
             if(standingHex && getNeighborHexes(hex).some(n => n && n.q === standingHex.q && n.r === standingHex.r)) {
                 let batch = gameData._wodClaimBatch;
                 if(batch) {
                     let standRec = batch.get(getHexKey(standingHex));
                     if(standRec && standRec.owner === unit.owner && !standRec.contested) return true;
                 }
-                if(wodHexOwnedByForClaim(standingHex, unit.owner)) return true;
             }
             let batch = gameData._wodClaimBatch;
             if(batch) {
@@ -19864,9 +19863,9 @@
         function wodCanClaimTerritoryHex(unit, hex, standingHex) {
             if(!hex || !unit || !canUnitEnterHex(unit, hex)) return false;
             if(hex.owner === unit.owner) return false;
-            if(standingHex && hex.q === standingHex.q && hex.r === standingHex.r) return true;
-            if(wodTerritoryClaimAttach(unit, hex, standingHex)) return true;
-            if(hex.owner > 0 && hex.owner !== unit.owner && hasOwnerNeighborForClaim(hex, unit.owner)) return true;
+            let onTile = standingHex && hex.q === standingHex.q && hex.r === standingHex.r;
+            if(onTile) return true;
+            if(hex.owner === 0) return wodTerritoryClaimAttach(unit, hex, standingHex);
             return false;
         }
 
@@ -19910,7 +19909,7 @@
             for(let i = 0; i <= steps; i++) {
                 let t = i / steps;
                 claimTerritoryAroundUnit(unit, x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
-                if(i > 0 && i < steps) wodApplyTerritoryClaimBatch();
+                if(i > 0 && i < steps && (i & 1) === 0) wodApplyTerritoryClaimBatch();
             }
         }
 
@@ -19963,21 +19962,6 @@
                 frontier = next;
             }
             return res;
-        }
-
-        function wodHexOwnedByForClaim(hex, owner) {
-            if(!hex || owner <= 0) return false;
-            if(hex.owner === owner) return true;
-            let batch = gameData._wodClaimBatch;
-            if(batch) {
-                let rec = batch.get(getHexKey(hex));
-                if(rec && rec.owner === owner && !rec.contested) return true;
-            }
-            return false;
-        }
-
-        function hasOwnerNeighborForClaim(hex, owner) {
-            return getNeighborHexes(hex).some(n => wodHexOwnedByForClaim(n, owner));
         }
 
         function hexRound(q, r) {
