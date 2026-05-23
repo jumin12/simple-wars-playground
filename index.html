@@ -3587,11 +3587,87 @@
             border: 1px solid rgba(255, 255, 255, 0.14);
             border-radius: 12px;
             background: rgba(0, 0, 0, 0.22);
-            padding: 12px 12px 10px;
+            padding: 8px 8px 10px;
             text-align: left;
             cursor: pointer;
             transition: border-color 0.15s, transform 0.12s, background 0.15s;
-            min-height: 118px;
+            min-height: 168px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .campaign-level-preview {
+            width: 100%;
+            aspect-ratio: 5 / 3;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #154360;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            flex-shrink: 0;
+        }
+        .campaign-level-preview canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .campaign-level-preview-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            font-size: 0.72rem;
+            color: rgba(255, 255, 255, 0.45);
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        .campaign-detail-preview {
+            width: 100%;
+            max-width: 420px;
+            aspect-ratio: 16 / 9;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #154360;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            margin: 0 0 12px;
+        }
+        .campaign-detail-preview canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .campaign-briefing-overlay-wrap {
+            z-index: 12050;
+            background: rgba(0, 0, 0, 0.72);
+        }
+        .campaign-briefing-panel {
+            max-width: 520px;
+            width: min(92vw, 520px);
+            margin: auto;
+            padding: 28px 26px 22px;
+            border-radius: 14px;
+            border: 1px solid rgba(212, 175, 55, 0.45);
+            background: linear-gradient(180deg, rgba(18, 24, 32, 0.98), rgba(8, 12, 18, 0.98));
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+            text-align: center;
+        }
+        .campaign-briefing-panel h2 {
+            margin: 0 0 10px;
+            color: #d4af37;
+            font-size: 1.35rem;
+        }
+        .campaign-briefing-panel p {
+            margin: 0 0 10px;
+            line-height: 1.45;
+            color: rgba(255, 255, 255, 0.88);
+        }
+        .campaign-briefing-handicap {
+            font-size: 0.88rem;
+            color: #bdc3c7;
+        }
+        .campaign-briefing-hint {
+            margin-top: 14px !important;
+            font-size: 0.82rem;
+            color: rgba(255, 255, 255, 0.55);
         }
         .campaign-level-card:not(.locked):hover {
             border-color: rgba(212, 175, 55, 0.55);
@@ -7025,6 +7101,7 @@
                 <p class="campaign-progress-line" id="campaignProgressLine">Mission 1 unlocked — beat each mission to unlock the next.</p>
                 <div class="campaign-level-grid" id="campaignLevelGrid"></div>
                 <div class="campaign-detail" id="campaignLevelDetail">
+                    <div class="campaign-detail-preview" id="campaignDetailPreview"><div class="campaign-level-preview-loading">Loading map…</div></div>
                     <h3 id="campaignDetailTitle">Select a mission</h3>
                     <p id="campaignDetailBlurb">Pick a mission above to see its briefing and handicap.</p>
                     <div class="campaign-detail-actions">
@@ -8325,6 +8402,16 @@
         </div>
     </div>
 
+    <div id="campaignBriefingOverlay" class="overlay hidden campaign-briefing-overlay-wrap">
+        <div class="campaign-briefing-panel">
+            <h2 id="campaignBriefingTitle">Mission briefing</h2>
+            <p id="campaignBriefingBody"></p>
+            <p id="campaignBriefingHandicap" class="campaign-briefing-handicap"></p>
+            <p class="campaign-briefing-hint">Press Space or click Begin to start (game begins paused).</p>
+            <button type="button" class="menu-btn" id="campaignBriefingBtn" style="margin-top:8px;width:100%;max-width:280px;">Begin mission</button>
+        </div>
+    </div>
+
     <!-- Production: static site simple-wars-live.onrender.com talks to Node relay simple-wars.onrender.com (wss). -->
     <script>
     (function () {
@@ -8662,6 +8749,10 @@
             if(el) el.classList.add('hidden');
         }
 
+        function hideCampaignBriefingOverlay() {
+            wodHideCampaignBriefingOverlay();
+        }
+
         function dismissCampaignSummaryToMenu() {
             hideCampaignSummaryOverlay();
             returnToMenu();
@@ -8707,6 +8798,181 @@
             { id: 10, name: 'One Rifle', blurb: 'One unit, one city, almost no cash — fight your way back.', seed: 0xCA01000A, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 0.18, manpowerMul: 0.5, unitMul: 0.05, landFrac: 0.42, cityCap: 1, heavyMul: 0, unitCap: 1 }
         ];
         let _wodCampaignSelectedLevel = 1;
+        const _wodCampaignPreviewCache = {};
+        let _wodCampaignPreviewBusy = false;
+        let _wodCampaignPreviewGenToken = 0;
+
+        function wodCampaignPreviewPaintCanvas(canvas, dataUrl) {
+            if(!canvas || !dataUrl) return;
+            let ctx = canvas.getContext('2d');
+            if(!ctx) return;
+            let img = new Image();
+            img.onload = () => {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0);
+            };
+            img.src = dataUrl;
+        }
+
+        function wodCampaignPreviewMountCanvas(host, levelId) {
+            if(!host) return null;
+            host.innerHTML = '';
+            let wrap = document.createElement('div');
+            wrap.className = 'campaign-level-preview';
+            wrap.setAttribute('data-level', String(levelId));
+            let canvas = document.createElement('canvas');
+            canvas.width = 200;
+            canvas.height = 120;
+            canvas.setAttribute('aria-hidden', 'true');
+            wrap.appendChild(canvas);
+            host.appendChild(wrap);
+            if(_wodCampaignPreviewCache[levelId]) wodCampaignPreviewPaintCanvas(canvas, _wodCampaignPreviewCache[levelId]);
+            else {
+                let loading = document.createElement('div');
+                loading.className = 'campaign-level-preview-loading';
+                loading.textContent = 'Map…';
+                wrap.appendChild(loading);
+            }
+            return canvas;
+        }
+
+        async function wodGenerateCampaignPreviewDataUrl(levelId) {
+            if(_wodCampaignPreviewCache[levelId]) return _wodCampaignPreviewCache[levelId];
+            let lv = wodGetCampaignLevelDef(levelId);
+            if(!lv) return null;
+            let menuSnap = cloneMenuBattleState();
+            let wasMenuAttract = !!gameData.menuAttractMode;
+            let prevSkip = !!gameData._wodSkipMapGenLoader;
+            try {
+                pauseMenuBackgroundBattle();
+                gameData.menuAttractMode = false;
+                gameData._wodSkipMapGenLoader = true;
+                wodConfigureCampaignMission(levelId);
+                wodApplyMapSizePreset(lv.mapSize);
+                gameData.aiCount = 1;
+                gameData._mapGenSeed = lv.seed >>> 0;
+                gameData._wodReuseMapGenSeed = true;
+                gameData.loadedCustomMap = false;
+                gameData._wodFastMapGen = true;
+                wodMapGenYieldingStart(4);
+                await generateMap();
+                let off = document.createElement('canvas');
+                off.width = 240;
+                off.height = 144;
+                previewLoadedMap(off);
+                _wodCampaignPreviewCache[levelId] = off.toDataURL('image/png');
+            } catch(e) {
+                console.warn('Campaign preview failed for mission', levelId, e);
+            } finally {
+                wodMapGenYieldingStop();
+                gameData._wodFastMapGen = false;
+                gameData._wodSkipMapGenLoader = prevSkip;
+                wodClearCampaignMissionConfig();
+                if(menuSnap && applyMenuBattleState(menuSnap)) {
+                    gameData.menuAttractMode = wasMenuAttract;
+                    if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
+                }
+            }
+            return _wodCampaignPreviewCache[levelId] || null;
+        }
+
+        async function wodRefreshCampaignPreviews() {
+            let token = ++_wodCampaignPreviewGenToken;
+            for(let lv of WOD_CAMPAIGN_LEVELS) {
+                if(token !== _wodCampaignPreviewGenToken) return;
+                if(_wodCampaignPreviewCache[lv.id]) {
+                    document.querySelectorAll('.campaign-level-preview[data-level="' + lv.id + '"] canvas').forEach(c => {
+                        wodCampaignPreviewPaintCanvas(c, _wodCampaignPreviewCache[lv.id]);
+                        let load = c.parentElement && c.parentElement.querySelector('.campaign-level-preview-loading');
+                        if(load) load.remove();
+                    });
+                    continue;
+                }
+                while(_wodCampaignPreviewBusy && token === _wodCampaignPreviewGenToken)
+                    await new Promise(r => setTimeout(r, 80));
+                if(token !== _wodCampaignPreviewGenToken) return;
+                _wodCampaignPreviewBusy = true;
+                let url = await wodGenerateCampaignPreviewDataUrl(lv.id);
+                _wodCampaignPreviewBusy = false;
+                if(token !== _wodCampaignPreviewGenToken) return;
+                if(url) {
+                    document.querySelectorAll('.campaign-level-preview[data-level="' + lv.id + '"] canvas').forEach(c => {
+                        wodCampaignPreviewPaintCanvas(c, url);
+                        let load = c.parentElement && c.parentElement.querySelector('.campaign-level-preview-loading');
+                        if(load) load.remove();
+                    });
+                    if(lv.id === _wodCampaignSelectedLevel) wodRenderCampaignDetailPreview();
+                }
+                await new Promise(r => setTimeout(r, 0));
+            }
+        }
+
+        function wodRenderCampaignDetailPreview() {
+            let host = document.getElementById('campaignDetailPreview');
+            if(!host) return;
+            let lv = wodGetCampaignLevelDef(_wodCampaignSelectedLevel);
+            if(!lv) {
+                host.innerHTML = '<div class="campaign-level-preview-loading">Select a mission</div>';
+                return;
+            }
+            host.innerHTML = '';
+            let wrap = document.createElement('div');
+            wrap.className = 'campaign-level-preview';
+            wrap.setAttribute('data-level', String(lv.id));
+            let canvas = document.createElement('canvas');
+            canvas.width = 420;
+            canvas.height = 236;
+            wrap.appendChild(canvas);
+            host.appendChild(wrap);
+            if(_wodCampaignPreviewCache[lv.id]) wodCampaignPreviewPaintCanvas(canvas, _wodCampaignPreviewCache[lv.id]);
+            else {
+                let loading = document.createElement('div');
+                loading.className = 'campaign-level-preview-loading';
+                loading.textContent = 'Generating map preview…';
+                wrap.appendChild(loading);
+            }
+        }
+
+        function wodShowCampaignBriefingOverlay() {
+            let overlay = document.getElementById('campaignBriefingOverlay');
+            let title = document.getElementById('campaignBriefingTitle');
+            let body = document.getElementById('campaignBriefingBody');
+            let handicap = document.getElementById('campaignBriefingHandicap');
+            if(!overlay || !gameData.campaign || !gameData.campaign.active) return;
+            let lv = wodGetCampaignLevelDef(gameData.campaign.levelId);
+            if(title) title.textContent = 'Mission ' + (gameData.campaign.levelId | 0) + ' — ' + (gameData.campaign.levelName || (lv && lv.name) || 'Briefing');
+            if(body) body.textContent = (lv && lv.blurb) || 'Engage the enemy and complete the objective.';
+            if(handicap) handicap.textContent = 'Handicap: ' + wodCampaignHandicapSummary(lv || {});
+            gameData._campaignBriefingPending = true;
+            setGameSpeed(0, true);
+            overlay.classList.remove('hidden');
+        }
+
+        function wodDismissCampaignBriefing() {
+            let overlay = document.getElementById('campaignBriefingOverlay');
+            if(overlay) overlay.classList.add('hidden');
+            gameData._campaignBriefingPending = false;
+            if(gameState === 'PLAYING' && !gameData._campaignEnded) setGameSpeed(1, true);
+        }
+
+        function wodWireCampaignBriefingButtons() {
+            if(window._wodCampaignBriefingWired) return;
+            window._wodCampaignBriefingWired = true;
+            let btn = document.getElementById('campaignBriefingBtn');
+            let overlay = document.getElementById('campaignBriefingOverlay');
+            if(btn) btn.onclick = () => wodDismissCampaignBriefing();
+            if(overlay) overlay.addEventListener('click', (ev) => {
+                if(ev.target === overlay) wodDismissCampaignBriefing();
+            });
+        }
+
+        function wodHideCampaignBriefingOverlay() {
+            let overlay = document.getElementById('campaignBriefingOverlay');
+            if(overlay) overlay.classList.add('hidden');
+            if(gameData) gameData._campaignBriefingPending = false;
+        }
         function wodEnsureCampaignProgress() {
             if(!wodProgress) wodProgress = defaultWodProgress();
             if(!wodProgress.campaign || typeof wodProgress.campaign !== 'object')
@@ -8756,11 +9022,24 @@
                 card.type = 'button';
                 card.className = 'campaign-level-card' + (unlocked ? '' : ' locked') + (completed ? ' completed' : '') + (lv.id === _wodCampaignSelectedLevel ? ' selected' : '');
                 card.innerHTML =
+                    '<div class="campaign-level-preview" data-level="' + lv.id + '"><canvas width="200" height="120" aria-hidden="true"></canvas></div>' +
                     '<div class="campaign-level-num">Mission ' + lv.id + '</div>' +
                     '<div class="campaign-level-name">' + wodMpEscapeHtml(lv.name) + '</div>' +
                     '<div class="campaign-level-blurb">' + wodMpEscapeHtml(wodCampaignHandicapSummary(lv)) + '</div>' +
                     (completed ? '<span class="campaign-level-badge">Clear</span>' : '') +
                     (unlocked ? '' : '<span class="campaign-level-lock" aria-hidden="true">🔒</span>');
+                if(_wodCampaignPreviewCache[lv.id]) {
+                    let c = card.querySelector('canvas');
+                    if(c) wodCampaignPreviewPaintCanvas(c, _wodCampaignPreviewCache[lv.id]);
+                } else {
+                    let prev = card.querySelector('.campaign-level-preview');
+                    if(prev) {
+                        let loading = document.createElement('div');
+                        loading.className = 'campaign-level-preview-loading';
+                        loading.textContent = 'Map…';
+                        prev.appendChild(loading);
+                    }
+                }
                 card.addEventListener('click', () => {
                     if(!unlocked) {
                         showNotification('Beat mission ' + (lv.id - 1) + ' to unlock this mission.');
@@ -8772,6 +9051,7 @@
                 grid.appendChild(card);
             }
             wodRenderCampaignDetail();
+            void wodRefreshCampaignPreviews();
         }
         function wodRenderCampaignDetail() {
             let lv = wodGetCampaignLevelDef(_wodCampaignSelectedLevel);
@@ -8783,6 +9063,7 @@
             blurb.textContent = lv.blurb + ' Handicap: ' + wodCampaignHandicapSummary(lv) + '. Map uses shared world seed ' + ('0000000' + lv.seed.toString(16).toUpperCase()).slice(-8) + '.';
             btn.disabled = !wodIsCampaignLevelUnlocked(lv.id);
             btn.onclick = () => wodStartCampaignLevel(lv.id);
+            wodRenderCampaignDetailPreview();
         }
         function wodConfigureCampaignMission(levelId) {
             let lv = wodGetCampaignLevelDef(levelId);
@@ -8835,10 +9116,10 @@
                 return;
             }
             if(!wodConfigureCampaignMission(levelId)) return;
-            if(gameData._soloPreviewGenerating || gameData._mapGenInProgress) {
-                showNotification('Map is still generating…');
-                return;
-            }
+            gameData._soloPreviewGenerating = false;
+            gameData._mapGenInProgress = false;
+            gameData._soloMapPreviewMatchesStart = false;
+            gameData._soloPreviewSnapshot = null;
             _wodCampaignSelectedLevel = levelId | 0;
             startGame('campaign');
         }
@@ -9337,26 +9618,30 @@
         }
 
         function startGame(mode) {
-            if((mode === 'ai' || mode === 'campaign') && gameData._soloPreviewGenerating) {
+            if(mode === 'ai' && gameData._soloPreviewGenerating) {
                 showNotification('Map is still generating...');
                 return;
             }
             if(mode === 'ai') wodClearCampaignMissionConfig();
+            let isCampaign = mode === 'campaign';
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             gameData._cityUnitStackTap = null;
+            gameData._campaignBriefingPending = false;
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             UI.escMenu.classList.add('hidden');
             UI.inGameUI.style.display = 'block';
             UI.canvas.style.display = 'block';
-            setGameSpeed(1);
+            setGameSpeed(isCampaign ? 0 : 1, isCampaign);
             wodResetMobileHud();
             if(!gameData.layers) gameData.layers = {};
             gameData.layers.territory = false;
             void (async function() {
                 try {
                     await initGame();
+                    if(isCampaign && gameData.campaign && gameData.campaign.active)
+                        wodShowCampaignBriefingOverlay();
                 } catch(e) {
                     console.error(e);
                 }
@@ -9368,6 +9653,7 @@
 
         function returnToMenu() {
             hideCampaignSummaryOverlay();
+            hideCampaignBriefingOverlay();
             wodApplyPlayViewportLock(false);
             gameState = 'MENU';
             wodResetMobileHud();
@@ -23491,7 +23777,8 @@
                 }
             }
 
-            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview';
+            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview'
+                || !!(gameData.cities && gameData.cities.some(c => c && c.owner > 0));
             if(wodPreviewDrawPolitical) {
                 let hxLookup = gameData.hexes || {};
                 wodPaintMapPreviewPolitical(pCtx, gameData.hexList, gameData.cities, null, cx, cy, scale, gameData.hexRadius, hxLookup);
@@ -23687,6 +23974,18 @@
                 } finally {
                     wodPopRandom();
                 }
+            } else if(gameData.campaign && gameData.campaign.active) {
+                let lv = wodGetCampaignLevelDef(gameData.campaign.levelId);
+                gameData.loadedCustomMap = false;
+                gameData._soloMapPreviewMatchesStart = false;
+                gameData._soloPreviewSnapshot = null;
+                gameData.mapRadius = newRadius;
+                gameData.mapShape = requestedShape;
+                if(lv) {
+                    gameData._mapGenSeed = lv.seed >>> 0;
+                    gameData._wodReuseMapGenSeed = true;
+                }
+                await generateMap();
             } else {
                 let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
                 if(gameData.loadedCustomMap) {
@@ -23732,6 +24031,7 @@
         }
 
         function stopGame() {
+            hideCampaignBriefingOverlay();
             if(typeof gameData !== 'undefined' && gameData && gameData.mp && gameData.mp.enabled) wodMpDisconnectAndReset();
             if(animationFrameId) cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
@@ -33813,6 +34113,11 @@
                 }
             }
             if(e.key === 'Escape') {
+                if(gameState === 'PLAYING' && gameData._campaignBriefingPending) {
+                    e.preventDefault();
+                    wodDismissCampaignBriefing();
+                    return;
+                }
                 if(gameState === 'PLAYING' && gameData.buildMode) {
                     e.preventDefault();
                     exitBuildPlacementMode();
@@ -33838,6 +34143,19 @@
                     toggleEscMenu();
                     return;
                 }
+            }
+            if((e.key === ' ' || e.code === 'Space') && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+                let tag = document.activeElement && document.activeElement.tagName;
+                if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+                e.preventDefault();
+                if(gameData._campaignBriefingPending) {
+                    wodDismissCampaignBriefing();
+                    return;
+                }
+                if(!gameData.mp || !gameData.mp.enabled) {
+                    setGameSpeed(gameData.speed === 0 ? 1 : 0, true);
+                }
+                return;
             }
             keys[e.key.toLowerCase()] = true;
         });
@@ -35060,6 +35378,7 @@
 
         initSetupPanelBindings();
         wodWireCampaignSummaryButtons();
+        wodWireCampaignBriefingButtons();
         wodInitPeriodSettingsBinding();
         wodInitShopPeriodBinding();
         wodSyncAllPeriodSelects();
