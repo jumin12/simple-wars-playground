@@ -19826,6 +19826,15 @@
             return occ;
         }
 
+        function wodHexNearActiveEnemyCombat(hex, friendlyOwner) {
+            if(!hex) return false;
+            if(wodHexOccupiedByEnemyCombat(hex, friendlyOwner)) return true;
+            for(let nb of getNeighborHexes(hex)) {
+                if(nb && wodHexOccupiedByEnemyCombat(nb, friendlyOwner)) return true;
+            }
+            return false;
+        }
+
         function wodQueueTerritoryClaim(hex, owner, priority) {
             if(!hex || owner <= 0) return;
             if(!gameData._wodClaimBatch) gameData._wodClaimBatch = new Map();
@@ -19891,6 +19900,8 @@
 
         function wodSpearheadCanClaimEnemyHex(unit, hex, standingHex) {
             if(!hex || !standingHex || hex.owner === unit.owner || hex.owner === 0) return false;
+            // Wedge capture only while pushing through hostile land — not from own frontline tiles.
+            if(standingHex.owner === unit.owner) return false;
             if(getNeighborHexes(hex).some(n => n && n.q === standingHex.q && n.r === standingHex.r))
                 return wodHexOwnedByForSpearhead(standingHex, unit.owner);
             let batch = gameData._wodClaimBatch;
@@ -19942,6 +19953,8 @@
                     let h = gameData.hexes[`${ch.q},${ch.r}`];
                     if(!h || (h.q === standingHex.q && h.r === standingHex.r)) continue;
                     if(!wodCanClaimTerritoryHex(unit, h, standingHex)) continue;
+                    let onTile = h.q === standingHex.q && h.r === standingHex.r;
+                    if(!onTile && wodHexNearActiveEnemyCombat(h, unit.owner)) continue;
                     if(wodHexOccupiedByEnemyCombat(h, unit.owner)) continue;
                     wodQueueTerritoryClaim(h, unit.owner, wodTerritoryClaimPriority(unit, h, standingHex));
                 }
@@ -19980,10 +19993,8 @@
                 claimTerritoryAroundUnit(unit, x1, y1);
                 return;
             }
-            for(let i = 0; i < line.length; i++) {
+            for(let i = 0; i < line.length; i++)
                 claimTerritoryAroundUnit(unit, null, null, line[i]);
-                if(i > 0 && i < line.length - 1) wodApplyTerritoryClaimBatch();
-            }
         }
 
         let batchHexOwner = false;
