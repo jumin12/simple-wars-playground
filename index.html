@@ -1233,6 +1233,36 @@
             border: 2px solid rgba(255, 255, 255, 0.35);
             box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
         }
+        .mp-gl-color-wrap {
+            position: relative;
+            flex-shrink: 0;
+        }
+        .mp-gl-color-trigger {
+            cursor: pointer;
+            padding: 0;
+            display: block;
+        }
+        .mp-gl-color-trigger:hover {
+            border-color: rgba(255, 255, 255, 0.65);
+        }
+        .mp-gl-color-menu {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            z-index: 40;
+            display: none;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 8px;
+            min-width: 148px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(18, 22, 28, 0.98);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+        }
+        .mp-gl-color-wrap.open .mp-gl-color-menu {
+            display: flex;
+        }
         .mp-gl-color-pick {
             display: flex;
             flex-wrap: wrap;
@@ -12518,16 +12548,53 @@
             let hex = String(currentHex || '#999999');
             if(!canEdit)
                 return '<span class="mp-gl-swatch mp-gl-swatch--lg" style="background:' + wodMpEscapeHtml(hex) + '" title="Faction color"></span>';
-            let html = '<div class="mp-gl-color-pick" data-slot="' + slot + '">';
+            let menu = '';
             for(let i = 0; i < WOD_MP_LOBBY_PALETTE.length; i++) {
                 let palHex = WOD_MP_LOBBY_PALETTE[i][0];
                 let lab = WOD_MP_LOBBY_PALETTE[i][1];
                 let taken = wodMpLobbyIsColorTakenByOthers(meta, slot, palHex, maxH);
                 let on = hex.toLowerCase() === palHex.toLowerCase() ? ' active' : '';
-                html += '<button type="button" class="mp-gl-color-btn' + on + '" data-slot="' + slot + '" data-color="' + palHex + '" style="background:' + palHex + '" title="' + wodMpEscapeHtml(lab) + '" aria-label="' + wodMpEscapeHtml(lab) + '"' + (taken ? ' disabled' : '') + '></button>';
+                menu += '<button type="button" class="mp-gl-color-btn' + on + '" data-slot="' + slot + '" data-color="' + palHex + '" style="background:' + palHex + '" title="' + wodMpEscapeHtml(lab) + '" aria-label="' + wodMpEscapeHtml(lab) + '"' + (taken ? ' disabled' : '') + '></button>';
             }
-            html += '</div>';
-            return html;
+            return '<div class="mp-gl-color-wrap" data-slot="' + slot + '">' +
+                '<button type="button" class="mp-gl-color-trigger mp-gl-swatch mp-gl-swatch--lg" data-slot="' + slot + '" style="background:' + wodMpEscapeHtml(hex) + '" title="Choose faction color" aria-label="Choose faction color"></button>' +
+                '<div class="mp-gl-color-menu">' + menu + '</div></div>';
+        }
+        function wodMpCloseLobbyColorMenus(exceptWrap) {
+            let slotsEl = document.getElementById('mpGlSlots');
+            if(!slotsEl) return;
+            slotsEl.querySelectorAll('.mp-gl-color-wrap.open').forEach(wrap => {
+                if(exceptWrap && wrap === exceptWrap) return;
+                wrap.classList.remove('open');
+            });
+        }
+        function wodMpWireLobbyColorPickers(slotsEl) {
+            if(!slotsEl) return;
+            slotsEl.querySelectorAll('.mp-gl-color-trigger').forEach(btn => {
+                btn.onclick = (ev) => {
+                    ev.stopPropagation();
+                    let wrap = btn.closest('.mp-gl-color-wrap');
+                    if(!wrap) return;
+                    let open = wrap.classList.contains('open');
+                    wodMpCloseLobbyColorMenus();
+                    if(!open) wrap.classList.add('open');
+                };
+            });
+            slotsEl.querySelectorAll('.mp-gl-color-menu .mp-gl-color-btn').forEach(btn => {
+                btn.onclick = (ev) => {
+                    ev.stopPropagation();
+                    if(btn.disabled) return;
+                    let slot = parseInt(btn.getAttribute('data-slot'), 10);
+                    let col = btn.getAttribute('data-color');
+                    if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyColor)
+                        WodMultiplayer.sendLobbyColor(slot, col);
+                    wodMpCloseLobbyColorMenus();
+                };
+            });
+            if(!window._wodMpColorMenuDocBound) {
+                window._wodMpColorMenuDocBound = true;
+                document.addEventListener('click', () => wodMpCloseLobbyColorMenus());
+            }
         }
         function wodMpSortLeaderboardRows(rows, sortKey) {
             let key = sortKey || 'wins';
@@ -12763,6 +12830,7 @@
             wodMpRenderFriendsList();
             if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.removeFriend)
                 WodMultiplayer.removeFriend(playerId);
+            showNotification('Friend removed.');
         }
         function wodMpRenderFriendsList() {
             let host = document.getElementById('mpFriendsList');
@@ -13640,15 +13708,7 @@
                         requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true, politicsOnly: true }));
                     };
                 });
-                slotsEl.querySelectorAll('.mp-gl-color-btn').forEach(btn => {
-                    btn.onclick = () => {
-                        if(btn.disabled) return;
-                        let slot = parseInt(btn.getAttribute('data-slot'), 10);
-                        let col = btn.getAttribute('data-color');
-                        if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyColor)
-                            WodMultiplayer.sendLobbyColor(slot, col);
-                    };
-                });
+                wodMpWireLobbyColorPickers(slotsEl);
                 slotsEl.querySelectorAll('.mp-gl-kick').forEach(btn => {
                     btn.onclick = () => {
                         let slot = parseInt(btn.getAttribute('data-slot'), 10);

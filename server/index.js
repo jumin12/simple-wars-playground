@@ -12,14 +12,19 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
 const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
+const FRIEND_REMOVALS_FILE = path.join(__dirname, 'friend-removals.json');
 const LEADERBOARD_SAVE_DEBOUNCE_MS = 2000;
+const FRIEND_REMOVALS_SAVE_DEBOUNCE_MS = 2000;
 
 const rooms = new Map();
 /** @type {Map<string, object>} */
 const onlineByPlayerId = new Map();
 /** @type {Map<string, object>} */
 const leaderboard = new Map();
+/** @type {Map<string, object[]>} */
+const pendingFriendRemovals = new Map();
 let leaderboardSaveTimer = null;
+let friendRemovalsSaveTimer = null;
 const friendRequestCooldown = new Map();
 const lobbyInviteCooldown = new Map();
 const recentLobbyInvites = new Map();
@@ -120,6 +125,86 @@ function scheduleLeaderboardSave() {
       console.warn('[leaderboard] save failed:', err.message);
     }
   }, LEADERBOARD_SAVE_DEBOUNCE_MS);
+}
+
+function loadFriendRemovalsFromDisk() {
+  try {
+    if (!fs.existsSync(FRIEND_REMOVALS_FILE)) return;
+    const raw = fs.readFileSync(FRIEND_REMOVALS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return;
+    for (const [id, rows] of Object.entries(data)) {
+      const targetId = sanitizePlayerId(id);
+      if (!targetId || !Array.isArray(rows)) continue;
+      const list = [];
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        const fromPlayerId = sanitizePlayerId(row.fromPlayerId);
+        if (!fromPlayerId) continue;
+        list.push({
+          fromPlayerId,
+          fromName: sanitizeDisplayName(row.fromName),
+          at: Math.max(0, parseInt(row.at, 10) || 0),
+        });
+      }
+      if (list.length) pendingFriendRemovals.set(targetId, list);
+    }
+  } catch (err) {
+    console.warn('[friend-removals] load failed:', err.message);
+  }
+}
+
+function scheduleFriendRemovalsSave() {
+  if (friendRemovalsSaveTimer) return;
+  friendRemovalsSaveTimer = setTimeout(() => {
+    friendRemovalsSaveTimer = null;
+    try {
+      const data = Object.fromEntries(pendingFriendRemovals);
+      fs.writeFileSync(FRIEND_REMOVALS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[friend-removals] save failed:', err.message);
+    }
+  }, FRIEND_REMOVALS_SAVE_DEBOUNCE_MS);
+}
+
+function queueFriendRemoval(targetId, entry) {
+  if (!targetId || !entry || !entry.fromPlayerId) return;
+  const list = pendingFriendRemovals.get(targetId) || [];
+  if (!list.some((row) => row.fromPlayerId === entry.fromPlayerId)) {
+    list.push({
+      fromPlayerId: entry.fromPlayerId,
+      fromName: sanitizeDisplayName(entry.fromName),
+      at: entry.at || Date.now(),
+    });
+    pendingFriendRemovals.set(targetId, list);
+    scheduleFriendRemovalsSave();
+  }
+}
+
+function sendFriendRemovedNotice(client, entry) {
+  if (!client || !client.ws || client.ws.readyState !== 1 || !entry) return false;
+  try {
+    client.ws.send(
+      JSON.stringify({
+        t: 'friend_removed',
+        fromPlayerId: entry.fromPlayerId,
+        fromName: entry.fromName || 'Player',
+      }),
+    );
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function flushFriendRemovalsForClient(client) {
+  const targetId = client && client.playerId;
+  if (!targetId) return;
+  const list = pendingFriendRemovals.get(targetId);
+  if (!list || !list.length) return;
+  for (const entry of list) sendFriendRemovedNotice(client, entry);
+  pendingFriendRemovals.delete(targetId);
+  scheduleFriendRemovalsSave();
 }
 
 function updateLeaderboardEntry(client, combinedStats) {
@@ -453,6 +538,7 @@ wss.on('connection', (ws) => {
         return;
       }
       ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId }));
+      flushFriendRemovalsForClient(client);
       return;
     }
 
@@ -479,18 +565,14 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', msg: 'Invalid friend remove request' }));
         return;
       }
+      const entry = {
+        fromPlayerId: fromId,
+        fromName: client.displayName || 'Player',
+        at: Date.now(),
+      };
       const target = onlineByPlayerId.get(targetId);
-      if (target && target.ws.readyState === 1) {
-        try {
-          target.ws.send(
-            JSON.stringify({
-              t: 'friend_removed',
-              fromPlayerId: fromId,
-              fromName: client.displayName || 'Player',
-            }),
-          );
-        } catch (_) {}
-      }
+      const delivered = target ? sendFriendRemovedNotice(target, entry) : false;
+      if (!delivered) queueFriendRemoval(targetId, entry);
       ws.send(JSON.stringify({ t: 'friend_remove_ack', targetPlayerId: targetId }));
       return;
     }
@@ -901,6 +983,7 @@ wss.on('connection', (ws) => {
 });
 
 loadLeaderboardFromDisk();
+loadFriendRemovalsFromDisk();
 
 server.listen(PORT, () => {
   console.log(`simple-wars-mp listening on ${PORT} (max ${MAX_PLAYERS} players / room)`);
