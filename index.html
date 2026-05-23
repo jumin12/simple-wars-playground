@@ -29387,89 +29387,98 @@
             return wodFogHexVisible(gameData.hexes[`${fort.q},${fort.r}`]);
         }
 
-        function wodCollectFogBorderChains(hexList, hexLookup, visibleSet, spacing) {
-            let edgeMap = new Map();
-            for(let hi = 0, hl = hexList.length; hi < hl; hi++) {
-                let hex = hexList[hi];
-                if(!visibleSet.has(getHexKey(hex))) continue;
-                for(let di = 0; di < cardinalHexDirections.length; di++) {
-                    let dir = cardinalHexDirections[di];
-                    let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(!nHex || visibleSet.has(getHexKey(nHex))) continue;
-                    let ek = hexPairBorderKey(hex, nHex);
-                    if(edgeMap.has(ek)) continue;
-                    edgeMap.set(ek, {
-                        x: (hex.x + nHex.x) / 2,
-                        y: (hex.y + nHex.y) / 2,
-                        hex, nHex, dir
-                    });
-                }
-            }
-            if(edgeMap.size === 0) return [];
-            let midpointByEdge = new Map();
-            let cornerMap = new Map();
-            for(let [ek, meta] of edgeMap) {
-                midpointByEdge.set(ek, { x: meta.x, y: meta.y });
-                registerBorderCornersForPair(cornerMap, meta.hex, meta.nHex, meta.dir, ek, meta.x, meta.y, spacing);
-            }
-            let adj = linkBorderEdgesAroundCorners(cornerMap);
-            bridgeBorderChainGaps(adj, midpointByEdge, spacing);
-            let chains = walkBorderEdgeChains(adj, midpointByEdge);
-            chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
-            let out = [];
-            for(let ci = 0; ci < chains.length; ci++) {
-                let c = chains[ci];
-                let pts = c.keys.map(k => midpointByEdge.get(k)).filter(Boolean);
-                if(pts.length >= 2) out.push({ closed: c.closed, pts });
-            }
-            return out;
-        }
-
-        function wodDrawFogHexTile(ctx, hex, fillStyle) {
-            let hr = gameData.hexRadius || 20;
-            let r = hr * 0.94;
-            ctx.beginPath();
+        function wodAppendFogHexPath(ctx, hex, radius) {
             for(let i = 0; i < 6; i++) {
                 let ang = Math.PI / 6 + i * Math.PI / 3;
-                let px = hex.x + Math.cos(ang) * r;
-                let py = hex.y + Math.sin(ang) * r;
+                let px = hex.x + Math.cos(ang) * radius;
+                let py = hex.y + Math.sin(ang) * radius;
                 if(i === 0) ctx.moveTo(px, py);
                 else ctx.lineTo(px, py);
             }
             ctx.closePath();
-            ctx.fillStyle = fillStyle;
-            ctx.fill();
         }
 
-        function wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad) {
+        function wodEnsureFogCloudPattern() {
+            if(gameData._fogCloudPattern) return gameData._fogCloudPattern;
+            let sz = 192;
+            let tile = document.createElement('canvas');
+            tile.width = sz;
+            tile.height = sz;
+            let tctx = tile.getContext('2d');
+            let img = tctx.createImageData(sz, sz);
+            let d = img.data;
+            for(let y = 0; y < sz; y++) {
+                for(let x = 0; x < sz; x++) {
+                    let n = fbm(x * 0.038 + 11.7, y * 0.038 + 6.3, 5);
+                    let n2 = fbm(x * 0.085 + 29.1, y * 0.072 + 18.4, 3);
+                    let cloud = Math.min(1, n * 0.68 + n2 * 0.38);
+                    let idx = (y * sz + x) * 4;
+                    let bright = 245 + Math.floor(cloud * 10);
+                    d[idx] = bright;
+                    d[idx + 1] = bright - 3;
+                    d[idx + 2] = bright - 8;
+                    d[idx + 3] = Math.floor(24 + cloud * 105);
+                }
+            }
+            tctx.putImageData(img, 0, 0);
+            gameData._fogCloudPattern = tile;
+            return tile;
+        }
+
+        function wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad, gfxLite) {
             let visible = gameData._fogVisible;
             let explored = gameData._fogExplored;
             if(!visible || !explored) return;
-            let spacing = gameData.hexRadius * 1.35;
-            ctx.save();
+            let hr = gameData.hexRadius || 20;
+            let r = hr * 1.04;
+            let pad = culPad + hr * 2.5;
+            let fogHexes = [];
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                 let h = gameData.hexList[hi];
-                if(h.x < camL - culPad || h.x > camR + culPad || h.y < camT - culPad || h.y > camB + culPad) continue;
+                if(h.x < camL - pad || h.x > camR + pad || h.y < camT - pad || h.y > camB + pad) continue;
                 let k = getHexKey(h);
                 if(visible.has(k)) continue;
-                wodDrawFogHexTile(ctx, h, explored.has(k) ? 'rgba(8, 12, 18, 0.76)' : 'rgba(2, 4, 8, 0.94)');
+                fogHexes.push({ hex: h, explored: explored.has(k) });
             }
-            let chains = wodCollectFogBorderChains(gameData.hexList, gameData.hexes, visible, spacing);
-            if(chains.length) {
-                ctx.lineCap = 'round';
-                ctx.lineJoin = 'round';
-                ctx.strokeStyle = 'rgba(2, 4, 8, 0.88)';
-                ctx.lineWidth = spacing * 1.42;
-                for(let ci = 0; ci < chains.length; ci++) {
-                    let c = chains[ci];
-                    drawPaintStroke(ctx, c.pts, spacing, {
-                        closedLoop: c.closed,
-                        suppressDegenerate: true,
-                        openLineCap: 'round',
-                        hybridBorder: true
-                    });
-                }
+            if(!fogHexes.length) return;
+
+            ctx.save();
+
+            ctx.beginPath();
+            for(let fi = 0; fi < fogHexes.length; fi++) {
+                if(!fogHexes[fi].explored) wodAppendFogHexPath(ctx, fogHexes[fi].hex, r);
             }
+            ctx.fillStyle = 'rgba(228, 232, 238, 0.9)';
+            ctx.fill();
+
+            ctx.beginPath();
+            for(let fi = 0; fi < fogHexes.length; fi++) {
+                if(fogHexes[fi].explored) wodAppendFogHexPath(ctx, fogHexes[fi].hex, r);
+            }
+            ctx.fillStyle = 'rgba(236, 240, 246, 0.62)';
+            ctx.fill();
+
+            ctx.beginPath();
+            for(let fi = 0; fi < fogHexes.length; fi++)
+                wodAppendFogHexPath(ctx, fogHexes[fi].hex, r);
+            ctx.clip();
+
+            let tile = wodEnsureFogCloudPattern();
+            let pat = ctx.createPattern(tile, 'repeat');
+            if(pat) {
+                ctx.save();
+                let drift = gfxLite ? 0 : performance.now() * 0.000024;
+                ctx.translate(-camL + drift * 110, -camT + drift * 48);
+                ctx.globalAlpha = gfxLite ? 0.58 : 0.74;
+                ctx.fillStyle = pat;
+                ctx.fillRect(camL - pad, camT - pad, camR - camL + pad * 2, camB - camT + pad * 2);
+                ctx.restore();
+            }
+
+            ctx.globalAlpha = gfxLite ? 0.28 : 0.34;
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+            ctx.fillRect(camL - pad, camT - pad, camR - camL + pad * 2, camB - camT + pad * 2);
+
             ctx.restore();
         }
 
@@ -29698,6 +29707,8 @@
                 ctx.setLineDash([]);
                 ctx.restore();
             }
+
+            if(wodFogActive()) wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad, gfxLite);
 
             // Draw Units
             if(gameData.layers.units) {
@@ -29932,8 +29943,6 @@
                     ctx.stroke();
                 }
             }
-
-            if(wodFogActive()) wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad);
 
             ctx.restore();
 
