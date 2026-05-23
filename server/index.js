@@ -12,7 +12,6 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
 const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
-const LEADERBOARD_ACTIVE_MS = 30 * 24 * 60 * 60 * 1000;
 const LEADERBOARD_SAVE_DEBOUNCE_MS = 2000;
 
 const rooms = new Map();
@@ -57,13 +56,6 @@ function sanitizeCombinedStats(obj) {
   };
 }
 
-function pruneInactiveLeaderboardEntries() {
-  const cutoff = Date.now() - LEADERBOARD_ACTIVE_MS;
-  for (const [id, row] of leaderboard) {
-    if (!row || (row.updatedAt || 0) < cutoff) leaderboard.delete(id);
-  }
-}
-
 function loadLeaderboardFromDisk() {
   try {
     if (!fs.existsSync(LEADERBOARD_FILE)) return;
@@ -81,7 +73,6 @@ function loadLeaderboardFromDisk() {
         updatedAt: Math.max(0, parseInt(row.updatedAt, 10) || 0),
       });
     }
-    pruneInactiveLeaderboardEntries();
   } catch (err) {
     console.warn('[leaderboard] load failed:', err.message);
   }
@@ -92,7 +83,6 @@ function scheduleLeaderboardSave() {
   leaderboardSaveTimer = setTimeout(() => {
     leaderboardSaveTimer = null;
     try {
-      pruneInactiveLeaderboardEntries();
       const data = Object.fromEntries(leaderboard);
       fs.writeFileSync(LEADERBOARD_FILE, JSON.stringify(data, null, 2), 'utf8');
     } catch (err) {
@@ -126,8 +116,7 @@ function buildLeaderboardRows(sortKey, filterIds) {
   const key = ['wins', 'kills', 'losses', 'defeats', 'gamesPlayed'].includes(sortKey)
     ? sortKey
     : 'wins';
-  const cutoff = Date.now() - LEADERBOARD_ACTIVE_MS;
-  let rows = [...leaderboard.values()].filter((r) => r && r.playerId && (r.updatedAt || 0) >= cutoff);
+  let rows = [...leaderboard.values()].filter((r) => r && r.playerId);
   if (Array.isArray(filterIds) && filterIds.length) {
     const set = new Set(filterIds);
     rows = rows.filter((r) => set.has(r.playerId));
