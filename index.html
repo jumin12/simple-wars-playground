@@ -6387,7 +6387,7 @@
                 </div>
                 <div class="setup-row">
                     <button type="button" class="build-btn" id="setupBtnGenerateNew" onclick="previewMap()">Generate New</button>
-                    <button type="button" class="wod-editor-btn" id="setupBtnPlayCustom" onclick="showScenarioPicker()" disabled title="Purchase scenarios in the Shop → Maps tab">Play Custom</button>
+                    <button type="button" class="wod-editor-btn" id="setupBtnShopMaps" onclick="showScenarioPicker()" disabled title="Purchase scenario maps in the Shop → Maps tab">Shop Maps</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnSaveMap" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnLoadMap" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
                 </div>
@@ -6964,7 +6964,7 @@
                 </div>
 
                 <div id="shopTabMaps" class="shop-tab-pane" data-shop-pane="maps" role="tabpanel" hidden>
-                    <p class="shop-tab-lead">Purchase historical scenario maps for <strong>250 gold</strong> each. Owned scenarios appear under <strong>Play Custom</strong> in solo setup.</p>
+                    <p class="shop-tab-lead">Purchase historical scenario maps for <strong>250 gold</strong> each. Select owned maps from <strong>Shop Maps</strong> in solo setup.</p>
                     <div class="shop-option-grid" id="shopScenarioMapsGrid"></div>
                 </div>
 
@@ -11973,7 +11973,7 @@
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
             for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney', 'setupPlayerColor',
-                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnPlayCustom', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
+                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnShopMaps', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
             if(on && document.activeElement && document.activeElement.closest) {
@@ -14961,6 +14961,8 @@
         /** Ends solo vs AI matches: domination (default) or annihilation; also handles defeat when the player has no cities. In multiplayer, only the host evaluates end conditions and broadcasts outcomes. */
         function checkCampaignEndConditions(dt) {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
+            if(gameData._activeScenarioId && gameData.gameSessionStartedPerfMs &&
+                (performance.now() - gameData.gameSessionStartedPerfMs) < 1500) return;
             if(gameData.mp && gameData.mp.enabled) {
                 if(gameData.mp.isHost) wodMpCheckEndConditionsHost(dt);
                 return;
@@ -21397,11 +21399,19 @@
                 }
             } else {
                 let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
-                if(gameData.loadedCustomMap) {
+                if(gameData._activeScenarioId && window.WodScenarios) {
+                    wodReloadActiveScenarioMap(true);
+                    await assignStartingCities();
+                } else if(gameData.loadedCustomMap) {
                     if(gameData.hexList.length === 0 || gameData.mapRadius !== newRadius || shapeChanged) {
-                        gameData.mapRadius = newRadius;
-                        gameData.loadedCustomMap = false;
-                        await generateMap();
+                        if(gameData._activeScenarioId) {
+                            wodReloadActiveScenarioMap(true);
+                            await assignStartingCities();
+                        } else {
+                            gameData.mapRadius = newRadius;
+                            gameData.loadedCustomMap = false;
+                            await generateMap();
+                        }
                     } else {
                         await assignStartingCities();
                     }
@@ -21973,6 +21983,10 @@
         async function assignStartingCities() {
             wodSyncViewportAndCanvas();
             gameData._campaignEnded = false;
+            if(gameData._activeScenarioId && window.WodScenarios) {
+                wodReloadActiveScenarioMap(true);
+                gameData.loadedCustomMap = true;
+            }
             let preserveLoadedLayout = !!(gameData.loadedCustomMap && (!gameData.mp || !gameData.mp.enabled));
             let useMapFileStartEconomy = !!(preserveLoadedLayout && gameData._mapExportHadStartEconomy);
             // Clear entities for procedural maps; keep authored units on loaded library / editor exports.
@@ -22348,7 +22362,7 @@
             let ownsInnerRng = !_wodSavedMathRandom;
             let soloGenToken = gameData._soloMapGenToken || 0;
             function soloMapGenAborted() {
-                return soloGenToken !== (gameData._soloMapGenToken || 0) || !!gameData.loadedCustomMap;
+                return soloGenToken !== (gameData._soloMapGenToken || 0);
             }
             let previewSpinnerActive = !!(gameData._wodPreviewSpinnerCanvasIds && gameData._wodPreviewSpinnerCanvasIds.size > 0);
             let showMapGenOverlay = !gameData._wodSkipMapGenLoader && !previewSpinnerActive;
@@ -28551,12 +28565,12 @@
             return true;
         }
 
-        function wodLoadScenarioToSetup(scenarioId) {
-            if(!window.WodScenarios) return;
+        function wodApplyScenarioMapData(scenarioId, opts) {
+            opts = opts || {};
+            if(!window.WodScenarios || !scenarioId) return false;
             let sc = WodScenarios.getScenario(scenarioId);
             let data = WodScenarios.getMapData(scenarioId);
-            if(!sc || !data) return;
-            wodCancelSoloMapPreviewGeneration();
+            if(!sc || !data || !data.hexList || !data.hexList.length) return false;
             let ms = document.getElementById('setupMapSize');
             let sz = String(data.mapSize || data.mapRadius || 80);
             if(ms) ms.value = sz;
@@ -28566,6 +28580,9 @@
             gameData._activeScenarioId = scenarioId;
             gameData.loadedCustomMap = true;
             gameData._wodProcgenBorderFirstApplied = false;
+            gameData.mapShape = 'custom';
+            let shapeEl = document.getElementById('setupMapShape');
+            if(shapeEl) shapeEl.value = 'custom';
             gameData.aiCount = sc.aiCount || 1;
             let aiEl = document.getElementById('setupAI');
             if(aiEl) aiEl.value = String(gameData.aiCount);
@@ -28574,11 +28591,19 @@
                 let pe = document.getElementById('setupGamePeriod');
                 if(pe) pe.value = sc.period;
             }
-            let shapeEl = document.getElementById('setupMapShape');
-            if(shapeEl) shapeEl.value = 'custom';
-            gameData.mapShape = 'custom';
-            wodScheduleSetupMapPreview({ captureSnapshot: true, force: true });
+            if(!opts.skipPreview) wodScheduleSetupMapPreview({ captureSnapshot: true, force: true });
             wodRefreshScenarioSetupUi();
+            return true;
+        }
+
+        function wodReloadActiveScenarioMap(forGameStart) {
+            if(!gameData._activeScenarioId) return false;
+            return wodApplyScenarioMapData(gameData._activeScenarioId, { skipPreview: !!forGameStart });
+        }
+
+        function wodLoadScenarioToSetup(scenarioId) {
+            wodCancelSoloMapPreviewGeneration();
+            if(!wodApplyScenarioMapData(scenarioId)) return;
         }
 
         function wodRefreshScenarioSetupUi() {
@@ -28599,14 +28624,14 @@
             let lock = !!sc;
             if(shapeEl) shapeEl.disabled = lock;
             if(sizeEl) sizeEl.disabled = lock;
-            let playBtn = document.getElementById('setupBtnPlayCustom');
+            let playBtn = document.getElementById('setupBtnShopMaps');
             if(playBtn && window.WodScenarios) {
                 let owned = WodScenarios.list().some(s => wodOwnsScenarioMap(s.shopId));
                 let busy = wodIsMapPreviewGenerating();
                 playBtn.disabled = !owned || busy;
                 playBtn.title = !owned
-                    ? 'Purchase scenarios in the Shop → Maps tab'
-                    : (busy ? 'Wait for the map preview to finish generating' : 'Choose a purchased historical scenario');
+                    ? 'Purchase scenario maps in the Shop → Maps tab'
+                    : (busy ? 'Wait for the map preview to finish generating' : 'Choose a purchased historical scenario map');
             }
         }
 
@@ -28661,23 +28686,20 @@
                 let owned = wodOwnsScenarioMap(sc.shopId);
                 let card = document.createElement('button');
                 card.type = 'button';
-                card.className = 'shop-option-card' + (owned ? '' : ' shop-visual-locked');
+                card.className = 'shop-option-card' + (owned ? ' shop-option-owned' : ' shop-visual-locked');
                 card.innerHTML = '<span class="shop-option-title">' + sc.name + '</span>' +
                     '<span class="shop-option-sub">' + sc.subtitle + '</span>' +
                     '<p style="font-size:12px;text-align:left;opacity:0.9;margin:8px 0;line-height:1.4">' + sc.description + '</p>' +
                     '<p style="font-size:11px;opacity:0.75;margin:4px 0">' + sc.playerLabel + ' vs ' + sc.enemyLabel + '</p>' +
                     (owned
-                        ? '<span class="shop-option-badge">Owned — click to play</span>'
+                        ? '<span class="shop-option-badge">Owned</span>'
                         : '<span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">' + cost + 'g</span></span>');
-                card.onclick = function() {
-                    if(owned) {
-                        wodLoadScenarioToSetup(sc.id);
-                        hidePanels();
-                        showPanel('setup', { preserveMap: true });
-                    } else {
-                        purchaseScenarioMap(sc.shopId);
-                    }
-                };
+                if(!owned) {
+                    card.onclick = function() { purchaseScenarioMap(sc.shopId); };
+                } else {
+                    card.disabled = true;
+                    card.title = 'Use Shop Maps in solo game setup to play this scenario';
+                }
                 grid.appendChild(card);
             }
         }
