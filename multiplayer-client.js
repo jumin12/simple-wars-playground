@@ -105,6 +105,27 @@
         case 'friend_invite_sent':
           emit('FriendInviteSent', { targetPlayerId: msg.targetPlayerId || '' });
           break;
+        case 'friend_request':
+          emit('FriendRequest', {
+            fromPlayerId: msg.fromPlayerId || '',
+            fromName: msg.fromName || 'Player',
+            unitSkin: msg.unitSkin || 'nato',
+          });
+          break;
+        case 'friend_request_sent':
+          emit('FriendRequestSent', { targetPlayerId: msg.targetPlayerId || '' });
+          break;
+        case 'friend_request_reply':
+          emit('FriendRequestReply', {
+            fromPlayerId: msg.fromPlayerId || '',
+            fromName: msg.fromName || 'Player',
+            unitSkin: msg.unitSkin || 'nato',
+            accept: !!msg.accept,
+          });
+          break;
+        case 'leaderboard':
+          emit('Leaderboard', { sort: msg.sort || 'wins', rows: msg.rows || [] });
+          break;
         case 'joined':
           api.code = msg.code;
           api.slot = msg.slot;
@@ -292,6 +313,7 @@
         mpStats: p.mpStats && typeof p.mpStats === 'object' ? p.mpStats : null,
         unitSkin: p.unitSkin != null ? String(p.unitSkin) : '',
         playerId: p.playerId != null ? String(p.playerId) : '',
+        combinedStats: p.combinedStats && typeof p.combinedStats === 'object' ? p.combinedStats : null,
       });
     },
     registerPlayer(payload) {
@@ -302,7 +324,17 @@
         displayName: p.displayName != null ? String(p.displayName) : '',
         unitSkin: p.unitSkin != null ? String(p.unitSkin) : 'nato',
         mpStats: p.mpStats && typeof p.mpStats === 'object' ? p.mpStats : null,
+        combinedStats: p.combinedStats && typeof p.combinedStats === 'object' ? p.combinedStats : null,
       });
+    },
+    sendFriendRequest(targetPlayerId) {
+      send({ t: 'friend_request', targetPlayerId: String(targetPlayerId || '') });
+    },
+    replyFriendRequest(fromPlayerId, accept) {
+      send({ t: 'friend_request_reply', fromPlayerId: String(fromPlayerId || ''), accept: !!accept });
+    },
+    requestLeaderboard(sort) {
+      send({ t: 'leaderboard', sort: String(sort || 'wins') });
     },
     queryFriendPresence(friendIds) {
       send({ t: 'friend_presence', friendIds: Array.isArray(friendIds) ? friendIds : [] });

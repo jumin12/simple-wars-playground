@@ -1559,6 +1559,94 @@
             gap: 10px;
             flex-wrap: wrap;
         }
+        .mp-profile-stats-actions {
+            margin-top: 10px;
+        }
+        .mp-profile-stats-actions button {
+            width: 100%;
+        }
+        .mp-lb-sort {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+        .mp-lb-sort button.active {
+            background: rgba(212, 175, 55, 0.22);
+            border-color: rgba(212, 175, 55, 0.65);
+            color: #ffeaa7;
+        }
+        #mpLeaderboardList {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: min(52vh, 420px);
+            overflow: auto;
+        }
+        .mp-lb-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(0, 0, 0, 0.18);
+        }
+        .mp-lb-rank {
+            font-weight: 800;
+            color: #d4af37;
+            min-width: 1.8em;
+            text-align: center;
+        }
+        .mp-lb-row canvas {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            flex-shrink: 0;
+        }
+        .mp-lb-meta {
+            flex: 1;
+            min-width: 0;
+        }
+        .mp-lb-name {
+            font-weight: 700;
+            font-size: 14px;
+        }
+        .mp-lb-val {
+            font-size: 12px;
+            opacity: 0.85;
+        }
+        .mp-friend-row.pending-in {
+            border-color: rgba(52, 152, 219, 0.45);
+        }
+        .mp-friend-row.pending-out {
+            opacity: 0.78;
+        }
+        .mp-stats-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 10px;
+        }
+        @media (max-width: 520px) {
+            .mp-stats-detail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        .mp-stats-detail-block {
+            padding: 10px;
+            border-radius: 10px;
+            background: rgba(0, 0, 0, 0.22);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .mp-stats-detail-block h4 {
+            margin: 0 0 6px 0;
+            font-size: 13px;
+            color: #d4af37;
+        }
 
         /* Generic Panels */
         .panel {
@@ -6781,9 +6869,13 @@
                                 </div>
                             </div>
                             <div class="mp-profile-stats" id="mpProfileStats">
-                                <div class="mp-profile-stat"><span class="mp-profile-stat-val" id="mpStatGames">0</span><span class="mp-profile-stat-lbl">Matches</span></div>
                                 <div class="mp-profile-stat"><span class="mp-profile-stat-val" id="mpStatWins">0</span><span class="mp-profile-stat-lbl">Wins</span></div>
+                                <div class="mp-profile-stat"><span class="mp-profile-stat-val" id="mpStatKills">0</span><span class="mp-profile-stat-lbl">Kills</span></div>
                                 <div class="mp-profile-stat"><span class="mp-profile-stat-val" id="mpStatLosses">0</span><span class="mp-profile-stat-lbl">Losses</span></div>
+                                <div class="mp-profile-stat"><span class="mp-profile-stat-val" id="mpStatDefeats">0</span><span class="mp-profile-stat-lbl">Defeats</span></div>
+                            </div>
+                            <div class="mp-profile-stats-actions">
+                                <button type="button" class="wod-editor-btn" id="mpBtnViewAllStats">View all stats</button>
                             </div>
                         </aside>
                         <main class="mp-hub-main">
@@ -6791,6 +6883,7 @@
                                 <button type="button" class="mp-hub-tab active" id="mpTabBrowse" data-mp-tab="browse" role="tab" aria-selected="true">Browse games</button>
                                 <button type="button" class="mp-hub-tab" id="mpTabHost" data-mp-tab="host" role="tab" aria-selected="false">Host</button>
                                 <button type="button" class="mp-hub-tab" id="mpTabFriends" data-mp-tab="friends" role="tab" aria-selected="false">Friends</button>
+                                <button type="button" class="mp-hub-tab" id="mpTabRankings" data-mp-tab="rankings" role="tab" aria-selected="false">Rankings</button>
                             </div>
                             <div id="mpPaneBrowse" class="mp-hub-pane active" data-mp-pane="browse" role="tabpanel">
                                 <p class="mp-hub-pane-lead">Join an open lobby. Password-protected games prompt for a password when you join.</p>
@@ -6805,13 +6898,23 @@
                                 </div>
                             </div>
                             <div id="mpPaneFriends" class="mp-hub-pane" data-mp-pane="friends" role="tabpanel" hidden>
-                                <p class="mp-hub-pane-lead">Add friends by player ID. See who is online and invite them when you host a lobby.</p>
+                                <p class="mp-hub-pane-lead">Send a friend request by player ID. They must accept before you can invite them to lobbies.</p>
                                 <div class="mp-friends-add">
                                     <input type="text" id="mpFriendAddInput" placeholder="WOD-XXXX-XXXX" maxlength="32" autocomplete="off">
-                                    <button type="button" class="build-btn" id="mpBtnAddFriend">Add friend</button>
+                                    <button type="button" class="build-btn" id="mpBtnAddFriend">Send request</button>
                                 </div>
                                 <div id="mpFriendsList"></div>
-                                <p id="mpFriendsEmpty" class="mp-hub-pane-lead" style="display:none;margin-top:8px">No friends yet — add someone using their player ID.</p>
+                                <p id="mpFriendsEmpty" class="mp-hub-pane-lead" style="display:none;margin-top:8px">No friends yet — send a request using their player ID.</p>
+                            </div>
+                            <div id="mpPaneRankings" class="mp-hub-pane" data-mp-pane="rankings" role="tabpanel" hidden>
+                                <p class="mp-hub-pane-lead">Top players online recently, ranked by combined solo and multiplayer stats.</p>
+                                <div class="mp-lb-sort" id="mpLbSort">
+                                    <button type="button" class="mp-hub-tab active" data-lb-sort="wins">Wins</button>
+                                    <button type="button" class="mp-hub-tab" data-lb-sort="kills">Kills</button>
+                                    <button type="button" class="mp-hub-tab" data-lb-sort="losses">Losses</button>
+                                    <button type="button" class="mp-hub-tab" data-lb-sort="defeats">Defeats</button>
+                                </div>
+                                <div id="mpLeaderboardList"></div>
                             </div>
                             <p id="mpStatus">Connecting…</p>
                         </main>
@@ -6958,6 +7061,28 @@
                 <div class="mp-host-dlg-actions">
                     <button type="button" class="menu-btn" id="mpFriendInviteAccept">Join lobby</button>
                     <button type="button" class="wod-editor-btn" id="mpFriendInviteDecline">Decline</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="mpFriendRequestDlg" class="mp-host-dlg hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mpFriendRequestTitle">
+            <div class="panel">
+                <h3 id="mpFriendRequestTitle" style="margin-top:0">Friend request</h3>
+                <div id="mpFriendRequestBody" style="font-size:14px;line-height:1.5;opacity:0.92"></div>
+                <div class="mp-host-dlg-actions">
+                    <button type="button" class="menu-btn" id="mpFriendRequestAccept">Accept</button>
+                    <button type="button" class="wod-editor-btn" id="mpFriendRequestDecline">Decline</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="mpStatsDetailDlg" class="mp-host-dlg hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="mpStatsDetailTitle">
+            <div class="panel panel-wide" style="max-width:640px;text-align:left">
+                <h3 id="mpStatsDetailTitle" style="margin-top:0">All stats</h3>
+                <p class="mp-hub-pane-lead" style="margin-bottom:8px">Combined across every time period and game mode on this device.</p>
+                <div id="mpStatsDetailBody"></div>
+                <div class="mp-host-dlg-actions" style="margin-top:14px">
+                    <button type="button" class="wod-editor-btn" id="mpStatsDetailClose">Close</button>
                 </div>
             </div>
         </div>
@@ -8487,6 +8612,8 @@
             wodMpCloseHostRulesDlg();
             wodMpClosePlayerProfileDlg();
             wodMpCloseFriendInviteDlg();
+            wodMpCloseFriendRequestDlg();
+            wodMpCloseStatsDetailDlg();
             wodMpCloseSeatInviteDlg();
             UI.panels.forEach(p => p.classList.add('hidden'));
             UI.mainMenu.classList.remove('hidden');
@@ -11727,6 +11854,7 @@
             else if(oc === 'lost') m.losses = (m.losses || 0) + 1;
             scheduleSaveWodProgress();
             wodMpRefreshLocalMpStatsReadout();
+            wodMpRegisterWithServer();
             if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.code)
                 wodMpPushLobbyProfile();
         }
@@ -12076,6 +12204,21 @@
             let m = wodProgress.multiplayer;
             return { gamesPlayed: m.gamesPlayed | 0, wins: m.wins | 0, losses: m.losses | 0 };
         }
+        function wodMpCombinedStats() {
+            let L = (wodProgress && wodProgress.lifetime) || {};
+            let mp = wodMpPublicMpStatsPayload();
+            let kills = (L.enemyTroopKills | 0) + (L.enemyTankKills | 0) + (L.enemyMarineKills | 0) + (L.enemyShipKills | 0);
+            return {
+                wins: (mp.wins | 0) + (L.battlesWon | 0),
+                losses: (mp.losses | 0) + (L.campaignLosses | 0),
+                kills,
+                defeats: L.battlesWon | 0,
+                gamesPlayed: (mp.gamesPlayed | 0) + (L.gamesStarted | 0)
+            };
+        }
+        function wodMpCombinedStatsPayload() {
+            return wodMpCombinedStats();
+        }
         function wodMpPushLobbyProfile() {
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.sendLobbyProfile) return;
             if(!WodMultiplayer.api || !WodMultiplayer.api.code) return;
@@ -12103,7 +12246,33 @@
                 scheduleSaveWodProgress();
             }
             if(!Array.isArray(wodProgress.profile.friends)) wodProgress.profile.friends = [];
+            if(!Array.isArray(wodProgress.profile.friendRequestsOut)) wodProgress.profile.friendRequestsOut = [];
+            if(!Array.isArray(wodProgress.profile.friendRequestsIn)) wodProgress.profile.friendRequestsIn = [];
             return wodProgress.profile.playerId;
+        }
+        function wodMpEnsureFriendRequestArrays() {
+            wodEnsurePlayerId();
+            if(!Array.isArray(wodProgress.profile.friendRequestsOut)) wodProgress.profile.friendRequestsOut = [];
+            if(!Array.isArray(wodProgress.profile.friendRequestsIn)) wodProgress.profile.friendRequestsIn = [];
+        }
+        function wodMpIsFriend(playerId) {
+            return wodMpGetFriendsList().some(f => f && f.playerId === playerId);
+        }
+        function wodMpAddFriendLocal(playerId, displayName, unitSkin) {
+            if(!playerId || wodMpIsFriend(playerId)) return false;
+            wodEnsurePlayerId();
+            wodProgress.profile.friends.push({
+                playerId,
+                displayName: displayName || '',
+                unitSkin: unitSkin || 'nato',
+                addedAt: Date.now()
+            });
+            wodProgress.profile.friendRequestsOut = (wodProgress.profile.friendRequestsOut || []).filter(r => r && r.playerId !== playerId);
+            wodProgress.profile.friendRequestsIn = (wodProgress.profile.friendRequestsIn || []).filter(r => r && r.playerId !== playerId);
+            scheduleSaveWodProgress();
+            wodMpRenderFriendsList();
+            wodMpQueryFriendPresence();
+            return true;
         }
         function wodMpGetFriendsList() {
             wodEnsurePlayerId();
@@ -12140,7 +12309,8 @@
                 playerId: wodProgress.profile.playerId,
                 displayName: dn,
                 unitSkin: skinId,
-                mpStats: wodMpPublicMpStatsPayload()
+                mpStats: wodMpPublicMpStatsPayload(),
+                combinedStats: wodMpCombinedStatsPayload()
             };
         }
         function wodMpRegisterWithServer() {
@@ -12159,14 +12329,97 @@
             if(skinCv) renderShopSkinThumbCanvas(skinCv, skinId);
             let skinName = document.getElementById('mpProfileSkinName');
             if(skinName) skinName.textContent = wodMpSkinLabelForId(skinId);
-            let m = wodMpPublicMpStatsPayload();
-            let g = document.getElementById('mpStatGames');
+            let cs = wodMpCombinedStats();
             let w = document.getElementById('mpStatWins');
+            let k = document.getElementById('mpStatKills');
             let l = document.getElementById('mpStatLosses');
-            if(g) g.textContent = String(m.gamesPlayed);
-            if(w) w.textContent = String(m.wins);
-            if(l) l.textContent = String(m.losses);
+            let d = document.getElementById('mpStatDefeats');
+            if(w) w.textContent = formatLifetimeBig(cs.wins);
+            if(k) k.textContent = formatLifetimeBig(cs.kills);
+            if(l) l.textContent = formatLifetimeBig(cs.losses);
+            if(d) d.textContent = formatLifetimeBig(cs.defeats);
             wodMpSyncDisplayNameFieldFromProfile();
+        }
+        function wodMpOpenStatsDetailDlg(extraLabel) {
+            let dlg = document.getElementById('mpStatsDetailDlg');
+            let body = document.getElementById('mpStatsDetailBody');
+            let title = document.getElementById('mpStatsDetailTitle');
+            if(!dlg || !body) return;
+            if(title) title.textContent = extraLabel ? ('Stats — ' + extraLabel) : 'All stats';
+            let cs = wodMpCombinedStats();
+            let mp = wodMpPublicMpStatsPayload();
+            let L = (wodProgress && wodProgress.lifetime) || {};
+            let periodHtml = '';
+            let byP = (wodProgress && wodProgress.lifetimeByPeriod) || {};
+            for(let pid of Object.keys(byP)) {
+                let b = byP[pid] || {};
+                periodHtml +=
+                    '<div class="mp-stats-detail-block"><h4>' + wodMpEscapeHtml(wodPeriodLabel(pid)) + '</h4>' +
+                    'Wins ' + formatLifetimeBig(b.battlesWon | 0) + ' · Losses ' + formatLifetimeBig(b.campaignLosses | 0) + '<br>' +
+                    'Kills ' + formatLifetimeBig((b.enemyTroopKills | 0) + (b.enemyTankKills | 0) + (b.enemyMarineKills | 0) + (b.enemyShipKills | 0)) +
+                    '</div>';
+            }
+            body.innerHTML =
+                '<div class="mp-stats-detail-block"><h4>Combined total</h4>' +
+                'Wins ' + formatLifetimeBig(cs.wins) + ' · Kills ' + formatLifetimeBig(cs.kills) + '<br>' +
+                'Losses ' + formatLifetimeBig(cs.losses) + ' · Defeats ' + formatLifetimeBig(cs.defeats) + '<br>' +
+                'Matches ' + formatLifetimeBig(cs.gamesPlayed) +
+                '</div>' +
+                '<div class="mp-stats-detail-block"><h4>Multiplayer</h4>' +
+                'Wins ' + formatLifetimeBig(mp.wins) + ' · Losses ' + formatLifetimeBig(mp.losses) + '<br>' +
+                'Matches ' + formatLifetimeBig(mp.gamesPlayed) +
+                '</div>' +
+                '<div class="mp-stats-detail-block"><h4>Solo lifetime</h4>' +
+                'Faction wins ' + formatLifetimeBig(L.battlesWon | 0) + ' · Campaign losses ' + formatLifetimeBig(L.campaignLosses | 0) + '<br>' +
+                'Kills ' + formatLifetimeBig((L.enemyTroopKills | 0) + (L.enemyTankKills | 0) + (L.enemyMarineKills | 0) + (L.enemyShipKills | 0)) +
+                '</div>' +
+                (periodHtml ? ('<div style="margin-top:10px"><strong>By time period</strong></div><div class="mp-stats-detail-grid">' + periodHtml + '</div>') : '');
+            dlg.classList.remove('hidden');
+            dlg.setAttribute('aria-hidden', 'false');
+        }
+        function wodMpCloseStatsDetailDlg() {
+            let dlg = document.getElementById('mpStatsDetailDlg');
+            if(dlg) { dlg.classList.add('hidden'); dlg.setAttribute('aria-hidden', 'true'); }
+        }
+        function wodMpRenderLeaderboard(rows, sortKey) {
+            let host = document.getElementById('mpLeaderboardList');
+            if(!host) return;
+            host.innerHTML = '';
+            if(!rows || !rows.length) {
+                host.innerHTML = '<p class="mp-hub-pane-lead">No rankings yet — play and stay connected to appear here.</p>';
+                return;
+            }
+            let labels = { wins: 'Wins', kills: 'Kills', losses: 'Losses', defeats: 'Defeats', gamesPlayed: 'Matches' };
+            let lab = labels[sortKey] || 'Wins';
+            rows.forEach((row, i) => {
+                let st = (row.stats || {});
+                let el = document.createElement('div');
+                el.className = 'mp-lb-row';
+                let cv = document.createElement('canvas');
+                cv.width = 32;
+                cv.height = 32;
+                renderShopSkinThumbCanvas(cv, row.unitSkin || 'nato');
+                let meta = document.createElement('div');
+                meta.className = 'mp-lb-meta';
+                meta.innerHTML =
+                    '<div class="mp-lb-name">' + wodMpEscapeHtml(row.displayName || row.playerId || 'Player') + '</div>' +
+                    '<div class="mp-lb-val">' + wodMpEscapeHtml(lab) + ': ' + formatLifetimeBig(st[sortKey] | 0) +
+                    ' · Kills ' + formatLifetimeBig(st.kills | 0) + ' · Wins ' + formatLifetimeBig(st.wins | 0) + '</div>';
+                let rank = document.createElement('span');
+                rank.className = 'mp-lb-rank';
+                rank.textContent = String(i + 1);
+                el.append(rank, cv, meta);
+                host.appendChild(el);
+            });
+        }
+        function wodMpRequestLeaderboard(sortKey) {
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.requestLeaderboard) return;
+            window._wodMpLbSort = sortKey || 'wins';
+            document.querySelectorAll('#mpLbSort [data-lb-sort]').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-lb-sort') === window._wodMpLbSort);
+            });
+            if(WodMultiplayer.api && WodMultiplayer.api.socketOpen)
+                WodMultiplayer.requestLeaderboard(window._wodMpLbSort);
         }
         function wodMpRefreshLocalMpStatsReadout() {
             wodMpRefreshProfileCard();
@@ -12194,8 +12447,11 @@
                 wodMpRenderFriendsList();
                 wodMpQueryFriendPresence();
             }
+            if(tabId === 'rankings') {
+                wodMpRequestLeaderboard(window._wodMpLbSort || 'wins');
+            }
         }
-        function wodMpAddFriendById(rawId) {
+        function wodMpSendFriendRequest(rawId) {
             let id = wodMpNormalizePlayerId(rawId);
             if(!id) {
                 showNotification('Enter a valid player ID (WOD-XXXX-XXXX).');
@@ -12206,18 +12462,34 @@
                 showNotification('That is your own player ID.');
                 return false;
             }
-            let friends = wodMpGetFriendsList();
-            if(friends.some(f => f && f.playerId === id)) {
-                showNotification('Already on your friends list.');
+            if(wodMpIsFriend(id)) {
+                showNotification('Already friends with this player.');
                 return false;
             }
-            friends.push({ playerId: id, displayName: '', addedAt: Date.now() });
-            wodProgress.profile.friends = friends;
+            wodMpEnsureFriendRequestArrays();
+            if((wodProgress.profile.friendRequestsOut || []).some(r => r && r.playerId === id)) {
+                showNotification('Friend request already pending.');
+                return false;
+            }
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.sendFriendRequest) {
+                showNotification('Multiplayer server not available.');
+                return false;
+            }
+            if(!WodMultiplayer.api || !WodMultiplayer.api.socketOpen) {
+                showNotification('Connecting… try again in a moment.');
+                void wodMpEnsureConnected().then(() => wodMpSendFriendRequest(rawId));
+                return false;
+            }
+            wodMpRegisterWithServer();
+            WodMultiplayer.sendFriendRequest(id);
+            wodProgress.profile.friendRequestsOut.push({ playerId: id, sentAt: Date.now() });
             scheduleSaveWodProgress();
             wodMpRenderFriendsList();
-            wodMpQueryFriendPresence();
-            showNotification('Friend added.');
+            showNotification('Friend request sent.');
             return true;
+        }
+        function wodMpAddFriendById(rawId) {
+            return wodMpSendFriendRequest(rawId);
         }
         function wodMpRemoveFriend(playerId) {
             wodEnsurePlayerId();
@@ -12229,12 +12501,70 @@
             let host = document.getElementById('mpFriendsList');
             let empty = document.getElementById('mpFriendsEmpty');
             if(!host) return;
+            wodMpEnsureFriendRequestArrays();
             let friends = wodMpGetFriendsList();
+            let incoming = wodProgress.profile.friendRequestsIn || [];
+            let outgoing = wodProgress.profile.friendRequestsOut || [];
             let presence = wodMpFriendPresenceMap();
             let api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : {};
             let inLobbyHost = !!(api.code && api.isHost);
             host.innerHTML = '';
-            if(empty) empty.style.display = friends.length ? 'none' : '';
+            if(empty) empty.style.display = (friends.length || incoming.length || outgoing.length) ? 'none' : '';
+            for(let req of incoming) {
+                if(!req || !req.playerId) continue;
+                let row = document.createElement('div');
+                row.className = 'mp-friend-row pending-in';
+                let cv = document.createElement('canvas');
+                cv.width = 36;
+                cv.height = 36;
+                renderShopSkinThumbCanvas(cv, req.unitSkin || 'nato');
+                let meta = document.createElement('div');
+                meta.className = 'mp-friend-meta';
+                meta.innerHTML =
+                    '<div class="mp-friend-name">' + wodMpEscapeHtml(req.fromName || req.playerId) + '</div>' +
+                    '<div class="mp-friend-id">' + wodMpEscapeHtml(req.playerId) + '</div>' +
+                    '<div class="mp-friend-status online">Incoming friend request</div>';
+                let actions = document.createElement('div');
+                actions.className = 'mp-friend-actions';
+                let acc = document.createElement('button');
+                acc.type = 'button';
+                acc.className = 'build-btn';
+                acc.textContent = 'Accept';
+                acc.addEventListener('click', () => wodMpRespondFriendRequest(req.playerId, true));
+                let dec = document.createElement('button');
+                dec.type = 'button';
+                dec.className = 'wod-editor-btn';
+                dec.textContent = 'Decline';
+                dec.addEventListener('click', () => wodMpRespondFriendRequest(req.playerId, false));
+                actions.append(acc, dec);
+                row.append(cv, meta, actions);
+                host.appendChild(row);
+            }
+            for(let req of outgoing) {
+                if(!req || !req.playerId) continue;
+                let row = document.createElement('div');
+                row.className = 'mp-friend-row pending-out';
+                let meta = document.createElement('div');
+                meta.className = 'mp-friend-meta';
+                meta.innerHTML =
+                    '<div class="mp-friend-name">Request pending</div>' +
+                    '<div class="mp-friend-id">' + wodMpEscapeHtml(req.playerId) + '</div>' +
+                    '<div class="mp-friend-status offline">Waiting for them to accept</div>';
+                let actions = document.createElement('div');
+                actions.className = 'mp-friend-actions';
+                let cancel = document.createElement('button');
+                cancel.type = 'button';
+                cancel.className = 'wod-editor-btn';
+                cancel.textContent = 'Cancel';
+                cancel.addEventListener('click', () => {
+                    wodProgress.profile.friendRequestsOut = outgoing.filter(r => r && r.playerId !== req.playerId);
+                    scheduleSaveWodProgress();
+                    wodMpRenderFriendsList();
+                });
+                actions.appendChild(cancel);
+                row.append(meta, actions);
+                host.appendChild(row);
+            }
             for(let f of friends) {
                 if(!f || !f.playerId) continue;
                 let online = presence[f.playerId];
@@ -12245,7 +12575,7 @@
                 let cv = document.createElement('canvas');
                 cv.width = 36;
                 cv.height = 36;
-                renderShopSkinThumbCanvas(cv, (online && online.unitSkin) || 'nato');
+                renderShopSkinThumbCanvas(cv, (online && online.unitSkin) || f.unitSkin || 'nato');
                 let meta = document.createElement('div');
                 meta.className = 'mp-friend-meta';
                 meta.innerHTML =
@@ -12288,10 +12618,86 @@
                 showNotification('Only the host can invite friends.');
                 return;
             }
+            if(!wodMpIsFriend(playerId)) {
+                showNotification('You can only invite accepted friends.');
+                return;
+            }
+            let now = Date.now();
+            window._wodMpInviteSentAt = window._wodMpInviteSentAt || {};
+            if(window._wodMpInviteSentAt[playerId] && now - window._wodMpInviteSentAt[playerId] < 45000) {
+                showNotification('Wait before inviting this friend again.');
+                return;
+            }
+            wodMpRegisterWithServer();
             WodMultiplayer.sendFriendInvite(playerId, seat | 0);
+            window._wodMpInviteSentAt[playerId] = now;
+            showNotification('Sending invite…');
             wodMpCloseSeatInviteDlg();
         }
         let _wodMpPendingInvite = null;
+        let _wodMpPendingFriendReq = null;
+        function wodMpCloseFriendRequestDlg() {
+            let dlg = document.getElementById('mpFriendRequestDlg');
+            if(dlg) { dlg.classList.add('hidden'); dlg.setAttribute('aria-hidden', 'true'); }
+            _wodMpPendingFriendReq = null;
+        }
+        function wodMpShowFriendRequestDlg(req) {
+            if(!req || !req.fromPlayerId) return;
+            wodMpEnsureFriendRequestArrays();
+            let exists = (wodProgress.profile.friendRequestsIn || []).some(r => r && r.playerId === req.fromPlayerId);
+            if(!exists) {
+                wodProgress.profile.friendRequestsIn.push({
+                    playerId: req.fromPlayerId,
+                    fromName: req.fromName || req.fromPlayerId,
+                    unitSkin: req.unitSkin || 'nato',
+                    receivedAt: Date.now()
+                });
+                scheduleSaveWodProgress();
+            }
+            if(_wodMpPendingFriendReq && _wodMpPendingFriendReq.fromPlayerId === req.fromPlayerId) return;
+            _wodMpPendingFriendReq = req;
+            let dlg = document.getElementById('mpFriendRequestDlg');
+            let body = document.getElementById('mpFriendRequestBody');
+            if(!dlg || !body) return;
+            body.innerHTML =
+                '<div class="mp-profile-view">' +
+                '<canvas id="mpFrReqSkin" width="48" height="48" aria-hidden="true"></canvas>' +
+                '<div class="mp-profile-view-stats">' +
+                '<div><strong>' + wodMpEscapeHtml(req.fromName || 'Player') + '</strong> wants to be friends.</div>' +
+                '<div style="font-size:12px;opacity:0.82;margin-top:6px">' + wodMpEscapeHtml(req.fromPlayerId) + '</div>' +
+                '</div></div>';
+            let cv = document.getElementById('mpFrReqSkin');
+            if(cv) renderShopSkinThumbCanvas(cv, req.unitSkin || 'nato');
+            dlg.classList.remove('hidden');
+            dlg.setAttribute('aria-hidden', 'false');
+            showNotification('Friend request from ' + (req.fromName || 'player'));
+            wodMpRenderFriendsList();
+        }
+        function wodMpRespondFriendRequest(fromPlayerId, accept) {
+            if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.replyFriendRequest)
+                WodMultiplayer.replyFriendRequest(fromPlayerId, accept);
+            wodMpEnsureFriendRequestArrays();
+            let req = (wodProgress.profile.friendRequestsIn || []).find(r => r && r.playerId === fromPlayerId);
+            wodProgress.profile.friendRequestsIn = (wodProgress.profile.friendRequestsIn || []).filter(r => r && r.playerId !== fromPlayerId);
+            if(accept && req) wodMpAddFriendLocal(fromPlayerId, req.fromName, req.unitSkin);
+            else scheduleSaveWodProgress();
+            wodMpCloseFriendRequestDlg();
+            wodMpRenderFriendsList();
+            showNotification(accept ? 'Friend added.' : 'Request declined.');
+        }
+        function wodMpHandleFriendRequestReply(rep) {
+            if(!rep || !rep.fromPlayerId) return;
+            wodMpEnsureFriendRequestArrays();
+            wodProgress.profile.friendRequestsOut = (wodProgress.profile.friendRequestsOut || []).filter(r => r && r.playerId !== rep.fromPlayerId);
+            if(rep.accept) {
+                wodMpAddFriendLocal(rep.fromPlayerId, rep.fromName, rep.unitSkin);
+                showNotification((rep.fromName || 'Player') + ' accepted your friend request.');
+            } else {
+                scheduleSaveWodProgress();
+                wodMpRenderFriendsList();
+                showNotification((rep.fromName || 'Player') + ' declined your friend request.');
+            }
+        }
         function wodMpCloseFriendInviteDlg() {
             let dlg = document.getElementById('mpFriendInviteDlg');
             if(dlg) { dlg.classList.add('hidden'); dlg.setAttribute('aria-hidden', 'true'); }
@@ -12299,6 +12705,12 @@
         }
         function wodMpShowFriendInviteDlg(inv) {
             if(!inv || !inv.lobbyId) return;
+            let now = Date.now();
+            let dedupeKey = inv.lobbyId + ':' + (inv.fromPlayerId || inv.fromName || '');
+            window._wodMpInviteDedupe = window._wodMpInviteDedupe || {};
+            if(_wodMpPendingInvite && _wodMpPendingInvite.lobbyId === inv.lobbyId) return;
+            if(window._wodMpInviteDedupe[dedupeKey] && now - window._wodMpInviteDedupe[dedupeKey] < 60000) return;
+            window._wodMpInviteDedupe[dedupeKey] = now;
             _wodMpPendingInvite = inv;
             let dlg = document.getElementById('mpFriendInviteDlg');
             let body = document.getElementById('mpFriendInviteBody');
@@ -12398,9 +12810,22 @@
             let col = wodMpLobbyEffectiveSlotColor(meta, slot);
             let skinId = pp.unitSkin || 'nato';
             let skinLab = wodMpSkinLabelForId(skinId);
-            let ms = pp.mpStats;
-            let statsHtml = ms && typeof ms === 'object'
-                ? '<div><strong>Matches</strong> ' + (ms.gamesPlayed | 0) + ' · <strong>Wins</strong> ' + (ms.wins | 0) + ' · <strong>Losses</strong> ' + (ms.losses | 0) + '</div><p style="font-size:12px;opacity:0.78;margin:8px 0 0">Stats shared from their device (not verified).</p>'
+            let cs = pp.combinedStats;
+            if(!cs && pp.mpStats) {
+                cs = {
+                    wins: pp.mpStats.wins | 0,
+                    losses: pp.mpStats.losses | 0,
+                    kills: 0,
+                    defeats: 0,
+                    gamesPlayed: pp.mpStats.gamesPlayed | 0
+                };
+            }
+            let statsHtml = cs && typeof cs === 'object'
+                ? '<div style="margin-top:8px"><strong>Wins</strong> ' + formatLifetimeBig(cs.wins | 0) +
+                ' · <strong>Kills</strong> ' + formatLifetimeBig(cs.kills | 0) +
+                '<br><strong>Losses</strong> ' + formatLifetimeBig(cs.losses | 0) +
+                ' · <strong>Defeats</strong> ' + formatLifetimeBig(cs.defeats | 0) + '</div>' +
+                '<p style="font-size:12px;opacity:0.78;margin:8px 0 0">Combined stats from their device (not verified).</p>'
                 : '<p style="font-size:12px;opacity:0.82;margin:0">No stats shared yet.</p>';
             body.innerHTML =
                 '<div class="mp-profile-view">' +
@@ -13153,6 +13578,40 @@
         }
 
         let _wodMpConnecting = null;
+        function wodMpInitGlobalHandlers() {
+            if(window._wodMpGlobalHandlers) return;
+            window._wodMpGlobalHandlers = true;
+            addEventListener('wod-mp-FriendInvite', (ev) => {
+                if(ev.detail) wodMpShowFriendInviteDlg(ev.detail);
+            });
+            addEventListener('wod-mp-FriendRequest', (ev) => {
+                if(ev.detail) wodMpShowFriendRequestDlg(ev.detail);
+            });
+            addEventListener('wod-mp-FriendRequestReply', (ev) => {
+                if(ev.detail) wodMpHandleFriendRequestReply(ev.detail);
+            });
+            addEventListener('wod-mp-FriendInviteSent', () => {
+                showNotification('Invite delivered to friend.');
+            });
+            addEventListener('wod-mp-Leaderboard', (ev) => {
+                let d = ev.detail || {};
+                wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins');
+            });
+            addEventListener('wod-mp-Close', () => {
+                if(window._wodMpBgReconnectTimer) clearTimeout(window._wodMpBgReconnectTimer);
+                window._wodMpBgReconnectTimer = setTimeout(() => {
+                    void wodMpBackgroundConnect();
+                }, 8000);
+            });
+        }
+        function wodMpBackgroundConnect() {
+            if(typeof WodMultiplayer === 'undefined') return Promise.resolve();
+            wodMpInitGlobalHandlers();
+            wodEnsurePlayerId();
+            return wodMpEnsureConnected().then(() => {
+                wodMpRegisterWithServer();
+            }).catch(() => {});
+        }
         function wodMpEnsureConnected() {
             if(typeof WodMultiplayer === 'undefined') return Promise.resolve();
             if(WodMultiplayer.api.socketOpen) {
@@ -13181,6 +13640,7 @@
         }
 
         function wodMpWireLobbyUi() {
+            wodMpInitGlobalHandlers();
             wodEnsurePlayerId();
             wodMpSyncDisplayNameFieldFromProfile();
             wodMpRefreshLocalMpStatsReadout();
@@ -13255,6 +13715,37 @@
                 mpSeatClose._wodMpBound = true;
                 mpSeatClose.onclick = () => wodMpCloseSeatInviteDlg();
             }
+            let mpViewStats = document.getElementById('mpBtnViewAllStats');
+            if(mpViewStats && !mpViewStats._wodMpBound) {
+                mpViewStats._wodMpBound = true;
+                mpViewStats.onclick = () => wodMpOpenStatsDetailDlg();
+            }
+            let mpStatsClose = document.getElementById('mpStatsDetailClose');
+            if(mpStatsClose && !mpStatsClose._wodMpBound) {
+                mpStatsClose._wodMpBound = true;
+                mpStatsClose.onclick = () => wodMpCloseStatsDetailDlg();
+            }
+            let mpFrAcc = document.getElementById('mpFriendRequestAccept');
+            let mpFrDec = document.getElementById('mpFriendRequestDecline');
+            if(mpFrAcc && !mpFrAcc._wodMpBound) {
+                mpFrAcc._wodMpBound = true;
+                mpFrAcc.onclick = () => {
+                    if(_wodMpPendingFriendReq) wodMpRespondFriendRequest(_wodMpPendingFriendReq.fromPlayerId, true);
+                    else wodMpCloseFriendRequestDlg();
+                };
+            }
+            if(mpFrDec && !mpFrDec._wodMpBound) {
+                mpFrDec._wodMpBound = true;
+                mpFrDec.onclick = () => {
+                    if(_wodMpPendingFriendReq) wodMpRespondFriendRequest(_wodMpPendingFriendReq.fromPlayerId, false);
+                    else wodMpCloseFriendRequestDlg();
+                };
+            }
+            document.querySelectorAll('#mpLbSort [data-lb-sort]').forEach(btn => {
+                if(btn._wodMpBound) return;
+                btn._wodMpBound = true;
+                btn.addEventListener('click', () => wodMpRequestLeaderboard(btn.getAttribute('data-lb-sort')));
+            });
             let mpProfClose = document.getElementById('mpPlayerProfileClose');
             if(mpProfClose && !mpProfClose._wodMpBound) {
                 mpProfClose._wodMpBound = true;
@@ -13469,12 +13960,6 @@
                 let seatDlg = document.getElementById('mpSeatInviteDlg');
                 if(seatDlg && !seatDlg.classList.contains('hidden') && _wodMpSeatInviteSlot)
                     wodMpOpenSeatInviteDlg(_wodMpSeatInviteSlot);
-            });
-            addEventListener('wod-mp-FriendInvite', (ev) => {
-                if(ev.detail) wodMpShowFriendInviteDlg(ev.detail);
-            });
-            addEventListener('wod-mp-FriendInviteSent', () => {
-                showNotification('Invite sent to friend.');
             });
             addEventListener('wod-mp-LobbyList', (ev) => {
                 let d = ev.detail || {};
@@ -14476,7 +14961,7 @@
                     unitsBuiltMarine: 0,
                     gamesStarted: 0
                 },
-                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [] },
+                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 }
             };
         }
@@ -14489,7 +14974,9 @@
                 lifetime: Object.assign({}, base.lifetime, o.lifetime || {}),
                 lifetimeByPeriod: Object.assign({}, base.lifetimeByPeriod, o.lifetimeByPeriod || {}),
                 profile: Object.assign({}, base.profile, o.profile || {}, {
-                    friends: Array.isArray(o.profile && o.profile.friends) ? o.profile.friends.slice() : (base.profile.friends || [])
+                    friends: Array.isArray(o.profile && o.profile.friends) ? o.profile.friends.slice() : (base.profile.friends || []),
+                    friendRequestsOut: Array.isArray(o.profile && o.profile.friendRequestsOut) ? o.profile.friendRequestsOut.slice() : (base.profile.friendRequestsOut || []),
+                    friendRequestsIn: Array.isArray(o.profile && o.profile.friendRequestsIn) ? o.profile.friendRequestsIn.slice() : (base.profile.friendRequestsIn || [])
                 }),
                 multiplayer: Object.assign({}, base.multiplayer, o.multiplayer || {})
             };
@@ -14596,6 +15083,12 @@
                 playerId: (wodProgress.profile && wodProgress.profile.playerId) || '',
                 friends: Array.isArray(wodProgress.profile && wodProgress.profile.friends)
                     ? wodProgress.profile.friends.slice()
+                    : [],
+                friendRequestsOut: Array.isArray(wodProgress.profile && wodProgress.profile.friendRequestsOut)
+                    ? wodProgress.profile.friendRequestsOut.slice()
+                    : [],
+                friendRequestsIn: Array.isArray(wodProgress.profile && wodProgress.profile.friendRequestsIn)
+                    ? wodProgress.profile.friendRequestsIn.slice()
                     : [],
                 ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { nato: true }),
                 ownedShopVisuals: Object.assign({}, gameData.ownedShopVisuals || {}),
@@ -33452,6 +33945,8 @@
 
         loadWodProgress();
         wodEnsurePlayerId();
+        wodMpInitGlobalHandlers();
+        void wodMpBackgroundConnect();
         applyWodProfileToGame();
         wodInitBrowserSaves();
         checkWodAchievements();

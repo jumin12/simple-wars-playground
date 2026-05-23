@@ -11,8 +11,16 @@ const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
 
 const rooms = new Map();
-/** @type {Map<string, import('ws').WebSocket & { _wodClient?: object }>} */
+/** @type {Map<string, object>} */
 const onlineByPlayerId = new Map();
+/** @type {Map<string, object>} */
+const leaderboard = new Map();
+const friendRequestCooldown = new Map();
+const lobbyInviteCooldown = new Map();
+const recentLobbyInvites = new Map();
+const FRIEND_REQUEST_COOLDOWN_MS = 30000;
+const LOBBY_INVITE_COOLDOWN_MS = 45000;
+const LOBBY_INVITE_DEDUPE_MS = 60000;
 
 function sanitizePlayerId(id) {
   const s = String(id || '').trim().slice(0, 32);
@@ -27,6 +35,54 @@ function sanitizeDisplayName(raw) {
 function sanitizeUnitSkin(raw) {
   const s = String(raw || 'nato').trim().slice(0, 32);
   return s || 'nato';
+}
+
+function sanitizeCombinedStats(obj) {
+  if (!obj || typeof obj !== 'object') {
+    return { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 };
+  }
+  const c = (v) => Math.max(0, Math.min(9999999, parseInt(v, 10) || 0));
+  return {
+    wins: c(obj.wins),
+    losses: c(obj.losses),
+    kills: c(obj.kills),
+    defeats: c(obj.defeats),
+    gamesPlayed: c(obj.gamesPlayed),
+  };
+}
+
+function updateLeaderboardEntry(client, combinedStats) {
+  if (!client || !client.playerId) return;
+  leaderboard.set(client.playerId, {
+    playerId: client.playerId,
+    displayName: client.displayName || 'Player',
+    unitSkin: client.unitSkin || 'nato',
+    stats: sanitizeCombinedStats(combinedStats),
+    updatedAt: Date.now(),
+  });
+}
+
+function cooldownBlocked(map, key, ms) {
+  const last = map.get(key) || 0;
+  return Date.now() - last < ms;
+}
+
+function markCooldown(map, key) {
+  map.set(key, Date.now());
+}
+
+function buildLeaderboardRows(sortKey) {
+  const key = ['wins', 'kills', 'losses', 'defeats', 'gamesPlayed'].includes(sortKey)
+    ? sortKey
+    : 'wins';
+  return [...leaderboard.values()]
+    .sort((a, b) => {
+      const av = (a.stats && a.stats[key]) || 0;
+      const bv = (b.stats && b.stats[key]) || 0;
+      if (bv !== av) return bv - av;
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
+    })
+    .slice(0, 50);
 }
 
 function sanitizeMpStats(obj) {
@@ -50,7 +106,9 @@ function registerClientPlayer(client, payload) {
   client.displayName = sanitizeDisplayName(payload.displayName);
   client.unitSkin = sanitizeUnitSkin(payload.unitSkin);
   client.mpStats = sanitizeMpStats(payload.mpStats);
+  client.combinedStats = sanitizeCombinedStats(payload.combinedStats);
   onlineByPlayerId.set(playerId, client);
+  updateLeaderboardEntry(client, client.combinedStats);
   return playerId;
 }
 
@@ -310,6 +368,78 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (t === 'leaderboard') {
+      const sort = String(msg.sort || 'wins');
+      ws.send(
+        JSON.stringify({
+          t: 'leaderboard',
+          sort,
+          rows: buildLeaderboardRows(sort),
+        }),
+      );
+      return;
+    }
+
+    if (t === 'friend_request') {
+      const targetId = sanitizePlayerId(msg.targetPlayerId);
+      const fromId = client.playerId;
+      if (!fromId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Register your profile before sending friend requests' }));
+        return;
+      }
+      if (!targetId || targetId === fromId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Invalid friend ID' }));
+        return;
+      }
+      const reqKey = `${fromId}:${targetId}`;
+      if (cooldownBlocked(friendRequestCooldown, reqKey, FRIEND_REQUEST_COOLDOWN_MS)) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Wait before sending another friend request to this player' }));
+        return;
+      }
+      const target = onlineByPlayerId.get(targetId);
+      if (!target || target.ws.readyState !== 1) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Player is offline' }));
+        return;
+      }
+      markCooldown(friendRequestCooldown, reqKey);
+      try {
+        target.ws.send(
+          JSON.stringify({
+            t: 'friend_request',
+            fromPlayerId: fromId,
+            fromName: client.displayName || 'Player',
+            unitSkin: client.unitSkin || 'nato',
+          }),
+        );
+      } catch (_) {}
+      ws.send(JSON.stringify({ t: 'friend_request_sent', targetPlayerId: targetId }));
+      return;
+    }
+
+    if (t === 'friend_request_reply') {
+      const fromId = sanitizePlayerId(msg.fromPlayerId);
+      const toId = client.playerId;
+      if (!fromId || !toId) return;
+      const requester = onlineByPlayerId.get(fromId);
+      if (!requester || requester.ws.readyState !== 1) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'That player is no longer online' }));
+        return;
+      }
+      const accept = !!msg.accept;
+      try {
+        requester.ws.send(
+          JSON.stringify({
+            t: 'friend_request_reply',
+            fromPlayerId: toId,
+            fromName: client.displayName || 'Player',
+            unitSkin: client.unitSkin || 'nato',
+            accept,
+          }),
+        );
+      } catch (_) {}
+      return;
+    }
+
     if (t === 'friend_presence') {
       const ids = Array.isArray(msg.friendIds) ? msg.friendIds.slice(0, 100) : [];
       const online = [];
@@ -336,6 +466,10 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', msg: 'Invalid friend ID' }));
         return;
       }
+      if (!client.playerId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Register your profile before inviting friends' }));
+        return;
+      }
       if (!client.room || client.room.matchStarted) {
         ws.send(JSON.stringify({ t: 'error', msg: 'You must be in a lobby to invite friends' }));
         return;
@@ -346,10 +480,26 @@ wss.on('connection', (ws) => {
       }
       const target = onlineByPlayerId.get(targetId);
       if (!target || target.ws.readyState !== 1) {
-        ws.send(JSON.stringify({ t: 'error', msg: 'Friend is offline' }));
+        ws.send(JSON.stringify({ t: 'error', msg: 'Friend is offline — they must have the game open' }));
+        return;
+      }
+      if (target.room && !target.room.matchStarted && target.room.id === client.room.id) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Friend is already in this lobby' }));
+        return;
+      }
+      const inviteKey = `${client.playerId}:${targetId}`;
+      if (cooldownBlocked(lobbyInviteCooldown, inviteKey, LOBBY_INVITE_COOLDOWN_MS)) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Wait before inviting this friend again' }));
+        return;
+      }
+      const dedupeKey = `${targetId}:${client.room.id}`;
+      if (cooldownBlocked(recentLobbyInvites, dedupeKey, LOBBY_INVITE_DEDUPE_MS)) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Invite already sent recently' }));
         return;
       }
       const seat = parseInt(msg.seat, 10) || 0;
+      markCooldown(lobbyInviteCooldown, inviteKey);
+      markCooldown(recentLobbyInvites, dedupeKey);
       try {
         target.ws.send(
           JSON.stringify({
@@ -362,7 +512,10 @@ wss.on('connection', (ws) => {
             seat,
           }),
         );
-      } catch (_) {}
+      } catch (_) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Could not deliver invite' }));
+        return;
+      }
       ws.send(JSON.stringify({ t: 'friend_invite_sent', targetPlayerId: targetId }));
       return;
     }
@@ -546,11 +699,17 @@ wss.on('connection', (ws) => {
       const displayName = sanitizeDisplayName(rawName || client.displayName || `Player ${client.slot}`);
       const unitSkin = sanitizeUnitSkin(msg.unitSkin != null ? msg.unitSkin : client.unitSkin);
       const mpStats = sanitizeMpStats(msg.mpStats) || client.mpStats;
+      const combinedStats = sanitizeCombinedStats(
+        msg.combinedStats != null ? msg.combinedStats : client.combinedStats,
+      );
       const playerId = sanitizePlayerId(msg.playerId != null ? msg.playerId : client.playerId);
       client.displayName = displayName;
       client.unitSkin = unitSkin;
       client.mpStats = mpStats;
-      if (playerId) registerClientPlayer(client, { playerId, displayName, unitSkin, mpStats });
+      client.combinedStats = combinedStats;
+      if (playerId)
+        registerClientPlayer(client, { playerId, displayName, unitSkin, mpStats, combinedStats });
+      else updateLeaderboardEntry(client, combinedStats);
       if (!client.room.meta.playerPublic || typeof client.room.meta.playerPublic !== 'object')
         client.room.meta.playerPublic = {};
       client.room.meta.playerPublic[String(client.slot)] = {
@@ -558,6 +717,7 @@ wss.on('connection', (ws) => {
         mpStats,
         unitSkin,
         playerId: playerId || client.playerId || '',
+        combinedStats,
       };
       broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
       broadcastLobbyList();
