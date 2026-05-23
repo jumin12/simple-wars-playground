@@ -2314,6 +2314,28 @@
         .map-skin-preview-default {
             background: linear-gradient(135deg, #2d6a4f 0%, #40916c 40%, #74c69d 70%, #1b4332 100%);
         }
+        .shop-scenario-card {
+            min-height: 168px;
+            text-align: left;
+            align-items: flex-start;
+        }
+        .shop-scenario-blurb {
+            display: block;
+            font-size: 0.78rem;
+            line-height: 1.35;
+            color: rgba(236, 240, 241, 0.78);
+            margin: 4px 0 8px;
+            font-weight: normal;
+        }
+        .scenario-preview-dday {
+            background: linear-gradient(180deg, #2980b9 0%, #2980b9 28%, #f4d03f 28%, #f4d03f 34%, #27ae60 34%, #1e8449 100%);
+        }
+        .scenario-preview-berlin {
+            background: radial-gradient(circle at 42% 48%, #7f8c8d 0%, #566573 22%, #c0392b 22%, #922b21 100%);
+        }
+        .scenario-preview-gettysburg {
+            background: linear-gradient(135deg, #2563eb 0%, #2563eb 42%, #7f8c8d 42%, #991b1b 100%);
+        }
         #shopTabCommand {
             --shop-frontline-color: #050505;
             --shop-command-color: #050505;
@@ -6947,10 +6969,26 @@
                 </div>
 
                 <div id="shopTabMaps" class="shop-tab-pane" data-shop-pane="maps" role="tabpanel" hidden>
-                    <p class="shop-tab-lead">Purchase custom battle maps for your skirmishes.</p>
-                    <div class="shop-empty-state">
-                        <p><strong>Coming soon</strong></p>
-                        <p>Custom maps will appear here for purchase with gold.</p>
+                    <p class="shop-tab-lead">Purchase historical scenario maps — detailed battlefields with authentic armies, cities, and starting supplies.</p>
+                    <div class="shop-option-grid" id="shopScenarioOptions">
+                        <button type="button" class="shop-option-card shop-scenario-card shop-visual-locked" id="shopScenarioDday" data-scenario-id="scenario_dday" onclick="purchaseShopScenario('scenario_dday')">
+                            <span class="shop-option-preview scenario-preview-dday" aria-hidden="true"></span>
+                            <span class="shop-option-title">D-Day: Normandy 1944</span>
+                            <span class="shop-scenario-blurb">Allied beach landings vs Atlantic Wall — Utah, Omaha, Gold, Juno &amp; Sword.</span>
+                            <span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">200g</span></span>
+                        </button>
+                        <button type="button" class="shop-option-card shop-scenario-card shop-visual-locked" id="shopScenarioBerlin" data-scenario-id="scenario_berlin" onclick="purchaseShopScenario('scenario_berlin')">
+                            <span class="shop-option-preview scenario-preview-berlin" aria-hidden="true"></span>
+                            <span class="shop-option-title">Berlin 1945</span>
+                            <span class="shop-scenario-blurb">Red Army encirclement of the Reich capital in the war's final battle.</span>
+                            <span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">200g</span></span>
+                        </button>
+                        <button type="button" class="shop-option-card shop-scenario-card shop-visual-locked" id="shopScenarioGettysburg" data-scenario-id="scenario_gettysburg" onclick="purchaseShopScenario('scenario_gettysburg')">
+                            <span class="shop-option-preview scenario-preview-gettysburg" aria-hidden="true"></span>
+                            <span class="shop-option-title">Gettysburg 1863</span>
+                            <span class="shop-scenario-blurb">Union vs Confederacy — Cemetery Hill, Little Round Top &amp; Pickett's Charge.</span>
+                            <span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">200g</span></span>
+                        </button>
                     </div>
                 </div>
 
@@ -8518,6 +8556,7 @@
             aiUnitSkin: 'nato',
             ownedUnitSkins: { nato: true },
             ownedShopVisuals: {},
+            ownedShopMaps: {},
             gamePeriod: 'modern',
             terrainViewMode: 'natural',
             menuAttractMode: false,
@@ -8567,6 +8606,16 @@
             if(!shopId) return true;
             wodEnsureOwnedShopVisuals();
             return !!gameData.ownedShopVisuals[shopId];
+        }
+
+        function wodEnsureOwnedShopMaps() {
+            if(!gameData.ownedShopMaps) gameData.ownedShopMaps = {};
+        }
+
+        function wodOwnsShopScenario(scenarioId) {
+            if(!scenarioId) return false;
+            wodEnsureOwnedShopMaps();
+            return !!gameData.ownedShopMaps[scenarioId];
         }
 
         function loadUiSettingsFromStorage() {
@@ -13664,7 +13713,7 @@
                     unitsBuiltMarine: 0,
                     gamesStarted: 0
                 },
-                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '' },
+                profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, ownedShopMaps: {}, gamePeriod: 'modern', mpDisplayName: '' },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 }
             };
         }
@@ -13737,6 +13786,7 @@
             gameData.aiUnitSkin = as;
             gameData.ownedUnitSkins = Object.assign({ nato: true }, p.ownedUnitSkins || {});
             gameData.ownedShopVisuals = Object.assign({}, p.ownedShopVisuals || {});
+            gameData.ownedShopMaps = Object.assign({}, p.ownedShopMaps || {});
             if(gameData.ownedUnitSkins.default) delete gameData.ownedUnitSkins.default;
             if(gameData.ownedUnitSkins.goldenChip && wodProgress.achievements) wodProgress.achievements.goldenChipMaster = true;
             for(let pid of ['napoleonic', 'medieval', 'ancient']) {
@@ -13779,6 +13829,7 @@
                 mpDisplayName: (wodProgress.profile && wodProgress.profile.mpDisplayName) || '',
                 ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { nato: true }),
                 ownedShopVisuals: Object.assign({}, gameData.ownedShopVisuals || {}),
+                ownedShopMaps: Object.assign({}, gameData.ownedShopMaps || {}),
                 gamePeriod: 'modern'
             };
         }
@@ -20681,17 +20732,54 @@
             if(!mapData) return;
             let ms = document.getElementById('setupMapSize');
             let sz = mapData.mapSize || mapData.mapRadius || 60;
-            if(ms) ms.value = String(sz);
-            wodApplyMapSizePreset(sz);
-            gameData.mapShape = 'custom';
+            if(ms) {
+                let opts = [40, 60, 80];
+                let nearest = opts[0];
+                for(let oi = 1; oi < opts.length; oi++)
+                    if(Math.abs(opts[oi] - sz) < Math.abs(nearest - sz)) nearest = opts[oi];
+                ms.value = String(nearest);
+            }
+            wodApplyMapSizePreset(ms ? ms.value : 60);
+            if(mapData.mapRadius) gameData.mapRadius = mapData.mapRadius;
+            if(mapData.hexRadius) gameData.hexRadius = mapData.hexRadius;
+            gameData.mapShape = mapData.mapShape || 'custom';
             gameData.loadedCustomMap = true;
             gameData.hexList = mapData.hexList || [];
             gameData.cities = mapData.cities || [];
             gameData.roads = mapData.roads || [];
             gameData.entities = mapData.entities || [];
+            for(let ei = 0; ei < gameData.entities.length; ei++) ensureUnitId(gameData.entities[ei]);
+            gameData.forts = (mapData.forts || []).map(f => Object.assign({}, f));
+            gameData.bridges = (mapData.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+            for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+            wodRebuildBridgeHexIndex();
             gameData.hexes = {};
             for(let hex of gameData.hexList) {
                 gameData.hexes[`${hex.q},${hex.r}`] = hex;
+            }
+            if(mapData.factionColors && mapData.factionColors.length) {
+                for(let fi = 0; fi < Math.min(mapData.factionColors.length, factionColors.length); fi++)
+                    factionColors[fi] = mapData.factionColors[fi];
+            }
+            if(mapData.savedStartEconomy) {
+                if(typeof mapData.money === 'number') gameData.money = mapData.money;
+                if(typeof mapData.manpower === 'number') gameData.manpower = mapData.manpower;
+                gameData.aiMoneyByOwner = Object.assign({}, mapData.aiMoneyByOwner || {});
+                gameData.aiManpowerByOwner = Object.assign({}, mapData.aiManpowerByOwner || {});
+                gameData._mapExportHadStartEconomy = true;
+            } else {
+                delete gameData._mapExportHadStartEconomy;
+            }
+            snapEditorRoadRefsToCities();
+            if(mapData.scenarioMeta) {
+                gameData._pendingScenarioMeta = mapData.scenarioMeta;
+                let aiEl = document.getElementById('setupAI');
+                if(aiEl && mapData.scenarioMeta.aiCount != null)
+                    aiEl.value = String(Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, mapData.scenarioMeta.aiCount | 0)));
+                let periodEl = document.getElementById('setupGamePeriod');
+                if(periodEl && mapData.scenarioMeta.period) periodEl.value = mapData.scenarioMeta.period;
+            } else {
+                gameData._pendingScenarioMeta = null;
             }
             normalizeTerrainHexes();
             for(let hex of gameData.hexList) {
@@ -21274,13 +21362,18 @@
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
             let startMoney = document.getElementById('setupMoney');
-            if(startMoney) gameData.money = parseInt(startMoney.value, 10) || 10000;
+            if(startMoney && !gameData._mapExportHadStartEconomy)
+                gameData.money = parseInt(startMoney.value, 10) || 10000;
             let shapeInput = document.getElementById('setupMapShape');
             let requestedShape = shapeInput ? shapeInput.value : 'island';
 
             let periodEl = document.getElementById('setupGamePeriod');
-            gameData._matchPeriod = periodEl ? periodEl.value : (gameData.gamePeriod || 'modern');
-            if(!wodIsPeriodUnlocked(gameData._matchPeriod)) gameData._matchPeriod = 'modern';
+            if(gameData._pendingScenarioMeta && gameData._pendingScenarioMeta.period) {
+                gameData._matchPeriod = gameData._pendingScenarioMeta.period;
+            } else {
+                gameData._matchPeriod = periodEl ? periodEl.value : (gameData.gamePeriod || 'modern');
+            }
+            if(!wodIsPeriodUnlocked(gameData._matchPeriod) && !gameData._pendingScenarioMeta) gameData._matchPeriod = 'modern';
             gameData.gamePeriod = gameData._matchPeriod;
             wodApplyPeriodUiLabels();
 
@@ -28444,6 +28537,84 @@
             return true;
         }
 
+        const WOD_SHOP_SCENARIO_COST = 200;
+
+        function wodGetShopScenarioEntry(scenarioId) {
+            if(typeof WOD_SCENARIOS === 'undefined' || !WOD_SCENARIOS.CATALOG) return null;
+            return WOD_SCENARIOS.CATALOG.find(s => s.id === scenarioId) || null;
+        }
+
+        function wodEnsureScenarioInLibrary(scenarioId, mapData) {
+            if(!mapData || !mapData.scenarioMeta) return;
+            let list = wodGetSavedMapsList();
+            let name = mapData.scenarioMeta.name || scenarioId;
+            let existing = list.find(e => e && e.data && e.data.scenarioId === scenarioId);
+            if(existing) {
+                wodOverwriteSavedMapById(existing.id, { mapData, name });
+                return existing.id;
+            }
+            let ent = wodSaveMapToLibraryWithName(name, { mapData });
+            return ent ? ent.id : null;
+        }
+
+        function purchaseShopScenario(scenarioId) {
+            let entry = wodGetShopScenarioEntry(scenarioId);
+            if(!entry || typeof WOD_SCENARIOS === 'undefined') {
+                showNotification('Scenario unavailable.');
+                return;
+            }
+            if(wodOwnsShopScenario(scenarioId)) {
+                wodLoadShopScenarioToSetup(scenarioId);
+                return;
+            }
+            if((gameData.gold || 0) < entry.cost) {
+                showNotification('Not enough gold!');
+                return;
+            }
+            let mapData = entry.build();
+            if(!mapData) {
+                showNotification('Could not build scenario map.');
+                return;
+            }
+            gameData.gold -= entry.cost;
+            wodEnsureOwnedShopMaps();
+            gameData.ownedShopMaps[scenarioId] = true;
+            wodEnsureScenarioInLibrary(scenarioId, mapData);
+            showNotification('Scenario unlocked: ' + (mapData.scenarioMeta.name || scenarioId));
+            updateShopMapsTab();
+            updateSkinShop();
+            scheduleSaveWodProgress();
+            wodLoadShopScenarioToSetup(scenarioId);
+        }
+
+        function wodLoadShopScenarioToSetup(scenarioId) {
+            if(!wodOwnsShopScenario(scenarioId)) return;
+            let mapData = null;
+            let list = wodGetSavedMapsList();
+            let saved = list.find(e => e && e.data && e.data.scenarioId === scenarioId);
+            if(saved && saved.data) mapData = saved.data;
+            else if(typeof WOD_SCENARIOS !== 'undefined') mapData = WOD_SCENARIOS.buildById(scenarioId);
+            if(!mapData) return;
+            wodApplyMapDataToSetup(mapData);
+            showPanel('setup');
+            showNotification('Loaded scenario: ' + (mapData.scenarioMeta ? mapData.scenarioMeta.name : scenarioId));
+        }
+
+        function updateShopMapsTab() {
+            if(typeof WOD_SCENARIOS === 'undefined') return;
+            for(let sc of WOD_SCENARIOS.CATALOG) {
+                let el = document.querySelector('[data-scenario-id="' + sc.id + '"]');
+                if(!el) continue;
+                let owned = wodOwnsShopScenario(sc.id);
+                el.classList.toggle('shop-visual-locked', !owned);
+                el.classList.toggle('shop-scenario-owned', owned);
+                let st = el.querySelector('.shop-visual-state');
+                let pr = el.querySelector('.shop-visual-price');
+                if(st) st.textContent = owned ? 'Owned — click to play' : 'Locked';
+                if(pr) pr.textContent = owned ? '' : (sc.cost + 'g');
+            }
+        }
+
         function wodSelectShopVisual(shopId, settingKey, value) {
             if(shopId && !wodOwnsShopVisual(shopId)) {
                 if(!purchaseShopVisual(shopId)) return;
@@ -28594,6 +28765,7 @@
             let goldEl = document.getElementById('shopGold');
             if(goldEl) goldEl.innerText = Math.floor(gameData.gold || 0);
             syncShopVisualOptionsUi();
+            updateShopMapsTab();
             let skinIds = ['nato', 'usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china',
                 'civRome', 'civCarthage', 'civGaul',
                 'ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina',
@@ -32409,6 +32581,7 @@
             wodRunInitialBootToMenu();
         }
     </script>
+    <script src="scenario-maps.js"></script>
     <script src="map-editor.js"></script>
 </body>
 </html>
