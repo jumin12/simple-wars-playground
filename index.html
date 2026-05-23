@@ -6343,6 +6343,10 @@
                     </select>
                 </div>
                 <p class="setup-victory-hint" id="setupVictoryModeDetail"></p>
+                <div class="setup-row">
+                    <label>Fog of war:</label>
+                    <input type="checkbox" id="setupFogOfWar" title="Hide enemy units and shroud map outside your vision">
+                </div>
                 <div class="setup-row hidden" id="setupGamePeriodRow">
                     <label>Time period:</label>
                     <select id="setupGamePeriod" title="Themed unit names and buildings for this match">
@@ -6504,6 +6508,9 @@
                     </select>
                 </div>
                 <p class="setup-victory-hint" id="mpCfgVictoryDetail" style="text-align:left;font-size:13px"></p>
+                <div class="setup-row"><label>Fog of war</label>
+                    <input type="checkbox" id="mpCfgFogOfWar" style="width:auto;flex:0">
+                </div>
                 <div class="setup-row hidden" id="mpCfgGamePeriodRow"><label>Time period</label>
                     <select id="mpCfgGamePeriod" style="flex:1">
                         <option value="modern" selected>Modern</option>
@@ -8489,6 +8496,10 @@
             layers: { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, structures: true, units: true },
             aiCount: 1,
             victoryMode: 'domination',
+            fogOfWar: false,
+            _fogVisible: null,
+            _fogExplored: null,
+            _fogVisionTimer: 0,
             _campaignEnded: false,
             casualties: 0,
             enemyCasualties: 0,
@@ -11682,6 +11693,7 @@
             wodMpCopyFieldToField('setupMapSize', 'mpCfgMapSize');
             wodMpCopyFieldToField('setupMapShape', 'mpCfgMapShape');
             wodMpCopyFieldToField('setupVictoryMode', 'mpCfgVictoryMode');
+            wodMpCopyFieldToField('setupFogOfWar', 'mpCfgFogOfWar');
             wodMpCopyFieldToField('setupMoney', 'mpCfgMoney');
             wodMpCopyFieldToField('setupPlayerColor', 'mpCfgPlayerColor');
             wodMpCopyFieldToField('setupGamePeriod', 'mpCfgGamePeriod');
@@ -11717,6 +11729,12 @@
             if(sh && window.wodMpRoomMeta.mapShape) sh.value = window.wodMpRoomMeta.mapShape;
             let vic = document.getElementById('mpCfgVictoryMode');
             if(vic && window.wodMpRoomMeta.victoryMode) vic.value = window.wodMpRoomMeta.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
+            let fogMp = document.getElementById('mpCfgFogOfWar');
+            let fogSetup = document.getElementById('setupFogOfWar');
+            if(window.wodMpRoomMeta.fogOfWar != null) {
+                if(fogMp) fogMp.checked = !!window.wodMpRoomMeta.fogOfWar;
+                if(fogSetup) fogSetup.checked = !!window.wodMpRoomMeta.fogOfWar;
+            }
             let mon = document.getElementById('mpCfgMoney');
             if(mon && window.wodMpRoomMeta.money != null) mon.value = String(window.wodMpRoomMeta.money);
             let per = document.getElementById('mpCfgGamePeriod');
@@ -11892,13 +11910,13 @@
         }
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
-            for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupMoney', 'setupPlayerColor',
+            for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney', 'setupPlayerColor',
                 'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch', 'mpGlMaxHumans',
                 'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
-                'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
+                'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgFogOfWar', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
                 'mpCfgRulesApply', 'mpCfgRulesClose']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
@@ -12101,6 +12119,7 @@
                     '<strong>Map</strong> ' + wodMpEscapeHtml(msL || '—') + ' · ' + wodMpEscapeHtml(shL || '') +
                     '<br><strong>AI seats</strong> ' + botN +
                     '<br><strong>Victory</strong> ' + wodMpEscapeHtml(meta.victoryLabel || '') +
+                    '<br><strong>Fog of war</strong> ' + (meta.fogOfWar ? 'On' : 'Off') +
                     '<br><strong>Starting cash</strong> $' + (meta.money != null ? (meta.money | 0) : '—') +
                     '<br><strong>Time period</strong> ' + wodMpEscapeHtml(meta.gamePeriodLabel || meta.gamePeriod || 'Modern');
             }
@@ -12251,6 +12270,7 @@
                 seatTypes: st,
                 lobbyMapSeed: window.wodMpRoomMeta.lobbyMapSeed >>> 0,
                 victoryMode: vic && vic.value === 'annihilation' ? 'annihilation' : 'domination',
+                fogOfWar: !!((document.getElementById('mpCfgFogOfWar') || document.getElementById('setupFogOfWar') || {}).checked),
                 money: moneyEl ? (parseInt(moneyEl.value, 10) || 10000) : 10000,
                 maxHumans,
                 mapSizeLabel: msLab ? msLab.text : '',
@@ -12282,7 +12302,7 @@
             }
             el.innerHTML = lobbies.map(l => {
                 let meta = l.meta || {};
-                let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel]
+                let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel, meta.fogOfWar ? 'Fog' : '']
                     .filter(Boolean).join(' · ');
                 if(!detail) detail = 'Host still configuring map';
                 let name = wodMpEscapeHtml(l.name || 'Game');
@@ -12354,7 +12374,9 @@
 
         function wodMpCopyFieldToField(srcId, dstId) {
             let s = document.getElementById(srcId), d = document.getElementById(dstId);
-            if(s && d) d.value = s.value;
+            if(!s || !d) return;
+            if(s.type === 'checkbox' || d.type === 'checkbox') d.checked = !!s.checked;
+            else d.value = s.value;
         }
         function wodMpSyncMpCfgVictoryDetail() {
             let sel = document.getElementById('mpCfgVictoryMode');
@@ -12510,6 +12532,7 @@
             if(mpCfgRulesApply) mpCfgRulesApply.onclick = () => {
                 if(wodIsMapPreviewGenerating()) return;
                 wodMpCopyFieldToField('mpCfgVictoryMode', 'setupVictoryMode');
+                wodMpCopyFieldToField('mpCfgFogOfWar', 'setupFogOfWar');
                 wodMpCopyFieldToField('mpCfgMoney', 'setupMoney');
                 wodMpCopyFieldToField('mpCfgPlayerColor', 'setupPlayerColor');
                 wodMpCopyFieldToField('mpCfgGamePeriod', 'setupGamePeriod');
@@ -19363,8 +19386,9 @@
                     if(!canUnitEnterHex(unit, nHex) || nHex.owner === unit.owner) continue;
                     let friendlyAround = getNeighborHexes(nHex).filter(aHex => aHex.owner === unit.owner).length;
                     let hostileAround = getNeighborHexes(nHex).filter(aHex => isClaimableLand(aHex) && aHex.owner !== unit.owner).length;
-                    let cityBonus = gameData.cities.some(city => city.owner !== unit.owner && city.q === nHex.q && city.r === nHex.r) ? 60 : 0;
-                    let playerBonus = nHex.owner === 1 ? 70 : 20;
+                    let cityBonus = gameData.cities.some(city => city.owner !== unit.owner && city.q === nHex.q && city.r === nHex.r)
+                        ? (nHex.owner === 1 ? 140 : 70) : 0;
+                    let playerBonus = nHex.owner === 1 ? 95 : 24;
                     // Avoid attacking into terrain that gives our unit type a defense penalty.
                     let terrainPenalty = 0;
                     if(unit.type === 'heavy') {
@@ -19407,11 +19431,11 @@
                 }
                 let playerNearHold = countPlayerThreatNear(hex.x, hex.y, 205);
                 let playerTile = getNeighborHexes(attackHex).some(n => n && n.owner === 1) ? 1 : 0;
-                let guardPull = -(playerNearHold * 19500 + playerTile * 24000);
+                let guardPull = -(playerNearHold * 12000 + playerTile * 15000);
                 let mireHold = hexMountainProximityScore(hex) * 2400;
                 let score = dx * dx + dy * dy - enemyPressure * 25000 * Math.min(1.15, Math.max(0.55, aggression))
                     - support * 12000 + enemies * 8000 - encirclePressure + holdBonus + cityDefenseBonus + mireHold + guardPull;
-                if(aggression < 1.05) score += 52000;
+                if(aggression < 1.05) score += 28000;
                 if(focus) {
                     let fdx = hex.x - focus.x;
                     let fdy = hex.y - focus.y;
@@ -21170,6 +21194,14 @@
 
             let victorySel = document.getElementById('setupVictoryMode');
             gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
+            let fogEl = document.getElementById('setupFogOfWar');
+            if(gameData.mp && gameData.mp.enabled && window.wodMpRoomMeta && window.wodMpRoomMeta.fogOfWar != null)
+                gameData.fogOfWar = !!window.wodMpRoomMeta.fogOfWar;
+            else
+                gameData.fogOfWar = !!(fogEl && fogEl.checked);
+            gameData._fogVisible = null;
+            gameData._fogExplored = new Set();
+            gameData._fogVisionTimer = 0;
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
             let startMoney = document.getElementById('setupMoney');
@@ -23442,6 +23474,105 @@
             return findAiFrontlineAssignment({owner, type: 'light', x: focus.x, y: focus.y, range: 50});
         }
 
+        function wodAiCollectPlayerCityAttackHexes(attackerOwner) {
+            let hexes = [];
+            let seen = new Set();
+            for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                let c = gameData.cities[ci];
+                if(c.owner !== 1) continue;
+                let tiles = getCityUrbanTerrainHexes(c);
+                if(!tiles.length) {
+                    let ch = gameData.hexes[`${c.q},${c.r}`];
+                    if(ch) tiles = [ch];
+                }
+                for(let ti = 0; ti < tiles.length; ti++) {
+                    let h = tiles[ti];
+                    if(!h || h.owner === attackerOwner) continue;
+                    let k = getHexKey(h);
+                    if(seen.has(k)) continue;
+                    seen.add(k);
+                    hexes.push(h);
+                }
+            }
+            return hexes;
+        }
+
+        function wodAiFortGuardReachSq() {
+            let hr = gameData.hexRadius || 20;
+            return Math.pow(hr * 1.35 * 5.5, 2);
+        }
+
+        function wodAiFortHasGuard(fort, ownerId) {
+            if(!fort || !ownerId) return false;
+            let r2 = wodAiFortGuardReachSq();
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.owner !== ownerId || u.type === 'convoy' || u.type === 'ship') continue;
+                let dx = u.x - fort.x, dy = u.y - fort.y;
+                if(dx * dx + dy * dy <= r2) return true;
+            }
+            return false;
+        }
+
+        function wodAiEnsureFortGuard(ownerId, fortHex) {
+            if(!ownerId || !fortHex || !gameData.forts || !gameData.forts.length) return;
+            let fort = null;
+            for(let fi = gameData.forts.length - 1; fi >= 0; fi--) {
+                let ft = gameData.forts[fi];
+                if(ft && ft.owner === ownerId && ft.q === fortHex.q && ft.r === fortHex.r) {
+                    fort = ft;
+                    break;
+                }
+            }
+            if(!fort || wodAiFortHasGuard(fort, ownerId)) return;
+            let best = null, bestD = Infinity;
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.owner !== ownerId || u.type === 'convoy' || u.type === 'ship') continue;
+                if(u.moraleBroken || u.retreating || u.hp / u.maxHp < 0.42) continue;
+                if(u.aiCityStriker) continue;
+                let dx = u.x - fort.x, dy = u.y - fort.y;
+                let d = dx * dx + dy * dy;
+                if(d < bestD) {
+                    bestD = d;
+                    best = u;
+                }
+            }
+            if(best) {
+                best.aiFortGuard = fort.id;
+                wodAiMoveUnitTowardHex(best, fortHex, true, 0.18);
+                return;
+            }
+            if(!canAffordUnit(ownerId, 'light')) return;
+            let spawnCity = null, spawnD = Infinity;
+            for(let c of gameData.cities) {
+                if(c.owner !== ownerId) continue;
+                if(!cityEligibleForBuildPlacementForOwner(c, 'light', ownerId)) continue;
+                let dx = c.x - fort.x, dy = c.y - fort.y;
+                let d = dx * dx + dy * dy;
+                if(d < spawnD) {
+                    spawnD = d;
+                    spawnCity = c;
+                }
+            }
+            if(!spawnCity) return;
+            if(!spendForUnit(ownerId, 'light')) return;
+            let spawned = spawnUnit('light', spawnCity, ownerId);
+            if(spawned) {
+                spawned.aiFortGuard = fort.id;
+                wodAiMoveUnitTowardHex(spawned, fortHex, true, 0.12);
+            }
+        }
+
+        function wodAiMaintainFortGuards(ownerId) {
+            let forts = gameData.forts;
+            if(!forts || !forts.length) return;
+            for(let fi = 0, fl = forts.length; fi < fl; fi++) {
+                let ft = forts[fi];
+                if(!ft || ft.owner !== ownerId) continue;
+                if(wodAiFortHasGuard(ft, ownerId)) continue;
+                wodAiEnsureFortGuard(ownerId, gameData.hexes[`${ft.q},${ft.r}`] || { q: ft.q, r: ft.r, x: ft.x, y: ft.y });
+            }
+        }
+
         function wodPickAiSectorForUnit(unit, sectors) {
             if(!sectors || !sectors.length) return null;
             let best = null;
@@ -23452,7 +23583,11 @@
                 let support = countNearbyUnits(unit.owner, s.holdHex.x, s.holdHex.y, 190);
                 let enemies = countNearbyUnits(unit.owner, s.holdHex.x, s.holdHex.y, 210, true);
                 let deficit = Math.max(0, (enemies + 1) * 1.25 - (support + 1));
-                let cityObj = gameData.cities.some(c => c.owner !== unit.owner && c.q === s.attackHex.q && c.r === s.attackHex.r) ? -420000 : 0;
+                let cityObj = 0;
+                if(gameData.cities.some(c => c.owner === 1 && c.q === s.attackHex.q && c.r === s.attackHex.r))
+                    cityObj = -520000;
+                else if(gameData.cities.some(c => c.owner !== unit.owner && c.q === s.attackHex.q && c.r === s.attackHex.r))
+                    cityObj = -180000;
                 let dx = s.holdHex.x - unit.x;
                 let dy = s.holdHex.y - unit.y;
                 let score = dx * dx + dy * dy + deficit * 92000 + i * 1800 - cityObj;
@@ -23475,7 +23610,8 @@
                     if(!canUnitEnterHex(fake, nHex) || nHex.owner === owner) continue;
                     let enemyWeight = countNearbyUnits(owner, nHex.x, nHex.y, 125, true);
                     let isCityTile = gameData.cities.some(city => city.owner !== owner && city.q === nHex.q && city.r === nHex.r);
-                    let weak = enemyWeight + (isCityTile ? -3 : 0);
+                    let isPlayerCity = gameData.cities.some(city => city.owner === 1 && city.q === nHex.q && city.r === nHex.r);
+                    let weak = enemyWeight + (isCityTile ? -3 : 0) - (isPlayerCity ? 11 : 0);
                     if(weak < bestWeak) {
                         bestWeak = weak;
                         attackHex = nHex;
@@ -23494,7 +23630,7 @@
                 }
                 let playerThreat = countPlayerThreatNear(hex.x, hex.y, 200);
                 let touchesPlayerLand = getNeighborHexes(hex).some(n => n && n.owner === 1);
-                let guardBias = -playerThreat * 4.1 - (touchesPlayerLand ? 14 : 0);
+                let guardBias = -playerThreat * 2.4 - (touchesPlayerLand ? 8 : 0);
                 candidates.push({holdHex: hex, attackHex, score: bestWeak + cityDefenseBias + guardBias});
             }
             candidates.sort((a, b) => a.score - b.score);
@@ -23557,6 +23693,7 @@
                 if(!ch || !getNeighborHexes(ch).some(h => isWaterHex(h))) continue;
                 let dx = c.x - fromX, dy = c.y - fromY;
                 let d = dx * dx + dy * dy;
+                if(c.owner === 1) d *= 0.72;
                 if(d < bestD) {
                     bestD = d;
                     best = c;
@@ -23586,7 +23723,10 @@
             let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[oid];
             if(myPower === undefined) myPower = getOwnerTroopManpower(owner);
             let ratio = myPower / Math.max(1, playerPower);
-            let canBreakthrough = ratio >= 1.35;
+            let canBreakthrough = ratio >= 1.15;
+            let playerCityTargets = wodAiCollectPlayerCityAttackHexes(oid);
+            let cityStrikerCount = playerCityTargets.length && ratio >= 0.95
+                ? Math.max(1, Math.ceil(readyUnits.length * 0.28)) : 0;
 
             readyUnits.forEach((unit, idx) => {
                 if(unit.target && !unit.holding) {
@@ -23594,16 +23734,23 @@
                     let tdy = unit.target.y - unit.y;
                     if(tdx * tdx + tdy * tdy > Math.pow(gameData.hexRadius * 3.2, 2)) return;
                 }
+                if(cityStrikerCount > 0 && idx >= readyUnits.length - cityStrikerCount) {
+                    let tgt = playerCityTargets[idx % playerCityTargets.length];
+                    unit.aiCityStriker = true;
+                    wodAiMoveUnitTowardHex(unit, tgt, false, 0.52);
+                    unit.aiFormationSerial = serial;
+                    return;
+                }
                 let sector = sectors[idx % sectors.length];
 
                 let support = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 195);
                 let enemies = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 215, true);
-                let neededSupport = canBreakthrough ? Math.max(3, Math.ceil(enemies * 1.1)) : Math.max(5, Math.ceil(enemies * 1.35) + 3);
+                let neededSupport = canBreakthrough ? Math.max(2, Math.ceil(enemies * 0.95)) : Math.max(4, Math.ceil(enemies * 1.15) + 2);
 
-                if(support < neededSupport && (unit.hp / unit.maxHp) < 0.9) {
+                if(support < neededSupport && (unit.hp / unit.maxHp) < 0.82) {
                     wodAiMoveUnitTowardHex(unit, sector.holdHex, true, 0.35);
                 } else {
-                    wodAiMoveUnitTowardHex(unit, canBreakthrough ? sector.attackHex : sector.holdHex, false, 0.4);
+                    wodAiMoveUnitTowardHex(unit, canBreakthrough || support >= neededSupport ? sector.attackHex : sector.holdHex, false, 0.46);
                 }
                 unit.aiFormationSerial = serial;
             });
@@ -23773,7 +23920,9 @@
             }
             if(!bestHex || bestScore < MIN_SCORE) return false;
             if(isFrontlineHex(bestHex, ownerId) && !wodAiFortHasNearbyDefenders(bestHex, ownerId)) return false;
-            return attemptFortPlacementForOwner(bestHex, ownerId, true);
+            if(!attemptFortPlacementForOwner(bestHex, ownerId, true)) return false;
+            wodAiEnsureFortGuard(ownerId, bestHex);
+            return true;
         }
 
         function wodAiWaterSeparatesOwnedShores(a, b, ownerId) {
@@ -23947,17 +24096,22 @@
             let aiTroops = getOwnerUnitCount(ownerId);
 
             let cash = gameData.aiMoneyByOwner[ownerKey] || 0;
-            while(cash >= WOD_PRICE_FACTORY) {
+            let unitReserve = Math.max(WOD_PRICE_LIGHT * 2.5, WOD_PRICE_HEAVY || WOD_PRICE_LIGHT * 3);
+            let facSpend = 0;
+            while(cash >= WOD_PRICE_FACTORY + unitReserve && facSpend < 1) {
                 let needFac = aiCities.find(ct => !ct.hasFactory);
                 if(!needFac) break;
                 needFac.hasFactory = true;
                 cash -= WOD_PRICE_FACTORY;
+                facSpend++;
             }
-            while(cash >= WOD_PRICE_HARBOR) {
+            let hbSpend = 0;
+            while(cash >= WOD_PRICE_HARBOR + unitReserve && hbSpend < 1) {
                 let needHb = aiCities.find(ct => !ct.hasHarbor && cityHasWaterNeighbor(ct));
                 if(!needHb) break;
                 needHb.hasHarbor = true;
                 cash -= WOD_PRICE_HARBOR;
+                hbSpend++;
             }
             gameData.aiMoneyByOwner[ownerKey] = cash;
 
@@ -23972,15 +24126,18 @@
             if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_BRIDGE * 3.1 && Math.random() < 0.22)
                 wodAiTryBridgeForOwner(ownerId, ownerKey);
 
-            let spawnCap = wodUsesVisualViewportLayout() ? 4 : 5;
-            let spawnsThisTick = Math.min(spawnCap, Math.max(2, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(180, WOD_PRICE_LIGHT))));
+            wodAiMaintainFortGuards(ownerId);
+
+            let spawnCap = wodUsesVisualViewportLayout() ? 5 : 6;
+            let spawnsThisTick = Math.min(spawnCap, Math.max(3, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(160, WOD_PRICE_LIGHT))));
             let combatSafeCities = aiCities.filter(c => !isCitySiegeBlockedForProduction(c));
-            let trainOrder = ['ship', 'heavy', 'marine', 'light'];
+            let trainOrder = ['light', 'marine', 'heavy', 'ship'];
             if(!gameData._aiTrainPick) gameData._aiTrainPick = {};
             let rotOff = gameData._aiTrainPick[String(ownerKey)] || 0;
             for(let s = 0; s < spawnsThisTick; s++) {
                 if(aiCities.length === 0 || aiTroops >= troopCap) break;
-                if(aiNetIncome <= -18 || (gameData.aiMoneyByOwner[ownerKey] || 0) < Math.floor(WOD_PRICE_LIGHT * 0.9)) break;
+                let brokeSpawnGate = aiNetIncome <= -32 && aiTroops >= Math.floor(troopCap * 0.55);
+                if(brokeSpawnGate || (gameData.aiMoneyByOwner[ownerKey] || 0) < Math.floor(WOD_PRICE_LIGHT * 0.72)) break;
                 if(combatSafeCities.length === 0) break;
 
                 let candidates = combatSafeCities.slice().sort((a, b) => {
@@ -24149,9 +24306,9 @@
                     let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[unit.owner];
                     if(myPower === undefined) myPower = getOwnerTroopManpower(unit.owner);
                     let strengthRatio = myPower / Math.max(1, playerPower);
-                    let canOverwhelm = strengthRatio >= 1.32;
+                    let canOverwhelm = strengthRatio >= 1.18;
                     let localRatio = (support + 1) / (enemies + 1);
-                    let neededSupport = canOverwhelm ? Math.max(3, Math.ceil(enemies * 1.05) + 1) : Math.max(6, Math.ceil(enemies * 1.4) + 3);
+                    let neededSupport = canOverwhelm ? Math.max(2, Math.ceil(enemies * 0.92) + 1) : Math.max(5, Math.ceil(enemies * 1.2) + 2);
                     if((!canOverwhelm || localRatio < 1.25) && support < neededSupport && hpRatio < 0.9) {
                         wodAiMoveUnitToward(unit,
                             assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.75 + spread,
@@ -24217,6 +24374,7 @@
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
             wodBeginSimPfBudget(gameData.entities.length);
+            if(gameState === 'PLAYING') wodRefreshFogVision(dt);
 
             // Economy (one pass over cities + one over units — avoids triple city scans)
             let incomeTick = getOwnerIncome(1);
@@ -24320,7 +24478,7 @@
             }
 
             if(!gameData.aiTimer) gameData.aiTimer = 0;
-            let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.55 : 2.5;
+            let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.0 : 2.0;
             if(!gameData._aiSpawnBurst) {
                 gameData.aiTimer += dt;
                 if(gameData.aiTimer > aiBurstEvery) {
@@ -29080,6 +29238,130 @@
 
         let lastPlayerSummaryMs = 0;
 
+        function wodFogActive() {
+            return !!(gameData.fogOfWar && gameState === 'PLAYING' && !gameData.menuAttractMode);
+        }
+
+        function wodFogVisionRadiusForUnit(unit) {
+            if(!unit || unit.hp <= 0) return 0;
+            if(unit.type === 'light') return 3;
+            if(unit.type === 'heavy') return 2;
+            if(unit.type === 'marine') return 2;
+            if(unit.type === 'ship') return 4;
+            if(unit.type === 'convoy') return 1;
+            return 2;
+        }
+
+        function wodFogRevealHexesAround(cq, cr, R, visible, explored) {
+            if(R <= 0) return;
+            let pts = getHexesInHexRadius(cq, cr, R);
+            for(let i = 0; i < pts.length; i++) {
+                let h = gameData.hexes[`${pts[i].q},${pts[i].r}`];
+                if(!h) continue;
+                let k = getHexKey(h);
+                visible.add(k);
+                explored.add(k);
+            }
+        }
+
+        function wodRefreshFogVision(dt) {
+            if(!wodFogActive()) {
+                gameData._fogVisible = null;
+                return;
+            }
+            gameData._fogVisionTimer = (gameData._fogVisionTimer || 0) + dt;
+            if(gameData._fogVisionTimer < 0.1 && gameData._fogVisible && gameData._fogVisible.size) return;
+            gameData._fogVisionTimer = 0;
+            let owner = wodLocalPlayerOwner();
+            if(!gameData._fogExplored) gameData._fogExplored = new Set();
+            let visible = new Set();
+            let explored = gameData._fogExplored;
+            for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
+                let h = gameData.hexList[hi];
+                if(h.owner !== owner) continue;
+                let k = getHexKey(h);
+                visible.add(k);
+                explored.add(k);
+                let nbs = getNeighborHexes(h);
+                for(let ni = 0; ni < nbs.length; ni++) {
+                    let nb = nbs[ni];
+                    if(!nb) continue;
+                    let nk = getHexKey(nb);
+                    visible.add(nk);
+                    explored.add(nk);
+                }
+            }
+            for(let ei = 0, el = gameData.entities.length; ei < el; ei++) {
+                let u = gameData.entities[ei];
+                if(u.hp <= 0 || u.owner !== owner) continue;
+                let uh = getNearestHexToPoint(u.x, u.y);
+                if(!uh) continue;
+                wodFogRevealHexesAround(uh.q, uh.r, wodFogVisionRadiusForUnit(u), visible, explored);
+            }
+            for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                let c = gameData.cities[ci];
+                if(c.owner !== owner) continue;
+                wodFogRevealHexesAround(c.q, c.r, 4, visible, explored);
+            }
+            let forts = gameData.forts;
+            if(forts && forts.length) {
+                for(let fi = 0, fl = forts.length; fi < fl; fi++) {
+                    let ft = forts[fi];
+                    if(!ft || ft.owner !== owner) continue;
+                    wodFogRevealHexesAround(ft.q, ft.r, 3, visible, explored);
+                }
+            }
+            gameData._fogVisible = visible;
+        }
+
+        function wodFogHexVisible(hex) {
+            if(!wodFogActive() || !hex) return true;
+            return !!(gameData._fogVisible && gameData._fogVisible.has(getHexKey(hex)));
+        }
+
+        function wodFogHexExplored(hex) {
+            if(!wodFogActive() || !hex) return true;
+            return !!(gameData._fogExplored && gameData._fogExplored.has(getHexKey(hex)));
+        }
+
+        function wodFogCanSeeUnit(unit) {
+            if(!wodFogActive() || !unit) return true;
+            if(unit.owner === wodLocalPlayerOwner()) return true;
+            return wodFogHexVisible(getNearestHexToPoint(unit.x, unit.y));
+        }
+
+        function wodFogCanSeeCity(city) {
+            if(!wodFogActive() || !city) return true;
+            if(city.owner === wodLocalPlayerOwner()) return true;
+            return wodFogHexVisible(gameData.hexes[`${city.q},${city.r}`]);
+        }
+
+        function wodFogCanSeeFort(fort) {
+            if(!wodFogActive() || !fort) return true;
+            if(fort.owner === wodLocalPlayerOwner()) return true;
+            return wodFogHexVisible(gameData.hexes[`${fort.q},${fort.r}`]);
+        }
+
+        function wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad) {
+            let visible = gameData._fogVisible;
+            let explored = gameData._fogExplored;
+            if(!visible || !explored) return;
+            let hr = gameData.hexRadius || 20;
+            let r = hr * 0.95;
+            ctx.save();
+            for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
+                let h = gameData.hexList[hi];
+                if(h.x < camL - culPad || h.x > camR + culPad || h.y < camT - culPad || h.y > camB + culPad) continue;
+                let k = getHexKey(h);
+                if(visible.has(k)) continue;
+                ctx.beginPath();
+                ctx.arc(h.x, h.y, r, 0, Math.PI * 2);
+                ctx.fillStyle = explored.has(k) ? 'rgba(8, 12, 18, 0.74)' : 'rgba(2, 4, 8, 0.94)';
+                ctx.fill();
+            }
+            ctx.restore();
+        }
+
         function draw() {
             let viewW = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
             let viewH = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
@@ -29178,6 +29460,7 @@
             }
             if(gameData.layers.cities) {
                 for(let city of gameData.cities) {
+                    if(!wodFogCanSeeCity(city)) continue;
                     let isSel = !!city.selected;
                     if(wodCull && !isSel && !wodInView(city.x, city.y, culPad)) continue;
                     if(gfxLite && city.owner !== 0) {
@@ -29263,6 +29546,7 @@
                     fortAuraStroke = gfxLite ? 'rgba(94, 198, 255, 0.88)' : 'rgba(74, 184, 255, 0.92)';
                 for(let fti = 0, ftl = gameData.forts.length; fti < ftl; fti++) {
                     let ftf = gameData.forts[fti];
+                    if(!wodFogCanSeeFort(ftf)) continue;
                     if(wodCull && !wodInView(ftf.x, ftf.y, auraPad)) continue;
                     let fcol = factionColors[ftf.owner] || '#95a5a6';
                     ctx.save();
@@ -29321,6 +29605,7 @@
                 }
                 for(let ui = 0, ul = uo.length; ui < ul; ui++) {
                     let unit = uo[ui];
+                    if(!wodFogCanSeeUnit(unit)) continue;
                     if(shouldDrawPlayerUnitOrderPath(unit) || shouldDrawConvoyMovementPath(unit)) {
                         if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad)) continue;
                         drawUnitMovementPath(ctx, unit);
@@ -29329,6 +29614,7 @@
 
                 for(let ui = 0, ul = uo.length; ui < ul; ui++) {
                     let unit = uo[ui];
+                    if(!wodFogCanSeeUnit(unit)) continue;
                     if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad)) continue;
                     ctx.save();
                     
@@ -29535,6 +29821,8 @@
                     ctx.stroke();
                 }
             }
+
+            if(wodFogActive()) wodDrawFogOverlay(ctx, camL, camR, camT, camB, culPad);
 
             ctx.restore();
 
@@ -29854,10 +30142,10 @@
                 if(unit.owner === lo && unit.type === 'convoy' && inRange(unit)) return unit;
             }
             for(let unit of gameData.entities) {
-                if(unit.owner !== lo && unit.type !== 'convoy' && inRange(unit)) return unit;
+                if(unit.owner !== lo && unit.type !== 'convoy' && inRange(unit) && wodFogCanSeeUnit(unit)) return unit;
             }
             for(let unit of gameData.entities) {
-                if(unit.owner !== lo && unit.type === 'convoy' && inRange(unit)) return unit;
+                if(unit.owner !== lo && unit.type === 'convoy' && inRange(unit) && wodFogCanSeeUnit(unit)) return unit;
             }
             return null;
         }
@@ -29868,6 +30156,7 @@
             let bestCity = null;
             let bestD = Infinity;
             for(let city of gameData.cities) {
+                if(!wodFogCanSeeCity(city)) continue;
                 let dx = worldPos.x - city.x, dy = worldPos.y - city.y;
                 let d = dx * dx + dy * dy;
                 if(d < CITY_R2 && d < bestD) {
