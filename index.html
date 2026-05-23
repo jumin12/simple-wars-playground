@@ -6400,6 +6400,7 @@
                 </div>
                 <div class="setup-row">
                     <button type="button" class="build-btn" id="setupBtnGenerateNew" onclick="previewMap()">Generate New</button>
+                    <button type="button" class="wod-editor-btn" id="setupBtnShopMaps" onclick="wodOpenSetupShopMapPicker()" disabled title="Unlock maps in the Shop first">Shop Map</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnSaveMap" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnLoadMap" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
                 </div>
@@ -6599,6 +6600,18 @@
                     </div>
                 </div>
                 <button type="button" class="wod-editor-btn" onclick="wodMapLibraryBack()" style="margin-top:16px">Back</button>
+            </div>
+        </div>
+
+        <div id="shopMapPickerPanel" class="overlay hidden">
+            <div class="panel panel-wide wod-map-lib-panel">
+                <h2 style="margin-top:0">Shop maps</h2>
+                <div class="shop-option-grid" id="shopMapPickerList"></div>
+                <div id="shopMapPickerEmpty" class="shop-empty-state hidden">
+                    <p><strong>No unlocked maps</strong></p>
+                    <p>Purchase maps in the Shop to use them here.</p>
+                </div>
+                <button type="button" class="wod-editor-btn" onclick="wodShopMapPickerBack()" style="margin-top:16px">Back</button>
             </div>
         </div>
 
@@ -6975,9 +6988,7 @@
                 </div>
 
                 <div id="shopTabMaps" class="shop-tab-pane" data-shop-pane="maps" role="tabpanel" hidden>
-                    <p class="shop-tab-lead">Purchase custom battle maps for your skirmishes. Maps use the same JSON export as the map editor.</p>
-                    <p class="shop-tab-lead" id="shopMapCatalogHint">Loading map catalog…</p>
-                    <div class="shop-option-grid" id="shopMapOptions"></div>
+                    <div id="shopMapOptions"></div>
                 </div>
 
                 <div id="shopTabMapSkins" class="shop-tab-pane" data-shop-pane="mapSkins" role="tabpanel" hidden>
@@ -7993,12 +8004,16 @@
                 wodApplyPeriodUiLabels();
                 let sb = document.getElementById('setupBtnStartAi');
                 let rb = document.getElementById('setupBtnMpReturn');
+                let shopMapBtn = document.getElementById('setupBtnShopMaps');
                 if(opts.fromMpHost) {
                     if(rb) rb.style.display = '';
                     if(sb) sb.style.display = 'none';
+                    if(shopMapBtn) shopMapBtn.style.display = 'none';
                 } else {
                     if(rb) rb.style.display = 'none';
                     if(sb) sb.style.display = '';
+                    if(shopMapBtn) shopMapBtn.style.display = '';
+                    wodSyncSetupShopMapButton();
                 }
                 if(!opts.fromMpHost && !opts.preserveMap) {
                     let shapeEl = document.getElementById('setupMapShape');
@@ -13776,6 +13791,7 @@
             wodRefreshUrbanHexColorsForPeriod('modern');
             wodSyncAllPeriodSelects();
             wodRefreshPeriodSelectorVisibility();
+            wodSyncSetupShopMapButton();
         }
 
         function syncGoldenChipUnlockFromAchievements() {
@@ -21253,7 +21269,11 @@
                         wodApplyMapSizePreset(prevSz ? prevSz.value : 60);
                         let aiEl = document.getElementById('setupAI');
                         if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
-                        if(!politicsOnly) gameData.loadedCustomMap = false;
+                        if(!politicsOnly) {
+                            gameData.loadedCustomMap = false;
+                            gameData._equippedShopMapId = null;
+                            if(wodProgress && wodProgress.profile) wodProgress.profile.equippedShopMapId = null;
+                        }
                         wodMapGenYieldingStart(politicsOnly ? 5 : 26);
                         try {
                             if(politicsOnly) {
@@ -28495,7 +28515,104 @@
             showNotification('Map unlocked!');
             scheduleSaveWodProgress();
             updateSkinShop();
+            wodSyncSetupShopMapButton();
             return true;
+        }
+
+        function wodGetOwnedShopMapEntries() {
+            wodEnsureOwnedShopVisuals();
+            return wodShopMapCatalog.filter(entry => entry && entry.id && wodOwnsShopVisual(wodShopMapShopId(entry.id)));
+        }
+
+        async function wodSyncSetupShopMapButton() {
+            let btn = document.getElementById('setupBtnShopMaps');
+            if(!btn || btn.style.display === 'none') return;
+            await wodLoadShopMapCatalog();
+            let owned = wodGetOwnedShopMapEntries();
+            btn.disabled = owned.length === 0;
+            btn.title = owned.length ? 'Choose an unlocked shop map' : 'Unlock maps in the Shop first';
+        }
+
+        async function wodOpenSetupShopMapPicker() {
+            await wodLoadShopMapCatalog();
+            let owned = wodGetOwnedShopMapEntries();
+            if(!owned.length) {
+                showNotification('Unlock a map in the Shop first.');
+                return;
+            }
+            wodRenderShopMapPicker(owned);
+            let pan = document.getElementById('shopMapPickerPanel');
+            if(pan) pan.classList.remove('hidden');
+        }
+
+        function wodShopMapPickerBack() {
+            let pan = document.getElementById('shopMapPickerPanel');
+            if(pan) pan.classList.add('hidden');
+        }
+
+        async function wodApplyOwnedShopMapToSetup(entry) {
+            if(!entry || !entry.id) return false;
+            if(!wodOwnsShopVisual(wodShopMapShopId(entry.id))) {
+                showNotification('Unlock this map in the Shop first.');
+                return false;
+            }
+            let data = await wodFetchShopMapData(entry);
+            if(!data) {
+                showNotification('Could not load map file.');
+                return false;
+            }
+            if(!wodApplyMapExportToSetup(data)) {
+                showNotification('Map data could not be applied.');
+                return false;
+            }
+            gameData._equippedShopMapId = entry.id;
+            if(wodProgress && wodProgress.profile) {
+                wodProgress.profile.equippedShopMapId = entry.id;
+                scheduleSaveWodProgress();
+            }
+            try {
+                wodCaptureSoloPreviewSnapshot();
+                gameData._soloMapPreviewMatchesStart = true;
+            } catch(_) {
+                gameData._soloMapPreviewMatchesStart = false;
+            }
+            wodShopMapPickerBack();
+            showNotification((entry.name || entry.id) + ' loaded.');
+            renderShopMapsTab();
+            return true;
+        }
+
+        function wodRenderShopMapPicker(ownedEntries) {
+            let host = document.getElementById('shopMapPickerList');
+            let empty = document.getElementById('shopMapPickerEmpty');
+            if(!host) return;
+            host.innerHTML = '';
+            if(!ownedEntries || !ownedEntries.length) {
+                if(empty) empty.classList.remove('hidden');
+                return;
+            }
+            if(empty) empty.classList.add('hidden');
+            for(let entry of ownedEntries) {
+                let equipped = gameData._equippedShopMapId === entry.id;
+                let card = document.createElement('button');
+                card.type = 'button';
+                card.className = 'shop-option-card shop-map-card' + (equipped ? ' active' : '');
+                card.title = entry.description || entry.name || entry.id;
+                card.innerHTML =
+                    '<span class="shop-map-preview"><canvas width="280" height="96" aria-hidden="true"></canvas></span>' +
+                    '<span class="shop-map-meta">' +
+                    '<span class="shop-option-title">' + (entry.name || entry.id) + '</span>' +
+                    (entry.description ? '<span class="shop-option-desc">' + entry.description + '</span>' : '') +
+                    '<span class="shop-option-badge">' + (equipped ? 'Selected' : 'Owned') + '</span>' +
+                    '</span>';
+                card.addEventListener('click', () => { wodApplyOwnedShopMapToSetup(entry); });
+                host.appendChild(card);
+                wodFetchShopMapData(entry).then(data => {
+                    if(!data || !card.isConnected) return;
+                    let cv = card.querySelector('canvas');
+                    if(cv) wodPaintMapDataOnCanvas(cv, data);
+                });
+            }
         }
 
         async function wodEquipShopMap(entry) {
@@ -28523,17 +28640,15 @@
 
         async function renderShopMapsTab() {
             let host = document.getElementById('shopMapOptions');
-            let hint = document.getElementById('shopMapCatalogHint');
             if(!host) return;
             let token = ++wodShopMapRenderToken;
             await wodLoadShopMapCatalog();
             if(token !== wodShopMapRenderToken) return;
             host.innerHTML = '';
             if(!wodShopMapCatalog.length) {
-                if(hint) hint.textContent = 'Add editor JSON exports to the custom-maps folder and list them in custom-maps/manifest.json.';
+                host.innerHTML = '<div class="shop-empty-state"><p><strong>Maps coming soon</strong></p></div>';
                 return;
             }
-            if(hint) hint.textContent = 'Unlock a map with gold, then click it again to load it on the skirmish setup screen.';
             for(let entry of wodShopMapCatalog) {
                 let shopId = wodShopMapShopId(entry.id);
                 let owned = wodOwnsShopVisual(shopId);
@@ -28768,6 +28883,7 @@
             if(goldEl) goldEl.innerText = Math.floor(gameData.gold || 0);
             let mapsPane = document.getElementById('shopTabMaps');
             if(mapsPane && !mapsPane.hasAttribute('hidden')) renderShopMapsTab();
+            wodSyncSetupShopMapButton();
             syncShopVisualOptionsUi();
             let skinIds = ['nato', 'usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china',
                 'civRome', 'civCarthage', 'civGaul',
@@ -32562,7 +32678,10 @@
         checkWodAchievements();
         updateSkinShop();
         wodInitShopTabs();
-        wodLoadShopMapCatalog().then(() => renderShopMapsTab());
+        wodLoadShopMapCatalog().then(() => {
+            renderShopMapsTab();
+            wodSyncSetupShopMapButton();
+        });
         renderAchievementsUi();
 
         initSetupPanelBindings();
