@@ -9860,6 +9860,7 @@
                 }
                 for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
                 if(!fast && pass + 1 < passes) await wodMapGenYieldSlice();
+                else if(fast && pass + 1 < passes && wodMapGenCooperativeMode()) await wodMapGenYieldSlice();
             }
         }
         async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
@@ -9889,7 +9890,7 @@
                 let t = (d - inner) / Math.max(fadeW, 1);
                 if(t > 0.58) wodSetGeneratedTerrainType(h, 'water');
                 else if(t > 0.34 && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') wodSetGeneratedTerrainType(h, 'sand');
-                if((++hi & 1023) === 0) await wodMapGenYieldSlice();
+                if((++hi & wodMapGenLoopYieldMask(1023)) === 0) await wodMapGenYieldSlice();
             }
         }
         async function wodNormalizeRectangleWaterFeatures(seedOffset) {
@@ -9919,7 +9920,7 @@
                         seen.add(nk);
                         queue.push(nb);
                     }
-                    if((++floodTick & 4095) === 0) await wodMapGenYieldSlice();
+                    if((++floodTick & wodMapGenLoopYieldMask(4095)) === 0) await wodMapGenYieldSlice();
                 }
                 let span = Math.max(maxQ - minQ, maxR - minR);
                 comps.push({ cells: comp, size: comp.length, span });
@@ -9933,7 +9934,7 @@
                     let wet = fbm(h.x * 0.012 + seedOffset + 7210, h.y * 0.012 + seedOffset + 7210, 3);
                     wodSetGeneratedTerrainType(h, wet > 0.62 ? 'swamp' : 'grass');
                     totalWater--;
-                    if((++ci & 255) === 0) await wodMapGenYieldSlice();
+                    if((++ci & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                 }
                 c.removed = true;
             }
@@ -9947,7 +9948,7 @@
                 for(let h of c.cells) {
                     let wet = fbm(h.x * 0.012 + seedOffset + 7330, h.y * 0.012 + seedOffset + 7330, 3);
                     wodSetGeneratedTerrainType(h, wet > 0.58 ? 'swamp' : 'grass');
-                    if((++ci & 255) === 0) await wodMapGenYieldSlice();
+                    if((++ci & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                 }
                 totalWater -= c.size;
             }
@@ -9964,7 +9965,7 @@
                 if(Math.abs(h.q) >= colM || Math.abs(h.r) >= rowM) {
                     wodSetGeneratedTerrainType(h, 'water');
                 }
-                if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
             }
         }
         async function wodApplyRectangleBiomeDominance(seedOffset) {
@@ -9979,14 +9980,14 @@
                 let t = Math.max(0, Math.min(1, u + (v - 0.5) * 0.12));
                 let region = fbm(h.x * 0.0025 + seedOffset + 7710, h.y * 0.0025 + seedOffset + 7710, 3);
                 if(region < 0.5) {
-                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                    if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                     continue;
                 }
                 let edge = 0.065;
                 let w = Math.max(0, Math.min(1, (region - (0.5 - edge)) / (2 * edge)));
                 let soften = fbm(h.x * 0.017 + seedOffset + 3310, h.y * 0.017 + seedOffset + 3310, 2);
                 if(w < 0.995 && soften > 0.38 + w * 0.52) {
-                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                    if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                     continue;
                 }
                 if(preset === 'forest') {
@@ -10006,7 +10007,7 @@
                     else if(t < 0.52) wodSetGeneratedTerrainType(h, 'hill');
                     else wodSetGeneratedTerrainType(h, 'mountain');
                 }
-                if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
             }
         }
         function wodBuildOceanConnectedWaterKeys(colM, rowM) {
@@ -10100,11 +10101,11 @@
                 if(h.type === 'forest' && landN >= 4) continue;
                 if(h.type === 'mountain') {
                     wodSetGeneratedTerrainType(h, waterN >= 3 ? 'sand' : 'hill');
-                    if((++hi & 511) === 0) await wodMapGenYieldSlice();
+                    if((++hi & wodMapGenLoopYieldMask(511)) === 0) await wodMapGenYieldSlice();
                     continue;
                 }
                 if(h.type !== 'sand') wodSetGeneratedTerrainType(h, 'sand');
-                if((++hi & 511) === 0) await wodMapGenYieldSlice();
+                if((++hi & wodMapGenLoopYieldMask(511)) === 0) await wodMapGenYieldSlice();
             }
         }
         /** Multi-source BFS: shortest steps from each land hex to nearest water (8-neighbor grid). */
@@ -11223,7 +11224,7 @@
                     } else if(bestType !== h.type && bestCount >= (pass === 0 ? 4 : 3)) {
                         changes.push({ h, type: bestType });
                     }
-                    if((++hi & 1023) === 0) await wodMapGenYieldSlice();
+                    if((++hi & wodMapGenLoopYieldMask(1023)) === 0) await wodMapGenYieldSlice();
                 }
                 for(let ch of changes) wodSetGeneratedTerrainType(ch.h, ch.type);
             }
@@ -11245,7 +11246,7 @@
                 else if(wet < 0.28 && h.type === 'grass' && nSand >= 3) wodSetGeneratedTerrainType(h, 'sand');
                 else if(wet > 0.58 && wet < 0.7 && h.type === 'sand' && nGrass >= 4 && !wodMapShapeUsesRadialIslandMask(mapShape))
                     wodSetGeneratedTerrainType(h, 'grass');
-                if((++hi2 & 1023) === 0) await wodMapGenYieldSlice();
+                if((++hi2 & wodMapGenLoopYieldMask(1023)) === 0) await wodMapGenYieldSlice();
             }
         }
         /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
@@ -11267,7 +11268,7 @@
                 }
                 if(bo > 0) setHexOwner(h, bo);
                 else setHexOwner(h, 0);
-                if((++hi & 127) === 0) await wodMapGenYieldSlice();
+                if((++hi & wodMapGenLoopYieldMask(127)) === 0) await wodMapGenYieldSlice();
             }
             wodMarkTerrainPoliticalDirty();
         }
@@ -11302,7 +11303,7 @@
                     }
                 }
                 setHexOwner(h, bestO || 0);
-                if((++hi & 127) === 0) await wodMapGenYieldSlice();
+                if((++hi & wodMapGenLoopYieldMask(127)) === 0) await wodMapGenYieldSlice();
             }
         }
         /** One seed per faction (capital with factory when available) keeps continents simply connected like classic wedge maps. */
@@ -11367,7 +11368,7 @@
                 for(let o of sorted) bias[o] += gain * stepScale * (tgt[o] - cts[o]);
                 let acceptErr = exactDivide ? 0 : 1;
                 if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 27 : minRelaxIter - 4)) break;
-                if((it & 3) === 0) await wodMapGenYieldSlice();
+                if((it & wodMapGenLoopYieldMask(3)) === 0) await wodMapGenYieldSlice();
             }
             await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
             await wodAssignWaterAndNonclaimablePoliticalVotes();
@@ -11421,7 +11422,7 @@
             }
 
             for(let move = 0; move < maxMoves && !countDeltaDone(); move++) {
-                if((move & 7) === 0) await wodMapGenYieldSlice();
+                if((move & wodMapGenLoopYieldMask(7)) === 0) await wodMapGenYieldSlice();
                 let best = null;
                 let bestScore = -Infinity;
                 for(let hex of gameData.hexList) {
@@ -11771,7 +11772,7 @@
                         seen.add(k);
                         q.push(nb);
                     }
-                    if((++walkTick & 8191) === 0) await wodMapGenYieldSlice();
+                    if((++walkTick & wodMapGenLoopYieldMask(8191)) === 0) await wodMapGenYieldSlice();
                 }
                 let hi = 0;
                 for(let hex of gameData.hexList) {
@@ -11789,7 +11790,7 @@
                     }
                     if(bo > 0) setHexOwner(hex, bo);
                     else setHexOwner(hex, 0);
-                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                    if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                 }
             }
         }
@@ -14828,18 +14829,6 @@
 
         function wodUsesVisualViewportLayout() {
             return window.matchMedia('(max-width: 900px), (max-height: 520px), (hover: none) and (pointer: coarse)').matches;
-        }
-
-        function wodCooperativeDevice() {
-            return wodUsesVisualViewportLayout();
-        }
-
-        function wodScheduleIdle(fn, timeoutMs) {
-            let run = () => Promise.resolve().then(fn).catch(err => console.warn(err));
-            if(typeof requestIdleCallback === 'function')
-                requestIdleCallback(() => { void run(); }, { timeout: timeoutMs || 1500 });
-            else
-                setTimeout(() => { void run(); }, timeoutMs || 32);
         }
 
         function wodApplyPlayViewportLock(playLocked) {
@@ -20862,7 +20851,7 @@
                         }
                     }
                     if(bestOwner !== hex.owner && bestCount >= minVotes) changes.push({hex, owner: bestOwner});
-                    if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                    if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                 }
                 for(let change of changes) setHexOwner(change.hex, change.owner);
             }
@@ -23483,7 +23472,7 @@
                     let ord = ownersSorted.slice();
                     if(lv % 2 === 1) ord.reverse();
                     for(let ow of ord) {
-                        if((++tryTick & 31) === 0) await wodMapGenYieldSlice();
+                        if((++tryTick & wodMapGenLoopYieldMask(31)) === 0) await wodMapGenYieldSlice();
                         let cand = buildCandidateList(ow, lv);
                         let tried = cand.length > 960 ? cand.slice(0, 960) : cand;
                         let hTick = 0;
@@ -23491,7 +23480,7 @@
                         let bestHex = null;
                         let bestD = Infinity;
                         for(let hTry of tried) {
-                            if((++hTick & 127) === 0) await wodMapGenYieldSlice();
+                            if((++hTick & wodMapGenLoopYieldMask(127)) === 0) await wodMapGenYieldSlice();
                             let qc = hTry.q,
                                 rc = hTry.r;
                             let tooNear = false;
@@ -23949,9 +23938,24 @@
         }
 
         let _wodMapGenYieldState = null;
+        function wodMapGenCooperativeMode() {
+            return typeof wodUsesVisualViewportLayout === 'function' && wodUsesVisualViewportLayout();
+        }
+        function wodMapGenLoopYieldMask(defaultMask) {
+            if(!wodMapGenCooperativeMode()) return defaultMask;
+            if(defaultMask >= 8191) return 127;
+            if(defaultMask >= 4095) return 63;
+            if(defaultMask >= 2047) return 31;
+            if(defaultMask >= 1023) return 15;
+            if(defaultMask >= 511) return 11;
+            if(defaultMask >= 255) return 7;
+            if(defaultMask >= 127) return 5;
+            if(defaultMask >= 31) return 3;
+            return 0;
+        }
         function wodMapGenYieldingStart(msBudget) {
             let b = Math.max(5, msBudget || 10);
-            _wodMapGenYieldState = { budget: b, due: performance.now() + b };
+            _wodMapGenYieldState = { budget: b, due: performance.now() + b, lastYieldAt: performance.now() };
         }
         function wodMapGenYieldingStop() {
             _wodMapGenYieldState = null;
@@ -23959,20 +23963,22 @@
         async function wodMapGenYieldSlice() {
             let st = _wodMapGenYieldState;
             if(!st) return;
-            let coop = wodCooperativeDevice();
-            if(gameData._wodFastMapGen) {
+            let cooperative = wodMapGenCooperativeMode();
+            if(gameData._wodFastMapGen && !cooperative) {
                 st.fastTick = (st.fastTick || 0) + 1;
-                let mask = coop ? 31 : 1023;
-                if((st.fastTick & mask) !== 0) return;
-            } else if(coop) {
-                st.coopTick = (st.coopTick || 0) + 1;
-                if((st.coopTick & 15) !== 0) return;
+                if((st.fastTick & 1023) !== 0) return;
             }
             let now = performance.now();
+            if(cooperative && st.lastYieldAt && (now - st.lastYieldAt) >= 24) {
+                await wodYieldToMainThread();
+                st.lastYieldAt = performance.now();
+                st.due = st.lastYieldAt + 5;
+                return;
+            }
             if(now < st.due) return;
             await wodYieldToMainThread();
-            let gap = coop ? 10 : (gameData._wodFastMapGen ? 4 : st.budget);
-            st.due = performance.now() + gap;
+            st.lastYieldAt = performance.now();
+            st.due = st.lastYieldAt + (cooperative ? 5 : (gameData._wodFastMapGen ? 4 : st.budget));
         }
 
         function wodYieldToMainThread() {
@@ -23980,11 +23986,14 @@
                 let sch = globalThis.scheduler;
                 if(sch && typeof sch.yield === 'function') return sch.yield();
             } catch(e) {}
+            if(wodMapGenCooperativeMode()) {
+                return new Promise(function(resolve) {
+                    setTimeout(resolve, 0);
+                });
+            }
             return new Promise(function(resolve) {
-                setTimeout(function() {
-                    if(typeof requestAnimationFrame === 'function') requestAnimationFrame(function() { resolve(); });
-                    else resolve();
-                }, 0);
+                if(typeof requestAnimationFrame === 'function') requestAnimationFrame(function() { resolve(); });
+                else setTimeout(resolve, 0);
             });
         }
 
@@ -24011,7 +24020,7 @@
             gameData._mapGenInProgress = true;
             wodRefreshMapPreviewGeneratingUi();
             gameData._wodFastMapGen = true;
-            wodMapGenYieldingStart(wodCooperativeDevice() ? 2 : 4);
+            wodMapGenYieldingStart(wodMapGenCooperativeMode() ? 5 : 4);
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 10000;
             gameData.income = 10;             gameData.selection = [];
@@ -24048,7 +24057,7 @@
             if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
-                if(procAttempt > 0) await wodYieldToMainThread();
+                if(procAttempt > 0 || wodMapGenCooperativeMode()) await wodYieldToMainThread();
                 if(ownsInnerRng) {
                     if(procAttempt > 0) wodPopRandom();
                     if(procAttempt === 0) {
@@ -24097,6 +24106,7 @@
                         setHexOwner(hex, 0);
                         gameData.hexes[`${cell.q},${cell.r}`] = hex;
                         gameData.hexList.push(hex);
+                        if(ci > 0 && (ci & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                     }
                     terrainAppliedFromWorker = true;
                 }
@@ -24325,7 +24335,7 @@
                     
                     gameData.hexes[`${q},${r}`] = hex;
                     gameData.hexList.push(hex);
-                    if((++terrainCellIx & 255) === 0) await wodMapGenYieldSlice();
+                    if((++terrainCellIx & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                 }
             }
 
@@ -24560,7 +24570,7 @@
                         visited.add(nKey);
                         queue.push(nHex);
                     }
-                    if((++walkTick & 4095) === 0) await wodMapGenYieldSlice();
+                    if((++walkTick & wodMapGenLoopYieldMask(4095)) === 0) await wodMapGenYieldSlice();
                 }
                 if(comp.length > 0) components.push(comp);
             }
@@ -24585,7 +24595,7 @@
                         let dx = a.x - b.x, dy = a.y - b.y;
                         let d = dx * dx + dy * dy;
                         if(d < bestDist) { bestDist = d; bestA = a; bestB = b; }
-                        if((++pairTick & 2047) === 0) await wodMapGenYieldSlice();
+                        if((++pairTick & wodMapGenLoopYieldMask(2047)) === 0) await wodMapGenYieldSlice();
                     }
                 }
                 if(!bestA || !bestB) continue;
@@ -24656,7 +24666,7 @@
                         hit = true;
                         break;
                     }
-                    if((++hi & 511) === 0) await wodMapGenYieldSlice();
+                    if((++hi & wodMapGenLoopYieldMask(511)) === 0) await wodMapGenYieldSlice();
                 }
                 if(!hit) break;
             }
@@ -24706,11 +24716,11 @@
                             seen.add(k);
                             queue.push(nb);
                         }
-                        if((++bfsTick & 8191) === 0) await wodMapGenYieldSlice();
+                        if((++bfsTick & wodMapGenLoopYieldMask(8191)) === 0) await wodMapGenYieldSlice();
                     }
                     let hi = 0;
                     for(let hex of gameData.hexList) {
-                        if((++hi & 255) === 0) await wodMapGenYieldSlice();
+                        if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                         if(hex.owner !== owner || isWaterHex(hex) || hex.type === 'mountain') continue;
                         if(!canUnitEnterHex(probeTpl, hex)) continue;
                         if(seen.has(getHexKey(hex))) continue;
@@ -24769,7 +24779,7 @@
                     let goalKeys = new Set();
                     let hi0 = 0;
                     for(let h of gameData.hexList) {
-                        if((++hi0 & 255) === 0) await wodMapGenYieldSlice();
+                        if((++hi0 & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                         if(!passable(h)) continue;
                         if(h.owner === o1) starts.push(h);
                         if(h.owner === o2) goalKeys.add(getHexKey(h));
@@ -24792,7 +24802,7 @@
                             seen.add(nk);
                             queue.push(nb);
                         }
-                        if((++bfsTick & 8191) === 0) await wodMapGenYieldSlice();
+                        if((++bfsTick & wodMapGenLoopYieldMask(8191)) === 0) await wodMapGenYieldSlice();
                     }
                     if(connected) continue;
                     let bestA = null, bestB = null, bestD = Infinity;
@@ -24808,7 +24818,7 @@
                                 bestA = a;
                                 bestB = b;
                             }
-                            if((++pairTick & 2047) === 0) await wodMapGenYieldSlice();
+                            if((++pairTick & wodMapGenLoopYieldMask(2047)) === 0) await wodMapGenYieldSlice();
                         }
                     }
                     if(bestA && bestB) carveMountainLine(bestA, bestB);
@@ -24999,23 +25009,18 @@
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
         }
 
-        async function kickstartMenuAttractSim() {
+        function kickstartMenuAttractSim() {
             if(gameState !== 'MENU') return;
             gameData.aiStrategyTimer = 1.42;
             gameData.aiFocusTimer = 4.1;
             updateAiFrontFocus();
             let dtSim = 2 / 60;
-            let steps = wodCooperativeDevice() ? 18 : 36;
-            for(let step = 0; step < steps; step++) {
+            for(let step = 0; step < 36; step++) {
                 update(dtSim);
-                if(wodCooperativeDevice() && (step & 3) === 3) await wodYieldToMainThread();
             }
             let drainGuard = 0;
-            let drainMax = wodCooperativeDevice() ? 120 : 480;
-            while((gameData._aiStratWork || gameData._aiSpawnBurst) && drainGuard++ < drainMax) {
+            while((gameData._aiStratWork || gameData._aiSpawnBurst) && drainGuard++ < 480)
                 update(dtSim);
-                if(wodCooperativeDevice() && (drainGuard & 7) === 0) await wodYieldToMainThread();
-            }
         }
 
         function menuBackgroundLoop(time) {
@@ -25050,83 +25055,6 @@
             if(window._wodBootStarted) return;
             window._wodBootStarted = true;
             window._wodBootSettledUntil = performance.now() + 2400;
-            if(wodCooperativeDevice()) {
-                wodRunCooperativeBootToMenu();
-                return;
-            }
-            wodRunFullBootToMenu();
-        }
-
-        async function wodDeferredMenuBattleBootstrap() {
-            if(menuDemoSeeded || window._wodMenuBootstrapBusy) return;
-            try {
-                await bootstrapMenuBackgroundBattle();
-                if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
-            } catch(err) {
-                console.warn('Deferred menu bootstrap', err);
-            }
-        }
-
-        function wodRunCooperativeBootToMenu() {
-            let ov = document.getElementById('wodBootOverlay');
-            let caption = document.getElementById('wodBootCaption');
-            let inner = document.getElementById('wodBootBarInner');
-            let bootErr = false;
-            gameData._wodSkipMapGenLoader = true;
-            if(UI.mainMenu) UI.mainMenu.classList.add('hidden');
-            if(inner) inner.classList.remove('wod-boot-tween-suppress');
-            wodSetBootSplashProgress(0);
-
-            function revealMenu() {
-                if(inner) inner.classList.remove('wod-boot-tween-suppress');
-                if(!bootErr) {
-                    if(caption) caption.textContent = 'Ready.';
-                    wodSetBootSplashProgress(100);
-                }
-                requestAnimationFrame(() => {
-                    if(!bootErr) {
-                        if(ov) {
-                            ov.classList.add('hidden');
-                            ov.setAttribute('aria-busy', 'false');
-                        }
-                        if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
-                    }
-                    gameData._wodSkipMapGenLoader = false;
-                    window._wodBootSettledUntil = 0;
-                    wodScheduleIdle(() => wodDeferredMenuBattleBootstrap(), 800);
-                });
-            }
-
-            (async () => {
-                try {
-                    if(caption) caption.textContent = 'Loading…';
-                    wodSetBootSplashProgress(18);
-                    await wodYieldToMainThread();
-                    try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
-                    wodSetBootSplashProgress(42);
-                    await wodYieldToMainThread();
-                    if(caption) caption.textContent = 'Preparing…';
-                    normalizeTerrainHexes();
-                    await wodYieldToMainThread();
-                    updateTerrainKey();
-                    wodSetBootSplashProgress(68);
-                    await wodYieldToMainThread();
-                    if(caption) caption.textContent = 'Almost ready…';
-                    wodSetBootSplashProgress(88);
-                    await wodYieldToMainThread();
-                    await new Promise(resolve => setTimeout(resolve, 120));
-                    revealMenu();
-                } catch(err) {
-                    bootErr = true;
-                    console.error(err);
-                    if(caption) caption.textContent = 'Could not load. Try refreshing.';
-                    gameData._wodSkipMapGenLoader = false;
-                    window._wodBootSettledUntil = 0;
-                }
-            })();
-        }
-
-        function wodRunFullBootToMenu() {
             let ov = document.getElementById('wodBootOverlay');
             let caption = document.getElementById('wodBootCaption');
             let inner = document.getElementById('wodBootBarInner');
@@ -25155,7 +25083,6 @@
                     let out = work();
                     if(out && typeof out.then === 'function') await out;
                 }
-                await wodYieldToMainThread();
                 await nextFrame();
             }
 
@@ -25194,19 +25121,15 @@
                         updateTerrainCache();
                         draw();
                     }, 54);
-                    await bootStage('Warming AI planners…', 74, async () => {
+                    await bootStage('Warming AI planners…', 74, () => {
                         let dtSim = 2 / 60;
-                        for(let i = 0; i < 8; i++) {
-                            update(dtSim);
-                            if((i & 1) === 1) await wodYieldToMainThread();
-                        }
+                        for(let i = 0; i < 8; i++) update(dtSim);
                     }, 52);
-                    await bootStage('Priming path and selection caches…', 84, async () => {
+                    await bootStage('Priming path and selection caches…', 84, () => {
                         let movable = gameData.entities.filter(u => u && u.hp > 0 && u.type !== 'convoy').slice(0, 8);
                         for(let u of movable) {
                             let h = getNearestWalkableHexForUnit(u, u.x, u.y, 8);
                             if(h) findLocalDetourHex(u, h.x + gameData.hexRadius * 2, h.y);
-                            await wodYieldToMainThread();
                         }
                         syncInfoCardPanelThrottled();
                     }, 52);
@@ -25279,7 +25202,7 @@
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
-            await kickstartMenuAttractSim();
+            kickstartMenuAttractSim();
             captureMenuBattleLive();
             draw();
             menuDemoLastTime = performance.now();
@@ -34445,8 +34368,19 @@
         loadWodProgress();
         wodEnsurePlayerId();
         wodMpInitGlobalHandlers();
+        void wodMpBackgroundConnect();
+        wodMpApplyFriendQueryFromUrl();
         applyWodProfileToGame();
         wodInitBrowserSaves();
+        checkWodAchievements();
+        updateSkinShop();
+        wodInitShopTabs();
+        wodLoadShopMapCatalog().then(() => {
+            renderShopMapsTab();
+            wodSyncSetupShopMapButton();
+        });
+        renderAchievementsUi();
+
         initSetupPanelBindings();
         wodInitPeriodSettingsBinding();
         wodInitShopPeriodBinding();
@@ -34455,19 +34389,6 @@
         wireShowOrdersCheckbox();
         wireOrderArrowsPathfindingCheckbox();
         wodSyncViewportAndCanvas();
-
-        wodScheduleIdle(() => {
-            void wodMpBackgroundConnect();
-            wodMpApplyFriendQueryFromUrl();
-            checkWodAchievements();
-            updateSkinShop();
-            wodInitShopTabs();
-            wodLoadShopMapCatalog().then(() => {
-                renderShopMapsTab();
-                wodSyncSetupShopMapButton();
-            });
-            renderAchievementsUi();
-        }, wodCooperativeDevice() ? 1200 : 600);
 
         if (new URLSearchParams(window.location.search).get('autostart') === '1') {
             let bo = document.getElementById('wodBootOverlay');
