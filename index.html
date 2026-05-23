@@ -6629,7 +6629,7 @@
 
                 <div class="esc-help-block">
                     <h4>Encirclement</h4>
-                    <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units inside take about <strong>3.5% max HP attrition per second</strong> unless they can reach a friendly <strong>town</strong> through your own tiles in that pocket. Forts alone do not prevent attrition. Encircled units without town supply flash a warning and <strong>cannot heal</strong> until the pocket reconnects or they break out.</p>
+                    <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units caught inside take about <strong>3.5% max HP attrition per second</strong>, flash a warning, and <strong>cannot heal</strong> until the pocket is broken. You may still attack outward and seize tiles to reopen a corridor — the penalty is meant to reward tightening sieges without making escape impossible.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -18095,10 +18095,7 @@
             if(unit.hp >= unit.maxHp && unit.manpower >= mpCap) return false;
             let hex = getNearestHexToPoint(unit.x, unit.y);
             if(!hex || hex.owner !== unit.owner) return false;
-            if(gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hex))) {
-                if(!gameData.encircledReliefHexes || !gameData.encircledReliefHexes.has(getHexKey(hex)))
-                    return false;
-            }
+            if(wodGetHexEncirclementState(hex)) return false;
             return countNearbyUnits(unit.owner, unit.x, unit.y, 115, true) === 0;
         }
 
@@ -18446,17 +18443,18 @@
                 if(terrCombat) effects.push(terrCombat);
                 let fortFx = getFortDefenseEffect(unit);
                 if(fortFx) effects.push(fortFx);
-                if(gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hex))) {
-                    let relief = gameData.encircledReliefHexes && gameData.encircledReliefHexes.has(getHexKey(hex));
-                    if(!relief) {
-                        effects.push({
-                            label: 'Encircled',
-                            detail: 'This hex is cut off behind enemy lines with no supply route to a friendly town. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
-                            stats: '−3.5% max HP/s · No heal until pocket breaks',
-                            block: true,
-                            warn: true
-                        });
-                    }
+                if(wodGetHexEncirclementState(hex)) {
+                    let relief = wodHexKeyEncirclementRelief(getHexKey(hex));
+                    let ratePct = relief ? '1.75' : '3.5';
+                    effects.push({
+                        label: 'Encircled',
+                        detail: relief
+                            ? 'This pocket is cut off but a friendly city or fort still supplies it. Attrition is halved until territory reconnects.'
+                            : 'This hex is cut off behind enemy lines. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
+                        stats: `−${ratePct}% max HP/s · No heal until pocket breaks`,
+                        block: true,
+                        warn: !relief
+                    });
                 }
                 if(!unit.amphibInWater && !wodUnitOnBridgeDeck(unit) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
                     effects.push({
@@ -18558,45 +18556,6 @@
             return effects;
         }
 
-        function wodRefreshEncircledCityReliefHexes() {
-            let relief = new Set();
-            let enc = gameData.encircledHexes;
-            if(!enc || !enc.size) {
-                gameData.encircledReliefHexes = relief;
-                return;
-            }
-            for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
-                let city = gameData.cities[ci];
-                if(city.owner <= 0) continue;
-                let seeds = getCityUrbanTerrainHexes(city);
-                if(!seeds.length) {
-                    let ch = gameData.hexes[`${city.q},${city.r}`];
-                    if(ch) seeds = [ch];
-                }
-                let queue = [];
-                let visited = new Set();
-                for(let uh of seeds) {
-                    let k = getHexKey(uh);
-                    if(!enc.has(k) || uh.owner !== city.owner) continue;
-                    visited.add(k);
-                    queue.push(uh);
-                    relief.add(k);
-                }
-                while(queue.length > 0) {
-                    let h = queue.pop();
-                    for(let nb of getNeighborHexes(h)) {
-                        if(!nb || nb.owner !== city.owner || !isClaimableLand(nb)) continue;
-                        let k = getHexKey(nb);
-                        if(!enc.has(k) || visited.has(k)) continue;
-                        visited.add(k);
-                        relief.add(k);
-                        queue.push(nb);
-                    }
-                }
-            }
-            gameData.encircledReliefHexes = relief;
-        }
-
         function wodEncirclementBorderHostileCounts(region, owner) {
             let counts = {};
             let regionKeys = new Set(region.map(hex => getHexKey(hex)));
@@ -18656,11 +18615,7 @@
         function wodUnitInsideRegion(unit, regionKeys) {
             if(!unit || unit.hp <= 0 || unit.type === 'convoy' || unit.owner <= 0) return false;
             let uh = getNearestHexToPoint(unit.x, unit.y);
-            if(!uh || !regionKeys.has(getHexKey(uh))) return false;
-            let hr = gameData.hexRadius || 20;
-            let dx = unit.x - uh.x;
-            let dy = unit.y - uh.y;
-            return dx * dx + dy * dy <= hr * hr * 2.8;
+            return !!(uh && regionKeys.has(getHexKey(uh)));
         }
 
         function wodDominantEncircler(borderCounts) {
@@ -18685,6 +18640,7 @@
             gameData._encircWork = {
                 visited: new Set(),
                 encircledHexes: new Set(),
+                encircledReliefHexes: new Set(),
                 idx: 0
             };
             wodEncirclementProcessChunk();
@@ -18717,6 +18673,10 @@
                             continue;
                         }
                         if(!isClaimableLand(nHex)) continue;
+                        if(nHex.owner === 0) {
+                            touchesOpenEdge = true;
+                            continue;
+                        }
                         if(nHex.owner === owner) {
                             let nKey = getHexKey(nHex);
                             if(!w.visited.has(nKey)) {
@@ -18730,6 +18690,19 @@
                 if(!touchesOpenEdge) {
                     let regionKeys = new Set(region.map(hex => getHexKey(hex)));
                     let hasOwnerCity = wodRegionHasOwnerCity(regionKeys, owner);
+                    let hasOwnerFort = false;
+                    let fortList = gameData.forts;
+                    if(fortList && fortList.length) {
+                        for(let fi = 0, fl = fortList.length; fi < fl; fi++) {
+                            let ft = fortList[fi];
+                            if(!ft || wodEffectiveFortOwner(ft) !== owner) continue;
+                            if(regionKeys.has(`${ft.q},${ft.r}`)) {
+                                hasOwnerFort = true;
+                                break;
+                            }
+                        }
+                    }
+                    let supplyRelief = hasOwnerCity || hasOwnerFort;
                     let hasOwnerCombatUnit = false;
                     for(let u of gameData.entities) {
                         if(u.owner !== owner) continue;
@@ -18739,7 +18712,9 @@
                         }
                     }
                     for(let hex of region) {
-                        w.encircledHexes.add(getHexKey(hex));
+                        let hk = getHexKey(hex);
+                        w.encircledHexes.add(hk);
+                        if(supplyRelief) w.encircledReliefHexes.add(hk);
                     }
                     if(!hasOwnerCity && !hasOwnerCombatUnit) {
                         let capturer = wodEncirclementCapturerForPocket(region, owner);
@@ -18751,12 +18726,33 @@
             }
             if(w.idx < list.length) return;
             gameData.encircledHexes = w.encircledHexes;
-            wodRefreshEncircledCityReliefHexes();
+            gameData.encircledReliefHexes = w.encircledReliefHexes;
             gameData._encircWork = null;
         }
 
         function getHexKey(hex) {
             return `${hex.q},${hex.r}`;
+        }
+
+        function wodHexKeyIsEncircled(key) {
+            if(!key) return false;
+            let w = gameData._encircWork;
+            if(w && w.encircledHexes && w.encircledHexes.has(key)) return true;
+            return !!(gameData.encircledHexes && gameData.encircledHexes.has(key));
+        }
+
+        function wodHexKeyEncirclementRelief(key) {
+            if(!key) return false;
+            let w = gameData._encircWork;
+            if(w && w.encircledReliefHexes && w.encircledReliefHexes.has(key)) return true;
+            return !!(gameData.encircledReliefHexes && gameData.encircledReliefHexes.has(key));
+        }
+
+        function wodGetHexEncirclementState(hex) {
+            if(!hex) return null;
+            let k = getHexKey(hex);
+            if(!wodHexKeyIsEncircled(k)) return null;
+            return { relief: wodHexKeyEncirclementRelief(k) };
         }
 
         function ensureUnitId(unit) {
@@ -19880,24 +19876,31 @@
                 }
             }
             let standingKey = standingHex ? getHexKey(standingHex) : '';
-            if(standingKey && gameData.encircledHexes && gameData.encircledHexes.has(standingKey) &&
-                gameData.encircledHexes.has(getHexKey(hex))) return true;
+            if(standingKey && wodHexKeyIsEncircled(standingKey) && wodHexKeyIsEncircled(getHexKey(hex))) return true;
             return false;
         }
 
-        function wodHexNeighborsHex(a, b) {
-            if(!a || !b) return false;
-            return getNeighborHexes(a).some(n => n && n.q === b.q && n.r === b.r);
-        }
-
-        function wodUnitPenetratingEnemyHex(standingHex, unit) {
-            if(!standingHex || !unit) return false;
-            if(standingHex.owner === unit.owner) return false;
-            if(standingHex.owner > 0) return true;
+        function wodHexOwnedByForSpearhead(hex, owner) {
+            if(!hex || owner <= 0) return false;
+            if(hex.owner === owner) return true;
             let batch = gameData._wodClaimBatch;
             if(!batch) return false;
-            let standRec = batch.get(getHexKey(standingHex));
-            return !!(standRec && standRec.owner === unit.owner && !standRec.contested);
+            let rec = batch.get(getHexKey(hex));
+            return !!(rec && rec.owner === owner && !rec.contested && rec.priority >= 3);
+        }
+
+        function wodSpearheadCanClaimEnemyHex(unit, hex, standingHex) {
+            if(!hex || !standingHex || hex.owner === unit.owner || hex.owner === 0) return false;
+            if(getNeighborHexes(hex).some(n => n && n.q === standingHex.q && n.r === standingHex.r))
+                return wodHexOwnedByForSpearhead(standingHex, unit.owner);
+            let batch = gameData._wodClaimBatch;
+            if(!batch) return false;
+            for(let nb of getNeighborHexes(hex)) {
+                if(nb.q === standingHex.q && nb.r === standingHex.r) continue;
+                let rec = batch.get(getHexKey(nb));
+                if(rec && rec.owner === unit.owner && !rec.contested && rec.priority >= 3) return true;
+            }
+            return false;
         }
 
         function wodCanClaimTerritoryHex(unit, hex, standingHex) {
@@ -19906,72 +19909,80 @@
             let onTile = standingHex && hex.q === standingHex.q && hex.r === standingHex.r;
             if(onTile) return true;
             if(hex.owner === 0) return wodTerritoryClaimAttach(unit, hex, standingHex);
-            if(hex.owner > 0 && hex.owner !== unit.owner && standingHex &&
-                wodUnitPenetratingEnemyHex(standingHex, unit) && wodHexNeighborsHex(hex, standingHex))
-                return true;
+            if(hex.owner > 0 && hex.owner !== unit.owner) return wodSpearheadCanClaimEnemyHex(unit, hex, standingHex);
             return false;
         }
 
-        function claimTerritoryAroundUnit(unit, atX, atY) {
+        function wodTerritoryClaimPriority(unit, hex, standingHex) {
+            if(!hex || !standingHex) return 1;
+            if(hex.q === standingHex.q && hex.r === standingHex.r) return 3;
+            if(hex.owner > 0 && hex.owner !== unit.owner && wodSpearheadCanClaimEnemyHex(unit, hex, standingHex)) return 3;
+            return 1;
+        }
+
+        function claimTerritoryAroundUnit(unit, atX, atY, hexOverride) {
             if(unit.type === 'convoy') return;
             let px = atX != null ? atX : unit.x;
             let py = atY != null ? atY : unit.y;
-            let standingHex = getNearestHexToPoint(px, py);
+            let standingHex = hexOverride
+                ? gameData.hexes[`${hexOverride.q},${hexOverride.r}`]
+                : getNearestHexToPoint(px, py);
             if(!standingHex) return;
             let uHex = {q: standingHex.q, r: standingHex.r};
             let claimRadius = unit.type === 'heavy' ? 2 : 1;
             let claimH = getHexesInHexRadius(uHex.q, uHex.r, claimRadius);
-            let claims = [];
 
-            if(wodCanClaimTerritoryHex(unit, standingHex, standingHex))
-                claims.push({ hex: standingHex, standing: true });
+            if(wodCanClaimTerritoryHex(unit, standingHex, standingHex) && !wodHexOccupiedByEnemyCombat(standingHex, unit.owner))
+                wodQueueTerritoryClaim(standingHex, unit.owner, 3);
 
-            for(let ch of claimH) {
-                let h = gameData.hexes[`${ch.q},${ch.r}`];
-                if(!h || h === standingHex) continue;
-                if(!wodCanClaimTerritoryHex(unit, h, standingHex)) continue;
-                claims.push({ hex: h, standing: false });
-            }
-
-            for(let c of claims) {
-                let h = c.hex;
-                if(wodHexOccupiedByEnemyCombat(h, unit.owner)) continue;
-                wodQueueTerritoryClaim(h, unit.owner, c.standing ? 3 : 1);
+            let maxPasses = claimRadius + 1;
+            for(let pass = 0; pass < maxPasses; pass++) {
+                for(let ci = 0; ci < claimH.length; ci++) {
+                    let ch = claimH[ci];
+                    let h = gameData.hexes[`${ch.q},${ch.r}`];
+                    if(!h || (h.q === standingHex.q && h.r === standingHex.r)) continue;
+                    if(!wodCanClaimTerritoryHex(unit, h, standingHex)) continue;
+                    if(wodHexOccupiedByEnemyCombat(h, unit.owner)) continue;
+                    wodQueueTerritoryClaim(h, unit.owner, wodTerritoryClaimPriority(unit, h, standingHex));
+                }
             }
         }
 
-        function getHexesOnLine(q0, r0, q1, r1) {
-            let s0 = -q0 - r0, s1 = -q1 - r1;
-            let n = Math.max(Math.abs(q1 - q0), Math.abs(r1 - r0), Math.abs(s1 - s0));
-            let res = [];
-            let prevKey = '';
+        function wodAxialHexDistance(q0, r0, q1, r1) {
+            return (Math.abs(q0 - q1) + Math.abs(q0 + r0 - q1 - r1) + Math.abs(r0 - r1)) / 2;
+        }
+
+        function wodGetHexLine(q0, r0, q1, r1) {
+            let n = wodAxialHexDistance(q0, r0, q1, r1);
+            let out = [];
+            let seen = new Set();
             for(let i = 0; i <= n; i++) {
                 let t = n === 0 ? 0 : i / n;
-                let hr = hexRound(q0 + (q1 - q0) * t, r0 + (r1 - r0) * t);
-                let k = `${hr.q},${hr.r}`;
-                if(k === prevKey) continue;
-                prevKey = k;
-                res.push(hr);
+                let pt = hexRound(q0 + (q1 - q0) * t, r0 + (r1 - r0) * t);
+                let k = `${pt.q},${pt.r}`;
+                if(seen.has(k)) continue;
+                seen.add(k);
+                out.push(pt);
             }
-            return res;
+            return out;
         }
 
         function wodClaimTerritoryAlongMove(unit, x0, y0, x1, y1) {
             if(unit.type === 'convoy') return;
             let h0 = getNearestHexToPoint(x0, y0);
             let h1 = getNearestHexToPoint(x1, y1);
-            if(!h1) return;
-            let lineHexes;
-            if(h0 && (h0.q !== h1.q || h0.r !== h1.r))
-                lineHexes = getHexesOnLine(h0.q, h0.r, h1.q, h1.r);
-            else
-                lineHexes = [{q: h1.q, r: h1.r}];
-            for(let i = 0; i < lineHexes.length; i++) {
-                let ch = lineHexes[i];
-                let hex = gameData.hexes[`${ch.q},${ch.r}`];
-                if(!hex) continue;
-                claimTerritoryAroundUnit(unit, hex.x, hex.y);
-                if(i > 0 && i < lineHexes.length - 1) wodApplyTerritoryClaimBatch();
+            if(!h0 || !h1) {
+                claimTerritoryAroundUnit(unit, x1, y1);
+                return;
+            }
+            let line = wodGetHexLine(h0.q, h0.r, h1.q, h1.r);
+            if(line.length <= 1) {
+                claimTerritoryAroundUnit(unit, x1, y1);
+                return;
+            }
+            for(let i = 0; i < line.length; i++) {
+                claimTerritoryAroundUnit(unit, null, null, line[i]);
+                if(i > 0 && i < line.length - 1) wodApplyTerritoryClaimBatch();
             }
         }
 
@@ -24502,16 +24513,12 @@
                 applyTerrainUnitEffects(unit, dt);
 
                 let currentHex = getNearestHexToPoint(unit.x, unit.y);
-                if(gameData.encircledHexes && currentHex && currentHex.owner === unit.owner &&
-                    gameData.encircledHexes.has(getHexKey(currentHex))) {
-                    let hasTownSupply = gameData.encircledReliefHexes &&
-                        gameData.encircledReliefHexes.has(getHexKey(currentHex));
-                    if(!hasTownSupply) {
-                        applyDamage(unit, unit.maxHp * 0.035 * dt, 0);
-                        unit.encircledFlash = 0.35;
-                    } else if(unit.encircledFlash) {
-                        unit.encircledFlash = Math.max(0, unit.encircledFlash - dt);
-                    }
+                let encState = wodGetHexEncirclementState(currentHex);
+                if(encState) {
+                    let encRate = 0.035;
+                    if(encState.relief) encRate *= 0.5;
+                    applyDamage(unit, unit.maxHp * encRate * dt, 0);
+                    unit.encircledFlash = 0.35;
                 } else if(unit.encircledFlash) {
                     unit.encircledFlash = Math.max(0, unit.encircledFlash - dt);
                 }
@@ -29047,7 +29054,7 @@
                     let hx = getNearestHexToPoint(s.x, s.y);
                     sig += '|h:' + (hx ? `${hx.q},${hx.r},${hx.type}` : 'none') + '|w:' + (s.inWater ? 1 : 0) + '|a:' + (s.amphibInWater ? 1 : 0);
                     sig += '|f:' + (wodFortDefenseDamageMultiplier(s) < 1 ? '1' : '0')
-                        + '|e:' + ((hx && gameData.encircledHexes && gameData.encircledHexes.has(getHexKey(hx))) ? '1' : '0');
+                        + '|e:' + ((hx && wodGetHexEncirclementState(hx)) ? '1' : '0');
                     if(hx && s.type !== 'convoy') {
                         sig += '|td:' + Math.round(getTerrainAttackModifier(s, hx) * 100) + ':' + Math.round(getTerrainDefenseModifier(s, hx) * 100);
                         sig += '|spd:' + Math.round(getUnitSpeedMultiplier(s) * wodFortEnemyMovementSlowdownMultiplier(s) * 100);
