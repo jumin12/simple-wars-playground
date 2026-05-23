@@ -37,6 +37,37 @@ function sanitizeDisplayName(raw) {
   return String(raw || '').trim().slice(0, 24) || 'Player';
 }
 
+function displayNameKey(raw) {
+  return sanitizeDisplayName(raw).toLowerCase();
+}
+
+function findPlayerIdByDisplayName(displayName, excludePlayerId) {
+  const key = displayNameKey(displayName);
+  if (!key) return '';
+  for (const [pid, row] of leaderboard) {
+    if (excludePlayerId && pid === excludePlayerId) continue;
+    if (displayNameKey(row.displayName) === key) return pid;
+  }
+  for (const [pid, peer] of onlineByPlayerId) {
+    if (excludePlayerId && pid === excludePlayerId) continue;
+    if (displayNameKey(peer.displayName) === key) return pid;
+  }
+  return '';
+}
+
+function validateDisplayNameForPlayer(displayName, playerId) {
+  const raw = String(displayName || '').trim();
+  if (!raw) {
+    return { ok: false, reason: 'display_name_required', msg: 'Enter a display name.' };
+  }
+  const name = sanitizeDisplayName(raw);
+  const owner = findPlayerIdByDisplayName(name, playerId);
+  if (owner) {
+    return { ok: false, reason: 'display_name_taken', msg: 'That display name is already taken.' };
+  }
+  return { ok: true, name };
+}
+
 function sanitizeUnitSkin(raw) {
   const s = String(raw || 'nato').trim().slice(0, 32);
   return s || 'nato';
@@ -151,18 +182,22 @@ function sanitizeMpStats(obj) {
 }
 
 function registerClientPlayer(client, payload) {
-  if (!client || !payload || typeof payload !== 'object') return '';
+  if (!client || !payload || typeof payload !== 'object') {
+    return { ok: false, reason: 'invalid', msg: 'Invalid registration.' };
+  }
   const playerId = sanitizePlayerId(payload.playerId);
-  if (!playerId) return '';
+  if (!playerId) return { ok: false, reason: 'invalid_player_id', msg: 'Invalid player ID.' };
+  const nameCheck = validateDisplayNameForPlayer(payload.displayName, playerId);
+  if (!nameCheck.ok) return nameCheck;
   if (client.playerId && client.playerId !== playerId) onlineByPlayerId.delete(client.playerId);
   client.playerId = playerId;
-  client.displayName = sanitizeDisplayName(payload.displayName);
+  client.displayName = nameCheck.name;
   client.unitSkin = sanitizeUnitSkin(payload.unitSkin);
   client.mpStats = sanitizeMpStats(payload.mpStats);
   client.combinedStats = sanitizeCombinedStats(payload.combinedStats);
   onlineByPlayerId.set(playerId, client);
   updateLeaderboardEntry(client, client.combinedStats);
-  return playerId;
+  return { ok: true, playerId };
 }
 
 function unregisterClientPlayer(client) {
@@ -412,12 +447,12 @@ wss.on('connection', (ws) => {
     const t = msg && msg.t;
 
     if (t === 'register_player') {
-      const playerId = registerClientPlayer(client, msg);
-      if (!playerId) {
-        ws.send(JSON.stringify({ t: 'error', msg: 'Invalid player ID' }));
+      const result = registerClientPlayer(client, msg);
+      if (!result.ok) {
+        ws.send(JSON.stringify({ t: 'register_failed', reason: result.reason, msg: result.msg }));
         return;
       }
-      ws.send(JSON.stringify({ t: 'registered', playerId }));
+      ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId }));
       return;
     }
 
@@ -776,20 +811,40 @@ wss.on('connection', (ws) => {
     if (t === 'lobby_profile') {
       if (!client.room || client.room.matchStarted) return;
       const rawName = msg.displayName != null ? String(msg.displayName) : '';
-      const displayName = sanitizeDisplayName(rawName || client.displayName || `Player ${client.slot}`);
       const unitSkin = sanitizeUnitSkin(msg.unitSkin != null ? msg.unitSkin : client.unitSkin);
       const mpStats = sanitizeMpStats(msg.mpStats) || client.mpStats;
       const combinedStats = sanitizeCombinedStats(
         msg.combinedStats != null ? msg.combinedStats : client.combinedStats,
       );
       const playerId = sanitizePlayerId(msg.playerId != null ? msg.playerId : client.playerId);
+      let displayName = client.displayName || `Player ${client.slot}`;
+      if (rawName.trim()) {
+        const nameCheck = playerId
+          ? validateDisplayNameForPlayer(rawName, playerId)
+          : validateDisplayNameForPlayer(rawName, '');
+        if (!nameCheck.ok) {
+          ws.send(JSON.stringify({ t: 'profile_failed', reason: nameCheck.reason, msg: nameCheck.msg }));
+          return;
+        }
+        displayName = nameCheck.name;
+      }
       client.displayName = displayName;
       client.unitSkin = unitSkin;
       client.mpStats = mpStats;
       client.combinedStats = combinedStats;
-      if (playerId)
-        registerClientPlayer(client, { playerId, displayName, unitSkin, mpStats, combinedStats });
-      else updateLeaderboardEntry(client, combinedStats);
+      if (playerId) {
+        const result = registerClientPlayer(client, {
+          playerId,
+          displayName,
+          unitSkin,
+          mpStats,
+          combinedStats,
+        });
+        if (!result.ok) {
+          ws.send(JSON.stringify({ t: 'profile_failed', reason: result.reason, msg: result.msg }));
+          return;
+        }
+      } else updateLeaderboardEntry(client, combinedStats);
       if (!client.room.meta.playerPublic || typeof client.room.meta.playerPublic !== 'object')
         client.room.meta.playerPublic = {};
       client.room.meta.playerPublic[String(client.slot)] = {

@@ -1389,6 +1389,14 @@
             color: inherit;
             font: inherit;
         }
+        .mp-profile-field input.invalid {
+            border-color: rgba(231, 76, 60, 0.85);
+        }
+        .mp-display-name-hint {
+            font-size: 11px;
+            opacity: 0.72;
+            margin-top: 4px;
+        }
         .mp-profile-id-row {
             display: flex;
             gap: 6px;
@@ -6927,7 +6935,8 @@
                             </div>
                             <div class="mp-profile-field">
                                 <label for="mpDisplayName">Display name</label>
-                                <input type="text" id="mpDisplayName" placeholder="Name shown in lobbies" maxlength="24" autocomplete="nickname">
+                                <input type="text" id="mpDisplayName" placeholder="Choose a unique name" maxlength="24" autocomplete="nickname">
+                                <p class="mp-display-name-hint" id="mpDisplayNameHint">Names must be unique — taken names cannot be used in multiplayer.</p>
                             </div>
                             <div class="mp-profile-field">
                                 <label>Player ID <span style="opacity:0.7">(share with friends)</span></label>
@@ -12376,14 +12385,39 @@
             let meta = shopSkinMetaList().find(r => r.id === skinId);
             return meta ? meta.label : (skinId || 'NATO');
         }
-        function wodMpBuildRegisterPayload() {
-            wodEnsurePlayerId();
+        function wodMpGetDisplayName() {
             let el = document.getElementById('mpDisplayName');
             let dn = el ? el.value.trim().slice(0, 24) : '';
-            if(wodProgress && wodProgress.profile) {
-                if(dn) wodProgress.profile.mpDisplayName = dn;
-                else if(wodProgress.profile.mpDisplayName) dn = wodProgress.profile.mpDisplayName;
+            if(!dn && wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName)
+                dn = String(wodProgress.profile.mpDisplayName).trim().slice(0, 24);
+            return dn;
+        }
+        function wodMpSetDisplayNameFieldInvalid(invalid, msg) {
+            let el = document.getElementById('mpDisplayName');
+            let hint = document.getElementById('mpDisplayNameHint');
+            if(el) el.classList.toggle('invalid', !!invalid);
+            if(hint) {
+                hint.textContent = msg || (invalid
+                    ? 'That name is taken — choose another.'
+                    : 'Names must be unique — taken names cannot be used in multiplayer.');
             }
+        }
+        function wodMpRevertDisplayNameField() {
+            wodMpSyncDisplayNameFieldFromProfile();
+            wodMpSetDisplayNameFieldInvalid(false);
+        }
+        function wodMpRequireRegisteredDisplayName(actionLabel) {
+            let dn = wodMpGetDisplayName();
+            if(dn) return true;
+            wodMpSetDisplayNameFieldInvalid(true, 'Enter a unique display name before ' + (actionLabel || 'continuing') + '.');
+            let el = document.getElementById('mpDisplayName');
+            if(el) el.focus();
+            showNotification('Set a unique display name in your profile first.');
+            return false;
+        }
+        function wodMpBuildRegisterPayload() {
+            wodEnsurePlayerId();
+            let dn = wodMpGetDisplayName();
             let skinId = gameData.unitSkin || (wodProgress.profile && wodProgress.profile.unitSkin) || 'nato';
             if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinId]) skinId = 'nato';
             return {
@@ -12397,7 +12431,25 @@
         function wodMpRegisterWithServer() {
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.registerPlayer) return;
             if(!WodMultiplayer.api || !WodMultiplayer.api.socketOpen) return;
+            let dn = wodMpGetDisplayName();
+            if(!dn) return;
+            window._wodMpPendingDisplayName = dn;
             WodMultiplayer.registerPlayer(wodMpBuildRegisterPayload());
+        }
+        function wodMpConfirmRegisteredDisplayName() {
+            let pending = window._wodMpPendingDisplayName;
+            if(!pending || !wodProgress || !wodProgress.profile) return;
+            wodProgress.profile.mpDisplayName = pending;
+            window._wodMpPendingDisplayName = '';
+            scheduleSaveWodProgress();
+            wodMpSetDisplayNameFieldInvalid(false);
+        }
+        function wodMpHandleDisplayNameRejected(detail) {
+            window._wodMpPendingDisplayName = '';
+            wodMpRevertDisplayNameField();
+            let msg = (detail && detail.msg) ? detail.msg : 'That display name is already taken.';
+            wodMpSetDisplayNameFieldInvalid(true, msg);
+            showNotification(msg);
         }
         function wodMpRefreshProfileCard() {
             wodEnsurePlayerId();
@@ -12939,6 +12991,7 @@
         async function wodMpAcceptPendingInvite() {
             let inv = _wodMpPendingInvite;
             if(!inv || !inv.lobbyId) return;
+            if(!wodMpRequireRegisteredDisplayName('joining a lobby')) return;
             wodMpCloseFriendInviteDlg();
             await wodMpEnsureConnected();
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
@@ -13700,6 +13753,7 @@
         }
         async function wodMpJoinLobbyFromList(id, locked) {
             let st = document.getElementById('mpStatus');
+            if(!wodMpRequireRegisteredDisplayName('joining a lobby')) return;
             await wodMpEnsureConnected();
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
                 if(st) st.textContent = 'Could not reach multiplayer server.';
@@ -13807,6 +13861,17 @@
                 let d = ev.detail || {};
                 wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', d.scope || window._wodMpLbScope || 'global');
             });
+            addEventListener('wod-mp-Registered', () => {
+                wodMpConfirmRegisteredDisplayName();
+            });
+            addEventListener('wod-mp-RegisterFailed', (ev) => {
+                if(ev.detail) wodMpHandleDisplayNameRejected(ev.detail);
+            });
+            addEventListener('wod-mp-ProfileFailed', (ev) => {
+                if(ev.detail && (ev.detail.reason === 'display_name_taken' || ev.detail.reason === 'display_name_required'))
+                    wodMpHandleDisplayNameRejected(ev.detail);
+                else if(ev.detail && ev.detail.msg) showNotification(ev.detail.msg);
+            });
             addEventListener('wod-mp-Close', () => {
                 if(window._wodMpBgReconnectTimer) clearTimeout(window._wodMpBgReconnectTimer);
                 window._wodMpBgReconnectTimer = setTimeout(() => {
@@ -13869,9 +13934,14 @@
             if(mpDn && !mpDn._wodMpBound) {
                 mpDn._wodMpBound = true;
                 mpDn.addEventListener('change', () => {
-                    if(wodProgress && wodProgress.profile)
-                        wodProgress.profile.mpDisplayName = mpDn.value.trim().slice(0, 24);
-                    scheduleSaveWodProgress();
+                    let newName = mpDn.value.trim().slice(0, 24);
+                    if(!newName) {
+                        wodMpRevertDisplayNameField();
+                        wodMpSetDisplayNameFieldInvalid(true, 'Enter a display name.');
+                        showNotification('Enter a display name.');
+                        return;
+                    }
+                    wodMpSetDisplayNameFieldInvalid(false);
                     wodMpRegisterWithServer();
                     wodMpPushLobbyProfile();
                 });
@@ -13995,6 +14065,7 @@
             };
             document.getElementById('mpBtnHostCreate').onclick = async () => {
                 try {
+                    if(!wodMpRequireRegisteredDisplayName('hosting')) return;
                     await wodMpEnsureConnected();
                     if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
                         if(st) st.textContent = 'Could not reach multiplayer server.';

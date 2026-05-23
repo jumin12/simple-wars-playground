@@ -89,6 +89,12 @@
         case 'registered':
           emit('Registered', { playerId: msg.playerId || '' });
           break;
+        case 'register_failed':
+          emit('RegisterFailed', { reason: msg.reason || '', msg: msg.msg || 'Registration failed' });
+          break;
+        case 'profile_failed':
+          emit('ProfileFailed', { reason: msg.reason || '', msg: msg.msg || 'Profile update failed' });
+          break;
         case 'friend_presence':
           emit('FriendPresence', { online: msg.online || [] });
           break;
