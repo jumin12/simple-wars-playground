@@ -12606,15 +12606,16 @@
             });
         }
         function wodMpMergeFriendsLeaderboardRows(serverRows) {
+            let friends = wodMpGetFriendsList().filter(f => f && f.playerId);
+            let friendIds = new Set(friends.map(f => f.playerId));
             let byId = {};
             for(let r of (serverRows || [])) {
-                if(r && r.playerId) byId[r.playerId] = r;
+                if(r && r.playerId && friendIds.has(r.playerId)) byId[r.playerId] = r;
             }
             let presence = wodMpFriendPresenceMap();
             wodEnsurePlayerId();
             let out = [];
-            for(let f of wodMpGetFriendsList()) {
-                if(!f || !f.playerId) continue;
+            for(let f of friends) {
                 if(byId[f.playerId]) {
                     let row = byId[f.playerId];
                     if(row.online == null) row.online = !!presence[f.playerId];
@@ -12641,6 +12642,10 @@
                 }
             }
             return out;
+        }
+        function wodMpRefreshFriendsLeaderboardIfVisible() {
+            if((window._wodMpLbScope || 'global') !== 'friends') return;
+            wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', 'friends');
         }
         const WOD_MP_LB_PAGE_SIZE = 5;
         function wodMpRenderLeaderboardPage() {
@@ -12702,7 +12707,7 @@
         function wodMpRenderLeaderboard(rows, sortKey, scope) {
             window._wodMpLbSort = sortKey || window._wodMpLbSort || 'wins';
             window._wodMpLbScope = scope || window._wodMpLbScope || 'global';
-            if(scope === 'friends') rows = wodMpMergeFriendsLeaderboardRows(rows);
+            if(window._wodMpLbScope === 'friends') rows = wodMpMergeFriendsLeaderboardRows(rows);
             window._wodMpLbRows = wodMpSortLeaderboardRows(rows, window._wodMpLbSort);
             if(window._wodMpLbPage == null) window._wodMpLbPage = 0;
             wodMpRenderLeaderboardPage();
@@ -12725,6 +12730,8 @@
                 WodMultiplayer.requestLeaderboard(window._wodMpLbSort, friendIds);
             else if(window._wodMpLbScope === 'friends')
                 wodMpRenderLeaderboard([], window._wodMpLbSort, 'friends');
+            else if(window._wodMpLbScope === 'global')
+                wodMpRenderLeaderboard([], window._wodMpLbSort, 'global');
         }
         function wodMpShareProfileLink() {
             wodEnsurePlayerId();
@@ -12751,6 +12758,7 @@
             wodProgress.profile.friends = wodMpGetFriendsList().filter(f => f && f.playerId !== payload.fromPlayerId);
             scheduleSaveWodProgress();
             wodMpRenderFriendsList();
+            wodMpRefreshFriendsLeaderboardIfVisible();
             showNotification((payload.fromName || 'A player') + ' removed you as a friend.');
         }
         function wodMpRefreshLocalMpStatsReadout() {
@@ -12828,6 +12836,7 @@
             wodProgress.profile.friends = wodMpGetFriendsList().filter(f => f && f.playerId !== playerId);
             scheduleSaveWodProgress();
             wodMpRenderFriendsList();
+            wodMpRefreshFriendsLeaderboardIfVisible();
             if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.removeFriend)
                 WodMultiplayer.removeFriend(playerId);
             showNotification('Friend removed.');
@@ -13919,7 +13928,8 @@
             });
             addEventListener('wod-mp-Leaderboard', (ev) => {
                 let d = ev.detail || {};
-                wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', d.scope || window._wodMpLbScope || 'global');
+                let scope = window._wodMpLbScope || d.scope || 'global';
+                wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', scope);
             });
             addEventListener('wod-mp-Registered', () => {
                 wodMpConfirmRegisteredDisplayName();
@@ -14837,6 +14847,7 @@
         function wodApplyVisualViewportInner() {
             const wrap = UI.wrapper;
             if(!wrap) return;
+            if(window._wodBootSettledUntil && performance.now() < window._wodBootSettledUntil) return;
             const vv = window.visualViewport;
             if(vv && wodUsesVisualViewportLayout()) {
                 let w = Math.round(vv.width);
@@ -14872,11 +14883,12 @@
             });
         }
         function wodQueueVisualViewportBurst() {
+            if(window._wodBootSettledUntil && performance.now() < window._wodBootSettledUntil) return;
             if(wodVvDebounceTimer) clearTimeout(wodVvDebounceTimer);
             wodVvDebounceTimer = setTimeout(() => {
                 wodVvDebounceTimer = null;
                 wodApplyVisualViewport();
-            }, 48);
+            }, wodUsesVisualViewportLayout() ? 120 : 48);
         }
         function wodSyncViewportAndCanvas() {
             wodVvFrameQueued = false;
@@ -23956,10 +23968,16 @@
             });
         }
 
+        function wodShouldShowMapGenOverlay() {
+            if(gameData._wodSkipMapGenLoader) return false;
+            if(gameData._wodPreviewSpinnerCanvasIds && gameData._wodPreviewSpinnerCanvasIds.size > 0) return false;
+            if(typeof wodUsesVisualViewportLayout === 'function' && wodUsesVisualViewportLayout()) return false;
+            return true;
+        }
+
         async function generateMap() {
             let ownsInnerRng = !_wodSavedMathRandom;
-            let previewSpinnerActive = !!(gameData._wodPreviewSpinnerCanvasIds && gameData._wodPreviewSpinnerCanvasIds.size > 0);
-            let showMapGenOverlay = !gameData._wodSkipMapGenLoader && !previewSpinnerActive;
+            let showMapGenOverlay = wodShouldShowMapGenOverlay();
             gameData._wodSkipMapGenLoader = false;
             let mapGenOverlayEl = null;
             if(showMapGenOverlay) {
@@ -25004,6 +25022,9 @@
 
         /** Black splash: staged boot so users see what is being warmed before the menu appears. */
         function wodRunInitialBootToMenu() {
+            if(window._wodBootStarted) return;
+            window._wodBootStarted = true;
+            window._wodBootSettledUntil = performance.now() + 2400;
             let ov = document.getElementById('wodBootOverlay');
             let caption = document.getElementById('wodBootCaption');
             let inner = document.getElementById('wodBootBarInner');
@@ -25051,6 +25072,7 @@
                         if(menuDemoSeeded) resumeMenuBackgroundBattle();
                     }
                     gameData._wodSkipMapGenLoader = false;
+                    window._wodBootSettledUntil = 0;
                 });
             }
 
@@ -25109,6 +25131,7 @@
 
         async function bootstrapMenuBackgroundBattle() {
             pauseMenuBackgroundBattle();
+            if(window._wodMenuBootstrapBusy) return;
             if(menuDemoSeeded && menuBattleLive) {
                 applyMenuBattleState(menuBattleLive);
                 if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
@@ -25124,6 +25147,7 @@
             }
             let _wodPrevSkipLoader = gameData._wodSkipMapGenLoader;
             gameData._wodSkipMapGenLoader = true;
+            window._wodMenuBootstrapBusy = true;
             try {
             wodSyncViewportAndCanvas();
             gameData.selection = [];
@@ -25156,6 +25180,7 @@
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
             } finally {
                 gameData._wodSkipMapGenLoader = _wodPrevSkipLoader;
+                window._wodMenuBootstrapBusy = false;
             }
         }
 
