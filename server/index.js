@@ -71,18 +71,22 @@ function markCooldown(map, key) {
   map.set(key, Date.now());
 }
 
-function buildLeaderboardRows(sortKey) {
+function buildLeaderboardRows(sortKey, filterIds) {
   const key = ['wins', 'kills', 'losses', 'defeats', 'gamesPlayed'].includes(sortKey)
     ? sortKey
     : 'wins';
-  return [...leaderboard.values()]
+  let rows = [...leaderboard.values()];
+  if (Array.isArray(filterIds) && filterIds.length) {
+    const set = new Set(filterIds);
+    rows = rows.filter((r) => r.playerId && set.has(r.playerId));
+  }
+  return rows
     .sort((a, b) => {
       const av = (a.stats && a.stats[key]) || 0;
       const bv = (b.stats && b.stats[key]) || 0;
       if (bv !== av) return bv - av;
       return (b.updatedAt || 0) - (a.updatedAt || 0);
-    })
-    .slice(0, 50);
+    });
 }
 
 function sanitizeMpStats(obj) {
@@ -370,13 +374,40 @@ wss.on('connection', (ws) => {
 
     if (t === 'leaderboard') {
       const sort = String(msg.sort || 'wins');
+      const friendIds = Array.isArray(msg.friendIds)
+        ? msg.friendIds.map((id) => sanitizePlayerId(id)).filter(Boolean)
+        : null;
       ws.send(
         JSON.stringify({
           t: 'leaderboard',
           sort,
-          rows: buildLeaderboardRows(sort),
+          scope: friendIds && friendIds.length ? 'friends' : 'global',
+          rows: buildLeaderboardRows(sort, friendIds),
         }),
       );
+      return;
+    }
+
+    if (t === 'friend_remove') {
+      const targetId = sanitizePlayerId(msg.targetPlayerId);
+      const fromId = client.playerId;
+      if (!fromId || !targetId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Invalid friend remove request' }));
+        return;
+      }
+      const target = onlineByPlayerId.get(targetId);
+      if (target && target.ws.readyState === 1) {
+        try {
+          target.ws.send(
+            JSON.stringify({
+              t: 'friend_removed',
+              fromPlayerId: fromId,
+              fromName: client.displayName || 'Player',
+            }),
+          );
+        } catch (_) {}
+      }
+      ws.send(JSON.stringify({ t: 'friend_remove_ack', targetPlayerId: targetId }));
       return;
     }
 

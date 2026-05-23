@@ -124,7 +124,16 @@
           });
           break;
         case 'leaderboard':
-          emit('Leaderboard', { sort: msg.sort || 'wins', rows: msg.rows || [] });
+          emit('Leaderboard', { sort: msg.sort || 'wins', scope: msg.scope || 'global', rows: msg.rows || [] });
+          break;
+        case 'friend_removed':
+          emit('FriendRemoved', {
+            fromPlayerId: msg.fromPlayerId || '',
+            fromName: msg.fromName || 'Player',
+          });
+          break;
+        case 'friend_remove_ack':
+          emit('FriendRemoveAck', { targetPlayerId: msg.targetPlayerId || '' });
           break;
         case 'joined':
           api.code = msg.code;
@@ -333,8 +342,15 @@
     replyFriendRequest(fromPlayerId, accept) {
       send({ t: 'friend_request_reply', fromPlayerId: String(fromPlayerId || ''), accept: !!accept });
     },
-    requestLeaderboard(sort) {
-      send({ t: 'leaderboard', sort: String(sort || 'wins') });
+    requestLeaderboard(sort, friendIds) {
+      send({
+        t: 'leaderboard',
+        sort: String(sort || 'wins'),
+        friendIds: Array.isArray(friendIds) ? friendIds : undefined,
+      });
+    },
+    removeFriend(targetPlayerId) {
+      send({ t: 'friend_remove', targetPlayerId: String(targetPlayerId || '') });
     },
     queryFriendPresence(friendIds) {
       send({ t: 'friend_presence', friendIds: Array.isArray(friendIds) ? friendIds : [] });

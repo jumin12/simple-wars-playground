@@ -1226,6 +1226,56 @@
             border: 1px solid rgba(255, 255, 255, 0.35);
             flex-shrink: 0;
         }
+        .mp-gl-swatch--lg {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+        }
+        .mp-gl-color-pick {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+        .mp-gl-color-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: 8px;
+            border: 2px solid rgba(255, 255, 255, 0.28);
+            cursor: pointer;
+            padding: 0;
+            flex-shrink: 0;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+        }
+        .mp-gl-color-btn.active {
+            border-color: #fff;
+            box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.85);
+        }
+        .mp-gl-color-btn:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+        .mp-lb-scope {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+        .mp-lb-pager {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .mp-lb-page-label {
+            font-size: 13px;
+            opacity: 0.88;
+            min-width: 6em;
+            text-align: center;
+        }
         #mpGlHostActions {
             display: flex;
             flex-wrap: wrap;
@@ -1355,22 +1405,30 @@
         }
         .mp-profile-stats {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 8px;
             margin-top: 12px;
         }
         .mp-profile-stat {
             text-align: center;
-            padding: 10px 6px;
+            padding: clamp(8px, 2vw, 10px) 6px;
             border-radius: 10px;
             background: rgba(0, 0, 0, 0.22);
             border: 1px solid rgba(255, 255, 255, 0.08);
+            min-width: 0;
         }
         .mp-profile-stat-val {
             display: block;
-            font-size: 1.15rem;
+            font-size: clamp(1rem, 3.5vw, 1.15rem);
             font-weight: 800;
             color: #d4af37;
+            line-height: 1.2;
+        }
+        .mp-profile-share {
+            margin-top: 10px;
+        }
+        .mp-profile-share button {
+            width: 100%;
         }
         .mp-profile-stat-lbl {
             font-size: 11px;
@@ -6868,6 +6926,9 @@
                                     <button type="button" class="wod-editor-btn" id="mpBtnCopyId" title="Copy player ID">Copy</button>
                                 </div>
                             </div>
+                            <div class="mp-profile-share">
+                                <button type="button" class="wod-editor-btn" id="mpBtnShareProfile">Share profile link</button>
+                            </div>
                             <div class="mp-profile-stats" id="mpProfileStats">
                                 <div class="mp-profile-stat"><span class="mp-profile-stat-val" id="mpStatWins">0</span><span class="mp-profile-stat-lbl">Wins</span></div>
                                 <div class="mp-profile-stat"><span class="mp-profile-stat-val" id="mpStatKills">0</span><span class="mp-profile-stat-lbl">Kills</span></div>
@@ -6907,7 +6968,11 @@
                                 <p id="mpFriendsEmpty" class="mp-hub-pane-lead" style="display:none;margin-top:8px">No friends yet — send a request using their player ID.</p>
                             </div>
                             <div id="mpPaneRankings" class="mp-hub-pane" data-mp-pane="rankings" role="tabpanel" hidden>
-                                <p class="mp-hub-pane-lead">Top players online recently, ranked by combined solo and multiplayer stats.</p>
+                                <p class="mp-hub-pane-lead">Compare stats with friends or see global rankings from recently connected players.</p>
+                                <div class="mp-lb-scope" id="mpLbScope">
+                                    <button type="button" class="mp-hub-tab active" data-lb-scope="global">Global</button>
+                                    <button type="button" class="mp-hub-tab" data-lb-scope="friends">Friends</button>
+                                </div>
                                 <div class="mp-lb-sort" id="mpLbSort">
                                     <button type="button" class="mp-hub-tab active" data-lb-sort="wins">Wins</button>
                                     <button type="button" class="mp-hub-tab" data-lb-sort="kills">Kills</button>
@@ -6915,6 +6980,11 @@
                                     <button type="button" class="mp-hub-tab" data-lb-sort="defeats">Defeats</button>
                                 </div>
                                 <div id="mpLeaderboardList"></div>
+                                <div class="mp-lb-pager" id="mpLbPager" hidden>
+                                    <button type="button" class="wod-editor-btn" id="mpLbPagePrev" aria-label="Previous page">←</button>
+                                    <span id="mpLbPageLabel" class="mp-lb-page-label"></span>
+                                    <button type="button" class="wod-editor-btn" id="mpLbPageNext" aria-label="Next page">→</button>
+                                </div>
                             </div>
                             <p id="mpStatus">Connecting…</p>
                         </main>
@@ -8505,6 +8575,7 @@
                 wodMpEnsureConnected();
                 wodMpRefreshProfileCard();
                 wodMpQueryFriendPresence();
+                wodMpApplyFriendQueryFromUrl();
             }
             if(panelId === 'helpGuide') updateTerrainKey();
             if(panelId === 'mapLibrary') {
@@ -12381,17 +12452,90 @@
             let dlg = document.getElementById('mpStatsDetailDlg');
             if(dlg) { dlg.classList.add('hidden'); dlg.setAttribute('aria-hidden', 'true'); }
         }
-        function wodMpRenderLeaderboard(rows, sortKey) {
+        function wodMpBuildColorPickerHtml(slot, meta, maxH, currentHex, canEdit) {
+            let hex = String(currentHex || '#999999');
+            if(!canEdit)
+                return '<span class="mp-gl-swatch mp-gl-swatch--lg" style="background:' + wodMpEscapeHtml(hex) + '" title="Faction color"></span>';
+            let html = '<div class="mp-gl-color-pick" data-slot="' + slot + '">';
+            for(let i = 0; i < WOD_MP_LOBBY_PALETTE.length; i++) {
+                let palHex = WOD_MP_LOBBY_PALETTE[i][0];
+                let lab = WOD_MP_LOBBY_PALETTE[i][1];
+                let taken = wodMpLobbyIsColorTakenByOthers(meta, slot, palHex, maxH);
+                let on = hex.toLowerCase() === palHex.toLowerCase() ? ' active' : '';
+                html += '<button type="button" class="mp-gl-color-btn' + on + '" data-slot="' + slot + '" data-color="' + palHex + '" style="background:' + palHex + '" title="' + wodMpEscapeHtml(lab) + '" aria-label="' + wodMpEscapeHtml(lab) + '"' + (taken ? ' disabled' : '') + '></button>';
+            }
+            html += '</div>';
+            return html;
+        }
+        function wodMpSortLeaderboardRows(rows, sortKey) {
+            let key = sortKey || 'wins';
+            return (rows || []).slice().sort((a, b) => {
+                let av = ((a.stats || {})[key]) | 0;
+                let bv = ((b.stats || {})[key]) | 0;
+                if(bv !== av) return bv - av;
+                return String(a.displayName || a.playerId || '').localeCompare(String(b.displayName || b.playerId || ''));
+            });
+        }
+        function wodMpMergeFriendsLeaderboardRows(serverRows) {
+            let byId = {};
+            for(let r of (serverRows || [])) {
+                if(r && r.playerId) byId[r.playerId] = r;
+            }
+            wodEnsurePlayerId();
+            let out = [];
+            for(let f of wodMpGetFriendsList()) {
+                if(!f || !f.playerId) continue;
+                if(byId[f.playerId]) {
+                    out.push(byId[f.playerId]);
+                    continue;
+                }
+                if(f.playerId === wodProgress.profile.playerId) {
+                    out.push({
+                        playerId: f.playerId,
+                        displayName: wodProgress.profile.mpDisplayName || f.displayName || f.playerId,
+                        unitSkin: gameData.unitSkin || f.unitSkin || 'nato',
+                        stats: wodMpCombinedStats()
+                    });
+                } else {
+                    out.push({
+                        playerId: f.playerId,
+                        displayName: f.displayName || f.playerId,
+                        unitSkin: f.unitSkin || 'nato',
+                        stats: { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 }
+                    });
+                }
+            }
+            return out;
+        }
+        const WOD_MP_LB_PAGE_SIZE = 5;
+        function wodMpRenderLeaderboardPage() {
+            let rows = window._wodMpLbRows || [];
+            let sortKey = window._wodMpLbSort || 'wins';
+            let page = window._wodMpLbPage | 0;
             let host = document.getElementById('mpLeaderboardList');
+            let pager = document.getElementById('mpLbPager');
+            let prev = document.getElementById('mpLbPagePrev');
+            let next = document.getElementById('mpLbPageNext');
+            let label = document.getElementById('mpLbPageLabel');
             if(!host) return;
             host.innerHTML = '';
-            if(!rows || !rows.length) {
-                host.innerHTML = '<p class="mp-hub-pane-lead">No rankings yet — play and stay connected to appear here.</p>';
+            if(!rows.length) {
+                let scope = window._wodMpLbScope || 'global';
+                host.innerHTML = '<p class="mp-hub-pane-lead">' + (scope === 'friends'
+                    ? 'No friend stats yet — add friends and play to compare rankings.'
+                    : 'No rankings yet — stay connected after playing to appear here.') + '</p>';
+                if(pager) pager.hidden = true;
                 return;
             }
+            let pageCount = Math.max(1, Math.ceil(rows.length / WOD_MP_LB_PAGE_SIZE));
+            if(page >= pageCount) page = pageCount - 1;
+            if(page < 0) page = 0;
+            window._wodMpLbPage = page;
+            let start = page * WOD_MP_LB_PAGE_SIZE;
+            let slice = rows.slice(start, start + WOD_MP_LB_PAGE_SIZE);
             let labels = { wins: 'Wins', kills: 'Kills', losses: 'Losses', defeats: 'Defeats', gamesPlayed: 'Matches' };
             let lab = labels[sortKey] || 'Wins';
-            rows.forEach((row, i) => {
+            slice.forEach((row, i) => {
                 let st = (row.stats || {});
                 let el = document.createElement('div');
                 el.className = 'mp-lb-row';
@@ -12407,19 +12551,70 @@
                     ' · Kills ' + formatLifetimeBig(st.kills | 0) + ' · Wins ' + formatLifetimeBig(st.wins | 0) + '</div>';
                 let rank = document.createElement('span');
                 rank.className = 'mp-lb-rank';
-                rank.textContent = String(i + 1);
+                rank.textContent = String(start + i + 1);
                 el.append(rank, cv, meta);
                 host.appendChild(el);
             });
+            if(pager) {
+                pager.hidden = pageCount <= 1;
+                if(label) label.textContent = 'Page ' + (page + 1) + ' / ' + pageCount;
+                if(prev) prev.disabled = page <= 0;
+                if(next) next.disabled = page >= pageCount - 1;
+            }
         }
-        function wodMpRequestLeaderboard(sortKey) {
+        function wodMpRenderLeaderboard(rows, sortKey, scope) {
+            window._wodMpLbSort = sortKey || window._wodMpLbSort || 'wins';
+            window._wodMpLbScope = scope || window._wodMpLbScope || 'global';
+            if(scope === 'friends') rows = wodMpMergeFriendsLeaderboardRows(rows);
+            window._wodMpLbRows = wodMpSortLeaderboardRows(rows, window._wodMpLbSort);
+            if(window._wodMpLbPage == null) window._wodMpLbPage = 0;
+            wodMpRenderLeaderboardPage();
+        }
+        function wodMpRequestLeaderboard(sortKey, scope) {
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.requestLeaderboard) return;
-            window._wodMpLbSort = sortKey || 'wins';
+            window._wodMpLbSort = sortKey || window._wodMpLbSort || 'wins';
+            window._wodMpLbScope = scope || window._wodMpLbScope || 'global';
+            window._wodMpLbPage = 0;
             document.querySelectorAll('#mpLbSort [data-lb-sort]').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-lb-sort') === window._wodMpLbSort);
             });
+            document.querySelectorAll('#mpLbScope [data-lb-scope]').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-lb-scope') === window._wodMpLbScope);
+            });
+            let friendIds = null;
+            if(window._wodMpLbScope === 'friends')
+                friendIds = wodMpGetFriendsList().map(f => f && f.playerId).filter(Boolean);
             if(WodMultiplayer.api && WodMultiplayer.api.socketOpen)
-                WodMultiplayer.requestLeaderboard(window._wodMpLbSort);
+                WodMultiplayer.requestLeaderboard(window._wodMpLbSort, friendIds);
+            else if(window._wodMpLbScope === 'friends')
+                wodMpRenderLeaderboard([], window._wodMpLbSort, 'friends');
+        }
+        function wodMpShareProfileLink() {
+            wodEnsurePlayerId();
+            let id = wodProgress.profile.playerId;
+            if(!id) return;
+            let url = new URL(location.href);
+            url.searchParams.set('friend', id);
+            let link = url.toString();
+            if(navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(link).then(() => showNotification('Profile link copied.')).catch(() => showNotification(link));
+            } else showNotification(link);
+        }
+        function wodMpApplyFriendQueryFromUrl() {
+            try {
+                let id = wodMpNormalizePlayerId(new URLSearchParams(location.search).get('friend'));
+                if(!id) return;
+                let inp = document.getElementById('mpFriendAddInput');
+                if(inp && !inp.value.trim()) inp.value = id;
+            } catch(_) {}
+        }
+        function wodMpHandleFriendRemoved(payload) {
+            if(!payload || !payload.fromPlayerId) return;
+            wodEnsurePlayerId();
+            wodProgress.profile.friends = wodMpGetFriendsList().filter(f => f && f.playerId !== payload.fromPlayerId);
+            scheduleSaveWodProgress();
+            wodMpRenderFriendsList();
+            showNotification((payload.fromName || 'A player') + ' removed you as a friend.');
         }
         function wodMpRefreshLocalMpStatsReadout() {
             wodMpRefreshProfileCard();
@@ -12448,7 +12643,7 @@
                 wodMpQueryFriendPresence();
             }
             if(tabId === 'rankings') {
-                wodMpRequestLeaderboard(window._wodMpLbSort || 'wins');
+                wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
             }
         }
         function wodMpSendFriendRequest(rawId) {
@@ -12496,6 +12691,8 @@
             wodProgress.profile.friends = wodMpGetFriendsList().filter(f => f && f.playerId !== playerId);
             scheduleSaveWodProgress();
             wodMpRenderFriendsList();
+            if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.removeFriend)
+                WodMultiplayer.removeFriend(playerId);
         }
         function wodMpRenderFriendsList() {
             let host = document.getElementById('mpFriendsList');
@@ -13338,19 +13535,9 @@
                     let colorCell = '';
                     if(!active || seatT === 'closed') {
                         colorCell = '<span style="opacity:0.55;font-size:12px">—</span>';
-                    } else if(api.isHost || (isOcc && s === api.slot)) {
-                        let opts = '';
-                        for(let i = 0; i < WOD_MP_LOBBY_PALETTE.length; i++) {
-                            let hex = WOD_MP_LOBBY_PALETTE[i][0];
-                            let lab = WOD_MP_LOBBY_PALETTE[i][1];
-                            let taken = wodMpLobbyIsColorTakenByOthers(meta, s, hex, maxH);
-                            if(taken) continue;
-                            let sel = String(myHex).toLowerCase() === hex.toLowerCase() ? ' selected' : '';
-                            opts += '<option value="' + hex + '"' + sel + '>' + wodMpEscapeHtml(lab) + '</option>';
-                        }
-                        colorCell = '<select class="mp-gl-color-select" data-slot="' + s + '" style="flex:1;max-width:200px">' + opts + '</select>';
                     } else {
-                        colorCell = '<span class="mp-gl-swatch" style="background:' + myHex + '"></span><span style="font-size:11px;opacity:0.85">' + myHex + '</span>';
+                        let canPickColor = api.isHost || (isOcc && s === api.slot);
+                        colorCell = wodMpBuildColorPickerHtml(s, meta, maxH, myHex, canPickColor);
                     }
 
                     let kickCell = '';
@@ -13382,11 +13569,13 @@
                         requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true, politicsOnly: true }));
                     };
                 });
-                slotsEl.querySelectorAll('.mp-gl-color-select').forEach(sel => {
-                    sel.onchange = () => {
-                        let slot = parseInt(sel.getAttribute('data-slot'), 10);
+                slotsEl.querySelectorAll('.mp-gl-color-btn').forEach(btn => {
+                    btn.onclick = () => {
+                        if(btn.disabled) return;
+                        let slot = parseInt(btn.getAttribute('data-slot'), 10);
+                        let col = btn.getAttribute('data-color');
                         if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyColor)
-                            WodMultiplayer.sendLobbyColor(slot, sel.value);
+                            WodMultiplayer.sendLobbyColor(slot, col);
                     };
                 });
                 slotsEl.querySelectorAll('.mp-gl-kick').forEach(btn => {
@@ -13590,12 +13779,15 @@
             addEventListener('wod-mp-FriendRequestReply', (ev) => {
                 if(ev.detail) wodMpHandleFriendRequestReply(ev.detail);
             });
+            addEventListener('wod-mp-FriendRemoved', (ev) => {
+                if(ev.detail) wodMpHandleFriendRemoved(ev.detail);
+            });
             addEventListener('wod-mp-FriendInviteSent', () => {
                 showNotification('Invite delivered to friend.');
             });
             addEventListener('wod-mp-Leaderboard', (ev) => {
                 let d = ev.detail || {};
-                wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins');
+                wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', d.scope || window._wodMpLbScope || 'global');
             });
             addEventListener('wod-mp-Close', () => {
                 if(window._wodMpBgReconnectTimer) clearTimeout(window._wodMpBgReconnectTimer);
@@ -13683,6 +13875,11 @@
                     } else showNotification(id);
                 };
             }
+            let mpShare = document.getElementById('mpBtnShareProfile');
+            if(mpShare && !mpShare._wodMpBound) {
+                mpShare._wodMpBound = true;
+                mpShare.onclick = () => wodMpShareProfileLink();
+            }
             let mpAddFr = document.getElementById('mpBtnAddFriend');
             let mpFrIn = document.getElementById('mpFriendAddInput');
             if(mpAddFr && !mpAddFr._wodMpBound) {
@@ -13744,8 +13941,29 @@
             document.querySelectorAll('#mpLbSort [data-lb-sort]').forEach(btn => {
                 if(btn._wodMpBound) return;
                 btn._wodMpBound = true;
-                btn.addEventListener('click', () => wodMpRequestLeaderboard(btn.getAttribute('data-lb-sort')));
+                btn.addEventListener('click', () => wodMpRequestLeaderboard(btn.getAttribute('data-lb-sort'), window._wodMpLbScope || 'global'));
             });
+            document.querySelectorAll('#mpLbScope [data-lb-scope]').forEach(btn => {
+                if(btn._wodMpBound) return;
+                btn._wodMpBound = true;
+                btn.addEventListener('click', () => wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', btn.getAttribute('data-lb-scope')));
+            });
+            let mpLbPrev = document.getElementById('mpLbPagePrev');
+            let mpLbNext = document.getElementById('mpLbPageNext');
+            if(mpLbPrev && !mpLbPrev._wodMpBound) {
+                mpLbPrev._wodMpBound = true;
+                mpLbPrev.onclick = () => {
+                    window._wodMpLbPage = Math.max(0, (window._wodMpLbPage | 0) - 1);
+                    wodMpRenderLeaderboardPage();
+                };
+            }
+            if(mpLbNext && !mpLbNext._wodMpBound) {
+                mpLbNext._wodMpBound = true;
+                mpLbNext.onclick = () => {
+                    window._wodMpLbPage = (window._wodMpLbPage | 0) + 1;
+                    wodMpRenderLeaderboardPage();
+                };
+            }
             let mpProfClose = document.getElementById('mpPlayerProfileClose');
             if(mpProfClose && !mpProfClose._wodMpBound) {
                 mpProfClose._wodMpBound = true;
@@ -33947,6 +34165,7 @@
         wodEnsurePlayerId();
         wodMpInitGlobalHandlers();
         void wodMpBackgroundConnect();
+        wodMpApplyFriendQueryFromUrl();
         applyWodProfileToGame();
         wodInitBrowserSaves();
         checkWodAchievements();
