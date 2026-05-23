@@ -11954,21 +11954,31 @@
         }
         function wodScheduleSetupMapPreview(opts) {
             opts = opts || {};
-            requestAnimationFrame(function() {
-                requestAnimationFrame(function() {
-                    let setupPanel = document.getElementById('setupPanel');
-                    if(setupPanel && setupPanel.classList.contains('hidden') && !opts.force) return;
-                    previewLoadedMap(opts.canvasId || 'mapPreview');
-                    if(opts.captureSnapshot) {
-                        try {
-                            wodCaptureSoloPreviewSnapshot();
-                            gameData._soloMapPreviewMatchesStart = true;
-                        } catch(_) {
-                            gameData._soloMapPreviewMatchesStart = false;
-                        }
+            let tries = 0;
+            let maxTries = 16;
+            function attempt() {
+                tries++;
+                let setupPanel = document.getElementById('setupPanel');
+                let canvasId = opts.canvasId || 'mapPreview';
+                let cv = document.getElementById(canvasId);
+                if(!cv) return;
+                let panelVisible = setupPanel && !setupPanel.classList.contains('hidden');
+                let rect = cv.getBoundingClientRect();
+                if((!panelVisible && !opts.force) || (rect.width < 48 && tries < maxTries)) {
+                    requestAnimationFrame(attempt);
+                    return;
+                }
+                previewLoadedMap(canvasId);
+                if(opts.captureSnapshot) {
+                    try {
+                        wodCaptureSoloPreviewSnapshot();
+                        gameData._soloMapPreviewMatchesStart = true;
+                    } catch(_) {
+                        gameData._soloMapPreviewMatchesStart = false;
                     }
-                });
-            });
+                }
+            }
+            requestAnimationFrame(attempt);
         }
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
@@ -20618,41 +20628,57 @@
         function wodHexQuickWater(h) {
             return h && h.type === 'water';
         }
-        function wodPaintMapDataOnCanvas(cnv, mapData) {
+        function wodPaintMapDataOnCanvas(cnv, mapData, opts) {
+            opts = opts || {};
             if(!cnv || !cnv.getContext || !mapData) return;
             let hexList = mapData.hexList || [];
             if(hexList.length === 0) return;
+            let isCustomGeo = !!(mapData.scenarioId || mapData.mapShape === 'custom' || gameData._activeScenarioId);
             let pCtx = cnv.getContext('2d');
             let w = cnv.width, h = cnv.height;
             pCtx.fillStyle = '#154360';
             pCtx.fillRect(0, 0, w, h);
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, hasLand = false;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, hasAny = false;
             for(let hex of hexList) {
-                if(!isWaterHex(hex)) {
+                if(isCustomGeo || !isWaterHex(hex)) {
                     if(hex.x < minX) minX = hex.x;
                     if(hex.x > maxX) maxX = hex.x;
                     if(hex.y < minY) minY = hex.y;
                     if(hex.y > maxY) maxY = hex.y;
-                    hasLand = true;
+                    hasAny = true;
                 }
             }
-            if(!hasLand) return;
-            let landW = maxX - minX, landH = maxY - minY;
-            let scale = Math.min((w - 16) / landW, (h - 16) / landH);
+            if(!hasAny) return;
+            let spanW = Math.max(maxX - minX, 1);
+            let spanH = Math.max(maxY - minY, 1);
+            let scale = Math.min((w - 16) / spanW, (h - 16) / spanH);
             let cx = w / 2 - ((minX + maxX) / 2) * scale;
             let cy = h / 2 - ((minY + maxY) / 2) * scale;
             let hr = gameData.hexRadius || 10;
-            for(let hex of hexList) {
-                if(!isWaterHex(hex)) {
+            let pSize = Math.max(1, hr * scale * 1.45);
+            if(isCustomGeo) {
+                for(let hex of hexList) {
+                    if(!isWaterHex(hex)) continue;
                     pCtx.fillStyle = getTerrainColor(hex.type);
-                    let pSize = Math.max(1, hr * scale * 1.45);
                     pCtx.fillRect(cx + hex.x * scale - pSize / 2, cy + hex.y * scale - pSize / 2, pSize + 1, pSize + 1);
                 }
             }
-            let smooth = null;
+            for(let hex of hexList) {
+                if(isWaterHex(hex)) continue;
+                let col = getTerrainColor(hex.type);
+                if(hex.owner > 0 && factionColors[hex.owner]) {
+                    pCtx.fillStyle = col;
+                    pCtx.fillRect(cx + hex.x * scale - pSize / 2, cy + hex.y * scale - pSize / 2, pSize + 1, pSize + 1);
+                    pCtx.fillStyle = factionColors[hex.owner] + '55';
+                    pCtx.fillRect(cx + hex.x * scale - pSize / 2, cy + hex.y * scale - pSize / 2, pSize + 1, pSize + 1);
+                } else {
+                    pCtx.fillStyle = col;
+                    pCtx.fillRect(cx + hex.x * scale - pSize / 2, cy + hex.y * scale - pSize / 2, pSize + 1, pSize + 1);
+                }
+            }
             let lk = {};
-            for(let h of hexList) lk[`${h.q},${h.r}`] = h;
-            wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, smooth, cx, cy, scale, hr, lk);
+            for(let hx of hexList) lk[`${hx.q},${hx.r}`] = hx;
+            wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, null, cx, cy, scale, hr, lk);
             wodPaintMapPreviewEntities(pCtx, mapData.entities || [], cx, cy, scale, hr);
         }
         function wodMapDataToThumbnailDataUrl(mapData, tw, th) {
@@ -21153,68 +21179,21 @@
             let prevCanvas = canvasOrId;
             if(typeof canvasOrId === 'string') prevCanvas = document.getElementById(canvasOrId);
             if(!prevCanvas) prevCanvas = document.getElementById('mapPreview');
-            if(!prevCanvas) return;
+            if(!prevCanvas || !gameData.hexList || !gameData.hexList.length) return;
 
             let rect = prevCanvas.getBoundingClientRect();
-            let w = Math.max(80, Math.floor(rect.width) || 320);
-            let h = Math.max(60, Math.floor(rect.height) || 220);
+            let w = Math.max(120, Math.floor(rect.width) || 320);
+            let h = Math.max(90, Math.floor(rect.height) || 220);
             prevCanvas.width = w;
             prevCanvas.height = h;
 
-            let pCtx = prevCanvas.getContext('2d');
-            pCtx.clearRect(0, 0, prevCanvas.width, prevCanvas.height);
-            pCtx.fillStyle = '#154360';
-            pCtx.fillRect(0, 0, prevCanvas.width, prevCanvas.height);
-            
-            // Find bounds of landmass
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            let hasLand = false;
-            for(let hex of gameData.hexList) {
-                if(!isWaterHex(hex)) {
-                    if(hex.x < minX) minX = hex.x;
-                    if(hex.x > maxX) maxX = hex.x;
-                    if(hex.y < minY) minY = hex.y;
-                    if(hex.y > maxY) maxY = hex.y;
-                    hasLand = true;
-                }
-            }
-            
-            if(!hasLand) return;
-            
-            let landWidth = Math.max(maxX - minX, (gameData.hexRadius || 10) * 0.35);
-            let landHeight = Math.max(maxY - minY, (gameData.hexRadius || 10) * 0.35);
-            let scale = Math.min((prevCanvas.width - 20) / landWidth, (prevCanvas.height - 20) / landHeight);
-            
-            let cx = prevCanvas.width / 2 - ((minX + maxX) / 2) * scale;
-            let cy = prevCanvas.height / 2 - ((minY + maxY) / 2) * scale;
-            
-            for(let hex of gameData.hexList) {
-                if(!isWaterHex(hex)) {
-                    pCtx.fillStyle = getTerrainColor(hex.type);
-                    let pSize = Math.max(1, gameData.hexRadius * scale * 1.45);
-                    pCtx.fillRect(cx + hex.x*scale - pSize/2, cy + hex.y*scale - pSize/2, pSize + 1, pSize + 1);
-                }
-            }
-
-            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview';
-            if(wodPreviewDrawPolitical) {
-                let hxLookup = gameData.hexes || {};
-                wodPaintMapPreviewPolitical(pCtx, gameData.hexList, gameData.cities, null, cx, cy, scale, gameData.hexRadius, hxLookup);
-                for(let u of gameData.entities) {
-                    if(!u.owner || u.hp <= 0 || u.type === 'convoy') continue;
-                    let col = factionColors[u.owner] || '#bbb';
-                    let px = cx + u.x * scale;
-                    let py = cy + u.y * scale;
-                    let sz = Math.max(1.25, scale * 1.65);
-                    pCtx.fillStyle = col;
-                    pCtx.strokeStyle = 'rgba(0,0,0,0.35)';
-                    pCtx.lineWidth = 0.75;
-                    pCtx.beginPath();
-                    pCtx.rect(px - sz / 2, py - sz / 2, sz, sz);
-                    pCtx.fill();
-                    pCtx.stroke();
-                }
-            }
+            wodPaintMapDataOnCanvas(prevCanvas, {
+                scenarioId: gameData._activeScenarioId,
+                mapShape: gameData.mapShape,
+                hexList: gameData.hexList,
+                cities: gameData.cities,
+                entities: gameData.entities
+            });
         }
 
         function wodDeepClonePlain(obj) {
@@ -28591,19 +28570,19 @@
                 let pe = document.getElementById('setupGamePeriod');
                 if(pe) pe.value = sc.period;
             }
-            if(!opts.skipPreview) wodScheduleSetupMapPreview({ captureSnapshot: true, force: true });
+            if(!opts.skipPreview && !opts.deferPreview) wodScheduleSetupMapPreview({ captureSnapshot: true });
             wodRefreshScenarioSetupUi();
             return true;
         }
 
         function wodReloadActiveScenarioMap(forGameStart) {
             if(!gameData._activeScenarioId) return false;
-            return wodApplyScenarioMapData(gameData._activeScenarioId, { skipPreview: !!forGameStart });
+            return wodApplyScenarioMapData(gameData._activeScenarioId, { skipPreview: !!forGameStart, deferPreview: !!forGameStart });
         }
 
         function wodLoadScenarioToSetup(scenarioId) {
             wodCancelSoloMapPreviewGeneration();
-            if(!wodApplyScenarioMapData(scenarioId)) return;
+            if(!wodApplyScenarioMapData(scenarioId, { deferPreview: true })) return;
         }
 
         function wodRefreshScenarioSetupUi() {

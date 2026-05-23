@@ -5,7 +5,7 @@
     'use strict';
 
     const WOD_SCENARIO_COST = 250;
-    const SCENARIO_BUILD_VER = 5;
+    const SCENARIO_BUILD_VER = 6;
 
     const TERRAIN_COLORS = {
         water: '#2980b9', grass: '#2ecc71', sand: '#f39c12', forest: '#27ae60',
@@ -45,13 +45,19 @@
         return inside;
     }
 
+    function pointInAnyPoly(lon, lat, polys) {
+        for(let i = 0; i < polys.length; i++) {
+            if(pointInPoly(lon, lat, polys[i])) return true;
+        }
+        return false;
+    }
+
     function distToSegment(lon, lat, lon1, lat1, lon2, lat2) {
         let dx = lon2 - lon1, dy = lat2 - lat1;
         let len2 = dx * dx + dy * dy;
         if(len2 < 1e-12) return Math.hypot(lon - lon1, lat - lat1);
         let t = Math.max(0, Math.min(1, ((lon - lon1) * dx + (lat - lat1) * dy) / len2));
-        let px = lon1 + t * dx, py = lat1 + t * dy;
-        return Math.hypot(lon - px, lat - py);
+        return Math.hypot(lon - lon1 - t * dx, lat - lat1 - t * dy);
     }
 
     function nearRiver(lon, lat, segments, width) {
@@ -59,6 +65,25 @@
         for(let i = 0; i < segments.length; i++) {
             let s = segments[i];
             if(distToSegment(lon, lat, s[0], s[1], s[2], s[3]) < width) return true;
+        }
+        return false;
+    }
+
+    function nearLake(lon, lat, lakes) {
+        for(let i = 0; i < lakes.length; i++) {
+            let lk = lakes[i];
+            if(Math.hypot(lon - lk.lon, lat - lk.lat) < lk.r) return true;
+        }
+        return false;
+    }
+
+    function nearPolyEdge(lon, lat, polys, maxDist) {
+        maxDist = maxDist || 0.028;
+        for(let p = 0; p < polys.length; p++) {
+            let poly = polys[p];
+            for(let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+                if(distToSegment(lon, lat, poly[j][0], poly[j][1], poly[i][0], poly[i][1]) < maxDist) return true;
+            }
         }
         return false;
     }
@@ -140,15 +165,6 @@
         return hex;
     };
 
-    function nearPolyEdge(lon, lat, poly, maxDist) {
-        maxDist = maxDist || 0.028;
-        for(let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-            if(distToSegment(lon, lat, poly[j][0], poly[j][1], poly[i][0], poly[i][1]) < maxDist) return true;
-        }
-        return false;
-    }
-
-    /** Only place land hexes plus a narrow coastal water band — no full rectangular grid. */
     ScenarioBuilder.prototype.buildGeoMap = function(regionFn, terrainFn, ownerFn) {
         let b = this.bbox;
         let pendingLand = [];
@@ -157,53 +173,54 @@
                 let lon = b.minLon + ((q + this.cols) / (this.cols * 2)) * (b.maxLon - b.minLon);
                 let lat = b.minLat + ((r + this.rows) / (this.rows * 2)) * (b.maxLat - b.minLat);
                 let region = regionFn(lon, lat, q, r, this);
+                if(region === 'void') continue;
+                if(region === 'water') {
+                    this._placeHex(q, r, lon, lat, 'water', 0);
+                    continue;
+                }
                 if(region !== 'land') continue;
                 let type = terrainFn(lon, lat, q, r, this);
-                if(!type || type === 'void' || type === 'water') type = 'grass';
+                if(type === 'water') {
+                    this._placeHex(q, r, lon, lat, 'water', 0);
+                    continue;
+                }
+                if(!type || type === 'void') type = 'grass';
                 pendingLand.push({ q, r, lon, lat, type });
             }
         }
-        let placeHex = (q, r, lon, lat, type, owner) => {
-            let key = q + ',' + r;
-            if(this.hexes[key]) return;
-            let x = q * this.spacing, y = r * this.spacing;
-            let hex = {
-                q, r, x, y, type, owner: owner || 0,
-                baseColor: terrainColor(type),
-                renderColor: terrainColor(type)
-            };
-            this.hexes[key] = hex;
-            this.hexList.push(hex);
-        };
         for(let i = 0; i < pendingLand.length; i++) {
             let p = pendingLand[i];
             let owner = ownerFn ? ownerFn(p.lon, p.lat, p.q, p.r, p.type, this) : 0;
-            placeHex(p.q, p.r, p.lon, p.lat, p.type, owner);
+            this._placeHex(p.q, p.r, p.lon, p.lat, p.type, owner);
         }
         let landKeys = new Set(pendingLand.map(p => p.q + ',' + p.r));
-        let coastBand = [];
         for(let i = 0; i < pendingLand.length; i++) {
             let p = pendingLand[i];
-            for(let dq = -3; dq <= 3; dq++) {
-                for(let dr = -3; dr <= 3; dr++) {
+            for(let dq = -5; dq <= 5; dq++) {
+                for(let dr = -5; dr <= 5; dr++) {
                     if(!dq && !dr) continue;
                     let nq = p.q + dq, nr = p.r + dr, nk = nq + ',' + nr;
-                    if(landKeys.has(nk)) continue;
+                    if(landKeys.has(nk) || this.hexes[nk]) continue;
                     let lon = b.minLon + ((nq + this.cols) / (this.cols * 2)) * (b.maxLon - b.minLon);
                     let lat = b.minLat + ((nr + this.rows) / (this.rows * 2)) * (b.maxLat - b.minLat);
-                    coastBand.push({ q: nq, r: nr, lon, lat });
+                    let region = regionFn(lon, lat, nq, nr, this);
+                    if(region === 'water') this._placeHex(nq, nr, lon, lat, 'water', 0);
                 }
             }
         }
-        for(let i = 0; i < coastBand.length; i++) {
-            let c = coastBand[i];
-            let key = c.q + ',' + c.r;
-            if(this.hexes[key]) continue;
-            let region = regionFn(c.lon, c.lat, c.q, c.r, this);
-            if(region === 'void') continue;
-            if(region === 'land') continue;
-            placeHex(c.q, c.r, c.lon, c.lat, 'water', 0);
-        }
+    };
+
+    ScenarioBuilder.prototype._placeHex = function(q, r, lon, lat, type, owner) {
+        let key = q + ',' + r;
+        if(this.hexes[key]) return;
+        let x = q * this.spacing, y = r * this.spacing;
+        let hex = {
+            q, r, x, y, type, owner: owner || 0,
+            baseColor: terrainColor(type),
+            renderColor: terrainColor(type)
+        };
+        this.hexes[key] = hex;
+        this.hexList.push(hex);
     };
 
     ScenarioBuilder.prototype.addCity = function(name, lon, lat, owner, opts) {
@@ -341,20 +358,32 @@
         };
     };
 
-    /* ── Normandy landmass (simplified Cotentin + Calvados coast) ── */
+    /* ── Normandy: Cotentin peninsula + Calvados coast (recognizable D-Day shape) ── */
     const NORMANDY_LAND = [
-        [-1.78, 49.70], [-1.72, 49.55], [-1.58, 49.48], [-1.48, 49.40],
-        [-1.42, 49.08], [-1.22, 48.93], [-0.78, 48.91], [-0.38, 48.93],
-        [-0.10, 49.06], [-0.05, 49.22], [-0.08, 49.32], [-0.18, 49.35],
-        [-0.45, 49.31], [-0.75, 49.32], [-1.05, 49.33], [-1.30, 49.36],
-        [-1.48, 49.42], [-1.58, 49.52], [-1.72, 49.62], [-1.78, 49.70]
+        [
+            [-1.775, 49.655], [-1.765, 49.600], [-1.745, 49.520], [-1.720, 49.450],
+            [-1.680, 49.350], [-1.620, 49.240], [-1.520, 49.150], [-1.420, 49.100],
+            [-1.250, 49.050], [-1.050, 49.020], [-0.820, 48.995], [-0.580, 48.990],
+            [-0.350, 49.005], [-0.180, 49.040], [-0.070, 49.100], [-0.030, 49.180],
+            [-0.025, 49.260], [-0.060, 49.320], [-0.150, 49.345], [-0.280, 49.350],
+            [-0.450, 49.345], [-0.620, 49.350], [-0.780, 49.360], [-0.950, 49.375],
+            [-1.120, 49.395], [-1.280, 49.420], [-1.420, 49.450], [-1.540, 49.490],
+            [-1.640, 49.540], [-1.710, 49.590], [-1.775, 49.655]
+        ]
     ];
 
     const NORMANDY_RIVERS = [
-        [-1.12, 49.05, -1.05, 49.28],
-        [-0.45, 49.02, -0.38, 49.22],
-        [-1.35, 49.08, -1.28, 49.30]
+        [-1.12, 49.05, -1.05, 49.28], [-0.45, 49.02, -0.38, 49.22], [-1.35, 49.08, -1.28, 49.30]
     ];
+
+    function normandyRegion(lon, lat, b) {
+        if(!b.inBbox(lon, lat, 0.05)) return 'void';
+        if(pointInAnyPoly(lon, lat, NORMANDY_LAND)) return 'land';
+        if(lat > 49.34 && lon > -1.78 && lon < 0.02) return 'water';
+        if(lon > -0.06 && lat > 49.40 && lat < 49.58) return 'water';
+        if(nearPolyEdge(lon, lat, NORMANDY_LAND, 0.028)) return 'water';
+        return 'void';
+    }
 
     function buildDdayMap() {
         let b = new ScenarioBuilder({
@@ -369,14 +398,9 @@
         });
 
         b.buildGeoMap(
-            function(lon, lat) {
-                if(!b.inBbox(lon, lat, 0.04)) return 'void';
-                if(pointInPoly(lon, lat, NORMANDY_LAND)) return 'land';
-                if(nearPolyEdge(lon, lat, NORMANDY_LAND, 0.032)) return 'water';
-                return 'void';
-            },
+            function(lon, lat) { return normandyRegion(lon, lat, b); },
             function(lon, lat, q, r) {
-                if(lat > 49.30 && lat < 49.44 && lon > -1.10 && lon < 0.0) return 'sand';
+                if(lat > 49.28 && lat < 49.44 && lon > -1.10 && lon < 0.0) return 'sand';
                 if(nearRiver(lon, lat, NORMANDY_RIVERS, 0.022)) return 'water';
                 if(lon > -1.15 && lon < -0.45 && lat > 49.02 && lat < 49.36 && hash2(q, r, 3) > 0.35) return 'forest';
                 if(lon > -1.05 && lon < 0.0 && lat > 48.98 && lat < 49.32) {
@@ -386,10 +410,7 @@
                 if(lon > -0.55 && lon < -0.15 && lat > 49.08 && lat < 49.22 && hash2(q, r, 37) > 0.82) return 'hill';
                 return 'grass';
             },
-            function(lon, lat, q, r, type) {
-                if(type === 'water') return 0;
-                return lon < -0.42 ? 1 : 2;
-            }
+            function(lon) { return lon < -0.42 ? 1 : 2; }
         );
 
         b.addCity('Cherbourg', -1.63, 49.63, 1, { factory: true, harbor: true, radius: 2 });
@@ -425,24 +446,42 @@
         return b.export();
     }
 
-    /* ── Berlin & approaches ── */
+    /* ── Berlin metro: Spree/Havel rivers + surrounding Brandenburg ── */
     const BERLIN_LAND = [
-        [13.02, 52.38], [13.05, 52.56], [13.22, 52.60], [13.48, 52.58],
-        [13.72, 52.52], [13.78, 52.40], [13.68, 52.32], [13.42, 52.30],
-        [13.12, 52.32], [13.02, 52.38]
+        [
+            [13.00, 52.34], [13.02, 52.42], [13.08, 52.50], [13.18, 52.57],
+            [13.35, 52.60], [13.55, 52.59], [13.72, 52.54], [13.78, 52.44],
+            [13.76, 52.36], [13.68, 52.31], [13.52, 52.29], [13.32, 52.29],
+            [13.12, 52.30], [13.00, 52.34]
+        ]
     ];
 
     const BERLIN_RIVERS = [
-        [13.20, 52.52, 13.55, 52.52],
+        [13.20, 52.52, 13.58, 52.52],
         [13.38, 52.40, 13.38, 52.54],
-        [13.44, 52.48, 13.58, 52.50]
+        [13.44, 52.48, 13.58, 52.50],
+        [13.10, 52.48, 13.18, 52.56]
     ];
+
+    const BERLIN_LAKES = [
+        { lon: 13.22, lat: 52.585, r: 0.022 },
+        { lon: 13.65, lat: 52.425, r: 0.035 },
+        { lon: 13.12, lat: 52.395, r: 0.018 }
+    ];
+
+    function berlinRegion(lon, lat, b) {
+        if(!b.inBbox(lon, lat, 0.02)) return 'void';
+        if(pointInAnyPoly(lon, lat, BERLIN_LAND)) return 'land';
+        if(lon > 13.68 && lat < 52.44) return 'water';
+        if(nearPolyEdge(lon, lat, BERLIN_LAND, 0.020)) return 'water';
+        return 'void';
+    }
 
     function buildBerlinMap() {
         let b = new ScenarioBuilder({
             id: 'berlin',
             mapRadius: 80, hr: 22,
-            bbox: { minLon: 12.98, maxLon: 13.82, minLat: 52.28, maxLat: 52.62 },
+            bbox: { minLon: 12.96, maxLon: 13.82, minLat: 52.26, maxLat: 52.64 },
             factionColors: ['#000', '#c0392b', '#566573', '#9b59b6', '#e67e22', '#f1c40f', '#1abc9c'],
             economy: {
                 playerMoney: 22000, playerManpower: 15000,
@@ -451,23 +490,16 @@
         });
 
         b.buildGeoMap(
-            function(lon, lat) {
-                if(!b.inBbox(lon, lat, 0.02)) return 'void';
-                if(pointInPoly(lon, lat, BERLIN_LAND)) return 'land';
-                if(nearPolyEdge(lon, lat, BERLIN_LAND, 0.022)) return 'water';
-                return 'void';
-            },
+            function(lon, lat) { return berlinRegion(lon, lat, b); },
             function(lon, lat, q, r) {
-                if(nearRiver(lon, lat, BERLIN_RIVERS, 0.012)) return 'water';
-                if(lon < 13.14 && lat > 52.46 && lat < 52.58) return 'water';
+                if(nearRiver(lon, lat, BERLIN_RIVERS, 0.011)) return 'water';
+                if(nearLake(lon, lat, BERLIN_LAKES)) return 'water';
                 if(lon > 13.18 && lon < 13.72 && lat > 52.34 && lat < 52.58 && hash2(q, r, 5) > 0.86) return 'forest';
+                if(lon > 13.30 && lon < 13.42 && lat > 52.50 && lat < 52.54 && hash2(q, r, 9) > 0.75) return 'urban';
                 if(hash2(q, r, 13) > 0.92) return 'hill';
                 return 'grass';
             },
-            function(lon, lat) {
-                if(lon > 13.44) return 1;
-                return 2;
-            }
+            function(lon) { return lon > 13.44 ? 1 : 2; }
         );
 
         b.addCity('Reichstag — Berlin', 13.377, 52.518, 2, { factory: true, radius: 3, fort: true });
@@ -500,19 +532,36 @@
         return b.export();
     }
 
-    /* ── Gettysburg campaign region (PA / MD / northern VA) ── */
+    /* ── Mid-Atlantic: Chesapeake Bay bite + Potomac + Blue Ridge west ── */
     const ACW_LAND = [
-        [-78.30, 39.05], [-78.28, 39.45], [-78.05, 39.85], [-77.55, 40.15],
-        [-76.85, 40.28], [-76.20, 40.05], [-76.05, 39.55], [-76.15, 39.05],
-        [-76.55, 38.55], [-77.15, 38.35], [-77.65, 38.45], [-78.05, 38.75],
-        [-78.30, 39.05]
+        [
+            [-78.28, 39.05], [-78.26, 39.55], [-78.08, 39.95], [-77.72, 40.18],
+            [-77.28, 40.28], [-76.72, 40.22], [-76.22, 40.02], [-76.08, 39.58],
+            [-76.12, 39.12], [-76.48, 38.58], [-77.02, 38.32], [-77.58, 38.38],
+            [-78.05, 38.72], [-78.28, 39.05]
+        ]
     ];
 
     const ACW_RIVERS = [
         [-77.05, 38.85, -77.05, 39.55],
         [-76.85, 39.45, -76.85, 39.78],
-        [-77.45, 38.30, -77.45, 38.55]
+        [-77.45, 38.30, -77.45, 38.55],
+        [-76.55, 39.15, -76.55, 39.45]
     ];
+
+    const CHESAPEAKE_BAY = [
+        [-76.55, 39.05], [-76.35, 38.85], [-76.25, 38.65], [-76.35, 38.50],
+        [-76.55, 38.55], [-76.65, 38.75], [-76.55, 39.05]
+    ];
+
+    function acwRegion(lon, lat, b) {
+        if(!b.inBbox(lon, lat, 0.03)) return 'void';
+        if(pointInPoly(lon, lat, CHESAPEAKE_BAY)) return 'water';
+        if(pointInAnyPoly(lon, lat, ACW_LAND)) return 'land';
+        if(lat < 38.58 && lon > -77.10 && lon < -76.35) return 'water';
+        if(nearPolyEdge(lon, lat, ACW_LAND, 0.028)) return 'water';
+        return 'void';
+    }
 
     function buildAcwMap() {
         let b = new ScenarioBuilder({
@@ -527,14 +576,9 @@
         });
 
         b.buildGeoMap(
-            function(lon, lat) {
-                if(!b.inBbox(lon, lat, 0.03)) return 'void';
-                if(pointInPoly(lon, lat, ACW_LAND)) return 'land';
-                if(nearPolyEdge(lon, lat, ACW_LAND, 0.030)) return 'water';
-                return 'void';
-            },
+            function(lon, lat) { return acwRegion(lon, lat, b); },
             function(lon, lat, q, r) {
-                if(nearRiver(lon, lat, ACW_RIVERS, 0.022)) return 'water';
+                if(nearRiver(lon, lat, ACW_RIVERS, 0.020)) return 'water';
                 if(lon < -77.55 && hash2(q, r, 17) > 0.52) return 'forest';
                 if(lon > -76.55 && lat > 39.85 && hash2(q, r, 23) > 0.62) return 'forest';
                 if(Math.abs(lon + 77.23) < 0.05 && Math.abs(lat - 39.83) < 0.06 && hash2(q, r, 47) > 0.50) return 'hill';
