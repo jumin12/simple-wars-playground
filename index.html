@@ -14830,6 +14830,18 @@
             return window.matchMedia('(max-width: 900px), (max-height: 520px), (hover: none) and (pointer: coarse)').matches;
         }
 
+        function wodCooperativeDevice() {
+            return wodUsesVisualViewportLayout();
+        }
+
+        function wodScheduleIdle(fn, timeoutMs) {
+            let run = () => Promise.resolve().then(fn).catch(err => console.warn(err));
+            if(typeof requestIdleCallback === 'function')
+                requestIdleCallback(() => { void run(); }, { timeout: timeoutMs || 1500 });
+            else
+                setTimeout(() => { void run(); }, timeoutMs || 32);
+        }
+
         function wodApplyPlayViewportLock(playLocked) {
             let meta = document.querySelector('meta[name="viewport"]');
             if(!meta) return;
@@ -23947,14 +23959,20 @@
         async function wodMapGenYieldSlice() {
             let st = _wodMapGenYieldState;
             if(!st) return;
+            let coop = wodCooperativeDevice();
             if(gameData._wodFastMapGen) {
                 st.fastTick = (st.fastTick || 0) + 1;
-                if((st.fastTick & 1023) !== 0) return;
+                let mask = coop ? 31 : 1023;
+                if((st.fastTick & mask) !== 0) return;
+            } else if(coop) {
+                st.coopTick = (st.coopTick || 0) + 1;
+                if((st.coopTick & 15) !== 0) return;
             }
             let now = performance.now();
             if(now < st.due) return;
             await wodYieldToMainThread();
-            st.due = performance.now() + (gameData._wodFastMapGen ? 4 : st.budget);
+            let gap = coop ? 10 : (gameData._wodFastMapGen ? 4 : st.budget);
+            st.due = performance.now() + gap;
         }
 
         function wodYieldToMainThread() {
@@ -23963,8 +23981,10 @@
                 if(sch && typeof sch.yield === 'function') return sch.yield();
             } catch(e) {}
             return new Promise(function(resolve) {
-                if(typeof requestAnimationFrame === 'function') requestAnimationFrame(function() { resolve(); });
-                else setTimeout(resolve, 0);
+                setTimeout(function() {
+                    if(typeof requestAnimationFrame === 'function') requestAnimationFrame(function() { resolve(); });
+                    else resolve();
+                }, 0);
             });
         }
 
@@ -23991,7 +24011,7 @@
             gameData._mapGenInProgress = true;
             wodRefreshMapPreviewGeneratingUi();
             gameData._wodFastMapGen = true;
-            wodMapGenYieldingStart(4);
+            wodMapGenYieldingStart(wodCooperativeDevice() ? 2 : 4);
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 10000;
             gameData.income = 10;             gameData.selection = [];
@@ -24979,18 +24999,23 @@
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
         }
 
-        function kickstartMenuAttractSim() {
+        async function kickstartMenuAttractSim() {
             if(gameState !== 'MENU') return;
             gameData.aiStrategyTimer = 1.42;
             gameData.aiFocusTimer = 4.1;
             updateAiFrontFocus();
             let dtSim = 2 / 60;
-            for(let step = 0; step < 36; step++) {
+            let steps = wodCooperativeDevice() ? 18 : 36;
+            for(let step = 0; step < steps; step++) {
                 update(dtSim);
+                if(wodCooperativeDevice() && (step & 3) === 3) await wodYieldToMainThread();
             }
             let drainGuard = 0;
-            while((gameData._aiStratWork || gameData._aiSpawnBurst) && drainGuard++ < 480)
+            let drainMax = wodCooperativeDevice() ? 120 : 480;
+            while((gameData._aiStratWork || gameData._aiSpawnBurst) && drainGuard++ < drainMax) {
                 update(dtSim);
+                if(wodCooperativeDevice() && (drainGuard & 7) === 0) await wodYieldToMainThread();
+            }
         }
 
         function menuBackgroundLoop(time) {
@@ -25025,6 +25050,83 @@
             if(window._wodBootStarted) return;
             window._wodBootStarted = true;
             window._wodBootSettledUntil = performance.now() + 2400;
+            if(wodCooperativeDevice()) {
+                wodRunCooperativeBootToMenu();
+                return;
+            }
+            wodRunFullBootToMenu();
+        }
+
+        async function wodDeferredMenuBattleBootstrap() {
+            if(menuDemoSeeded || window._wodMenuBootstrapBusy) return;
+            try {
+                await bootstrapMenuBackgroundBattle();
+                if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
+            } catch(err) {
+                console.warn('Deferred menu bootstrap', err);
+            }
+        }
+
+        function wodRunCooperativeBootToMenu() {
+            let ov = document.getElementById('wodBootOverlay');
+            let caption = document.getElementById('wodBootCaption');
+            let inner = document.getElementById('wodBootBarInner');
+            let bootErr = false;
+            gameData._wodSkipMapGenLoader = true;
+            if(UI.mainMenu) UI.mainMenu.classList.add('hidden');
+            if(inner) inner.classList.remove('wod-boot-tween-suppress');
+            wodSetBootSplashProgress(0);
+
+            function revealMenu() {
+                if(inner) inner.classList.remove('wod-boot-tween-suppress');
+                if(!bootErr) {
+                    if(caption) caption.textContent = 'Ready.';
+                    wodSetBootSplashProgress(100);
+                }
+                requestAnimationFrame(() => {
+                    if(!bootErr) {
+                        if(ov) {
+                            ov.classList.add('hidden');
+                            ov.setAttribute('aria-busy', 'false');
+                        }
+                        if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                    }
+                    gameData._wodSkipMapGenLoader = false;
+                    window._wodBootSettledUntil = 0;
+                    wodScheduleIdle(() => wodDeferredMenuBattleBootstrap(), 800);
+                });
+            }
+
+            (async () => {
+                try {
+                    if(caption) caption.textContent = 'Loading…';
+                    wodSetBootSplashProgress(18);
+                    await wodYieldToMainThread();
+                    try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
+                    wodSetBootSplashProgress(42);
+                    await wodYieldToMainThread();
+                    if(caption) caption.textContent = 'Preparing…';
+                    normalizeTerrainHexes();
+                    await wodYieldToMainThread();
+                    updateTerrainKey();
+                    wodSetBootSplashProgress(68);
+                    await wodYieldToMainThread();
+                    if(caption) caption.textContent = 'Almost ready…';
+                    wodSetBootSplashProgress(88);
+                    await wodYieldToMainThread();
+                    await new Promise(resolve => setTimeout(resolve, 120));
+                    revealMenu();
+                } catch(err) {
+                    bootErr = true;
+                    console.error(err);
+                    if(caption) caption.textContent = 'Could not load. Try refreshing.';
+                    gameData._wodSkipMapGenLoader = false;
+                    window._wodBootSettledUntil = 0;
+                }
+            })();
+        }
+
+        function wodRunFullBootToMenu() {
             let ov = document.getElementById('wodBootOverlay');
             let caption = document.getElementById('wodBootCaption');
             let inner = document.getElementById('wodBootBarInner');
@@ -25053,6 +25155,7 @@
                     let out = work();
                     if(out && typeof out.then === 'function') await out;
                 }
+                await wodYieldToMainThread();
                 await nextFrame();
             }
 
@@ -25091,15 +25194,19 @@
                         updateTerrainCache();
                         draw();
                     }, 54);
-                    await bootStage('Warming AI planners…', 74, () => {
+                    await bootStage('Warming AI planners…', 74, async () => {
                         let dtSim = 2 / 60;
-                        for(let i = 0; i < 8; i++) update(dtSim);
+                        for(let i = 0; i < 8; i++) {
+                            update(dtSim);
+                            if((i & 1) === 1) await wodYieldToMainThread();
+                        }
                     }, 52);
-                    await bootStage('Priming path and selection caches…', 84, () => {
+                    await bootStage('Priming path and selection caches…', 84, async () => {
                         let movable = gameData.entities.filter(u => u && u.hp > 0 && u.type !== 'convoy').slice(0, 8);
                         for(let u of movable) {
                             let h = getNearestWalkableHexForUnit(u, u.x, u.y, 8);
                             if(h) findLocalDetourHex(u, h.x + gameData.hexRadius * 2, h.y);
+                            await wodYieldToMainThread();
                         }
                         syncInfoCardPanelThrottled();
                     }, 52);
@@ -25172,7 +25279,7 @@
             UI.canvas.style.display = 'block';
             UI.canvas.classList.add('menu-bg-active');
             wodCenterCameraOnLandmassForMenu();
-            kickstartMenuAttractSim();
+            await kickstartMenuAttractSim();
             captureMenuBattleLive();
             draw();
             menuDemoLastTime = performance.now();
@@ -34338,19 +34445,8 @@
         loadWodProgress();
         wodEnsurePlayerId();
         wodMpInitGlobalHandlers();
-        void wodMpBackgroundConnect();
-        wodMpApplyFriendQueryFromUrl();
         applyWodProfileToGame();
         wodInitBrowserSaves();
-        checkWodAchievements();
-        updateSkinShop();
-        wodInitShopTabs();
-        wodLoadShopMapCatalog().then(() => {
-            renderShopMapsTab();
-            wodSyncSetupShopMapButton();
-        });
-        renderAchievementsUi();
-
         initSetupPanelBindings();
         wodInitPeriodSettingsBinding();
         wodInitShopPeriodBinding();
@@ -34359,6 +34455,19 @@
         wireShowOrdersCheckbox();
         wireOrderArrowsPathfindingCheckbox();
         wodSyncViewportAndCanvas();
+
+        wodScheduleIdle(() => {
+            void wodMpBackgroundConnect();
+            wodMpApplyFriendQueryFromUrl();
+            checkWodAchievements();
+            updateSkinShop();
+            wodInitShopTabs();
+            wodLoadShopMapCatalog().then(() => {
+                renderShopMapsTab();
+                wodSyncSetupShopMapButton();
+            });
+            renderAchievementsUi();
+        }, wodCooperativeDevice() ? 1200 : 600);
 
         if (new URLSearchParams(window.location.search).get('autostart') === '1') {
             let bo = document.getElementById('wodBootOverlay');
