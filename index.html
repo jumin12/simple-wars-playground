@@ -8457,6 +8457,8 @@
             let n = entCount | 0;
             wodPfBudgetMs = n > 200 ? 2.2 : (n > 120 ? 3.0 : (n > 70 ? 3.8 : 4.8));
             if(wodUsesVisualViewportLayout()) wodPfBudgetMs *= 0.75;
+            let spd = gameData && gameData.speed > 0 ? gameData.speed : 1;
+            wodPfBudgetMs *= Math.min(3, spd);
         }
         function wodCanSpendPf() {
             return wodPfSpentMs < wodPfBudgetMs;
@@ -29473,11 +29475,13 @@
             if(UI.escMenu.classList.contains('hidden') && gameData.speed > 0) {
                 updateCamera(dt * gameData.speed);
                 let simDt = dt * gameData.speed;
-                if(gameData.speed <= 1 && simDt <= 0.06) {
+                let baseChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
+                let maxSingleStep = baseChunk * 1.15;
+                if(simDt <= maxSingleStep) {
                     update(simDt);
                 } else {
+                    let simChunk = baseChunk * Math.max(1, gameData.speed || 1);
                     let simRemain = simDt;
-                    let simChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
                     while(simRemain > 0.0001) {
                         let step = Math.min(simRemain, simChunk);
                         update(step);
