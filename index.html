@@ -8799,8 +8799,7 @@
         ];
         let _wodCampaignSelectedLevel = 1;
         const _wodCampaignPreviewCache = {};
-        let _wodCampaignPreviewBusy = false;
-        let _wodCampaignPreviewGenToken = 0;
+        let _wodCampaignPreviewsBootDone = false;
 
         function wodCampaignPreviewPaintCanvas(canvas, dataUrl) {
             if(!canvas || !dataUrl) return;
@@ -8838,17 +8837,24 @@
             return canvas;
         }
 
-        async function wodGenerateCampaignPreviewDataUrl(levelId) {
+        async function wodGenerateCampaignPreviewDataUrl(levelId, opts) {
+            opts = opts || {};
             if(_wodCampaignPreviewCache[levelId]) return _wodCampaignPreviewCache[levelId];
             let lv = wodGetCampaignLevelDef(levelId);
             if(!lv) return null;
-            let menuSnap = cloneMenuBattleState();
+            let bootPhase = !!opts.bootPhase;
+            let menuSnap = null;
             let wasMenuAttract = !!gameData.menuAttractMode;
             let prevSkip = !!gameData._wodSkipMapGenLoader;
+            let shouldRestoreMenu = !bootPhase && menuDemoSeeded && menuBattleLive && menuBattleLive.hexList && menuBattleLive.hexList.length;
             try {
-                pauseMenuBackgroundBattle();
-                gameData.menuAttractMode = false;
+                if(shouldRestoreMenu) {
+                    pauseMenuBackgroundBattle();
+                    gameData.menuAttractMode = false;
+                    menuSnap = cloneMenuBattleState();
+                }
                 gameData._wodSkipMapGenLoader = true;
+                gameData._mapGenInProgress = false;
                 wodConfigureCampaignMission(levelId);
                 wodApplyMapSizePreset(lv.mapSize);
                 gameData.aiCount = 1;
@@ -8868,45 +8874,39 @@
             } finally {
                 wodMapGenYieldingStop();
                 gameData._wodFastMapGen = false;
+                gameData._mapGenInProgress = false;
                 gameData._wodSkipMapGenLoader = prevSkip;
                 wodClearCampaignMissionConfig();
-                if(menuSnap && applyMenuBattleState(menuSnap)) {
+                if(shouldRestoreMenu && menuSnap && applyMenuBattleState(menuSnap)) {
                     gameData.menuAttractMode = wasMenuAttract;
-                    if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
                 }
             }
             return _wodCampaignPreviewCache[levelId] || null;
         }
 
-        async function wodRefreshCampaignPreviews() {
-            let token = ++_wodCampaignPreviewGenToken;
-            for(let lv of WOD_CAMPAIGN_LEVELS) {
-                if(token !== _wodCampaignPreviewGenToken) return;
-                if(_wodCampaignPreviewCache[lv.id]) {
-                    document.querySelectorAll('.campaign-level-preview[data-level="' + lv.id + '"] canvas').forEach(c => {
-                        wodCampaignPreviewPaintCanvas(c, _wodCampaignPreviewCache[lv.id]);
-                        let load = c.parentElement && c.parentElement.querySelector('.campaign-level-preview-loading');
-                        if(load) load.remove();
-                    });
-                    continue;
-                }
-                while(_wodCampaignPreviewBusy && token === _wodCampaignPreviewGenToken)
-                    await new Promise(r => setTimeout(r, 80));
-                if(token !== _wodCampaignPreviewGenToken) return;
-                _wodCampaignPreviewBusy = true;
-                let url = await wodGenerateCampaignPreviewDataUrl(lv.id);
-                _wodCampaignPreviewBusy = false;
-                if(token !== _wodCampaignPreviewGenToken) return;
-                if(url) {
-                    document.querySelectorAll('.campaign-level-preview[data-level="' + lv.id + '"] canvas').forEach(c => {
-                        wodCampaignPreviewPaintCanvas(c, url);
-                        let load = c.parentElement && c.parentElement.querySelector('.campaign-level-preview-loading');
-                        if(load) load.remove();
-                    });
-                    if(lv.id === _wodCampaignSelectedLevel) wodRenderCampaignDetailPreview();
-                }
-                await new Promise(r => setTimeout(r, 0));
+        async function wodPregenerateAllCampaignPreviewsDuringBoot(onProgress) {
+            if(_wodCampaignPreviewsBootDone) return;
+            gameData._wodSkipMapGenLoader = true;
+            for(let i = 0; i < WOD_CAMPAIGN_LEVELS.length; i++) {
+                let lv = WOD_CAMPAIGN_LEVELS[i];
+                if(onProgress) onProgress(i + 1, WOD_CAMPAIGN_LEVELS.length, lv);
+                if(!_wodCampaignPreviewCache[lv.id])
+                    await wodGenerateCampaignPreviewDataUrl(lv.id, { bootPhase: true });
             }
+            _wodCampaignPreviewsBootDone = true;
+        }
+
+        function wodApplyCampaignPreviewsToDom() {
+            for(let lv of WOD_CAMPAIGN_LEVELS) {
+                let url = _wodCampaignPreviewCache[lv.id];
+                if(!url) continue;
+                document.querySelectorAll('.campaign-level-preview[data-level="' + lv.id + '"] canvas').forEach(c => {
+                    wodCampaignPreviewPaintCanvas(c, url);
+                    let load = c.parentElement && c.parentElement.querySelector('.campaign-level-preview-loading');
+                    if(load) load.remove();
+                });
+            }
+            wodRenderCampaignDetailPreview();
         }
 
         function wodRenderCampaignDetailPreview() {
@@ -9051,7 +9051,7 @@
                 grid.appendChild(card);
             }
             wodRenderCampaignDetail();
-            void wodRefreshCampaignPreviews();
+            wodApplyCampaignPreviewsToDom();
         }
         function wodRenderCampaignDetail() {
             let lv = wodGetCampaignLevelDef(_wodCampaignSelectedLevel);
@@ -26086,10 +26086,14 @@
                     await bootStage('Reading profile and settings…', 16, () => {
                         try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
                     }, 55);
-                    await bootStage('Preparing terrain palettes…', 25, () => {
+                    await bootStage('Preparing terrain palettes…', 22, () => {
                         normalizeTerrainHexes();
                         updateTerrainKey();
                     }, 48);
+                    await bootStage('Preparing campaign maps…', 28, () => wodPregenerateAllCampaignPreviewsDuringBoot((n, total) => {
+                        if(caption) caption.textContent = 'Preparing campaign maps (' + n + ' / ' + total + ')…';
+                        wodSetBootSplashProgress(28 + Math.floor((n / total) * 8));
+                    }), 12);
                     await bootStage('Building menu battlefield…', 38, () => Promise.race([
                         bootstrapMenuBackgroundBattle(),
                         new Promise((_, reject) => setTimeout(() => reject(new Error('Menu preview timed out')), 28000))
