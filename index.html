@@ -7912,8 +7912,20 @@
                 <h2>Settings</h2>
                 <div class="settings-section">
                     <h3 style="color:#e74c3c;margin-top:0;">Reset progress</h3>
-                    <p>Clear all saved data for this browser: achievements, lifetime stats, gold, and unlocked unit skins. This cannot be undone.</p>
+                    <p>Clear all saved data for your account: achievements, lifetime stats, gold, and unlocked unit skins. Progress is stored on the game server (only your player ID stays in this browser). This cannot be undone.</p>
                     <button type="button" class="menu-btn danger-btn" onclick="resetAllGameProgress()">Reset all progress</button>
+                </div>
+                <div class="settings-section">
+                    <h3 style="color:#2ecc71;margin-top:0;">Portable backup</h3>
+                    <p>Download or restore a JSON save file to move progress between accounts or keep an offline copy.</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;">
+                        <button type="button" class="menu-btn" onclick="wodExportSaveDownload()">Export save file</button>
+                        <label class="menu-btn" style="cursor:pointer;margin:0;">
+                            Import save file
+                            <input type="file" accept="application/json,.json" style="display:none" onchange="wodImportSaveFromInput(this)">
+                        </label>
+                    </div>
+                    <p id="wodBrowserSaveStatus" style="margin:10px 0 0;color:#95a5a6;font-size:0.88rem;"></p>
                 </div>
                 <div class="settings-section hidden" id="settingsGamePeriodSection">
                     <h3 style="color:#9b59b6;margin-top:0;">Time period</h3>
@@ -9095,6 +9107,7 @@
                 syncOrderArrowsPathfindingCheckbox();
                 wodInitPeriodSettingsBinding();
                 wodSyncAllPeriodSelects();
+                wodRefreshBrowserSaveStatus();
             }
             if(panelId === 'multiplayer') {
                 wodMpWireLobbyUi();
@@ -12845,6 +12858,7 @@
             if(!wodProgress.profile) wodProgress.profile = {};
             if(!wodProgress.profile.playerId) {
                 wodProgress.profile.playerId = wodMpGeneratePlayerId();
+                wodPersistPlayerIdLocal(wodProgress.profile.playerId);
                 scheduleSaveWodProgress();
             }
             if(!Array.isArray(wodProgress.profile.friends)) wodProgress.profile.friends = [];
@@ -14413,6 +14427,15 @@
                 let scope = window._wodMpLbScope || d.scope || 'global';
                 wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', scope);
             });
+            addEventListener('wod-mp-ProgressSaved', () => {
+                _wodProgressSaveInFlight = false;
+                window._wodProgressSavePending = false;
+            });
+            addEventListener('wod-mp-ProgressSaveFailed', (ev) => {
+                _wodProgressSaveInFlight = false;
+                window._wodProgressSavePending = true;
+                if(ev.detail && ev.detail.msg) console.warn('Progress sync failed:', ev.detail.msg);
+            });
             addEventListener('wod-mp-Registered', () => {
                 wodMpConfirmRegisteredDisplayName();
             });
@@ -14425,6 +14448,12 @@
                 else if(ev.detail && ev.detail.msg) showNotification(ev.detail.msg);
             });
             addEventListener('wod-mp-Close', () => {
+                if(wodSaveTimer) {
+                    clearTimeout(wodSaveTimer);
+                    wodSaveTimer = null;
+                }
+                persistWodProgressNow();
+                window._wodServerProgressHydrated = false;
                 if(window._wodMpBgReconnectTimer) clearTimeout(window._wodMpBgReconnectTimer);
                 window._wodMpBgReconnectTimer = setTimeout(() => {
                     void wodMpBackgroundConnect();
@@ -14436,7 +14465,10 @@
             wodMpInitGlobalHandlers();
             wodEnsurePlayerId();
             return wodMpEnsureConnected().then(() => {
+                return wodProgressSyncFromServer();
+            }).then(() => {
                 wodMpRegisterWithServer();
+                if(window._wodProgressSavePending) persistWodProgressNow();
             }).catch(() => {});
         }
         function wodMpEnsureConnected() {
@@ -14445,6 +14477,7 @@
                 wodMpRegisterWithServer();
                 wodMpQueryFriendPresence();
                 wodMpRefreshMpPanelState();
+                if(window._wodProgressSavePending) persistWodProgressNow();
                 return Promise.resolve();
             }
             if(_wodMpConnecting) return _wodMpConnecting;
@@ -14453,10 +14486,14 @@
             _wodMpConnecting = WodMultiplayer.connect()
                 .then(() => {
                     if(st) st.textContent = 'Connected — browse lobbies or host a match.';
+                    return wodProgressSyncFromServer();
+                })
+                .then(() => {
                     wodMpRegisterWithServer();
                     wodMpQueryFriendPresence();
                     wodMpRefreshMpPanelState();
                     wodMpRenderLobbyList(WodMultiplayer.api.lobbies || []);
+                    if(window._wodProgressSavePending) persistWodProgressNow();
                 })
                 .catch((e) => {
                     let m = e && e.message ? e.message : String(e);
@@ -15784,10 +15821,14 @@
         const START_SPAWN_MIN_ENEMY_FRONT_DISTANCE = 76;
         const START_SPAWN_MIN_UNIT_DISTANCE = 46;
 
+        const SL_PLAYER_ID_KEY = 'simplewarsPlayerId.v1';
         const SL_PROGRESS_LS_KEY = 'simplewarsProgress.v1';
         const SL_PROGRESS_LS_BACKUP_KEY = 'simplewarsProgress.backup.v1';
         const SL_PROGRESS_LS_LEGACY = 'wodProgress.v2';
         let wodProgress = null;
+        let wodSaveTimer = null;
+        let _wodProgressLoadPromise = null;
+        let _wodProgressSaveInFlight = false;
 
         function defaultWodProgress() {
             return {
@@ -15858,7 +15899,12 @@
             };
         }
 
-        function wodReadProgressRawFromStorage() {
+        function wodPersistPlayerIdLocal(playerId) {
+            if(!playerId) return;
+            try { localStorage.setItem(SL_PLAYER_ID_KEY, playerId); } catch (e) {}
+        }
+
+        function wodReadLegacyLocalProgressRaw() {
             try {
                 return localStorage.getItem(SL_PROGRESS_LS_KEY)
                     || localStorage.getItem(SL_PROGRESS_LS_BACKUP_KEY)
@@ -15866,42 +15912,122 @@
             } catch (e) { return null; }
         }
 
+        function wodReadLegacyLocalProgressObject() {
+            let raw = wodReadLegacyLocalProgressRaw();
+            if(!raw) return null;
+            try { return JSON.parse(raw); } catch (e) { return null; }
+        }
+
+        function wodClearLegacyLocalProgress() {
+            try {
+                localStorage.removeItem(SL_PROGRESS_LS_KEY);
+                localStorage.removeItem(SL_PROGRESS_LS_BACKUP_KEY);
+                localStorage.removeItem(SL_PROGRESS_LS_LEGACY);
+            } catch (e) {}
+            window._wodLegacyLocalProgress = null;
+        }
+
         function loadWodProgress() {
-            let base = defaultWodProgress();
-            let raw = wodReadProgressRawFromStorage();
-            if(!raw) { wodProgress = base; return; }
-            let parseErr = null;
-            try {
-                wodProgress = wodMergeProgressObject(JSON.parse(raw));
-                return;
-            } catch (e) { parseErr = e; }
-            try {
-                let bak = localStorage.getItem(SL_PROGRESS_LS_BACKUP_KEY);
-                if(bak && bak !== raw) {
-                    wodProgress = wodMergeProgressObject(JSON.parse(bak));
-                    persistWodProgressNow();
-                    return;
+            wodProgress = defaultWodProgress();
+            let playerId = '';
+            try { playerId = wodMpSanitizePlayerId(localStorage.getItem(SL_PLAYER_ID_KEY)); } catch (e) {}
+            if(!playerId) {
+                let legacy = wodReadLegacyLocalProgressObject();
+                if(legacy && legacy.profile && legacy.profile.playerId)
+                    playerId = wodMpSanitizePlayerId(legacy.profile.playerId);
+            }
+            if(playerId) {
+                wodProgress.profile.playerId = playerId;
+                wodPersistPlayerIdLocal(playerId);
+            }
+            window._wodLegacyLocalProgress = wodReadLegacyLocalProgressObject();
+        }
+
+        function wodApplyServerProgressPayload(detail) {
+            if(!detail) return;
+            let pid = wodProgress && wodProgress.profile && wodProgress.profile.playerId;
+            if(detail.found && detail.progress) {
+                wodProgress = wodMergeProgressObject(detail.progress);
+            } else if(window._wodLegacyLocalProgress) {
+                wodProgress = wodMergeProgressObject(window._wodLegacyLocalProgress);
+                scheduleSaveWodProgress();
+            }
+            if(pid) wodProgress.profile.playerId = pid;
+            wodPersistPlayerIdLocal(wodProgress.profile.playerId);
+            wodClearLegacyLocalProgress();
+            window._wodServerProgressHydrated = true;
+            applyWodProfileToGame();
+            checkWodAchievements();
+            if(typeof renderAchievementsUi === 'function') renderAchievementsUi();
+            updateSkinShop();
+            wodEnsureCampaignProgress();
+            if(document.getElementById('campaignPanel') && !document.getElementById('campaignPanel').classList.contains('hidden'))
+                wodRenderCampaignPanel();
+        }
+
+        function wodProgressSyncFromServer() {
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.progressLoad) return Promise.resolve(false);
+            wodEnsurePlayerId();
+            let pid = wodProgress.profile.playerId;
+            if(!pid || !WodMultiplayer.api || !WodMultiplayer.api.socketOpen) return Promise.resolve(false);
+            if(_wodProgressLoadPromise) return _wodProgressLoadPromise;
+            _wodProgressLoadPromise = new Promise((resolve) => {
+                let done = false;
+                let to = setTimeout(() => {
+                    if(done) return;
+                    done = true;
+                    resolve(false);
+                }, 12000);
+                function onLoad(ev) {
+                    if(done) return;
+                    let d = ev.detail || {};
+                    if(d.playerId !== pid) return;
+                    done = true;
+                    clearTimeout(to);
+                    removeEventListener('wod-mp-ProgressLoaded', onLoad);
+                    wodApplyServerProgressPayload(d);
+                    if(window._wodProgressSavePending) persistWodProgressNow();
+                    resolve(true);
                 }
-            } catch (e2) { parseErr = e2; }
-            console.warn('Progress save corrupted; starting fresh.', parseErr);
-            wodProgress = base;
+                addEventListener('wod-mp-ProgressLoaded', onLoad);
+                WodMultiplayer.progressLoad(pid);
+            }).finally(() => { _wodProgressLoadPromise = null; });
+            return _wodProgressLoadPromise;
+        }
+
+        function wodProgressSaveToServer(notify) {
+            if(!wodProgress || !wodProgress.profile || !wodProgress.profile.playerId) return false;
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.progressSave) {
+                window._wodProgressSavePending = true;
+                return false;
+            }
+            if(!WodMultiplayer.api || !WodMultiplayer.api.socketOpen) {
+                window._wodProgressSavePending = true;
+                return false;
+            }
+            if(_wodProgressSaveInFlight) {
+                window._wodProgressSavePending = true;
+                return false;
+            }
+            let pid = wodProgress.profile.playerId;
+            let payload;
+            try { payload = JSON.parse(JSON.stringify(wodProgress)); } catch (e) { return false; }
+            _wodProgressSaveInFlight = true;
+            window._wodProgressSavePending = false;
+            WodMultiplayer.progressSave(pid, payload);
+            if(notify) showNotification('Progress synced to your account.');
+            return true;
         }
 
         function persistWodProgressNow(notify) {
             if(!wodProgress) return false;
             flushGameProfileToWod();
-            let json;
-            try { json = JSON.stringify(wodProgress); } catch (e) { return false; }
-            try {
-                let prev = localStorage.getItem(SL_PROGRESS_LS_KEY);
-                if(prev && prev !== json) localStorage.setItem(SL_PROGRESS_LS_BACKUP_KEY, prev);
-                localStorage.setItem(SL_PROGRESS_LS_KEY, json);
-                if(notify) showNotification('Progress saved in this browser.');
-                return true;
-            } catch (e) {
-                showNotification('Could not save (browser storage full). Export a backup in Settings.');
-                return false;
-            }
+            wodPersistPlayerIdLocal(wodProgress.profile.playerId);
+            return wodProgressSaveToServer(notify);
+        }
+
+        function wodReadProgressRawFromStorage() {
+            return wodReadLegacyLocalProgressRaw();
         }
 
         function applyWodProfileToGame() {
@@ -15973,7 +16099,6 @@
             };
         }
 
-        let wodSaveTimer = null;
         function scheduleSaveWodProgress() {
             if(wodSaveTimer) clearTimeout(wodSaveTimer);
             wodSaveTimer = setTimeout(() => {
@@ -16213,7 +16338,7 @@
             persistWodProgressNow();
             updateSkinShop();
             if(typeof renderAchievementsUi === 'function') renderAchievementsUi();
-            if(!opts.silent) showNotification('Save loaded.');
+            if(!opts.silent) showNotification('Save loaded and synced to server.');
         }
 
         function wodSaveFilenameStamp() {
@@ -16332,17 +16457,10 @@
         function wodRefreshBrowserSaveStatus() {
             let status = document.getElementById('wodBrowserSaveStatus');
             if(!status) return;
-            let storageOk = true;
-            try {
-                localStorage.setItem('__wod_quota_probe__', '1');
-                localStorage.removeItem('__wod_quota_probe__');
-            } catch (e) { storageOk = false; }
-            let slotHint = window.indexedDB
-                ? ' Named backup slots use extra browser storage (very large capacity).'
-                : ' Named slots need a modern browser with IndexedDB.';
-            status.textContent = storageOk
-                ? 'Auto-save is on in localStorage for this site.' + slotHint
-                : 'Browser storage is blocked or full. Export a backup below.' + slotHint;
+            let online = typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen;
+            status.textContent = online
+                ? 'Progress auto-syncs to the game server under your player ID. Export a file below for a portable backup.'
+                : 'Server offline — playing locally until reconnect. Export a backup file to keep a copy safe.';
         }
 
         function wodRefreshBrowserSaveList() {
@@ -16410,7 +16528,9 @@
             await wodIdbPutProgressSlotIndex([]);
         }
 
-        function wodInitBrowserSaves() {}
+        function wodInitBrowserSaves() {
+            wodRefreshBrowserSaveStatus();
+        }
         window.wodCreateBrowserSaveSlot = wodCreateBrowserSaveSlot;
         window.wodLoadBrowserSaveSlotBtn = wodLoadBrowserSaveSlotBtn;
         window.wodDeleteBrowserSaveSlotBtn = wodDeleteBrowserSaveSlotBtn;
@@ -16421,18 +16541,15 @@
         function resetAllGameProgress() {
             if(!confirm('Reset ALL progress — achievements, stats, gold, and skins? This cannot be undone.')) return;
             wodProgress = defaultWodProgress();
-            try {
-                localStorage.removeItem(SL_PROGRESS_LS_KEY);
-                localStorage.removeItem(SL_PROGRESS_LS_BACKUP_KEY);
-                localStorage.removeItem(SL_PROGRESS_LS_LEGACY);
-            } catch (e) {}
+            wodEnsurePlayerId();
+            wodClearLegacyLocalProgress();
             void wodClearAllBrowserSaveSlots().catch(function() {});
             applyWodProfileToGame();
-            persistWodProgressNow();
+            persistWodProgressNow(true);
             updateSkinShop();
             renderAchievementsUi();
             wodRefreshBrowserSaveList();
-            showNotification('Progress reset.');
+            showNotification('Progress reset and synced to server.');
         }
 
         function isWaterHex(hex) {

@@ -13,8 +13,11 @@ const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
 const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
 const FRIEND_REMOVALS_FILE = path.join(__dirname, 'friend-removals.json');
+const PROGRESS_FILE = path.join(__dirname, 'player-progress.json');
 const LEADERBOARD_SAVE_DEBOUNCE_MS = 2000;
 const FRIEND_REMOVALS_SAVE_DEBOUNCE_MS = 2000;
+const PROGRESS_SAVE_DEBOUNCE_MS = 2000;
+const MAX_PROGRESS_BYTES = 512 * 1024;
 
 const rooms = new Map();
 /** @type {Map<string, object>} */
@@ -23,8 +26,11 @@ const onlineByPlayerId = new Map();
 const leaderboard = new Map();
 /** @type {Map<string, object[]>} */
 const pendingFriendRemovals = new Map();
+/** @type {Map<string, object>} */
+const playerProgress = new Map();
 let leaderboardSaveTimer = null;
 let friendRemovalsSaveTimer = null;
+let progressSaveTimer = null;
 const friendRequestCooldown = new Map();
 const lobbyInviteCooldown = new Map();
 const recentLobbyInvites = new Map();
@@ -264,6 +270,236 @@ function sanitizeMpStats(obj) {
     wins: Number.isFinite(w) ? Math.max(0, Math.min(99999, w)) : 0,
     losses: Number.isFinite(l) ? Math.max(0, Math.min(99999, l)) : 0,
   };
+}
+
+const ACHIEVEMENT_KEYS = [
+  'goldenChipMaster',
+  'periodNapoleonic',
+  'periodAncient',
+  'periodMedieval',
+  'campaignComplete',
+  'campaignLevel1',
+  'campaignLevel2',
+  'campaignLevel3',
+  'campaignLevel4',
+  'campaignLevel5',
+  'campaignLevel6',
+  'campaignLevel7',
+  'campaignLevel8',
+  'campaignLevel9',
+  'campaignLevel10',
+];
+
+const LIFETIME_KEYS = [
+  'enemyTroopKills',
+  'ownTroopLosses',
+  'enemyMarineKills',
+  'ownMarineLosses',
+  'enemyTankKills',
+  'ownTankLosses',
+  'enemyShipKills',
+  'ownShipLosses',
+  'peakFieldManpower',
+  'battlesWon',
+  'campaignLosses',
+  'citiesCaptured',
+  'convoysCaptured',
+  'factoriesBuilt',
+  'harborsBuilt',
+  'fortsBuilt',
+  'peakMoneyHeld',
+  'unitsBuiltLight',
+  'unitsBuiltHeavy',
+  'unitsBuiltShip',
+  'unitsBuiltMarine',
+  'gamesStarted',
+];
+
+function clampProgressInt(v, max = 999999999) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(max, n));
+}
+
+function sanitizeOwnedMap(obj, maxKeys = 64) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  let n = 0;
+  for (const [k, v] of Object.entries(obj)) {
+    if (n >= maxKeys) break;
+    const key = String(k || '').trim().slice(0, 32);
+    if (!key) continue;
+    out[key] = !!v;
+    n++;
+  }
+  return out;
+}
+
+function sanitizeFriendRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  const playerId = sanitizePlayerId(row.playerId);
+  if (!playerId) return null;
+  return {
+    playerId,
+    displayName: sanitizeDisplayName(row.displayName),
+    unitSkin: sanitizeUnitSkin(row.unitSkin),
+    addedAt: Math.max(0, parseInt(row.addedAt, 10) || 0),
+  };
+}
+
+function sanitizeFriendRequestRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  const playerId = sanitizePlayerId(row.playerId);
+  if (!playerId) return null;
+  return {
+    playerId,
+    sentAt: Math.max(0, parseInt(row.sentAt, 10) || 0),
+  };
+}
+
+function sanitizeAchievements(obj) {
+  const out = {};
+  for (const k of ACHIEVEMENT_KEYS) out[k] = !!(obj && obj[k]);
+  return out;
+}
+
+function sanitizeLifetime(obj) {
+  const out = {};
+  for (const k of LIFETIME_KEYS) out[k] = clampProgressInt(obj && obj[k]);
+  return out;
+}
+
+function sanitizeCampaign(obj) {
+  const base = { unlockedMax: 1, completed: {} };
+  if (!obj || typeof obj !== 'object') return base;
+  let unlockedMax = clampProgressInt(obj.unlockedMax, 11);
+  if (unlockedMax < 1) unlockedMax = 1;
+  const completed = {};
+  if (obj.completed && typeof obj.completed === 'object') {
+    for (const [k, v] of Object.entries(obj.completed)) {
+      if (!/^level\d+$/.test(String(k))) continue;
+      if (v) completed[k] = true;
+    }
+  }
+  return { unlockedMax, completed };
+}
+
+function sanitizeProfile(obj, playerId) {
+  const friends = [];
+  if (obj && Array.isArray(obj.friends)) {
+    for (const row of obj.friends.slice(0, 200)) {
+      const fr = sanitizeFriendRow(row);
+      if (fr) friends.push(fr);
+    }
+  }
+  const friendRequestsOut = [];
+  const friendRequestsIn = [];
+  if (obj && Array.isArray(obj.friendRequestsOut)) {
+    for (const row of obj.friendRequestsOut.slice(0, 100)) {
+      const fr = sanitizeFriendRequestRow(row);
+      if (fr) friendRequestsOut.push(fr);
+    }
+  }
+  if (obj && Array.isArray(obj.friendRequestsIn)) {
+    for (const row of obj.friendRequestsIn.slice(0, 100)) {
+      const fr = sanitizeFriendRequestRow(row);
+      if (fr) friendRequestsIn.push(fr);
+    }
+  }
+  const equippedShopMapId = obj && obj.equippedShopMapId != null ? String(obj.equippedShopMapId).slice(0, 64) : null;
+  return {
+    gold: clampProgressInt(obj && obj.gold, 999999999),
+    unitSkin: sanitizeUnitSkin(obj && obj.unitSkin),
+    aiUnitSkin: sanitizeUnitSkin(obj && obj.aiUnitSkin),
+    ownedUnitSkins: Object.assign({ nato: true }, sanitizeOwnedMap(obj && obj.ownedUnitSkins)),
+    ownedShopVisuals: sanitizeOwnedMap(obj && obj.ownedShopVisuals),
+    gamePeriod: 'modern',
+    mpDisplayName: sanitizeDisplayName(obj && obj.mpDisplayName),
+    playerId: playerId || sanitizePlayerId(obj && obj.playerId),
+    friends,
+    friendRequestsOut,
+    friendRequestsIn,
+    equippedShopMapId: equippedShopMapId || null,
+  };
+}
+
+function sanitizeLifetimeByPeriod(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  let n = 0;
+  for (const [pid, bucket] of Object.entries(obj)) {
+    if (n >= 8) break;
+    const key = String(pid || '').trim().slice(0, 24);
+    if (!key || !bucket || typeof bucket !== 'object') continue;
+    out[key] = sanitizeLifetime(bucket);
+    n++;
+  }
+  return out;
+}
+
+function sanitizeProgressObject(raw, playerId) {
+  if (!raw || typeof raw !== 'object') raw = {};
+  return {
+    achievements: sanitizeAchievements(raw.achievements),
+    campaign: sanitizeCampaign(raw.campaign),
+    lifetime: sanitizeLifetime(raw.lifetime),
+    lifetimeByPeriod: sanitizeLifetimeByPeriod(raw.lifetimeByPeriod),
+    profile: sanitizeProfile(raw.profile, playerId),
+    multiplayer: sanitizeMpStats(raw.multiplayer) || { gamesPlayed: 0, wins: 0, losses: 0 },
+  };
+}
+
+function loadProgressFromDisk() {
+  try {
+    if (!fs.existsSync(PROGRESS_FILE)) return;
+    const raw = fs.readFileSync(PROGRESS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return;
+    for (const [id, row] of Object.entries(data)) {
+      const playerId = sanitizePlayerId(id);
+      if (!playerId || !row || typeof row !== 'object') continue;
+      playerProgress.set(playerId, {
+        playerId,
+        progress: sanitizeProgressObject(row.progress, playerId),
+        updatedAt: Math.max(0, parseInt(row.updatedAt, 10) || 0),
+      });
+    }
+  } catch (err) {
+    console.warn('[progress] load failed:', err.message);
+  }
+}
+
+function scheduleProgressSave() {
+  if (progressSaveTimer) return;
+  progressSaveTimer = setTimeout(() => {
+    progressSaveTimer = null;
+    try {
+      const data = {};
+      for (const [id, row] of playerProgress) {
+        data[id] = { progress: row.progress, updatedAt: row.updatedAt || 0 };
+      }
+      fs.writeFileSync(PROGRESS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[progress] save failed:', err.message);
+    }
+  }, PROGRESS_SAVE_DEBOUNCE_MS);
+}
+
+function getStoredProgress(playerId) {
+  return playerProgress.get(playerId) || null;
+}
+
+function saveStoredProgress(playerId, progressObj) {
+  const sanitized = sanitizeProgressObject(progressObj, playerId);
+  sanitized.profile.playerId = playerId;
+  const row = {
+    playerId,
+    progress: sanitized,
+    updatedAt: Date.now(),
+  };
+  playerProgress.set(playerId, row);
+  scheduleProgressSave();
+  return row;
 }
 
 function registerClientPlayer(client, payload) {
@@ -539,6 +775,56 @@ wss.on('connection', (ws) => {
       }
       ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId }));
       flushFriendRemovalsForClient(client);
+      return;
+    }
+
+    if (t === 'progress_load') {
+      const playerId = sanitizePlayerId(msg.playerId);
+      if (!playerId) {
+        ws.send(JSON.stringify({ t: 'progress_failed', reason: 'invalid_player_id', msg: 'Invalid player ID.' }));
+        return;
+      }
+      const row = getStoredProgress(playerId);
+      ws.send(
+        JSON.stringify({
+          t: 'progress',
+          playerId,
+          found: !!row,
+          progress: row ? row.progress : null,
+          updatedAt: row ? row.updatedAt : 0,
+        }),
+      );
+      return;
+    }
+
+    if (t === 'progress_save') {
+      const playerId = sanitizePlayerId(msg.playerId);
+      if (!playerId) {
+        ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'invalid_player_id', msg: 'Invalid player ID.' }));
+        return;
+      }
+      if (client.playerId && client.playerId !== playerId) {
+        ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'player_mismatch', msg: 'Player ID mismatch.' }));
+        return;
+      }
+      let rawSize = 0;
+      try {
+        rawSize = Buffer.byteLength(JSON.stringify(msg.progress || {}), 'utf8');
+      } catch (_) {
+        rawSize = MAX_PROGRESS_BYTES + 1;
+      }
+      if (rawSize > MAX_PROGRESS_BYTES) {
+        ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'too_large', msg: 'Progress payload too large.' }));
+        return;
+      }
+      const row = saveStoredProgress(playerId, msg.progress);
+      ws.send(
+        JSON.stringify({
+          t: 'progress_saved',
+          playerId,
+          updatedAt: row.updatedAt,
+        }),
+      );
       return;
     }
 
@@ -984,6 +1270,7 @@ wss.on('connection', (ws) => {
 
 loadLeaderboardFromDisk();
 loadFriendRemovalsFromDisk();
+loadProgressFromDisk();
 
 server.listen(PORT, () => {
   console.log(`simple-wars-mp listening on ${PORT} (max ${MAX_PLAYERS} players / room)`);

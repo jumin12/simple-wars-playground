@@ -86,6 +86,27 @@
           api.lobbies = msg.lobbies || [];
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
+        case 'progress':
+          emit('ProgressLoaded', {
+            playerId: msg.playerId || '',
+            found: !!msg.found,
+            progress: msg.progress || null,
+            updatedAt: msg.updatedAt | 0,
+          });
+          break;
+        case 'progress_saved':
+          emit('ProgressSaved', {
+            playerId: msg.playerId || '',
+            updatedAt: msg.updatedAt | 0,
+          });
+          break;
+        case 'progress_save_failed':
+        case 'progress_failed':
+          emit('ProgressSaveFailed', {
+            reason: msg.reason || '',
+            msg: msg.msg || 'Progress sync failed',
+          });
+          break;
         case 'registered':
           emit('Registered', { playerId: msg.playerId || '' });
           break;
@@ -340,6 +361,16 @@
         unitSkin: p.unitSkin != null ? String(p.unitSkin) : 'nato',
         mpStats: p.mpStats && typeof p.mpStats === 'object' ? p.mpStats : null,
         combinedStats: p.combinedStats && typeof p.combinedStats === 'object' ? p.combinedStats : null,
+      });
+    },
+    progressLoad(playerId) {
+      send({ t: 'progress_load', playerId: String(playerId || '') });
+    },
+    progressSave(playerId, progress) {
+      send({
+        t: 'progress_save',
+        playerId: String(playerId || ''),
+        progress: progress && typeof progress === 'object' ? progress : {},
       });
     },
     sendFriendRequest(targetPlayerId) {
