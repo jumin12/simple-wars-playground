@@ -6332,6 +6332,7 @@
                 <div class="setup-row">
                     <label>Map Shape:</label>
                     <select id="setupMapShape">
+                        <option value="custom" hidden>Custom scenario</option>
                         <option value="island" selected>Island</option>
                         <option value="rectangle">Rectangle</option>
                         <option value="ring">Ring (lake)</option>
@@ -6386,7 +6387,7 @@
                 </div>
                 <div class="setup-row">
                     <button type="button" class="build-btn" id="setupBtnGenerateNew" onclick="previewMap()">Generate New</button>
-                    <button type="button" class="wod-editor-btn" id="setupBtnPlayCustom" onclick="showScenarioPicker()">Play Custom</button>
+                    <button type="button" class="wod-editor-btn" id="setupBtnPlayCustom" onclick="showScenarioPicker()" disabled title="Purchase scenarios in the Shop → Maps tab">Play Custom</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnSaveMap" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnLoadMap" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
                 </div>
@@ -7909,6 +7910,7 @@
             function regenerateSetupPreview(ev) {
                 let setupPanel = document.getElementById('setupPanel');
                 if(!setupPanel || setupPanel.classList.contains('hidden')) return;
+                if(gameData._activeScenarioId || gameData.loadedCustomMap) return;
                 let politicsOnly = !!(ev && ev.target && ev.target.id === 'setupAI' && typeof wodCanRegeneratePoliticsOnly === 'function' && wodCanRegeneratePoliticsOnly());
                 previewMap(politicsOnly ? { politicsOnly: true } : {});
             }
@@ -8008,11 +8010,13 @@
                 let mapSizeEl = document.getElementById('setupMapSize');
                 wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
                 if(!opts.preserveMap) {
+                    let genToken = wodBumpSoloMapGenToken();
                     wodArmMapPreviewSpinner('mapPreview');
                     gameData._soloPreviewGenerating = true;
                     wodRefreshMapPreviewGeneratingUi();
                     void generateMap()
                         .then(() => {
+                            if(genToken !== gameData._soloMapGenToken || gameData.loadedCustomMap) return;
                             previewLoadedMap();
                             try {
                                 wodCaptureSoloPreviewSnapshot();
@@ -8023,22 +8027,18 @@
                         })
                         .catch(e => {
                             console.warn(e);
+                            if(genToken !== gameData._soloMapGenToken || gameData.loadedCustomMap) return;
                             previewLoadedMap();
                             gameData._soloMapPreviewMatchesStart = false;
                         })
                         .finally(() => {
+                            if(genToken !== gameData._soloMapGenToken) return;
                             wodDisarmMapPreviewSpinner('mapPreview');
                             gameData._soloPreviewGenerating = false;
                             wodRefreshMapPreviewGeneratingUi();
                         });
                 } else {
-                    previewLoadedMap();
-                    try {
-                        wodCaptureSoloPreviewSnapshot();
-                        gameData._soloMapPreviewMatchesStart = true;
-                    } catch(_) {
-                        gameData._soloMapPreviewMatchesStart = false;
-                    }
+                    wodScheduleSetupMapPreview({ captureSnapshot: true });
                 }
                 if(!_wodEditorSaveDomPrewarmed && typeof window.wodEnsureMapEditorDom === 'function') {
                     _wodEditorSaveDomPrewarmed = true;
@@ -8564,6 +8564,7 @@
             _wodSkipMapGenLoader: false,
             /** When set, `generateMap` reads `{ mapShape?, cities?, territory?, units? }` then clears in `finally`. */
             _mapGenOptions: null,
+            _soloMapGenToken: 0,
         };
 
         const SL_UI_SETTINGS_KEY = 'simplewars_ui_settings.v1';
@@ -11939,12 +11940,47 @@
             el.disabled = !!on;
             el.toggleAttribute('disabled', !!on);
         }
+        function wodBumpSoloMapGenToken() {
+            gameData._soloMapGenToken = ((gameData._soloMapGenToken || 0) + 1) | 0;
+            return gameData._soloMapGenToken;
+        }
+        function wodCancelSoloMapPreviewGeneration() {
+            wodBumpSoloMapGenToken();
+            gameData._soloPreviewGenerating = false;
+            gameData._mapGenInProgress = false;
+            gameData._wodProcgenBorderFirstApplied = false;
+            wodDisarmMapPreviewSpinner('mapPreview');
+            wodRefreshMapPreviewGeneratingUi();
+        }
+        function wodScheduleSetupMapPreview(opts) {
+            opts = opts || {};
+            requestAnimationFrame(function() {
+                requestAnimationFrame(function() {
+                    let setupPanel = document.getElementById('setupPanel');
+                    if(setupPanel && setupPanel.classList.contains('hidden') && !opts.force) return;
+                    previewLoadedMap(opts.canvasId || 'mapPreview');
+                    if(opts.captureSnapshot) {
+                        try {
+                            wodCaptureSoloPreviewSnapshot();
+                            gameData._soloMapPreviewMatchesStart = true;
+                        } catch(_) {
+                            gameData._soloMapPreviewMatchesStart = false;
+                        }
+                    }
+                });
+            });
+        }
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
             for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney', 'setupPlayerColor',
-                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
+                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnPlayCustom', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
+            if(on && document.activeElement && document.activeElement.closest) {
+                let ae = document.activeElement;
+                if(ae.closest('#setupPanel')) ae.blur();
+            }
+            wodRefreshScenarioSetupUi();
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch', 'mpGlMaxHumans',
                 'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
                 'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgFogOfWar', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
@@ -20744,7 +20780,7 @@
                 hex.renderColor = hex.baseColor;
             }
             gameData._soloMapPreviewMatchesStart = false;
-            previewLoadedMap();
+            wodScheduleSetupMapPreview();
         }
         function wodWireMapLibraryPanelOnce() {
             if(!_wodMapLib.pagerWired) {
@@ -21239,6 +21275,7 @@
             opts = opts || {};
             if(wodIsMapPreviewGenerating()) return;
             let politicsOnly = !!(opts.politicsOnly && wodCanRegeneratePoliticsOnly());
+            let genToken = wodBumpSoloMapGenToken();
             wodArmMapPreviewSpinner('mapPreview');
             gameData._soloPreviewGenerating = true;
             gameData._soloMapPreviewMatchesStart = false;
@@ -21255,6 +21292,7 @@
                         if(!politicsOnly) {
                             gameData.loadedCustomMap = false;
                             gameData._activeScenarioId = null;
+                            gameData._wodProcgenBorderFirstApplied = false;
                             wodRefreshScenarioSetupUi();
                         }
                         wodMapGenYieldingStart(politicsOnly ? 5 : 26);
@@ -21279,14 +21317,16 @@
                         } finally {
                             wodMapGenYieldingStop();
                         }
-                        previewLoadedMap('mapPreview');
+                        if(genToken === gameData._soloMapGenToken && !gameData.loadedCustomMap)
+                            previewLoadedMap('mapPreview');
                     } catch(e) {
                         ok = false;
                         console.warn(e);
                     } finally {
+                        if(genToken !== gameData._soloMapGenToken) return;
                         wodDisarmMapPreviewSpinner('mapPreview');
-                        gameData._soloMapPreviewMatchesStart = ok;
-                        if(ok) wodCaptureSoloPreviewSnapshot();
+                        gameData._soloMapPreviewMatchesStart = ok && !gameData.loadedCustomMap;
+                        if(ok && !gameData.loadedCustomMap) wodCaptureSoloPreviewSnapshot();
                         gameData._soloPreviewGenerating = false;
                         wodRefreshMapPreviewGeneratingUi();
                     }
@@ -21323,7 +21363,8 @@
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
             let startMoney = document.getElementById('setupMoney');
-            if(startMoney) gameData.money = parseInt(startMoney.value, 10) || 10000;
+            let preserveScenarioEconomy = !!(gameData._activeScenarioId || (gameData.loadedCustomMap && gameData._mapExportHadStartEconomy));
+            if(startMoney && !preserveScenarioEconomy) gameData.money = parseInt(startMoney.value, 10) || 10000;
             let shapeInput = document.getElementById('setupMapShape');
             let requestedShape = shapeInput ? shapeInput.value : 'island';
 
@@ -21980,40 +22021,7 @@
             }
             if(landHexes.length === 0) return;
 
-            // Terrain → borders → cities pipeline already partitioned and stamped towns — only wire economy/units/camera.
-            if(gameData._wodProcgenBorderFirstApplied && gameData.cities && gameData.cities.length >= ownersList.length &&
-                ownersList.every(o => gameData.cities.some(c => c && c.owner === o))) {
-
-                gameData.tradeTimer = 0;
-
-                let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
-                for(let owner of ownersList) {
-                    gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 10000);
-                    gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
-                }
-
-                wodNormalizeStartingCityEconomy(ownersList);
-                gameData._landIncomeCacheDirty = true;
-                if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false)) {
-                    gameData.entities = [];
-                    spawnInitialFrontlineUnits(ownersList);
-                }
-
-                wodMarkTerrainPoliticalDirty();
-
-                let startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
-                if(startMe) {
-                    let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
-                    let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
-                    gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
-                    gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
-                }
-
-                gameData._wodProcgenBorderFirstApplied = false;
-                return;
-            }
-
-            // Loaded custom map (library / JSON / editor export): keep borders, city ownership, factories/harbors, and unit positions.
+            // Loaded custom map (library / JSON / editor export / shop scenario): keep borders, city ownership, factories/harbors, and unit positions.
             if(preserveLoadedLayout) {
                 gameData.tradeTimer = 0;
                 let locO = 1;
@@ -22056,6 +22064,40 @@
                     gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
                     gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
                 }
+                gameData._wodProcgenBorderFirstApplied = false;
+                return;
+            }
+
+            // Terrain → borders → cities pipeline already partitioned and stamped towns — only wire economy/units/camera.
+            if(gameData._wodProcgenBorderFirstApplied && gameData.cities && gameData.cities.length >= ownersList.length &&
+                ownersList.every(o => gameData.cities.some(c => c && c.owner === o))) {
+
+                gameData.tradeTimer = 0;
+
+                let locO = (!gameData.mp || !gameData.mp.enabled) ? 1 : (gameData.mp.localSlot || 1);
+                for(let owner of ownersList) {
+                    gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 10000);
+                    gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
+                }
+
+                wodNormalizeStartingCityEconomy(ownersList);
+                gameData._landIncomeCacheDirty = true;
+                if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false)) {
+                    gameData.entities = [];
+                    spawnInitialFrontlineUnits(ownersList);
+                }
+
+                wodMarkTerrainPoliticalDirty();
+
+                let startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
+                if(startMe) {
+                    let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+                    let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+                    gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
+                    gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
+                }
+
+                gameData._wodProcgenBorderFirstApplied = false;
                 return;
             }
 
@@ -22304,6 +22346,10 @@
 
         async function generateMap() {
             let ownsInnerRng = !_wodSavedMathRandom;
+            let soloGenToken = gameData._soloMapGenToken || 0;
+            function soloMapGenAborted() {
+                return soloGenToken !== (gameData._soloMapGenToken || 0) || !!gameData.loadedCustomMap;
+            }
             let previewSpinnerActive = !!(gameData._wodPreviewSpinnerCanvasIds && gameData._wodPreviewSpinnerCanvasIds.size > 0);
             let showMapGenOverlay = !gameData._wodSkipMapGenLoader && !previewSpinnerActive;
             gameData._wodSkipMapGenLoader = false;
@@ -22357,6 +22403,7 @@
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
                 if(procAttempt > 0) await wodYieldToMainThread();
+                if(soloMapGenAborted()) break outerProcTerrain;
                 if(ownsInnerRng) {
                     if(procAttempt > 0) wodPopRandom();
                     if(procAttempt === 0) {
@@ -22375,6 +22422,7 @@
                     wodPushSeededRandom(gameData._mapGenSeed);
                 }
 
+            if(soloMapGenAborted()) break outerProcTerrain;
             gameData.hexes = {}; gameData.hexList = [];
             gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = []; gameData.bridges = [];
             gameData._wodCitySplitAnglePhase = null;
@@ -28508,6 +28556,7 @@
             let sc = WodScenarios.getScenario(scenarioId);
             let data = WodScenarios.getMapData(scenarioId);
             if(!sc || !data) return;
+            wodCancelSoloMapPreviewGeneration();
             let ms = document.getElementById('setupMapSize');
             let sz = String(data.mapSize || data.mapRadius || 80);
             if(ms) ms.value = sz;
@@ -28516,6 +28565,7 @@
             else wodApplyMapDataToSetup(data);
             gameData._activeScenarioId = scenarioId;
             gameData.loadedCustomMap = true;
+            gameData._wodProcgenBorderFirstApplied = false;
             gameData.aiCount = sc.aiCount || 1;
             let aiEl = document.getElementById('setupAI');
             if(aiEl) aiEl.value = String(gameData.aiCount);
@@ -28527,13 +28577,7 @@
             let shapeEl = document.getElementById('setupMapShape');
             if(shapeEl) shapeEl.value = 'custom';
             gameData.mapShape = 'custom';
-            previewLoadedMap();
-            try {
-                wodCaptureSoloPreviewSnapshot();
-                gameData._soloMapPreviewMatchesStart = true;
-            } catch(_) {
-                gameData._soloMapPreviewMatchesStart = false;
-            }
+            wodScheduleSetupMapPreview({ captureSnapshot: true, force: true });
             wodRefreshScenarioSetupUi();
         }
 
@@ -28558,12 +28602,19 @@
             let playBtn = document.getElementById('setupBtnPlayCustom');
             if(playBtn && window.WodScenarios) {
                 let owned = WodScenarios.list().some(s => wodOwnsScenarioMap(s.shopId));
-                playBtn.disabled = !owned;
-                playBtn.title = owned ? 'Choose a purchased historical scenario' : 'Purchase scenarios in the Shop → Maps tab';
+                let busy = wodIsMapPreviewGenerating();
+                playBtn.disabled = !owned || busy;
+                playBtn.title = !owned
+                    ? 'Purchase scenarios in the Shop → Maps tab'
+                    : (busy ? 'Wait for the map preview to finish generating' : 'Choose a purchased historical scenario');
             }
         }
 
         function showScenarioPicker() {
+            if(wodIsMapPreviewGenerating()) {
+                showNotification('Map is still generating...');
+                return;
+            }
             if(!window.WodScenarios || !WodScenarios.list().some(s => wodOwnsScenarioMap(s.shopId))) {
                 showNotification('Purchase scenarios in the Shop → Maps tab first.');
                 showPanel('shop');

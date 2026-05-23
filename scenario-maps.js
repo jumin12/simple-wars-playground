@@ -6,6 +6,7 @@
     'use strict';
 
     const WOD_SCENARIO_COST = 250;
+    const SCENARIO_BUILD_VER = 3;
 
     const TERRAIN_COLORS = {
         water: '#2980b9', grass: '#2ecc71', sand: '#f39c12', forest: '#27ae60',
@@ -268,9 +269,12 @@
             if(lon < -1.62 && lat > 49.52 && lat < 49.72) return 'water';
             if(lon < -1.68 && lat > 49.38 && lat < 49.52) return 'water';
             if(lon > -0.08 && lat > 49.55) return 'water';
+            if(lon > -0.02 && lat > 49.42) return 'water';
             if(lat > 49.30 && lat < 49.44 && lon > -1.15 && lon < 0.02) return 'sand';
-            if(Math.abs(lon + 0.36) < 0.035 && lat > 49.08 && lat < 49.28) return 'water';
-            if(Math.abs(lon + 0.72) < 0.025 && lat > 49.05 && lat < 49.22) return 'water';
+            if(Math.abs(lon + 0.36) < 0.04 && lat > 49.06 && lat < 49.30) return 'water';
+            if(Math.abs(lon + 0.72) < 0.028 && lat > 49.04 && lat < 49.24) return 'water';
+            if(Math.abs(lon + 1.05) < 0.03 && lat > 49.02 && lat < 49.18) return 'water';
+            if(lon > -1.15 && lon < -0.45 && lat > 49.02 && lat < 49.36 && hash2(q, r, 3) > 0.38) return 'forest';
             if(lon > -0.05 && lon < 0.08 && lat > 49.12 && lat < 49.32 && hash2(q, r, 3) > 0.55) return 'forest';
             if(lon > -1.05 && lon < 0.0 && lat > 48.98 && lat < 49.32) {
                 if(hash2(q, r, 11) > 0.42) return 'forest';
@@ -279,6 +283,7 @@
             if(lon < -1.42 && lat < 49.65 && lat > 49.18) {
                 if(hash2(q, r, 7) > 0.72) return 'hill';
             }
+            if(lon > -0.55 && lon < -0.15 && lat > 49.08 && lat < 49.22 && hash2(q, r, 37) > 0.84) return 'hill';
             return 'grass';
         }, function(lon, lat, q, r, type) {
             if(type === 'water') return 0;
@@ -334,9 +339,12 @@
 
         b.buildCells(function(lon, lat, q, r) {
             if(lon > 13.72 && lat < 52.42 && hash2(q, r, 2) > 0.35) return 'water';
+            if(lon < 13.12 && lat > 52.46 && lat < 52.58) return 'water';
             if(Math.abs(lat - 52.46) < 0.018 && lon > 13.25 && lon < 13.65) return 'water';
-            if(Math.abs(lon - 13.38) < 0.012 && lat > 52.40 && lat < 52.52) return 'water';
+            if(Math.abs(lon - 13.38) < 0.014 && lat > 52.40 && lat < 52.52) return 'water';
+            if(Math.abs(lon - 13.45) < 0.01 && lat > 52.48 && lat < 52.54) return 'water';
             if(lon > 13.48 && lon < 13.58 && lat > 52.48 && lat < 52.54) return 'water';
+            if(lon > 13.56 && lat > 52.50 && lat < 52.56) return 'water';
             if(lon > 13.18 && lon < 13.72 && lat > 52.34 && lat < 52.58) {
                 if(hash2(q, r, 5) > 0.88) return 'forest';
                 return 'grass';
@@ -396,11 +404,14 @@
             if(lat < 38.55 && lon > -77.05 && lon < -76.35) return 'water';
             if(lat < 39.05 && lon > -76.95 && lon < -76.15) return 'water';
             if(Math.abs(lon + 76.35) < 0.05 && lat > 38.85 && lat < 39.35) return 'water';
-            if(Math.abs(lon + 77.05) < 0.04 && lat > 39.25 && lat < 39.55) return 'water';
-            if(Math.abs(lon + 76.85) < 0.03 && lat > 39.45 && lat < 39.75) return 'water';
+            if(Math.abs(lon + 77.05) < 0.045 && lat > 39.20 && lat < 39.58) return 'water';
+            if(Math.abs(lon + 76.85) < 0.035 && lat > 39.42 && lat < 39.78) return 'water';
+            if(Math.abs(lon + 77.45) < 0.025 && lat > 38.28 && lat < 38.42) return 'water';
             if(lon < -77.55 && hash2(q, r, 17) > 0.55) return 'forest';
             if(lon > -76.55 && lat > 39.85 && hash2(q, r, 23) > 0.65) return 'forest';
             if(lon > -77.8 && lat < 39.35 && hash2(q, r, 29) > 0.58) return 'forest';
+            if(Math.abs(lon + 77.23) < 0.04 && Math.abs(lat - 39.83) < 0.05 && hash2(q, r, 47) > 0.55) return 'hill';
+            if(lon < -77.65 && lat > 39.55 && lat < 40.05 && hash2(q, r, 31) > 0.82) return 'hill';
             if(hash2(q, r, 31) > 0.90) return 'hill';
             if(lat > 39.95 && hash2(q, r, 41) > 0.82) return 'hill';
             return 'grass';
@@ -495,11 +506,12 @@
     }
 
     function getMapData(id) {
-        if(_cache[id]) return _cache[id];
+        let cacheKey = id + '@v' + SCENARIO_BUILD_VER;
+        if(_cache[cacheKey]) return _cache[cacheKey];
         let sc = getScenario(id);
         if(!sc || typeof sc.build !== 'function') return null;
-        _cache[id] = sc.build();
-        return _cache[id];
+        _cache[cacheKey] = sc.build();
+        return _cache[cacheKey];
     }
 
     global.WodScenarios = {
