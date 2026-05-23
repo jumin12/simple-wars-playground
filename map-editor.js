@@ -804,8 +804,29 @@
     return 0.299 * r + 0.587 * g + 0.114 * b;
   }
 
-  function editorIsLandPixel(r, g, b, a) {
-    return editorPixelLuminance(r, g, b, a) >= EDITOR_IMAGE_LAND_THRESHOLD;
+  function editorIsLandPixel(r, g, b, a, invert) {
+    const lum = editorPixelLuminance(r, g, b, a);
+    return invert ? lum < EDITOR_IMAGE_LAND_THRESHOLD : lum >= EDITOR_IMAGE_LAND_THRESHOLD;
+  }
+
+  function editorDetectInvertLand(data, w, h) {
+    let light = 0;
+    let dark = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4;
+        if (editorPixelLuminance(data[i], data[i + 1], data[i + 2], data[i + 3]) >= EDITOR_IMAGE_LAND_THRESHOLD) light++;
+        else dark++;
+      }
+    }
+    return dark > light;
+  }
+
+  function editorSampleImageLand(data, w, h, px, py, invert) {
+    const ix = Math.min(w - 1, Math.max(0, Math.round(px)));
+    const iy = Math.min(h - 1, Math.max(0, Math.round(py)));
+    const i = (iy * w + ix) * 4;
+    return editorIsLandPixel(data[i], data[i + 1], data[i + 2], data[i + 3], invert);
   }
 
   function editorReadImageFileAsBitmap(file) {
@@ -835,6 +856,7 @@
     sctx.drawImage(image, 0, 0);
     const full = sctx.getImageData(0, 0, w, h);
     const d = full.data;
+    const invert = editorDetectInvertLand(d, w, h);
     let minX = w;
     let minY = h;
     let maxX = -1;
@@ -842,7 +864,7 @@
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const i = (y * w + x) * 4;
-        if (editorIsLandPixel(d[i], d[i + 1], d[i + 2], d[i + 3])) {
+        if (editorIsLandPixel(d[i], d[i + 1], d[i + 2], d[i + 3], invert)) {
           if (x < minX) minX = x;
           if (y < minY) minY = y;
           if (x > maxX) maxX = x;
@@ -863,7 +885,7 @@
     crop.height = ch;
     const cctx = crop.getContext("2d", { willReadFrequently: true });
     cctx.drawImage(src, minX, minY, cw, ch, 0, 0, cw, ch);
-    return { width: cw, height: ch, data: cctx.getImageData(0, 0, cw, ch) };
+    return { width: cw, height: ch, data: cctx.getImageData(0, 0, cw, ch), invert };
   }
 
   function editorApplyImageShapeToHexes(cropped, sizeVal) {
@@ -874,40 +896,37 @@
     gd.mapShape = "custom";
     gd.loadedCustomMap = true;
 
-    const mapRadius = gd.mapRadius || sizeVal || 60;
-    const rows = Math.floor(mapRadius * 0.8);
-    const gridAspect = mapRadius / Math.max(1, rows);
     const imgW = cropped.width;
     const imgH = cropped.height;
-    const imgAspect = imgW / imgH;
     const data = cropped.data.data;
+    const invert = cropped.invert != null ? cropped.invert : editorDetectInvertLand(data, imgW, imgH);
     const getTerrainColor = WOD.getTerrainColor;
 
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
     for (const hex of gd.hexList) {
-      const nx = hex.q / Math.max(1, mapRadius);
-      const ny = hex.r / Math.max(1, rows);
-      if (nx < -1 || nx > 1 || ny < -1 || ny > 1) {
+      if (hex.x < minX) minX = hex.x;
+      if (hex.x > maxX) maxX = hex.x;
+      if (hex.y < minY) minY = hex.y;
+      if (hex.y > maxY) maxY = hex.y;
+    }
+    const gridW = Math.max(1, maxX - minX);
+    const gridH = Math.max(1, maxY - minY);
+    const scale = Math.min(gridW / imgW, gridH / imgH);
+    const drawW = imgW * scale;
+    const drawH = imgH * scale;
+    const offX = minX + (gridW - drawW) * 0.5;
+    const offY = minY + (gridH - drawH) * 0.5;
+
+    for (const hex of gd.hexList) {
+      const px = (hex.x - offX) / scale;
+      const py = (hex.y - offY) / scale;
+      if (px < 0 || px >= imgW || py < 0 || py >= imgH) {
         hex.type = "water";
       } else {
-        let u;
-        let v;
-        if (imgAspect > gridAspect) {
-          u = (nx + 1) * 0.5;
-          const scale = gridAspect / imgAspect;
-          v = (ny + 1) * 0.5 * scale + (1 - scale) * 0.5;
-        } else {
-          v = (ny + 1) * 0.5;
-          const scale = imgAspect / gridAspect;
-          u = (nx + 1) * 0.5 * scale + (1 - scale) * 0.5;
-        }
-        if (u < 0 || u > 1 || v < 0 || v > 1) {
-          hex.type = "water";
-        } else {
-          const px = Math.min(imgW - 1, Math.max(0, Math.floor(u * imgW)));
-          const py = Math.min(imgH - 1, Math.max(0, Math.floor(v * imgH)));
-          const i = (py * imgW + px) * 4;
-          hex.type = editorIsLandPixel(data[i], data[i + 1], data[i + 2], data[i + 3]) ? "grass" : "water";
-        }
+        hex.type = editorSampleImageLand(data, imgW, imgH, px, py, invert) ? "grass" : "water";
       }
       if (typeof getTerrainColor === "function") {
         hex.baseColor = getTerrainColor(hex.type);
@@ -916,9 +935,21 @@
       hex.owner = 0;
     }
 
-    if (typeof WOD.updateTerrainKey === "function") WOD.updateTerrainKey();
     if (typeof WOD.invalidateTerrain === "function") WOD.invalidateTerrain();
-    return true;
+    if (typeof WOD.updateTerrainKey === "function") WOD.updateTerrainKey();
+    if (typeof WOD.syncTerrainCacheForEditorView === "function") {
+      try {
+        WOD.syncTerrainCacheForEditorView({
+          terrain: true,
+          territory: !!(gd.layers && gd.layers.territory),
+          diplomacy: !!(gd.layers && gd.layers.diplomacy),
+          terrainViewMode: gd.terrainViewMode,
+        });
+      } catch (_) {
+        /* ignore cache sync errors during import */
+      }
+    }
+    return { ok: true, invert };
   }
 
   function editorAfterImportedMapReady() {
@@ -948,13 +979,18 @@
       }
       const sizeEl = document.getElementById("editorSize");
       const sizeVal = parseInt(sizeEl && sizeEl.value, 10) || 60;
-      if (!editorApplyImageShapeToHexes(cropped, sizeVal)) {
+      const applied = editorApplyImageShapeToHexes(cropped, sizeVal);
+      if (!applied || !applied.ok) {
         alert("Could not build map from this image.");
         return;
       }
       editorAfterImportedMapReady();
       if (typeof window.showNotification === "function") {
-        window.showNotification("Image map imported — white = land, black = water.");
+        window.showNotification(
+          applied.invert
+            ? "Image map imported — dark = land, light = water."
+            : "Image map imported — white = land, black = water.",
+        );
       }
     } catch (e) {
       console.warn(e);
