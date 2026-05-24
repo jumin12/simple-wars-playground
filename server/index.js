@@ -18,6 +18,10 @@ const LEADERBOARD_SAVE_DEBOUNCE_MS = 2000;
 const FRIEND_REMOVALS_SAVE_DEBOUNCE_MS = 2000;
 const PROGRESS_SAVE_DEBOUNCE_MS = 2000;
 const MAX_PROGRESS_BYTES = 512 * 1024;
+const AC_MS_PER_HOUR = 3600000;
+const AC_STARTING_GOLD = 1000;
+const AC_GOLD_GAIN_PER_HOUR = 50000;
+const AC_SKIN_GOLD_COST = 100;
 
 const rooms = new Map();
 /** @type {Map<string, object>} */
@@ -96,6 +100,497 @@ function sanitizeCombinedStats(obj) {
     defeats: c(obj.defeats),
     gamesPlayed: c(obj.gamesPlayed),
   };
+}
+
+const ACHIEVEMENT_KEYS = [
+  'goldenChipMaster',
+  'periodNapoleonic',
+  'periodAncient',
+  'periodMedieval',
+];
+
+const LIFETIME_KEYS = [
+  'enemyTroopKills',
+  'ownTroopLosses',
+  'enemyMarineKills',
+  'ownMarineLosses',
+  'enemyTankKills',
+  'ownTankLosses',
+  'enemyShipKills',
+  'ownShipLosses',
+  'peakFieldManpower',
+  'battlesWon',
+  'campaignLosses',
+  'citiesCaptured',
+  'convoysCaptured',
+  'factoriesBuilt',
+  'harborsBuilt',
+  'fortsBuilt',
+  'peakMoneyHeld',
+  'unitsBuiltLight',
+  'unitsBuiltHeavy',
+  'unitsBuiltShip',
+  'unitsBuiltMarine',
+  'gamesStarted',
+];
+
+const AC_LIFETIME_RATE_PER_HOUR = {
+  enemyTroopKills: 250000,
+  ownTroopLosses: 250000,
+  enemyMarineKills: 100000,
+  ownMarineLosses: 100000,
+  enemyTankKills: 100000,
+  ownTankLosses: 100000,
+  enemyShipKills: 50000,
+  ownShipLosses: 50000,
+  peakFieldManpower: 500000,
+  battlesWon: 100,
+  campaignLosses: 100,
+  citiesCaptured: 500,
+  convoysCaptured: 500,
+  factoriesBuilt: 200,
+  harborsBuilt: 200,
+  fortsBuilt: 200,
+  peakMoneyHeld: 500000,
+  unitsBuiltLight: 500000,
+  unitsBuiltHeavy: 200000,
+  unitsBuiltShip: 100000,
+  unitsBuiltMarine: 100000,
+  gamesStarted: 200,
+};
+
+const VALID_SKIN_IDS = new Set([
+  'nato',
+  'napoleonic',
+  'medieval',
+  'ancient',
+  'civRome',
+  'civCarthage',
+  'civGaul',
+  'usa',
+  'uk',
+  'germany',
+  'france',
+  'japan',
+  'ussr',
+  'italy',
+  'china',
+  'ruseUsa',
+  'ruseUk',
+  'ruseFrance',
+  'ruseGermany',
+  'ruseUssr',
+  'ruseJapan',
+  'ruseItaly',
+  'ruseChina',
+  'goldenChip',
+]);
+
+const PERIOD_SKIN_ACH = {
+  napoleonic: 'periodNapoleonic',
+  medieval: 'periodMedieval',
+  ancient: 'periodAncient',
+};
+
+function clampProgressInt(v, max = 999999999) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(max, n));
+}
+
+function sanitizeOwnedMap(obj, maxKeys = 64) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  let n = 0;
+  for (const [k, v] of Object.entries(obj)) {
+    if (n >= maxKeys) break;
+    const key = String(k || '').trim().slice(0, 32);
+    if (!key) continue;
+    out[key] = !!v;
+    n++;
+  }
+  return out;
+}
+
+function sanitizeFriendRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  const playerId = sanitizePlayerId(row.playerId);
+  if (!playerId) return null;
+  return {
+    playerId,
+    displayName: sanitizeDisplayName(row.displayName),
+    unitSkin: sanitizeUnitSkin(row.unitSkin),
+    addedAt: Math.max(0, parseInt(row.addedAt, 10) || 0),
+  };
+}
+
+function sanitizeFriendRequestRow(row) {
+  if (!row || typeof row !== 'object') return null;
+  const playerId = sanitizePlayerId(row.playerId);
+  if (!playerId) return null;
+  return {
+    playerId,
+    sentAt: Math.max(0, parseInt(row.sentAt, 10) || 0),
+  };
+}
+
+function sanitizeAchievements(obj) {
+  const out = {};
+  for (const k of ACHIEVEMENT_KEYS) out[k] = !!(obj && obj[k]);
+  return out;
+}
+
+function sanitizeLifetime(obj) {
+  const out = {};
+  for (const k of LIFETIME_KEYS) out[k] = clampProgressInt(obj && obj[k]);
+  return out;
+}
+
+function sanitizeProfile(obj, playerId) {
+  const friends = [];
+  if (obj && Array.isArray(obj.friends)) {
+    for (const row of obj.friends.slice(0, 200)) {
+      const fr = sanitizeFriendRow(row);
+      if (fr) friends.push(fr);
+    }
+  }
+  const friendRequestsOut = [];
+  const friendRequestsIn = [];
+  if (obj && Array.isArray(obj.friendRequestsOut)) {
+    for (const row of obj.friendRequestsOut.slice(0, 100)) {
+      const fr = sanitizeFriendRequestRow(row);
+      if (fr) friendRequestsOut.push(fr);
+    }
+  }
+  if (obj && Array.isArray(obj.friendRequestsIn)) {
+    for (const row of obj.friendRequestsIn.slice(0, 100)) {
+      const fr = sanitizeFriendRequestRow(row);
+      if (fr) friendRequestsIn.push(fr);
+    }
+  }
+  const equippedShopMapId = obj && obj.equippedShopMapId != null ? String(obj.equippedShopMapId).slice(0, 64) : null;
+  return {
+    gold: clampProgressInt(obj && obj.gold, 999999999),
+    unitSkin: sanitizeUnitSkin(obj && obj.unitSkin),
+    aiUnitSkin: sanitizeUnitSkin(obj && obj.aiUnitSkin),
+    ownedUnitSkins: Object.assign({ nato: true }, sanitizeOwnedMap(obj && obj.ownedUnitSkins)),
+    ownedShopVisuals: sanitizeOwnedMap(obj && obj.ownedShopVisuals),
+    gamePeriod: 'modern',
+    mpDisplayName: sanitizeDisplayName(obj && obj.mpDisplayName),
+    playerId: playerId || sanitizePlayerId(obj && obj.playerId),
+    friends,
+    friendRequestsOut,
+    friendRequestsIn,
+    equippedShopMapId: equippedShopMapId || null,
+  };
+}
+
+function sanitizeLifetimeByPeriod(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  let n = 0;
+  for (const [pid, bucket] of Object.entries(obj)) {
+    if (n >= 8) break;
+    const key = String(pid || '').trim().slice(0, 24);
+    if (!key || !bucket || typeof bucket !== 'object') continue;
+    out[key] = sanitizeLifetime(bucket);
+    n++;
+  }
+  return out;
+}
+
+function sanitizeMpStats(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const g = parseInt(obj.gamesPlayed, 10);
+  const w = parseInt(obj.wins, 10);
+  const l = parseInt(obj.losses, 10);
+  return {
+    gamesPlayed: Number.isFinite(g) ? Math.max(0, Math.min(99999, g)) : 0,
+    wins: Number.isFinite(w) ? Math.max(0, Math.min(99999, w)) : 0,
+    losses: Number.isFinite(l) ? Math.max(0, Math.min(99999, l)) : 0,
+  };
+}
+
+function sanitizeProgressObject(raw, playerId) {
+  if (!raw || typeof raw !== 'object') raw = {};
+  return {
+    achievements: sanitizeAchievements(raw.achievements),
+    lifetime: sanitizeLifetime(raw.lifetime),
+    lifetimeByPeriod: sanitizeLifetimeByPeriod(raw.lifetimeByPeriod),
+    profile: sanitizeProfile(raw.profile, playerId),
+    multiplayer: sanitizeMpStats(raw.multiplayer) || { gamesPlayed: 0, wins: 0, losses: 0 },
+  };
+}
+
+function mergeFriendRows(storedRows, incomingRows) {
+  const map = new Map();
+  for (const row of storedRows || []) {
+    if (row && row.playerId) map.set(row.playerId, row);
+  }
+  for (const row of incomingRows || []) {
+    if (row && row.playerId) map.set(row.playerId, row);
+  }
+  return [...map.values()].slice(0, 200);
+}
+
+function mergeFriendRequestRows(storedRows, incomingRows) {
+  const map = new Map();
+  for (const row of storedRows || []) {
+    if (row && row.playerId) map.set(row.playerId, row);
+  }
+  for (const row of incomingRows || []) {
+    if (row && row.playerId) map.set(row.playerId, row);
+  }
+  return [...map.values()].slice(0, 100);
+}
+
+function mergeMonotonicLifetime(storedLt, incomingLt, elapsedMs, adjustedRef) {
+  const out = {};
+  for (const k of LIFETIME_KEYS) {
+    const base = storedLt && storedLt[k] != null ? storedLt[k] : 0;
+    let inc = incomingLt && incomingLt[k] != null ? incomingLt[k] : 0;
+    inc = clampProgressInt(inc);
+    if (inc < base) {
+      adjustedRef.v = true;
+      inc = base;
+    }
+    const rate = AC_LIFETIME_RATE_PER_HOUR[k] || 100000;
+    const maxDelta = Math.max(0, Math.ceil((rate * elapsedMs) / AC_MS_PER_HOUR));
+    if (inc > base + maxDelta) {
+      adjustedRef.v = true;
+      inc = base + maxDelta;
+    }
+    out[k] = inc;
+  }
+  return out;
+}
+
+function mergeGold(storedGold, incomingGold, elapsedMs, adjustedRef) {
+  const base = storedGold != null ? storedGold : AC_STARTING_GOLD;
+  let g = clampProgressInt(incomingGold, 999999999);
+  const maxGain = Math.max(0, Math.ceil((AC_GOLD_GAIN_PER_HOUR * elapsedMs) / AC_MS_PER_HOUR));
+  if (g > base + maxGain) {
+    adjustedRef.v = true;
+    g = base + maxGain;
+  }
+  return g;
+}
+
+function mergeOwnedSkins(storedProf, incomingProf, achievements, adjustedRef) {
+  const storedSkins = Object.assign({ nato: true }, (storedProf && storedProf.ownedUnitSkins) || {});
+  const incoming = sanitizeOwnedMap(incomingProf && incomingProf.ownedUnitSkins);
+  const out = Object.assign({}, storedSkins);
+  const storedGold = storedProf ? storedProf.gold : AC_STARTING_GOLD;
+  const mergedGold = incomingProf ? incomingProf.gold : storedGold;
+  const pending = [];
+
+  for (const skinId of Object.keys(incoming)) {
+    if (!incoming[skinId] || out[skinId]) continue;
+    if (!VALID_SKIN_IDS.has(skinId)) {
+      adjustedRef.v = true;
+      continue;
+    }
+    if (skinId === 'goldenChip') {
+      if (achievements.goldenChipMaster) out[skinId] = true;
+      else adjustedRef.v = true;
+      continue;
+    }
+    const achKey = PERIOD_SKIN_ACH[skinId];
+    if (achKey) {
+      if (achievements[achKey]) out[skinId] = true;
+      else adjustedRef.v = true;
+      continue;
+    }
+    pending.push(skinId);
+  }
+
+  const impliedSpend = Math.max(0, storedGold - mergedGold);
+  const affordable = Math.floor(impliedSpend / AC_SKIN_GOLD_COST);
+  if (affordable < pending.length) {
+    if (pending.length) adjustedRef.v = true;
+    for (let i = 0; i < affordable && i < pending.length; i++) out[pending[i]] = true;
+  } else {
+    for (const s of pending) out[s] = true;
+  }
+  return out;
+}
+
+function mergeMpStats(storedMp, incomingMp, elapsedMs, adjustedRef) {
+  const base = storedMp || { gamesPlayed: 0, wins: 0, losses: 0 };
+  const inc = incomingMp || { gamesPlayed: 0, wins: 0, losses: 0 };
+  let gamesPlayed = Math.max(base.gamesPlayed || 0, inc.gamesPlayed || 0);
+  let wins = Math.max(base.wins || 0, inc.wins || 0);
+  let losses = Math.max(base.losses || 0, inc.losses || 0);
+  const maxGames = Math.max(0, Math.ceil((40 * elapsedMs) / AC_MS_PER_HOUR));
+  const baseGames = base.gamesPlayed || 0;
+  if (gamesPlayed > baseGames + maxGames) {
+    adjustedRef.v = true;
+    gamesPlayed = baseGames + maxGames;
+  }
+  if (wins + losses > gamesPlayed) {
+    adjustedRef.v = true;
+    const scale = gamesPlayed / Math.max(1, wins + losses);
+    wins = Math.floor(wins * scale);
+    losses = Math.floor(losses * scale);
+  }
+  if (wins < (base.wins || 0) || losses < (base.losses || 0) || gamesPlayed < (base.gamesPlayed || 0)) {
+    adjustedRef.v = true;
+    wins = Math.max(base.wins || 0, wins);
+    losses = Math.max(base.losses || 0, losses);
+    gamesPlayed = Math.max(base.gamesPlayed || 0, gamesPlayed);
+  }
+  return { gamesPlayed, wins, losses };
+}
+
+function mergeStickyAchievements(storedAch, incomingAch) {
+  const out = sanitizeAchievements(incomingAch);
+  if (storedAch) {
+    for (const k of ACHIEVEMENT_KEYS) {
+      if (storedAch[k]) out[k] = true;
+    }
+  }
+  return out;
+}
+
+function mergeProgressAntiCheat(stored, incoming, elapsedMs) {
+  const adjustedRef = { v: false };
+  const safeElapsed = Math.max(60000, Math.min(7 * 24 * AC_MS_PER_HOUR, elapsedMs || AC_MS_PER_HOUR));
+  if (!stored) {
+    const achievements = mergeStickyAchievements(null, incoming.achievements);
+    const lifetime = mergeMonotonicLifetime({}, incoming.lifetime, safeElapsed, adjustedRef);
+    const profile = Object.assign({}, incoming.profile);
+    profile.gold = mergeGold(AC_STARTING_GOLD, profile.gold, safeElapsed, adjustedRef);
+    profile.ownedUnitSkins = mergeOwnedSkins({ gold: AC_STARTING_GOLD, ownedUnitSkins: { nato: true } }, profile, achievements, adjustedRef);
+    if (!profile.ownedUnitSkins[profile.unitSkin]) profile.unitSkin = 'nato';
+    if (!profile.ownedUnitSkins[profile.aiUnitSkin]) profile.aiUnitSkin = 'nato';
+    return {
+      adjusted: adjustedRef.v,
+      progress: {
+        achievements,
+        lifetime,
+        lifetimeByPeriod: sanitizeLifetimeByPeriod(incoming.lifetimeByPeriod),
+        profile,
+        multiplayer: mergeMpStats(null, incoming.multiplayer, safeElapsed, adjustedRef),
+      },
+    };
+  }
+
+  const achievements = mergeStickyAchievements(stored.achievements, incoming.achievements);
+  const lifetime = mergeMonotonicLifetime(stored.lifetime, incoming.lifetime, safeElapsed, adjustedRef);
+  const lifetimeByPeriod = {};
+  const periodKeys = new Set([
+    ...Object.keys(stored.lifetimeByPeriod || {}),
+    ...Object.keys(incoming.lifetimeByPeriod || {}),
+  ]);
+  for (const pid of periodKeys) {
+    lifetimeByPeriod[pid] = mergeMonotonicLifetime(
+      (stored.lifetimeByPeriod || {})[pid],
+      (incoming.lifetimeByPeriod || {})[pid],
+      safeElapsed,
+      adjustedRef,
+    );
+  }
+
+  const storedProf = stored.profile || {};
+  const incomingProf = incoming.profile || {};
+  const mergedGold = mergeGold(storedProf.gold, incomingProf.gold, safeElapsed, adjustedRef);
+  const ownedUnitSkins = mergeOwnedSkins(storedProf, { gold: mergedGold, ownedUnitSkins: incomingProf.ownedUnitSkins }, achievements, adjustedRef);
+  let unitSkin = sanitizeUnitSkin(incomingProf.unitSkin);
+  let aiUnitSkin = sanitizeUnitSkin(incomingProf.aiUnitSkin);
+  if (!ownedUnitSkins[unitSkin]) {
+    adjustedRef.v = true;
+    unitSkin = ownedUnitSkins[storedProf.unitSkin] ? storedProf.unitSkin : 'nato';
+  }
+  if (!ownedUnitSkins[aiUnitSkin]) {
+    adjustedRef.v = true;
+    aiUnitSkin = ownedUnitSkins[storedProf.aiUnitSkin] ? storedProf.aiUnitSkin : 'nato';
+  }
+
+  const profile = {
+    gold: mergedGold,
+    unitSkin,
+    aiUnitSkin,
+    ownedUnitSkins,
+    ownedShopVisuals: Object.assign({}, sanitizeOwnedMap(storedProf.ownedShopVisuals), sanitizeOwnedMap(incomingProf.ownedShopVisuals)),
+    gamePeriod: 'modern',
+    mpDisplayName: sanitizeDisplayName(incomingProf.mpDisplayName || storedProf.mpDisplayName),
+    playerId: incomingProf.playerId || storedProf.playerId,
+    friends: mergeFriendRows(storedProf.friends, incomingProf.friends),
+    friendRequestsOut: mergeFriendRequestRows(storedProf.friendRequestsOut, incomingProf.friendRequestsOut),
+    friendRequestsIn: mergeFriendRequestRows(storedProf.friendRequestsIn, incomingProf.friendRequestsIn),
+    equippedShopMapId: incomingProf.equippedShopMapId != null
+      ? (String(incomingProf.equippedShopMapId).slice(0, 64) || null)
+      : (storedProf.equippedShopMapId || null),
+  };
+
+  return {
+    adjusted: adjustedRef.v,
+    progress: {
+      achievements,
+      lifetime,
+      lifetimeByPeriod,
+      profile,
+      multiplayer: mergeMpStats(stored.multiplayer, incoming.multiplayer, safeElapsed, adjustedRef),
+    },
+  };
+}
+
+function loadProgressFromDisk() {
+  try {
+    if (!fs.existsSync(PROGRESS_FILE)) return;
+    const raw = fs.readFileSync(PROGRESS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return;
+    for (const [id, row] of Object.entries(data)) {
+      const playerId = sanitizePlayerId(id);
+      if (!playerId || !row || typeof row !== 'object') continue;
+      playerProgress.set(playerId, {
+        playerId,
+        progress: sanitizeProgressObject(row.progress, playerId),
+        updatedAt: Math.max(0, parseInt(row.updatedAt, 10) || 0),
+      });
+    }
+  } catch (err) {
+    console.warn('[progress] load failed:', err.message);
+  }
+}
+
+function scheduleProgressSave() {
+  if (progressSaveTimer) return;
+  progressSaveTimer = setTimeout(() => {
+    progressSaveTimer = null;
+    try {
+      const data = {};
+      for (const [id, row] of playerProgress) {
+        data[id] = { progress: row.progress, updatedAt: row.updatedAt || 0 };
+      }
+      fs.writeFileSync(PROGRESS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[progress] save failed:', err.message);
+    }
+  }, PROGRESS_SAVE_DEBOUNCE_MS);
+}
+
+function getStoredProgress(playerId) {
+  return playerProgress.get(playerId) || null;
+}
+
+function saveStoredProgress(playerId, progressObj) {
+  const sanitized = sanitizeProgressObject(progressObj, playerId);
+  sanitized.profile.playerId = playerId;
+  const existing = playerProgress.get(playerId);
+  const elapsedMs = existing ? Math.max(60000, Date.now() - (existing.updatedAt || 0)) : 24 * AC_MS_PER_HOUR;
+  const merged = mergeProgressAntiCheat(existing ? existing.progress : null, sanitized, elapsedMs);
+  merged.progress.profile.playerId = playerId;
+  const row = {
+    playerId,
+    progress: merged.progress,
+    updatedAt: Date.now(),
+    adjusted: !!merged.adjusted,
+  };
+  playerProgress.set(playerId, row);
+  scheduleProgressSave();
+  return row;
 }
 
 function loadLeaderboardFromDisk() {
@@ -258,248 +753,6 @@ function buildLeaderboardRows(sortKey, filterIds) {
       updatedAt: r.updatedAt,
       online: onlineByPlayerId.has(r.playerId),
     }));
-}
-
-function sanitizeMpStats(obj) {
-  if (!obj || typeof obj !== 'object') return null;
-  const g = parseInt(obj.gamesPlayed, 10);
-  const w = parseInt(obj.wins, 10);
-  const l = parseInt(obj.losses, 10);
-  return {
-    gamesPlayed: Number.isFinite(g) ? Math.max(0, Math.min(99999, g)) : 0,
-    wins: Number.isFinite(w) ? Math.max(0, Math.min(99999, w)) : 0,
-    losses: Number.isFinite(l) ? Math.max(0, Math.min(99999, l)) : 0,
-  };
-}
-
-const ACHIEVEMENT_KEYS = [
-  'goldenChipMaster',
-  'periodNapoleonic',
-  'periodAncient',
-  'periodMedieval',
-  'campaignComplete',
-  'campaignLevel1',
-  'campaignLevel2',
-  'campaignLevel3',
-  'campaignLevel4',
-  'campaignLevel5',
-  'campaignLevel6',
-  'campaignLevel7',
-  'campaignLevel8',
-  'campaignLevel9',
-  'campaignLevel10',
-];
-
-const LIFETIME_KEYS = [
-  'enemyTroopKills',
-  'ownTroopLosses',
-  'enemyMarineKills',
-  'ownMarineLosses',
-  'enemyTankKills',
-  'ownTankLosses',
-  'enemyShipKills',
-  'ownShipLosses',
-  'peakFieldManpower',
-  'battlesWon',
-  'campaignLosses',
-  'citiesCaptured',
-  'convoysCaptured',
-  'factoriesBuilt',
-  'harborsBuilt',
-  'fortsBuilt',
-  'peakMoneyHeld',
-  'unitsBuiltLight',
-  'unitsBuiltHeavy',
-  'unitsBuiltShip',
-  'unitsBuiltMarine',
-  'gamesStarted',
-];
-
-function clampProgressInt(v, max = 999999999) {
-  const n = parseInt(v, 10);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(max, n));
-}
-
-function sanitizeOwnedMap(obj, maxKeys = 64) {
-  const out = {};
-  if (!obj || typeof obj !== 'object') return out;
-  let n = 0;
-  for (const [k, v] of Object.entries(obj)) {
-    if (n >= maxKeys) break;
-    const key = String(k || '').trim().slice(0, 32);
-    if (!key) continue;
-    out[key] = !!v;
-    n++;
-  }
-  return out;
-}
-
-function sanitizeFriendRow(row) {
-  if (!row || typeof row !== 'object') return null;
-  const playerId = sanitizePlayerId(row.playerId);
-  if (!playerId) return null;
-  return {
-    playerId,
-    displayName: sanitizeDisplayName(row.displayName),
-    unitSkin: sanitizeUnitSkin(row.unitSkin),
-    addedAt: Math.max(0, parseInt(row.addedAt, 10) || 0),
-  };
-}
-
-function sanitizeFriendRequestRow(row) {
-  if (!row || typeof row !== 'object') return null;
-  const playerId = sanitizePlayerId(row.playerId);
-  if (!playerId) return null;
-  return {
-    playerId,
-    sentAt: Math.max(0, parseInt(row.sentAt, 10) || 0),
-  };
-}
-
-function sanitizeAchievements(obj) {
-  const out = {};
-  for (const k of ACHIEVEMENT_KEYS) out[k] = !!(obj && obj[k]);
-  return out;
-}
-
-function sanitizeLifetime(obj) {
-  const out = {};
-  for (const k of LIFETIME_KEYS) out[k] = clampProgressInt(obj && obj[k]);
-  return out;
-}
-
-function sanitizeCampaign(obj) {
-  const base = { unlockedMax: 1, completed: {} };
-  if (!obj || typeof obj !== 'object') return base;
-  let unlockedMax = clampProgressInt(obj.unlockedMax, 11);
-  if (unlockedMax < 1) unlockedMax = 1;
-  const completed = {};
-  if (obj.completed && typeof obj.completed === 'object') {
-    for (const [k, v] of Object.entries(obj.completed)) {
-      if (!/^level\d+$/.test(String(k))) continue;
-      if (v) completed[k] = true;
-    }
-  }
-  return { unlockedMax, completed };
-}
-
-function sanitizeProfile(obj, playerId) {
-  const friends = [];
-  if (obj && Array.isArray(obj.friends)) {
-    for (const row of obj.friends.slice(0, 200)) {
-      const fr = sanitizeFriendRow(row);
-      if (fr) friends.push(fr);
-    }
-  }
-  const friendRequestsOut = [];
-  const friendRequestsIn = [];
-  if (obj && Array.isArray(obj.friendRequestsOut)) {
-    for (const row of obj.friendRequestsOut.slice(0, 100)) {
-      const fr = sanitizeFriendRequestRow(row);
-      if (fr) friendRequestsOut.push(fr);
-    }
-  }
-  if (obj && Array.isArray(obj.friendRequestsIn)) {
-    for (const row of obj.friendRequestsIn.slice(0, 100)) {
-      const fr = sanitizeFriendRequestRow(row);
-      if (fr) friendRequestsIn.push(fr);
-    }
-  }
-  const equippedShopMapId = obj && obj.equippedShopMapId != null ? String(obj.equippedShopMapId).slice(0, 64) : null;
-  return {
-    gold: clampProgressInt(obj && obj.gold, 999999999),
-    unitSkin: sanitizeUnitSkin(obj && obj.unitSkin),
-    aiUnitSkin: sanitizeUnitSkin(obj && obj.aiUnitSkin),
-    ownedUnitSkins: Object.assign({ nato: true }, sanitizeOwnedMap(obj && obj.ownedUnitSkins)),
-    ownedShopVisuals: sanitizeOwnedMap(obj && obj.ownedShopVisuals),
-    gamePeriod: 'modern',
-    mpDisplayName: sanitizeDisplayName(obj && obj.mpDisplayName),
-    playerId: playerId || sanitizePlayerId(obj && obj.playerId),
-    friends,
-    friendRequestsOut,
-    friendRequestsIn,
-    equippedShopMapId: equippedShopMapId || null,
-  };
-}
-
-function sanitizeLifetimeByPeriod(obj) {
-  const out = {};
-  if (!obj || typeof obj !== 'object') return out;
-  let n = 0;
-  for (const [pid, bucket] of Object.entries(obj)) {
-    if (n >= 8) break;
-    const key = String(pid || '').trim().slice(0, 24);
-    if (!key || !bucket || typeof bucket !== 'object') continue;
-    out[key] = sanitizeLifetime(bucket);
-    n++;
-  }
-  return out;
-}
-
-function sanitizeProgressObject(raw, playerId) {
-  if (!raw || typeof raw !== 'object') raw = {};
-  return {
-    achievements: sanitizeAchievements(raw.achievements),
-    campaign: sanitizeCampaign(raw.campaign),
-    lifetime: sanitizeLifetime(raw.lifetime),
-    lifetimeByPeriod: sanitizeLifetimeByPeriod(raw.lifetimeByPeriod),
-    profile: sanitizeProfile(raw.profile, playerId),
-    multiplayer: sanitizeMpStats(raw.multiplayer) || { gamesPlayed: 0, wins: 0, losses: 0 },
-  };
-}
-
-function loadProgressFromDisk() {
-  try {
-    if (!fs.existsSync(PROGRESS_FILE)) return;
-    const raw = fs.readFileSync(PROGRESS_FILE, 'utf8');
-    const data = JSON.parse(raw);
-    if (!data || typeof data !== 'object') return;
-    for (const [id, row] of Object.entries(data)) {
-      const playerId = sanitizePlayerId(id);
-      if (!playerId || !row || typeof row !== 'object') continue;
-      playerProgress.set(playerId, {
-        playerId,
-        progress: sanitizeProgressObject(row.progress, playerId),
-        updatedAt: Math.max(0, parseInt(row.updatedAt, 10) || 0),
-      });
-    }
-  } catch (err) {
-    console.warn('[progress] load failed:', err.message);
-  }
-}
-
-function scheduleProgressSave() {
-  if (progressSaveTimer) return;
-  progressSaveTimer = setTimeout(() => {
-    progressSaveTimer = null;
-    try {
-      const data = {};
-      for (const [id, row] of playerProgress) {
-        data[id] = { progress: row.progress, updatedAt: row.updatedAt || 0 };
-      }
-      fs.writeFileSync(PROGRESS_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (err) {
-      console.warn('[progress] save failed:', err.message);
-    }
-  }, PROGRESS_SAVE_DEBOUNCE_MS);
-}
-
-function getStoredProgress(playerId) {
-  return playerProgress.get(playerId) || null;
-}
-
-function saveStoredProgress(playerId, progressObj) {
-  const sanitized = sanitizeProgressObject(progressObj, playerId);
-  sanitized.profile.playerId = playerId;
-  const row = {
-    playerId,
-    progress: sanitized,
-    updatedAt: Date.now(),
-  };
-  playerProgress.set(playerId, row);
-  scheduleProgressSave();
-  return row;
 }
 
 function registerClientPlayer(client, payload) {
@@ -803,8 +1056,8 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'invalid_player_id', msg: 'Invalid player ID.' }));
         return;
       }
-      if (client.playerId && client.playerId !== playerId) {
-        ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'player_mismatch', msg: 'Player ID mismatch.' }));
+      if (!client.playerId || client.playerId !== playerId) {
+        ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'not_registered', msg: 'Register before saving progress.' }));
         return;
       }
       let rawSize = 0;
@@ -829,6 +1082,8 @@ wss.on('connection', (ws) => {
           t: 'progress_saved',
           playerId,
           updatedAt: row.updatedAt,
+          adjusted: !!row.adjusted,
+          progress: row.progress,
         }),
       );
       return;

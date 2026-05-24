@@ -86,27 +86,6 @@
           api.lobbies = msg.lobbies || [];
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
-        case 'progress':
-          emit('ProgressLoaded', {
-            playerId: msg.playerId || '',
-            found: !!msg.found,
-            progress: msg.progress || null,
-            updatedAt: msg.updatedAt | 0,
-          });
-          break;
-        case 'progress_saved':
-          emit('ProgressSaved', {
-            playerId: msg.playerId || '',
-            updatedAt: msg.updatedAt | 0,
-          });
-          break;
-        case 'progress_save_failed':
-        case 'progress_failed':
-          emit('ProgressSaveFailed', {
-            reason: msg.reason || '',
-            msg: msg.msg || 'Progress sync failed',
-          });
-          break;
         case 'registered':
           emit('Registered', { playerId: msg.playerId || '' });
           break;
@@ -152,6 +131,29 @@
           break;
         case 'leaderboard':
           emit('Leaderboard', { sort: msg.sort || 'wins', scope: msg.scope || 'global', rows: msg.rows || [] });
+          break;
+        case 'progress':
+          emit('ProgressLoaded', {
+            playerId: msg.playerId || '',
+            found: !!msg.found,
+            progress: msg.progress || null,
+            updatedAt: msg.updatedAt | 0,
+          });
+          break;
+        case 'progress_saved':
+          emit('ProgressSaved', {
+            playerId: msg.playerId || '',
+            updatedAt: msg.updatedAt | 0,
+            adjusted: !!msg.adjusted,
+            progress: msg.progress || null,
+          });
+          break;
+        case 'progress_save_failed':
+        case 'progress_failed':
+          emit('ProgressSaveFailed', {
+            reason: msg.reason || '',
+            msg: msg.msg || 'Progress sync failed',
+          });
           break;
         case 'friend_removed':
           emit('FriendRemoved', {
@@ -363,16 +365,6 @@
         combinedStats: p.combinedStats && typeof p.combinedStats === 'object' ? p.combinedStats : null,
       });
     },
-    progressLoad(playerId) {
-      send({ t: 'progress_load', playerId: String(playerId || '') });
-    },
-    progressSave(playerId, progress) {
-      send({
-        t: 'progress_save',
-        playerId: String(playerId || ''),
-        progress: progress && typeof progress === 'object' ? progress : {},
-      });
-    },
     sendFriendRequest(targetPlayerId) {
       send({ t: 'friend_request', targetPlayerId: String(targetPlayerId || '') });
     },
@@ -391,6 +383,16 @@
     },
     queryFriendPresence(friendIds) {
       send({ t: 'friend_presence', friendIds: Array.isArray(friendIds) ? friendIds : [] });
+    },
+    progressLoad(playerId) {
+      send({ t: 'progress_load', playerId: String(playerId || '') });
+    },
+    progressSave(playerId, progress) {
+      send({
+        t: 'progress_save',
+        playerId: String(playerId || ''),
+        progress: progress && typeof progress === 'object' ? progress : {},
+      });
     },
     sendFriendInvite(targetPlayerId, seat) {
       send({ t: 'friend_invite', targetPlayerId: String(targetPlayerId || ''), seat: seat | 0 });
