@@ -3587,87 +3587,11 @@
             border: 1px solid rgba(255, 255, 255, 0.14);
             border-radius: 12px;
             background: rgba(0, 0, 0, 0.22);
-            padding: 8px 8px 10px;
+            padding: 12px 12px 10px;
             text-align: left;
             cursor: pointer;
             transition: border-color 0.15s, transform 0.12s, background 0.15s;
-            min-height: 168px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        .campaign-level-preview {
-            width: 100%;
-            aspect-ratio: 5 / 3;
-            border-radius: 8px;
-            overflow: hidden;
-            background: #154360;
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            flex-shrink: 0;
-        }
-        .campaign-level-preview canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
-        .campaign-level-preview-loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            font-size: 0.72rem;
-            color: rgba(255, 255, 255, 0.45);
-            letter-spacing: 0.04em;
-            text-transform: uppercase;
-        }
-        .campaign-detail-preview {
-            width: 100%;
-            max-width: 420px;
-            aspect-ratio: 16 / 9;
-            border-radius: 10px;
-            overflow: hidden;
-            background: #154360;
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            margin: 0 0 12px;
-        }
-        .campaign-detail-preview canvas {
-            display: block;
-            width: 100%;
-            height: 100%;
-        }
-        .campaign-briefing-overlay-wrap {
-            z-index: 12050;
-            background: rgba(0, 0, 0, 0.72);
-        }
-        .campaign-briefing-panel {
-            max-width: 520px;
-            width: min(92vw, 520px);
-            margin: auto;
-            padding: 28px 26px 22px;
-            border-radius: 14px;
-            border: 1px solid rgba(212, 175, 55, 0.45);
-            background: linear-gradient(180deg, rgba(18, 24, 32, 0.98), rgba(8, 12, 18, 0.98));
-            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
-            text-align: center;
-        }
-        .campaign-briefing-panel h2 {
-            margin: 0 0 10px;
-            color: #d4af37;
-            font-size: 1.35rem;
-        }
-        .campaign-briefing-panel p {
-            margin: 0 0 10px;
-            line-height: 1.45;
-            color: rgba(255, 255, 255, 0.88);
-        }
-        .campaign-briefing-handicap {
-            font-size: 0.88rem;
-            color: #bdc3c7;
-        }
-        .campaign-briefing-hint {
-            margin-top: 14px !important;
-            font-size: 0.82rem;
-            color: rgba(255, 255, 255, 0.55);
+            min-height: 118px;
         }
         .campaign-level-card:not(.locked):hover {
             border-color: rgba(212, 175, 55, 0.55);
@@ -7101,7 +7025,6 @@
                 <p class="campaign-progress-line" id="campaignProgressLine">Mission 1 unlocked — beat each mission to unlock the next.</p>
                 <div class="campaign-level-grid" id="campaignLevelGrid"></div>
                 <div class="campaign-detail" id="campaignLevelDetail">
-                    <div class="campaign-detail-preview" id="campaignDetailPreview"><div class="campaign-level-preview-loading">Loading map…</div></div>
                     <h3 id="campaignDetailTitle">Select a mission</h3>
                     <p id="campaignDetailBlurb">Pick a mission above to see its briefing and handicap.</p>
                     <div class="campaign-detail-actions">
@@ -8003,7 +7926,6 @@
                         </label>
                     </div>
                     <p id="wodBrowserSaveStatus" style="margin:10px 0 0;color:#95a5a6;font-size:0.88rem;"></p>
-                    <p id="wodSettingsPlayerId" style="margin:8px 0 0;color:#bdc3c7;font-size:0.88rem;word-break:break-all;"></p>
                 </div>
                 <div class="settings-section hidden" id="settingsGamePeriodSection">
                     <h3 style="color:#9b59b6;margin-top:0;">Time period</h3>
@@ -8402,16 +8324,6 @@
         </div>
     </div>
 
-    <div id="campaignBriefingOverlay" class="overlay hidden campaign-briefing-overlay-wrap">
-        <div class="campaign-briefing-panel">
-            <h2 id="campaignBriefingTitle">Mission briefing</h2>
-            <p id="campaignBriefingBody"></p>
-            <p id="campaignBriefingHandicap" class="campaign-briefing-handicap"></p>
-            <p class="campaign-briefing-hint">Press Space or click Begin to start (game begins paused).</p>
-            <button type="button" class="menu-btn" id="campaignBriefingBtn" style="margin-top:8px;width:100%;max-width:280px;">Begin mission</button>
-        </div>
-    </div>
-
     <!-- Production: static site simple-wars-live.onrender.com talks to Node relay simple-wars.onrender.com (wss). -->
     <script>
     (function () {
@@ -8749,10 +8661,6 @@
             if(el) el.classList.add('hidden');
         }
 
-        function hideCampaignBriefingOverlay() {
-            wodHideCampaignBriefingOverlay();
-        }
-
         function dismissCampaignSummaryToMenu() {
             hideCampaignSummaryOverlay();
             returnToMenu();
@@ -8778,201 +8686,123 @@
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             stopGame();
-            if(nextId >= 1 && nextId <= WOD_CAMPAIGN_LEVELS.length && wodIsCampaignLevelUnlocked(nextId)) {
+            if(nextId >= 1 && nextId <= wodGetCampaignLevelCount() && wodIsCampaignLevelUnlocked(nextId)) {
                 wodStartCampaignLevel(nextId);
             } else {
                 showPanel('campaign');
             }
         }
 
-        const WOD_CAMPAIGN_LEVELS = [
-            { id: 1, name: 'Opening Strike', blurb: 'Even footing on a shared island — standard cash, cities, and armies.', seed: 0xCA010001, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 1, manpowerMul: 1, unitMul: 1, landFrac: 1, cityCap: null, heavyMul: 1, unitCap: null },
-            { id: 2, name: 'Thin Lines', blurb: 'Same map seed, but your starting army is smaller.', seed: 0xCA010002, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 1, manpowerMul: 1, unitMul: 0.72, landFrac: 1, cityCap: null, heavyMul: 1, unitCap: null },
-            { id: 3, name: 'Tight Budget', blurb: 'Treasury reserves are cut before the first turn.', seed: 0xCA010003, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 0.68, manpowerMul: 0.9, unitMul: 1, landFrac: 1, cityCap: null, heavyMul: 1, unitCap: null },
-            { id: 4, name: 'Contested Soil', blurb: 'You hold less starting territory on the same coastline.', seed: 0xCA010004, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 1, manpowerMul: 1, unitMul: 1, landFrac: 0.84, cityCap: null, heavyMul: 1, unitCap: null },
-            { id: 5, name: 'Fewer Strongholds', blurb: 'Only two cities begin under your banner.', seed: 0xCA010005, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 1, manpowerMul: 1, unitMul: 1, landFrac: 1, cityCap: 2, heavyMul: 1, unitCap: null },
-            { id: 6, name: 'Underequipped', blurb: 'Smaller armies and a lighter wallet.', seed: 0xCA010006, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 0.62, manpowerMul: 0.82, unitMul: 0.58, landFrac: 1, cityCap: null, heavyMul: 0.5, unitCap: null },
-            { id: 7, name: 'Total War', blurb: 'Annihilation rules — destroy every enemy unit to win.', seed: 0xCA010007, mapSize: 60, mapShape: 'island', victoryMode: 'annihilation', money: 10000, moneyMul: 1, manpowerMul: 1, unitMul: 0.52, landFrac: 1, cityCap: null, heavyMul: 0.5, unitCap: null },
-            { id: 8, name: 'Broken Front', blurb: 'Less land, less cash, and fewer boots on the ground.', seed: 0xCA010008, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 0.48, manpowerMul: 0.75, unitMul: 0.48, landFrac: 0.72, cityCap: null, heavyMul: 0, unitCap: null },
-            { id: 9, name: 'Last Bastion', blurb: 'One city, a shrunken realm, and barely enough to survive.', seed: 0xCA010009, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 0.32, manpowerMul: 0.65, unitMul: 0.32, landFrac: 0.58, cityCap: 1, heavyMul: 0, unitCap: null },
-            { id: 10, name: 'One Rifle', blurb: 'One unit, one city, almost no cash — fight your way back.', seed: 0xCA01000A, mapSize: 60, mapShape: 'island', victoryMode: 'domination', money: 10000, moneyMul: 0.18, manpowerMul: 0.5, unitMul: 0.05, landFrac: 0.42, cityCap: 1, heavyMul: 0, unitCap: 1 }
-        ];
-        let _wodCampaignSelectedLevel = 1;
-        const _wodCampaignPreviewCache = {};
-        let _wodCampaignPreviewsBootDone = false;
+        const WOD_CAMPAIGN_MAPS_DIR = 'campaign-maps/';
+        let wodCampaignCatalog = [];
+        let wodCampaignMapCache = Object.create(null);
+        let wodCampaignCatalogLoaded = false;
 
-        function wodCampaignPreviewPaintCanvas(canvas, dataUrl) {
-            if(!canvas || !dataUrl) return;
-            let ctx = canvas.getContext('2d');
-            if(!ctx) return;
-            let img = new Image();
-            img.onload = () => {
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-                ctx.drawImage(img, 0, 0);
+        function wodNormalizeCampaignMissionEntry(raw, index) {
+            if(!raw || typeof raw !== 'object') return null;
+            let id = parseInt(raw.id != null ? raw.id : raw.level, 10);
+            if(!Number.isFinite(id) || id < 1) id = (index | 0) + 1;
+            let file = String(raw.file || raw.map || '').trim();
+            if(!file) return null;
+            function numOr(v, d) {
+                let n = parseFloat(v);
+                return Number.isFinite(n) ? n : d;
+            }
+            function capOr(v) {
+                if(v == null || v === '' || v === false) return null;
+                let n = parseInt(v, 10);
+                return Number.isFinite(n) ? Math.max(1, n) : null;
+            }
+            return {
+                id: id,
+                name: String(raw.name || ('Mission ' + id)).slice(0, 64),
+                blurb: String(raw.description || raw.blurb || '').slice(0, 280),
+                file: file,
+                victoryMode: raw.victoryMode === 'annihilation' ? 'annihilation' : 'domination',
+                money: Math.max(0, parseInt(raw.baseMoney != null ? raw.baseMoney : raw.money, 10) || 10000),
+                moneyMul: numOr(raw.moneyMul, 1),
+                manpowerMul: numOr(raw.manpowerMul, 1),
+                unitMul: numOr(raw.unitMul, 1),
+                landFrac: numOr(raw.landFrac, 1),
+                cityCap: capOr(raw.cityCap),
+                heavyMul: numOr(raw.heavyMul, 1),
+                unitCap: capOr(raw.unitCap)
             };
-            img.src = dataUrl;
         }
 
-        function wodCampaignPreviewMountCanvas(host, levelId) {
-            if(!host) return null;
-            host.innerHTML = '';
-            let wrap = document.createElement('div');
-            wrap.className = 'campaign-level-preview';
-            wrap.setAttribute('data-level', String(levelId));
-            let canvas = document.createElement('canvas');
-            canvas.width = 200;
-            canvas.height = 120;
-            canvas.setAttribute('aria-hidden', 'true');
-            wrap.appendChild(canvas);
-            host.appendChild(wrap);
-            if(_wodCampaignPreviewCache[levelId]) wodCampaignPreviewPaintCanvas(canvas, _wodCampaignPreviewCache[levelId]);
-            else {
-                let loading = document.createElement('div');
-                loading.className = 'campaign-level-preview-loading';
-                loading.textContent = 'Map…';
-                wrap.appendChild(loading);
-            }
-            return canvas;
-        }
-
-        async function wodGenerateCampaignPreviewDataUrl(levelId, opts) {
-            opts = opts || {};
-            if(_wodCampaignPreviewCache[levelId]) return _wodCampaignPreviewCache[levelId];
-            let lv = wodGetCampaignLevelDef(levelId);
-            if(!lv) return null;
-            let bootPhase = !!opts.bootPhase;
-            let menuSnap = null;
-            let wasMenuAttract = !!gameData.menuAttractMode;
-            let prevSkip = !!gameData._wodSkipMapGenLoader;
-            let shouldRestoreMenu = !bootPhase && menuDemoSeeded && menuBattleLive && menuBattleLive.hexList && menuBattleLive.hexList.length;
+        async function wodLoadCampaignCatalog(force) {
+            if(wodCampaignCatalogLoaded && !force) return wodCampaignCatalog;
             try {
-                if(shouldRestoreMenu) {
-                    pauseMenuBackgroundBattle();
-                    gameData.menuAttractMode = false;
-                    menuSnap = cloneMenuBattleState();
-                }
-                gameData._wodSkipMapGenLoader = true;
-                gameData._mapGenInProgress = false;
-                wodConfigureCampaignMission(levelId);
-                wodApplyMapSizePreset(lv.mapSize);
-                gameData.aiCount = 1;
-                gameData._mapGenSeed = lv.seed >>> 0;
-                gameData._wodReuseMapGenSeed = true;
-                gameData.loadedCustomMap = false;
-                gameData._wodFastMapGen = true;
-                wodMapGenYieldingStart(4);
-                await generateMap();
-                let off = document.createElement('canvas');
-                off.width = 240;
-                off.height = 144;
-                previewLoadedMap(off);
-                _wodCampaignPreviewCache[levelId] = off.toDataURL('image/png');
+                let res = await fetch(WOD_CAMPAIGN_MAPS_DIR + 'manifest.json', { cache: 'no-cache' });
+                if(!res.ok) throw new Error('campaign manifest missing');
+                let json = await res.json();
+                let list = Array.isArray(json.missions) ? json.missions : (json.levels || []);
+                wodCampaignCatalog = list.map((m, i) => wodNormalizeCampaignMissionEntry(m, i)).filter(Boolean)
+                    .sort((a, b) => a.id - b.id);
             } catch(e) {
-                console.warn('Campaign preview failed for mission', levelId, e);
-            } finally {
-                wodMapGenYieldingStop();
-                gameData._wodFastMapGen = false;
-                gameData._mapGenInProgress = false;
-                gameData._wodSkipMapGenLoader = prevSkip;
-                wodClearCampaignMissionConfig();
-                if(shouldRestoreMenu && menuSnap && applyMenuBattleState(menuSnap)) {
-                    gameData.menuAttractMode = wasMenuAttract;
-                }
+                wodCampaignCatalog = [];
+                console.warn('wodLoadCampaignCatalog', e);
             }
-            return _wodCampaignPreviewCache[levelId] || null;
+            wodCampaignCatalogLoaded = true;
+            return wodCampaignCatalog;
         }
 
-        async function wodPregenerateAllCampaignPreviewsDuringBoot(onProgress) {
-            if(_wodCampaignPreviewsBootDone) return;
-            gameData._wodSkipMapGenLoader = true;
-            for(let i = 0; i < WOD_CAMPAIGN_LEVELS.length; i++) {
-                let lv = WOD_CAMPAIGN_LEVELS[i];
-                if(onProgress) onProgress(i + 1, WOD_CAMPAIGN_LEVELS.length, lv);
-                if(!_wodCampaignPreviewCache[lv.id])
-                    await wodGenerateCampaignPreviewDataUrl(lv.id, { bootPhase: true });
-            }
-            _wodCampaignPreviewsBootDone = true;
+        function wodGetCampaignLevels() {
+            return wodCampaignCatalog.length ? wodCampaignCatalog : [];
         }
 
-        function wodApplyCampaignPreviewsToDom() {
-            for(let lv of WOD_CAMPAIGN_LEVELS) {
-                let url = _wodCampaignPreviewCache[lv.id];
-                if(!url) continue;
-                document.querySelectorAll('.campaign-level-preview[data-level="' + lv.id + '"] canvas').forEach(c => {
-                    wodCampaignPreviewPaintCanvas(c, url);
-                    let load = c.parentElement && c.parentElement.querySelector('.campaign-level-preview-loading');
-                    if(load) load.remove();
-                });
-            }
-            wodRenderCampaignDetailPreview();
+        function wodGetCampaignLevelCount() {
+            return wodGetCampaignLevels().length;
         }
 
-        function wodRenderCampaignDetailPreview() {
-            let host = document.getElementById('campaignDetailPreview');
-            if(!host) return;
-            let lv = wodGetCampaignLevelDef(_wodCampaignSelectedLevel);
-            if(!lv) {
-                host.innerHTML = '<div class="campaign-level-preview-loading">Select a mission</div>';
-                return;
+        async function wodFetchCampaignMapData(entry) {
+            if(!entry || !entry.file) return null;
+            let key = entry.file + '::' + entry.id;
+            if(wodCampaignMapCache[key]) return wodCampaignMapCache[key];
+            try {
+                let res = await fetch(WOD_CAMPAIGN_MAPS_DIR + entry.file, { cache: 'no-cache' });
+                if(!res.ok) throw new Error('map file missing');
+                let data = await res.json();
+                if(!data || !Array.isArray(data.hexList) || !data.hexList.length) throw new Error('invalid map export');
+                wodCampaignMapCache[key] = data;
+                return data;
+            } catch(e) {
+                console.warn('wodFetchCampaignMapData', entry.file, e);
+                return null;
             }
-            host.innerHTML = '';
-            let wrap = document.createElement('div');
-            wrap.className = 'campaign-level-preview';
-            wrap.setAttribute('data-level', String(lv.id));
-            let canvas = document.createElement('canvas');
-            canvas.width = 420;
-            canvas.height = 236;
-            wrap.appendChild(canvas);
-            host.appendChild(wrap);
-            if(_wodCampaignPreviewCache[lv.id]) wodCampaignPreviewPaintCanvas(canvas, _wodCampaignPreviewCache[lv.id]);
+        }
+
+        function wodLoadCampaignMapIntoGame(mapData) {
+            if(!mapData || !mapData.hexList || !mapData.hexList.length) return false;
+            let sz = mapData.mapSize || mapData.mapRadius || 60;
+            wodApplyMapSizePreset(sz);
+            gameData.mapShape = mapData.mapShape || 'custom';
+            if(window.WOD && typeof WOD.loadMapData === 'function') WOD.loadMapData(mapData);
             else {
-                let loading = document.createElement('div');
-                loading.className = 'campaign-level-preview-loading';
-                loading.textContent = 'Generating map preview…';
-                wrap.appendChild(loading);
+                gameData.loadedCustomMap = true;
+                gameData.hexList = mapData.hexList || [];
+                gameData.cities = mapData.cities || [];
+                gameData.roads = mapData.roads || [];
+                gameData.entities = mapData.entities || [];
+                gameData.forts = (mapData.forts || []).map(f => Object.assign({}, f));
+                gameData.bridges = (mapData.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+                for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+                wodRebuildBridgeHexIndex();
+                gameData.hexes = {};
+                for(let hex of gameData.hexList) {
+                    hex.baseColor = getTerrainColor(hex.type);
+                    hex.renderColor = hex.baseColor;
+                    if(hex.owner === undefined || hex.owner === null) hex.owner = 0;
+                    gameData.hexes[`${hex.q},${hex.r}`] = hex;
+                }
+                normalizeTerrainHexes();
             }
+            gameData.loadedCustomMap = true;
+            gameData._soloMapPreviewMatchesStart = true;
+            return true;
         }
 
-        function wodShowCampaignBriefingOverlay() {
-            let overlay = document.getElementById('campaignBriefingOverlay');
-            let title = document.getElementById('campaignBriefingTitle');
-            let body = document.getElementById('campaignBriefingBody');
-            let handicap = document.getElementById('campaignBriefingHandicap');
-            if(!overlay || !gameData.campaign || !gameData.campaign.active) return;
-            let lv = wodGetCampaignLevelDef(gameData.campaign.levelId);
-            if(title) title.textContent = 'Mission ' + (gameData.campaign.levelId | 0) + ' — ' + (gameData.campaign.levelName || (lv && lv.name) || 'Briefing');
-            if(body) body.textContent = (lv && lv.blurb) || 'Engage the enemy and complete the objective.';
-            if(handicap) handicap.textContent = 'Handicap: ' + wodCampaignHandicapSummary(lv || {});
-            gameData._campaignBriefingPending = true;
-            setGameSpeed(0, true);
-            overlay.classList.remove('hidden');
-        }
-
-        function wodDismissCampaignBriefing() {
-            let overlay = document.getElementById('campaignBriefingOverlay');
-            if(overlay) overlay.classList.add('hidden');
-            gameData._campaignBriefingPending = false;
-            if(gameState === 'PLAYING' && !gameData._campaignEnded) setGameSpeed(1, true);
-        }
-
-        function wodWireCampaignBriefingButtons() {
-            if(window._wodCampaignBriefingWired) return;
-            window._wodCampaignBriefingWired = true;
-            let btn = document.getElementById('campaignBriefingBtn');
-            let overlay = document.getElementById('campaignBriefingOverlay');
-            if(btn) btn.onclick = () => wodDismissCampaignBriefing();
-            if(overlay) overlay.addEventListener('click', (ev) => {
-                if(ev.target === overlay) wodDismissCampaignBriefing();
-            });
-        }
-
-        function wodHideCampaignBriefingOverlay() {
-            let overlay = document.getElementById('campaignBriefingOverlay');
-            if(overlay) overlay.classList.add('hidden');
-            if(gameData) gameData._campaignBriefingPending = false;
-        }
+        let _wodCampaignSelectedLevel = 1;
         function wodEnsureCampaignProgress() {
             if(!wodProgress) wodProgress = defaultWodProgress();
             if(!wodProgress.campaign || typeof wodProgress.campaign !== 'object')
@@ -8981,7 +8811,7 @@
                 wodProgress.campaign.completed = {};
             let um = parseInt(wodProgress.campaign.unlockedMax, 10);
             if(!Number.isFinite(um) || um < 1) wodProgress.campaign.unlockedMax = 1;
-            if(um > WOD_CAMPAIGN_LEVELS.length + 1) wodProgress.campaign.unlockedMax = WOD_CAMPAIGN_LEVELS.length + 1;
+            if(um > wodGetCampaignLevelCount() + 1) wodProgress.campaign.unlockedMax = wodGetCampaignLevelCount() + 1;
         }
         function wodIsCampaignLevelUnlocked(levelId) {
             wodEnsureCampaignProgress();
@@ -8992,7 +8822,7 @@
             return !!wodProgress.campaign.completed['level' + levelId];
         }
         function wodGetCampaignLevelDef(levelId) {
-            return WOD_CAMPAIGN_LEVELS[(levelId | 0) - 1] || null;
+            return wodGetCampaignLevels()[(levelId | 0) - 1] || null;
         }
         function wodCampaignHandicapSummary(lv) {
             if(!lv) return '';
@@ -9007,39 +8837,33 @@
             if(!parts.length) parts.push('even start');
             return parts.join(' · ');
         }
-        function wodRenderCampaignPanel() {
+        async function wodRenderCampaignPanel() {
+            await wodLoadCampaignCatalog();
             wodEnsureCampaignProgress();
             let grid = document.getElementById('campaignLevelGrid');
             let line = document.getElementById('campaignProgressLine');
             if(!grid) return;
-            let done = WOD_CAMPAIGN_LEVELS.filter(lv => wodIsCampaignLevelCompleted(lv.id)).length;
-            if(line) line.textContent = done + ' / ' + WOD_CAMPAIGN_LEVELS.length + ' missions complete · unlocked through mission ' + Math.min(WOD_CAMPAIGN_LEVELS.length, wodProgress.campaign.unlockedMax | 0);
+            let levels = wodGetCampaignLevels();
+            if(!levels.length) {
+                grid.innerHTML = '<p class="credits-intro" style="grid-column:1/-1;">No campaign missions found. Add maps under <strong>campaign-maps/</strong> — see README there.</p>';
+                if(line) line.textContent = '';
+                return;
+            }
+            let done = levels.filter(lv => wodIsCampaignLevelCompleted(lv.id)).length;
+            if(line) line.textContent = done + ' / ' + levels.length + ' missions complete · unlocked through mission ' + Math.min(levels.length, wodProgress.campaign.unlockedMax | 0);
             grid.innerHTML = '';
-            for(let lv of WOD_CAMPAIGN_LEVELS) {
+            for(let lv of levels) {
                 let unlocked = wodIsCampaignLevelUnlocked(lv.id);
                 let completed = wodIsCampaignLevelCompleted(lv.id);
                 let card = document.createElement('button');
                 card.type = 'button';
                 card.className = 'campaign-level-card' + (unlocked ? '' : ' locked') + (completed ? ' completed' : '') + (lv.id === _wodCampaignSelectedLevel ? ' selected' : '');
                 card.innerHTML =
-                    '<div class="campaign-level-preview" data-level="' + lv.id + '"><canvas width="200" height="120" aria-hidden="true"></canvas></div>' +
                     '<div class="campaign-level-num">Mission ' + lv.id + '</div>' +
                     '<div class="campaign-level-name">' + wodMpEscapeHtml(lv.name) + '</div>' +
                     '<div class="campaign-level-blurb">' + wodMpEscapeHtml(wodCampaignHandicapSummary(lv)) + '</div>' +
                     (completed ? '<span class="campaign-level-badge">Clear</span>' : '') +
                     (unlocked ? '' : '<span class="campaign-level-lock" aria-hidden="true">🔒</span>');
-                if(_wodCampaignPreviewCache[lv.id]) {
-                    let c = card.querySelector('canvas');
-                    if(c) wodCampaignPreviewPaintCanvas(c, _wodCampaignPreviewCache[lv.id]);
-                } else {
-                    let prev = card.querySelector('.campaign-level-preview');
-                    if(prev) {
-                        let loading = document.createElement('div');
-                        loading.className = 'campaign-level-preview-loading';
-                        loading.textContent = 'Map…';
-                        prev.appendChild(loading);
-                    }
-                }
                 card.addEventListener('click', () => {
                     if(!unlocked) {
                         showNotification('Beat mission ' + (lv.id - 1) + ' to unlock this mission.');
@@ -9051,7 +8875,6 @@
                 grid.appendChild(card);
             }
             wodRenderCampaignDetail();
-            wodApplyCampaignPreviewsToDom();
         }
         function wodRenderCampaignDetail() {
             let lv = wodGetCampaignLevelDef(_wodCampaignSelectedLevel);
@@ -9060,10 +8883,9 @@
             let btn = document.getElementById('campaignBtnStart');
             if(!title || !blurb || !btn || !lv) return;
             title.textContent = 'Mission ' + lv.id + ' — ' + lv.name;
-            blurb.textContent = lv.blurb + ' Handicap: ' + wodCampaignHandicapSummary(lv) + '. Map uses shared world seed ' + ('0000000' + lv.seed.toString(16).toUpperCase()).slice(-8) + '.';
+            blurb.textContent = (lv.blurb || 'Campaign mission.') + ' Handicap: ' + wodCampaignHandicapSummary(lv) + '. Map file: campaign-maps/' + lv.file + '.';
             btn.disabled = !wodIsCampaignLevelUnlocked(lv.id);
-            btn.onclick = () => wodStartCampaignLevel(lv.id);
-            wodRenderCampaignDetailPreview();
+            btn.onclick = () => { void wodStartCampaignLevel(lv.id); };
         }
         function wodConfigureCampaignMission(levelId) {
             let lv = wodGetCampaignLevelDef(levelId);
@@ -9083,21 +8905,16 @@
             gameData.loadedCustomMap = false;
             gameData._equippedShopMapId = null;
             gameData.aiCount = 1;
-            gameData._wodReuseMapGenSeed = true;
-            gameData._mapGenSeed = lv.seed >>> 0;
+            gameData._wodReuseMapGenSeed = false;
+            gameData._mapGenSeed = null;
             gameData._soloMapPreviewMatchesStart = false;
             gameData._soloPreviewSnapshot = null;
-            let ms = document.getElementById('setupMapSize');
-            let sh = document.getElementById('setupMapShape');
             let ai = document.getElementById('setupAI');
             let vic = document.getElementById('setupVictoryMode');
             let mon = document.getElementById('setupMoney');
-            if(ms) ms.value = String(lv.mapSize);
-            if(sh) sh.value = lv.mapShape;
             if(ai) ai.value = '1';
             if(vic) vic.value = lv.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
             if(mon) mon.value = String(lv.money || 10000);
-            wodApplyMapSizePreset(lv.mapSize);
             return true;
         }
         function wodClearCampaignMissionConfig() {
@@ -9110,16 +8927,31 @@
             wodClearCampaignMissionConfig();
             showPanel('setup');
         }
-        function wodStartCampaignLevel(levelId) {
+        async function wodStartCampaignLevel(levelId) {
             if(!wodIsCampaignLevelUnlocked(levelId)) {
                 showNotification('That mission is still locked.');
                 return;
             }
+            await wodLoadCampaignCatalog();
+            let lv = wodGetCampaignLevelDef(levelId);
+            if(!lv) {
+                showNotification('Mission not found in campaign-maps/manifest.json.');
+                return;
+            }
+            let data = await wodFetchCampaignMapData(lv);
+            if(!data) {
+                showNotification('Missing map: campaign-maps/' + lv.file + ' — export from the Map Editor (see campaign-maps/README.md).');
+                return;
+            }
             if(!wodConfigureCampaignMission(levelId)) return;
-            gameData._soloPreviewGenerating = false;
-            gameData._mapGenInProgress = false;
-            gameData._soloMapPreviewMatchesStart = false;
-            gameData._soloPreviewSnapshot = null;
+            if(!wodLoadCampaignMapIntoGame(data)) {
+                showNotification('Mission map could not be loaded.');
+                return;
+            }
+            if(gameData._soloPreviewGenerating || gameData._mapGenInProgress) {
+                showNotification('Map is still generating…');
+                return;
+            }
             _wodCampaignSelectedLevel = levelId | 0;
             startGame('campaign');
         }
@@ -9131,13 +8963,13 @@
             wodProgress.campaign.unlockedMax = Math.max(wodProgress.campaign.unlockedMax | 0, (levelId | 0) + 1);
             if(!wodProgress.achievements) wodProgress.achievements = {};
             wodProgress.achievements['campaignLevel' + levelId] = true;
-            if(levelId >= WOD_CAMPAIGN_LEVELS.length) wodProgress.achievements.campaignComplete = true;
-            if(gameData.campaign) gameData.campaign.pendingNextLevel = levelId < WOD_CAMPAIGN_LEVELS.length ? levelId + 1 : null;
+            if(levelId >= wodGetCampaignLevelCount()) wodProgress.achievements.campaignComplete = true;
+            if(gameData.campaign) gameData.campaign.pendingNextLevel = levelId < wodGetCampaignLevelCount() ? levelId + 1 : null;
             scheduleSaveWodProgress();
             if(!wasDone) {
                 let lv = wodGetCampaignLevelDef(levelId);
                 showNotification('Mission ' + levelId + (lv && lv.name ? ' (' + lv.name + ')' : '') + ' cleared — achievement unlocked!');
-                if(levelId >= WOD_CAMPAIGN_LEVELS.length) showNotification('Campaign complete! All missions cleared.');
+                if(levelId >= wodGetCampaignLevelCount()) showNotification('Campaign complete! All missions cleared.');
             }
             checkWodAchievements();
         }
@@ -9380,9 +9212,11 @@
             if(panelId === 'achievements') renderAchievementsUi();
             if(panelId === 'campaign') {
                 wodEnsureCampaignProgress();
-                if(!wodIsCampaignLevelUnlocked(_wodCampaignSelectedLevel))
-                    _wodCampaignSelectedLevel = Math.min(WOD_CAMPAIGN_LEVELS.length, wodProgress.campaign.unlockedMax | 0);
-                wodRenderCampaignPanel();
+                void wodLoadCampaignCatalog().then(() => {
+                    if(!wodIsCampaignLevelUnlocked(_wodCampaignSelectedLevel))
+                        _wodCampaignSelectedLevel = Math.min(wodGetCampaignLevelCount() || 1, wodProgress.campaign.unlockedMax | 0);
+                    wodRenderCampaignPanel();
+                });
             }
             if(panelId === 'settings') {
                 syncShowOrdersCheckbox();
@@ -9618,30 +9452,26 @@
         }
 
         function startGame(mode) {
-            if(mode === 'ai' && gameData._soloPreviewGenerating) {
+            if((mode === 'ai' || mode === 'campaign') && gameData._soloPreviewGenerating) {
                 showNotification('Map is still generating...');
                 return;
             }
             if(mode === 'ai') wodClearCampaignMissionConfig();
-            let isCampaign = mode === 'campaign';
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             gameData._cityUnitStackTap = null;
-            gameData._campaignBriefingPending = false;
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             UI.escMenu.classList.add('hidden');
             UI.inGameUI.style.display = 'block';
             UI.canvas.style.display = 'block';
-            setGameSpeed(isCampaign ? 0 : 1, isCampaign);
+            setGameSpeed(1);
             wodResetMobileHud();
             if(!gameData.layers) gameData.layers = {};
             gameData.layers.territory = false;
             void (async function() {
                 try {
                     await initGame();
-                    if(isCampaign && gameData.campaign && gameData.campaign.active)
-                        wodShowCampaignBriefingOverlay();
                 } catch(e) {
                     console.error(e);
                 }
@@ -9653,7 +9483,6 @@
 
         function returnToMenu() {
             hideCampaignSummaryOverlay();
-            hideCampaignBriefingOverlay();
             wodApplyPlayViewportLock(false);
             gameState = 'MENU';
             wodResetMobileHud();
@@ -13140,12 +12969,10 @@
             if(!/^WOD-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(s)) return '';
             return s;
         }
+        function wodMpSanitizePlayerId(raw) { return wodMpNormalizePlayerId(raw); }
         function wodEnsurePlayerId() {
             if(!wodProgress) wodProgress = defaultWodProgress();
             if(!wodProgress.profile) wodProgress.profile = {};
-            let stored = '';
-            try { stored = wodMpNormalizePlayerId(localStorage.getItem(SL_PLAYER_ID_KEY)); } catch (e) {}
-            if(stored && !wodProgress.profile.playerId) wodProgress.profile.playerId = stored;
             if(!wodProgress.profile.playerId) {
                 wodProgress.profile.playerId = wodMpGeneratePlayerId();
                 wodPersistPlayerIdLocal(wodProgress.profile.playerId);
@@ -16220,11 +16047,11 @@
         function loadWodProgress() {
             wodProgress = defaultWodProgress();
             let playerId = '';
-            try { playerId = wodMpNormalizePlayerId(localStorage.getItem(SL_PLAYER_ID_KEY)); } catch (e) {}
+            try { playerId = wodMpSanitizePlayerId(localStorage.getItem(SL_PLAYER_ID_KEY)); } catch (e) {}
             if(!playerId) {
                 let legacy = wodReadLegacyLocalProgressObject();
                 if(legacy && legacy.profile && legacy.profile.playerId)
-                    playerId = wodMpNormalizePlayerId(legacy.profile.playerId);
+                    playerId = wodMpSanitizePlayerId(legacy.profile.playerId);
             }
             if(playerId) {
                 wodProgress.profile.playerId = playerId;
@@ -16233,26 +16060,30 @@
             window._wodLegacyLocalProgress = wodReadLegacyLocalProgressObject();
         }
 
-        function wodLegacyProgressMatchesPlayer(legacy, pid) {
-            if(!legacy || !pid) return false;
-            let legacyPid = wodMpNormalizePlayerId(legacy.profile && legacy.profile.playerId);
-            if(legacyPid && legacyPid !== pid) return false;
-            return true;
-        }
-
         function wodApplyServerProgressPayload(detail) {
             if(!detail) return;
-            wodEnsurePlayerId();
-            let pid = wodProgress.profile.playerId;
-            if(detail.playerId && detail.playerId !== pid) return;
+            let pid = wodProgress && wodProgress.profile && wodProgress.profile.playerId;
+            if(!pid) return;
+            if(detail.playerId && detail.playerId !== pid) {
+                console.warn('Ignored progress payload for a different player ID.');
+                return;
+            }
             if(detail.found && detail.progress) {
+                let savedPid = detail.progress.profile && detail.progress.profile.playerId;
+                if(savedPid && savedPid !== pid) {
+                    console.warn('Server progress playerId mismatch; keeping local account.');
+                    return;
+                }
                 wodProgress = wodMergeProgressObject(detail.progress);
-            } else if(window._wodLegacyLocalProgress && wodLegacyProgressMatchesPlayer(window._wodLegacyLocalProgress, pid)) {
-                wodProgress = wodMergeProgressObject(window._wodLegacyLocalProgress);
-                scheduleSaveWodProgress();
+            } else if(window._wodLegacyLocalProgress) {
+                let legPid = window._wodLegacyLocalProgress.profile && window._wodLegacyLocalProgress.profile.playerId;
+                if(!legPid || legPid === pid) {
+                    wodProgress = wodMergeProgressObject(window._wodLegacyLocalProgress);
+                    scheduleSaveWodProgress();
+                }
             }
             wodProgress.profile.playerId = pid;
-            wodPersistPlayerIdLocal(pid);
+            wodPersistPlayerIdLocal(wodProgress.profile.playerId);
             wodClearLegacyLocalProgress();
             window._wodServerProgressHydrated = true;
             applyWodProfileToGame();
@@ -16310,9 +16141,11 @@
             }
             let pid = wodProgress.profile.playerId;
             let payload;
-            try { payload = JSON.parse(JSON.stringify(wodProgress)); } catch (e) { return false; }
-            if(!payload.profile) payload.profile = {};
-            payload.profile.playerId = pid;
+            try {
+                payload = JSON.parse(JSON.stringify(wodProgress));
+                if(!payload.profile) payload.profile = {};
+                payload.profile.playerId = pid;
+            } catch (e) { return false; }
             _wodProgressSaveInFlight = true;
             window._wodProgressSavePending = false;
             WodMultiplayer.progressSave(pid, payload);
@@ -16458,12 +16291,17 @@
             ];
             let html = '<div class="ach-grid">';
             html += '<div class="ach-section-heading">Campaign missions</div>';
-            for(let lv of WOD_CAMPAIGN_LEVELS) {
+            let campLevels = wodGetCampaignLevels();
+            if(!campLevels.length) {
+                html += '<div class="ach-card"><div class="ach-icon">&#8226;</div><div><div class="ach-title">Campaign</div><div class="ach-desc">Add missions under campaign-maps/ to enable campaign achievements.</div></div></div>';
+            }
+            for(let lv of campLevels) {
                 let ok = !!A['campaignLevel' + lv.id];
-                html += `<div class="ach-card${ok ? ' unlocked' : ''}"><div class="ach-icon">${ok ? '&#10003;' : '&#8226;'}</div><div><div class="ach-title">Mission ${lv.id}: ${wodMpEscapeHtml(lv.name)}</div><div class="ach-desc">${wodMpEscapeHtml(lv.blurb)}</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${ok ? 100 : 0}%"></div></div><div class="ach-progress-footer"><span>Status</span><strong>${ok ? 'Cleared' : 'Not cleared yet'}</strong></div></div></div>`;
+                html += `<div class="ach-card${ok ? ' unlocked' : ''}"><div class="ach-icon">${ok ? '&#10003;' : '&#8226;'}</div><div><div class="ach-title">Mission ${lv.id}: ${wodMpEscapeHtml(lv.name)}</div><div class="ach-desc">${wodMpEscapeHtml(lv.blurb || '')}</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${ok ? 100 : 0}%"></div></div><div class="ach-progress-footer"><span>Status</span><strong>${ok ? 'Cleared' : 'Not cleared yet'}</strong></div></div></div>`;
             }
             let campAllOk = !!A.campaignComplete;
-            html += `<div class="ach-card${campAllOk ? ' unlocked' : ''}"><div class="ach-icon">${campAllOk ? '&#10003;' : '&#8226;'}</div><div><div class="ach-title">Campaign victor</div><div class="ach-desc">Clear all ten campaign missions.</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${campAllOk ? 100 : 0}%"></div></div><div class="ach-progress-footer"><span>Progress</span><strong>${WOD_CAMPAIGN_LEVELS.filter(lv => A['campaignLevel' + lv.id]).length} / ${WOD_CAMPAIGN_LEVELS.length}</strong></div></div></div>`;
+            let campTotal = campLevels.length || 10;
+            html += `<div class="ach-card${campAllOk ? ' unlocked' : ''}"><div class="ach-icon">${campAllOk ? '&#10003;' : '&#8226;'}</div><div><div class="ach-title">Campaign victor</div><div class="ach-desc">Clear all campaign missions.</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${campAllOk ? 100 : 0}%"></div></div><div class="ach-progress-footer"><span>Progress</span><strong>${campLevels.filter(lv => A['campaignLevel' + lv.id]).length} / ${campTotal}</strong></div></div></div>`;
             html += '<div class="ach-section-heading">Lifetime badges</div>';
             html += rows.map((r) => {
                 let ok = r.prog >= r.need;
@@ -16612,11 +16450,7 @@
             if(!bundle || bundle.format !== 'simplewars_save') throw new Error('Not a Simple Wars save file.');
             let o = bundle.progress;
             if(!o || typeof o !== 'object') throw new Error('Save file missing progress.');
-            wodEnsurePlayerId();
-            let keepPid = wodProgress.profile.playerId;
             wodProgress = wodMergeProgressObject(o);
-            wodProgress.profile.playerId = keepPid;
-            wodPersistPlayerIdLocal(keepPid);
             if(bundle.uiSettings) {
                 if(typeof bundle.uiSettings.showOrdersWhenDeselected === 'boolean')
                     gameData.uiSettings.showOrdersWhenDeselected = bundle.uiSettings.showOrdersWhenDeselected;
@@ -16761,11 +16595,6 @@
 
         function wodRefreshBrowserSaveStatus() {
             let status = document.getElementById('wodBrowserSaveStatus');
-            let idEl = document.getElementById('wodSettingsPlayerId');
-            if(idEl) {
-                wodEnsurePlayerId();
-                idEl.textContent = 'Your player ID (separate save per ID): ' + (wodProgress.profile.playerId || '—');
-            }
             if(!status) return;
             let online = typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen;
             status.textContent = online
@@ -23777,8 +23606,7 @@
                 }
             }
 
-            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview'
-                || !!(gameData.cities && gameData.cities.some(c => c && c.owner > 0));
+            let wodPreviewDrawPolitical = prevCanvas.id === 'mpLobbyMapPreview' || prevCanvas.id === 'mapPreview';
             if(wodPreviewDrawPolitical) {
                 let hxLookup = gameData.hexes || {};
                 wodPaintMapPreviewPolitical(pCtx, gameData.hexList, gameData.cities, null, cx, cy, scale, gameData.hexRadius, hxLookup);
@@ -23974,18 +23802,6 @@
                 } finally {
                     wodPopRandom();
                 }
-            } else if(gameData.campaign && gameData.campaign.active) {
-                let lv = wodGetCampaignLevelDef(gameData.campaign.levelId);
-                gameData.loadedCustomMap = false;
-                gameData._soloMapPreviewMatchesStart = false;
-                gameData._soloPreviewSnapshot = null;
-                gameData.mapRadius = newRadius;
-                gameData.mapShape = requestedShape;
-                if(lv) {
-                    gameData._mapGenSeed = lv.seed >>> 0;
-                    gameData._wodReuseMapGenSeed = true;
-                }
-                await generateMap();
             } else {
                 let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
                 if(gameData.loadedCustomMap) {
@@ -24031,7 +23847,6 @@
         }
 
         function stopGame() {
-            hideCampaignBriefingOverlay();
             if(typeof gameData !== 'undefined' && gameData && gameData.mp && gameData.mp.enabled) wodMpDisconnectAndReset();
             if(animationFrameId) cancelAnimationFrame(animationFrameId);
             animationFrameId = null;
@@ -26068,15 +25883,16 @@
                     wodSetBootSplashProgress(100);
                 }
                 requestAnimationFrame(() => {
-                    if(ov) {
-                        ov.classList.add('hidden');
-                        ov.setAttribute('aria-busy', 'false');
+                    if(!bootErr) {
+                        if(ov) {
+                            ov.classList.add('hidden');
+                            ov.setAttribute('aria-busy', 'false');
+                        }
+                        if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                        if(menuDemoSeeded) resumeMenuBackgroundBattle();
                     }
-                    if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
-                    if(!bootErr && menuDemoSeeded) resumeMenuBackgroundBattle();
                     gameData._wodSkipMapGenLoader = false;
                     window._wodBootSettledUntil = 0;
-                    void wodMpBackgroundConnect();
                 });
             }
 
@@ -26086,18 +25902,11 @@
                     await bootStage('Reading profile and settings…', 16, () => {
                         try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
                     }, 55);
-                    await bootStage('Preparing terrain palettes…', 22, () => {
+                    await bootStage('Preparing terrain palettes…', 25, () => {
                         normalizeTerrainHexes();
                         updateTerrainKey();
                     }, 48);
-                    await bootStage('Preparing campaign maps…', 28, () => wodPregenerateAllCampaignPreviewsDuringBoot((n, total) => {
-                        if(caption) caption.textContent = 'Preparing campaign maps (' + n + ' / ' + total + ')…';
-                        wodSetBootSplashProgress(28 + Math.floor((n / total) * 8));
-                    }), 12);
-                    await bootStage('Building menu battlefield…', 38, () => Promise.race([
-                        bootstrapMenuBackgroundBattle(),
-                        new Promise((_, reject) => setTimeout(() => reject(new Error('Menu preview timed out')), 28000))
-                    ]), 28);
+                    await bootStage('Building menu battlefield…', 38, () => bootstrapMenuBackgroundBattle(), 28);
                     await bootStage('Baking terrain and borders…', 62, () => {
                         updateTerrainCache();
                         draw();
@@ -26133,10 +25942,9 @@
                 } catch(err) {
                     bootErr = true;
                     console.error(err);
-                    if(caption) caption.textContent = 'Menu preview skipped — you can still play.';
+                    if(caption) caption.textContent = 'Could not load. Try refreshing.';
                     if(inner) inner.classList.remove('wod-boot-tween-suppress');
                     gameData._wodSkipMapGenLoader = false;
-                    revealMenu();
                 }
             })();
         }
@@ -34117,11 +33925,6 @@
                 }
             }
             if(e.key === 'Escape') {
-                if(gameState === 'PLAYING' && gameData._campaignBriefingPending) {
-                    e.preventDefault();
-                    wodDismissCampaignBriefing();
-                    return;
-                }
                 if(gameState === 'PLAYING' && gameData.buildMode) {
                     e.preventDefault();
                     exitBuildPlacementMode();
@@ -34147,19 +33950,6 @@
                     toggleEscMenu();
                     return;
                 }
-            }
-            if((e.key === ' ' || e.code === 'Space') && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                let tag = document.activeElement && document.activeElement.tagName;
-                if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-                e.preventDefault();
-                if(gameData._campaignBriefingPending) {
-                    wodDismissCampaignBriefing();
-                    return;
-                }
-                if(!gameData.mp || !gameData.mp.enabled) {
-                    setGameSpeed(gameData.speed === 0 ? 1 : 0, true);
-                }
-                return;
             }
             keys[e.key.toLowerCase()] = true;
         });
@@ -35368,6 +35158,7 @@
         loadWodProgress();
         wodEnsurePlayerId();
         wodMpInitGlobalHandlers();
+        void wodMpBackgroundConnect();
         wodMpApplyFriendQueryFromUrl();
         applyWodProfileToGame();
         wodInitBrowserSaves();
@@ -35378,11 +35169,14 @@
             renderShopMapsTab();
             wodSyncSetupShopMapButton();
         });
+        wodLoadCampaignCatalog().then(() => {
+            if(document.getElementById('campaignPanel') && !document.getElementById('campaignPanel').classList.contains('hidden'))
+                wodRenderCampaignPanel();
+        });
         renderAchievementsUi();
 
         initSetupPanelBindings();
         wodWireCampaignSummaryButtons();
-        wodWireCampaignBriefingButtons();
         wodInitPeriodSettingsBinding();
         wodInitShopPeriodBinding();
         wodSyncAllPeriodSelects();

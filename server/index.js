@@ -807,7 +807,6 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'player_mismatch', msg: 'Player ID mismatch.' }));
         return;
       }
-      if (!client.playerId) client.playerId = playerId;
       let rawSize = 0;
       try {
         rawSize = Buffer.byteLength(JSON.stringify(msg.progress || {}), 'utf8');
@@ -818,7 +817,13 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'too_large', msg: 'Progress payload too large.' }));
         return;
       }
-      const row = saveStoredProgress(playerId, msg.progress);
+      const sanitized = sanitizeProgressObject(msg.progress, playerId);
+      if (sanitized.profile.playerId && sanitized.profile.playerId !== playerId) {
+        ws.send(JSON.stringify({ t: 'progress_save_failed', reason: 'player_mismatch', msg: 'Progress profile playerId mismatch.' }));
+        return;
+      }
+      sanitized.profile.playerId = playerId;
+      const row = saveStoredProgress(playerId, sanitized);
       ws.send(
         JSON.stringify({
           t: 'progress_saved',
