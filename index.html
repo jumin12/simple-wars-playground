@@ -7620,16 +7620,31 @@
                         <p class="shop-skin-section-title">Ancient civilizations</p>
                         <button type="button" class="menu-btn shop-purchase-all-btn" id="shopBuyAllAncientCiv" onclick="purchaseAllShopSkins('ancientCiv')">Purchase all</button>
                     </div>
-                    <p class="shop-skin-section-desc">Ancient-era counter shapes with classical emblems.</p>
+                    <p class="shop-skin-section-desc">Ancient-era counter shapes with classical emblems. Dual-emblem packs include two equip styles.</p>
                     <button type="button" class="skin-card skin-missing locked" id="skinCivRome" onclick="purchaseUnitSkin('civRome')">
                         <canvas class="skin-preview" id="skinCivRomePreview" width="120" height="80" aria-hidden="true"></canvas>
-                        Rome — Imperial eagle
-                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
+                        Rome — 2 emblems
+                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">200g</span></div>
                     </button>
                     <button type="button" class="skin-card skin-missing locked" id="skinCivCarthage" onclick="purchaseUnitSkin('civCarthage')">
                         <canvas class="skin-preview" id="skinCivCarthagePreview" width="120" height="80" aria-hidden="true"></canvas>
-                        Carthage — Tanit
-                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">100g</span></div>
+                        Carthage — 2 emblems
+                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">200g</span></div>
+                    </button>
+                    <button type="button" class="skin-card skin-missing locked" id="skinCivEgypt" onclick="purchaseUnitSkin('civEgypt')">
+                        <canvas class="skin-preview" id="skinCivEgyptPreview" width="120" height="80" aria-hidden="true"></canvas>
+                        Egypt — 2 emblems
+                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">200g</span></div>
+                    </button>
+                    <button type="button" class="skin-card skin-missing locked" id="skinCivMacedon" onclick="purchaseUnitSkin('civMacedon')">
+                        <canvas class="skin-preview" id="skinCivMacedonPreview" width="120" height="80" aria-hidden="true"></canvas>
+                        Macedon — 2 emblems
+                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">200g</span></div>
+                    </button>
+                    <button type="button" class="skin-card skin-missing locked" id="skinCivSparta" onclick="purchaseUnitSkin('civSparta')">
+                        <canvas class="skin-preview" id="skinCivSpartaPreview" width="120" height="80" aria-hidden="true"></canvas>
+                        Sparta — 2 emblems
+                        <div class="skin-card-footer"><span class="skin-card-state">Locked</span><span class="skin-card-price">200g</span></div>
                     </button>
                     <button type="button" class="skin-card skin-missing locked" id="skinCivGaul" onclick="purchaseUnitSkin('civGaul')">
                         <canvas class="skin-preview" id="skinCivGaulPreview" width="120" height="80" aria-hidden="true"></canvas>
@@ -12593,7 +12608,7 @@
             wodEnsurePlayerId();
             let dn = wodMpGetDisplayName();
             let skinId = gameData.unitSkin || (wodProgress.profile && wodProgress.profile.unitSkin) || 'nato';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinId]) skinId = 'nato';
+            if(!wodShopSkinOwned(skinId)) skinId = 'nato';
             return {
                 playerId: wodProgress.profile.playerId,
                 displayName: dn,
@@ -12631,7 +12646,7 @@
             let codeEl = document.getElementById('mpPlayerIdCode');
             if(codeEl) codeEl.textContent = pid || '—';
             let skinId = gameData.unitSkin || wodProgress.profile.unitSkin || 'nato';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinId]) skinId = 'nato';
+            if(!wodShopSkinOwned(skinId)) skinId = 'nato';
             let skinCv = document.getElementById('mpProfileSkinCanvas');
             if(skinCv) renderShopSkinThumbCanvas(skinCv, skinId);
             let skinName = document.getElementById('mpProfileSkinName');
@@ -14890,7 +14905,7 @@
                 showNotification('Modern NATO counters are free for everyone.');
                 return;
             }
-            if(gameData.ownedUnitSkins[skin]) {
+            if(gameData.ownedUnitSkins[skin] || wodShopSkinOwned(skin)) {
                 if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
                     gameData.unitSkin = skin;
                     wodApplyGamePeriod(skin, { saveProfile: true });
@@ -14915,9 +14930,11 @@
                 });
                 return;
             }
-            if((gameData.gold || 0) < 100) { showNotification('Not enough gold!'); return; }
-            gameData.gold -= 100;
-            gameData.ownedUnitSkins[skin] = true;
+            let skinCost = wodShopSkinCost(skin);
+            if((gameData.gold || 0) < skinCost) { showNotification('Not enough gold! Need ' + skinCost + 'g.'); return; }
+            gameData.gold -= skinCost;
+            if(WOD_ANCIENT_CIV_PACK_IDS.includes(skin)) wodGrantAncientCivPack(gameData.ownedUnitSkins, skin);
+            else gameData.ownedUnitSkins[skin] = true;
             if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
                 wodGrantPeriodSkinAchievement(skin);
                 gameData.unitSkin = skin;
@@ -14936,7 +14953,7 @@
             if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { nato: true };
             let ids = WOD_SHOP_PURCHASABLE_SECTIONS[sectionKey];
             if(!ids || !ids.length) return;
-            let toBuy = ids.filter(id => !gameData.ownedUnitSkins[id]);
+            let toBuy = ids.filter(id => !wodShopSkinOwned(id));
             if(toBuy.length === 0) {
                 showNotification('You already own everything in this section.');
                 return;
@@ -14951,13 +14968,16 @@
                 });
                 return;
             }
-            let cost = toBuy.length * 100;
+            let cost = toBuy.reduce((sum, id) => sum + wodShopSkinCost(id), 0);
             if((gameData.gold || 0) < cost) {
-                showNotification('Not enough gold! Need ' + cost + 'g for ' + toBuy.length + ' skin(s).');
+                showNotification('Not enough gold! Need ' + cost + 'g for ' + toBuy.length + ' item(s).');
                 return;
             }
             gameData.gold -= cost;
-            for(let id of toBuy) gameData.ownedUnitSkins[id] = true;
+            for(let id of toBuy) {
+                if(WOD_ANCIENT_CIV_PACK_IDS.includes(id)) wodGrantAncientCivPack(gameData.ownedUnitSkins, id);
+                else gameData.ownedUnitSkins[id] = true;
+            }
             showNotification('Unlocked ' + toBuy.length + ' skin(s)! Equip them from the dropdowns above.');
             updateSkinShop();
             wodSyncAllPeriodSelects();
@@ -28738,15 +28758,40 @@
 
         const WOD_PERIOD_IDS = ['modern', 'napoleonic', 'medieval', 'ancient'];
         const WOD_PERIOD_SKIN_IDS = ['napoleonic', 'medieval', 'ancient'];
-        const WOD_ANCIENT_CIV_SKIN_IDS = ['civRome', 'civCarthage', 'civGaul'];
+        const WOD_ANCIENT_CIV_SKIN_IDS = (typeof globalThis !== 'undefined' && globalThis.WOD_ANCIENT_CIV_SKIN_IDS)
+            ? globalThis.WOD_ANCIENT_CIV_SKIN_IDS.slice()
+            : ['civRome', 'civCarthage', 'civGaul'];
+        const WOD_ANCIENT_CIV_PACK_IDS = (typeof globalThis !== 'undefined' && globalThis.WOD_ANCIENT_CIV_PACK_IDS)
+            ? globalThis.WOD_ANCIENT_CIV_PACK_IDS.slice()
+            : ['civRome', 'civCarthage', 'civGaul'];
         const WOD_RUSE_SKIN_IDS = ['ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina'];
         const WOD_COUNTRYBALL_SKIN_IDS = ['usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china'];
         const WOD_SHOP_PURCHASABLE_SECTIONS = {
             standard: ['napoleonic', 'medieval', 'ancient'],
-            ancientCiv: WOD_ANCIENT_CIV_SKIN_IDS.slice(),
+            ancientCiv: WOD_ANCIENT_CIV_PACK_IDS.slice(),
             countryballs: WOD_COUNTRYBALL_SKIN_IDS.slice(),
             ruse: WOD_RUSE_SKIN_IDS.slice()
         };
+
+        function wodShopSkinCost(skin) {
+            if(WOD_ANCIENT_CIV_PACK_IDS.includes(skin) && typeof wodAncientCivPackCost === 'function')
+                return wodAncientCivPackCost(skin);
+            return 100;
+        }
+
+        function wodShopSkinOwned(skin) {
+            if(!gameData.ownedUnitSkins) return false;
+            if(WOD_ANCIENT_CIV_PACK_IDS.includes(skin) && typeof wodAncientCivPackOwned === 'function')
+                return wodAncientCivPackOwned(gameData.ownedUnitSkins, skin);
+            if(WOD_ANCIENT_CIV_SKIN_IDS.includes(skin) && typeof wodAncientCivVariantOwned === 'function')
+                return wodAncientCivVariantOwned(gameData.ownedUnitSkins, skin);
+            return !!gameData.ownedUnitSkins[skin];
+        }
+
+        function wodAncientCivPackPreviewId(packId) {
+            let packs = (typeof globalThis !== 'undefined' && globalThis.WOD_ANCIENT_CIV_PACKS) || {};
+            return (packs[packId] && packs[packId].preview) || packId;
+        }
 
         function wodPeriodLabel(id) {
             if(id === 'napoleonic') return 'Napoleonic';
@@ -29225,89 +29270,13 @@
             }
         }
 
-        function wodAncientCivPalette(civId) {
-            if(civId === 'civRome') return {
-                fill: '#6e1210', fillHi: '#9a1c18', rim: '#e8c84a', rimInner: '#4a0806',
-                emblem: '#f5e6a8', emblemStroke: '#2a0604', emblemHi: '#fff8dc'
-            };
-            if(civId === 'civCarthage') return {
-                fill: '#5c2d68', fillHi: '#7a4490', rim: '#d4b878', rimInner: '#3e1e48',
-                emblem: '#f2ebe0', emblemStroke: '#1e0c28', emblemHi: '#ffffff'
-            };
-            if(civId === 'civGaul') return {
-                fill: '#1e4a2c', fillHi: '#2d6640', rim: '#ddb840', rimInner: '#123420',
-                emblem: '#f2d858', emblemStroke: '#0c2418', emblemHi: '#fff4b0'
-            };
-            return null;
-        }
-
-        const WOD_ANCIENT_CIV_SVG = (typeof globalThis !== 'undefined' && globalThis.WOD_ANCIENT_CIV_SVG) || {};
-
-        function wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw, strokeOnly) {
-            let path = new Path2D(d);
-            if(strokeOnly) {
-                if(stroke) {
-                    ctx.strokeStyle = stroke;
-                    ctx.lineWidth = lw;
-                    ctx.stroke(path);
-                }
-                return;
-            }
-            ctx.fillStyle = fill;
-            ctx.fill(path);
-            if(stroke) {
-                ctx.strokeStyle = stroke;
-                ctx.lineWidth = lw;
-                ctx.stroke(path);
-            }
-        }
-
-        function wodPaintAncientCivSvgEmblem(ctx, civId, radius, fill, stroke) {
-            let def = WOD_ANCIENT_CIV_SVG[civId];
-            if(!def) return;
-            let sc = (radius * 1.88) / def.size;
-            ctx.save();
-            ctx.scale(sc, sc);
-            ctx.translate(-def.ox, -def.oy);
-            ctx.lineJoin = 'round';
-            ctx.lineCap = 'round';
-            let lw = Math.max(1.4, 2.8 / sc);
-            if(civId === 'civGaul') {
-                wodPaintAncientCivSvgPath(ctx, def.ring, null, stroke || fill, Math.max(2.5, 7 / sc), true);
-                for(let i = 0; i < 3; i++) {
-                    ctx.save();
-                    ctx.translate(def.ox, def.oy);
-                    ctx.rotate(i * Math.PI * 2 / 3 - Math.PI / 2);
-                    ctx.translate(-def.ox, -def.oy);
-                    wodPaintAncientCivSvgPath(ctx, def.arm, fill, stroke, lw, false);
-                    ctx.restore();
-                }
-                if(def.hub) wodPaintAncientCivSvgPath(ctx, def.hub, stroke || fill, null, 0, false);
-            } else if(civId === 'civCarthage') {
-                for(let d of def.paths) wodPaintAncientCivSvgPath(ctx, d, null, stroke, Math.max(2.2, 5.5 / sc), true);
-            } else if(civId === 'civRome') {
-                for(let d of def.paths) wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw * 0.9, false);
-                if(def.strokes) {
-                    for(let d of def.strokes) wodPaintAncientCivSvgPath(ctx, d, null, stroke, Math.max(2.2, 5.5 / sc), true);
-                }
-            } else {
-                for(let d of def.paths) wodPaintAncientCivSvgPath(ctx, d, fill, stroke, lw, false);
-            }
-            ctx.restore();
-        }
-
-        function wodPaintAncientCivEmblem(ctx, civId, r, pal) {
-            if(!pal) return;
-            wodPaintAncientCivSvgEmblem(ctx, civId, r, pal.emblem, pal.emblemStroke);
-        }
-
         function drawPeriodCounter(ctx, unit, radius, color, period, civSkinId) {
             if(period === 'napoleonic') {
                 drawNapoleonicCounter(ctx, unit, radius, color);
                 return;
             }
             if(civSkinId) period = 'ancient';
-            let civPal = civSkinId ? wodAncientCivPalette(civSkinId) : null;
+            let civPal = civSkinId && typeof wodAncientCivPalette === 'function' ? wodAncientCivPalette(civSkinId) : null;
             let w = radius * 2.15, h = radius * 1.38, x = -w / 2, y = -h / 2;
             let rr = Math.max(2, radius * 0.22);
             if(period === 'ancient') { w = radius * 2.22; h = radius * 2.22; x = -w / 2; y = -h / 2; rr = w * 0.5; }
@@ -29388,8 +29357,8 @@
                     ctx.moveTo(0, -r * 0.55); ctx.lineTo(0, r * 0.45);
                 }
             } else if(period === 'ancient') {
-                if(civSkinId) {
-                    wodPaintAncientCivEmblem(ctx, civSkinId, r, civPal);
+                if(civSkinId && typeof wodPaintAncientCivEmblem === 'function') {
+                    wodPaintAncientCivEmblem(ctx, civSkinId, r, color, unit.owner);
                 } else if(unit.type === 'heavy') {
                     ctx.arc(0, 0, r * 0.42, 0, Math.PI * 2);
                     ctx.moveTo(-r * 0.55, 0); ctx.lineTo(r * 0.55, 0);
@@ -30093,18 +30062,23 @@
 
         function ownedShopSkinMetaList() {
             if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { nato: true };
-            return shopSkinMetaList().filter(row => !!gameData.ownedUnitSkins[row.id]);
+            return shopSkinMetaList().filter(row => wodShopSkinOwned(row.id));
         }
 
         function shopSkinMetaList() {
+            let civRows = typeof wodAncientCivShopMetaList === 'function'
+                ? wodAncientCivShopMetaList()
+                : [
+                    { id: 'civRome', label: 'Rome — Eagle' },
+                    { id: 'civCarthage', label: 'Carthage — Tanit' },
+                    { id: 'civGaul', label: 'Gaul — Triskelion' }
+                ];
             return [
                 { id: 'nato', label: 'NATO counters (default)' },
                 { id: 'napoleonic', label: 'Napoleonic' },
                 { id: 'medieval', label: 'Medieval era' },
                 { id: 'ancient', label: 'Ancient era' },
-                { id: 'civRome', label: 'Rome — Imperial eagle' },
-                { id: 'civCarthage', label: 'Carthage — Tanit' },
-                { id: 'civGaul', label: 'Gaul — Triskelion' },
+                ...civRows,
                 { id: 'usa', label: 'USA countryball' },
                 { id: 'uk', label: 'UK countryball' },
                 { id: 'germany', label: 'Germany countryball' },
@@ -30140,6 +30114,9 @@
             if(skin === 'ruseJapan') return 'skinRuseJapan';
             if(skin === 'civRome') return 'skinCivRome';
             if(skin === 'civCarthage') return 'skinCivCarthage';
+            if(skin === 'civEgypt') return 'skinCivEgypt';
+            if(skin === 'civMacedon') return 'skinCivMacedon';
+            if(skin === 'civSparta') return 'skinCivSparta';
             if(skin === 'civGaul') return 'skinCivGaul';
             if(skin === 'ruseItaly') return 'skinRuseItaly';
             if(skin === 'ruseChina') return 'skinRuseChina';
@@ -30345,17 +30322,21 @@
                 ['skinChinaPreview', 'china'],
                 ['skinCivRomePreview', 'civRome'],
                 ['skinCivCarthagePreview', 'civCarthage'],
+                ['skinCivEgyptPreview', 'civEgypt'],
+                ['skinCivMacedonPreview', 'civMacedon'],
+                ['skinCivSpartaPreview', 'civSparta'],
                 ['skinCivGaulPreview', 'civGaul'],
                 ['skinRuseItalyPreview', 'ruseItaly'],
                 ['skinRuseChinaPreview', 'ruseChina']
-            ].forEach(([cid, sid]) => {
+            ].forEach(([cid, packId]) => {
                 let c = document.getElementById(cid);
                 if(!c) return;
                 if(c.width !== dim.w || c.height !== dim.h) {
                     c.width = dim.w;
                     c.height = dim.h;
                 }
-                renderShopSkinThumbCanvas(c, sid);
+                let previewId = WOD_ANCIENT_CIV_PACK_IDS.includes(packId) ? wodAncientCivPackPreviewId(packId) : packId;
+                renderShopSkinThumbCanvas(c, previewId);
             });
         }
 
@@ -30375,14 +30356,14 @@
 
         function syncShopSkinBar(which) {
             let skinId = which === 'player' ? gameData.unitSkin : (gameData.aiUnitSkin || 'nato');
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinId]) skinId = 'nato';
+            if(!wodShopSkinOwned(skinId)) skinId = 'nato';
             let meta = shopSkinMetaList().find(r => r.id === skinId) || shopSkinMetaList()[0];
             let flag = document.getElementById(which === 'player' ? 'shopSkinFlagPlayer' : 'shopSkinFlagAi');
             let lab = document.getElementById(which === 'player' ? 'shopSkinLabelPlayer' : 'shopSkinLabelAi');
             let sel = document.getElementById(which === 'player' ? 'shopSelectPlayer' : 'shopSelectAi');
             setShopSkinPickerFlag(flag, skinId, which);
             if(lab) lab.textContent = meta.label;
-            if(sel && gameData.ownedUnitSkins && gameData.ownedUnitSkins[skinId]) sel.value = skinId;
+            if(sel && wodShopSkinOwned(skinId)) sel.value = skinId;
         }
 
         function closeShopSkinMenus() {
@@ -30423,7 +30404,7 @@
         }
 
         function equipShopSkinChoice(which, skinId) {
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinId]) return;
+            if(!wodShopSkinOwned(skinId)) return;
             let sel = document.getElementById(which === 'player' ? 'shopSelectPlayer' : 'shopSelectAi');
             if(sel) sel.value = skinId;
             if(which === 'player') gameData.unitSkin = skinId;
@@ -30449,8 +30430,8 @@
 
             let curP = gameData.unitSkin || 'nato';
             let curA = gameData.aiUnitSkin || 'nato';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[curP]) curP = 'nato';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[curA]) curA = 'nato';
+            if(!wodShopSkinOwned(curP)) curP = 'nato';
+            if(!wodShopSkinOwned(curA)) curA = 'nato';
             selP.value = curP;
             selA.value = curA;
             gameData.unitSkin = curP;
@@ -30514,8 +30495,8 @@
             let map = [['shopPvLight', 'light'], ['shopPvMarine', 'marine'], ['shopPvHeavy', 'heavy'], ['shopPvShip', 'ship'], ['shopAiLight', 'light'], ['shopAiMarine', 'marine'], ['shopAiHeavy', 'heavy'], ['shopAiShip', 'ship']];
             let skinPlayer = gameData.unitSkin || 'nato';
             let skinAi = gameData.aiUnitSkin || 'nato';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinPlayer]) skinPlayer = 'nato';
-            if(!gameData.ownedUnitSkins || !gameData.ownedUnitSkins[skinAi]) skinAi = 'nato';
+            if(!wodShopSkinOwned(skinPlayer)) skinPlayer = 'nato';
+            if(!wodShopSkinOwned(skinAi)) skinAi = 'nato';
             let px = wodShopArmyCanvasPx();
             for(let [cid, ut] of map) {
                 let cnv = document.getElementById(cid);
@@ -31004,14 +30985,14 @@
             wodSyncSetupShopMapButton();
             syncShopVisualOptionsUi();
             let skinIds = ['nato', 'usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china',
-                'civRome', 'civCarthage', 'civGaul',
+                ...WOD_ANCIENT_CIV_PACK_IDS,
                 'ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina',
                 'goldenChip', 'napoleonic', 'medieval', 'ancient'];
             for(let skin of skinIds) {
                 let id = wodSkinShopCardId(skin);
                 let el = document.getElementById(id);
                 if(!el) continue;
-                let owned = !!(gameData.ownedUnitSkins && gameData.ownedUnitSkins[skin]);
+                let owned = wodShopSkinOwned(skin);
                 el.classList.toggle('skin-owned', owned);
                 el.classList.toggle('skin-missing', !owned);
                 el.classList.toggle('locked', !owned);
@@ -31025,7 +31006,7 @@
                 }
                 if(st) st.textContent = owned ? 'Unlocked' : 'Locked';
                 if(pr) {
-                    pr.textContent = owned ? '' : '100g';
+                    pr.textContent = owned ? '' : (wodShopSkinCost(skin) + 'g');
                 }
             }
             populateShopEquipSelects();
@@ -31040,9 +31021,10 @@
                 let btn = document.getElementById(map[key]);
                 let ids = WOD_SHOP_PURCHASABLE_SECTIONS[key];
                 if(!btn || !ids) continue;
-                let remaining = ids.filter(id => !(gameData.ownedUnitSkins && gameData.ownedUnitSkins[id])).length;
+                let remaining = ids.filter(id => !wodShopSkinOwned(id)).length;
+                let bulkCost = ids.filter(id => !wodShopSkinOwned(id)).reduce((sum, id) => sum + wodShopSkinCost(id), 0);
                 btn.disabled = remaining === 0;
-                btn.textContent = remaining === 0 ? 'All owned' : ('Purchase all (' + (remaining * 100) + 'g)');
+                btn.textContent = remaining === 0 ? 'All owned' : ('Purchase all (' + bulkCost + 'g)');
             }
         }
 
@@ -34800,6 +34782,7 @@
         checkWodAchievements();
         updateSkinShop();
         wodInitShopTabs();
+        if(typeof wodPreloadAncientCivArt === 'function') void wodPreloadAncientCivArt();
         wodLoadShopMapCatalog().then(() => {
             renderShopMapsTab();
             wodSyncSetupShopMapButton();

@@ -8,12 +8,25 @@ const PROFILES_FILE = path.join(__dirname, 'player-profiles.json');
 const SAVE_DEBOUNCE_MS = 1500;
 const DEFAULT_GOLD = 1000;
 const SHOP_SKIN_COST = 100;
+const SHOP_ANCIENT_CIV_GAUL_COST = 100;
+const SHOP_ANCIENT_CIV_PACK_COST = 200;
 const SHOP_VISUAL_COST = 100;
 const SHOP_MAP_DEFAULT_PRICE = 150;
 
+const ANCIENT_CIV_PACKS = {
+  civRome: { cost: SHOP_ANCIENT_CIV_PACK_COST, variants: ['civRome', 'civRome2'] },
+  civCarthage: { cost: SHOP_ANCIENT_CIV_PACK_COST, variants: ['civCarthage', 'civCarthage2'] },
+  civEgypt: { cost: SHOP_ANCIENT_CIV_PACK_COST, variants: ['civEgypt', 'civEgypt2'] },
+  civMacedon: { cost: SHOP_ANCIENT_CIV_PACK_COST, variants: ['civMacedon', 'civMacedon2'] },
+  civSparta: { cost: SHOP_ANCIENT_CIV_PACK_COST, variants: ['civSparta', 'civSparta2'] },
+  civGaul: { cost: SHOP_ANCIENT_CIV_GAUL_COST, variants: ['civGaul'] },
+};
+const ANCIENT_CIV_PACK_IDS = Object.keys(ANCIENT_CIV_PACKS);
+const ANCIENT_CIV_VARIANT_IDS = ANCIENT_CIV_PACK_IDS.flatMap((id) => ANCIENT_CIV_PACKS[id].variants);
+
 const PURCHASABLE_SKINS = new Set([
   'napoleonic', 'medieval', 'ancient',
-  'civRome', 'civCarthage', 'civGaul',
+  'civRome', 'civCarthage', 'civGaul', 'civEgypt', 'civMacedon', 'civSparta',
   'usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china',
   'ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina',
 ]);
@@ -285,10 +298,42 @@ function exportProfile(playerId) {
   return JSON.parse(JSON.stringify(p));
 }
 
+function ancientCivPackVariants(packId) {
+  return ANCIENT_CIV_PACKS[packId] ? ANCIENT_CIV_PACKS[packId].variants.slice() : [];
+}
+
+function ancientCivPackCost(packId) {
+  return ANCIENT_CIV_PACKS[packId] ? ANCIENT_CIV_PACKS[packId].cost : SHOP_SKIN_COST;
+}
+
+function grantAncientCivPack(ownedUnitSkins, packId) {
+  if (!ownedUnitSkins || !packId || !ANCIENT_CIV_PACKS[packId]) return;
+  ownedUnitSkins[packId] = true;
+  for (const variantId of ancientCivPackVariants(packId)) ownedUnitSkins[variantId] = true;
+}
+
+function ancientCivPackOwned(profile, packId) {
+  const owned = profile.profile.ownedUnitSkins || {};
+  if (owned[packId]) return true;
+  const variants = ancientCivPackVariants(packId);
+  return variants.length > 0 && variants.every((id) => !!owned[id]);
+}
+
+function ancientCivVariantOwned(profile, variantId) {
+  const owned = profile.profile.ownedUnitSkins || {};
+  if (owned[variantId]) return true;
+  for (const [packId, pack] of Object.entries(ANCIENT_CIV_PACKS)) {
+    if (pack.variants.includes(variantId)) return ancientCivPackOwned(profile, packId);
+  }
+  return false;
+}
+
 function skinIsOwned(profile, skinId) {
   const id = sanitizeSkin(skinId);
   if (id === 'nato') return true;
   if (id === 'goldenChip') return !!(profile.achievements && profile.achievements.goldenChipMaster);
+  if (ANCIENT_CIV_VARIANT_IDS.includes(id)) return ancientCivVariantOwned(profile, id);
+  if (ANCIENT_CIV_PACKS[id]) return ancientCivPackOwned(profile, id);
   return !!(profile.profile.ownedUnitSkins && profile.profile.ownedUnitSkins[id]);
 }
 
@@ -347,13 +392,21 @@ function shopPurchase(playerId, req) {
     if (itemId === 'nato') return { ok: false, msg: 'Already free' };
     if (itemId === 'goldenChip') return { ok: false, msg: 'Achievement unlock only' };
     if (!PURCHASABLE_SKINS.has(itemId)) return { ok: false, msg: 'Unknown skin' };
-    if (cur.ownedUnitSkins[itemId]) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
-    if ((cur.gold || 0) < SHOP_SKIN_COST) return { ok: false, msg: 'Not enough gold' };
-    cur.gold -= SHOP_SKIN_COST;
-    cur.ownedUnitSkins[itemId] = true;
-    if (itemId === 'napoleonic') profile.achievements.periodNapoleonic = true;
-    if (itemId === 'medieval') profile.achievements.periodMedieval = true;
-    if (itemId === 'ancient') profile.achievements.periodAncient = true;
+    if (ANCIENT_CIV_PACKS[itemId]) {
+      if (ancientCivPackOwned(profile, itemId)) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
+      const cost = ancientCivPackCost(itemId);
+      if ((cur.gold || 0) < cost) return { ok: false, msg: 'Not enough gold' };
+      cur.gold -= cost;
+      grantAncientCivPack(cur.ownedUnitSkins, itemId);
+    } else {
+      if (cur.ownedUnitSkins[itemId]) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
+      if ((cur.gold || 0) < SHOP_SKIN_COST) return { ok: false, msg: 'Not enough gold' };
+      cur.gold -= SHOP_SKIN_COST;
+      cur.ownedUnitSkins[itemId] = true;
+      if (itemId === 'napoleonic') profile.achievements.periodNapoleonic = true;
+      if (itemId === 'medieval') profile.achievements.periodMedieval = true;
+      if (itemId === 'ancient') profile.achievements.periodAncient = true;
+    }
   } else if (kind === 'visual') {
     if (!SHOP_VISUAL_IDS.has(itemId)) return { ok: false, msg: 'Unknown shop item' };
     if (cur.ownedShopVisuals[itemId]) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
@@ -373,22 +426,27 @@ function shopPurchase(playerId, req) {
     const section = String(req.section || '').trim();
     const sections = {
       standard: ['napoleonic', 'medieval', 'ancient'],
-      ancientCiv: ['civRome', 'civCarthage', 'civGaul'],
+      ancientCiv: ANCIENT_CIV_PACK_IDS.slice(),
       countryballs: ['usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china'],
       ruse: ['ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina'],
     };
     const ids = sections[section];
     if (!ids) return { ok: false, msg: 'Unknown section' };
-    const toBuy = ids.filter((sid) => PURCHASABLE_SKINS.has(sid) && !cur.ownedUnitSkins[sid]);
+    const toBuy = ids.filter((sid) => PURCHASABLE_SKINS.has(sid) && (
+      ANCIENT_CIV_PACKS[sid] ? !ancientCivPackOwned(profile, sid) : !cur.ownedUnitSkins[sid]
+    ));
     if (!toBuy.length) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
-    const cost = toBuy.length * SHOP_SKIN_COST;
+    const cost = toBuy.reduce((sum, sid) => sum + (ANCIENT_CIV_PACKS[sid] ? ancientCivPackCost(sid) : SHOP_SKIN_COST), 0);
     if ((cur.gold || 0) < cost) return { ok: false, msg: 'Not enough gold' };
     cur.gold -= cost;
     for (const sid of toBuy) {
-      cur.ownedUnitSkins[sid] = true;
-      if (sid === 'napoleonic') profile.achievements.periodNapoleonic = true;
-      if (sid === 'medieval') profile.achievements.periodMedieval = true;
-      if (sid === 'ancient') profile.achievements.periodAncient = true;
+      if (ANCIENT_CIV_PACKS[sid]) grantAncientCivPack(cur.ownedUnitSkins, sid);
+      else {
+        cur.ownedUnitSkins[sid] = true;
+        if (sid === 'napoleonic') profile.achievements.periodNapoleonic = true;
+        if (sid === 'medieval') profile.achievements.periodMedieval = true;
+        if (sid === 'ancient') profile.achievements.periodAncient = true;
+      }
     }
   } else {
     return { ok: false, msg: 'Unknown purchase kind' };
