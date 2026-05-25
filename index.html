@@ -30290,6 +30290,52 @@
             ctx.restore();
         }
 
+        function renderShopAncientCivPackPreview(cnv, packId, previewColor) {
+            if(!cnv || typeof cnv.getContext !== 'function') return;
+            let variants = (typeof wodAncientCivPackVariants === 'function')
+                ? wodAncientCivPackVariants(packId)
+                : [packId];
+            if(variants.length <= 1) {
+                renderShopSkinThumbCanvas(cnv, variants[0], previewColor);
+                return;
+            }
+            let ctx = cnv.getContext('2d');
+            let w = cnv.width, h = cnv.height;
+            ctx.save();
+            ctx.fillStyle = '#0f1823';
+            ctx.fillRect(0, 0, w, h);
+            let col = previewColor || factionColors[1];
+            let gap = Math.max(2, Math.round(w * 0.02));
+            let halfW = (w - gap) / 2;
+            let m = Math.min(halfW, h);
+            for(let i = 0; i < 2; i++) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(i * (halfW + gap), 0, halfW, h);
+                ctx.clip();
+                ctx.translate(i * (halfW + gap) + halfW / 2, h / 2);
+                ctx.scale(m / 50, m / 50);
+                let u = {
+                    type: 'light',
+                    owner: 1,
+                    hp: 100,
+                    maxHp: 100,
+                    manpower: 1000,
+                    tanks: 0,
+                    skinOverride: variants[i]
+                };
+                drawUnitSkin(ctx, u, 15, col);
+                ctx.restore();
+            }
+            ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(halfW + gap / 2, 4);
+            ctx.lineTo(halfW + gap / 2, h - 4);
+            ctx.stroke();
+            ctx.restore();
+        }
+
         function wodSkinCardPreviewSize() {
             if(window.matchMedia('(orientation: portrait)').matches && window.innerWidth <= 640)
                 return { w: 168, h: 105 };
@@ -30328,15 +30374,18 @@
                 ['skinCivGaulPreview', 'civGaul'],
                 ['skinRuseItalyPreview', 'ruseItaly'],
                 ['skinRuseChinaPreview', 'ruseChina']
-            ].forEach(([cid, packId]) => {
+            ].forEach(([cid, packOrSkinId]) => {
                 let c = document.getElementById(cid);
                 if(!c) return;
                 if(c.width !== dim.w || c.height !== dim.h) {
                     c.width = dim.w;
                     c.height = dim.h;
                 }
-                let previewId = WOD_ANCIENT_CIV_PACK_IDS.includes(packId) ? wodAncientCivPackPreviewId(packId) : packId;
-                renderShopSkinThumbCanvas(c, previewId);
+                if(WOD_ANCIENT_CIV_PACK_IDS.includes(packOrSkinId)) {
+                    renderShopAncientCivPackPreview(c, packOrSkinId, wodShopPreviewColor('player'));
+                } else {
+                    renderShopSkinThumbCanvas(c, packOrSkinId);
+                }
             });
         }
 

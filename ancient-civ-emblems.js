@@ -7,66 +7,77 @@
         civRome: {
             file: 'skins/art/rome1.svg',
             label: 'Rome — Eagle',
+            emblemScale: 0.68,
             fill: '#6e1210', fillHi: '#9a1c18', rim: '#e8c84a', rimInner: '#4a0806',
             emblem: '#f5e6a8', emblemStroke: '#2a0604', emblemHi: '#fff8dc'
         },
         civRome2: {
             file: 'skins/art/rome2.svg',
             label: 'Rome — Imperial eagle',
+            emblemScale: 0.72,
             fill: '#6e1210', fillHi: '#9a1c18', rim: '#e8c84a', rimInner: '#4a0806',
             emblem: '#f5e6a8', emblemStroke: '#2a0604', emblemHi: '#fff8dc'
         },
         civCarthage: {
             file: 'skins/art/carthage1.svg',
             label: 'Carthage — Tanit',
+            emblemScale: 0.60,
             fill: '#5c2d68', fillHi: '#7a4490', rim: '#d4b878', rimInner: '#3e1e48',
             emblem: '#f2ebe0', emblemStroke: '#1e0c28', emblemHi: '#ffffff'
         },
         civCarthage2: {
             file: 'skins/art/carthage2.svg',
             label: 'Carthage — Tanit outline',
+            emblemScale: 0.66,
             fill: '#5c2d68', fillHi: '#7a4490', rim: '#d4b878', rimInner: '#3e1e48',
             emblem: '#f2ebe0', emblemStroke: '#1e0c28', emblemHi: '#ffffff'
         },
         civGaul: {
             file: 'skins/art/gaul1.svg',
             label: 'Gaul — Triskelion',
+            emblemScale: 0.70,
             fill: '#1e4a2c', fillHi: '#2d6640', rim: '#ddb840', rimInner: '#123420',
             emblem: '#f2d858', emblemStroke: '#0c2418', emblemHi: '#fff4b0'
         },
         civEgypt: {
             file: 'skins/art/egypt1.svg',
             label: 'Egypt — Ankh',
+            emblemScale: 0.58,
             fill: '#8b6914', fillHi: '#b08828', rim: '#d4af37', rimInner: '#5c4010',
             emblem: '#fff4c8', emblemStroke: '#1a1408', emblemHi: '#ffffff'
         },
         civEgypt2: {
             file: 'skins/art/egypt2.svg',
             label: 'Egypt — Eye of Horus',
+            emblemScale: 0.66,
             fill: '#1a4a6e', fillHi: '#286890', rim: '#c9a227', rimInner: '#0e2840',
             emblem: '#f0e8d0', emblemStroke: '#0a1828', emblemHi: '#ffffff'
         },
         civMacedon: {
             file: 'skins/art/macedon1.svg',
             label: 'Macedon — Vergina sun',
+            emblemScale: 0.72,
             fill: '#1a2848', fillHi: '#283868', rim: '#d4af37', rimInner: '#0e1830',
             emblem: '#f5e6a8', emblemStroke: '#0a1020', emblemHi: '#fff8dc'
         },
         civMacedon2: {
             file: 'skins/art/macedon2.svg',
             label: 'Macedon — Vergina sun (outline)',
+            emblemScale: 0.72,
             fill: '#1a2848', fillHi: '#283868', rim: '#d4af37', rimInner: '#0e1830',
             emblem: '#f5e6a8', emblemStroke: '#0a1020', emblemHi: '#fff8dc'
         },
         civSparta: {
             file: 'skins/art/sparta1.svg',
             label: 'Sparta — Lambda',
+            emblemScale: 0.62,
             fill: '#8b2020', fillHi: '#b03030', rim: '#c9a227', rimInner: '#5c1010',
             emblem: '#f5e6c8', emblemStroke: '#1a0808', emblemHi: '#ffffff'
         },
         civSparta2: {
             file: 'skins/art/sparta2.svg',
             label: 'Sparta — Lambda in circle',
+            emblemScale: 0.68,
             fill: '#8b2020', fillHi: '#b03030', rim: '#c9a227', rimInner: '#5c1010',
             emblem: '#f5e6c8', emblemStroke: '#1a0808', emblemHi: '#ffffff'
         }
@@ -259,6 +270,12 @@
         img.src = url;
     }
 
+    function wodAncientCivEmblemHalfSize(civId, chipRadius) {
+        let art = WOD_ANCIENT_CIV_ART[civId];
+        let mul = (art && art.emblemScale) || 0.72;
+        return chipRadius * mul;
+    }
+
     function wodPaintAncientCivEmblem(ctx, civId, radius, playerColor, owner) {
         let pal = wodAncientCivPalette(civId);
         if (!pal) return;
@@ -267,7 +284,11 @@
         let img = _imgCache[wodEmblemCacheKey(civId, tint)];
         if (!img || !img.complete || !img.naturalWidth) return;
         ctx.save();
-        let sz = radius * 1.62;
+        let clipR = radius * 0.84;
+        ctx.beginPath();
+        ctx.arc(0, 0, clipR, 0, Math.PI * 2);
+        ctx.clip();
+        let sz = wodAncientCivEmblemHalfSize(civId, radius);
         ctx.imageSmoothingEnabled = true;
         if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, -sz, -sz, sz * 2, sz * 2);
@@ -300,6 +321,7 @@
     global.wodAncientCivPackOwned = wodAncientCivPackOwned;
     global.wodAncientCivVariantOwned = wodAncientCivVariantOwned;
     global.wodAncientCivPalette = wodAncientCivPalette;
+    global.wodAncientCivEmblemHalfSize = wodAncientCivEmblemHalfSize;
     global.wodPaintAncientCivEmblem = wodPaintAncientCivEmblem;
     global.wodPreloadAncientCivArt = wodPreloadAncientCivArt;
     global.wodAncientCivShopMetaList = wodAncientCivShopMetaList;
