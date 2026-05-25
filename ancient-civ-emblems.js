@@ -1,7 +1,7 @@
 /**
  * Ancient civilization unit-counter emblems (Path2D-friendly SVG paths).
- * Rome: aquila (Roman eagle standard). Carthage: Tanit (Wikimedia Tanit-Symbol.svg, PD).
- * Gaul: Celtic triskelion.
+ * Rome/Gaul/Carthage use Path2D emblems below. SVG art assets live in skins/art/
+ * (egypt1–2, macedon1–2, sparta1–2, rome1–10, gaul1–10).
  */
 (function (global) {
     const WOD_ANCIENT_CIV_SVG = {

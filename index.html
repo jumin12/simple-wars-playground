@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -3037,6 +3037,96 @@
             color: #f1c40f;
             letter-spacing: 0.06em;
             text-transform: uppercase;
+        }
+
+        .shop-preview-card-top {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .shop-color-picker {
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .shop-color-picker-trigger {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 34px;
+            height: 34px;
+            padding: 0;
+            border: 2px solid rgba(212, 175, 55, 0.55);
+            border-radius: 8px;
+            background: rgba(8, 16, 26, 0.95);
+            cursor: pointer;
+        }
+
+        .shop-color-picker-trigger:hover {
+            border-color: rgba(46, 204, 113, 0.85);
+        }
+
+        .shop-color-picker-swatch {
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
+            border: 2px solid #0a1520;
+            box-sizing: border-box;
+            background: #2ecc71;
+            display: block;
+        }
+
+        .shop-color-picker-menu {
+            display: none;
+            position: absolute;
+            right: 0;
+            top: calc(100% + 6px);
+            z-index: 65;
+            min-width: 148px;
+            padding: 6px;
+            background: rgba(12, 22, 34, 0.98);
+            border: 2px solid rgba(212, 175, 55, 0.55);
+            border-radius: 10px;
+            box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .shop-color-picker-menu.open {
+            display: block !important;
+        }
+
+        .shop-color-picker-option {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            margin: 2px 0;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            background: transparent;
+            color: #ecf4fa;
+            font: inherit;
+            font-weight: 600;
+            font-size: 12px;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .shop-color-picker-option:hover {
+            background: rgba(46, 204, 113, 0.15);
+            border-color: rgba(46, 204, 113, 0.45);
+        }
+
+        .shop-color-picker-option.active {
+            border-color: rgba(241, 196, 15, 0.65);
+            background: rgba(241, 196, 15, 0.08);
+        }
+
+        .shop-color-picker-option .shop-color-picker-swatch {
+            width: 18px;
+            height: 18px;
         }
 
         .shop-skin-picker {
@@ -7442,7 +7532,15 @@
 
                 <div class="shop-preview-row">
                     <div class="shop-preview-card">
-                        <h4>Your armies</h4>
+                        <div class="shop-preview-card-top">
+                            <h4>Your armies</h4>
+                            <div class="shop-color-picker" id="shopColorPickerPlayer">
+                                <button type="button" class="shop-color-picker-trigger" id="shopColorTriggerPlayer" title="Preview unit color" aria-expanded="false" aria-haspopup="listbox">
+                                    <span class="shop-color-picker-swatch" id="shopColorSwatchPlayer"></span>
+                                </button>
+                                <div class="shop-color-picker-menu" id="shopColorMenuPlayer" role="listbox"></div>
+                            </div>
+                        </div>
                         <div class="shop-skin-picker" id="shopSkinPickerPlayer">
                             <button type="button" class="shop-skin-picker-trigger" id="shopSkinTriggerPlayer" aria-expanded="false" aria-haspopup="listbox">
                                 <canvas class="shop-skin-picker-flag" id="shopSkinFlagPlayer" width="38" height="38" aria-hidden="true"></canvas>
@@ -7459,7 +7557,15 @@
                         </div>
                     </div>
                     <div class="shop-preview-card">
-                        <h4>AI armies</h4>
+                        <div class="shop-preview-card-top">
+                            <h4>AI armies</h4>
+                            <div class="shop-color-picker" id="shopColorPickerAi">
+                                <button type="button" class="shop-color-picker-trigger" id="shopColorTriggerAi" title="Preview AI unit color" aria-expanded="false" aria-haspopup="listbox">
+                                    <span class="shop-color-picker-swatch" id="shopColorSwatchAi"></span>
+                                </button>
+                                <div class="shop-color-picker-menu" id="shopColorMenuAi" role="listbox"></div>
+                            </div>
+                        </div>
                         <div class="shop-skin-picker" id="shopSkinPickerAi">
                             <button type="button" class="shop-skin-picker-trigger" id="shopSkinTriggerAi" aria-expanded="false" aria-haspopup="listbox">
                                 <canvas class="shop-skin-picker-flag" id="shopSkinFlagAi" width="38" height="38" aria-hidden="true"></canvas>
@@ -8578,6 +8684,15 @@
                 aiSel._wodBound = true;
                 aiSel.addEventListener('change', regenerateSetupPreview);
             }
+            let playerColorSel = document.getElementById('setupPlayerColor');
+            if(playerColorSel && !playerColorSel._wodShopColorBound) {
+                playerColorSel._wodShopColorBound = true;
+                playerColorSel.addEventListener('change', () => {
+                    applyPlayerFactionColorFromSetup();
+                    renderShopArmyCanvases();
+                    syncShopSkinBar('player');
+                });
+            }
             if(victorySel && !victorySel._wodVictoryDetailBound) {
                 victorySel._wodVictoryDetailBound = true;
                 victorySel.addEventListener('change', syncSetupVictoryDetail);
@@ -9204,6 +9319,8 @@
             citySkin: 'classic',
             unitSkin: 'nato',
             aiUnitSkin: 'nato',
+            shopPreviewPlayerColor: '#2ecc71',
+            shopPreviewAiColor: '#e74c3c',
             ownedUnitSkins: { nato: true },
             ownedShopVisuals: {},
             gamePeriod: 'modern',
@@ -15257,11 +15374,25 @@
             '#f1c40f'  // 6 = AI 5 (Yellow)
         ];
 
+        const WOD_FACTION_COLOR_OPTIONS = [
+            { value: '#2ecc71', label: 'Green' },
+            { value: '#3498db', label: 'Blue' },
+            { value: '#e74c3c', label: 'Red' },
+            { value: '#9b59b6', label: 'Purple' },
+            { value: '#e67e22', label: 'Orange' },
+            { value: '#f1c40f', label: 'Yellow' },
+            { value: '#1abc9c', label: 'Teal' },
+            { value: '#ecf0f1', label: 'Light gray' }
+        ];
+
         function applyPlayerFactionColorFromSetup() {
             let el = document.getElementById('setupPlayerColor');
             let hex = el && el.value;
-            if(hex && /^#[0-9A-Fa-f]{6}$/.test(hex)) factionColors[1] = hex;
-            else factionColors[1] = '#2ecc71';
+            if(hex && /^#[0-9A-Fa-f]{6}$/.test(hex)) {
+                factionColors[1] = hex;
+                gameData.shopPreviewPlayerColor = hex;
+                syncShopColorSwatch('player');
+            } else factionColors[1] = '#2ecc71';
             ensureAiFactionColorsDistinctFromPlayer();
         }
 
@@ -15476,6 +15607,10 @@
             let as = (!p.aiUnitSkin || p.aiUnitSkin === 'default') ? 'nato' : p.aiUnitSkin;
             gameData.unitSkin = us;
             gameData.aiUnitSkin = as;
+            if(p.shopPreviewPlayerColor && /^#[0-9A-Fa-f]{6}$/.test(p.shopPreviewPlayerColor))
+                gameData.shopPreviewPlayerColor = p.shopPreviewPlayerColor;
+            if(p.shopPreviewAiColor && /^#[0-9A-Fa-f]{6}$/.test(p.shopPreviewAiColor))
+                gameData.shopPreviewAiColor = p.shopPreviewAiColor;
             gameData.ownedUnitSkins = Object.assign({ nato: true }, p.ownedUnitSkins || {});
             gameData.ownedShopVisuals = Object.assign({}, p.ownedShopVisuals || {});
             if(gameData.ownedUnitSkins.default) delete gameData.ownedUnitSkins.default;
@@ -15491,6 +15626,12 @@
             wodSyncAllPeriodSelects();
             wodRefreshPeriodSelectorVisibility();
             wodSyncSetupShopMapButton();
+            wodEnsureShopPreviewColors();
+            factionColors[1] = gameData.shopPreviewPlayerColor;
+            let setupCol = document.getElementById('setupPlayerColor');
+            if(setupCol) setupCol.value = gameData.shopPreviewPlayerColor;
+            let mpCol = document.getElementById('mpCfgPlayerColor');
+            if(mpCol) mpCol.value = gameData.shopPreviewPlayerColor;
         }
 
         function syncGoldenChipUnlockFromAchievements() {
@@ -15518,6 +15659,8 @@
                 gold: gameData.gold,
                 unitSkin: gameData.unitSkin,
                 aiUnitSkin: gameData.aiUnitSkin || 'nato',
+                shopPreviewPlayerColor: gameData.shopPreviewPlayerColor || '#2ecc71',
+                shopPreviewAiColor: gameData.shopPreviewAiColor || '#e74c3c',
                 mpDisplayName: (wodProgress.profile && wodProgress.profile.mpDisplayName) || '',
                 playerId: (wodProgress.profile && wodProgress.profile.playerId) || '',
                 friends: Array.isArray(wodProgress.profile && wodProgress.profile.friends)
@@ -30001,7 +30144,130 @@
             return 'skin' + skin.charAt(0).toUpperCase() + skin.slice(1);
         }
 
-        function renderShopSkinThumbCanvas(cnv, skinId) {
+        function wodShopPreviewColor(which) {
+            let hex = which === 'player'
+                ? (gameData.shopPreviewPlayerColor || factionColors[1] || '#2ecc71')
+                : (gameData.shopPreviewAiColor || factionColors[2] || '#e74c3c');
+            return /^#[0-9A-Fa-f]{6}$/.test(hex) ? hex : (which === 'player' ? '#2ecc71' : '#e74c3c');
+        }
+
+        function wodEnsureShopPreviewColors() {
+            if(!/^#[0-9A-Fa-f]{6}$/.test(gameData.shopPreviewPlayerColor || ''))
+                gameData.shopPreviewPlayerColor = factionColors[1] || '#2ecc71';
+            if(!/^#[0-9A-Fa-f]{6}$/.test(gameData.shopPreviewAiColor || ''))
+                gameData.shopPreviewAiColor = factionColors[2] || '#e74c3c';
+        }
+
+        function syncShopColorSwatch(which) {
+            wodEnsureShopPreviewColors();
+            let sw = document.getElementById(which === 'player' ? 'shopColorSwatchPlayer' : 'shopColorSwatchAi');
+            if(sw) sw.style.background = wodShopPreviewColor(which);
+        }
+
+        function closeShopColorMenus() {
+            ['shopColorMenuPlayer', 'shopColorMenuAi'].forEach(mid => {
+                let m = document.getElementById(mid);
+                if(m) m.classList.remove('open');
+            });
+            ['shopColorTriggerPlayer', 'shopColorTriggerAi'].forEach(tid => {
+                let t = document.getElementById(tid);
+                if(t) t.setAttribute('aria-expanded', 'false');
+            });
+        }
+
+        function setShopPreviewColor(which, hex) {
+            if(!/^#[0-9A-Fa-f]{6}$/.test(hex)) return;
+            if(which === 'player') {
+                gameData.shopPreviewPlayerColor = hex;
+                factionColors[1] = hex;
+                let setup = document.getElementById('setupPlayerColor');
+                if(setup) setup.value = hex;
+                let mpSetup = document.getElementById('mpCfgPlayerColor');
+                if(mpSetup) mpSetup.value = hex;
+                ensureAiFactionColorsDistinctFromPlayer();
+            } else {
+                gameData.shopPreviewAiColor = hex;
+            }
+            syncShopColorSwatch(which);
+            syncShopSkinBar(which);
+            renderShopArmyCanvases();
+            renderSkinShopGridCanvases();
+            scheduleSaveWodProgress();
+        }
+
+        function buildShopColorMenu(which) {
+            let menuId = which === 'player' ? 'shopColorMenuPlayer' : 'shopColorMenuAi';
+            let menu = document.getElementById(menuId);
+            if(!menu) return;
+            let cur = wodShopPreviewColor(which);
+            menu.innerHTML = '';
+            for(let row of WOD_FACTION_COLOR_OPTIONS) {
+                let btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'shop-color-picker-option' + (row.value.toLowerCase() === cur.toLowerCase() ? ' active' : '');
+                let dot = document.createElement('span');
+                dot.className = 'shop-color-picker-swatch';
+                dot.style.background = row.value;
+                let txt = document.createElement('span');
+                txt.textContent = row.label;
+                btn.append(dot, txt);
+                btn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    setShopPreviewColor(which, row.value);
+                    closeShopColorMenus();
+                });
+                menu.appendChild(btn);
+            }
+        }
+
+        function initShopColorPickers() {
+            wodEnsureShopPreviewColors();
+            syncShopColorSwatch('player');
+            syncShopColorSwatch('ai');
+            buildShopColorMenu('player');
+            buildShopColorMenu('ai');
+            let tP = document.getElementById('shopColorTriggerPlayer');
+            let tA = document.getElementById('shopColorTriggerAi');
+            if(tP && !tP._shopColorBound) {
+                tP._shopColorBound = true;
+                tP.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    let menu = document.getElementById('shopColorMenuPlayer');
+                    let open = menu && menu.classList.contains('open');
+                    closeShopColorMenus();
+                    closeShopSkinMenus();
+                    if(menu && !open) {
+                        buildShopColorMenu('player');
+                        menu.classList.add('open');
+                        tP.setAttribute('aria-expanded', 'true');
+                    }
+                });
+            }
+            if(tA && !tA._shopColorBound) {
+                tA._shopColorBound = true;
+                tA.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    let menu = document.getElementById('shopColorMenuAi');
+                    let open = menu && menu.classList.contains('open');
+                    closeShopColorMenus();
+                    closeShopSkinMenus();
+                    if(menu && !open) {
+                        buildShopColorMenu('ai');
+                        menu.classList.add('open');
+                        tA.setAttribute('aria-expanded', 'true');
+                    }
+                });
+            }
+            if(!window._shopColorCloseBound) {
+                window._shopColorCloseBound = true;
+                document.addEventListener('click', (e) => {
+                    if(e.target.closest && e.target.closest('.shop-color-picker')) return;
+                    closeShopColorMenus();
+                });
+            }
+        }
+
+        function renderShopSkinThumbCanvas(cnv, skinId, previewColor) {
             if(!cnv || typeof cnv.getContext !== 'function') return;
             let ctx = cnv.getContext('2d');
             let w = cnv.width, h = cnv.height, m = Math.min(w, h);
@@ -30028,7 +30294,7 @@
                 tanks: 0,
                 skinOverride: skinId
             };
-            let col = factionColors[1];
+            let col = previewColor || factionColors[1];
             ctx.translate(w / 2, h / 2);
             ctx.scale(m / 50, m / 50);
             let rDraw = 15;
@@ -30098,9 +30364,10 @@
             return [c, 'ball-preview', 'ball-' + id];
         }
 
-        function setShopSkinPickerFlag(el, id) {
+        function setShopSkinPickerFlag(el, id, which) {
             if(!el) return;
-            if(el.tagName === 'CANVAS') renderShopSkinThumbCanvas(el, id);
+            let col = wodShopPreviewColor(which || 'player');
+            if(el.tagName === 'CANVAS') renderShopSkinThumbCanvas(el, id, col);
             else el.className = shopSkinThumbClassList(id, 'shop-skin-picker-flag').join(' ');
         }
 
@@ -30111,7 +30378,7 @@
             let flag = document.getElementById(which === 'player' ? 'shopSkinFlagPlayer' : 'shopSkinFlagAi');
             let lab = document.getElementById(which === 'player' ? 'shopSkinLabelPlayer' : 'shopSkinLabelAi');
             let sel = document.getElementById(which === 'player' ? 'shopSelectPlayer' : 'shopSelectAi');
-            setShopSkinPickerFlag(flag, skinId);
+            setShopSkinPickerFlag(flag, skinId, which);
             if(lab) lab.textContent = meta.label;
             if(sel && gameData.ownedUnitSkins && gameData.ownedUnitSkins[skinId]) sel.value = skinId;
         }
@@ -30141,7 +30408,7 @@
                 thumb.width = 36;
                 thumb.height = 36;
                 thumb.setAttribute('role', 'presentation');
-                renderShopSkinThumbCanvas(thumb, row.id);
+                renderShopSkinThumbCanvas(thumb, row.id, wodShopPreviewColor(which));
                 let txt = document.createElement('span');
                 txt.textContent = row.label;
                 btn.append(thumb, txt);
@@ -30191,6 +30458,7 @@
             buildShopSkinMenu('ai');
             syncShopSkinBar('player');
             syncShopSkinBar('ai');
+            initShopColorPickers();
             syncSetupPlayerColorRow();
 
             let tP = document.getElementById('shopSkinTriggerPlayer');
@@ -30272,7 +30540,7 @@
                 ctx2.translate(w / 2, h / 2);
                 let drawScale = w <= 58 ? 0.72 : (w <= 64 ? 0.78 : 0.84);
                 ctx2.scale(drawScale, drawScale);
-                let uCol = factionColors[owner];
+                let uCol = owner === 1 ? wodShopPreviewColor('player') : wodShopPreviewColor('ai');
                 let ur = u.radius || 22;
                 if(!drawUnitSkin(ctx2, u, ur, uCol)) drawClassicUnitShape(ctx2, ut, ur, uCol, ut === 'ship' ? u : null);
                 ctx2.restore();
