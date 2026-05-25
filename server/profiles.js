@@ -13,7 +13,8 @@ const SHOP_MAP_DEFAULT_PRICE = 150;
 
 const PURCHASABLE_SKINS = new Set([
   'napoleonic', 'medieval', 'ancient',
-  'civRome', 'civCarthage', 'civGaul',
+  'civRome', 'civRome2', 'civCarthage', 'civCarthage2', 'civGaul',
+  'civEgypt', 'civEgypt2', 'civMacedon', 'civMacedon2', 'civSparta', 'civSparta2',
   'usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china',
   'ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina',
 ]);
@@ -373,7 +374,7 @@ function shopPurchase(playerId, req) {
     const section = String(req.section || '').trim();
     const sections = {
       standard: ['napoleonic', 'medieval', 'ancient'],
-      ancientCiv: ['civRome', 'civCarthage', 'civGaul'],
+      ancientCiv: ['civRome', 'civRome2', 'civCarthage', 'civCarthage2', 'civGaul', 'civEgypt', 'civEgypt2', 'civMacedon', 'civMacedon2', 'civSparta', 'civSparta2'],
       countryballs: ['usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china'],
       ruse: ['ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina'],
     };
