@@ -14919,7 +14919,40 @@
             }
             return { x, y };
         }
-        function resizeCanvas() {
+        function wodOverlayCoordScale() {
+            let sx = 1;
+            let sy = 1;
+            if(wodInputRect.width > 0 && wodInputRect.layoutWidth > 0)
+                sx = wodInputRect.layoutWidth / wodInputRect.width;
+            if(wodInputRect.height > 0 && wodInputRect.layoutHeight > 0)
+                sy = wodInputRect.layoutHeight / wodInputRect.height;
+            return { sx, sy };
+        }
+        function wodApplyScreenPanDelta(dx, dy) {
+            let sc = wodOverlayCoordScale();
+            gameData.camera.x = cameraStart.x - dx * sc.sx;
+            gameData.camera.y = cameraStart.y - dy * sc.sy;
+        }
+        function wodUpdateSelectionBoxClients(x1, y1, x2, y2) {
+            if(!UI.selectionBox) return;
+            let a = wodClientToCanvasLocal(x1, y1);
+            let b = wodClientToCanvasLocal(x2, y2);
+            let left = Math.min(a.x, b.x);
+            let top = Math.min(a.y, b.y);
+            UI.selectionBox.style.left = left + 'px';
+            UI.selectionBox.style.top = top + 'px';
+            UI.selectionBox.style.width = Math.abs(b.x - a.x) + 'px';
+            UI.selectionBox.style.height = Math.abs(b.y - a.y) + 'px';
+        }
+        function wodShowSelectionBoxAtClient(x, y) {
+            if(!UI.selectionBox) return;
+            let p = wodClientToCanvasLocal(x, y);
+            UI.selectionBox.style.display = 'block';
+            UI.selectionBox.style.left = p.x + 'px';
+            UI.selectionBox.style.top = p.y + 'px';
+            UI.selectionBox.style.width = '0px';
+            UI.selectionBox.style.height = '0px';
+        }
             let w = UI.wrapper.clientWidth | 0;
             let h = UI.wrapper.clientHeight | 0;
             if(w <= 0 || h <= 0) return;
@@ -32515,8 +32548,9 @@
             gameData.camera.zoom = newZ;
             gameData.camera.x = worldX * newZ - mx;
             gameData.camera.y = worldY * newZ - my;
-            gameData.camera.x -= (midX - g.lastMidX);
-            gameData.camera.y -= (midY - g.lastMidY);
+            let panD = wodOverlayCoordScale();
+            gameData.camera.x -= (midX - g.lastMidX) * panD.sx;
+            gameData.camera.y -= (midY - g.lastMidY) * panD.sy;
             g.lastDist = dist;
             g.lastMidX = midX;
             g.lastMidY = midY;
@@ -32991,11 +33025,7 @@
                 isDragging = true;
                 dragStart = {x: cx, y: cy};
                 dragStartClient = { x: e.clientX, y: e.clientY };
-                UI.selectionBox.style.display = 'block';
-                UI.selectionBox.style.left = e.clientX + 'px';
-                UI.selectionBox.style.top = e.clientY + 'px';
-                UI.selectionBox.style.width = '0px';
-                UI.selectionBox.style.height = '0px';
+                wodShowSelectionBoxAtClient(e.clientX, e.clientY);
                 
                 if(!e.shiftKey) {
                     gameData.selection.forEach(s => s.selected = false);
@@ -33020,16 +33050,7 @@
                 let local = wodClientToCanvasLocal(e.clientX, e.clientY);
                 let cx = local.x;
                 let cy = local.y;
-                
-                const width = Math.abs(e.clientX - dragStartClient.x);
-                const height = Math.abs(e.clientY - dragStartClient.y);
-                const left = Math.min(e.clientX, dragStartClient.x);
-                const top = Math.min(e.clientY, dragStartClient.y);
-
-                UI.selectionBox.style.left = left + 'px';
-                UI.selectionBox.style.top = top + 'px';
-                UI.selectionBox.style.width = width + 'px';
-                UI.selectionBox.style.height = height + 'px';
+                wodUpdateSelectionBoxClients(dragStartClient.x, dragStartClient.y, e.clientX, e.clientY);
             } else if(pathOrderStroke.active) {
                 let w = getMouseWorldPos(e);
                 let last = pathOrderStroke.pts[pathOrderStroke.pts.length - 1];
@@ -33046,8 +33067,7 @@
                 wodBumpCamInteract(220);
                 let dx = e.clientX - panStart.x;
                 let dy = e.clientY - panStart.y;
-                gameData.camera.x = cameraStart.x - dx;
-                gameData.camera.y = cameraStart.y - dy;
+                wodApplyScreenPanDelta(dx, dy);
             } else if(gameState === 'PLAYING' && gameData.buildMode === 'bridge' && gameData.bridgePlacement) {
                 let w = getMouseWorldPos(e);
                 gameData.bridgePlacement.x = w.x;
@@ -33278,8 +33298,7 @@
                 wodBumpCamInteract(220);
                 let dx = touch.clientX - panStart.x;
                 let dy = touch.clientY - panStart.y;
-                gameData.camera.x = cameraStart.x - dx;
-                gameData.camera.y = cameraStart.y - dy;
+                wodApplyScreenPanDelta(dx, dy);
             } else if(wodMobileOrderGesture) {
                 let g = wodMobileOrderGesture;
                 let mdx = touch.clientX - g.startClientX;
@@ -33311,21 +33330,11 @@
                     isDragging = true;
                     dragStart = { x: g.startCx, y: g.startCy };
                     dragStartClient = { x: g.startClientX, y: g.startClientY };
-                    UI.selectionBox.style.display = 'block';
-                    UI.selectionBox.style.left = Math.min(g.startClientX, touch.clientX) + 'px';
-                    UI.selectionBox.style.top = Math.min(g.startClientY, touch.clientY) + 'px';
-                    UI.selectionBox.style.width = Math.abs(touch.clientX - g.startClientX) + 'px';
-                    UI.selectionBox.style.height = Math.abs(touch.clientY - g.startClientY) + 'px';
+                    wodShowSelectionBoxAtClient(g.startClientX, g.startClientY);
+                    wodUpdateSelectionBoxClients(g.startClientX, g.startClientY, touch.clientX, touch.clientY);
                 }
             } else if(isDragging) {
-                const width = Math.abs(touch.clientX - dragStartClient.x);
-                const height = Math.abs(touch.clientY - dragStartClient.y);
-                const left = Math.min(touch.clientX, dragStartClient.x);
-                const top = Math.min(touch.clientY, dragStartClient.y);
-                UI.selectionBox.style.left = left + 'px';
-                UI.selectionBox.style.top = top + 'px';
-                UI.selectionBox.style.width = width + 'px';
-                UI.selectionBox.style.height = height + 'px';
+                wodUpdateSelectionBoxClients(dragStartClient.x, dragStartClient.y, touch.clientX, touch.clientY);
             }
         }, {passive: false});
 
