@@ -204,6 +204,12 @@
         case 'match_start':
           emit('MatchStart', { payload: msg.payload, fromSlot: msg.fromSlot });
           break;
+        case 'player_ready':
+          emit('PlayerReady', { slot: msg.slot | 0 });
+          break;
+        case 'match_go':
+          emit('MatchGo', {});
+          break;
         case 'snap':
           if (msg.seq != null && msg.seq <= api.lastSeq) return;
           if (msg.seq != null) api.lastSeq = msg.seq;
@@ -422,6 +428,12 @@
     },
     hostSendMatchStart(payload) {
       send({ t: 'start', payload });
+    },
+    sendMatchReady() {
+      send({ t: 'ready' });
+    },
+    hostSendMatchGo() {
+      send({ t: 'match_go' });
     },
     hostSendSnap(seq, payload) {
       send({ t: 'snap', seq, payload });

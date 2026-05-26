@@ -1019,6 +1019,16 @@ wss.on('connection', (ws) => {
       broadcastLobbyList();
       return;
     }
+    if (t === 'ready' && client.room && client.room.matchStarted) {
+      if (client.room.host && client.room.host.ws.readyState === 1) {
+        client.room.host.ws.send(JSON.stringify({ t: 'player_ready', slot: client.slot }));
+      }
+      return;
+    }
+    if (t === 'match_go' && client.isHost && client.room && client.room.matchStarted) {
+      broadcastAll(client.room, { t: 'match_go' });
+      return;
+    }
     if (t === 'snap' && client.isHost) {
       broadcast(client.room, { t: 'snap', payload: msg.payload, seq: msg.seq }, ws);
       return;
