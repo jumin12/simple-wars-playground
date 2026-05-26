@@ -4341,10 +4341,75 @@
             }
             .stats-menu .player-summary {
                 margin-top: 4px;
+                max-width: 100%;
+                min-width: 0;
+                overflow: hidden;
             }
-            .stats-menu .player-row {
+            .stats-menu #playerSummaryBody {
+                max-width: 100%;
+                min-width: 0;
+                overflow: hidden;
+            }
+            #statsMenu.stats-menu .wod-m-sheet--intel .player-row.header {
+                display: none;
+            }
+            #statsMenu.stats-menu .wod-m-sheet--intel .player-row {
+                display: grid;
+                grid-template-columns: 12px 1fr;
+                gap: 4px 10px;
+                align-items: center;
+                padding: 10px 12px;
+                margin: 0 0 10px;
+                border-radius: 10px;
+                background: rgba(8, 14, 24, 0.75);
+                border: 1px solid rgba(212, 175, 55, 0.28);
+                min-width: 0;
                 font-size: 11px;
-                padding: 8px 6px;
+            }
+            #statsMenu.stats-menu .wod-m-sheet--intel .player-row.loss-row {
+                margin-top: -8px;
+                margin-bottom: 12px;
+                padding-top: 6px;
+                padding-bottom: 10px;
+                border-bottom: none;
+                background: rgba(6, 10, 18, 0.55);
+                border-style: dashed;
+                opacity: 0.92;
+            }
+            #statsMenu.stats-menu .wod-m-sheet--intel .player-row .player-dot {
+                grid-row: 1 / span 6;
+                align-self: start;
+                margin-top: 2px;
+            }
+            #statsMenu.stats-menu .wod-m-sheet--intel .player-row .player-name {
+                grid-column: 2;
+                font-weight: 800;
+                font-size: 12px;
+                text-align: left;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            #statsMenu.stats-menu .wod-m-sheet--intel .player-row .player-stat {
+                grid-column: 2;
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                gap: 10px;
+                text-align: right;
+                white-space: normal;
+                font-size: 10px;
+                color: rgba(236, 240, 241, 0.92);
+            }
+            #statsMenu.stats-menu .wod-m-sheet--intel .player-row .player-stat::before {
+                content: attr(data-label);
+                flex: 1 1 auto;
+                text-align: left;
+                opacity: 0.68;
+                font-weight: 600;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
         }
         @media (min-width: 901px) {
@@ -31588,6 +31653,7 @@
             }).join('|');
             if(sig === wodPlayerSummarySig) return;
             wodPlayerSummarySig = sig;
+            let pfSum = wodActivePeriodFlavor();
             let rows = ownArr.map(owner => {
                 let money = owner === 1 ? gameData.money : (gameData.aiMoneyByOwner && gameData.aiMoneyByOwner[owner]) || 0;
                 let ships = formatTanks(getOwnerShipCount(owner));
@@ -31607,10 +31673,9 @@
                     label = owner === wodLocalPlayerOwner() ? 'You'
                         : (wodMpIsHumanOwner(owner) ? ('Player ' + owner) : ('AI ' + (owner - 1)));
                 }
-                return `<div class="player-row"><span class="player-dot" style="background:${factionColors[owner]}"></span><span>${label}</span><span>$${Math.floor(money)}</span><span>${troops}</span><span>${tanks}</span><span>${ships}</span><span></span></div>
-                        <div class="player-row loss-row"><span></span><span>Losses</span><span>$${lossMoney}</span><span>${casualties}</span><span>${tankLosses}</span><span>${shipLosses}</span><span></span></div>`;
+                return `<div class="player-row"><span class="player-dot" style="background:${factionColors[owner]}"></span><span class="player-name">${label}</span><span class="player-stat" data-label="Money">$${Math.floor(money)}</span><span class="player-stat" data-label="Troops">${troops}</span><span class="player-stat" data-label="${pfSum.playerSummaryHeavy}">${tanks}</span><span class="player-stat" data-label="${pfSum.hudShips}">${ships}</span><span></span></div>
+                        <div class="player-row loss-row"><span></span><span class="player-name">Losses</span><span class="player-stat" data-label="Cost">$${lossMoney}</span><span class="player-stat" data-label="Soldiers">${casualties}</span><span class="player-stat" data-label="${pfSum.summaryHeavyDestroyed}">${tankLosses}</span><span class="player-stat" data-label="${pfSum.hudShipsLost}">${shipLosses}</span><span></span></div>`;
             }).join('');
-            let pfSum = wodActivePeriodFlavor();
             body.innerHTML = `<div class="player-row header"><span></span><span>Side</span><span>Money</span><span>Troops</span><span>${pfSum.playerSummaryHeavy}</span><span>${pfSum.hudShips}</span><span></span></div>${rows}`;
         }
 
@@ -32165,7 +32230,7 @@
 
         function wodDrawFogOverlay(ctx) {
             if(!wodFogActive() || !gameData._fogVisible) return;
-            if(gameData._fogCanvasDirty) wodTryRebuildFogCanvas();
+            if(gameData._fogCanvasDirty && !wodIsCamInteracting()) wodTryRebuildFogCanvas();
             if(!gameData._fogCanvas || gameData._fogCanvas.width <= 0) return;
             ctx.save();
             ctx.drawImage(gameData._fogCanvas, terrainBounds.minX, terrainBounds.minY);
@@ -32189,7 +32254,8 @@
             let camT = gameData.camera.y / gameData.camera.zoom;
             let camB = camT + viewH / gameData.camera.zoom;
 
-            let gfxLite = wodShouldSimplifyDraw();
+            let gfxDecorSkip = wodShouldSimplifyDraw();
+            let gfxLite = false;
             let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
             // Always cull to the camera frustum: without this, desktop "small" battles still iterated/drew every entity every frame — very costly when zoomed in.
             let wodCull = true;
@@ -32402,7 +32468,7 @@
 
             // Draw Units
             if(gameData.layers.units) {
-                if(!gfxLite && gameData.pathStrokePreview && gameData.pathStrokePreview.length >= 2) {
+                if(!gfxDecorSkip && gameData.pathStrokePreview && gameData.pathStrokePreview.length >= 2) {
                     drawStrokePreviewArrows(ctx, gameData.pathStrokePreview, getMovableSelectedUnits());
                 }
                 let uo = wodUnitsDrawOrderScratch;
@@ -32465,7 +32531,7 @@
                         drawClassicUnitShape(ctx, 'light', ur, uColor);
                     }
 
-                    if(!gfxLite && unit.moraleBroken && unit.type !== 'convoy') {
+                    if(!gfxDecorSkip && unit.moraleBroken && unit.type !== 'convoy') {
                         let t = performance.now() * 0.012 + ((unit.uid || '').length * 0.31);
                         let pulse = 0.34 + 0.56 * (Math.sin(t) * 0.5 + 0.5);
                         ctx.save();
