@@ -2502,6 +2502,31 @@
             #inGameUI .info-card.visible .info-deselect-wrap {
                 display: block;
             }
+            #inGameUI .info-card.visible .info-card-body {
+                overflow: hidden;
+                gap: 0;
+            }
+            #inGameUI .info-card.visible .info-card-pages {
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+            #inGameUI .info-card.visible .info-card-pager {
+                margin-top: 0;
+                padding-top: 8px;
+                flex-shrink: 0;
+            }
+            #inGameUI .info-card.visible .info-deselect-wrap {
+                flex-shrink: 0;
+                margin-top: 8px;
+            }
+            #inGameUI .info-card--paged.visible .info-deselect-wrap {
+                margin-top: 6px;
+            }
+            #inGameUI .info-card.visible .info-deselect-btn {
+                margin-top: 0;
+            }
         }
         /* Layer Toggles */
         .layer-toggles {
@@ -7875,9 +7900,6 @@
                         <button type="button" class="info-order-btn" data-mo="formation" onclick="setMobileOrderMode('formation')">Formation</button>
                     </div>
                 </div>
-                <div class="info-deselect-wrap">
-                    <button type="button" class="info-deselect-btn" id="infoDeselect" onclick="deselectAllSelection()">Deselect</button>
-                </div>
                 </div>
                 <div class="info-card-page" id="infoCardPage1" data-page="1" hidden>
                     <div class="info-record-head">Service record</div>
@@ -7895,6 +7917,9 @@
                     <button type="button" class="info-card-page-btn" id="infoCardPagePrev" aria-label="Previous page">&#8249;</button>
                     <span class="info-card-page-label" id="infoCardPageLabel">Overview</span>
                     <button type="button" class="info-card-page-btn" id="infoCardPageNext" aria-label="Next page">&#8250;</button>
+                </div>
+                <div class="info-deselect-wrap">
+                    <button type="button" class="info-deselect-btn" id="infoDeselect" onclick="deselectAllSelection()">Deselect</button>
                 </div>
                 </div>
                 <button type="button" id="wodInfoCardToggle" class="info-card-edge-toggle" aria-expanded="true" aria-controls="infoCardBody" title="Tuck unit sheet">
@@ -14864,7 +14889,7 @@
         }
 
         let wodCanvasAllocSize = {w: -1, h: -1, dpr: -1};
-        let wodInputRect = {left: 0, top: 0, width: 1, height: 1};
+        let wodInputRect = {left: 0, top: 0, width: 1, height: 1, layoutWidth: 1, layoutHeight: 1};
         function wodGetBackingStoreDpr() {
             let d = window.devicePixelRatio || 1;
             if(!isFinite(d) || d <= 0) d = 1;
@@ -14878,6 +14903,19 @@
             wodInputRect.top = r.top;
             wodInputRect.width = r.width || 1;
             wodInputRect.height = r.height || 1;
+            wodInputRect.layoutWidth = canvas.clientWidth || (UI.wrapper && UI.wrapper.clientWidth) || r.width;
+            wodInputRect.layoutHeight = canvas.clientHeight || (UI.wrapper && UI.wrapper.clientHeight) || r.height;
+        }
+        function wodClientToCanvasLocal(clientX, clientY) {
+            let x = clientX - wodInputRect.left;
+            let y = clientY - wodInputRect.top;
+            let lw = wodInputRect.layoutWidth || wodInputRect.width;
+            let lh = wodInputRect.layoutHeight || wodInputRect.height;
+            if(wodInputRect.width > 0 && Math.abs(lw - wodInputRect.width) > 0.5) {
+                x *= lw / wodInputRect.width;
+                y *= lh / wodInputRect.height;
+            }
+            return { x, y };
         }
         function resizeCanvas() {
             let w = UI.wrapper.clientWidth | 0;
@@ -32461,8 +32499,9 @@
         function wodApplyPinchSample(g, dist, midX, midY) {
             let oldZ = gameData.camera.zoom;
             let newZ = Math.max(0.1, Math.min(25, oldZ * (dist / g.lastDist)));
-            let mx = g.lastMidX - wodInputRect.left;
-            let my = g.lastMidY - wodInputRect.top;
+            let local = wodClientToCanvasLocal(g.lastMidX, g.lastMidY);
+            let mx = local.x;
+            let my = local.y;
             let worldX = (mx + gameData.camera.x) / oldZ;
             let worldY = (my + gameData.camera.y) / oldZ;
             gameData.camera.zoom = newZ;
@@ -32616,11 +32655,10 @@
         }
         
         function getWorldPosFromClientXY(clientX, clientY) {
-            let x = clientX - wodInputRect.left;
-            let y = clientY - wodInputRect.top;
+            let p = wodClientToCanvasLocal(clientX, clientY);
             return {
-                x: (x + gameData.camera.x) / gameData.camera.zoom,
-                y: (y + gameData.camera.y) / gameData.camera.zoom
+                x: (p.x + gameData.camera.x) / gameData.camera.zoom,
+                y: (p.y + gameData.camera.y) / gameData.camera.zoom
             };
         }
 
@@ -32916,8 +32954,9 @@
                 return;
             }
             let worldPos = getMouseWorldPos(e);
-            let cx = e.clientX - wodInputRect.left;
-            let cy = e.clientY - wodInputRect.top;
+            let local = wodClientToCanvasLocal(e.clientX, e.clientY);
+            let cx = local.x;
+            let cy = local.y;
             
             if (e.button === 0) { 
                 let strokeHit = null;
@@ -32970,8 +33009,9 @@
 
         canvas.addEventListener('mousemove', (e) => {
             if (isDragging) {
-                let cx = e.clientX - wodInputRect.left;
-                let cy = e.clientY - wodInputRect.top;
+                let local = wodClientToCanvasLocal(e.clientX, e.clientY);
+                let cx = local.x;
+                let cy = local.y;
                 
                 const width = Math.abs(e.clientX - dragStartClient.x);
                 const height = Math.abs(e.clientY - dragStartClient.y);
@@ -33026,8 +33066,9 @@
                 isDragging = false;
                 UI.selectionBox.style.display = 'none';
                 
-                let cx = e.clientX - wodInputRect.left;
-                let cy = e.clientY - wodInputRect.top;
+                let local = wodClientToCanvasLocal(e.clientX, e.clientY);
+                let cx = local.x;
+                let cy = local.y;
                 
                 if(Math.abs(cx - dragStart.x) < 5 && Math.abs(cy - dragStart.y) < 5) {
                     let worldPos = getMouseWorldPos(e);
@@ -33058,8 +33099,9 @@
                 }
             } else if (e.button === 2 && shiftWaypointDrag.active) {
                 shiftWaypointDrag.active = false;
-                let cx = e.clientX - wodInputRect.left;
-                let cy = e.clientY - wodInputRect.top;
+                let local = wodClientToCanvasLocal(e.clientX, e.clientY);
+                let cx = local.x;
+                let cy = local.y;
                 let sc = shiftWaypointDrag.startClient;
                 if(Math.abs(cx - sc.x) < 5 && Math.abs(cy - sc.y) < 5 && getMovableSelectedUnits().length > 0) {
                     let worldPos = getMouseWorldPos(e);
@@ -33138,8 +33180,9 @@
             let touch = e.touches[0];
             gameTouchTrackId = touch.identifier;
             let worldPos = getWorldPosFromClientXY(touch.clientX, touch.clientY);
-            let cx = touch.clientX - wodInputRect.left;
-            let cy = touch.clientY - wodInputRect.top;
+            let local = wodClientToCanvasLocal(touch.clientX, touch.clientY);
+            let cx = local.x;
+            let cy = local.y;
 
             if(mobileOrderMode === 'formation' && getMovableSelectedUnits().length > 0) {
                 wodCancelMobileNavTouch();
@@ -33297,8 +33340,9 @@
                 if(g.timer) { clearTimeout(g.timer); g.timer = null; }
                 wodMobileNavTouch = null;
                 wodRefreshInputRect();
-                let cx = touch.clientX - wodInputRect.left;
-                let cy = touch.clientY - wodInputRect.top;
+                let local = wodClientToCanvasLocal(touch.clientX, touch.clientY);
+                let cx = local.x;
+                let cy = local.y;
                 if(Math.abs(cx - g.startCx) < 5 && Math.abs(cy - g.startCy) < 5) {
                     let worldPos = getWorldPosFromClientXY(touch.clientX, touch.clientY);
                     if(gameData.buildMode) {
@@ -33329,8 +33373,9 @@
                 isDragging = false;
                 UI.selectionBox.style.display = 'none';
                 wodRefreshInputRect();
-                let cx = touch.clientX - wodInputRect.left;
-                let cy = touch.clientY - wodInputRect.top;
+                let local = wodClientToCanvasLocal(touch.clientX, touch.clientY);
+                let cx = local.x;
+                let cy = local.y;
                 if(Math.abs(cx - dragStart.x) < 5 && Math.abs(cy - dragStart.y) < 5) {
                     let worldPos = getWorldPosFromClientXY(touch.clientX, touch.clientY);
                     if(gameData.buildMode) {
@@ -33405,8 +33450,9 @@
             let newZoom = oldZoom * f;
             newZoom = Math.max(0.1, Math.min(25.0, newZoom));
             if(Math.abs(newZoom - oldZoom) < 1e-6) return;
-            let mx = lx - wodInputRect.left;
-            let my = ly - wodInputRect.top;
+            let local = wodClientToCanvasLocal(lx, ly);
+            let mx = local.x;
+            let my = local.y;
             let worldX = (mx + gameData.camera.x) / oldZoom;
             let worldY = (my + gameData.camera.y) / oldZoom;
             gameData.camera.zoom = newZoom;
@@ -33463,8 +33509,9 @@
                 gameData.camera.zoom = Math.min(25.0, gameData.camera.zoom * zoomFactor);
             }
 
-            let mx = e.clientX - wodInputRect.left;
-            let my = e.clientY - wodInputRect.top;
+            let local = wodClientToCanvasLocal(e.clientX, e.clientY);
+            let mx = local.x;
+            let my = local.y;
             
             let worldX = (mx + gameData.camera.x) / oldZoom;
             let worldY = (my + gameData.camera.y) / oldZoom;
