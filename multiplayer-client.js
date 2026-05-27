@@ -185,6 +185,30 @@
         case 'peer_left':
           emit('Peers', { count: msg.count, slot: msg.slot, t: msg.t });
           break;
+        case 'player_disconnected':
+          emit('PlayerDisconnected', { slot: msg.slot | 0, count: msg.count, canRejoin: !!msg.canRejoin });
+          break;
+        case 'player_reconnected':
+          emit('PlayerReconnected', { slot: msg.slot | 0, count: msg.count });
+          break;
+        case 'rejoin_match':
+          api.code = msg.code || '';
+          api.slot = msg.slot | 0;
+          api.isHost = !!msg.isHost;
+          api.connected = true;
+          joinResolve = null;
+          joinReject = null;
+          createResolve = null;
+          createReject = null;
+          emit('RejoinMatch', {
+            code: api.code,
+            slot: api.slot,
+            isHost: api.isHost,
+            payload: msg.payload || null,
+            snap: msg.snap || null,
+            lobbyName: msg.lobbyName || 'Game',
+          });
+          break;
         case 'host_migrated':
           api.isHost = true;
           if (msg.slot != null) api.slot = msg.slot;
@@ -314,7 +338,8 @@
         });
       });
     },
-    joinLobby(id, password) {
+    joinLobby(id, password, opts) {
+      opts = opts && typeof opts === 'object' ? opts : {};
       return new Promise((resolve, reject) => {
         if (!ws || ws.readyState !== 1) {
           reject(new Error('Not connected'));
@@ -329,7 +354,13 @@
             joinResolve = null;
           }
         }, 12000);
-        send({ t: 'join_lobby', id: String(id || '').trim(), password: password || '' });
+        send({
+          t: 'join_lobby',
+          id: String(id || '').trim(),
+          password: password || '',
+          seat: opts.seat | 0,
+          playerId: opts.playerId != null ? String(opts.playerId) : '',
+        });
       });
     },
     sendLobbyMeta(meta) {

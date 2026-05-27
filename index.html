@@ -7089,7 +7089,7 @@
                             <div id="mpPaneFriends" class="mp-hub-pane" data-mp-pane="friends" role="tabpanel" hidden>
                                 <p class="mp-hub-pane-lead">Send a friend request by player ID. They must accept before you can invite them to lobbies.</p>
                                 <div class="mp-friends-add">
-                                    <input type="text" id="mpFriendAddInput" placeholder="WOD-XXXX-XXXX" maxlength="32" autocomplete="off">
+                                    <input type="text" id="mpFriendAddInput" placeholder="WOD-XXXX-XXXX — invite code" maxlength="32" autocomplete="off">
                                     <button type="button" class="build-btn" id="mpBtnAddFriend">Send request</button>
                                 </div>
                                 <div id="mpFriendsList"></div>
@@ -9529,7 +9529,30 @@
         }
         function wodMpIsHumanOwner(owner) {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.humanSlots) return owner === 1;
-            return gameData.mp.humanSlots.indexOf(owner) >= 0;
+            if(gameData.mp.humanSlots.indexOf(owner) < 0) return false;
+            if(wodMpIsSlotEliminated(owner)) return false;
+            let conn = gameData.mp.connectedSlots;
+            if(conn && conn.length && conn.indexOf(owner) < 0) return false;
+            return true;
+        }
+        function wodMpCollectLayoutHumanSeats(meta) {
+            if(!meta || typeof meta !== 'object') return [1];
+            wodMpEnsureDefaultSeatTypes(meta);
+            let maxH = wodMpClampLobbyCap(meta.maxHumans);
+            let st = meta.seatTypes || [];
+            let out = [];
+            for(let s = 1; s <= maxH; s++) {
+                if((st[s - 1] || 'human') === 'human') out.push(s);
+            }
+            return out.length ? out : [1];
+        }
+        function wodMpHostMarkSlotDisconnected(slot) {
+            if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost || !slot) return;
+            showNotification('Seat ' + slot + ' disconnected — AI controls their forces until they return.');
+        }
+        function wodMpHostMarkSlotReconnected(slot) {
+            if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost || !slot) return;
+            showNotification('Seat ' + slot + ' reconnected and resumed control.');
         }
         function wodGetActiveFactionSlotsForMap() {
             if(!gameData.mp || !gameData.mp.enabled) return null;
@@ -9550,7 +9573,7 @@
                     out.push(s);
                     continue;
                 }
-                if(t === 'human' && hs.indexOf(s) >= 0) out.push(s);
+                if(t === 'human') out.push(s);
             }
             return out.length ? out.sort((a, b) => a - b) : null;
         }
@@ -12069,6 +12092,7 @@
         }
         function wodMpBuildInitPayload() {
             let hs = gameData.mp && gameData.mp.humanSlots ? gameData.mp.humanSlots.slice() : [1];
+            let conn = gameData.mp && gameData.mp.connectedSlots ? gameData.mp.connectedSlots.slice() : hs.slice();
             let maxL = (gameData.mp && gameData.mp.maxLobbySlots) || WOD_MP_MAX_PLAYERS;
             let st = (gameData.mp && gameData.mp.seatTypes) ? gameData.mp.seatTypes.slice(0, maxL) : [];
             return {
@@ -12086,9 +12110,10 @@
                 aiCount: gameData.aiCount,
                 victoryMode: gameData.victoryMode,
                 humanSlots: hs,
+                connectedSlots: conn,
                 seatTypes: st,
                 maxLobbySlots: maxL,
-                expectedReady: hs.slice().sort((a, b) => a - b),
+                expectedReady: conn.slice().sort((a, b) => a - b),
                 money: gameData.money,
                 manpower: gameData.manpower,
                 income: gameData.income,
@@ -13023,19 +13048,50 @@
             let id = wodProgress.profile.playerId;
             if(!id) return;
             let url = new URL(location.href);
-            url.searchParams.set('friend', id);
+            url.searchParams.delete('friend');
+            url.searchParams.set('invite', id);
             let link = url.toString();
             if(navigator.clipboard && navigator.clipboard.writeText) {
                 navigator.clipboard.writeText(link).then(() => showNotification('Profile link copied.')).catch(() => showNotification(link));
             } else showNotification(link);
         }
-        function wodMpApplyFriendQueryFromUrl() {
+        function wodMpApplyInviteQueryFromUrl() {
             try {
-                let id = wodMpNormalizePlayerId(new URLSearchParams(location.search).get('friend'));
-                if(!id) return;
-                let inp = document.getElementById('mpFriendAddInput');
-                if(inp && !inp.value.trim()) inp.value = id;
+                let params = new URLSearchParams(location.search);
+                let id = wodMpNormalizePlayerId(params.get('invite') || params.get('friend'));
+                if(id) {
+                    wodMpSwitchHubTab('friends');
+                    let inp = document.getElementById('mpFriendAddInput');
+                    if(inp) {
+                        inp.value = id;
+                        inp.focus();
+                    }
+                }
+                let lobbyId = String(params.get('lobby') || params.get('join') || '').trim();
+                if(lobbyId) window._wodMpPendingLobbyFromUrl = lobbyId;
             } catch(_) {}
+        }
+        function wodMpApplyFriendQueryFromUrl() {
+            wodMpApplyInviteQueryFromUrl();
+        }
+        async function wodMpTryJoinLobbyFromUrl() {
+            let id = window._wodMpPendingLobbyFromUrl;
+            if(!id) return;
+            window._wodMpPendingLobbyFromUrl = '';
+            if(!wodMpRequireRegisteredDisplayName('joining a lobby')) return;
+            await wodMpEnsureConnected();
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) return;
+            if(WodMultiplayer.api.code) return;
+            try {
+                wodEnsurePlayerId();
+                await WodMultiplayer.joinLobby(id, '', { playerId: wodProgress.profile.playerId || '' });
+                wodMpLobbyCount = Math.max(1, WodMultiplayer.api.slot | 0, 1);
+                wodMpRefreshMpPanelState();
+                wodMpPushLobbyProfile();
+                showNotification('Joined lobby from invite link.');
+            } catch(e) {
+                showNotification(e && e.message ? e.message : 'Could not join lobby from link.');
+            }
         }
         function wodMpHandleFriendRemoved(payload) {
             if(!payload || !payload.fromPlayerId) return;
@@ -13346,6 +13402,12 @@
             if(!dlg || !body) return;
             body.textContent = (inv.fromName || 'A friend') + ' invited you to "' + (inv.lobbyName || 'Game') + '".' +
                 (inv.locked ? ' This lobby requires a password.' : '');
+            if(inv.fromPlayerId) {
+                wodMpSwitchHubTab('friends');
+                let inp = document.getElementById('mpFriendAddInput');
+                if(inp) inp.value = wodMpNormalizePlayerId(inv.fromPlayerId) || inv.fromPlayerId;
+            }
+            if(inv.lobbyId) window._wodMpPendingLobbyFromUrl = inv.lobbyId;
             dlg.classList.remove('hidden');
             dlg.setAttribute('aria-hidden', 'false');
             showNotification('Lobby invite from ' + (inv.fromName || 'friend'));
@@ -13370,7 +13432,11 @@
                 if(!pw) { showNotification('Password required.'); return; }
             }
             try {
-                await WodMultiplayer.joinLobby(inv.lobbyId, pw);
+                wodEnsurePlayerId();
+                await WodMultiplayer.joinLobby(inv.lobbyId, pw, {
+                    seat: inv.seat | 0,
+                    playerId: wodProgress.profile.playerId || ''
+                });
                 wodMpLobbyCount = Math.max(wodMpLobbyCount, WodMultiplayer.api.slot | 0, 1);
                 wodMpRefreshMpPanelState();
                 wodMpPushLobbyProfile();
@@ -13501,7 +13567,7 @@
             meta.seatTypes = st;
         }
         function wodMpApplyRoomMeta(meta) {
-            window.wodMpRoomMeta = meta && typeof meta === 'object' ? meta : {};
+            window.wodMpRoomMeta = meta && typeof meta === 'object' ? JSON.parse(JSON.stringify(meta)) : {};
             wodMpEnsureDefaultSeatTypes(window.wodMpRoomMeta);
             if(window.wodMpRoomMeta.playerColors) {
                 for(let k of Object.keys(window.wodMpRoomMeta.playerColors)) {
@@ -14133,7 +14199,8 @@
             }
             try {
                 if(st) st.textContent = 'Joining…';
-                await WodMultiplayer.joinLobby(id, pw);
+                wodEnsurePlayerId();
+                await WodMultiplayer.joinLobby(id, pw, { playerId: wodProgress.profile.playerId || '' });
                 wodMpLobbyCount = Math.max(wodMpLobbyCount, WodMultiplayer.api.slot | 0, 1);
                 if(st) st.textContent = 'Joined — waiting for host to launch.';
                 wodMpRefreshMpPanelState();
@@ -14256,6 +14323,7 @@
             return wodMpEnsureConnected().then(() => {
                 wodMpRegisterWithServer();
                 wodCloudFetchProfile();
+                void wodMpTryJoinLobbyFromUrl();
             }).catch(() => {});
         }
         function wodMpEnsureConnected() {
@@ -14277,6 +14345,7 @@
                     wodMpQueryFriendPresence();
                     wodMpRefreshMpPanelState();
                     wodMpRenderLobbyList(WodMultiplayer.api.lobbies || []);
+                    void wodMpTryJoinLobbyFromUrl();
                 })
                 .catch((e) => {
                     let m = e && e.message ? e.message : String(e);
@@ -14559,12 +14628,14 @@
                     let st = (meta.seatTypes || []).slice(0, maxH);
                     while(st.length < maxH) st.push('human');
                     let occ = (meta.occupiedSlots || []).slice().sort((a, b) => a - b);
+                    let layoutHumans = wodMpCollectLayoutHumanSeats(meta);
                     wodMpApplyMetaToSetupFields(meta);
-                    wodMpApplyLaunchColorsFromHumans(meta, occ);
+                    wodMpApplyLaunchColorsFromHumans(meta, layoutHumans);
                     gameData.aiCount = st.filter(t => t === 'bot').length;
                     gameData.mp = {
                         enabled: true, isHost: true, localSlot: WodMultiplayer.api.slot,
-                        humanSlots: occ,
+                        humanSlots: layoutHumans,
+                        connectedSlots: occ.slice(),
                         seatTypes: st,
                         maxLobbySlots: maxH,
                         lobbyCount: wodMpLobbyCount | 0,
@@ -14677,8 +14748,86 @@
             });
             addEventListener('wod-mp-RoomMeta', (ev) => {
                 let m = ev.detail && ev.detail.meta;
-                if(m) wodMpApplyRoomMeta(m);
-                wodMpRenderGameLobbyScreen();
+                if(m) {
+                    wodMpApplyRoomMeta(m);
+                    wodMpRenderGameLobbyScreen();
+                    if(typeof _wodMpLobbyPreviewLastFp !== 'undefined') _wodMpLobbyPreviewLastFp = '';
+                    requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
+                }
+            });
+            addEventListener('wod-mp-PlayerDisconnected', (ev) => {
+                let slot = ev.detail && ev.detail.slot | 0;
+                if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
+                if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = (gameData.mp.humanSlots || []).slice();
+                let i = gameData.mp.connectedSlots.indexOf(slot);
+                if(i >= 0) gameData.mp.connectedSlots.splice(i, 1);
+                if(gameData.mp.isHost) wodMpHostMarkSlotDisconnected(slot);
+            });
+            addEventListener('wod-mp-PlayerReconnected', (ev) => {
+                let slot = ev.detail && ev.detail.slot | 0;
+                if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
+                if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
+                if(gameData.mp.connectedSlots.indexOf(slot) < 0) gameData.mp.connectedSlots.push(slot);
+                if(gameData.mp.isHost) wodMpHostMarkSlotReconnected(slot);
+            });
+            addEventListener('wod-mp-RejoinMatch', (ev) => {
+                let d = ev && ev.detail;
+                if(!d || !d.payload || typeof WodMultiplayer === 'undefined') return;
+                let pl = d.payload;
+                let conn = Array.isArray(pl.connectedSlots) ? pl.connectedSlots.slice() : (pl.humanSlots || [1]).slice();
+                let mySlot = WodMultiplayer.api.slot | 0;
+                if(mySlot && conn.indexOf(mySlot) < 0) conn.push(mySlot);
+                let expectedReady = Array.isArray(pl.expectedReady) ? pl.expectedReady.slice() : conn.slice();
+                gameData.mp = {
+                    enabled: true,
+                    isHost: !!d.isHost,
+                    localSlot: mySlot,
+                    humanSlots: pl.humanSlots || [1],
+                    connectedSlots: conn,
+                    seatTypes: pl.seatTypes || [],
+                    maxLobbySlots: wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS),
+                    eliminatedSlots: [],
+                    allReady: false,
+                    expectedReady: expectedReady.slice().sort((a, b) => a - b),
+                    readySlots: {},
+                    playerPublic: (pl.playerPublic && typeof pl.playerPublic === 'object')
+                        ? Object.assign({}, pl.playerPublic)
+                        : {}
+                };
+                wodMpInitSyncState(expectedReady);
+                if(pl.aiCount != null) gameData.aiCount = pl.aiCount;
+                wodMpApplyInitFromHost(pl);
+                if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
+                hidePanels();
+                gameState = 'PLAYING';
+                pauseMenuBackgroundBattle();
+                UI.mainMenu.classList.add('hidden');
+                UI.panels.forEach(p => p.classList.add('hidden'));
+                UI.escMenu.classList.add('hidden');
+                UI.inGameUI.style.display = 'block';
+                UI.canvas.style.display = 'block';
+                wodSetMpMatchUiFlag(true);
+                wodResetMobileHud();
+                if(!gameData.layers) gameData.layers = {};
+                gameData.layers.territory = false;
+                gameData.selection = [];
+                setGameSpeed(0, true);
+                wodMpRefreshSyncOverlay();
+                lastTime = performance.now();
+                if(animationFrameId) cancelAnimationFrame(animationFrameId);
+                gameLoop(lastTime);
+                wodSyncDesktopLayersPanelExpanded();
+                syncInGameLayerToolbar();
+                wodApplyPlayViewportLock(true);
+                let sc = gameData.cities.find(c => c.owner === gameData.mp.localSlot);
+                if(sc) {
+                    let vw = canvas.clientWidth || UI.wrapper.clientWidth || 1;
+                    let vh = canvas.clientHeight || UI.wrapper.clientHeight || 1;
+                    gameData.camera.x = sc.x * gameData.camera.zoom - vw / 2;
+                    gameData.camera.y = sc.y * gameData.camera.zoom - vh / 2;
+                }
+                if(WodMultiplayer.sendMatchReady) WodMultiplayer.sendMatchReady();
+                showNotification('Rejoined match — resuming your seat.');
             });
             addEventListener('wod-mp-LeftLobby', () => {
                 window.wodMpRoomMeta = {};
@@ -14721,10 +14870,12 @@
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.isHost) return;
                 if(!ev.detail || !ev.detail.payload) return;
                 let pl = ev.detail.payload;
-                let expectedReady = Array.isArray(pl.expectedReady) ? pl.expectedReady.slice() : (pl.humanSlots || [1]).slice();
+                let expectedReady = Array.isArray(pl.expectedReady) ? pl.expectedReady.slice() : (pl.connectedSlots || pl.humanSlots || [1]).slice();
+                let conn = Array.isArray(pl.connectedSlots) ? pl.connectedSlots.slice() : expectedReady.slice();
                 gameData.mp = {
                     enabled: true, isHost: false, localSlot: WodMultiplayer.api.slot,
                     humanSlots: pl.humanSlots || [1],
+                    connectedSlots: conn,
                     seatTypes: pl.seatTypes || [],
                     maxLobbySlots: wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS),
                     eliminatedSlots: [],
@@ -35090,7 +35241,7 @@
         wodEnsurePlayerId();
         wodMpInitGlobalHandlers();
         void wodMpBackgroundConnect();
-        wodMpApplyFriendQueryFromUrl();
+        wodMpApplyInviteQueryFromUrl();
         applyWodProfileToGame();
         wodInitBrowserSaves();
         checkWodAchievements();
