@@ -6898,18 +6898,12 @@
         <div id="wodMapGenOverlay" class="wod-load-overlay hidden" aria-busy="true" aria-label="Generating map">
             <div class="wod-load-panel">
                 <div class="wod-load-spinner" aria-hidden="true"></div>
-                <div class="wod-load-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="wodMapGenBarTrack">
-                    <div id="wodMapGenBarInner" class="wod-load-bar-inner wod-boot-tween-suppress"></div>
-                </div>
-                <div class="wod-load-caption" id="wodMapGenCaption">Generating map…</div>
+                <div class="wod-load-caption">Generating map…</div>
             </div>
         </div>
         <div id="wodMpSyncOverlay" class="wod-load-overlay hidden" aria-live="polite" aria-label="Waiting for players">
             <div class="wod-load-panel">
                 <div class="wod-load-spinner" aria-hidden="true"></div>
-                <div class="wod-load-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="wodMpLoadBarTrack">
-                    <div id="wodMpLoadBarInner" class="wod-load-bar-inner wod-boot-tween-suppress"></div>
-                </div>
                 <div class="wod-load-caption wod-mp-sync-msg">Waiting for all players…</div>
             </div>
         </div>
@@ -9092,26 +9086,7 @@
         let wodWheelZoomRaf = 0;
         let wodWheelBatch = null;
         const WOD_POW_PARTS = 16;
-        function wodHardwareThreadCount() {
-            if(typeof navigator === 'undefined') return 4;
-            let hc = navigator.hardwareConcurrency;
-            if(!hc || hc < 1) return 4;
-            return hc;
-        }
-        function wodMapGenPoolSize() {
-            let hc = wodHardwareThreadCount();
-            if(hc >= 12) return 8;
-            if(hc >= 8) return 6;
-            if(hc >= 4) return Math.max(3, hc - 1);
-            return 2;
-        }
-        function wodMapGenSliceBudgetMs() {
-            if(typeof wodMapGenCooperativeMode === 'function' && wodMapGenCooperativeMode()) return 5;
-            let hc = wodHardwareThreadCount();
-            if(hc >= 8) return 14;
-            if(hc >= 4) return 9;
-            return 6;
-        }
+        const WOD_MAP_GEN_POOL = 4;
         let wodPowWorkers = [];
         let wodPowWUrl = null;
         let wodPowParts = new Array(WOD_POW_PARTS).fill(null);
@@ -9148,7 +9123,7 @@
         }
         function wodEnsureMapGenWorkerPool() {
             if(wodMapGenWorkers.length > 0 || typeof Worker === 'undefined') return wodMapGenWorkers;
-            for(let i = 0; i < wodMapGenPoolSize(); i++) {
+            for(let i = 0; i < WOD_MAP_GEN_POOL; i++) {
                 try {
                     wodMapGenWorkers.push(new Worker('map-gen-worker.js'));
                 } catch(_) {}
@@ -12297,19 +12272,15 @@
             }
             let hexes = {};
             let hexList = new Array(list.length);
-            let chunk = Math.max(800, Math.floor(6000 / Math.max(1, wodHardwareThreadCount())));
+            let chunk = 3000;
             for(let i = 0; i < list.length; i++) {
                 let h = list[i];
                 hexList[i] = h;
                 hexes[h.q + ',' + h.r] = h;
-                if(i > 0 && (i % chunk) === 0) {
-                    wodMapGenEmitProgress(0.12 + 0.5 * (i / list.length), 'Loading terrain tiles…');
-                    await new Promise(r => requestAnimationFrame(r));
-                }
+                if(i > 0 && (i % chunk) === 0) await new Promise(r => requestAnimationFrame(r));
             }
             gameData.hexes = hexes;
             gameData.hexList = hexList;
-            wodMapGenEmitProgress(0.62, 'Terrain tiles loaded');
         }
         function wodMpIsLobbyPreviewHost() {
             return typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost;
@@ -12341,10 +12312,8 @@
         }
         async function wodMpApplyInitFromHost(p, opts) {
             opts = opts || {};
-            wodMapGenEmitProgress(0.04, 'Receiving host map…');
             if(opts.asyncHexes) await wodMpRebuildHexesFromListAsync(p.hexList);
             else wodMpRebuildHexesFromList(p.hexList);
-            wodMapGenEmitProgress(0.68, 'Placing cities & structures…');
             gameData.cities = p.cities.map(c => Object.assign({}, c));
             gameData.roads = (p.roads || []).map(ro => {
                 let from = gameData.cities.find(c => c.q === ro.fq && c.r === ro.fr);
@@ -12364,15 +12333,11 @@
             for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
             wodRebuildBridgeHexIndex();
             gameData.entities = [];
-            let entN = (p.entities && p.entities.length) || 0;
-            for(let ei = 0; ei < entN; ei++) {
-                let u = wodEntityFromNet(p.entities[ei]);
+            for(let ed of p.entities) {
+                let u = wodEntityFromNet(ed);
                 gameData.entities.push(u);
                 ensureUnitId(u);
-                if(entN > 400 && (ei & 127) === 0)
-                    wodMapGenEmitProgress(0.72 + 0.2 * (ei / entN), 'Deploying units…');
             }
-            wodMapGenEmitProgress(0.94, 'Finalizing map…');
             gameData.mapRadius = p.mapRadius;
             gameData.mapShape = p.mapShape;
             gameData.hexRadius = p.hexRadius;
@@ -15421,22 +15386,16 @@
                     gameData.selection = [];
                     setGameSpeed(0, true);
                     wodMpRefreshSyncOverlay();
-                    wodSetMpLoadOverlayProgress(0, 'Loading host map…');
-                    gameData._wodMapGenProgressFn = (t, cap) => {
-                        wodSetMpLoadOverlayProgress(Math.min(99, t * 100), cap || 'Loading host map…');
-                    };
+                    let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
+                    if(syncMsg) syncMsg.textContent = 'Loading host map…';
                     try {
                         await wodMpApplyInitFromHost(pl, { asyncHexes: true });
                     } catch(err) {
                         console.error(err);
                         showNotification('Failed to load host map on rejoin.');
                         gameState = 'MENU';
-                        gameData._wodMapGenProgressFn = null;
                         return;
-                    } finally {
-                        gameData._wodMapGenProgressFn = null;
                     }
-                    wodSetMpLoadOverlayProgress(100, 'Map loaded');
                     if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
                     if(!gameData.hexList || !gameData.hexList.length) {
                         showNotification('Host map data was empty — cannot rejoin.');
@@ -15562,22 +15521,16 @@
                     gameData.selection = [];
                     setGameSpeed(0, true);
                     wodMpRefreshSyncOverlay();
-                    wodSetMpLoadOverlayProgress(0, 'Loading host map…');
-                    gameData._wodMapGenProgressFn = (t, cap) => {
-                        wodSetMpLoadOverlayProgress(Math.min(99, t * 100), cap || 'Loading host map…');
-                    };
+                    let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
+                    if(syncMsg) syncMsg.textContent = 'Loading host map…';
                     try {
                         await wodMpApplyInitFromHost(pl, { asyncHexes: true });
                     } catch(err) {
                         console.error(err);
                         showNotification('Failed to load host map.');
                         gameState = 'MENU';
-                        gameData._wodMapGenProgressFn = null;
                         return;
-                    } finally {
-                        gameData._wodMapGenProgressFn = null;
                     }
-                    wodSetMpLoadOverlayProgress(100, 'Map loaded');
                     if(!gameData.hexList || !gameData.hexList.length) {
                         showNotification('Host map data was empty — cannot start.');
                         gameState = 'MENU';
@@ -25402,15 +25355,13 @@
                 if(mapGenOverlayEl) {
                     mapGenOverlayEl.classList.remove('hidden');
                     mapGenOverlayEl.setAttribute('aria-busy', 'true');
-                    wodSetMapGenOverlayProgress(0, 'Starting map generation…');
                 }
             }
             try {
             gameData._mapGenInProgress = true;
             wodRefreshMapPreviewGeneratingUi();
             gameData._wodFastMapGen = true;
-            wodMapGenYieldingStart(wodMapGenSliceBudgetMs());
-            wodMapGenEmitProgress(0.02, 'Laying out terrain…');
+            wodMapGenYieldingStart(wodMapGenCooperativeMode() ? 5 : 4);
             let startMoneyInput = document.getElementById('setupMoney');
             gameData.money = startMoneyInput ? parseInt(startMoneyInput.value) : 10000;
             gameData.income = 10;             gameData.selection = [];
@@ -25499,7 +25450,6 @@
                         if(ci > 0 && (ci & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                     }
                     terrainAppliedFromWorker = true;
-                    wodMapGenEmitProgress(0.2, 'Terrain mesh from workers…');
                 }
             } catch(_) {}
 
@@ -25748,7 +25698,6 @@
             await wodCoalesceTerrainSpeckles(2);
             await wodEnsureMountainLandOutlets();
             wodCaptureTerrainPoliticsBase();
-            wodMapGenEmitProgress(0.38, 'Terrain passes & rivers…');
 
             if(!wodMapLandFractionAcceptable(mapShape)) {
                 if(ownsInnerRng) wodPopRandom();
@@ -25765,7 +25714,6 @@
             let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
             let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
             let landNC = Math.max(1, landForCities.length);
-            wodMapGenEmitProgress(0.48, 'Placing ' + factionSlots + ' faction' + (factionSlots === 1 ? '' : 's') + '…');
 
             if(mapShape === 'archipelago') {
                 let passLand = 0;
@@ -25895,7 +25843,6 @@
             }
 
             gameData.roads = [];
-            wodMapGenEmitProgress(0.76, 'Connecting roads…');
             // Generate Roads (MST style connecting nearest)
             for(let i=0; i<gameData.cities.length; i++){
                 let c1 = gameData.cities[i];
@@ -25910,7 +25857,6 @@
             }
 
             if(wantTerritory && wantCities) {
-                wodMapGenEmitProgress(0.9, 'Deploying starting forces…');
                 await assignStartingCities();
             } else if(wantCities && !wantTerritory) {
                 for(let hx of gameData.hexList) setHexOwner(hx, 0);
@@ -25924,11 +25870,10 @@
                 wodMarkTerrainPoliticalDirty();
             }
             updateTerrainKey();
-            wodMapGenEmitProgress(1, 'Map ready');
             if(ownsInnerRng)
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
-            gameData._mapGenInProgress = false;
+                gameData._mapGenInProgress = false;
                 wodRefreshMapPreviewGeneratingUi();
                 gameData._wodFastMapGen = false;
                 wodMapGenYieldingStop();
@@ -26438,90 +26383,39 @@
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
         }
 
-        function wodSetLoadBarProgress(innerId, trackId, pct) {
-            let inner = innerId ? document.getElementById(innerId) : null;
-            let tr = trackId ? document.getElementById(trackId) : null;
+        function wodSetBootSplashProgress(pct) {
+            let inner = document.getElementById('wodBootBarInner');
+            let tr = document.getElementById('wodBootBarTrack');
             let p = Math.min(100, Math.max(0, +pct || 0));
             if(inner) inner.style.transform = `scaleX(${p / 100})`;
             if(tr) tr.setAttribute('aria-valuenow', String(Math.round(p)));
-            return p;
-        }
-        function wodSetBootSplashProgress(pct) {
-            wodSetLoadBarProgress('wodBootBarInner', 'wodBootBarTrack', pct);
-        }
-        function wodSetMapGenOverlayProgress(pct, caption) {
-            wodSetLoadBarProgress('wodMapGenBarInner', 'wodMapGenBarTrack', pct);
-            let cap = document.getElementById('wodMapGenCaption');
-            if(cap && caption) cap.textContent = caption;
-        }
-        function wodSetMpLoadOverlayProgress(pct, caption) {
-            wodSetLoadBarProgress('wodMpLoadBarInner', 'wodMpLoadBarTrack', pct);
-            let cap = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
-            if(cap && caption) cap.textContent = caption;
-        }
-        /** Report 0..1 progress from mapgen / boot / MP load (prefers active progress callback). */
-        function wodMapGenEmitProgress(t, caption) {
-            t = Math.min(1, Math.max(0, +t || 0));
-            if(typeof gameData._wodMapGenProgressFn === 'function') {
-                gameData._wodMapGenProgressFn(t, caption || '');
-                return;
-            }
-            let bootOv = document.getElementById('wodBootOverlay');
-            let mapOv = document.getElementById('wodMapGenOverlay');
-            let mpOv = document.getElementById('wodMpSyncOverlay');
-            if(mapOv && !mapOv.classList.contains('hidden'))
-                wodSetMapGenOverlayProgress(t * 100, caption || 'Generating map…');
-            else if(mpOv && !mpOv.classList.contains('hidden'))
-                wodSetMpLoadOverlayProgress(t * 100, caption || 'Loading…');
-            else if(bootOv && !bootOv.classList.contains('hidden') && caption) {
-                let bc = document.getElementById('wodBootCaption');
-                if(bc) bc.textContent = caption;
-            }
         }
 
-        /** Advance boot splash while heavy work runs; real mapgen steps can push progress via wodMapGenEmitProgress. */
+        /** Advance boot splash caption/progress while async work runs (keeps bar from looking stuck). */
         async function wodBootRunWithProgress(captionEl, fromPct, toPct, labelPrefix, work, subLabels) {
             subLabels = subLabels || [
-                labelPrefix + ' — terrain layout',
-                labelPrefix + ' — coastlines',
+                labelPrefix + ' — layout',
+                labelPrefix + ' — terrain',
                 labelPrefix + ' — borders',
                 labelPrefix + ' — settlements',
-                labelPrefix + ' — forces'
+                labelPrefix + ' — units'
             ];
-            let span = Math.max(1, toPct - fromPct);
-            let t0 = performance.now();
-            let creepT = 0;
-            let reportedT = 0;
+            let shown = fromPct;
             let sub = 0;
-            function paint(forceT, capText) {
-                let t = forceT != null ? Math.min(1, Math.max(0, forceT)) : Math.max(reportedT, creepT);
-                reportedT = t;
-                wodSetBootSplashProgress(fromPct + span * t);
-                if(captionEl && capText) captionEl.textContent = capText;
-            }
             let iv = setInterval(() => {
-                let elapsed = performance.now() - t0;
-                let estMs = Math.max(14000, span * 280);
-                creepT = Math.max(creepT, Math.min(0.94, elapsed / estMs));
-                let cap = gameData._wodMapGenProgressCap || subLabels[sub % subLabels.length];
-                if(!gameData._wodMapGenProgressCap) sub++;
-                paint(null, cap);
-            }, 120);
-            gameData._wodMapGenProgressFn = (t, cap) => {
-                if(cap) gameData._wodMapGenProgressCap = cap;
-                creepT = Math.max(creepT, Math.min(0.98, t));
-                paint(creepT, cap || (captionEl && captionEl.textContent) || labelPrefix);
-            };
-            gameData._wodMapGenProgressCap = '';
+                shown = Math.min(toPct - 2, shown + 1.4);
+                wodSetBootSplashProgress(shown);
+                if(captionEl && subLabels.length) {
+                    captionEl.textContent = subLabels[sub % subLabels.length];
+                    sub++;
+                }
+            }, 160);
             try {
                 let out = work();
                 if(out && typeof out.then === 'function') await out;
             } finally {
                 clearInterval(iv);
-                gameData._wodMapGenProgressFn = null;
-                gameData._wodMapGenProgressCap = '';
             }
-            paint(1, labelPrefix + ' — ready');
             wodSetBootSplashProgress(toPct);
             if(captionEl) captionEl.textContent = labelPrefix;
             await new Promise(r => requestAnimationFrame(r));
@@ -26587,7 +26481,7 @@
             (async () => {
                 try {
                     await bootStage('Loading interface…', 6, null, 20);
-                    await bootStage('Starting worker pool (' + wodMapGenPoolSize() + ' workers)…', 14, () => {
+                    await bootStage('Starting worker pool…', 14, () => {
                         wodEnsureMapGenWorkerPool();
                         wodEnsurePowWorkers();
                         wodEnsureSepWorker();
@@ -26598,23 +26492,12 @@
                         updateTerrainKey({ skipHelp: true });
                     }, 18);
                     await bootStage('Menu UI chrome…', 30, null, 16);
-                    await wodBootRunWithProgress(caption, 32, 62, 'Preparing menu battlefield', () => bootstrapMenuBackgroundBattle({ waitForBusy: true }), [
-                        'Preparing menu battlefield — terrain',
-                        'Preparing menu battlefield — coastlines',
-                        'Preparing menu battlefield — nations',
-                        'Preparing menu battlefield — settlements',
-                        'Preparing menu battlefield — armies'
-                    ]);
-                    await bootStage('Menu layers…', 64, null, 12);
-                    await wodBootRunWithProgress(caption, 66, 78, 'Rendering terrain', () => {
+                    await wodBootRunWithProgress(caption, 32, 62, 'Building menu battlefield', () => bootstrapMenuBackgroundBattle());
+                    await bootStage('Baking terrain layers…', 72, () => {
                         updateTerrainCache();
                         draw();
-                    }, [
-                        'Rendering terrain — scanning bounds',
-                        'Rendering terrain — baking layers',
-                        'Rendering terrain — finishing'
-                    ]);
-                    await bootStage('Warming battle AI…', 80, () => {
+                    }, 20);
+                    await bootStage('Warming battle AI…', 82, () => {
                         let dtSim = 2 / 60;
                         for(let i = 0; i < 6; i++) update(dtSim);
                     }, 18);
@@ -26645,26 +26528,16 @@
                 } catch(err) {
                     bootErr = true;
                     console.error(err);
-                    if(caption) caption.textContent = 'Could not load — try refreshing the page.';
-                    wodSetBootSplashProgress(100);
+                    if(caption) caption.textContent = 'Could not load. Try refreshing.';
                     if(inner) inner.classList.remove('wod-boot-tween-suppress');
                     gameData._wodSkipMapGenLoader = false;
-                    setTimeout(revealMenu, 2200);
                 }
             })();
         }
 
-        async function bootstrapMenuBackgroundBattle(opts) {
-            opts = opts || {};
+        async function bootstrapMenuBackgroundBattle() {
             pauseMenuBackgroundBattle();
-            if(window._wodMenuBootstrapBusy) {
-                if(opts.waitForBusy !== false) {
-                    let waitT0 = performance.now();
-                    while(window._wodMenuBootstrapBusy && performance.now() - waitT0 < 120000)
-                        await new Promise(r => setTimeout(r, 48));
-                }
-                if(window._wodMenuBootstrapBusy) return;
-            }
+            if(window._wodMenuBootstrapBusy) return;
             if(menuDemoSeeded && menuBattleLive) {
                 applyMenuBattleState(menuBattleLive);
                 if(wodIsMainMenuAttractEligible()) resumeMenuBackgroundBattle();
