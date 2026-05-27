@@ -295,18 +295,15 @@ function unregisterClientPlayer(client) {
   client.playerId = '';
 }
 
-function lobbyCap(room) {
-  let mh = room.meta && room.meta.maxHumans != null ? parseInt(room.meta.maxHumans, 10) : MAX_PLAYERS;
-  if (!Number.isFinite(mh)) mh = MAX_PLAYERS;
-  return Math.min(MAX_PLAYERS, Math.max(2, mh));
+function lobbyCap() {
+  return MAX_PLAYERS;
 }
 
 function normalizeSeatTypes(meta) {
   if (!meta || typeof meta !== 'object') return;
-  const cap = Math.min(MAX_PLAYERS, Math.max(2, parseInt(meta.maxHumans, 10) || MAX_PLAYERS));
-  meta.maxHumans = cap;
-  let st = Array.isArray(meta.seatTypes) ? meta.seatTypes.slice(0, cap) : [];
-  while (st.length < cap) st.push('human');
+  meta.maxHumans = MAX_PLAYERS;
+  let st = Array.isArray(meta.seatTypes) ? meta.seatTypes.slice(0, MAX_PLAYERS) : [];
+  while (st.length < MAX_PLAYERS) st.push('human');
   for (let i = 0; i < st.length; i++) {
     const v = st[i];
     if (v === 'bot' || v === 'closed') st[i] = v;
@@ -332,7 +329,7 @@ function slotEffectiveColor(room, slot) {
 
 function lobbyActiveSeats(room) {
   normalizeSeatTypes(room.meta);
-  const cap = lobbyCap(room);
+  const cap = lobbyCap();
   const st = room.meta.seatTypes || [];
   const out = [];
   for (let s = 1; s <= cap; s++) {
@@ -344,7 +341,7 @@ function lobbyActiveSeats(room) {
 /** First slot 1..cap that is `human` in seatTypes and not taken by a connected client. */
 function firstFreeHumanSlot(room) {
   normalizeSeatTypes(room.meta);
-  const cap = lobbyCap(room);
+  const cap = lobbyCap();
   const taken = new Set();
   for (const c of room.clients) taken.add(c.slot);
   const st = room.meta.seatTypes;
@@ -357,7 +354,7 @@ function firstFreeHumanSlot(room) {
 
 function pickJoinSlot(room, requestedSeat) {
   normalizeSeatTypes(room.meta);
-  const cap = lobbyCap(room);
+  const cap = lobbyCap();
   const taken = new Set();
   for (const c of room.clients) taken.add(c.slot);
   const st = room.meta.seatTypes || [];
@@ -402,14 +399,15 @@ function disconnectClientFromMatch(client) {
 }
 
 function assertMetaCompatibleWithRoom(room, metaTrial) {
-  const cap = Math.min(MAX_PLAYERS, Math.max(2, parseInt(metaTrial.maxHumans, 10) || MAX_PLAYERS));
+  normalizeSeatTypes(metaTrial);
+  const cap = lobbyCap();
   let humanSeats = 0;
   for (let i = 0; i < cap; i++) {
     if ((metaTrial.seatTypes[i] || 'human') === 'human') humanSeats++;
   }
   if (humanSeats < 1) return 'At least one seat must be Human for real players';
   for (const c of room.clients) {
-    if (c.slot > cap) return `Seat ${c.slot} is in use — raise max seats or remove players first`;
+    if (c.slot > cap) return `Seat ${c.slot} is out of range`;
     const st = metaTrial.seatTypes[c.slot - 1] || 'human';
     if (st !== 'human') return `Seat ${c.slot} has a player — set it to Human first`;
   }
@@ -458,7 +456,7 @@ function getLobbyListPublic() {
   for (const room of rooms.values()) {
     if (room.matchStarted) continue;
     normalizeSeatTypes(room.meta);
-    const cap = lobbyCap(room);
+    const cap = lobbyCap();
     out.push({
       id: room.id,
       name: room.name,
@@ -1047,7 +1045,7 @@ wss.on('connection', (ws) => {
     if (t === 'lobby_color') {
       if (!client.room || client.room.matchStarted) return;
       const slot = parseInt(msg.slot, 10) || 0;
-      const cap = lobbyCap(client.room);
+      const cap = lobbyCap();
       if (slot < 1 || slot > cap) return;
       if (!client.isHost && slot !== client.slot) return;
       const hex = String(msg.color || '').trim();
