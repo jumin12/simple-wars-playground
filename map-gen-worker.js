@@ -109,7 +109,9 @@
         let hexList = [];
         let scale = 0.004;
 
-        for (let r = -rows; r <= rows; r++) {
+        let rMin = d.rowMin != null ? d.rowMin : -rows;
+        let rMax = d.rowMax != null ? d.rowMax : rows;
+        for (let r = rMin; r <= rMax; r++) {
             for (let q = -cols; q <= cols; q++) {
                 let x = q * spacing;
                 let y = r * spacing;
@@ -319,13 +321,24 @@
                 hexList.push({ q, r, x, y, type });
             }
         }
-        smoothTerrainHexList(hexList);
+        if (d.rowMin == null && d.rowMax == null) smoothTerrainHexList(hexList);
         return hexList;
     }
 
     self.onmessage = function (ev) {
         let d = ev.data;
-        if (!d || d.cmd !== 'terrain') return;
+        if (!d) return;
+        if (d.cmd === 'smooth') {
+            try {
+                let list = Array.isArray(d.hexList) ? d.hexList : [];
+                smoothTerrainHexList(list);
+                self.postMessage({ ok: true, hexList: list, jobId: d.jobId });
+            } catch (err) {
+                self.postMessage({ ok: false, err: String(err && err.message ? err.message : err), jobId: d.jobId });
+            }
+            return;
+        }
+        if (d.cmd !== 'terrain') return;
         try {
             let hexList = generateTerrainCells(d);
             self.postMessage({ ok: true, hexList, jobId: d.jobId });
