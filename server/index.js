@@ -303,7 +303,7 @@ function normalizeSeatTypes(meta) {
   if (!meta || typeof meta !== 'object') return;
   meta.maxHumans = MAX_PLAYERS;
   let st = Array.isArray(meta.seatTypes) ? meta.seatTypes.slice(0, MAX_PLAYERS) : [];
-  while (st.length < MAX_PLAYERS) st.push('human');
+  while (st.length < MAX_PLAYERS) st.push(st.length === 0 ? 'human' : 'closed');
   for (let i = 0; i < st.length; i++) {
     const v = st[i];
     if (v === 'bot' || v === 'closed') st[i] = v;

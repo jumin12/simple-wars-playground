@@ -12308,7 +12308,7 @@
         }
         function wodMpCanUsePoliticsOnlyForMeta(meta) {
             if(!wodCanRegeneratePoliticsOnly()) return false;
-            return wodMpLobbyMapMatchesMeta(meta, null);
+            return !!(meta && typeof meta === 'object');
         }
         async function wodMpApplyInitFromHost(p, opts) {
             opts = opts || {};
@@ -13737,12 +13737,21 @@
             if(!meta || typeof meta !== 'object') return WOD_MP_MAX_PLAYERS;
             meta.maxHumans = WOD_MP_MAX_PLAYERS;
             let st = Array.isArray(meta.seatTypes) ? meta.seatTypes.slice(0, WOD_MP_MAX_PLAYERS) : [];
-            while(st.length < WOD_MP_MAX_PLAYERS) st.push('human');
+            while(st.length < WOD_MP_MAX_PLAYERS) st.push(st.length === 0 ? 'human' : 'closed');
             for(let i = 0; i < st.length; i++) {
                 if(st[i] !== 'bot' && st[i] !== 'closed') st[i] = 'human';
             }
             meta.seatTypes = st;
             return WOD_MP_MAX_PLAYERS;
+        }
+        /** Active non-closed seats — map layout depends on this, not human vs bot per seat. */
+        function wodMpLobbyFactionFingerprint(meta) {
+            if(!meta || typeof meta !== 'object') return '1';
+            try {
+                return wodMpGetLobbyFactionSlotsFromMeta(meta).join(',');
+            } catch(e) {
+                return '1';
+            }
         }
         function wodMpEnsureDefaultSeatTypes(meta) { wodMpNormalizeLobbyMeta(meta); }
         function wodMpResolveLobbyCapacity(meta) { return wodMpNormalizeLobbyMeta(meta); }
@@ -13831,6 +13840,7 @@
         let _wodMpLobbyPreviewGenToken = 0;
         let _wodMpLobbyPreviewLastFp = '';
         let _wodMpLobbyPreviewLastTerrainFp = '';
+        let _wodMpLobbyPreviewLastFactionFp = '';
         let _wodMpGuestLobbyPreviewFp = '';
         let _wodMpCommittedLobbyMap = null;
         function wodMpDeepSnapshotMapState() {
@@ -14070,18 +14080,23 @@
             gameData.loadedCustomMap = false;
             let previewSeed = wodMpLobbyPreviewSeed(meta);
             gameData._mapGenSeed = previewSeed >>> 0;
-            wodMapGenYieldingStart(26);
+            gameData._wodSkipMapGenLoader = true;
+            gameData._wodReuseMapGenSeed = true;
+            wodMapGenYieldingStart(8);
             wodPushSeededRandom(previewSeed);
             try {
                 await generateMap();
             } finally {
                 wodPopRandom();
                 wodMapGenYieldingStop();
+                gameData._wodSkipMapGenLoader = false;
             }
             if(!wodMpLobbyMapMatchesMeta(meta, null)) return false;
             let fp = wodMpLobbyPreviewFingerprint(meta);
             wodMpCommitLobbyPreviewMap(meta, fp);
             _wodMpLobbyPreviewLastFp = fp;
+            _wodMpLobbyPreviewLastTerrainFp = wodMpLobbyTerrainFingerprint(meta);
+            _wodMpLobbyPreviewLastFactionFp = wodMpLobbyFactionFingerprint(meta);
             wodMpHostPushLobbyPreview(fp);
             return true;
         }
@@ -14113,7 +14128,6 @@
         async function wodMpFinalizeLaunchMapFromLobby(meta) {
             wodMpNormalizeLobbyMeta(meta);
             gameData.menuAttractMode = false;
-            wodMpResetTransientMapState();
             let expected = wodMpGetLobbyFactionSlotsFromMeta(meta);
             gameData._wodMpLaunchFactionSlots = expected.slice();
             wodMpSyncLaunchSettingsFromMeta(meta);
@@ -14135,17 +14149,25 @@
                     if(!ok) throw new Error('Could not build launch map for current lobby seats');
                 }
             }
-            wodMpResetTransientMapState();
             if(wodMpTryActivateCommittedLobbyMap(meta)) {
-                wodMpWireLaunchFromCommittedMap(meta, expected);
+                gameData._wodMpLaunchFromCommitted = true;
+                try {
+                    wodMpWireLaunchFromCommittedMap(meta, expected);
+                } finally {
+                    gameData._wodMpLaunchFromCommitted = false;
+                }
             } else {
+                wodMpResetTransientMapState();
                 let mpSeed = wodMpLobbyPreviewSeed(meta);
                 gameData._mapGenSeed = mpSeed >>> 0;
+                gameData._wodSkipMapGenLoader = true;
+                gameData._wodReuseMapGenSeed = true;
                 wodPushSeededRandom(mpSeed);
                 try {
                     await generateMap();
                 } finally {
                     wodPopRandom();
+                    gameData._wodSkipMapGenLoader = false;
                 }
             }
             let owners = new Set();
@@ -14252,13 +14274,7 @@
             return [seed, meta.mapSize, meta.mapShape || ''].join('|');
         }
         function wodMpLobbyPoliticsFingerprint(meta) {
-            if(!meta || typeof meta !== 'object') return '';
-            try {
-                wodMpNormalizeLobbyMeta(meta);
-                return (meta.seatTypes || []).join(',');
-            } catch(e) {
-                return String(Date.now());
-            }
+            return wodMpLobbyFactionFingerprint(meta);
         }
         function wodMpHostPaintLobbyPreviewFromCommitted(meta) {
             let cm = _wodMpCommittedLobbyMap;
@@ -14285,6 +14301,7 @@
             wodMpAbortLobbyPreviewJobs();
             _wodMpLobbyPreviewLastFp = '';
             _wodMpLobbyPreviewLastTerrainFp = '';
+            _wodMpLobbyPreviewLastFactionFp = '';
             _wodMpGuestLobbyPreviewFp = '';
             wodRefreshMapPreviewGeneratingUi();
         }
@@ -14320,12 +14337,23 @@
                 return;
             }
             let terrainFp = wodMpLobbyTerrainFingerprint(meta);
-            let politicsFp = wodMpLobbyPoliticsFingerprint(meta);
-            let fp = terrainFp + '||' + politicsFp;
+            let factionFp = wodMpLobbyFactionFingerprint(meta);
+            let fp = terrainFp + '||' + factionFp;
+            if(opts.appearanceOnly) {
+                if(wodMpHostPaintLobbyPreviewFromCommitted(meta)) {
+                    _wodMpLobbyPreviewLastFp = fp;
+                    _wodMpLobbyPreviewLastTerrainFp = terrainFp;
+                    _wodMpLobbyPreviewLastFactionFp = factionFp;
+                    wodMpCommitLobbyPreviewMap(meta, fp);
+                    wodMpHostPushLobbyPreview(fp);
+                }
+                return;
+            }
             if(!opts.force && fp === _wodMpLobbyPreviewLastFp && !_wodMpLobbyPreviewBusy && !_wodMpLobbyPreviewQueued) return;
             if(!opts.force && wodMpHostPaintLobbyPreviewFromCommitted(meta)) {
                 _wodMpLobbyPreviewLastFp = fp;
                 _wodMpLobbyPreviewLastTerrainFp = terrainFp;
+                _wodMpLobbyPreviewLastFactionFp = factionFp;
                 return;
             }
             if(_wodMpLobbyPreviewBusy) {
@@ -14347,8 +14375,7 @@
                     (async function() {
                         try {
                             if(previewTok !== _wodMpLobbyPreviewGenToken || gameState === 'PLAYING') return;
-                            let r = parseInt(meta.mapSize, 10) || 60;
-                            gameData.mapRadius = r;
+                            wodApplyMapSizePreset(parseInt(meta.mapSize, 10) || 60);
                             if(shapeEl) shapeEl.value = meta.mapShape || 'island';
                             gameData.loadedCustomMap = false;
                             wodMpNormalizeLobbyMeta(meta);
@@ -14372,7 +14399,8 @@
                             };
                             gameData.aiCount = st.filter(t => t === 'bot').length;
                             let previewSeed = wodMpLobbyPreviewSeed(meta);
-                            wodMapGenYieldingStart(politicsOnly ? 5 : 26);
+                            gameData._wodSkipMapGenLoader = true;
+                            wodMapGenYieldingStart(politicsOnly ? 4 : 8);
                             try {
                                 if(politicsOnly) {
                                     wodPushSeededRandom((previewSeed ^ wodMpPoliticsLayoutSeed(meta)) >>> 0);
@@ -14383,6 +14411,7 @@
                                     }
                                 }
                                 if(!politicsOnly) {
+                                    gameData._wodReuseMapGenSeed = true;
                                     wodPushSeededRandom(previewSeed);
                                     try {
                                         await generateMap();
@@ -14393,10 +14422,12 @@
                                 }
                             } finally {
                                 wodMapGenYieldingStop();
+                                gameData._wodSkipMapGenLoader = false;
                             }
                             if(previewTok !== _wodMpLobbyPreviewGenToken || gameState === 'PLAYING') return;
                             previewLoadedMap('mpLobbyMapPreview');
                             _wodMpLobbyPreviewLastFp = fp;
+                            _wodMpLobbyPreviewLastFactionFp = factionFp;
                             wodMpCommitLobbyPreviewMap(meta, fp);
                             wodMpHostPushLobbyPreview(fp);
                         } catch(err) {
@@ -14616,12 +14647,19 @@
                         let slot = parseInt(sel.getAttribute('data-slot'), 10);
                         let v = sel.value;
                         wodMpNormalizeLobbyMeta(window.wodMpRoomMeta);
+                        let prevFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
                         if(slot >= 1 && slot <= WOD_MP_MAX_PLAYERS) {
                             window.wodMpRoomMeta.seatTypes[slot - 1] = v;
                         }
                         wodMpPushLobbyMetaFromCurrentUi();
-                        _wodMpCommittedLobbyMap = null;
-                        requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
+                        let nextFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
+                        if(prevFactionFp === nextFactionFp) {
+                            requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ appearanceOnly: true }));
+                        } else {
+                            requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({
+                                politicsOnly: _wodMpLobbyPreviewLastTerrainFp === wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta)
+                            }));
+                        }
                     };
                 });
                 wodMpWireLobbyColorPickers(slotsEl);
@@ -15308,12 +15346,22 @@
             addEventListener('wod-mp-RoomMeta', (ev) => {
                 let m = ev.detail && ev.detail.meta;
                 if(m) {
+                    let prevFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta || {});
+                    let prevTerrainFp = wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta || {});
                     wodMpApplyRoomMeta(m);
                     wodMpRenderGameLobbyScreen();
                     if(wodMpIsLobbyPreviewHost()) {
                         requestAnimationFrame(() => {
+                            let terrainFp = wodMpLobbyTerrainFingerprint(m);
+                            let factionFp = wodMpLobbyFactionFingerprint(m);
+                            if(terrainFp === prevTerrainFp && factionFp === prevFactionFp) {
+                                wodMpRefreshLobbyMapPreview({ appearanceOnly: true });
+                                return;
+                            }
                             if(!wodMpHostPaintLobbyPreviewFromCommitted(m))
-                                wodMpRefreshLobbyMapPreview();
+                                wodMpRefreshLobbyMapPreview({
+                                    politicsOnly: terrainFp === prevTerrainFp && terrainFp === _wodMpLobbyPreviewLastTerrainFp
+                                });
                         });
                     } else if(!wodMpGuestPreviewMatchesMeta(m)) {
                         _wodMpGuestLobbyPreviewFp = '';
@@ -25306,7 +25354,7 @@
             let cooperative = wodMapGenCooperativeMode();
             if(gameData._wodFastMapGen && !cooperative) {
                 st.fastTick = (st.fastTick || 0) + 1;
-                if((st.fastTick & 1023) !== 0) return;
+                if((st.fastTick & (gameData._wodFastMapGenLobby ? 8191 : 1023)) !== 0) return;
             }
             let now = performance.now();
             if(cooperative && st.lastYieldAt && (now - st.lastYieldAt) >= 24) {
@@ -25347,8 +25395,10 @@
 
         async function generateMap() {
             let ownsInnerRng = !_wodSavedMathRandom;
-            let showMapGenOverlay = wodShouldShowMapGenOverlay();
+            let skipMapGenLoader = !!gameData._wodSkipMapGenLoader;
+            let showMapGenOverlay = wodShouldShowMapGenOverlay() && !skipMapGenLoader;
             gameData._wodSkipMapGenLoader = false;
+            gameData._wodFastMapGenLobby = skipMapGenLoader;
             let mapGenOverlayEl = null;
             if(showMapGenOverlay) {
                 mapGenOverlayEl = document.getElementById('wodMapGenOverlay');
@@ -25381,7 +25431,7 @@
             wodApplyMapSizePreset(sizeVal);
             let mapR = gameData.mapRadius;
             let hr = gameData.hexRadius;
-            let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed);
+            let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed) || !!_wodSavedMathRandom || !!(gameData._wodReuseMapGenSeed && (gameData._mapGenSeed >>> 0));
             const PROCMAP_ACCEPT_TRIES_MAX = wodFingerReuseMapSeed ? 1 : Math.min(28, Math.max(10, 14 + Math.floor(mapR / 18)));
             let procSucceeded = false;
 
@@ -25393,8 +25443,9 @@
             let shapePre = document.getElementById('setupMapShape');
             let mapShapePre = (mog && wodIsProcGenMapShape(mog.mapShape)) ? mog.mapShape : (shapePre ? shapePre.value : 'island');
             let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
-            if(wodMapShapeUsesRectanglePipeline(mapShapePre)) procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 26);
-            if(mapShapePre === 'archipelago') procMapAcceptTriesMax = Math.max(procMapAcceptTriesMax, 34);
+            if(wodFingerReuseMapSeed) procMapAcceptTriesMax = 1;
+            if(wodMapShapeUsesRectanglePipeline(mapShapePre)) procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, wodFingerReuseMapSeed ? 1 : 26);
+            if(mapShapePre === 'archipelago') procMapAcceptTriesMax = wodFingerReuseMapSeed ? 1 : Math.max(procMapAcceptTriesMax, 34);
             if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
@@ -25876,6 +25927,7 @@
                 gameData._mapGenInProgress = false;
                 wodRefreshMapPreviewGeneratingUi();
                 gameData._wodFastMapGen = false;
+                gameData._wodFastMapGenLobby = false;
                 wodMapGenYieldingStop();
                 if(showMapGenOverlay && mapGenOverlayEl) {
                     mapGenOverlayEl.classList.add('hidden');
