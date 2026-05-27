@@ -13850,7 +13850,8 @@
                 _mapGenSeed: gameData._mapGenSeed,
                 hexRadius: gameData.hexRadius,
                 aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner),
-                aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner)
+                aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner),
+                _wodProcgenBorderFirstApplied: !!gameData._wodProcgenBorderFirstApplied
             };
         }
         function wodMpApplyDeepMapSnapshot(snap) {
@@ -13879,7 +13880,53 @@
             if(snap.hexRadius != null) gameData.hexRadius = snap.hexRadius;
             gameData.aiMoneyByOwner = Object.assign({}, snap.aiMoneyByOwner);
             gameData.aiManpowerByOwner = Object.assign({}, snap.aiManpowerByOwner);
+            if(snap._wodProcgenBorderFirstApplied) gameData._wodProcgenBorderFirstApplied = true;
             return gameData.hexList.length > 0;
+        }
+        function wodMpCommittedIsCurrentForMeta(meta) {
+            let cm = _wodMpCommittedLobbyMap;
+            if(!cm || !cm.data) return false;
+            let curFp = wodMpLobbyPreviewFingerprint(meta);
+            if(cm.fp && cm.fp !== curFp) return false;
+            return wodMpLobbyMapMatchesMeta(meta, cm.data);
+        }
+        /** Wire economy/camera/units after applying the lobby preview snapshot — do not rerun full assignStartingCities. */
+        function wodMpWireLaunchFromCommittedMap(meta, expected) {
+            let ownersList = (expected && expected.length) ? expected.slice() : wodMpGetLobbyFactionSlotsFromMeta(meta);
+            if(!ownersList.length) throw new Error('No active lobby factions');
+            if(!ownersList.every(o => gameData.cities.some(c => c && c.owner === o)))
+                throw new Error('Lobby map is missing a capital for each active seat');
+            gameData._wodProcgenBorderFirstApplied = true;
+            gameData.tradeTimer = 0;
+            let locO = (gameData.mp && gameData.mp.enabled) ? (gameData.mp.localSlot || 1) : 1;
+            let startMoney = meta && meta.money != null
+                ? (parseInt(meta.money, 10) || 10000)
+                : (parseInt((document.getElementById('setupMoney') || {}).value, 10) || 10000);
+            if(!gameData.aiMoneyByOwner) gameData.aiMoneyByOwner = {};
+            if(!gameData.aiManpowerByOwner) gameData.aiManpowerByOwner = {};
+            for(let owner of ownersList) {
+                if(owner === locO) {
+                    gameData.money = startMoney;
+                    gameData.manpower = 5000;
+                    gameData.aiMoneyByOwner[owner] = 0;
+                    gameData.aiManpowerByOwner[owner] = 0;
+                } else {
+                    gameData.aiMoneyByOwner[owner] = startMoney;
+                    gameData.aiManpowerByOwner[owner] = 5000;
+                }
+            }
+            wodNormalizeStartingCityEconomy(ownersList);
+            gameData._landIncomeCacheDirty = true;
+            if(!gameData.entities.length) spawnInitialFrontlineUnits(ownersList);
+            wodMarkTerrainPoliticalDirty();
+            let startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
+            if(startMe) {
+                let vw = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+                let vh = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+                gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
+                gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
+            }
+            gameData._wodProcgenBorderFirstApplied = false;
         }
         function wodMpCommitLobbyPreviewMap(meta, fp) {
             if(!meta || !gameData.hexList || !gameData.hexList.length) return;
@@ -14083,21 +14130,14 @@
                 } catch(e) {
                     console.warn(e);
                 }
-                if(!_wodMpCommittedLobbyMap || !_wodMpCommittedLobbyMap.data ||
-                    !wodMpLobbyMapMatchesMeta(meta, _wodMpCommittedLobbyMap.data)) {
+                if(!wodMpCommittedIsCurrentForMeta(meta)) {
                     let ok = await wodMpHostSyncCommittedPreviewForLaunch(meta);
                     if(!ok) throw new Error('Could not build launch map for current lobby seats');
                 }
             }
             wodMpResetTransientMapState();
             if(wodMpTryActivateCommittedLobbyMap(meta)) {
-                gameData._wodProcgenBorderFirstApplied = true;
-                gameData._wodMpLaunchFromCommitted = true;
-                try {
-                    await assignStartingCities();
-                } finally {
-                    gameData._wodMpLaunchFromCommitted = false;
-                }
+                wodMpWireLaunchFromCommittedMap(meta, expected);
             } else {
                 let mpSeed = wodMpLobbyPreviewSeed(meta);
                 gameData._mapGenSeed = mpSeed >>> 0;
@@ -15156,7 +15196,6 @@
                     wodMpInitSyncState(occ);
                     pauseMenuBackgroundBattle();
                     gameData.menuAttractMode = false;
-                    wodMpResetTransientMapState();
                     if(!gameData.layers) gameData.layers = {};
                     gameData.layers.territory = false;
                     let mapReady = false;
@@ -24256,27 +24295,53 @@
             gameData._aiStratWork = null;
             wodTerrainBakeNextMs = 0;
             wodTerrainPolWork = null;
-            // Apply Setup variables
-            let mapSizeEl = document.getElementById('setupMapSize');
-            let sizePreset = wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
-            let newRadius = sizePreset.mapRadius;
-            
-            let aiCount = document.getElementById('setupAI');
-            if(aiCount && (!gameData.mp || !gameData.mp.enabled))
-                gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiCount.value, 10) || 1));
-
-            let victorySel = document.getElementById('setupVictoryMode');
-            gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
-            let fogEl = document.getElementById('setupFogOfWar');
-            if(gameData.mp && gameData.mp.enabled && window.wodMpRoomMeta && window.wodMpRoomMeta.fogOfWar != null)
-                gameData.fogOfWar = !!window.wodMpRoomMeta.fogOfWar;
-            else
-                gameData.fogOfWar = !!(fogEl && fogEl.checked);
             gameData._fogVisible = null;
             gameData._fogExplored = new Set();
             gameData._fogVisionTimer = 0;
             gameData._fogCanvasDirty = true;
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
+
+            if(wodProgress) {
+                wodBumpLifetime('gamesStarted', 1);
+                scheduleSaveWodProgress();
+            }
+
+            wodSyncViewportAndCanvas();
+
+            if(gameData.mp && gameData.mp.enabled) {
+                gameData.menuAttractMode = false;
+                gameData.loadedCustomMap = false;
+                let meta = window.wodMpRoomMeta || {};
+                wodMpSyncLaunchSettingsFromMeta(meta);
+                if(meta.fogOfWar != null) gameData.fogOfWar = !!meta.fogOfWar;
+                await wodMpFinalizeLaunchMapFromLobby(meta);
+                if(!gameData.hexList || !gameData.hexList.length)
+                    throw new Error('Multiplayer map is empty');
+                wodCaptureTerrainPoliticsBase();
+                updateTerrainKey();
+                gameData.playerShiftWaypoints = [];
+                gameData.pathStrokePreview = null;
+                syncHudObjectiveDisplay();
+                wodBindHudResourceTooltips();
+                lastTime = performance.now();
+                if(animationFrameId) cancelAnimationFrame(animationFrameId);
+                gameLoop(lastTime);
+                return;
+            }
+
+            // Solo / skirmish — apply Setup panel variables (must not run for multiplayer).
+            let mapSizeEl = document.getElementById('setupMapSize');
+            let sizePreset = wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
+            let newRadius = sizePreset.mapRadius;
+
+            let aiCount = document.getElementById('setupAI');
+            if(aiCount)
+                gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiCount.value, 10) || 1));
+
+            let victorySel = document.getElementById('setupVictoryMode');
+            gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
+            let fogEl = document.getElementById('setupFogOfWar');
+            gameData.fogOfWar = !!(fogEl && fogEl.checked);
 
             let startMoney = document.getElementById('setupMoney');
             if(startMoney) gameData.money = parseInt(startMoney.value, 10) || 10000;
@@ -24289,24 +24354,9 @@
             gameData.gamePeriod = gameData._matchPeriod;
             wodApplyPeriodUiLabels();
 
-            if(wodProgress) {
-                wodBumpLifetime('gamesStarted', 1);
-                scheduleSaveWodProgress();
-            }
+            applyPlayerFactionColorFromSetup();
 
-            wodSyncViewportAndCanvas();
-
-            if(!gameData.mp || !gameData.mp.enabled) applyPlayerFactionColorFromSetup();
-            
-            if(gameData.mp && gameData.mp.enabled) {
-                gameData.loadedCustomMap = false;
-                let meta = window.wodMpRoomMeta || {};
-                wodMpSyncLaunchSettingsFromMeta(meta);
-                await wodMpFinalizeLaunchMapFromLobby(meta);
-                if(!gameData.hexList || !gameData.hexList.length)
-                    throw new Error('Multiplayer map is empty');
-                wodCaptureTerrainPoliticsBase();
-            } else {
+            {
                 let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
                 if(gameData.loadedCustomMap) {
                     if(gameData.hexList.length === 0 || gameData.mapRadius !== newRadius || shapeChanged) {
@@ -24887,7 +24937,7 @@
             let preserveLoadedLayout = !!(gameData.loadedCustomMap && (!gameData.mp || !gameData.mp.enabled));
             let useMapFileStartEconomy = !!(preserveLoadedLayout && gameData._mapExportHadStartEconomy);
             // Clear entities for procedural maps; keep authored units on loaded library / editor exports.
-            if(!preserveLoadedLayout) gameData.entities = [];
+            if(!preserveLoadedLayout && !gameData._wodMpLaunchFromCommitted) gameData.entities = [];
             if(!useMapFileStartEconomy) {
                 gameData.money = parseInt(document.getElementById('setupMoney').value) || 10000;
                 gameData.aiMoneyByOwner = {};
@@ -25008,6 +25058,11 @@
                     gameData.camera.x = startMe.x * gameData.camera.zoom - vw / 2;
                     gameData.camera.y = startMe.y * gameData.camera.zoom - vh / 2;
                 }
+                return;
+            }
+
+            if(gameData._wodMpLaunchFromCommitted) {
+                console.warn('assignStartingCities: unexpected full regen during MP committed launch');
                 return;
             }
 
