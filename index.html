@@ -13801,9 +13801,9 @@
                 wodApplyGamePeriod(window.wodMpRoomMeta.gamePeriod, { saveProfile: false });
             }
             wodMpSyncMpCfgVictoryDetail();
-            if(_wodMpCommittedLobbyMap && _wodMpCommittedLobbyMap.fp) {
-                let nfp = wodMpLobbyPreviewFingerprint(window.wodMpRoomMeta);
-                if(nfp !== _wodMpCommittedLobbyMap.fp) _wodMpCommittedLobbyMap = null;
+            if(_wodMpCommittedLobbyMap && _wodMpCommittedLobbyMap.data) {
+                if(!wodMpLobbyMapHasAllFactions(window.wodMpRoomMeta, _wodMpCommittedLobbyMap.data))
+                    _wodMpCommittedLobbyMap = null;
             }
         }
         function wodMpSnapshotLobbyGenBackup() {
@@ -13975,34 +13975,73 @@
                 wodMpRestoreLobbyGenBackup(snap);
             }
         }
-        function wodMpTryActivateCommittedLobbyMap(meta) {
-            let cm = _wodMpCommittedLobbyMap;
-            if(!cm || !cm.data) return false;
-            let fp = wodMpLobbyPreviewFingerprint(meta);
-            if(cm.fp !== fp) return false;
+        function wodMpLobbyMapHasAllFactions(meta, snap) {
             let expectedSlots = wodMpGetLobbyFactionSlotsFromMeta(meta);
-            if(!wodMpApplyDeepMapSnapshot(cm.data)) return false;
-            if(expectedSlots.length > 0) {
-                let owners = new Set();
-                for(let c of gameData.cities || []) {
-                    if(c && c.owner > 0) owners.add(c.owner);
+            if(!expectedSlots.length) return true;
+            let owners = new Set();
+            for(let c of (snap && snap.cities) || gameData.cities || []) {
+                if(c && c.owner > 0) owners.add(c.owner);
+            }
+            if(owners.size === 0) {
+                for(let h of (snap && snap.hexList) || gameData.hexList || []) {
+                    if(h && h.owner > 0) owners.add(h.owner);
                 }
-                if(owners.size === 0) {
-                    for(let h of gameData.hexList || []) {
-                        if(h && h.owner > 0) owners.add(h.owner);
-                    }
-                }
-                for(let s of expectedSlots) {
-                    if(!owners.has(s)) return false;
-                }
+            }
+            for(let s of expectedSlots) {
+                if(!owners.has(s)) return false;
             }
             return true;
         }
+        function wodMpTryActivateCommittedLobbyMap(meta) {
+            let cm = _wodMpCommittedLobbyMap;
+            if(!cm || !cm.data) return false;
+            if(!wodMpLobbyMapHasAllFactions(meta, cm.data)) return false;
+            if(!wodMpApplyDeepMapSnapshot(cm.data)) return false;
+            return wodMpLobbyMapHasAllFactions(meta, null);
+        }
+        function wodMpSyncLaunchSettingsFromMeta(meta) {
+            if(!meta || typeof meta !== 'object') return;
+            wodMpEnsureDefaultSeatTypes(meta);
+            if(meta.mapSize != null) wodApplyMapSizePreset(meta.mapSize);
+            if(meta.mapShape) gameData.mapShape = meta.mapShape;
+            if(meta.victoryMode) gameData.victoryMode = meta.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
+            if(meta.money != null) gameData.money = parseInt(meta.money, 10) || gameData.money;
+            if(meta.fogOfWar != null) gameData.fogOfWar = !!meta.fogOfWar;
+            if(meta.gamePeriod) {
+                gameData._matchPeriod = meta.gamePeriod;
+                gameData.gamePeriod = meta.gamePeriod;
+                wodApplyPeriodUiLabels();
+            }
+            wodMpApplyMetaToSetupFields(meta);
+        }
+        function wodMpResetTransientMapState() {
+            gameData.hexList = [];
+            gameData.hexes = {};
+            gameData.cities = [];
+            gameData.roads = [];
+            gameData.entities = [];
+            gameData.forts = [];
+            gameData.bridges = [];
+            gameData._wodProcgenBorderFirstApplied = false;
+        }
         async function wodMpFinalizeLaunchMapFromLobby(meta) {
             let expected = wodMpGetLobbyFactionSlotsFromMeta(meta);
+            wodMpSyncLaunchSettingsFromMeta(meta);
+            if(gameData.mp && gameData.mp.enabled) {
+                gameData.mp.factionSlots = expected.slice();
+                let st = meta.seatTypes || gameData.mp.seatTypes || [];
+                gameData.mp.seatTypes = st.slice(0, wodMpClampLobbyCap(meta.maxHumans));
+                gameData.aiCount = st.filter(t => t === 'bot').length;
+            }
+            wodMpResetTransientMapState();
             if(wodMpTryActivateCommittedLobbyMap(meta)) {
                 gameData._wodProcgenBorderFirstApplied = true;
-                await assignStartingCities();
+                gameData._wodMpLaunchFromCommitted = true;
+                try {
+                    await assignStartingCities();
+                } finally {
+                    gameData._wodMpLaunchFromCommitted = false;
+                }
             } else {
                 let mpSeed = wodMpLobbyPreviewSeed(meta);
                 gameData._mapGenSeed = mpSeed >>> 0;
@@ -15021,9 +15060,12 @@
                 }
                 let meta = window.wodMpRoomMeta;
                 if(!wodMpValidateLaunchReady(meta)) return;
+                if(_wodMpLobbyPreviewBusy) {
+                    showNotification('Lobby map preview is still generating — wait a moment, then launch.');
+                    return;
+                }
                 void (async function() {
                     wodMpAbortLobbyPreviewJobs();
-                    if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
                     wodMpEnsureDefaultSeatTypes(meta);
                     let maxH = wodMpClampLobbyCap(meta.maxHumans);
                     let st = (meta.seatTypes || []).slice(0, maxH);
@@ -24186,10 +24228,9 @@
             if(!gameData.mp || !gameData.mp.enabled) applyPlayerFactionColorFromSetup();
             
             if(gameData.mp && gameData.mp.enabled) {
-                gameData.mapRadius = newRadius;
-                gameData.mapShape = requestedShape;
                 gameData.loadedCustomMap = false;
                 let meta = window.wodMpRoomMeta || {};
+                wodMpSyncLaunchSettingsFromMeta(meta);
                 await wodMpFinalizeLaunchMapFromLobby(meta);
                 if(!gameData.hexList || !gameData.hexList.length)
                     throw new Error('Multiplayer map is empty');
@@ -24834,7 +24875,7 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
-                if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false)) {
+                if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false) && !gameData._wodMpLaunchFromCommitted) {
                     gameData.entities = [];
                     spawnInitialFrontlineUnits(ownersList);
                 }
@@ -26224,6 +26265,36 @@
             if(tr) tr.setAttribute('aria-valuenow', String(Math.round(p)));
         }
 
+        /** Advance boot splash caption/progress while async work runs (keeps bar from looking stuck). */
+        async function wodBootRunWithProgress(captionEl, fromPct, toPct, labelPrefix, work, subLabels) {
+            subLabels = subLabels || [
+                labelPrefix + ' — layout',
+                labelPrefix + ' — terrain',
+                labelPrefix + ' — borders',
+                labelPrefix + ' — settlements',
+                labelPrefix + ' — units'
+            ];
+            let shown = fromPct;
+            let sub = 0;
+            let iv = setInterval(() => {
+                shown = Math.min(toPct - 2, shown + 1.4);
+                wodSetBootSplashProgress(shown);
+                if(captionEl && subLabels.length) {
+                    captionEl.textContent = subLabels[sub % subLabels.length];
+                    sub++;
+                }
+            }, 160);
+            try {
+                let out = work();
+                if(out && typeof out.then === 'function') await out;
+            } finally {
+                clearInterval(iv);
+            }
+            wodSetBootSplashProgress(toPct);
+            if(captionEl) captionEl.textContent = labelPrefix;
+            await new Promise(r => requestAnimationFrame(r));
+        }
+
         /** Black splash: staged boot so users see what is being warmed before the menu appears. */
         function wodRunInitialBootToMenu() {
             if(window._wodBootStarted) return;
@@ -26283,37 +26354,38 @@
 
             (async () => {
                 try {
-                    await bootStage('Loading interface panels…', 8, null, 28);
-                    await bootStage('Starting worker pool…', 18, () => {
+                    await bootStage('Loading interface…', 6, null, 20);
+                    await bootStage('Starting worker pool…', 14, () => {
                         wodEnsureMapGenWorkerPool();
                         wodEnsurePowWorkers();
                         wodEnsureSepWorker();
                         try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
-                    }, 20);
-                    await bootStage('Preparing terrain palettes…', 28, () => {
+                    }, 16);
+                    await bootStage('Terrain palettes…', 22, () => {
                         normalizeTerrainHexes();
-                        updateTerrainKey();
-                    }, 22);
-                    await bootStage('Building menu battlefield…', 48, () => bootstrapMenuBackgroundBattle(), 18);
-                    await bootStage('Baking terrain and borders…', 68, () => {
+                        updateTerrainKey({ skipHelp: true });
+                    }, 18);
+                    await bootStage('Menu UI chrome…', 30, null, 16);
+                    await wodBootRunWithProgress(caption, 32, 62, 'Building menu battlefield', () => bootstrapMenuBackgroundBattle());
+                    await bootStage('Baking terrain layers…', 72, () => {
                         updateTerrainCache();
                         draw();
-                    }, 28);
-                    await bootStage('Warming AI planners…', 80, () => {
+                    }, 20);
+                    await bootStage('Warming battle AI…', 82, () => {
                         let dtSim = 2 / 60;
                         for(let i = 0; i < 6; i++) update(dtSim);
-                    }, 24);
-                    await bootStage('Priming path and selection caches…', 90, () => {
+                    }, 18);
+                    await bootStage('Pathfinding caches…', 90, () => {
                         let movable = gameData.entities.filter(u => u && u.hp > 0 && u.type !== 'convoy').slice(0, 6);
                         for(let u of movable) {
                             let h = getNearestWalkableHexForUnit(u, u.x, u.y, 8);
                             if(h) findLocalDetourHex(u, h.x + gameData.hexRadius * 2, h.y);
                         }
                         syncInfoCardPanelThrottled();
-                    }, 22);
-                    await bootStage('Drawing first frame…', 96, () => {
-                        draw();
                     }, 18);
+                    await bootStage('Final frame…', 96, () => {
+                        draw();
+                    }, 14);
 
                     let elapsed = performance.now() - splashT0;
                     if(elapsed < 380) await sleep(380 - elapsed);
