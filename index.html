@@ -12316,22 +12316,7 @@
         }
         function wodMpCanUsePoliticsOnlyForMeta(meta) {
             if(!wodCanRegeneratePoliticsOnly()) return false;
-            let expected = wodMpGetLobbyFactionSlotsFromMeta(meta);
-            if(!expected.length) return false;
-            let owners = new Set();
-            for(let c of gameData.cities || []) {
-                if(c && c.owner > 0) owners.add(c.owner);
-            }
-            if(owners.size === 0) {
-                for(let h of gameData.hexList || []) {
-                    if(h && h.owner > 0) owners.add(h.owner);
-                }
-            }
-            if(owners.size !== expected.length) return false;
-            for(let s of expected) {
-                if(!owners.has(s)) return false;
-            }
-            return true;
+            return wodMpLobbyMapMatchesMeta(meta, null);
         }
         async function wodMpApplyInitFromHost(p, opts) {
             opts = opts || {};
@@ -13802,7 +13787,7 @@
             }
             wodMpSyncMpCfgVictoryDetail();
             if(_wodMpCommittedLobbyMap && _wodMpCommittedLobbyMap.data) {
-                if(!wodMpLobbyMapHasAllFactions(window.wodMpRoomMeta, _wodMpCommittedLobbyMap.data))
+                if(!wodMpLobbyMapMatchesMeta(window.wodMpRoomMeta, _wodMpCommittedLobbyMap.data))
                     _wodMpCommittedLobbyMap = null;
             }
         }
@@ -13975,9 +13960,7 @@
                 wodMpRestoreLobbyGenBackup(snap);
             }
         }
-        function wodMpLobbyMapHasAllFactions(meta, snap) {
-            let expectedSlots = wodMpGetLobbyFactionSlotsFromMeta(meta);
-            if(!expectedSlots.length) return true;
+        function wodMpCollectOwnersFromSnap(snap) {
             let owners = new Set();
             for(let c of (snap && snap.cities) || gameData.cities || []) {
                 if(c && c.owner > 0) owners.add(c.owner);
@@ -13987,6 +13970,14 @@
                     if(h && h.owner > 0) owners.add(h.owner);
                 }
             }
+            return owners;
+        }
+        /** Lobby map must have exactly the active factions in meta — no missing or extra seats. */
+        function wodMpLobbyMapMatchesMeta(meta, snap) {
+            let expectedSlots = wodMpGetLobbyFactionSlotsFromMeta(meta);
+            if(!expectedSlots.length) return false;
+            let owners = wodMpCollectOwnersFromSnap(snap);
+            if(owners.size !== expectedSlots.length) return false;
             for(let s of expectedSlots) {
                 if(!owners.has(s)) return false;
             }
@@ -13995,9 +13986,64 @@
         function wodMpTryActivateCommittedLobbyMap(meta) {
             let cm = _wodMpCommittedLobbyMap;
             if(!cm || !cm.data) return false;
-            if(!wodMpLobbyMapHasAllFactions(meta, cm.data)) return false;
+            if(!wodMpLobbyMapMatchesMeta(meta, cm.data)) return false;
             if(!wodMpApplyDeepMapSnapshot(cm.data)) return false;
-            return wodMpLobbyMapHasAllFactions(meta, null);
+            return wodMpLobbyMapMatchesMeta(meta, null);
+        }
+        function wodMpWaitForLobbyPreviewIdle(timeoutMs) {
+            timeoutMs = timeoutMs || 90000;
+            let t0 = performance.now();
+            return new Promise((resolve, reject) => {
+                (function tick() {
+                    if(!_wodMpLobbyPreviewBusy && !_wodMpLobbyPreviewQueued) {
+                        resolve();
+                        return;
+                    }
+                    if(performance.now() - t0 > timeoutMs) {
+                        reject(new Error('Lobby map preview timed out'));
+                        return;
+                    }
+                    setTimeout(tick, 40);
+                })();
+            });
+        }
+        async function wodMpHostSyncCommittedPreviewForLaunch(meta) {
+            if(!meta || typeof meta !== 'object') return false;
+            wodMpEnsureDefaultSeatTypes(meta);
+            wodMpSyncLaunchSettingsFromMeta(meta);
+            let maxH = wodMpClampLobbyCap(meta.maxHumans);
+            let st = (meta.seatTypes || []).slice(0, maxH);
+            while(st.length < maxH) st.push('human');
+            let factions = wodMpGetLobbyFactionSlotsFromMeta(meta);
+            let api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : null;
+            gameData.mp = {
+                enabled: true,
+                isHost: true,
+                localSlot: (api && api.slot) ? api.slot : 1,
+                humanSlots: wodMpCollectLayoutHumanSeats(meta),
+                factionSlots: factions.slice(),
+                seatTypes: st,
+                maxLobbySlots: maxH,
+                eliminatedSlots: []
+            };
+            gameData.aiCount = st.filter(t => t === 'bot').length;
+            gameData.loadedCustomMap = false;
+            let previewSeed = wodMpLobbyPreviewSeed(meta);
+            gameData._mapGenSeed = previewSeed >>> 0;
+            wodMapGenYieldingStart(26);
+            wodPushSeededRandom(previewSeed);
+            try {
+                await generateMap();
+            } finally {
+                wodPopRandom();
+                wodMapGenYieldingStop();
+            }
+            if(!wodMpLobbyMapMatchesMeta(meta, null)) return false;
+            let fp = wodMpLobbyPreviewFingerprint(meta);
+            wodMpCommitLobbyPreviewMap(meta, fp);
+            _wodMpLobbyPreviewLastFp = fp;
+            wodMpHostPushLobbyPreview(fp);
+            return true;
         }
         function wodMpSyncLaunchSettingsFromMeta(meta) {
             if(!meta || typeof meta !== 'object') return;
@@ -14031,7 +14077,20 @@
                 gameData.mp.factionSlots = expected.slice();
                 let st = meta.seatTypes || gameData.mp.seatTypes || [];
                 gameData.mp.seatTypes = st.slice(0, wodMpClampLobbyCap(meta.maxHumans));
+                gameData.mp.maxLobbySlots = wodMpClampLobbyCap(meta.maxHumans);
                 gameData.aiCount = st.filter(t => t === 'bot').length;
+            }
+            if(gameData.mp && gameData.mp.enabled && gameData.mp.isHost) {
+                try {
+                    await wodMpWaitForLobbyPreviewIdle(90000);
+                } catch(e) {
+                    console.warn(e);
+                }
+                if(!_wodMpCommittedLobbyMap || !_wodMpCommittedLobbyMap.data ||
+                    !wodMpLobbyMapMatchesMeta(meta, _wodMpCommittedLobbyMap.data)) {
+                    let ok = await wodMpHostSyncCommittedPreviewForLaunch(meta);
+                    if(!ok) throw new Error('Could not build launch map for current lobby seats');
+                }
             }
             wodMpResetTransientMapState();
             if(wodMpTryActivateCommittedLobbyMap(meta)) {
@@ -14512,7 +14571,8 @@
                             window.wodMpRoomMeta.seatTypes[slot - 1] = v;
                         }
                         wodMpPushLobbyMetaFromCurrentUi();
-                        requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true, politicsOnly: true }));
+                        _wodMpCommittedLobbyMap = null;
+                        requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
                     };
                 });
                 wodMpWireLobbyColorPickers(slotsEl);
@@ -15060,12 +15120,7 @@
                 }
                 let meta = window.wodMpRoomMeta;
                 if(!wodMpValidateLaunchReady(meta)) return;
-                if(_wodMpLobbyPreviewBusy) {
-                    showNotification('Lobby map preview is still generating — wait a moment, then launch.');
-                    return;
-                }
                 void (async function() {
-                    wodMpAbortLobbyPreviewJobs();
                     wodMpEnsureDefaultSeatTypes(meta);
                     let maxH = wodMpClampLobbyCap(meta.maxHumans);
                     let st = (meta.seatTypes || []).slice(0, maxH);
@@ -15153,7 +15208,8 @@
                     if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost && WodMultiplayer.sendLobbyMeta)
                         WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
                     wodMpRenderGameLobbyScreen();
-                    requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true, politicsOnly: true }));
+                    _wodMpCommittedLobbyMap = null;
+                    requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
                 });
             }
 
