@@ -9611,8 +9611,8 @@
             } else root.classList.remove('wod-mp-match');
         }
         function wodMpIsHumanOwner(owner) {
-            if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.humanSlots) return owner === 1;
-            if(gameData.mp.humanSlots.indexOf(owner) < 0) return false;
+            if(!gameData.mp || !gameData.mp.enabled) return owner === 1;
+            if(!wodMpSeatTypeIsHuman(owner)) return false;
             if(wodMpIsSlotEliminated(owner)) return false;
             let conn = gameData.mp.connectedSlots;
             if(conn && conn.length && conn.indexOf(owner) < 0) return false;
@@ -9629,6 +9629,38 @@
             }
             return out.length ? out : [1];
         }
+        /** Active lobby factions (human + bot seats, not closed) — drives mapgen player count. */
+        function wodMpGetLobbyFactionSlotsFromMeta(meta) {
+            if(!meta || typeof meta !== 'object') return [1];
+            wodMpEnsureDefaultSeatTypes(meta);
+            let maxH = wodMpClampLobbyCap(meta.maxHumans);
+            let st = meta.seatTypes || [];
+            let out = [];
+            for(let s = 1; s <= maxH; s++) {
+                if((st[s - 1] || 'human') === 'closed') continue;
+                out.push(s);
+            }
+            return out.length ? out : [1];
+        }
+        function wodMpCountOwnersOnMap() {
+            let owners = new Set();
+            for(let c of gameData.cities || []) {
+                if(c && c.owner > 0) owners.add(c.owner);
+            }
+            if(owners.size === 0) {
+                for(let h of gameData.hexList || []) {
+                    if(h && h.owner > 0) owners.add(h.owner);
+                }
+            }
+            return owners.size;
+        }
+        function wodMpSeatTypeIsHuman(slot) {
+            if(!gameData.mp || !gameData.mp.enabled) return slot === 1;
+            let st = gameData.mp.seatTypes;
+            let maxH = gameData.mp.maxLobbySlots || WOD_MP_MAX_PLAYERS;
+            if(!st || slot < 1 || slot > maxH) return false;
+            return (st[slot - 1] || 'human') === 'human';
+        }
         function wodMpHostMarkSlotDisconnected(slot) {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost || !slot) return;
             showNotification('Seat ' + slot + ' disconnected — AI controls their forces until they return.');
@@ -9639,6 +9671,8 @@
         }
         function wodGetActiveFactionSlotsForMap() {
             if(!gameData.mp || !gameData.mp.enabled) return null;
+            if(gameData.mp.factionSlots && gameData.mp.factionSlots.length)
+                return gameData.mp.factionSlots.slice().sort((a, b) => a - b);
             let maxH = gameData.mp.maxLobbySlots || WOD_MP_MAX_PLAYERS;
             let st = gameData.mp.seatTypes;
             let hs = gameData.mp.humanSlots || [];
@@ -9664,6 +9698,8 @@
             if(gameData.mp && gameData.mp.enabled) {
                 let act = wodGetActiveFactionSlotsForMap();
                 if(act && act.length) return Math.min(act.length, factionColors.length - 1);
+                if(gameData.mp.factionSlots && gameData.mp.factionSlots.length)
+                    return Math.min(gameData.mp.factionSlots.length, factionColors.length - 1);
                 if(gameData.mp.humanSlots && gameData.mp.humanSlots.length) {
                     return Math.min(gameData.mp.humanSlots.length + Math.max(0, gameData.aiCount | 0), factionColors.length - 1);
                 }
@@ -9673,6 +9709,8 @@
         /** All non-closed lobby seats (humans + bots), in order — used for mapgen / starting borders so preview matches launch. */
         function wodGetLobbyLayoutFactionSlots() {
             if(!gameData.mp || !gameData.mp.enabled) return null;
+            if(gameData.mp.factionSlots && gameData.mp.factionSlots.length)
+                return gameData.mp.factionSlots.slice().sort((a, b) => a - b);
             let maxH = gameData.mp.maxLobbySlots || WOD_MP_MAX_PLAYERS;
             let st = gameData.mp.seatTypes || [];
             let out = [];
@@ -12174,10 +12212,13 @@
             return u;
         }
         function wodMpBuildInitPayload() {
-            let hs = gameData.mp && gameData.mp.humanSlots ? gameData.mp.humanSlots.slice() : [1];
-            let conn = gameData.mp && gameData.mp.connectedSlots ? gameData.mp.connectedSlots.slice() : hs.slice();
             let maxL = (gameData.mp && gameData.mp.maxLobbySlots) || WOD_MP_MAX_PLAYERS;
             let st = (gameData.mp && gameData.mp.seatTypes) ? gameData.mp.seatTypes.slice(0, maxL) : [];
+            let factions = (gameData.mp && gameData.mp.factionSlots && gameData.mp.factionSlots.length)
+                ? gameData.mp.factionSlots.slice()
+                : wodMpGetLobbyFactionSlotsFromMeta({ maxHumans: maxL, seatTypes: st });
+            let hs = (gameData.mp && gameData.mp.humanSlots) ? gameData.mp.humanSlots.slice() : factions.slice();
+            let conn = gameData.mp && gameData.mp.connectedSlots ? gameData.mp.connectedSlots.slice() : hs.slice();
             return {
                 v: 1,
                 hexList: gameData.hexList.map(wodStripHexForNet),
@@ -12193,6 +12234,7 @@
                 aiCount: gameData.aiCount,
                 victoryMode: gameData.victoryMode,
                 humanSlots: hs,
+                factionSlots: factions,
                 connectedSlots: conn,
                 seatTypes: st,
                 maxLobbySlots: maxL,
@@ -13794,7 +13836,52 @@
             if(!cm || !cm.data) return false;
             let fp = wodMpLobbyPreviewFingerprint(meta);
             if(cm.fp !== fp) return false;
-            return wodMpApplyDeepMapSnapshot(cm.data);
+            let expectedSlots = wodMpGetLobbyFactionSlotsFromMeta(meta);
+            if(!wodMpApplyDeepMapSnapshot(cm.data)) return false;
+            if(expectedSlots.length > 0) {
+                let owners = new Set();
+                for(let c of gameData.cities || []) {
+                    if(c && c.owner > 0) owners.add(c.owner);
+                }
+                if(owners.size === 0) {
+                    for(let h of gameData.hexList || []) {
+                        if(h && h.owner > 0) owners.add(h.owner);
+                    }
+                }
+                for(let s of expectedSlots) {
+                    if(!owners.has(s)) return false;
+                }
+            }
+            return true;
+        }
+        async function wodMpFinalizeLaunchMapFromLobby(meta) {
+            let expected = wodMpGetLobbyFactionSlotsFromMeta(meta);
+            if(wodMpTryActivateCommittedLobbyMap(meta)) {
+                gameData._wodProcgenBorderFirstApplied = true;
+                await assignStartingCities();
+            } else {
+                let mpSeed = wodMpLobbyPreviewSeed(meta);
+                gameData._mapGenSeed = mpSeed >>> 0;
+                wodPushSeededRandom(mpSeed);
+                try {
+                    await generateMap();
+                } finally {
+                    wodPopRandom();
+                }
+            }
+            let owners = new Set();
+            for(let c of gameData.cities || []) {
+                if(c && c.owner > 0) owners.add(c.owner);
+            }
+            if(owners.size === 0) {
+                for(let h of gameData.hexList || []) {
+                    if(h && h.owner > 0) owners.add(h.owner);
+                }
+            }
+            for(let s of expected) {
+                if(!owners.has(s))
+                    throw new Error('Map did not generate all lobby factions (missing seat ' + s + ')');
+            }
         }
         function wodMpAbortLobbyPreviewJobs() {
             _wodMpLobbyPreviewBusy = false;
@@ -13888,8 +13975,7 @@
                 wodMpEnsureDefaultSeatTypes(meta);
                 let maxH = wodMpClampLobbyCap(meta.maxHumans);
                 let st = (meta.seatTypes || []).slice(0, maxH).join(',');
-                let occ = Array.isArray(meta.occupiedSlots) ? meta.occupiedSlots.slice().sort((a, b) => a - b).join(',') : '';
-                return [maxH, st, occ].join('|');
+                return [maxH, st].join('|');
             } catch(e) {
                 return String(Date.now());
             }
@@ -13966,14 +14052,18 @@
                             let st = (meta.seatTypes && meta.seatTypes.length) ? meta.seatTypes.slice(0, maxH) : [];
                             while(st.length < maxH) st.push('human');
                             let hs = [];
+                            let factions = [];
                             for(let s = 1; s <= maxH; s++) {
-                                if((st[s - 1] || 'human') === 'human') hs.push(s);
+                                let t = st[s - 1] || 'human';
+                                if(t === 'human') hs.push(s);
+                                if(t !== 'closed') factions.push(s);
                             }
                             gameData.mp = {
                                 enabled: true,
                                 isHost: true,
                                 localSlot: (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.slot) ? WodMultiplayer.api.slot : 1,
                                 humanSlots: hs,
+                                factionSlots: factions.length ? factions : [1],
                                 seatTypes: st,
                                 maxLobbySlots: maxH,
                                 eliminatedSlots: []
@@ -14767,6 +14857,12 @@
             let btnGlLaunch = document.getElementById('mpBtnGlLaunch');
             if(btnGlLaunch) btnGlLaunch.onclick = () => {
                 if(!WodMultiplayer.api || !WodMultiplayer.api.isHost) return;
+                if(WodMultiplayer.sendLobbyMeta) {
+                    let built = wodMpBuildLobbyMetaFromSetup();
+                    window.wodMpRoomMeta = Object.assign(window.wodMpRoomMeta || {}, built);
+                    wodMpEnsureDefaultSeatTypes(window.wodMpRoomMeta);
+                    WodMultiplayer.sendLobbyMeta(built);
+                }
                 let meta = window.wodMpRoomMeta;
                 if(!wodMpValidateLaunchReady(meta)) return;
                 void (async function() {
@@ -14778,12 +14874,17 @@
                     while(st.length < maxH) st.push('human');
                     let occ = (meta.occupiedSlots || []).slice().sort((a, b) => a - b);
                     let layoutHumans = wodMpCollectLayoutHumanSeats(meta);
+                    let layoutFactions = wodMpGetLobbyFactionSlotsFromMeta(meta);
+                    window.wodMpRoomMeta = meta;
+                    window.wodMpRoomMeta.maxHumans = maxH;
+                    window.wodMpRoomMeta.seatTypes = st.slice();
                     wodMpApplyMetaToSetupFields(meta);
-                    wodMpApplyLaunchColorsFromHumans(meta, layoutHumans);
+                    wodMpApplyLaunchColorsFromHumans(meta, layoutFactions);
                     gameData.aiCount = st.filter(t => t === 'bot').length;
                     gameData.mp = {
                         enabled: true, isHost: true, localSlot: WodMultiplayer.api.slot,
                         humanSlots: layoutHumans,
+                        factionSlots: layoutFactions.slice(),
                         connectedSlots: occ.slice(),
                         seatTypes: st,
                         maxLobbySlots: maxH,
@@ -14933,14 +15034,20 @@
                 let mySlot = WodMultiplayer.api.slot | 0;
                 if(mySlot && conn.indexOf(mySlot) < 0) conn.push(mySlot);
                 let expectedReady = Array.isArray(pl.expectedReady) ? pl.expectedReady.slice() : conn.slice();
+                let maxL = wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS);
+                let stRe = pl.seatTypes || [];
+                let factionsRe = (pl.factionSlots && pl.factionSlots.length)
+                    ? pl.factionSlots.slice()
+                    : wodMpGetLobbyFactionSlotsFromMeta({ maxHumans: maxL, seatTypes: stRe });
                 gameData.mp = {
                     enabled: true,
                     isHost: !!d.isHost,
                     localSlot: mySlot,
-                    humanSlots: pl.humanSlots || [1],
+                    humanSlots: pl.humanSlots || factionsRe.slice(),
+                    factionSlots: factionsRe,
                     connectedSlots: conn,
-                    seatTypes: pl.seatTypes || [],
-                    maxLobbySlots: wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS),
+                    seatTypes: stRe,
+                    maxLobbySlots: maxL,
                     eliminatedSlots: [],
                     allReady: false,
                     expectedReady: expectedReady.slice().sort((a, b) => a - b),
@@ -15027,12 +15134,18 @@
                 let pl = ev.detail.payload;
                 let expectedReady = Array.isArray(pl.expectedReady) ? pl.expectedReady.slice() : (pl.connectedSlots || pl.humanSlots || [1]).slice();
                 let conn = Array.isArray(pl.connectedSlots) ? pl.connectedSlots.slice() : expectedReady.slice();
+                let maxL = wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS);
+                let st = pl.seatTypes || [];
+                let factions = (pl.factionSlots && pl.factionSlots.length)
+                    ? pl.factionSlots.slice()
+                    : wodMpGetLobbyFactionSlotsFromMeta({ maxHumans: maxL, seatTypes: st });
                 gameData.mp = {
                     enabled: true, isHost: false, localSlot: WodMultiplayer.api.slot,
-                    humanSlots: pl.humanSlots || [1],
+                    humanSlots: pl.humanSlots || factions.slice(),
+                    factionSlots: factions,
                     connectedSlots: conn,
-                    seatTypes: pl.seatTypes || [],
-                    maxLobbySlots: wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS),
+                    seatTypes: st,
+                    maxLobbySlots: maxL,
                     eliminatedSlots: [],
                     allReady: false,
                     expectedReady: expectedReady.slice().sort((a, b) => a - b),
@@ -23865,16 +23978,7 @@
                 gameData.mapShape = requestedShape;
                 gameData.loadedCustomMap = false;
                 let meta = window.wodMpRoomMeta || {};
-                if(!wodMpTryActivateCommittedLobbyMap(meta)) {
-                    let mpSeed = wodMpLobbyPreviewSeed(meta);
-                    gameData._mapGenSeed = mpSeed >>> 0;
-                    wodPushSeededRandom(mpSeed);
-                    try {
-                        await generateMap();
-                    } finally {
-                        wodPopRandom();
-                    }
-                }
+                await wodMpFinalizeLaunchMapFromLobby(meta);
                 if(!gameData.hexList || !gameData.hexList.length)
                     throw new Error('Multiplayer map is empty');
                 wodCaptureTerrainPoliticsBase();
