@@ -869,6 +869,7 @@ wss.on('connection', (ws) => {
         clients: [],
         host: null,
         matchStarted: false,
+        lobbyPreview: null,
       };
       rooms.set(id, room);
       addClientToRoom(client, room);
@@ -964,6 +965,17 @@ wss.on('connection', (ws) => {
           meta: metaWire(room),
         }),
       );
+      if (room.lobbyPreview && room.lobbyPreview.payload) {
+        try {
+          ws.send(
+            JSON.stringify({
+              t: 'lobby_preview',
+              fp: room.lobbyPreview.fp || '',
+              payload: room.lobbyPreview.payload,
+            }),
+          );
+        } catch (_) {}
+      }
       broadcastAll(room, { t: 'peer_joined', slot: client.slot, count: room.clients.length });
       broadcastAll(room, { t: 'room_meta', meta: metaWire(room) });
       broadcastLobbyList();
@@ -997,6 +1009,17 @@ wss.on('connection', (ws) => {
       }
       broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
       broadcastLobbyList();
+      return;
+    }
+
+    if (t === 'lobby_preview') {
+      if (!client.room || !client.isHost || client.room.matchStarted) return;
+      const payload = msg.payload;
+      if (!payload || typeof payload !== 'object' || !Array.isArray(payload.hexList) || !payload.hexList.length)
+        return;
+      const fp = String(msg.fp || '');
+      client.room.lobbyPreview = { fp, payload };
+      broadcastAll(client.room, { t: 'lobby_preview', fp, payload });
       return;
     }
 
@@ -1103,6 +1126,7 @@ wss.on('connection', (ws) => {
 
     if (t === 'start' && client.isHost) {
       client.room.matchStarted = true;
+      client.room.lobbyPreview = null;
       const payload = msg.payload;
       client.room.matchInitPayload = payload;
       client.room.lastSnap = null;

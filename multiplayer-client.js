@@ -181,6 +181,9 @@
         case 'room_meta':
           emit('RoomMeta', { meta: msg.meta || {} });
           break;
+        case 'lobby_preview':
+          emit('LobbyPreview', { fp: msg.fp || '', payload: msg.payload || null });
+          break;
         case 'peer_joined':
         case 'peer_left':
           emit('Peers', { count: msg.count, slot: msg.slot, t: msg.t });
@@ -365,6 +368,9 @@
     },
     sendLobbyMeta(meta) {
       send({ t: 'lobby_meta', meta: meta || {} });
+    },
+    sendLobbyPreview(fp, payload) {
+      send({ t: 'lobby_preview', fp: fp != null ? String(fp) : '', payload: payload || {} });
     },
     sendLobbyColor(slot, color) {
       send({ t: 'lobby_color', slot: slot | 0, color: String(color || '').trim() });
