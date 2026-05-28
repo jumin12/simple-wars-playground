@@ -8860,8 +8860,12 @@
                         .then(() => {
                             previewLoadedMap();
                             try {
-                                wodCaptureSoloPreviewSnapshot();
-                                gameData._soloMapPreviewMatchesStart = true;
+                                if(!wodLiveMapLooksLikeMenuAttract()) {
+                                    wodCaptureSoloPreviewSnapshot();
+                                    gameData._soloMapPreviewMatchesStart = wodSoloSnapshotValidForMatchStart(gameData._soloPreviewSnapshot);
+                                } else {
+                                    gameData._soloMapPreviewMatchesStart = false;
+                                }
                             } catch(_) {
                                 gameData._soloMapPreviewMatchesStart = false;
                             }
@@ -8879,8 +8883,12 @@
                 } else {
                     previewLoadedMap();
                     try {
-                        wodCaptureSoloPreviewSnapshot();
-                        gameData._soloMapPreviewMatchesStart = true;
+                        if(!wodLiveMapLooksLikeMenuAttract()) {
+                            wodCaptureSoloPreviewSnapshot();
+                            gameData._soloMapPreviewMatchesStart = wodSoloSnapshotValidForMatchStart(gameData._soloPreviewSnapshot);
+                        } else {
+                            gameData._soloMapPreviewMatchesStart = false;
+                        }
                     } catch(_) {
                         gameData._soloMapPreviewMatchesStart = false;
                     }
@@ -9034,6 +9042,7 @@
             }
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
+            wodPrepareForNewMatch({ keepMp: false });
             gameData._cityUnitStackTap = null;
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
@@ -9060,6 +9069,8 @@
             hideCampaignSummaryOverlay();
             wodApplyPlayViewportLock(false);
             gameState = 'MENU';
+            gameData._soloMapPreviewMatchesStart = false;
+            gameData._soloPreviewSnapshot = null;
             wodResetMobileHud();
             UI.inGameUI.style.display = 'none';
             UI.escMenu.classList.add('hidden');
@@ -14167,7 +14178,8 @@
         }
         async function wodMpFinalizeLaunchMapFromLobby(meta) {
             wodMpNormalizeLobbyMeta(meta);
-            gameData.menuAttractMode = false;
+            wodPrepareForNewMatch({ keepMp: true });
+            wodMpResetTransientMapState();
             let expected = wodMpGetLobbyFactionSlotsFromMeta(meta);
             gameData._wodMpLaunchFactionSlots = expected.slice();
             wodMpSyncLaunchSettingsFromMeta(meta);
@@ -15309,7 +15321,7 @@
                     };
                     wodMpInitSyncState(occ);
                     pauseMenuBackgroundBattle();
-                    gameData.menuAttractMode = false;
+                    wodPrepareForNewMatch({ keepMp: true });
                     if(!gameData.layers) gameData.layers = {};
                     gameData.layers.territory = false;
                     let mapReady = false;
@@ -15497,6 +15509,8 @@
                     hidePanels();
                     gameState = 'PLAYING';
                     pauseMenuBackgroundBattle();
+                    wodPrepareForNewMatch({ keepMp: true });
+                    wodClearLiveMapForNewMatch();
                     UI.mainMenu.classList.add('hidden');
                     UI.panels.forEach(p => p.classList.add('hidden'));
                     UI.escMenu.classList.add('hidden');
@@ -15657,6 +15671,8 @@
                     hidePanels();
                     gameState = 'PLAYING';
                     pauseMenuBackgroundBattle();
+                    wodPrepareForNewMatch({ keepMp: true });
+                    wodClearLiveMapForNewMatch();
                     UI.mainMenu.classList.add('hidden');
                     UI.panels.forEach(p => p.classList.add('hidden'));
                     UI.escMenu.classList.add('hidden');
@@ -24345,6 +24361,7 @@
         function wodRestoreSoloPreviewSnapshot(newRadius, requestedShape) {
             let snap = gameData._soloPreviewSnapshot;
             if(!snap) return false;
+            if(!wodSoloSnapshotValidForMatchStart(snap)) return false;
             if(snap.mapRadius !== newRadius || snap.mapShape !== requestedShape) return false;
             if(snap.aiCount != null && snap.aiCount !== gameData.aiCount) return false;
 
@@ -24374,6 +24391,7 @@
                 gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
             }
             gameData._landIncomeCacheDirty = true;
+            gameData._wodProcgenBorderFirstApplied = true;
             wodMarkTerrainFullDirty();
             return true;
         }
@@ -24457,7 +24475,7 @@
             wodSyncViewportAndCanvas();
 
             if(gameData.mp && gameData.mp.enabled) {
-                gameData.menuAttractMode = false;
+                wodPrepareForNewMatch({ keepMp: true, keepLiveMap: true });
                 gameData.loadedCustomMap = false;
                 let meta = window.wodMpRoomMeta || {};
                 wodMpSyncLaunchSettingsFromMeta(meta);
@@ -24478,6 +24496,7 @@
             }
 
             // Solo / skirmish — apply Setup panel variables (must not run for multiplayer).
+            wodPrepareForNewMatch({ keepMp: false });
             let mapSizeEl = document.getElementById('setupMapSize');
             let sizePreset = wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
             let newRadius = sizePreset.mapRadius;
@@ -24519,8 +24538,8 @@
                     let restoredPreviewMap = wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
                     gameData._soloMapPreviewMatchesStart = false;
                     if(restoredPreviewMap) {
-                        // Exact preview map restored; do not regenerate terrain or borders.
-                    } else if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape) {
+                        await assignStartingCities();
+                    } else if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape && !wodLiveMapLooksLikeMenuAttract()) {
                         let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
                         if(fp === gameData._lastMapFingerprint && gameData._mapGenSeed)
                             gameData._wodReuseMapGenSeed = true;
@@ -26392,6 +26411,75 @@
             let z = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
             gameData.camera.x = sx * z - vw / 2;
             gameData.camera.y = sy * z - vh / 2;
+        }
+
+        function wodSoloSnapshotValidForMatchStart(snap) {
+            if(!snap || !snap.hexList || !snap.hexList.length) return false;
+            let owners = new Set();
+            for(let c of snap.cities || []) {
+                if(c && c.owner > 0) owners.add(c.owner);
+            }
+            if(owners.size === 0) {
+                for(let h of snap.hexList) {
+                    if(h && h.owner > 0) owners.add(h.owner);
+                }
+            }
+            if(!owners.has(1)) return false;
+            if(owners.has(3) && owners.has(4) && !owners.has(2)) return false;
+            return true;
+        }
+        function wodLiveMapLooksLikeMenuAttract() {
+            if(!gameData.hexList || !gameData.hexList.length) return false;
+            let owners = new Set();
+            for(let c of gameData.cities || []) {
+                if(c && c.owner > 0) owners.add(c.owner);
+            }
+            if(owners.size === 0) {
+                for(let h of gameData.hexList) {
+                    if(h && h.owner > 0) owners.add(h.owner);
+                }
+            }
+            if(!owners.size) return false;
+            if(owners.has(1)) return false;
+            if(owners.has(3) || owners.has(4)) return true;
+            return false;
+        }
+        function wodClearLiveMapForNewMatch() {
+            gameData.hexList = [];
+            gameData.hexes = {};
+            gameData.cities = [];
+            gameData.roads = [];
+            gameData.entities = [];
+            gameData.forts = [];
+            gameData.bridges = [];
+            gameData._wodProcgenBorderFirstApplied = false;
+            gameData._wodTerrainPoliticsBase = null;
+            gameData._wodTerrainPoliticsBaseFp = '';
+            gameData.loadedCustomMap = false;
+        }
+        function wodPrepareForNewMatch(opts) {
+            opts = opts || {};
+            gameData.menuAttractMode = false;
+            menuDemoPausedByVisibility = false;
+            if(menuDemoAnimId) {
+                cancelAnimationFrame(menuDemoAnimId);
+                menuDemoAnimId = 0;
+            }
+            if(UI && UI.canvas) UI.canvas.classList.remove('menu-bg-active');
+            if(!opts.keepMp) gameData.mp = null;
+            gameData._campaignEnded = false;
+            gameData.aiFrontFocus = {};
+            gameData.aiStrategyTimer = 0;
+            gameData.aiFocusTimer = 0;
+            gameData._aiStratWork = null;
+            gameData._aiSpawnBurst = null;
+            gameData._encircWork = null;
+            if(gameData._soloPreviewSnapshot && !wodSoloSnapshotValidForMatchStart(gameData._soloPreviewSnapshot))
+                gameData._soloPreviewSnapshot = null;
+            if(!opts.keepLiveMap && wodLiveMapLooksLikeMenuAttract())
+                wodClearLiveMapForNewMatch();
+            if(gameData.camera && Math.abs((gameData.camera.zoom || 0.5) - 0.655) < 0.02)
+                gameData.camera.zoom = 0.5;
         }
 
         function cloneMenuBattleState() {
