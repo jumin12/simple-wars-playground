@@ -12222,18 +12222,25 @@
                 : wodMpGetLobbyFactionSlotsFromMeta({ maxHumans: maxL, seatTypes: st });
             let hs = (gameData.mp && gameData.mp.humanSlots) ? gameData.mp.humanSlots.slice() : factions.slice();
             let conn = gameData.mp && gameData.mp.connectedSlots ? gameData.mp.connectedSlots.slice() : hs.slice();
+            let snap = wodMpMatchPayloadSourceSnap();
+            let hexList = snap ? snap.hexList : gameData.hexList;
+            let cities = snap ? snap.cities : gameData.cities;
+            let entities = snap ? snap.entities : gameData.entities;
+            let roadsSrc = snap ? snap.roads : gameData.roads;
+            let fortsSrc = snap ? snap.forts : gameData.forts;
+            let bridgesSrc = snap ? snap.bridges : gameData.bridges;
             return {
                 v: 1,
-                hexList: gameData.hexList.map(wodStripHexForNet),
-                cities: gameData.cities.map(c => ({
+                hexList: (hexList || []).map(wodStripHexForNet),
+                cities: (cities || []).map(c => ({
                     id: c.id, name: c.name, x: c.x, y: c.y, q: c.q, r: c.r, owner: c.owner,
                     hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp, maxHp: c.maxHp,
                     urbanStyle: c.urbanStyle, incomeBonus: c.incomeBonus, manpowerBonus: c.manpowerBonus
                 })),
-                entities: gameData.entities.map(wodStripEntityForNet),
-                mapRadius: gameData.mapRadius,
-                mapShape: gameData.mapShape,
-                hexRadius: gameData.hexRadius,
+                entities: (entities || []).map(wodStripEntityForNet),
+                mapRadius: snap ? snap.mapRadius : gameData.mapRadius,
+                mapShape: snap ? snap.mapShape : gameData.mapShape,
+                hexRadius: snap && snap.hexRadius != null ? snap.hexRadius : gameData.hexRadius,
                 aiCount: gameData.aiCount,
                 victoryMode: gameData.victoryMode,
                 humanSlots: hs,
@@ -12250,10 +12257,13 @@
                 aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner),
                 aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner),
                 factionColors: factionColors.slice(),
-                roads: gameData.roads.map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r })),
-                forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                bridges: (gameData.bridges || []).map(wodStripBridgeForNet).filter(Boolean),
-                mapGenSeed: (gameData._mapGenSeed >>> 0) || 0,
+                roads: (roadsSrc || []).map(r => {
+                    if(r.fq != null) return { fq: r.fq, fr: r.fr, tq: r.tq, tr: r.tr };
+                    return { fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r };
+                }),
+                forts: (fortsSrc || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
+                bridges: (bridgesSrc || []).map(wodStripBridgeForNet).filter(Boolean),
+                mapGenSeed: ((snap && snap._mapGenSeed != null ? snap._mapGenSeed : gameData._mapGenSeed) >>> 0) || 0,
                 playerPublic: (window.wodMpRoomMeta && window.wodMpRoomMeta.playerPublic && typeof window.wodMpRoomMeta.playerPublic === 'object')
                     ? JSON.parse(JSON.stringify(window.wodMpRoomMeta.playerPublic))
                     : {}
@@ -12406,7 +12416,11 @@
                     factionColors[i] = p.factionColors[i];
             }
             wodMarkTerrainFullDirty();
-            updateTerrainKey();
+            wodTerrainBakeNextMs = 0;
+            wodTerrainPolWork = null;
+            normalizeTerrainHexes();
+            updateTerrainKey({ skipHelp: true });
+            if(typeof updateTerrainCache === 'function') updateTerrainCache();
             gameData.encircledHexes = new Set();
             gameData.encircledReliefHexes = new Set();
             gameData._mpSyncCityWarKeys = new Set();
@@ -13868,7 +13882,28 @@
                     _wodMpCommittedLobbyMap = null;
             }
         }
+        function wodMpEmptyLobbyGenBackup() {
+            return {
+                hexList: [],
+                hexes: {},
+                cities: [],
+                roads: [],
+                entities: [],
+                mapRadius: gameData.mapRadius,
+                mapShape: gameData.mapShape,
+                loadedCustomMap: false,
+                money: gameData.money,
+                income: gameData.income,
+                manpower: gameData.manpower,
+                aiCount: gameData.aiCount,
+                mp: gameData.mp,
+                selection: [],
+                buildMode: gameData.buildMode
+            };
+        }
         function wodMpSnapshotLobbyGenBackup() {
+            if(wodLiveMapLooksLikeMenuAttract() || !gameData.hexList || !gameData.hexList.length)
+                return wodMpEmptyLobbyGenBackup();
             return {
                 hexList: gameData.hexList,
                 hexes: gameData.hexes,
@@ -13968,6 +14003,28 @@
             gameData.aiManpowerByOwner = Object.assign({}, snap.aiManpowerByOwner);
             if(snap._wodProcgenBorderFirstApplied) gameData._wodProcgenBorderFirstApplied = true;
             return gameData.hexList.length > 0;
+        }
+        /** Apply a map snapshot for an active MP match and invalidate all baked terrain/fog caches. */
+        function wodMpInstallMatchMapFromSnapshot(snap, opts) {
+            opts = opts || {};
+            if(!wodMpApplyDeepMapSnapshot(snap)) return false;
+            wodMarkTerrainFullDirty();
+            wodTerrainBakeNextMs = 0;
+            wodTerrainPolWork = null;
+            gameData._fogCanvasDirty = true;
+            gameData._fogExplored = new Set();
+            gameData._fogVisible = null;
+            normalizeTerrainHexes();
+            updateTerrainKey(opts.terrainKeyOpts || { skipHelp: true });
+            if(opts.bakeNow !== false && typeof updateTerrainCache === 'function')
+                updateTerrainCache();
+            return true;
+        }
+        function wodMpMatchPayloadSourceSnap(meta) {
+            meta = meta || window.wodMpRoomMeta || {};
+            let cm = _wodMpCommittedLobbyMap;
+            if(cm && cm.data && wodMpLobbyMapMatchesMeta(meta, cm.data)) return cm.data;
+            return null;
         }
         function wodMpCommittedIsCurrentForMeta(meta) {
             let cm = _wodMpCommittedLobbyMap;
@@ -14118,7 +14175,7 @@
             let cm = _wodMpCommittedLobbyMap;
             if(!cm || !cm.data) return false;
             if(!wodMpLobbyMapMatchesMeta(meta, cm.data)) return false;
-            if(!wodMpApplyDeepMapSnapshot(cm.data)) return false;
+            if(!wodMpInstallMatchMapFromSnapshot(cm.data, { bakeNow: true })) return false;
             return wodMpLobbyMapMatchesMeta(meta, null);
         }
         function wodMpWaitForLobbyPreviewIdle(timeoutMs) {
@@ -14281,6 +14338,11 @@
                     gameData._wodLobbyPreviewGen = false;
                     gameData._mapGenSeedBase = 0;
                 }
+                wodMarkTerrainFullDirty();
+                wodTerrainBakeNextMs = 0;
+                normalizeTerrainHexes();
+                updateTerrainKey({ skipHelp: true });
+                if(typeof updateTerrainCache === 'function') updateTerrainCache();
             }
             let owners = new Set();
             for(let c of gameData.cities || []) {
@@ -15397,6 +15459,7 @@
                     wodMpInitSyncState(occ);
                     pauseMenuBackgroundBattle();
                     wodPrepareForNewMatch({ keepMp: true });
+                    wodClearLiveMapForNewMatch();
                     if(!gameData.layers) gameData.layers = {};
                     gameData.layers.territory = false;
                     let mapReady = false;
@@ -15492,6 +15555,7 @@
                 wodMpPushLobbyProfile();
                 if(wodMpIsLobbyPreviewHost())
                     requestAnimationFrame(() => {
+                        wodClearLiveMapForNewMatch();
                         if(!wodMpHostPaintLobbyPreviewFromCommitted(window.wodMpRoomMeta))
                             wodMpRefreshLobbyMapPreview();
                     });
@@ -24551,6 +24615,7 @@
 
             if(gameData.mp && gameData.mp.enabled) {
                 wodPrepareForNewMatch({ keepMp: true });
+                wodClearLiveMapForNewMatch();
                 gameData.loadedCustomMap = false;
                 let meta = window.wodMpRoomMeta || {};
                 wodMpSyncLaunchSettingsFromMeta(meta);
@@ -24559,14 +24624,10 @@
                 if(!gameData.hexList || !gameData.hexList.length)
                     throw new Error('Multiplayer map is empty');
                 wodCaptureTerrainPoliticsBase();
-                updateTerrainKey();
                 gameData.playerShiftWaypoints = [];
                 gameData.pathStrokePreview = null;
                 syncHudObjectiveDisplay();
                 wodBindHudResourceTooltips();
-                lastTime = performance.now();
-                if(animationFrameId) cancelAnimationFrame(animationFrameId);
-                gameLoop(lastTime);
                 return;
             }
 
