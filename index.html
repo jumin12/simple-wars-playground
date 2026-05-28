@@ -12214,6 +12214,33 @@
             u.selected = false;
             return u;
         }
+        function wodMpNormalizeHexListTerrainColors(list) {
+            if(!list) return;
+            for(let i = 0; i < list.length; i++) {
+                let h = list[i];
+                if(!h || !h.type) continue;
+                if(!h.baseColor) h.baseColor = getTerrainColor(h.type);
+                if(!h.renderColor) h.renderColor = h.baseColor;
+            }
+        }
+        function wodMpClearTerrainCachesForNewMatch() {
+            wodMarkTerrainFullDirty();
+            wodTerrainBakeNextMs = 0;
+            wodTerrainPolWork = null;
+            wodTerrainBaseBuilt = false;
+            terrainNeedsUpdate = true;
+            if(typeof terrainCanvas !== 'undefined' && terrainCanvas) {
+                terrainCanvas.width = 1;
+                terrainCanvas.height = 1;
+            }
+            if(typeof terrainBaseCanvas !== 'undefined' && terrainBaseCanvas) {
+                terrainBaseCanvas.width = 1;
+                terrainBaseCanvas.height = 1;
+            }
+            gameData._fogCanvasDirty = true;
+            gameData._fogExplored = new Set();
+            gameData._fogVisible = null;
+        }
         function wodMpEnsureDefaultMatchLayers() {
             if(!gameData.layers) gameData.layers = {};
             let defaults = {
@@ -12308,6 +12335,7 @@
             }
             gameData.hexes = hexes;
             gameData.hexList = hexList;
+            wodMpNormalizeHexListTerrainColors(hexList);
         }
         async function wodMpRebuildHexesFromListAsync(list) {
             if(!list || !list.length) {
@@ -12326,6 +12354,7 @@
             }
             gameData.hexes = hexes;
             gameData.hexList = hexList;
+            wodMpNormalizeHexListTerrainColors(hexList);
         }
         function wodMpIsLobbyPreviewHost() {
             return typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.isHost;
@@ -12395,11 +12424,13 @@
         function wodMpTryPaintLobbyPreviewCanvas(meta) {
             return wodMpHostPaintLobbyPreviewFromCommitted(meta);
         }
-        async function wodMpApplyInitFromHost(p, opts) {
+        async function wodMpApplyMatchStartPayload(p, opts) {
             opts = opts || {};
+            if(!p || !p.hexList || !p.hexList.length) throw new Error('Match start payload has no map');
+            wodMpNormalizeHexListTerrainColors(p.hexList);
             if(opts.asyncHexes) await wodMpRebuildHexesFromListAsync(p.hexList);
             else wodMpRebuildHexesFromList(p.hexList);
-            gameData.cities = p.cities.map(c => Object.assign({}, c));
+            gameData.cities = (p.cities || []).map(c => Object.assign({}, c));
             gameData.roads = (p.roads || []).map(ro => {
                 let from = gameData.cities.find(c => c.q === ro.fq && c.r === ro.fr);
                 let to = gameData.cities.find(c => c.q === ro.tq && c.r === ro.tr);
@@ -12440,11 +12471,6 @@
                 for(let i = 0; i < Math.min(p.factionColors.length, factionColors.length); i++)
                     factionColors[i] = p.factionColors[i];
             }
-            wodMarkTerrainFullDirty();
-            wodTerrainBakeNextMs = 0;
-            wodTerrainPolWork = null;
-            normalizeTerrainHexes();
-            updateTerrainKey({ skipHelp: true });
             gameData.encircledHexes = new Set();
             gameData.encircledReliefHexes = new Set();
             gameData._mpSyncCityWarKeys = new Set();
@@ -12452,6 +12478,23 @@
             gameData._wodTerrainPoliticsBase = null;
             gameData._wodTerrainPoliticsBaseFp = '';
             if(p.mapGenSeed != null) gameData._mapGenSeed = p.mapGenSeed >>> 0;
+            if(opts.bake !== false) wodMpRefreshMatchViewportAndTerrain();
+        }
+        async function wodMpPrepareHostLaunchPayload(meta) {
+            wodMpAbortLobbyPreviewJobs();
+            wodClearLiveMapForNewMatch();
+            wodMpSyncLaunchSettingsFromMeta(meta);
+            if(meta.fogOfWar != null) gameData.fogOfWar = !!meta.fogOfWar;
+            await wodMpFinalizeLaunchMapFromLobby(meta);
+            if(!gameData.hexList || !gameData.hexList.length)
+                throw new Error('Multiplayer map is empty');
+            wodMpNormalizeHexListTerrainColors(gameData.hexList);
+            wodMpRebuildHexesFromList(gameData.hexList);
+            wodCaptureTerrainPoliticsBase();
+            return wodMpBuildInitPayload();
+        }
+        async function wodMpApplyInitFromHost(p, opts) {
+            return wodMpApplyMatchStartPayload(p, opts);
         }
         const WOD_MOBILE_UI_REF_W = 429;
         function wodMpExpectedReadySlots() {
@@ -14001,9 +14044,10 @@
         }
         function wodMpApplyDeepMapSnapshot(snap) {
             if(!snap) return false;
-            gameData.hexList = snap.hexList || [];
-            gameData.hexes = snap.hexes || {};
-            gameData.cities = snap.cities || [];
+            gameData.hexList = (snap.hexList || []).map(h => Object.assign({}, h));
+            wodMpNormalizeHexListTerrainColors(gameData.hexList);
+            wodMpRebuildHexesFromList(gameData.hexList);
+            gameData.cities = (snap.cities || []).map(c => Object.assign({}, c));
             gameData.roads = (snap.roads || []).map(ro => {
                 let fq = ro.fq != null ? ro.fq : (ro.from && ro.from.q);
                 let fr = ro.fr != null ? ro.fr : (ro.from && ro.from.r);
@@ -15483,12 +15527,10 @@
                     wodMpInitSyncState(occ);
                     pauseMenuBackgroundBattle();
                     wodPrepareForNewMatch({ keepMp: true });
-                    wodClearLiveMapForNewMatch();
                     wodMpEnsureDefaultMatchLayers();
-                    let mapReady = false;
+                    let launchPayload = null;
                     try {
-                        await initGame();
-                        mapReady = !!(gameData.hexList && gameData.hexList.length && gameData.cities && gameData.cities.length);
+                        launchPayload = await wodMpPrepareHostLaunchPayload(meta);
                     } catch(e) {
                         console.error(e);
                         gameData._wodMpLaunchFactionSlots = null;
@@ -15497,7 +15539,7 @@
                     } finally {
                         gameData._wodMpLaunchFactionSlots = null;
                     }
-                    if(!mapReady) {
+                    if(!launchPayload || !launchPayload.hexList || !launchPayload.hexList.length || !launchPayload.cities || !launchPayload.cities.length) {
                         showNotification('Map generation failed — wait for the lobby preview, then launch again.');
                         return;
                     }
@@ -15512,9 +15554,20 @@
                     wodResetMobileHud();
                     setGameSpeed(0, true);
                     wodMpSnapSeq = 0;
-                    wodMpRefreshMatchViewportAndTerrain();
                     try {
-                        WodMultiplayer.hostSendMatchStart(wodMpBuildInitPayload());
+                        await wodMpApplyMatchStartPayload(launchPayload, { asyncHexes: false });
+                    } catch(err) {
+                        console.error(err);
+                        showNotification('Failed to load multiplayer map on host.');
+                        gameState = 'MENU';
+                        return;
+                    }
+                    gameData.playerShiftWaypoints = [];
+                    gameData.pathStrokePreview = null;
+                    syncHudObjectiveDisplay();
+                    wodBindHudResourceTooltips();
+                    try {
+                        WodMultiplayer.hostSendMatchStart(launchPayload);
                     } catch(err) {
                         console.error(err);
                         showNotification('Failed to send map to players (too large?)');
@@ -15689,7 +15742,7 @@
                     let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
                     if(syncMsg) syncMsg.textContent = 'Loading host map…';
                     try {
-                        await wodMpApplyInitFromHost(pl, { asyncHexes: true });
+                        await wodMpApplyMatchStartPayload(pl, { asyncHexes: true });
                     } catch(err) {
                         console.error(err);
                         showNotification('Failed to load host map on rejoin.');
@@ -15849,7 +15902,7 @@
                     let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
                     if(syncMsg) syncMsg.textContent = 'Loading host map…';
                     try {
-                        await wodMpApplyInitFromHost(pl, { asyncHexes: true });
+                        await wodMpApplyMatchStartPayload(pl, { asyncHexes: true });
                     } catch(err) {
                         console.error(err);
                         showNotification('Failed to load host map.');
@@ -15861,7 +15914,6 @@
                         gameState = 'MENU';
                         return;
                     }
-                    wodMpRefreshMatchViewportAndTerrain();
                     wodTerrainBakeNextMs = 0;
                     lastTime = performance.now();
                     if(animationFrameId) cancelAnimationFrame(animationFrameId);
@@ -26613,6 +26665,7 @@
             gameData._wodTerrainPoliticsBase = null;
             gameData._wodTerrainPoliticsBaseFp = '';
             gameData.loadedCustomMap = false;
+            wodMpClearTerrainCachesForNewMatch();
         }
         function wodPrepareForNewMatch(opts) {
             opts = opts || {};
