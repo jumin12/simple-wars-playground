@@ -12214,6 +12214,39 @@
             u.selected = false;
             return u;
         }
+        function wodMpEnsureDefaultMatchLayers() {
+            if(!gameData.layers) gameData.layers = {};
+            let defaults = {
+                terrain: true, diplomacy: true, territory: false, cities: true,
+                cityNames: true, structures: true, units: true
+            };
+            for(let k of Object.keys(defaults)) {
+                if(gameData.layers[k] === undefined) gameData.layers[k] = defaults[k];
+            }
+            if(gameData.layers.terrain !== false) gameData.terrainViewMode = 'natural';
+        }
+        function wodMpEnsureMatchStartingUnits(factionSlots) {
+            if(gameData.entities && gameData.entities.length) return;
+            let owners = (factionSlots && factionSlots.length)
+                ? factionSlots.slice()
+                : (gameData.mp && gameData.mp.factionSlots && gameData.mp.factionSlots.length)
+                    ? gameData.mp.factionSlots.slice()
+                    : wodGetLobbyLayoutFactionSlots();
+            if(!owners || !owners.length) return;
+            spawnInitialFrontlineUnits(owners);
+            for(let u of gameData.entities) ensureUnitId(u);
+        }
+        function wodMpRefreshMatchViewportAndTerrain() {
+            wodMpEnsureDefaultMatchLayers();
+            wodSyncViewportAndCanvas();
+            wodMarkTerrainFullDirty();
+            wodTerrainBakeNextMs = 0;
+            wodTerrainPolWork = null;
+            gameData._fogCanvasDirty = true;
+            normalizeTerrainHexes();
+            updateTerrainKey({ skipHelp: true });
+            if(typeof updateTerrainCache === 'function') updateTerrainCache();
+        }
         function wodMpBuildInitPayload() {
             let maxL = (gameData.mp && gameData.mp.maxLobbySlots) || WOD_MP_MAX_PLAYERS;
             let st = (gameData.mp && gameData.mp.seatTypes) ? gameData.mp.seatTypes.slice(0, maxL) : [];
@@ -12222,25 +12255,19 @@
                 : wodMpGetLobbyFactionSlotsFromMeta({ maxHumans: maxL, seatTypes: st });
             let hs = (gameData.mp && gameData.mp.humanSlots) ? gameData.mp.humanSlots.slice() : factions.slice();
             let conn = gameData.mp && gameData.mp.connectedSlots ? gameData.mp.connectedSlots.slice() : hs.slice();
-            let snap = wodMpMatchPayloadSourceSnap();
-            let hexList = snap ? snap.hexList : gameData.hexList;
-            let cities = snap ? snap.cities : gameData.cities;
-            let entities = snap ? snap.entities : gameData.entities;
-            let roadsSrc = snap ? snap.roads : gameData.roads;
-            let fortsSrc = snap ? snap.forts : gameData.forts;
-            let bridgesSrc = snap ? snap.bridges : gameData.bridges;
+            wodMpEnsureMatchStartingUnits(factions);
             return {
                 v: 1,
-                hexList: (hexList || []).map(wodStripHexForNet),
-                cities: (cities || []).map(c => ({
+                hexList: (gameData.hexList || []).map(wodStripHexForNet),
+                cities: (gameData.cities || []).map(c => ({
                     id: c.id, name: c.name, x: c.x, y: c.y, q: c.q, r: c.r, owner: c.owner,
                     hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp, maxHp: c.maxHp,
                     urbanStyle: c.urbanStyle, incomeBonus: c.incomeBonus, manpowerBonus: c.manpowerBonus
                 })),
-                entities: (entities || []).map(wodStripEntityForNet),
-                mapRadius: snap ? snap.mapRadius : gameData.mapRadius,
-                mapShape: snap ? snap.mapShape : gameData.mapShape,
-                hexRadius: snap && snap.hexRadius != null ? snap.hexRadius : gameData.hexRadius,
+                entities: (gameData.entities || []).map(wodStripEntityForNet),
+                mapRadius: gameData.mapRadius,
+                mapShape: gameData.mapShape,
+                hexRadius: gameData.hexRadius,
                 aiCount: gameData.aiCount,
                 victoryMode: gameData.victoryMode,
                 humanSlots: hs,
@@ -12257,13 +12284,10 @@
                 aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner),
                 aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner),
                 factionColors: factionColors.slice(),
-                roads: (roadsSrc || []).map(r => {
-                    if(r.fq != null) return { fq: r.fq, fr: r.fr, tq: r.tq, tr: r.tr };
-                    return { fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r };
-                }),
-                forts: (fortsSrc || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
-                bridges: (bridgesSrc || []).map(wodStripBridgeForNet).filter(Boolean),
-                mapGenSeed: ((snap && snap._mapGenSeed != null ? snap._mapGenSeed : gameData._mapGenSeed) >>> 0) || 0,
+                roads: (gameData.roads || []).map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r })),
+                forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
+                bridges: (gameData.bridges || []).map(wodStripBridgeForNet).filter(Boolean),
+                mapGenSeed: (gameData._mapGenSeed >>> 0) || 0,
                 playerPublic: (window.wodMpRoomMeta && window.wodMpRoomMeta.playerPublic && typeof window.wodMpRoomMeta.playerPublic === 'object')
                     ? JSON.parse(JSON.stringify(window.wodMpRoomMeta.playerPublic))
                     : {}
@@ -12394,11 +12418,12 @@
             for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
             wodRebuildBridgeHexIndex();
             gameData.entities = [];
-            for(let ed of p.entities) {
+            for(let ed of (p.entities || [])) {
                 let u = wodEntityFromNet(ed);
                 gameData.entities.push(u);
                 ensureUnitId(u);
             }
+            wodMpEnsureMatchStartingUnits(p.factionSlots);
             gameData.mapRadius = p.mapRadius;
             gameData.mapShape = p.mapShape;
             gameData.hexRadius = p.hexRadius;
@@ -12420,7 +12445,6 @@
             wodTerrainPolWork = null;
             normalizeTerrainHexes();
             updateTerrainKey({ skipHelp: true });
-            if(typeof updateTerrainCache === 'function') updateTerrainCache();
             gameData.encircledHexes = new Set();
             gameData.encircledReliefHexes = new Set();
             gameData._mpSyncCityWarKeys = new Set();
@@ -14175,7 +14199,7 @@
             let cm = _wodMpCommittedLobbyMap;
             if(!cm || !cm.data) return false;
             if(!wodMpLobbyMapMatchesMeta(meta, cm.data)) return false;
-            if(!wodMpInstallMatchMapFromSnapshot(cm.data, { bakeNow: true })) return false;
+            if(!wodMpInstallMatchMapFromSnapshot(cm.data, { bakeNow: false })) return false;
             return wodMpLobbyMapMatchesMeta(meta, null);
         }
         function wodMpWaitForLobbyPreviewIdle(timeoutMs) {
@@ -14342,8 +14366,8 @@
                 wodTerrainBakeNextMs = 0;
                 normalizeTerrainHexes();
                 updateTerrainKey({ skipHelp: true });
-                if(typeof updateTerrainCache === 'function') updateTerrainCache();
             }
+            wodMpEnsureMatchStartingUnits(expected);
             let owners = new Set();
             for(let c of gameData.cities || []) {
                 if(c && c.owner > 0) owners.add(c.owner);
@@ -15460,8 +15484,7 @@
                     pauseMenuBackgroundBattle();
                     wodPrepareForNewMatch({ keepMp: true });
                     wodClearLiveMapForNewMatch();
-                    if(!gameData.layers) gameData.layers = {};
-                    gameData.layers.territory = false;
+                    wodMpEnsureDefaultMatchLayers();
                     let mapReady = false;
                     try {
                         await initGame();
@@ -15489,6 +15512,7 @@
                     wodResetMobileHud();
                     setGameSpeed(0, true);
                     wodMpSnapSeq = 0;
+                    wodMpRefreshMatchViewportAndTerrain();
                     try {
                         WodMultiplayer.hostSendMatchStart(wodMpBuildInitPayload());
                     } catch(err) {
@@ -15658,8 +15682,7 @@
                     UI.canvas.style.display = 'block';
                     wodSetMpMatchUiFlag(true);
                     wodResetMobileHud();
-                    if(!gameData.layers) gameData.layers = {};
-                    gameData.layers.territory = false;
+                    wodMpEnsureDefaultMatchLayers();
                     gameData.selection = [];
                     setGameSpeed(0, true);
                     wodMpRefreshSyncOverlay();
@@ -15679,8 +15702,7 @@
                         gameState = 'MENU';
                         return;
                     }
-                    wodMarkTerrainFullDirty();
-                    updateTerrainKey({ skipHelp: true });
+                    wodMpRefreshMatchViewportAndTerrain();
                     wodTerrainBakeNextMs = 0;
                     lastTime = performance.now();
                     if(animationFrameId) cancelAnimationFrame(animationFrameId);
@@ -15820,8 +15842,7 @@
                     UI.canvas.style.display = 'block';
                     wodSetMpMatchUiFlag(true);
                     wodResetMobileHud();
-                    if(!gameData.layers) gameData.layers = {};
-                    gameData.layers.territory = false;
+                    wodMpEnsureDefaultMatchLayers();
                     gameData.selection = [];
                     setGameSpeed(0, true);
                     wodMpRefreshSyncOverlay();
@@ -15840,8 +15861,7 @@
                         gameState = 'MENU';
                         return;
                     }
-                    wodMarkTerrainFullDirty();
-                    updateTerrainKey({ skipHelp: true });
+                    wodMpRefreshMatchViewportAndTerrain();
                     wodTerrainBakeNextMs = 0;
                     lastTime = performance.now();
                     if(animationFrameId) cancelAnimationFrame(animationFrameId);
