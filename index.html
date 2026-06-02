@@ -9067,6 +9067,8 @@
 
         function returnToMenu() {
             hideCampaignSummaryOverlay();
+            if(gameData && gameData.mp && gameData.mp.enabled && gameState === 'PLAYING')
+                wodMpLeaveActiveMatch();
             wodApplyPlayViewportLock(false);
             gameState = 'MENU';
             gameData._soloMapPreviewMatchesStart = false;
@@ -9664,11 +9666,102 @@
         }
         function wodMpHostMarkSlotDisconnected(slot) {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost || !slot) return;
+            if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = (gameData.mp.humanSlots || []).slice();
+            let i = gameData.mp.connectedSlots.indexOf(slot);
+            if(i >= 0) gameData.mp.connectedSlots.splice(i, 1);
             showNotification('Seat ' + slot + ' disconnected — AI controls their forces until they return.');
+            wodMpHostEmitSnapshot();
         }
         function wodMpHostMarkSlotReconnected(slot) {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost || !slot) return;
+            if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
+            if(gameData.mp.connectedSlots.indexOf(slot) < 0) gameData.mp.connectedSlots.push(slot);
             showNotification('Seat ' + slot + ' reconnected and resumed control.');
+            wodMpHostEmitSnapshot();
+        }
+        function wodMpSaveSession() {
+            if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api || !WodMultiplayer.api.code) return;
+            wodEnsurePlayerId();
+            let inMatch = gameState === 'PLAYING' && gameData.mp && gameData.mp.enabled;
+            window._wodMpInMatch = !!inMatch;
+            window._wodMpSession = {
+                code: WodMultiplayer.api.code,
+                slot: WodMultiplayer.api.slot | 0,
+                isHost: !!WodMultiplayer.api.isHost,
+                inMatch: !!inMatch,
+                playerId: (wodProgress && wodProgress.profile && wodProgress.profile.playerId) || ''
+            };
+        }
+        function wodMpClearSession() {
+            window._wodMpInMatch = false;
+            window._wodMpSession = null;
+        }
+        async function wodMpReconnectToMatch(sess, attempt) {
+            attempt = attempt | 0;
+            if(!sess || !sess.code || !sess.inMatch) return false;
+            if(gameState !== 'PLAYING' || !gameData.mp || !gameData.mp.enabled) return false;
+            if(typeof WodMultiplayer === 'undefined') return false;
+            let delay = Math.min(30000, Math.round(1500 * Math.pow(1.45, attempt)));
+            try {
+                await wodMpEnsureConnected();
+                wodMpRegisterWithServer();
+                wodEnsurePlayerId();
+                let pid = sess.playerId || (wodProgress && wodProgress.profile && wodProgress.profile.playerId) || '';
+                if(WodMultiplayer.rejoinMatch)
+                    await WodMultiplayer.rejoinMatch(sess.code, pid);
+                else
+                    await WodMultiplayer.joinLobby(sess.code, '', { playerId: pid });
+                wodMpSaveSession();
+                return true;
+            } catch(e) {
+                if(attempt >= 8) {
+                    showNotification('Could not reconnect to the match.');
+                    return false;
+                }
+                await new Promise(r => setTimeout(r, delay));
+                return wodMpReconnectToMatch(sess, attempt + 1);
+            }
+        }
+        function wodMpCountCitiesForOwner(owner) {
+            let n = 0;
+            for(let c of gameData.cities || []) if(c && (c.owner | 0) === owner) n++;
+            return n;
+        }
+        function wodMpHostEndMatchForQuit(quitSlot) {
+            if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost) return;
+            let hs = gameData.mp.humanSlots || [];
+            let outcomes = {};
+            let best = null;
+            let bestN = -1;
+            for(let s of hs) {
+                if(wodMpIsSlotEliminated(s)) {
+                    outcomes[String(s)] = 'lost';
+                    continue;
+                }
+                let n = wodMpCountCitiesForOwner(s);
+                if(n > bestN) {
+                    bestN = n;
+                    best = s;
+                } else if(n === bestN) best = null;
+            }
+            for(let s of hs) {
+                if(outcomes[String(s)]) continue;
+                if(quitSlot && s === quitSlot) outcomes[String(s)] = 'lost';
+                else if(best && s === best) outcomes[String(s)] = 'won';
+                else outcomes[String(s)] = 'lost';
+            }
+            wodMpHostBroadcastMatchEnd({
+                outcomes: wodMpMergeOutcomesAllActiveSlots(outcomes),
+                message: 'Match ended.',
+                countAsBattleWon: false
+            });
+        }
+        function wodMpLeaveActiveMatch() {
+            if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING') return false;
+            if(gameData.mp.isHost) wodMpHostEndMatchForQuit(gameData.mp.localSlot);
+            else if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendCmd)
+                WodMultiplayer.sendCmd({ kind: 'forfeit' });
+            return true;
         }
         function wodGetActiveFactionSlotsForMap() {
             if(!gameData.mp || !gameData.mp.enabled) return null;
@@ -12531,6 +12624,7 @@
             gameData.mp.allReady = true;
             wodMpRefreshSyncOverlay();
             setGameSpeed(1, true);
+            wodMpSaveSession();
             showNotification('All players connected — battle begins!');
         }
         function wodMpTryMarkReady(slot) {
@@ -12596,6 +12690,7 @@
         function wodMpClientApplyMatchEnd(me) {
             if(!me || !me.outcomes || gameData._campaignEnded) return;
             if(!gameData.mp || !gameData.mp.enabled) return;
+            wodMpClearSession();
             gameData._mpLastMatchEnd = me;
             let slot = gameData.mp.localSlot;
             if(slot == null) return;
@@ -12834,6 +12929,8 @@
                 if(s.encircledReliefKeys != null) gameData.encircledReliefHexes = new Set(s.encircledReliefKeys);
                 if(s.cityWarKeys != null) gameData._mpSyncCityWarKeys = new Set(s.cityWarKeys);
             }
+            if(s.connectedSlots && gameData.mp && gameData.mp.enabled && Array.isArray(s.connectedSlots))
+                gameData.mp.connectedSlots = s.connectedSlots.slice();
             if(s.matchEnd) wodMpClientApplyMatchEnd(s.matchEnd);
             if(s.allReady && gameData.mp && gameData.mp.enabled && !gameData.mp.allReady)
                 wodMpFinalizeMatchStart();
@@ -12885,10 +12982,14 @@
                 encircledReliefKeys,
                 cityWarKeys,
                 matchEnd: gameData._mpMatchEnd || undefined,
-                allReady: !!(gameData.mp && gameData.mp.allReady)
+                allReady: !!(gameData.mp && gameData.mp.allReady),
+                connectedSlots: (gameData.mp && gameData.mp.connectedSlots)
+                    ? gameData.mp.connectedSlots.slice()
+                    : undefined
             });
         }
         function wodMpDisconnectAndReset() {
+            wodMpClearSession();
             if(typeof WodMultiplayer !== 'undefined') WodMultiplayer.disconnect();
             gameData.mp = null;
             wodMpSnapSeq = 0;
@@ -15184,7 +15285,18 @@
                     wodMpHandleDisplayNameRejected(ev.detail);
                 else if(ev.detail && ev.detail.msg) showNotification(ev.detail.msg);
             });
-            addEventListener('wod-mp-Close', () => {
+            addEventListener('wod-mp-Close', (ev) => {
+                let d = ev && ev.detail;
+                let sess = window._wodMpSession;
+                if(sess && sess.inMatch && gameState === 'PLAYING' && gameData.mp && gameData.mp.enabled) {
+                    showNotification('Connection lost — reconnecting…');
+                    void wodMpReconnectToMatch(sess, 0);
+                    return;
+                }
+                if(d && d.keepSession && sess && sess.code) {
+                    void wodMpReconnectToMatch(sess, 0);
+                    return;
+                }
                 if(window._wodMpBgReconnectTimer) clearTimeout(window._wodMpBgReconnectTimer);
                 window._wodMpBgReconnectTimer = setTimeout(() => {
                     void wodMpBackgroundConnect();
@@ -15572,6 +15684,7 @@
                         console.error(err);
                         showNotification('Failed to send map to players (too large?)');
                     }
+                    wodMpSaveSession();
                     wodMpTryMarkReady(WodMultiplayer.api.slot | 0);
                     wodSyncDesktopLayersPanelExpanded();
                     syncInGameLayerToolbar();
@@ -15674,20 +15787,30 @@
                     }
                 }
             });
+            addEventListener('wod-mp-PlayerLinkLost', (ev) => {
+                let slot = ev.detail && ev.detail.slot | 0;
+                if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
+                let grace = (ev.detail && ev.detail.graceMs) ? Math.round(ev.detail.graceMs / 1000) : 45;
+                showNotification('Seat ' + slot + ' connection lost — ' + grace + 's to reconnect before AI takes over.');
+            });
             addEventListener('wod-mp-PlayerDisconnected', (ev) => {
                 let slot = ev.detail && ev.detail.slot | 0;
                 if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
-                if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = (gameData.mp.humanSlots || []).slice();
-                let i = gameData.mp.connectedSlots.indexOf(slot);
-                if(i >= 0) gameData.mp.connectedSlots.splice(i, 1);
                 if(gameData.mp.isHost) wodMpHostMarkSlotDisconnected(slot);
+                else {
+                    if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = (gameData.mp.humanSlots || []).slice();
+                    let i = gameData.mp.connectedSlots.indexOf(slot);
+                    if(i >= 0) gameData.mp.connectedSlots.splice(i, 1);
+                }
             });
             addEventListener('wod-mp-PlayerReconnected', (ev) => {
                 let slot = ev.detail && ev.detail.slot | 0;
                 if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
-                if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
-                if(gameData.mp.connectedSlots.indexOf(slot) < 0) gameData.mp.connectedSlots.push(slot);
                 if(gameData.mp.isHost) wodMpHostMarkSlotReconnected(slot);
+                else {
+                    if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
+                    if(gameData.mp.connectedSlots.indexOf(slot) < 0) gameData.mp.connectedSlots.push(slot);
+                }
             });
             addEventListener('wod-mp-RejoinMatch', (ev) => {
                 let d = ev && ev.detail;
@@ -15772,6 +15895,7 @@
                         gameData.camera.y = sc.y * gameData.camera.zoom - vh / 2;
                     }
                     if(WodMultiplayer.sendMatchReady) WodMultiplayer.sendMatchReady();
+                    wodMpSaveSession();
                     showNotification('Rejoined match — resuming your seat.');
                 })();
             });
@@ -15931,6 +16055,7 @@
                     }
                     if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendMatchReady)
                         WodMultiplayer.sendMatchReady();
+                    wodMpSaveSession();
                     showNotification('Multiplayer: received game from host');
                 })();
             });
@@ -15952,6 +16077,15 @@
                 if(!wodMpMatchCanPlay()) return;
                 let d = ev.detail;
                 if(!d || !d.cmd) return;
+                if(d.cmd.kind === 'forfeit') {
+                    let slot = d.fromSlot | 0;
+                    if(!slot) return;
+                    wodMpHostMarkSlotDisconnected(slot);
+                    let hs = gameData.mp.humanSlots || [];
+                    let active = (gameData.mp.connectedSlots || []).filter(s => hs.indexOf(s) >= 0);
+                    if(active.length === 0) wodMpHostEndMatchForQuit(slot);
+                    return;
+                }
                 if(d.cmd.kind === 'move') {
                     let units = [];
                     for(let id of d.cmd.uids || []) {
@@ -28398,7 +28532,11 @@
             checkCampaignEndConditions(dt);
             if(gameData.mp && gameData.mp.enabled && gameData.mp.isHost) {
                 gameData._mpSnapAcc = (gameData._mpSnapAcc || 0) + dt;
-                if(gameData._mpSnapAcc >= 0.1) {
+                let hexN = (gameData.hexList && gameData.hexList.length) || 0;
+                let entN = (gameData.entities && gameData.entities.length) || 0;
+                let snapEvery = hexN > 12000 ? 0.18 : (hexN > 8000 ? 0.14 : 0.1);
+                if(entN > 350) snapEvery += 0.04;
+                if(gameData._mpSnapAcc >= snapEvery) {
                     gameData._mpSnapAcc = 0;
                     wodMpHostEmitSnapshot();
                 }

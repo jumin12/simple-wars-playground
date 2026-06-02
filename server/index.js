@@ -32,6 +32,10 @@ const recentLobbyInvites = new Map();
 const FRIEND_REQUEST_COOLDOWN_MS = 30000;
 const LOBBY_INVITE_COOLDOWN_MS = 45000;
 const LOBBY_INVITE_DEDUPE_MS = 60000;
+/** Grace before a dropped connection is treated as a full disconnect (AI takeover). */
+const MP_DISCONNECT_GRACE_MS = 45000;
+/** Close idle sockets that stop responding to pings (proxies often drop ~60s idle WS). */
+const MP_STALE_CONNECTION_MS = 90000;
 
 function sanitizePlayerId(id) {
   const s = String(id || '').trim().slice(0, 32);
@@ -373,7 +377,89 @@ function captureMatchSeatPlayers(room) {
   room.disconnectedSlots = room.disconnectedSlots || new Set();
 }
 
-function disconnectClientFromMatch(client) {
+function cancelMatchReconnectGrace(room, slot) {
+  if (!room || !room.pendingReconnect || !slot) return;
+  const pending = room.pendingReconnect.get(slot);
+  if (!pending) return;
+  if (pending.timer) clearTimeout(pending.timer);
+  room.pendingReconnect.delete(slot);
+}
+
+function buildOutcomesFromLastSnap(room) {
+  const snap = room.lastSnap && room.lastSnap.payload;
+  const hs =
+    (room.matchInitPayload && room.matchInitPayload.humanSlots) ||
+    [...new Set(Object.values(room.seatByPlayerId || {}))];
+  const outcomes = {};
+  if (!hs.length) return outcomes;
+  let best = null;
+  let bestN = -1;
+  if (snap && Array.isArray(snap.cities)) {
+    for (const s of hs) {
+      let n = 0;
+      for (const c of snap.cities) if ((c.owner | 0) === s) n++;
+      if (n > bestN) {
+        bestN = n;
+        best = s;
+      } else if (n === bestN) best = null;
+    }
+  }
+  for (const s of hs) {
+    outcomes[String(s)] = best && s === best ? 'won' : 'lost';
+  }
+  return outcomes;
+}
+
+function buildMatchEndParticipants(room, outcomes) {
+  const map = room.seatByPlayerId || {};
+  const out = [];
+  for (const [pid, slot] of Object.entries(map)) {
+    const s = slot | 0;
+    if (!s) continue;
+    const oc = outcomes[String(s)] || outcomes[s];
+    if (oc !== 'won' && oc !== 'lost') continue;
+    out.push({ slot: s, playerId: sanitizePlayerId(pid) });
+  }
+  return out.filter((p) => p.playerId);
+}
+
+function finalizeAbandonedMatch(room) {
+  if (!room || !room.matchStarted || room._matchEndRecorded) return;
+  const hostPid =
+    sanitizePlayerId(room.hostPlayerId) ||
+    sanitizePlayerId(room.host && room.host.playerId) ||
+    sanitizePlayerId(Object.keys(room.seatByPlayerId || {})[0]);
+  const outcomes = buildOutcomesFromLastSnap(room);
+  const participants = buildMatchEndParticipants(room, outcomes);
+  if (!participants.length) return;
+  const result = profiles.recordMpMatchEnd(hostPid, room, { outcomes, participants });
+  if (result.ok) room._matchEndRecorded = true;
+}
+
+function maybeEndMatchWhenEmpty(room) {
+  if (!room || !room.matchStarted) return;
+  const pending = room.pendingReconnect ? room.pendingReconnect.size : 0;
+  if (room.clients.length > 0 || pending > 0) return;
+  finalizeAbandonedMatch(room);
+  rooms.delete(room.id);
+}
+
+function markSlotDisconnectedInMatch(room, leftSlot) {
+  if (!room || !leftSlot) return;
+  cancelMatchReconnectGrace(room, leftSlot);
+  if (!room.disconnectedSlots) room.disconnectedSlots = new Set();
+  room.disconnectedSlots.add(leftSlot);
+  broadcastAll(room, {
+    t: 'player_disconnected',
+    slot: leftSlot,
+    count: room.clients.length,
+    canRejoin: true,
+  });
+  maybeEndMatchWhenEmpty(room);
+  broadcastLobbyList();
+}
+
+function disconnectClientFromMatch(client, immediate) {
   const room = client.room;
   if (!room || !room.matchStarted) {
     leaveRoom(client);
@@ -382,20 +468,53 @@ function disconnectClientFromMatch(client) {
   const leftSlot = client.slot;
   const idx = room.clients.indexOf(client);
   if (idx >= 0) room.clients.splice(idx, 1);
-  if (leftSlot > 0) {
-    if (!room.disconnectedSlots) room.disconnectedSlots = new Set();
-    room.disconnectedSlots.add(leftSlot);
+
+  if (immediate) {
+    markSlotDisconnectedInMatch(room, leftSlot);
+    client.room = null;
+    client.slot = 0;
+    client.isHost = false;
+    return;
   }
-  broadcastAll(room, {
-    t: 'player_disconnected',
-    slot: leftSlot,
-    count: room.clients.length,
-    canRejoin: true,
-  });
+
+  if (leftSlot > 0) {
+    if (!room.pendingReconnect) room.pendingReconnect = new Map();
+    cancelMatchReconnectGrace(room, leftSlot);
+    const timer = setTimeout(() => {
+      markSlotDisconnectedInMatch(room, leftSlot);
+    }, MP_DISCONNECT_GRACE_MS);
+    room.pendingReconnect.set(leftSlot, { timer, playerId: sanitizePlayerId(client.playerId) });
+    try {
+      broadcastAll(room, {
+        t: 'player_link_lost',
+        slot: leftSlot,
+        graceMs: MP_DISCONNECT_GRACE_MS,
+        count: room.clients.length,
+      });
+    } catch (_) {}
+  }
+
   client.room = null;
   client.slot = 0;
   client.isHost = false;
   broadcastLobbyList();
+}
+
+function forfeitClientFromMatch(client) {
+  const room = client.room;
+  if (!room || !room.matchStarted) {
+    leaveRoom(client);
+    return;
+  }
+  disconnectClientFromMatch(client, true);
+}
+
+function scheduleMatchSocketClose(client) {
+  if (!client.room || !client.room.matchStarted) {
+    leaveRoom(client);
+    return;
+  }
+  disconnectClientFromMatch(client, false);
 }
 
 function assertMetaCompatibleWithRoom(room, metaTrial) {
@@ -555,6 +674,7 @@ wss.on('connection', (ws) => {
     displayName: '',
     unitSkin: 'nato',
     mpStats: null,
+    lastPingAt: Date.now(),
   };
   ws._wodClient = client;
 
@@ -904,12 +1024,14 @@ wss.on('connection', (ws) => {
       const joinPlayerId = sanitizePlayerId(msg.playerId || client.playerId);
 
       if (room.matchStarted) {
-        if (!joinPlayerId || !room.seatByPlayerId || !room.disconnectedSlots) {
+        if (!joinPlayerId || !room.seatByPlayerId) {
           ws.send(JSON.stringify({ t: 'error', msg: 'Match in progress — rejoin with the same player account.' }));
           return;
         }
         const rejoinSlot = room.seatByPlayerId[joinPlayerId];
-        if (!rejoinSlot || !room.disconnectedSlots.has(rejoinSlot)) {
+        const inGrace = !!(room.pendingReconnect && room.pendingReconnect.has(rejoinSlot));
+        const inDisc = !!(room.disconnectedSlots && room.disconnectedSlots.has(rejoinSlot));
+        if (!rejoinSlot || (!inGrace && !inDisc)) {
           ws.send(
             JSON.stringify({
               t: 'error',
@@ -919,11 +1041,22 @@ wss.on('connection', (ws) => {
           return;
         }
         leaveRoom(client);
+        cancelMatchReconnectGrace(room, rejoinSlot);
+        if (room.disconnectedSlots) room.disconnectedSlots.delete(rejoinSlot);
         client.room = room;
         client.slot = rejoinSlot;
         room.clients.push(client);
-        client.isHost = room.host === client;
-        room.disconnectedSlots.delete(rejoinSlot);
+        const hostLive = room.clients.some((c) => c.isHost && c.ws.readyState === 1);
+        if (!hostLive) {
+          room.host = client;
+          client.isHost = true;
+          for (const c of room.clients) c.isHost = c === client;
+          try {
+            client.ws.send(JSON.stringify({ t: 'host_migrated', slot: client.slot, isHost: true }));
+          } catch (_) {}
+        } else {
+          client.isHost = room.host === client;
+        }
         ws.send(
           JSON.stringify({
             t: 'rejoin_match',
@@ -1113,9 +1246,18 @@ wss.on('connection', (ws) => {
     }
 
     if (t === 'leave') {
-      leaveRoom(client);
+      if (client.room && client.room.matchStarted) forfeitClientFromMatch(client);
+      else leaveRoom(client);
       try {
         ws.send(JSON.stringify({ t: 'left' }));
+      } catch (_) {}
+      return;
+    }
+
+    if (t === 'ping') {
+      client.lastPingAt = Date.now();
+      try {
+        ws.send(JSON.stringify({ t: 'pong', ts: msg.ts || 0 }));
       } catch (_) {}
       return;
     }
@@ -1125,9 +1267,12 @@ wss.on('connection', (ws) => {
     if (t === 'start' && client.isHost) {
       client.room.matchStarted = true;
       client.room.lobbyPreview = null;
+      client.room._matchEndRecorded = false;
+      client.room.pendingReconnect = new Map();
       const payload = msg.payload;
       client.room.matchInitPayload = payload;
       client.room.lastSnap = null;
+      client.room.hostPlayerId = sanitizePlayerId(client.playerId);
       captureMatchSeatPlayers(client.room);
       broadcastAll(client.room, { t: 'match_start', payload, fromSlot: client.slot });
       broadcastLobbyList();
@@ -1162,12 +1307,26 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    if (client.room && client.room.matchStarted) disconnectClientFromMatch(client);
+    if (client.room && client.room.matchStarted) scheduleMatchSocketClose(client);
     else leaveRoom(client);
     unregisterClientPlayer(client);
     broadcastLobbyList();
   });
 });
+
+setInterval(() => {
+  const now = Date.now();
+  wss.clients.forEach((ws) => {
+    const client = ws._wodClient;
+    if (!client || ws.readyState !== 1) return;
+    const last = client.lastPingAt || 0;
+    if (last && now - last > MP_STALE_CONNECTION_MS) {
+      try {
+        ws.close();
+      } catch (_) {}
+    }
+  });
+}, 15000);
 
 loadLeaderboardFromDisk();
 loadFriendRemovalsFromDisk();

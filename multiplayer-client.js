@@ -15,6 +15,8 @@
   }
 
   let ws = null;
+  let pingTimer = null;
+  const MP_PING_MS = 20000;
   const api = {
     code: '',
     slot: 0,
@@ -49,6 +51,28 @@
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
   }
 
+  function stopPing() {
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
+  }
+
+  function startPing() {
+    stopPing();
+    pingTimer = setInterval(() => {
+      send({ t: 'ping', ts: Date.now() });
+    }, MP_PING_MS);
+  }
+
+  function inActiveMatchSession() {
+    try {
+      return !!(global._wodMpInMatch && global._wodMpSession && global._wodMpSession.code);
+    } catch (_) {
+      return false;
+    }
+  }
+
   function clearJoinHandlers(err) {
     if (joinReject) {
       joinReject(err);
@@ -77,6 +101,7 @@
           api.socketOpen = true;
           api.online = msg.online | 0;
           api.lobbies = msg.lobbies || [];
+          startPing();
           emit('Welcome', { online: api.online, lobbies: api.lobbies });
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
@@ -188,11 +213,20 @@
         case 'peer_left':
           emit('Peers', { count: msg.count, slot: msg.slot, t: msg.t });
           break;
+        case 'player_link_lost':
+          emit('PlayerLinkLost', {
+            slot: msg.slot | 0,
+            graceMs: msg.graceMs | 0,
+            count: msg.count,
+          });
+          break;
         case 'player_disconnected':
           emit('PlayerDisconnected', { slot: msg.slot | 0, count: msg.count, canRejoin: !!msg.canRejoin });
           break;
         case 'player_reconnected':
           emit('PlayerReconnected', { slot: msg.slot | 0, count: msg.count });
+          break;
+        case 'pong':
           break;
         case 'rejoin_match':
           api.code = msg.code || '';
@@ -263,14 +297,27 @@
       }
     };
     ws.onclose = () => {
+      stopPing();
+      const keepSession = inActiveMatchSession();
+      const prevCode = api.code;
+      const prevSlot = api.slot;
+      const prevHost = api.isHost;
       api.socketOpen = false;
       api.connected = false;
-      api.code = '';
-      api.slot = 0;
-      api.isHost = false;
+      if (!keepSession) {
+        api.code = '';
+        api.slot = 0;
+        api.isHost = false;
+        api.lastSeq = 0;
+      }
       clearJoinHandlers(new Error('Disconnected'));
       clearCreateHandlers(new Error('Disconnected'));
-      emit('Close', {});
+      emit('Close', {
+        keepSession,
+        code: keepSession ? prevCode : '',
+        slot: keepSession ? prevSlot : 0,
+        isHost: keepSession ? prevHost : false,
+      });
     };
     ws.onerror = () => emit('Error', { msg: 'WebSocket error' });
   }
@@ -443,6 +490,11 @@
       api.connected = false;
     },
     disconnect() {
+      try {
+        global._wodMpInMatch = false;
+        global._wodMpSession = null;
+      } catch (_) {}
+      stopPing();
       clearJoinHandlers(new Error('Disconnected'));
       clearCreateHandlers(new Error('Disconnected'));
       if (ws) {
@@ -462,6 +514,9 @@
       api.lastSeq = 0;
       api.online = 0;
       api.lobbies = [];
+    },
+    rejoinMatch(code, playerId) {
+      return global.WodMultiplayer.joinLobby(code, '', { playerId: String(playerId || '') });
     },
     hostSendMatchStart(payload) {
       send({ t: 'start', payload });
