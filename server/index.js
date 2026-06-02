@@ -444,6 +444,31 @@ function maybeEndMatchWhenEmpty(room) {
   rooms.delete(room.id);
 }
 
+function migrateMatchHostIfNeeded(room) {
+  if (!room || !room.matchStarted || room.clients.length === 0) return null;
+  const newHost = room.clients.find((c) => c.ws.readyState === 1) || room.clients[0];
+  if (!newHost) return null;
+  room.host = newHost;
+  room.hostPlayerId = sanitizePlayerId(newHost.playerId);
+  for (const c of room.clients) {
+    c.isHost = c === newHost;
+    try {
+      c.ws.send(JSON.stringify({ t: 'slot_sync', slot: c.slot, isHost: c.isHost }));
+    } catch (_) {}
+  }
+  broadcastAll(room, { t: 'host_migrated', slot: newHost.slot });
+  try {
+    newHost.ws.send(
+      JSON.stringify({
+        t: 'host_takeover',
+        payload: room.matchInitPayload || null,
+        snap: room.lastSnap || null,
+      }),
+    );
+  } catch (_) {}
+  return newHost;
+}
+
 function markSlotDisconnectedInMatch(room, leftSlot) {
   if (!room || !leftSlot) return;
   cancelMatchReconnectGrace(room, leftSlot);
@@ -466,8 +491,10 @@ function disconnectClientFromMatch(client, immediate) {
     return;
   }
   const leftSlot = client.slot;
+  const wasHost = room.host === client;
   const idx = room.clients.indexOf(client);
   if (idx >= 0) room.clients.splice(idx, 1);
+  if (wasHost && room.clients.length > 0) migrateMatchHostIfNeeded(room);
 
   if (immediate) {
     markSlotDisconnectedInMatch(room, leftSlot);

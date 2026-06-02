@@ -7083,6 +7083,23 @@
                                 <div id="mpHostForm" class="mp-host-form visible">
                                     <div class="setup-row"><label>Lobby name</label><input type="text" id="mpHostName" placeholder="My battle" style="flex:1" maxlength="40"></div>
                                     <div class="setup-row"><label>Password</label><input type="password" id="mpHostPassword" placeholder="Optional — open if empty" style="flex:1" maxlength="80" autocomplete="new-password"></div>
+                                    <div class="setup-row"><label>Human seats</label>
+                                        <select id="mpHostHumanSeats" style="flex:1" title="Open seats for real players (including you)">
+                                            <option value="1">1</option>
+                                            <option value="2" selected>2</option>
+                                            <option value="3">3</option>
+                                            <option value="4">4</option>
+                                        </select>
+                                    </div>
+                                    <div class="setup-row"><label>AI bots</label>
+                                        <select id="mpHostBotSeats" style="flex:1" title="AI-controlled factions on the map">
+                                            <option value="0">0</option>
+                                            <option value="1" selected>1</option>
+                                            <option value="2">2</option>
+                                            <option value="3">3</option>
+                                        </select>
+                                    </div>
+                                    <p class="mp-hub-pane-lead" style="margin:8px 0 0;font-size:12px;opacity:0.85">Layout can be changed in the game lobby without regenerating terrain when possible.</p>
                                     <button type="button" class="menu-btn" id="mpBtnHostCreate" style="margin-top:12px">Create lobby</button>
                                 </div>
                             </div>
@@ -7147,6 +7164,24 @@
                             </div>
                             <div id="mpGlSettingsReadout" class="mp-gl-readout"></div>
                             <div id="mpGlHostActions" style="display:none;margin-top:12px">
+                                <div id="mpGlLayoutQuick" class="setup-row" style="flex-wrap:wrap;gap:8px;margin-bottom:10px;align-items:center">
+                                    <label style="min-width:4.5em">Humans</label>
+                                    <select id="mpGlHumanCount" style="flex:0 1 72px" title="Human player seats">
+                                        <option value="1">1</option>
+                                        <option value="2" selected>2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                    </select>
+                                    <label style="min-width:3em">Bots</label>
+                                    <select id="mpGlBotCount" style="flex:0 1 72px" title="AI bot seats">
+                                        <option value="0">0</option>
+                                        <option value="1" selected>1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                    </select>
+                                    <button type="button" class="build-btn" id="mpBtnGlApplyLayout" title="Update seats; keeps terrain when possible">Apply layout</button>
+                                    <button type="button" class="wod-editor-btn" id="mpBtnGlRegenMap" title="Force a new terrain preview">Regenerate map</button>
+                                </div>
                                 <button type="button" class="menu-btn" id="mpBtnGlMap">Map</button>
                                 <button type="button" class="menu-btn" id="mpBtnGlRules">Match rules</button>
                                 <button type="button" class="menu-btn" id="mpBtnGlLaunch">Launch match</button>
@@ -14008,6 +14043,89 @@
             return changed;
         }
         function wodMpEnsureDefaultSeatTypes(meta) { wodMpNormalizeLobbyMeta(meta); }
+        function wodMpBuildSeatTypesFromCounts(humanCount, botCount) {
+            let humans = Math.max(1, Math.min(WOD_MP_MAX_PLAYERS, humanCount | 0));
+            let bots = Math.max(0, Math.min(WOD_MP_MAX_PLAYERS - humans, botCount | 0));
+            let st = [];
+            for(let i = 0; i < humans; i++) st.push('human');
+            for(let i = 0; i < bots; i++) st.push('bot');
+            while(st.length < WOD_MP_MAX_PLAYERS) st.push('closed');
+            return st;
+        }
+        function wodMpReadHostLayoutCounts() {
+            let hEl = document.getElementById('mpHostHumanSeats');
+            let bEl = document.getElementById('mpHostBotSeats');
+            let humans = hEl ? (parseInt(hEl.value, 10) || 2) : 2;
+            let bots = bEl ? (parseInt(bEl.value, 10) || 1) : 1;
+            if(humans + bots > WOD_MP_MAX_PLAYERS) bots = Math.max(0, WOD_MP_MAX_PLAYERS - humans);
+            return { humans, bots };
+        }
+        function wodMpReadGlLayoutCounts() {
+            let hEl = document.getElementById('mpGlHumanCount');
+            let bEl = document.getElementById('mpGlBotCount');
+            let humans = hEl ? (parseInt(hEl.value, 10) || 2) : 2;
+            let bots = bEl ? (parseInt(bEl.value, 10) || 1) : 1;
+            if(humans + bots > WOD_MP_MAX_PLAYERS) bots = Math.max(0, WOD_MP_MAX_PLAYERS - humans);
+            return { humans, bots };
+        }
+        function wodMpSyncLayoutCountFieldsFromMeta(meta) {
+            if(!meta || !meta.seatTypes) return;
+            let st = meta.seatTypes;
+            let humans = 0, bots = 0;
+            for(let i = 0; i < WOD_MP_MAX_PLAYERS; i++) {
+                if(st[i] === 'human') humans++;
+                else if(st[i] === 'bot') bots++;
+            }
+            let hHost = document.getElementById('mpHostHumanSeats');
+            let bHost = document.getElementById('mpHostBotSeats');
+            let hGl = document.getElementById('mpGlHumanCount');
+            let bGl = document.getElementById('mpGlBotCount');
+            if(hHost) hHost.value = String(Math.max(1, humans));
+            if(bHost) bHost.value = String(bots);
+            if(hGl) hGl.value = String(Math.max(1, humans));
+            if(bGl) bGl.value = String(bots);
+        }
+        function wodMpBuildInitialHostMeta() {
+            let layout = wodMpReadHostLayoutCounts();
+            let st = wodMpBuildSeatTypesFromCounts(layout.humans, layout.bots);
+            return {
+                seatTypes: st,
+                aiCount: layout.bots,
+                maxHumans: WOD_MP_MAX_PLAYERS,
+                mapSize: 60,
+                mapShape: 'island',
+                victoryMode: 'domination',
+                money: 1000,
+                mapSizeLabel: 'Medium',
+                mapShapeLabel: 'Island',
+                victoryLabel: 'Domination'
+            };
+        }
+        /** Update human/bot seat layout; politics-only refresh when terrain can stay. */
+        function wodMpApplyLayoutCounts(humanCount, botCount, opts) {
+            opts = opts || {};
+            if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
+            wodMpNormalizeLobbyMeta(window.wodMpRoomMeta);
+            let prevFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
+            let prevTerrainFp = wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta);
+            window.wodMpRoomMeta.seatTypes = wodMpBuildSeatTypesFromCounts(humanCount, botCount);
+            gameData.aiCount = window.wodMpRoomMeta.seatTypes.filter(t => t === 'bot').length;
+            wodMpSyncLayoutCountFieldsFromMeta(window.wodMpRoomMeta);
+            wodMpPushLobbyMetaFromCurrentUi();
+            let nextFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
+            if(opts.forceRegen) {
+                window.wodMpRoomMeta.lobbyMapSeed = (Math.imul(Date.now() >>> 0, 2246822519) ^ (window.wodMpRoomMeta.lobbyMapSeed || 0) ^ 0x9e3779b9) >>> 0;
+                if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x6a09e667;
+                wodMpRefreshLobbyMapPreviewAfterMetaChange(window.wodMpRoomMeta, { force: true });
+                return;
+            }
+            let terrainUnchanged = prevTerrainFp === wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta);
+            let politicsOk = terrainUnchanged && (prevFactionFp === nextFactionFp || wodMpCanUsePoliticsOnlyForMeta(window.wodMpRoomMeta));
+            wodMpRefreshLobbyMapPreviewAfterMetaChange(window.wodMpRoomMeta, {
+                politicsOnly: politicsOk,
+                force: !politicsOk && prevFactionFp !== nextFactionFp
+            });
+        }
         function wodMpResolveLobbyCapacity(meta) { return wodMpNormalizeLobbyMeta(meta); }
         function wodMpApplyRoomMeta(meta) {
             window.wodMpRoomMeta = meta && typeof meta === 'object' ? JSON.parse(JSON.stringify(meta)) : {};
@@ -14920,6 +15038,7 @@
             let api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : {};
             let meta = window.wodMpRoomMeta || {};
             wodMpNormalizeLobbyMeta(meta);
+            wodMpSyncLayoutCountFieldsFromMeta(meta);
             let st = meta.seatTypes || [];
             let occ = new Set(Array.isArray(meta.occupiedSlots) ? meta.occupiedSlots : []);
             let activeFactions = 0;
@@ -15504,8 +15623,12 @@
                     let name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : 'Game';
                     let password = pwEl ? String(pwEl.value) : '';
                     if(st) st.textContent = 'Creating lobby…';
-                    await WodMultiplayer.createLobby({ name, password });
+                    let hostMeta = wodMpBuildInitialHostMeta();
+                    await WodMultiplayer.createLobby({ name, password, meta: hostMeta });
                     wodMpLobbyCount = 1;
+                    window.wodMpRoomMeta = Object.assign(window.wodMpRoomMeta || {}, hostMeta);
+                    wodMpEnsureDefaultSeatTypes(window.wodMpRoomMeta);
+                    wodMpSyncLayoutCountFieldsFromMeta(window.wodMpRoomMeta);
                     wodMpSyncHostCfgFromSetup();
                     wodMpRefreshMpPanelState();
                     if(WodMultiplayer.sendLobbyMeta) WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
@@ -15520,6 +15643,40 @@
             let mpGlRules = document.getElementById('mpBtnGlRules');
             if(mpGlMap) mpGlMap.onclick = () => wodMpOpenHostMapDlg();
             if(mpGlRules) mpGlRules.onclick = () => wodMpOpenHostRulesDlg();
+            let mpBtnGlApplyLayout = document.getElementById('mpBtnGlApplyLayout');
+            let mpBtnGlRegenMap = document.getElementById('mpBtnGlRegenMap');
+            if(mpBtnGlApplyLayout) mpBtnGlApplyLayout.onclick = () => {
+                if(wodIsMapPreviewGenerating()) return;
+                let layout = wodMpReadGlLayoutCounts();
+                wodMpApplyLayoutCounts(layout.humans, layout.bots, {});
+                wodMpRenderGameLobbyScreen();
+                showNotification('Seat layout updated.');
+            };
+            if(mpBtnGlRegenMap) mpBtnGlRegenMap.onclick = () => {
+                if(wodIsMapPreviewGenerating()) return;
+                let layout = wodMpReadGlLayoutCounts();
+                wodMpApplyLayoutCounts(layout.humans, layout.bots, { forceRegen: true });
+                wodMpRenderGameLobbyScreen();
+                showNotification('Map preview regenerated.');
+            };
+            let mpGlHumanCount = document.getElementById('mpGlHumanCount');
+            let mpGlBotCount = document.getElementById('mpGlBotCount');
+            if(mpGlHumanCount && !mpGlHumanCount._wodMpBound) {
+                mpGlHumanCount._wodMpBound = true;
+                mpGlHumanCount.onchange = () => {
+                    let layout = wodMpReadGlLayoutCounts();
+                    if(mpGlBotCount && layout.humans + layout.bots > WOD_MP_MAX_PLAYERS)
+                        mpGlBotCount.value = String(Math.max(0, WOD_MP_MAX_PLAYERS - layout.humans));
+                };
+            }
+            if(mpGlBotCount && !mpGlBotCount._wodMpBound) {
+                mpGlBotCount._wodMpBound = true;
+                mpGlBotCount.onchange = () => {
+                    let layout = wodMpReadGlLayoutCounts();
+                    if(mpGlHumanCount && layout.humans + layout.bots > WOD_MP_MAX_PLAYERS)
+                        mpGlBotCount.value = String(Math.max(0, WOD_MP_MAX_PLAYERS - layout.humans));
+                };
+            }
             let mpCfgMapApply = document.getElementById('mpCfgMapApply');
             let mpCfgMapClose = document.getElementById('mpCfgMapClose');
             let mpCfgMapSaveMap = document.getElementById('mpCfgMapSaveMap');
@@ -15969,13 +16126,29 @@
                 wodMpRefreshMpPanelState();
                 if(WodMultiplayer.api && WodMultiplayer.api.code && gameState !== 'PLAYING') wodMpRenderGameLobbyScreen();
             });
-            addEventListener('wod-mp-HostMigrated', () => {
+            addEventListener('wod-mp-HostMigrated', (ev) => {
                 if(typeof WodMultiplayer === 'undefined') return;
+                let d = ev && ev.detail;
+                let isHost = !!(d && d.isHost) || !!WodMultiplayer.api.isHost;
                 if(gameData && gameData.mp && gameData.mp.enabled) {
-                    gameData.mp.isHost = true;
+                    gameData.mp.isHost = isHost;
                     gameData.mp.localSlot = WodMultiplayer.api.slot;
                 }
+                if(isHost && gameState === 'PLAYING')
+                    showNotification('You are now the match host.');
+                else if(gameState === 'PLAYING' && d && d.slot)
+                    showNotification('Seat ' + d.slot + ' is now hosting the match.');
                 wodMpRefreshMpPanelState();
+            });
+            addEventListener('wod-mp-HostTakeover', (ev) => {
+                if(typeof WodMultiplayer === 'undefined') return;
+                let d = ev && ev.detail;
+                if(!d || gameState !== 'PLAYING' || !gameData.mp || !gameData.mp.enabled) return;
+                gameData.mp.isHost = true;
+                gameData.mp.localSlot = WodMultiplayer.api.slot;
+                if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
+                wodMpSaveSession();
+                showNotification('You are now the host — the battle continues on your machine.');
             });
             addEventListener('wod-mp-MatchStart', (ev) => {
                 if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.isHost) return;

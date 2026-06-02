@@ -247,9 +247,15 @@
           });
           break;
         case 'host_migrated':
+          if (msg.slot != null) api.isHost = (api.slot | 0) === (msg.slot | 0);
+          emit('HostMigrated', { slot: msg.slot | 0, isHost: api.isHost });
+          break;
+        case 'host_takeover':
           api.isHost = true;
-          if (msg.slot != null) api.slot = msg.slot;
-          emit('HostMigrated', { slot: msg.slot });
+          emit('HostTakeover', {
+            payload: msg.payload || null,
+            snap: msg.snap || null,
+          });
           break;
         case 'slot_sync':
           if (msg.slot != null) api.slot = msg.slot;
