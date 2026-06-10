@@ -7084,7 +7084,7 @@
         <div id="missionsPanel" class="overlay hidden">
             <div class="panel panel-wide wod-map-lib-panel">
                 <h2 style="margin-top:0">Missions</h2>
-                <p class="wod-map-lib-sub">Scripted scenarios with popups, timers, kill goals, and reinforcements. Drop mission JSON files into the <strong>missions/</strong> folder, run <code>npm run missions:sync</code>, then refresh this page.</p>
+                <p class="wod-map-lib-sub">Scripted scenarios with popups, timers, kill goals, and reinforcements. Drop mission JSON into <strong>missions/</strong>, run <code>npm run missions:sync</code>, commit both the JSON and <code>manifest.json</code>, then refresh. Large maps may take a few seconds to load.</p>
                 <div class="wod-map-lib-layout">
                     <div class="wod-map-lib-list-column">
                         <div class="wod-map-lib-list" id="wodMissionList" aria-label="Mission list"></div>
@@ -9287,14 +9287,17 @@
             });
         }
 
-        function startGame(mode) {
-            if(mode === 'ai' && gameData._soloPreviewGenerating) {
+        function startGame(mode, opts) {
+            opts = opts || {};
+            if(mode === 'ai' && gameData._soloPreviewGenerating && !opts.mission) {
                 showNotification('Map is still generating...');
                 return;
             }
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
-            wodPrepareForNewMatch({ keepMp: false });
+            let launchingMission = !!(opts.mission || gameData._selectedMissionEntry);
+            if(opts.mission) gameData._launchingMission = true;
+            wodPrepareForNewMatch({ keepMp: false, keepLiveMap: launchingMission });
             gameData._cityUnitStackTap = null;
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
@@ -9322,6 +9325,7 @@
             wodHideMissionPopup();
             gameData._missionRuntime = null;
             gameData._selectedMissionEntry = null;
+            gameData._launchingMission = false;
             if(gameData && gameData.mp && gameData.mp.enabled && gameState === 'PLAYING')
                 wodMpLeaveActiveMatch();
             wodApplyPlayViewportLock(false);
@@ -25233,7 +25237,8 @@
             }
 
             // Solo / skirmish — apply Setup panel variables (must not run for multiplayer).
-            wodPrepareForNewMatch({ keepMp: false });
+            let launchingMission = !!(gameData._launchingMission || gameData._selectedMissionEntry);
+            wodPrepareForNewMatch({ keepMp: false, keepLiveMap: launchingMission });
             let mapSizeEl = document.getElementById('setupMapSize');
             let sizePreset = wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
             let newRadius = sizePreset.mapRadius;
@@ -25261,35 +25266,46 @@
             applyPlayerFactionColorFromSetup();
 
             {
-                let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
-                if(gameData.loadedCustomMap) {
-                    if(gameData.hexList.length === 0 || gameData.mapRadius !== newRadius || shapeChanged) {
-                        gameData.mapRadius = newRadius;
-                        gameData.loadedCustomMap = false;
-                        await generateMap();
-                    } else {
-                        await assignStartingCities();
+                if(launchingMission) {
+                    if(!gameData.loadedCustomMap || !gameData.hexList.length) {
+                        let ok = await wodApplyMissionEntry(gameData._selectedMissionEntry);
+                        if(!ok) throw new Error('Mission map could not be loaded');
                     }
+                    wodSyncSetupControlsFromLoadedMap();
+                    await assignStartingCities();
+                    wodCaptureTerrainPoliticsBase();
                 } else {
-                    let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
-                    let restoredPreviewMap = wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
-                    gameData._soloMapPreviewMatchesStart = false;
-                    if(restoredPreviewMap) {
-                        await assignStartingCities();
-                    } else if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape && !wodLiveMapLooksLikeMenuAttract()) {
-                        let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
-                        if(fp === gameData._lastMapFingerprint && gameData._mapGenSeed)
-                            gameData._wodReuseMapGenSeed = true;
-                        gameData.mapRadius = newRadius;
-                        gameData.mapShape = requestedShape;
-                        await generateMap();
+                    let shapeChanged = !gameData.loadedCustomMap && gameData.mapShape !== requestedShape;
+                    if(gameData.loadedCustomMap) {
+                        if(gameData.hexList.length === 0 || gameData.mapRadius !== newRadius || shapeChanged) {
+                            gameData.mapRadius = newRadius;
+                            gameData.loadedCustomMap = false;
+                            await generateMap();
+                        } else {
+                            await assignStartingCities();
+                        }
                     } else {
-                        gameData.mapRadius = newRadius;
-                        gameData.mapShape = requestedShape;
-                        await generateMap();
+                        let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
+                        let restoredPreviewMap = wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
+                        gameData._soloMapPreviewMatchesStart = false;
+                        if(restoredPreviewMap) {
+                            await assignStartingCities();
+                        } else if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape && !wodLiveMapLooksLikeMenuAttract()) {
+                            let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
+                            if(fp === gameData._lastMapFingerprint && gameData._mapGenSeed)
+                                gameData._wodReuseMapGenSeed = true;
+                            gameData.mapRadius = newRadius;
+                            gameData.mapShape = requestedShape;
+                            await generateMap();
+                        } else {
+                            gameData.mapRadius = newRadius;
+                            gameData.mapShape = requestedShape;
+                            await generateMap();
+                        }
                     }
                 }
             }
+            gameData._launchingMission = false;
             updateTerrainKey();
             
             gameData.playerShiftWaypoints = [];
@@ -27215,7 +27231,8 @@
             gameData._encircWork = null;
             if(gameData._soloPreviewSnapshot && !wodSoloSnapshotValidForMatchStart(gameData._soloPreviewSnapshot))
                 gameData._soloPreviewSnapshot = null;
-            if(!opts.keepLiveMap && wodLiveMapLooksLikeMenuAttract())
+            let keepMissionMap = !!(opts.keepLiveMap || gameData._launchingMission || gameData._selectedMissionEntry);
+            if(!keepMissionMap && wodLiveMapLooksLikeMenuAttract())
                 wodClearLiveMapForNewMatch();
             if(gameData.camera && Math.abs((gameData.camera.zoom || 0.5) - 0.655) < 0.02)
                 gameData.camera.zoom = 0.5;
@@ -32706,20 +32723,64 @@
             return wodMissionCatalog;
         }
 
-        async function wodFetchMissionData(entry) {
+        function wodMissionDataLooksValid(data) {
+            if(!data || !Array.isArray(data.hexList) || !data.hexList.length) return false;
+            let mission = typeof wodNormalizeMission === 'function' ? wodNormalizeMission(data.mission) : data.mission;
+            return !!(mission && Array.isArray(mission.events) && mission.events.length);
+        }
+
+        function wodSyncSetupControlsFromLoadedMap() {
+            let ms = document.getElementById('setupMapSize');
+            let radius = gameData.mapRadius || 60;
+            if(ms) {
+                let val = String(radius);
+                if(ms.value !== val) ms.value = val;
+            }
+            wodApplyMapSizePreset(radius);
+            let shape = gameData.mapShape || 'island';
+            let shapeEl = document.getElementById('setupMapShape');
+            if(shapeEl) {
+                let has = false;
+                for(let i = 0; i < shapeEl.options.length; i++) {
+                    if(shapeEl.options[i].value === shape) { has = true; break; }
+                }
+                if(!has && shape !== 'custom') {
+                    let opt = document.createElement('option');
+                    opt.value = shape;
+                    opt.textContent = shape;
+                    shapeEl.appendChild(opt);
+                }
+                shapeEl.value = shape;
+            }
+        }
+
+        function wodPaintMissionPreviewPlaceholder(cnv, msg) {
+            if(!cnv || !cnv.getContext) return;
+            let ctx = cnv.getContext('2d');
+            ctx.fillStyle = '#0f1823';
+            ctx.fillRect(0, 0, cnv.width, cnv.height);
+            ctx.fillStyle = '#9db3c7';
+            ctx.font = '13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(msg || 'Loading…', cnv.width / 2, cnv.height / 2);
+        }
+
+        async function wodFetchMissionData(entry, opts) {
+            opts = opts || {};
             if(!entry || !entry.id) return null;
-            if(wodMissionDataCache[entry.id]) return wodMissionDataCache[entry.id];
+            if(!opts.force && wodMissionDataCache[entry.id]) return wodMissionDataCache[entry.id];
             let file = entry.file || (entry.id + '.json');
             try {
                 let res = await fetch(WOD_MISSIONS_DIR + file, { cache: 'no-cache' });
-                if(!res.ok) throw new Error('mission file missing');
+                if(!res.ok) throw new Error('mission file missing (' + res.status + ')');
                 let data = await res.json();
-                if(!data || !Array.isArray(data.hexList) || !data.hexList.length) throw new Error('invalid mission map');
-                if(!data.mission || !Array.isArray(data.mission.events) || !data.mission.events.length) throw new Error('mission has no events');
+                if(!wodMissionDataLooksValid(data)) throw new Error('invalid mission export');
                 wodMissionDataCache[entry.id] = data;
                 return data;
             } catch(e) {
                 console.warn('wodFetchMissionData', entry.id, e);
+                if(opts.force) delete wodMissionDataCache[entry.id];
                 return null;
             }
         }
@@ -32756,8 +32817,14 @@
                 return;
             }
             if(meta) meta.innerHTML = '<p><strong>' + (entry.name || entry.id) + '</strong></p><p class="wod-map-lib-meta-sub">Loading preview…</p>';
+            if(cv) wodPaintMissionPreviewPlaceholder(cv, 'Loading map…');
             void wodFetchMissionData(entry).then(data => {
-                if(!data || _wodSelectedMissionId !== entry.id) return;
+                if(_wodSelectedMissionId !== entry.id) return;
+                if(!data) {
+                    if(meta) meta.innerHTML = '<p><strong>' + (entry.name || entry.id) + '</strong></p><p class="wod-map-lib-meta-sub" style="color:#e74c3c">Could not load mission file. Ensure it is in missions/ and deployed with manifest.json.</p>';
+                    if(cv) wodPaintMissionPreviewPlaceholder(cv, 'Load failed');
+                    return;
+                }
                 let evtN = (data.mission && data.mission.events) ? data.mission.events.length : 0;
                 let trig = wodMissionTriggerSummary(data);
                 let html = '<p><strong>' + (entry.name || data.mission.title || entry.id) + '</strong></p>';
@@ -32766,7 +32833,13 @@
                 if(trig) html += ' · ' + trig;
                 html += '</p>';
                 if(meta) meta.innerHTML = html;
-                if(cv) wodPaintMapDataOnCanvas(cv, data);
+                if(cv) {
+                    try { wodPaintMapDataOnCanvas(cv, data); }
+                    catch(e) {
+                        console.warn('wodSelectMissionEntry preview', e);
+                        wodPaintMissionPreviewPlaceholder(cv, 'Preview unavailable');
+                    }
+                }
             });
         }
 
@@ -32789,7 +32862,7 @@
                 return;
             }
             if(empty) empty.classList.add('hidden');
-            if(layout) layout.style.display = '';
+            if(layout) layout.style.display = 'flex';
             for(let entry of wodMissionCatalog) {
                 let btn = document.createElement('button');
                 btn.type = 'button';
@@ -32806,18 +32879,31 @@
 
         async function wodApplyMissionEntry(entry) {
             if(!entry || !entry.id) return false;
-            let data = await wodFetchMissionData(entry);
+            let data = await wodFetchMissionData(entry, { force: true });
             if(!data) return false;
             if(window.WOD && typeof WOD.loadMapData === 'function') WOD.loadMapData(data);
             else return false;
             gameData.loadedCustomMap = true;
             gameData._selectedMissionEntry = entry;
             gameData._soloMapPreviewMatchesStart = true;
+            gameData._soloPreviewSnapshot = null;
+            wodSyncSetupControlsFromLoadedMap();
             if(entry.aiCount != null) {
                 let n = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(entry.aiCount, 10) || 1));
                 gameData.aiCount = n;
                 let aiEl = document.getElementById('setupAI');
                 if(aiEl) aiEl.value = String(n);
+            } else {
+                let owners = new Set();
+                for(let c of gameData.cities || []) if(c && c.owner > 1) owners.add(c.owner);
+                let aiN = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, owners.size || 1));
+                gameData.aiCount = aiN;
+                let aiEl = document.getElementById('setupAI');
+                if(aiEl) aiEl.value = String(aiN);
+            }
+            if(!wodMissionHasEvents()) {
+                console.warn('wodApplyMissionEntry: mission events missing after load');
+                return false;
             }
             return true;
         }
@@ -32832,12 +32918,19 @@
                     showNotification('Select a mission first.');
                     return;
                 }
+                btn.disabled = true;
+                btn.textContent = 'Loading…';
+                gameData._launchingMission = true;
+                showNotification('Loading mission map…');
                 void wodApplyMissionEntry(entry).then(ok => {
+                    btn.textContent = 'Start mission';
+                    btn.disabled = !_wodSelectedMissionId;
                     if(!ok) {
-                        showNotification('Could not load mission file.');
+                        gameData._launchingMission = false;
+                        showNotification('Could not load mission file. Check missions/ folder and refresh.');
                         return;
                     }
-                    startGame('ai');
+                    startGame('ai', { mission: true });
                 });
             });
         }
