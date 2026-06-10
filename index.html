@@ -4680,6 +4680,63 @@
             flex: 1 1 100%;
         }
 
+        .wod-play-mode-panel {
+            max-width: 420px;
+            text-align: center;
+        }
+        .wod-play-mode-btns {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin: 18px 0 20px;
+        }
+        .wod-play-mode-btn {
+            width: 100%;
+            margin: 0;
+        }
+        .wod-campaign-placeholder {
+            margin: 0 0 20px;
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px dashed rgba(255, 255, 255, 0.18);
+            background: rgba(0, 0, 0, 0.2);
+            color: #95a5a6;
+            font-size: 0.92rem;
+            line-height: 1.5;
+        }
+        .wod-mission-row {
+            display: block;
+            width: 100%;
+            text-align: left;
+            padding: 10px 12px;
+            margin: 0 0 6px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            color: #ecf0f1;
+            cursor: pointer;
+            font: inherit;
+        }
+        .wod-mission-row:hover {
+            border-color: rgba(212, 175, 55, 0.55);
+        }
+        .wod-mission-row.active {
+            border-color: rgba(46, 204, 113, 0.75);
+            background: rgba(46, 204, 113, 0.12);
+        }
+        .wod-mission-row-title {
+            display: block;
+            font-weight: 700;
+            font-size: 0.95rem;
+        }
+        .wod-mission-row-desc {
+            display: block;
+            margin-top: 4px;
+            font-size: 0.8rem;
+            color: #9db3c7;
+            line-height: 1.4;
+        }
+
         #mapLibraryPanel.overlay {
             z-index: 40;
         }
@@ -6987,7 +7044,7 @@
                     <h1>Simple Wars</h1>
                 </header>
                 <div class="main-menu-btns">
-                    <button class="menu-btn" onclick="showPanel('setup')">Play vs AI</button>
+                    <button class="menu-btn" onclick="showPanel('playMode')">Play vs AI</button>
                     <button class="menu-btn" onclick="showPanel('multiplayer')">Multiplayer</button>
                     <button class="menu-btn" onclick="showPanel('shop')">Shop</button>
                     <button class="menu-btn" onclick="openMapEditor()">Map Editor</button>
@@ -7000,6 +7057,54 @@
         </div>
 
         <!-- Sub Panels -->
+        <div id="playModePanel" class="overlay hidden">
+            <div class="panel wod-play-mode-panel">
+                <h2>Play vs AI</h2>
+                <p class="wod-map-lib-sub">Choose how you want to play a solo match against computer opponents.</p>
+                <div class="wod-play-mode-btns">
+                    <button type="button" class="menu-btn wod-play-mode-btn" onclick="showPanel('campaign')">Campaign</button>
+                    <button type="button" class="menu-btn wod-play-mode-btn" onclick="showPanel('missions')">Missions</button>
+                    <button type="button" class="menu-btn wod-play-mode-btn" onclick="wodOpenSkirmishSetup()">Skirmish</button>
+                </div>
+                <button type="button" class="menu-btn" onclick="hidePanels()">Back</button>
+            </div>
+        </div>
+
+        <div id="campaignPanel" class="overlay hidden">
+            <div class="panel wod-play-mode-panel">
+                <h2>Campaign</h2>
+                <p class="wod-map-lib-sub">Linked scenarios with story progression and persistent unlocks — <strong>coming soon</strong>.</p>
+                <div class="wod-campaign-placeholder">
+                    <p>Placeholder for a future campaign map and mission chain.</p>
+                </div>
+                <button type="button" class="menu-btn" onclick="showPanel('playMode')">Back</button>
+            </div>
+        </div>
+
+        <div id="missionsPanel" class="overlay hidden">
+            <div class="panel panel-wide wod-map-lib-panel">
+                <h2 style="margin-top:0">Missions</h2>
+                <p class="wod-map-lib-sub">Scripted scenarios with popups, timers, kill goals, and reinforcements. Drop mission JSON files into the <strong>missions/</strong> folder, run <code>npm run missions:sync</code>, then refresh this page.</p>
+                <div class="wod-map-lib-layout">
+                    <div class="wod-map-lib-list-column">
+                        <div class="wod-map-lib-list" id="wodMissionList" aria-label="Mission list"></div>
+                    </div>
+                    <div class="wod-map-lib-detail">
+                        <canvas id="wodMissionPreview" width="380" height="210" class="wod-map-lib-preview-canvas" aria-label="Mission map preview"></canvas>
+                        <div id="wodMissionMeta" class="wod-map-lib-meta"></div>
+                        <div class="wod-map-lib-actions">
+                            <button type="button" class="menu-btn" id="wodMissionStartBtn" disabled>Start mission</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="wodMissionEmpty" class="shop-empty-state hidden">
+                    <p><strong>No missions found</strong></p>
+                    <p>Export a mission from the map editor, save it under <code>missions/</code>, then run <code>npm run missions:sync</code>.</p>
+                </div>
+                <button type="button" class="menu-btn" onclick="showPanel('playMode')" style="margin-top:16px">Back</button>
+            </div>
+        </div>
+
         <div id="setupPanel" class="overlay hidden">
             <div class="panel">
                 <h2>Game Setup</h2>
@@ -7081,7 +7186,7 @@
                 </div>
                 <button class="menu-btn" id="setupBtnStartAi" onclick="startGame('ai')">Start Game</button>
                 <button class="menu-btn" id="setupBtnMpReturn" type="button" style="display:none" onclick="wodMpFinishSetupFromHost()">Return to lobby</button>
-                <button class="menu-btn" id="setupBtnBack" onclick="hidePanels()">Back</button>
+                <button class="menu-btn" id="setupBtnBack" onclick="wodBackFromSkirmishSetup()">Back</button>
             </div>
         </div>
 
@@ -8902,7 +9007,9 @@
             opts = opts || {};
             pauseMenuBackgroundBattle();
             UI.mainMenu.classList.add('hidden');
-            document.getElementById(panelId + 'Panel').classList.remove('hidden');
+            UI.panels.forEach(p => p.classList.add('hidden'));
+            let pan = document.getElementById(panelId + 'Panel');
+            if(pan) pan.classList.remove('hidden');
             if(panelId === 'shop') {
                 wodInitShopPeriodBinding();
                 wodSyncAllPeriodSelects();
@@ -8925,6 +9032,10 @@
                 wodMpApplyFriendQueryFromUrl();
             }
             if(panelId === 'helpGuide') updateTerrainKey();
+            if(panelId === 'missions') {
+                wodMissionCatalogLoaded = false;
+                void wodRefreshMissionsPanel();
+            }
             if(panelId === 'mapLibrary') {
                 _wodMapLib.context = opts.libContext || 'setup';
                 window._wodMapLibFromMpHost = !!opts.fromMpHost;
@@ -8960,6 +9071,9 @@
                     let shapeEl = document.getElementById('setupMapShape');
                     if(shapeEl) shapeEl.value = 'island';
                     gameData.loadedCustomMap = false;
+                    gameData.mission = null;
+                    gameData._missionRuntime = null;
+                    gameData._selectedMissionEntry = null;
                 }
                 let aiEl = document.getElementById('setupAI');
                 if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
@@ -9028,8 +9142,33 @@
                 wodMpEnsureConnected();
                 return;
             }
-            if(ret === 'setup') return;
+            if(ret === 'setup') {
+                let sp = document.getElementById('setupPanel');
+                if(sp) sp.classList.remove('hidden');
+                return;
+            }
             hidePanels();
+        }
+
+        function wodOpenSkirmishSetup() {
+            gameData.mission = null;
+            gameData._missionRuntime = null;
+            gameData._selectedMissionEntry = null;
+            showPanel('setup');
+        }
+
+        function wodBackFromSkirmishSetup() {
+            if(window._wodMapLibFromMpHost) {
+                hidePanels();
+                return;
+            }
+            let rb = document.getElementById('setupBtnMpReturn');
+            if(rb && rb.style.display !== 'none') {
+                hidePanels();
+                return;
+            }
+            UI.panels.forEach(p => p.classList.add('hidden'));
+            showPanel('playMode');
         }
 
         function hidePanels(resumeMenuDemo) {
@@ -9182,6 +9321,7 @@
             hideCampaignSummaryOverlay();
             wodHideMissionPopup();
             gameData._missionRuntime = null;
+            gameData._selectedMissionEntry = null;
             if(gameData && gameData.mp && gameData.mp.enabled && gameState === 'PLAYING')
                 wodMpLeaveActiveMatch();
             wodApplyPlayViewportLock(false);
@@ -32543,7 +32683,168 @@
         ];
 
         const WOD_SHOP_VISUAL_COST = 100;
+        const WOD_MISSIONS_DIR = 'missions/';
         const WOD_SHOP_MAPS_DIR = 'custom-maps/';
+        let wodMissionCatalog = [];
+        let wodMissionDataCache = Object.create(null);
+        let wodMissionCatalogLoaded = false;
+        let wodMissionRenderToken = 0;
+        let _wodSelectedMissionId = null;
+
+        async function wodLoadMissionCatalog() {
+            if(wodMissionCatalogLoaded) return wodMissionCatalog;
+            try {
+                let res = await fetch(WOD_MISSIONS_DIR + 'manifest.json', { cache: 'no-cache' });
+                if(!res.ok) throw new Error('manifest missing');
+                let json = await res.json();
+                wodMissionCatalog = (json.missions || []).filter(m => m && m.id && m.file);
+            } catch(e) {
+                wodMissionCatalog = [];
+                console.warn('wodLoadMissionCatalog', e);
+            }
+            wodMissionCatalogLoaded = true;
+            return wodMissionCatalog;
+        }
+
+        async function wodFetchMissionData(entry) {
+            if(!entry || !entry.id) return null;
+            if(wodMissionDataCache[entry.id]) return wodMissionDataCache[entry.id];
+            let file = entry.file || (entry.id + '.json');
+            try {
+                let res = await fetch(WOD_MISSIONS_DIR + file, { cache: 'no-cache' });
+                if(!res.ok) throw new Error('mission file missing');
+                let data = await res.json();
+                if(!data || !Array.isArray(data.hexList) || !data.hexList.length) throw new Error('invalid mission map');
+                if(!data.mission || !Array.isArray(data.mission.events) || !data.mission.events.length) throw new Error('mission has no events');
+                wodMissionDataCache[entry.id] = data;
+                return data;
+            } catch(e) {
+                console.warn('wodFetchMissionData', entry.id, e);
+                return null;
+            }
+        }
+
+        function wodMissionTriggerSummary(data) {
+            if(!data || !data.mission || !Array.isArray(data.mission.events)) return '';
+            let types = [];
+            for(let evt of data.mission.events) {
+                let t = evt && evt.trigger && evt.trigger.type;
+                if(t && !types.includes(t)) types.push(t);
+            }
+            let labels = { timer: 'timer', time_survived: 'survival', troops_killed: 'kill goal' };
+            return types.map(t => labels[t] || t).join(', ');
+        }
+
+        function wodSelectMissionEntry(entry) {
+            _wodSelectedMissionId = entry && entry.id ? entry.id : null;
+            let startBtn = document.getElementById('wodMissionStartBtn');
+            if(startBtn) startBtn.disabled = !_wodSelectedMissionId;
+            let list = document.getElementById('wodMissionList');
+            if(list) {
+                list.querySelectorAll('.wod-mission-row').forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.missionId === _wodSelectedMissionId);
+                });
+            }
+            let meta = document.getElementById('wodMissionMeta');
+            let cv = document.getElementById('wodMissionPreview');
+            if(!entry) {
+                if(meta) meta.innerHTML = '<p class="wod-map-lib-meta-empty">Select a mission to preview.</p>';
+                if(cv) {
+                    let ctx = cv.getContext('2d');
+                    if(ctx) ctx.clearRect(0, 0, cv.width, cv.height);
+                }
+                return;
+            }
+            if(meta) meta.innerHTML = '<p><strong>' + (entry.name || entry.id) + '</strong></p><p class="wod-map-lib-meta-sub">Loading preview…</p>';
+            void wodFetchMissionData(entry).then(data => {
+                if(!data || _wodSelectedMissionId !== entry.id) return;
+                let evtN = (data.mission && data.mission.events) ? data.mission.events.length : 0;
+                let trig = wodMissionTriggerSummary(data);
+                let html = '<p><strong>' + (entry.name || data.mission.title || entry.id) + '</strong></p>';
+                if(entry.description) html += '<p>' + entry.description + '</p>';
+                html += '<p class="wod-map-lib-meta-sub">' + evtN + ' scripted event' + (evtN === 1 ? '' : 's');
+                if(trig) html += ' · ' + trig;
+                html += '</p>';
+                if(meta) meta.innerHTML = html;
+                if(cv) wodPaintMapDataOnCanvas(cv, data);
+            });
+        }
+
+        async function wodRefreshMissionsPanel() {
+            let token = ++wodMissionRenderToken;
+            let list = document.getElementById('wodMissionList');
+            let empty = document.getElementById('wodMissionEmpty');
+            let layout = document.querySelector('#missionsPanel .wod-map-lib-layout');
+            if(!list) return;
+            list.innerHTML = '';
+            _wodSelectedMissionId = null;
+            let startBtn = document.getElementById('wodMissionStartBtn');
+            if(startBtn) startBtn.disabled = true;
+            wodSelectMissionEntry(null);
+            await wodLoadMissionCatalog();
+            if(token !== wodMissionRenderToken) return;
+            if(!wodMissionCatalog.length) {
+                if(empty) empty.classList.remove('hidden');
+                if(layout) layout.style.display = 'none';
+                return;
+            }
+            if(empty) empty.classList.add('hidden');
+            if(layout) layout.style.display = '';
+            for(let entry of wodMissionCatalog) {
+                let btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'wod-mission-row';
+                btn.dataset.missionId = entry.id;
+                btn.innerHTML =
+                    '<span class="wod-mission-row-title">' + (entry.name || entry.id) + '</span>' +
+                    (entry.description ? '<span class="wod-mission-row-desc">' + entry.description + '</span>' : '');
+                btn.addEventListener('click', () => wodSelectMissionEntry(entry));
+                list.appendChild(btn);
+            }
+            if(wodMissionCatalog.length === 1) wodSelectMissionEntry(wodMissionCatalog[0]);
+        }
+
+        async function wodApplyMissionEntry(entry) {
+            if(!entry || !entry.id) return false;
+            let data = await wodFetchMissionData(entry);
+            if(!data) return false;
+            if(window.WOD && typeof WOD.loadMapData === 'function') WOD.loadMapData(data);
+            else return false;
+            gameData.loadedCustomMap = true;
+            gameData._selectedMissionEntry = entry;
+            gameData._soloMapPreviewMatchesStart = true;
+            if(entry.aiCount != null) {
+                let n = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(entry.aiCount, 10) || 1));
+                gameData.aiCount = n;
+                let aiEl = document.getElementById('setupAI');
+                if(aiEl) aiEl.value = String(n);
+            }
+            return true;
+        }
+
+        function wodWireMissionStartButtonOnce() {
+            let btn = document.getElementById('wodMissionStartBtn');
+            if(!btn || btn.dataset.wired === '1') return;
+            btn.dataset.wired = '1';
+            btn.addEventListener('click', () => {
+                let entry = wodMissionCatalog.find(m => m.id === _wodSelectedMissionId);
+                if(!entry) {
+                    showNotification('Select a mission first.');
+                    return;
+                }
+                void wodApplyMissionEntry(entry).then(ok => {
+                    if(!ok) {
+                        showNotification('Could not load mission file.');
+                        return;
+                    }
+                    startGame('ai');
+                });
+            });
+        }
+
+        window.wodOpenSkirmishSetup = wodOpenSkirmishSetup;
+        window.wodBackFromSkirmishSetup = wodBackFromSkirmishSetup;
+
         const WOD_SHOP_MAP_DEFAULT_PRICE = 150;
         let wodShopMapCatalog = [];
         let wodShopMapDataCache = Object.create(null);
@@ -36995,10 +37296,12 @@
         checkWodAchievements();
         updateSkinShop();
         wodInitShopTabs();
+        wodWireMissionStartButtonOnce();
         wodLoadShopMapCatalog().then(() => {
             renderShopMapsTab();
             wodSyncSetupShopMapButton();
         });
+        void wodLoadMissionCatalog();
         renderAchievementsUi();
 
         initSetupPanelBindings();
