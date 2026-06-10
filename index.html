@@ -170,6 +170,73 @@
             color: rgba(255,255,255,0.72);
         }
 
+        #wodMissionPopupOverlay {
+            z-index: 100004;
+            background: rgba(4, 10, 18, 0.82);
+            pointer-events: auto;
+        }
+        .wod-mission-popup-panel {
+            width: min(520px, 92vw);
+            max-height: min(78vh, 640px);
+            overflow: auto;
+            background: linear-gradient(165deg, #1a2f42 0%, #0f1a28 55%, #0a121c 100%);
+            border: 2px solid rgba(201, 162, 39, 0.55);
+            border-radius: 14px;
+            padding: 22px 24px 20px;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+            text-align: center;
+        }
+        .wod-mission-popup-panel.wod-mission-style-alert {
+            border-color: rgba(231, 76, 60, 0.75);
+            box-shadow: 0 0 32px rgba(231, 76, 60, 0.18);
+        }
+        .wod-mission-popup-panel.wod-mission-style-briefing {
+            border-color: rgba(52, 152, 219, 0.65);
+        }
+        .wod-mission-popup-panel.wod-mission-style-victory {
+            border-color: rgba(46, 204, 113, 0.7);
+        }
+        .wod-mission-popup-kicker {
+            margin: 0 0 6px;
+            font-size: 11px;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: rgba(201, 220, 240, 0.72);
+            font-weight: 800;
+        }
+        .wod-mission-popup-title {
+            margin: 0 0 14px;
+            font-size: 1.45rem;
+            font-weight: 800;
+            color: #f4e4a6;
+            line-height: 1.25;
+        }
+        .wod-mission-popup-body {
+            margin: 0 0 20px;
+            font-size: 1rem;
+            line-height: 1.55;
+            color: #d5e4f0;
+            text-align: left;
+            white-space: pre-wrap;
+        }
+        .wod-mission-popup-actions {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+        .wod-mission-popup-btn {
+            min-width: 120px;
+            padding: 10px 22px;
+            border-radius: 8px;
+            border: 1px solid rgba(201, 162, 39, 0.65);
+            background: linear-gradient(180deg, #2a4a62, #1e3448);
+            color: #f4f8fc;
+            font-weight: 800;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .wod-mission-popup-btn:hover { filter: brightness(1.08); }
+
         #campaignSummaryOverlay {
             z-index: 42;
             background: radial-gradient(circle at 50% 20%, rgba(26, 48, 64, 0.96), rgba(5, 10, 16, 0.96));
@@ -7374,6 +7441,17 @@
             </div>
         </div>
 
+        <div id="wodMissionPopupOverlay" class="overlay hidden wod-load-overlay" role="dialog" aria-modal="true" aria-labelledby="wodMissionPopupTitle">
+            <div id="wodMissionPopupPanel" class="wod-mission-popup-panel wod-mission-style-briefing">
+                <p class="wod-mission-popup-kicker" id="wodMissionPopupKicker">Mission briefing</p>
+                <h2 class="wod-mission-popup-title" id="wodMissionPopupTitle">Intel</h2>
+                <p class="wod-mission-popup-body" id="wodMissionPopupBody"></p>
+                <div class="wod-mission-popup-actions">
+                    <button type="button" class="wod-mission-popup-btn" id="wodMissionPopupOk">Continue</button>
+                </div>
+            </div>
+        </div>
+
         <div id="helpGuidePanel" class="overlay hidden">
             <div class="panel panel-wide" style="max-width:900px;max-height:92vh;overflow:auto">
                 <h2 style="margin-top:0">Game guide</h2>
@@ -9102,6 +9180,8 @@
 
         function returnToMenu() {
             hideCampaignSummaryOverlay();
+            wodHideMissionPopup();
+            gameData._missionRuntime = null;
             if(gameData && gameData.mp && gameData.mp.enabled && gameState === 'PLAYING')
                 wodMpLeaveActiveMatch();
             wodApplyPlayViewportLock(false);
@@ -9497,6 +9577,7 @@
             hexRadius: 20, mapRadius: 40,
             mapShape: 'island',
             loadedCustomMap: false,
+            mission: null,
             layers: { terrain: true, diplomacy: true, territory: false, cities: true, cityNames: true, structures: true, units: true },
             aiCount: 1,
             victoryMode: 'domination',
@@ -25646,6 +25727,7 @@
             gameData.tankCasualtiesByOwner = {};
             gameData.shipCasualtiesByOwner = {};
             gameData.gameSessionStartedPerfMs = performance.now();
+            wodInitMissionRuntime();
             gameData.sessionCitiesCaptured = 0;
             gameData.sessionCitiesCapturedByOwner = {};
             gameData._annihilationCheckAcc = 0;
@@ -28703,6 +28785,7 @@
             wodSyncFortOwnershipFromTerrain();
             wodKickParallelTroopPowIfEligible();
             checkCampaignEndConditions(dt);
+            wodUpdateMissionEvents(dt);
             if(gameData.mp && gameData.mp.enabled && gameData.mp.isHost) {
                 gameData._mpSnapAcc = (gameData._mpSnapAcc || 0) + dt;
                 let hexN = (gameData.hexList && gameData.hexList.length) || 0;
@@ -35506,6 +35589,206 @@
             if(keys['d'] || keys['arrowright']) gameData.camera.x += camSpeed;
         }
 
+        function wodDefaultMission() {
+            return { version: 1, title: '', events: [] };
+        }
+        function wodNormalizeMission(raw) {
+            if(!raw || typeof raw !== 'object') return null;
+            let events = Array.isArray(raw.events) ? raw.events.map((evt, i) => {
+                if(!evt || typeof evt !== 'object') return null;
+                let trig = evt.trigger && typeof evt.trigger === 'object' ? evt.trigger : {};
+                let type = ['timer', 'time_survived', 'troops_killed'].includes(trig.type) ? trig.type : 'timer';
+                let trigger = { type };
+                if(type === 'troops_killed') trigger.count = Math.max(1, parseInt(trig.count, 10) || 100);
+                else trigger.seconds = Math.max(0, parseFloat(trig.seconds) || 60);
+                let popup = evt.popup && typeof evt.popup === 'object' ? evt.popup : {};
+                let reps = Array.isArray(evt.reinforcements) ? evt.reinforcements.map(r => {
+                    if(!r || typeof r !== 'object') return null;
+                    return {
+                        owner: Math.max(1, parseInt(r.owner, 10) || 2),
+                        type: ['light', 'marine', 'heavy', 'ship'].includes(r.type) ? r.type : 'light',
+                        count: Math.max(1, Math.min(48, parseInt(r.count, 10) || 1)),
+                        anchor: ['enemy_city', 'player_city', 'faction_city', 'map_center', 'coords'].includes(r.anchor) ? r.anchor : 'enemy_city',
+                        cityOwner: parseInt(r.cityOwner, 10) || 0,
+                        x: Number.isFinite(r.x) ? r.x : null,
+                        y: Number.isFinite(r.y) ? r.y : null
+                    };
+                }).filter(Boolean) : [];
+                return {
+                    id: String(evt.id || ('evt_' + (i + 1))),
+                    name: String(evt.name || ('Event ' + (i + 1))).slice(0, 64),
+                    once: evt.once !== false,
+                    trigger,
+                    popup: {
+                        title: String(popup.title || '').slice(0, 80),
+                        body: String(popup.body || '').slice(0, 1200),
+                        style: ['briefing', 'alert', 'victory'].includes(popup.style) ? popup.style : 'briefing',
+                        kicker: String(popup.kicker || '').slice(0, 48)
+                    },
+                    reinforcements: reps
+                };
+            }).filter(Boolean) : [];
+            if(!events.length) return null;
+            return {
+                version: 1,
+                title: String(raw.title || '').slice(0, 80),
+                events
+            };
+        }
+        function wodMissionHasEvents() {
+            return !!(gameData.mission && Array.isArray(gameData.mission.events) && gameData.mission.events.length);
+        }
+        function wodInitMissionRuntime() {
+            gameData._missionRuntime = null;
+            if(!wodMissionHasEvents()) return;
+            if(gameData.mp && gameData.mp.enabled) return;
+            let lo = wodLocalPlayerOwner();
+            gameData._missionRuntime = {
+                elapsed: 0,
+                fired: new Set(),
+                killsBaseline: (getOwnerTroopKills(lo) | 0) + (getOwnerTankKills(lo) | 0) + (getOwnerShipKills(lo) | 0),
+                popupOpen: false,
+                resumeSpeed: 1
+            };
+        }
+        function wodMissionPlayerAlive() {
+            let lo = wodLocalPlayerOwner();
+            if(factionControlsAnyCity(lo)) return true;
+            for(let u of gameData.entities) {
+                if(u.owner === lo && u.hp > 0 && u.type !== 'convoy') return true;
+            }
+            return false;
+        }
+        function wodMissionKillsSinceStart() {
+            let rt = gameData._missionRuntime;
+            if(!rt) return 0;
+            let lo = wodLocalPlayerOwner();
+            let total = (getOwnerTroopKills(lo) | 0) + (getOwnerTankKills(lo) | 0) + (getOwnerShipKills(lo) | 0);
+            return Math.max(0, total - (rt.killsBaseline | 0));
+        }
+        function wodMissionTriggerMet(evt, rt) {
+            let t = evt.trigger || {};
+            if(t.type === 'timer') return rt.elapsed >= (parseFloat(t.seconds) || 0);
+            if(t.type === 'time_survived') return rt.elapsed >= (parseFloat(t.seconds) || 0) && wodMissionPlayerAlive();
+            if(t.type === 'troops_killed') return wodMissionKillsSinceStart() >= (parseInt(t.count, 10) || 0);
+            return false;
+        }
+        function wodMissionSpawnPoint(spec) {
+            let owner = parseInt(spec.owner, 10) || 2;
+            let anchor = spec.anchor || 'enemy_city';
+            let cx = spec.x, cy = spec.y;
+            if(Number.isFinite(cx) && Number.isFinite(cy)) return { x: cx, y: cy };
+            let lo = wodLocalPlayerOwner();
+            let pool = (gameData.cities || []).filter(c => c && c.owner > 0);
+            if(anchor === 'player_city') pool = pool.filter(c => c.owner === lo);
+            else if(anchor === 'enemy_city') pool = pool.filter(c => c.owner !== lo);
+            else if(anchor === 'faction_city') {
+                let fo = parseInt(spec.cityOwner, 10) || owner;
+                pool = pool.filter(c => c.owner === fo);
+            } else if(anchor === 'map_center') {
+                let sx = 0, sy = 0, n = 0;
+                for(let h of gameData.hexList || []) {
+                    if(!h || isWaterHex(h)) continue;
+                    sx += h.x; sy += h.y; n++;
+                }
+                if(n) return { x: sx / n, y: sy / n };
+            }
+            if(pool.length) {
+                let pick = pool[Math.floor(Math.random() * pool.length)];
+                return { x: pick.x, y: pick.y };
+            }
+            if(gameData.cities && gameData.cities.length) {
+                let c = gameData.cities[0];
+                return { x: c.x, y: c.y };
+            }
+            return { x: 0, y: 0 };
+        }
+        function wodSpawnMissionReinforcementGroup(spec) {
+            if(!spec) return;
+            let owner = parseInt(spec.owner, 10) || 2;
+            let type = spec.type || 'light';
+            let count = Math.max(1, Math.min(48, parseInt(spec.count, 10) || 1));
+            let pt = wodMissionSpawnPoint(spec);
+            let spacing = Math.max(28, (gameData.hexRadius || 20) * 1.35);
+            for(let i = 0; i < count; i++) {
+                let ang = (i / Math.max(1, count)) * Math.PI * 2 + Math.random() * 0.35;
+                let r = spacing * (0.55 + (i % 4) * 0.28);
+                createUnitAt(type, pt.x + Math.cos(ang) * r, pt.y + Math.sin(ang) * r, owner, { startSpawn: true });
+            }
+        }
+        function wodHideMissionPopup() {
+            let ov = document.getElementById('wodMissionPopupOverlay');
+            if(ov) ov.classList.add('hidden');
+        }
+        function wodShowMissionPopupDialog(popup, onDone) {
+            let ov = document.getElementById('wodMissionPopupOverlay');
+            let panel = document.getElementById('wodMissionPopupPanel');
+            let kicker = document.getElementById('wodMissionPopupKicker');
+            let title = document.getElementById('wodMissionPopupTitle');
+            let body = document.getElementById('wodMissionPopupBody');
+            let ok = document.getElementById('wodMissionPopupOk');
+            if(!ov || !panel || !title || !body || !ok) {
+                if(typeof onDone === 'function') onDone();
+                return;
+            }
+            popup = popup || {};
+            let style = ['briefing', 'alert', 'victory'].includes(popup.style) ? popup.style : 'briefing';
+            panel.classList.remove('wod-mission-style-briefing', 'wod-mission-style-alert', 'wod-mission-style-victory');
+            panel.classList.add('wod-mission-style-' + style);
+            if(kicker) {
+                kicker.textContent = popup.kicker || (style === 'alert' ? 'Urgent report' : style === 'victory' ? 'Objective complete' : 'Mission briefing');
+                kicker.style.display = kicker.textContent ? '' : 'none';
+            }
+            title.textContent = popup.title || 'Mission update';
+            body.textContent = popup.body || '';
+            ov.classList.remove('hidden');
+            let done = false;
+            function finish() {
+                if(done) return;
+                done = true;
+                wodHideMissionPopup();
+                ok.removeEventListener('click', finish);
+                if(typeof onDone === 'function') onDone();
+            }
+            ok.addEventListener('click', finish);
+        }
+        function wodFireMissionEvent(evt) {
+            let rt = gameData._missionRuntime;
+            if(!rt || !evt) return;
+            rt.popupOpen = true;
+            rt.resumeSpeed = gameData.speed > 0 ? gameData.speed : (rt.resumeSpeed || 1);
+            gameData.speed = 0;
+            if(evt.reinforcements && evt.reinforcements.length) {
+                for(let r of evt.reinforcements) wodSpawnMissionReinforcementGroup(r);
+            }
+            let popup = evt.popup || {};
+            if(popup.title || popup.body) {
+                wodShowMissionPopupDialog(popup, () => {
+                    rt.popupOpen = false;
+                    gameData.speed = rt.resumeSpeed || 1;
+                });
+            } else {
+                rt.popupOpen = false;
+                gameData.speed = rt.resumeSpeed || 1;
+            }
+        }
+        function wodUpdateMissionEvents(dt) {
+            if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
+            if(gameData.mp && gameData.mp.enabled) return;
+            if(!wodMissionHasEvents() || !gameData._missionRuntime) return;
+            let rt = gameData._missionRuntime;
+            if(rt.popupOpen) return;
+            if(gameData.speed > 0) rt.elapsed += dt * gameData.speed;
+            for(let evt of gameData.mission.events) {
+                if(!evt || !evt.id) continue;
+                if(evt.once !== false && rt.fired.has(evt.id)) continue;
+                if(!wodMissionTriggerMet(evt, rt)) continue;
+                rt.fired.add(evt.id);
+                wodFireMissionEvent(evt);
+                break;
+            }
+        }
+
         function showNotification(msg) {
             let el = document.createElement('div');
             el.innerText = msg;
@@ -36507,6 +36790,8 @@
             return { income, manpowerIncome, expenses, territoryHexes, troopManpower };
         }
 
+        window.wodNormalizeMission = wodNormalizeMission;
+
         window.WOD = {
             gameData,
             maxLobbyPlayers: WOD_MP_MAX_PLAYERS,
@@ -36603,6 +36888,7 @@
                     gameData.aiManpowerByOwner = Object.assign({}, mapData.aiManpowerByOwner || {});
                     gameData._mapExportHadStartEconomy = true;
                 } else delete gameData._mapExportHadStartEconomy;
+                gameData.mission = wodNormalizeMission(mapData.mission);
                 snapEditorRoadRefsToCities();
                 normalizeTerrainHexes();
                 wodMarkTerrainFullDirty();
@@ -36610,7 +36896,7 @@
                 if (typeof window.wodEditorAfterLoadMapData === "function") window.wodEditorAfterLoadMapData();
             },
             exportMapData() {
-                return {
+                let out = {
                     mapSize: gameData.mapRadius,
                     mapShape: gameData.mapShape || 'island',
                     hexList: gameData.hexList,
@@ -36626,6 +36912,9 @@
                     aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner || {}),
                     aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner || {}),
                 };
+                if(gameData.mission && Array.isArray(gameData.mission.events) && gameData.mission.events.length)
+                    out.mission = JSON.parse(JSON.stringify(gameData.mission));
+                return out;
             },
             rebuildEditorTradeRoutes() { rebuildEditorTradeRoutesFromCities(); },
             snapEditorRoadRefsToCities() { snapEditorRoadRefsToCities(); },
