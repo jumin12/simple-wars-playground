@@ -43,6 +43,8 @@
     /** Right panel: faction start editor slot (matches editor economy selects). */
     factionEconomySlot: 1,
     missionEventIndex: 0,
+    /** { kind:'spawn'|'path', reinfIndex?, pathIndex? } — click map to place marker */
+    missionMapPick: null,
   };
 
   const editorPtrs = new Map();
@@ -803,11 +805,30 @@
     if (!WOD.gameData.mission || typeof WOD.gameData.mission !== "object")
       WOD.gameData.mission = wodDefaultMissionShape();
     if (!Array.isArray(WOD.gameData.mission.events)) WOD.gameData.mission.events = [];
+    if (!WOD.gameData.mission.victoryMode) WOD.gameData.mission.victoryMode = "domination";
     return WOD.gameData.mission;
   }
 
+  const MISSION_VICTORY_HINTS = {
+    domination: "Capture every enemy-held city.",
+    annihilation: "Eliminate all enemy combat units (convoys excluded).",
+  };
+
   function wodDefaultMissionShape() {
-    return { version: 1, title: "", events: [] };
+    return { version: 1, title: "", victoryMode: "domination", events: [] };
+  }
+
+  function missionEventTriggerSummary(evt) {
+    if (!evt || !evt.trigger) return "Timer";
+    const t = evt.trigger.type || "timer";
+    if (t === "troops_killed") return "Kill " + (evt.trigger.count || "?") + " troops";
+    if (t === "time_survived") return "Survive " + (evt.trigger.seconds || "?") + "s";
+    return "After " + (evt.trigger.seconds || "?") + "s";
+  }
+
+  function missionEventChipLabel(evt, index) {
+    const name = (evt && evt.name) ? evt.name : "Event " + (index + 1);
+    return (index + 1) + ". " + name + " — " + missionEventTriggerSummary(evt);
   }
 
   function newMissionEventId() {
@@ -822,17 +843,175 @@
       trigger: { type: "timer", seconds: 120 },
       popup: { title: "Intel report", body: "Enemy reserves are moving toward the front.", style: "briefing", kicker: "" },
       reinforcements: [],
+      pathOrders: [],
     };
+  }
+
+  function missionMarkerDragPayload(kind, index) {
+    return JSON.stringify({ kind, index: index != null ? (index | 0) : -1 });
+  }
+
+  function wireMissionMarkerChip(chip) {
+    if (!chip || chip.dataset.missionMarkerWired === "1") return;
+    chip.dataset.missionMarkerWired = "1";
+    chip.addEventListener("dragstart", ev => {
+      const kind = chip.dataset.missionMarker || "spawn";
+      const idx = chip.dataset.reinfIndex != null ? parseInt(chip.dataset.reinfIndex, 10)
+        : chip.dataset.pathIndex != null ? parseInt(chip.dataset.pathIndex, 10) : -1;
+      ev.dataTransfer.setData("application/x-wod-mission-marker", missionMarkerDragPayload(kind, idx));
+      ev.dataTransfer.effectAllowed = "copy";
+      chip.classList.add("dragging");
+    });
+    chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+  }
+
+  function clearMissionMapPick() {
+    state.missionMapPick = null;
+    const canvas = document.getElementById("editorCanvas");
+    if (canvas) canvas.classList.remove("editor-mission-pick-active");
+    const hint = document.getElementById("editorMissionMapPickHint");
+    if (hint) hint.classList.add("hidden");
+    const cancelPick = document.getElementById("editorMissionCancelPick");
+    if (cancelPick) cancelPick.classList.add("hidden");
+  }
+
+  function startMissionMapPick(spec) {
+    state.missionMapPick = spec || null;
+    const canvas = document.getElementById("editorCanvas");
+    const hint = document.getElementById("editorMissionMapPickHint");
+    if (!spec) {
+      clearMissionMapPick();
+      return;
+    }
+    if (canvas) canvas.classList.add("editor-mission-pick-active");
+    if (hint) {
+      hint.classList.remove("hidden");
+      hint.textContent = spec.kind === "path"
+        ? "Click the map to set the path destination for this order."
+        : "Click the map to set the reinforcement spawn point.";
+    }
+    const cancelPick = document.getElementById("editorMissionCancelPick");
+    if (cancelPick) cancelPick.classList.remove("hidden");
+    scheduleEditorRender();
+  }
+
+  function applyMissionCoordsToReinf(evt, reinfIndex, x, y) {
+    if (!evt) return;
+    if (!evt.reinforcements) evt.reinforcements = [];
+    while (evt.reinforcements.length <= reinfIndex) {
+      evt.reinforcements.push({ owner: 2, type: "light", count: 4, anchor: "coords", x: 0, y: 0 });
+    }
+    const rep = evt.reinforcements[reinfIndex];
+    rep.anchor = "coords";
+    rep.x = x;
+    rep.y = y;
+  }
+
+  function applyMissionCoordsToPath(evt, pathIndex, x, y) {
+    if (!evt) return;
+    if (!evt.pathOrders) evt.pathOrders = [];
+    while (evt.pathOrders.length <= pathIndex) {
+      evt.pathOrders.push({ owner: 2, scope: "all", x: 0, y: 0 });
+    }
+    const po = evt.pathOrders[pathIndex];
+    po.x = x;
+    po.y = y;
+  }
+
+  function applyMissionMarkerAtWorldPos(data, pos) {
+    const m = ensureGameMission();
+    const evt = m.events[state.missionEventIndex];
+    if (!evt || !pos) return false;
+    const hex = nearestHex(pos);
+    const x = hex ? hex.x : pos.x;
+    const y = hex ? hex.y : pos.y;
+    const kind = data && data.kind ? data.kind : "spawn";
+    let index = data && data.index != null ? (data.index | 0) : -1;
+    if (kind === "spawn") {
+      if (index < 0) index = 0;
+      applyMissionCoordsToReinf(evt, index, x, y);
+      renderMissionReinforcementRows(evt);
+    } else {
+      if (index < 0) index = (evt.pathOrders && evt.pathOrders.length) ? evt.pathOrders.length - 1 : 0;
+      applyMissionCoordsToPath(evt, index, x, y);
+      renderMissionPathOrderRows(evt);
+    }
+    markEditorMapChanged();
+    scheduleEditorRender();
+    editorPushSnapshot();
+    state.editorGestureMutatedMap = false;
+    return true;
+  }
+
+  function handleMissionMapPickClick(pos) {
+    const pick = state.missionMapPick;
+    if (!pick) return false;
+    applyMissionMarkerAtWorldPos(
+      { kind: pick.kind, index: pick.kind === "spawn" ? (pick.reinfIndex | 0) : (pick.pathIndex | 0) },
+      pos,
+    );
+    clearMissionMapPick();
+    return true;
+  }
+
+  function readMissionVictoryFromForm() {
+    const m = ensureGameMission();
+    const sel = document.getElementById("editorMissionVictoryMode");
+    m.victoryMode = sel && sel.value === "annihilation" ? "annihilation" : "domination";
+    return m.victoryMode;
+  }
+
+  function syncMissionVictoryHint(root) {
+    const r = root || document.getElementById("mapEditorApp");
+    if (!r) return;
+    const hint = r.querySelector("#editorMissionVictoryHint");
+    const sel = r.querySelector("#editorMissionVictoryMode");
+    if (!hint || !sel) return;
+    const mode = sel.value === "annihilation" ? "annihilation" : "domination";
+    hint.textContent = MISSION_VICTORY_HINTS[mode] || "";
+  }
+
+  function fillMissionVictoryForm(m) {
+    const root = document.getElementById("mapEditorApp");
+    if (!root || !m) return;
+    const sel = root.querySelector("#editorMissionVictoryMode");
+    if (sel) sel.value = m.victoryMode === "annihilation" ? "annihilation" : "domination";
+    syncMissionVictoryHint(root);
+  }
+
+  function readMissionTriggerType(root) {
+    const r = root || document.getElementById("mapEditorApp");
+    if (!r) return "timer";
+    const active = r.querySelector(".editor-mission-trig-btn.active");
+    return active ? active.dataset.trigType || "timer" : "timer";
   }
 
   function syncMissionTriggerFieldVisibility(root) {
     const r = root || document.getElementById("mapEditorApp");
     if (!r) return;
-    const type = (r.querySelector("#editorMissionTrigType") || {}).value || "timer";
+    const type = readMissionTriggerType(r);
     const secRow = r.querySelector("#editorMissionTrigSecondsRow");
     const killRow = r.querySelector("#editorMissionTrigKillsRow");
+    const hint = r.querySelector("#editorMissionTrigHint");
     if (secRow) secRow.style.display = type === "troops_killed" ? "none" : "";
     if (killRow) killRow.style.display = type === "troops_killed" ? "" : "none";
+    if (hint) {
+      if (type === "troops_killed") hint.textContent = "Fires when the player has eliminated this many enemy troops since the match began.";
+      else if (type === "time_survived") hint.textContent = "Fires after this many in-game seconds only if the player still has units or cities.";
+      else hint.textContent = "Fires once this many in-game seconds have passed, whether or not the player is still alive.";
+    }
+    r.querySelectorAll(".editor-mission-trig-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.trigType === type);
+    });
+  }
+
+  function setMissionTriggerType(root, type) {
+    const r = root || document.getElementById("mapEditorApp");
+    if (!r) return;
+    r.querySelectorAll(".editor-mission-trig-btn").forEach(btn => {
+      btn.classList.toggle("active", btn.dataset.trigType === type);
+    });
+    syncMissionTriggerFieldVisibility(r);
   }
 
   function readMissionEventFromForm() {
@@ -843,7 +1022,6 @@
     const evt = m.events[idx];
     if (!evt) return null;
     const nameEl = root.querySelector("#editorMissionEvtName");
-    const trigEl = root.querySelector("#editorMissionTrigType");
     const secEl = root.querySelector("#editorMissionTrigSeconds");
     const killEl = root.querySelector("#editorMissionTrigKills");
     const styleEl = root.querySelector("#editorMissionPopupStyle");
@@ -851,7 +1029,7 @@
     const bodyEl = root.querySelector("#editorMissionPopupBody");
     const onceEl = root.querySelector("#editorMissionOnce");
     evt.name = nameEl ? String(nameEl.value || "").trim().slice(0, 64) || "Event" : evt.name;
-    const trigType = trigEl ? trigEl.value : "timer";
+    const trigType = readMissionTriggerType(root);
     evt.trigger = { type: trigType };
     if (trigType === "troops_killed") {
       evt.trigger.count = Math.max(1, parseInt(killEl && killEl.value, 10) || 100);
@@ -898,12 +1076,17 @@
             <option value="coords"${rep.anchor === "coords" ? " selected" : ""}>Map coords</option>
           </select>
         </div>
-        <div class="editor-row editor-mission-reinf-coords"${rep.anchor === "coords" ? "" : ' style="display:none"'}>
-          <label>X / Y</label>
-          <span style="display:flex;gap:6px;flex:1">
-            <input type="number" class="editor-mission-reinf-x" step="1" value="${rep.x != null ? rep.x : 0}" style="flex:1" />
-            <input type="number" class="editor-mission-reinf-y" step="1" value="${rep.y != null ? rep.y : 0}" style="flex:1" />
-          </span>
+        <div class="editor-mission-reinf-coords"${rep.anchor === "coords" ? "" : ' style="display:none"'}>
+          <div class="editor-row"><label>Map position</label>
+            <span class="editor-mission-coord-tools">
+              <input type="number" class="editor-mission-reinf-x" step="1" value="${rep.x != null ? rep.x : 0}" title="World X" />
+              <input type="number" class="editor-mission-reinf-y" step="1" value="${rep.y != null ? rep.y : 0}" title="World Y" />
+            </span>
+          </div>
+          <div class="editor-mission-marker-actions">
+            <button type="button" class="editor-btn editor-mission-pick-spawn">Pick on map</button>
+            <div class="mission-marker-chip" draggable="true" data-mission-marker="spawn" data-reinf-index="${ri}" title="Drag onto map">Drag spawn</div>
+          </div>
         </div>
         <div class="editor-mission-reinf-actions"><button type="button" class="editor-btn editor-mission-reinf-del">Remove</button></div>`;
       host.appendChild(row);
@@ -912,14 +1095,29 @@
       if (anchorSel && coordsRow) {
         anchorSel.addEventListener("change", () => {
           coordsRow.style.display = anchorSel.value === "coords" ? "" : "none";
+          if (anchorSel.value === "coords") scheduleEditorRender();
         });
       }
+      const pickBtn = row.querySelector(".editor-mission-pick-spawn");
+      if (pickBtn) {
+        pickBtn.addEventListener("click", () => {
+          readMissionReinforcementsFromDom(evt);
+          if (anchorSel) anchorSel.value = "coords";
+          coordsRow.style.display = "";
+          startMissionMapPick({ kind: "spawn", reinfIndex: ri });
+        });
+      }
+      row.querySelectorAll(".mission-marker-chip").forEach(wireMissionMarkerChip);
+      row.querySelectorAll(".editor-mission-reinf-x, .editor-mission-reinf-y").forEach(inp => {
+        inp.addEventListener("change", () => scheduleEditorRender());
+      });
       const del = row.querySelector(".editor-mission-reinf-del");
       if (del) {
         del.addEventListener("click", () => {
           readMissionReinforcementsFromDom(evt);
           evt.reinforcements.splice(ri, 1);
           renderMissionReinforcementRows(evt);
+          scheduleEditorRender();
           editorPushSnapshot();
         });
       }
@@ -946,6 +1144,82 @@
     evt.reinforcements = out;
   }
 
+  function renderMissionPathOrderRows(evt) {
+    const host = document.getElementById("editorMissionPathList");
+    if (!host) return;
+    host.innerHTML = "";
+    const orders = (evt && evt.pathOrders) || [];
+    const cap = state.maxFactionSlots;
+    orders.forEach((po, pi) => {
+      const row = document.createElement("div");
+      row.className = "editor-mission-path";
+      row.dataset.pathIndex = String(pi);
+      const ownerOpts = [];
+      for (let o = 1; o <= cap; o++) ownerOpts.push(`<option value="${o}"${po.owner === o ? " selected" : ""}>Faction ${o}</option>`);
+      row.innerHTML = `
+        <div class="editor-row"><label>Faction</label><select class="editor-mission-path-owner">${ownerOpts.join("")}</select></div>
+        <div class="editor-row"><label>Units</label>
+          <select class="editor-mission-path-scope">
+            <option value="all"${po.scope !== "reinforcements" ? " selected" : ""}>All faction units</option>
+            <option value="reinforcements"${po.scope === "reinforcements" ? " selected" : ""}>Reinforcements from this event</option>
+          </select>
+        </div>
+        <div class="editor-row"><label>Destination</label>
+          <span class="editor-mission-coord-tools">
+            <input type="number" class="editor-mission-path-x" step="1" value="${po.x != null ? po.x : 0}" title="World X" />
+            <input type="number" class="editor-mission-path-y" step="1" value="${po.y != null ? po.y : 0}" title="World Y" />
+          </span>
+        </div>
+        <div class="editor-mission-marker-actions">
+          <button type="button" class="editor-btn editor-mission-pick-path">Pick on map</button>
+          <div class="mission-marker-chip mission-marker-chip-path" draggable="true" data-mission-marker="path" data-path-index="${pi}" title="Drag onto map">Drag target</div>
+        </div>
+        <div class="editor-mission-reinf-actions"><button type="button" class="editor-btn editor-mission-path-del">Remove</button></div>`;
+      host.appendChild(row);
+      const pickBtn = row.querySelector(".editor-mission-pick-path");
+      if (pickBtn) {
+        pickBtn.addEventListener("click", () => {
+          readMissionPathOrdersFromDom(evt);
+          startMissionMapPick({ kind: "path", pathIndex: pi });
+        });
+      }
+      const del = row.querySelector(".editor-mission-path-del");
+      if (del) {
+        del.addEventListener("click", () => {
+          readMissionPathOrdersFromDom(evt);
+          evt.pathOrders.splice(pi, 1);
+          renderMissionPathOrderRows(evt);
+          scheduleEditorRender();
+          editorPushSnapshot();
+        });
+      }
+      row.querySelectorAll(".mission-marker-chip").forEach(wireMissionMarkerChip);
+      row.querySelectorAll(".editor-mission-path-x, .editor-mission-path-y").forEach(inp => {
+        inp.addEventListener("change", () => scheduleEditorRender());
+      });
+    });
+  }
+
+  function readMissionPathOrdersFromDom(evt) {
+    if (!evt) return;
+    const host = document.getElementById("editorMissionPathList");
+    if (!host) return;
+    const out = [];
+    host.querySelectorAll(".editor-mission-path").forEach(row => {
+      const owner = parseInt((row.querySelector(".editor-mission-path-owner") || {}).value, 10) || 2;
+      const scope = (row.querySelector(".editor-mission-path-scope") || {}).value === "reinforcements" ? "reinforcements" : "all";
+      const x = parseFloat((row.querySelector(".editor-mission-path-x") || {}).value);
+      const y = parseFloat((row.querySelector(".editor-mission-path-y") || {}).value);
+      out.push({
+        owner,
+        scope,
+        x: Number.isFinite(x) ? x : 0,
+        y: Number.isFinite(y) ? y : 0,
+      });
+    });
+    evt.pathOrders = out;
+  }
+
   function fillMissionEventForm(evt) {
     const root = document.getElementById("mapEditorApp");
     if (!root || !evt) return;
@@ -953,7 +1227,6 @@
     const m = ensureGameMission();
     if (titleMission) titleMission.value = m.title || "";
     const nameEl = root.querySelector("#editorMissionEvtName");
-    const trigEl = root.querySelector("#editorMissionTrigType");
     const secEl = root.querySelector("#editorMissionTrigSeconds");
     const killEl = root.querySelector("#editorMissionTrigKills");
     const styleEl = root.querySelector("#editorMissionPopupStyle");
@@ -962,7 +1235,7 @@
     const onceEl = root.querySelector("#editorMissionOnce");
     const trig = evt.trigger || { type: "timer", seconds: 120 };
     if (nameEl) nameEl.value = evt.name || "";
-    if (trigEl) trigEl.value = trig.type || "timer";
+    setMissionTriggerType(root, trig.type || "timer");
     if (secEl) secEl.value = trig.seconds != null ? trig.seconds : 120;
     if (killEl) killEl.value = trig.count != null ? trig.count : 500;
     const pop = evt.popup || {};
@@ -972,40 +1245,65 @@
     if (onceEl) onceEl.checked = evt.once !== false;
     syncMissionTriggerFieldVisibility(root);
     renderMissionReinforcementRows(evt);
+    renderMissionPathOrderRows(evt);
+    clearMissionMapPick();
+    scheduleEditorRender();
+  }
+
+  function renderMissionEventChips(m) {
+    const root = document.getElementById("mapEditorApp");
+    if (!root) return;
+    const chips = root.querySelector("#editorMissionEventChips");
+    const nav = root.querySelector("#editorMissionEventNav");
+    if (!chips) return;
+    chips.innerHTML = "";
+    if (!m.events.length) {
+      if (nav) nav.textContent = "No scripted events yet";
+      return;
+    }
+    if (state.missionEventIndex >= m.events.length) state.missionEventIndex = m.events.length - 1;
+    const idx = state.missionEventIndex | 0;
+    if (nav) nav.textContent = "Editing event " + (idx + 1) + " of " + m.events.length;
+    m.events.forEach((evt, i) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "editor-mission-chip" + (i === idx ? " active" : "");
+      btn.title = missionEventChipLabel(evt, i);
+      btn.innerHTML = "<span class=\"editor-mission-chip-num\">" + (i + 1) + "</span><span class=\"editor-mission-chip-text\">" + missionEventTriggerSummary(evt) + "</span>";
+      btn.addEventListener("click", () => {
+        readMissionEventFromForm();
+        readMissionReinforcementsFromDom(m.events[state.missionEventIndex]);
+        readMissionPathOrdersFromDom(m.events[state.missionEventIndex]);
+        state.missionEventIndex = i;
+        fillMissionEventForm(m.events[i]);
+        renderMissionEventChips(m);
+        editorPushSnapshot();
+      });
+      chips.appendChild(btn);
+    });
   }
 
   function renderMissionPanel() {
     const root = document.getElementById("mapEditorApp");
     if (!root || !state.open) return;
     const m = ensureGameMission();
-    const pick = root.querySelector("#editorMissionEventPick");
     const titleMission = root.querySelector("#editorMissionTitle");
     if (titleMission && document.activeElement !== titleMission) titleMission.value = m.title || "";
-    if (!pick) return;
+    fillMissionVictoryForm(m);
     const prev = state.missionEventIndex | 0;
     if (m.events.length && prev < m.events.length) readMissionEventFromForm();
-    pick.innerHTML = "";
+    readMissionVictoryFromForm();
+    const form = root.querySelector("#editorMissionEventForm");
     if (!m.events.length) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "No events — click + Event";
-      pick.appendChild(opt);
       state.missionEventIndex = 0;
-      const form = root.querySelector("#editorMissionEventForm");
       if (form) form.style.opacity = "0.45";
+      renderMissionEventChips(m);
       return;
     }
     if (state.missionEventIndex >= m.events.length) state.missionEventIndex = m.events.length - 1;
-    m.events.forEach((evt, i) => {
-      const opt = document.createElement("option");
-      opt.value = String(i);
-      opt.textContent = (evt.name || "Event") + " (" + (evt.trigger && evt.trigger.type ? evt.trigger.type : "timer") + ")";
-      if (i === state.missionEventIndex) opt.selected = true;
-      pick.appendChild(opt);
-    });
-    const form = root.querySelector("#editorMissionEventForm");
     if (form) form.style.opacity = "1";
     fillMissionEventForm(m.events[state.missionEventIndex]);
+    renderMissionEventChips(m);
   }
 
   function wireMissionPanel(root) {
@@ -1020,24 +1318,62 @@
         editorPushSnapshot();
       });
     }
-    const pick = app.querySelector("#editorMissionEventPick");
-    if (pick) {
-      pick.addEventListener("change", () => {
-        readMissionEventFromForm();
-        readMissionReinforcementsFromDom(ensureGameMission().events[state.missionEventIndex]);
-        state.missionEventIndex = parseInt(pick.value, 10) || 0;
-        fillMissionEventForm(ensureGameMission().events[state.missionEventIndex]);
+    const victorySel = app.querySelector("#editorMissionVictoryMode");
+    if (victorySel) {
+      victorySel.addEventListener("change", () => {
+        readMissionVictoryFromForm();
+        syncMissionVictoryHint(app);
+        editorPushSnapshot();
       });
     }
-    const trigEl = app.querySelector("#editorMissionTrigType");
-    if (trigEl) trigEl.addEventListener("change", () => syncMissionTriggerFieldVisibility(app));
+    app.querySelectorAll(".editor-mission-trig-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        setMissionTriggerType(app, btn.dataset.trigType || "timer");
+        const m = ensureGameMission();
+        const evt = m.events[state.missionEventIndex];
+        if (!evt) return;
+        readMissionEventFromForm();
+        renderMissionEventChips(m);
+        editorPushSnapshot();
+      });
+    });
+    const prevEvt = app.querySelector("#editorMissionPrevEvent");
+    const nextEvt = app.querySelector("#editorMissionNextEvent");
+    if (prevEvt) {
+      prevEvt.addEventListener("click", () => {
+        const m = ensureGameMission();
+        if (!m.events.length) return;
+        readMissionEventFromForm();
+        readMissionReinforcementsFromDom(m.events[state.missionEventIndex]);
+        readMissionPathOrdersFromDom(m.events[state.missionEventIndex]);
+        state.missionEventIndex = Math.max(0, state.missionEventIndex - 1);
+        fillMissionEventForm(m.events[state.missionEventIndex]);
+        renderMissionEventChips(m);
+        editorPushSnapshot();
+      });
+    }
+    if (nextEvt) {
+      nextEvt.addEventListener("click", () => {
+        const m = ensureGameMission();
+        if (!m.events.length) return;
+        readMissionEventFromForm();
+        readMissionReinforcementsFromDom(m.events[state.missionEventIndex]);
+        readMissionPathOrdersFromDom(m.events[state.missionEventIndex]);
+        state.missionEventIndex = Math.min(m.events.length - 1, state.missionEventIndex + 1);
+        fillMissionEventForm(m.events[state.missionEventIndex]);
+        renderMissionEventChips(m);
+        editorPushSnapshot();
+      });
+    }
     const commitEvt = () => {
       const m = ensureGameMission();
       const evt = m.events[state.missionEventIndex];
       if (!evt) return;
       readMissionEventFromForm();
       readMissionReinforcementsFromDom(evt);
-      renderMissionPanel();
+      readMissionPathOrdersFromDom(evt);
+      renderMissionEventChips(m);
+      scheduleEditorRender();
       editorPushSnapshot();
     };
     ["#editorMissionEvtName", "#editorMissionTrigSeconds", "#editorMissionTrigKills", "#editorMissionPopupStyle", "#editorMissionPopupTitle", "#editorMissionPopupBody"].forEach(sel => {
@@ -1084,6 +1420,25 @@
         editorPushSnapshot();
       });
     }
+    const addPath = app.querySelector("#editorMissionAddPath");
+    if (addPath) {
+      addPath.addEventListener("click", () => {
+        const m = ensureGameMission();
+        const evt = m.events[state.missionEventIndex];
+        if (!evt) return;
+        readMissionEventFromForm();
+        readMissionPathOrdersFromDom(evt);
+        if (!evt.pathOrders) evt.pathOrders = [];
+        evt.pathOrders.push({ owner: 2, scope: "all", x: 0, y: 0 });
+        renderMissionPathOrderRows(evt);
+        editorPushSnapshot();
+      });
+    }
+    const cancelPick = app.querySelector("#editorMissionCancelPick");
+    if (cancelPick) {
+      cancelPick.addEventListener("click", () => clearMissionMapPick());
+    }
+    app.querySelectorAll(".mission-marker-chip[data-mission-marker]:not([data-reinf-index]):not([data-path-index])").forEach(wireMissionMarkerChip);
   }
 
   function exportMissionJson() {
@@ -1092,8 +1447,10 @@
     if (m.events.length) {
       readMissionEventFromForm();
       readMissionReinforcementsFromDom(m.events[state.missionEventIndex]);
+      readMissionPathOrdersFromDom(m.events[state.missionEventIndex]);
       const titleMission = document.getElementById("editorMissionTitle");
       if (titleMission) m.title = String(titleMission.value || "").trim().slice(0, 80);
+      readMissionVictoryFromForm();
     }
     const data = WOD.exportMapData();
     data.format = "simple-wars-mission";
@@ -1154,8 +1511,10 @@
         if (m.events.length) {
           readMissionEventFromForm();
           readMissionReinforcementsFromDom(m.events[state.missionEventIndex]);
+          readMissionPathOrdersFromDom(m.events[state.missionEventIndex]);
           const titleMission = document.getElementById("editorMissionTitle");
           if (titleMission) m.title = String(titleMission.value || "").trim().slice(0, 80);
+          readMissionVictoryFromForm();
         }
         const data = WOD.exportMapData();
         data.format = "simple-wars-map";
@@ -1404,9 +1763,47 @@
         margin:8px 0 0;font-size:11px;color:#8aa4b8;line-height:1.35;
       }
       .editor-mission-event-toolbar {
-        display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:8px 0 10px;
+        display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:8px 0 6px;
       }
-      .editor-mission-event-toolbar select { flex:1 1 120px; min-width:0; }
+      .editor-mission-event-nav {
+        margin:0 0 8px; font-size:12px; font-weight:700; color:#9db3c7;
+      }
+      .editor-mission-event-chips {
+        display:flex; flex-wrap:wrap; gap:6px; margin:0 0 10px;
+      }
+      .editor-mission-chip {
+        display:inline-flex; align-items:center; gap:6px; padding:6px 10px;
+        border-radius:999px; border:1px solid rgba(120,150,175,.45);
+        background:rgba(0,0,0,.18); color:#dce8f2; font-size:11px; cursor:pointer;
+        max-width:100%;
+      }
+      .editor-mission-chip:hover { border-color:rgba(212,175,55,.65); }
+      .editor-mission-chip.active {
+        border-color:rgba(46,204,113,.75); background:rgba(46,204,113,.14); color:#fff;
+      }
+      .editor-mission-chip-num {
+        display:inline-flex; align-items:center; justify-content:center;
+        min-width:18px; height:18px; border-radius:50%; background:rgba(255,255,255,.12);
+        font-size:10px; font-weight:800;
+      }
+      .editor-mission-chip-text { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .editor-mission-trig-btns {
+        display:flex; flex-direction:column; gap:6px; flex:1; min-width:0;
+      }
+      .editor-mission-trig-btn {
+        width:100%; text-align:left; padding:8px 10px; border-radius:8px;
+        border:1px solid rgba(120,150,175,.45); background:rgba(0,0,0,.16);
+        color:#dce8f2; font-size:12px; cursor:pointer;
+      }
+      .editor-mission-trig-btn:hover { border-color:rgba(212,175,55,.55); }
+      .editor-mission-trig-btn.active {
+        border-color:rgba(46,204,113,.75); background:rgba(46,204,113,.12);
+      }
+      .editor-mission-trig-hint {
+        margin:0 0 8px; font-size:11px; line-height:1.4; color:#8aa4b8;
+      }
+      .editor-mission-trig-row { align-items:flex-start; }
+      .editor-mission-trig-row > label { padding-top:8px; }
       .editor-mission-form { display:flex; flex-direction:column; gap:2px; }
       .editor-mission-subhead {
         margin:12px 0 6px; font-size:10px; text-transform:uppercase; letter-spacing:.1em;
@@ -1417,12 +1814,36 @@
         background:#1a3348; color:#fff; border:1px solid rgba(139,173,192,.55);
         border-radius:6px; padding:8px; font-size:13px; font-family:inherit;
       }
-      .editor-mission-reinf {
+      .editor-mission-reinf, .editor-mission-path {
         border:1px solid rgba(120,150,175,.35); border-radius:8px; padding:8px; margin-bottom:8px;
         background:rgba(0,0,0,.12);
       }
-      .editor-mission-reinf .editor-row { margin:4px 0; }
+      .editor-mission-reinf .editor-row, .editor-mission-path .editor-row { margin:4px 0; }
       .editor-mission-reinf-actions { text-align:right; margin-top:4px; }
+      .editor-mission-coord-tools {
+        display:flex; gap:6px; flex:1; min-width:0; align-items:center;
+      }
+      .editor-mission-coord-tools input { flex:1; min-width:0; }
+      .editor-mission-marker-actions {
+        display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:4px 0 2px;
+      }
+      .mission-marker-chip {
+        display:inline-flex; align-items:center; justify-content:center;
+        padding:6px 10px; border-radius:8px; border:1px dashed rgba(212,175,55,.55);
+        background:rgba(46,204,113,.12); color:#eafaf1; font-size:11px; font-weight:700;
+        cursor:grab; user-select:none;
+      }
+      .mission-marker-chip-path { background:rgba(230,126,34,.14); border-color:rgba(230,126,34,.55); color:#fdebd0; }
+      .mission-marker-chip.dragging { opacity:.65; }
+      .editor-mission-map-hint { margin:0 0 8px; font-size:11px; }
+      .editor-mission-pick-banner {
+        margin:10px 0 6px; padding:8px 10px; border-radius:8px;
+        background:rgba(241,196,15,.14); border:1px solid rgba(241,196,15,.45);
+        color:#f9e79f; font-size:12px; font-weight:700;
+      }
+      .editor-mission-pick-banner.hidden, #editorMissionCancelPick.hidden { display:none !important; }
+      #editorMissionCancelPick { width:100%; margin-top:4px; }
+      #editorCanvas.editor-mission-pick-active { cursor:crosshair; }
       .editor-row { display:flex; gap:10px; align-items:center; margin:7px 0; }
       .editor-row label { flex:0 0 42%; color:#cfdce8; font-size:13px;line-height:1.25 }
       .editor-row input,.editor-row select { flex:1; min-width:0; background:#1a3348; color:#fff;
@@ -1807,38 +2228,60 @@
           </div>
         </section>
         <section class="editor-card" id="editorMissionCard">
-          <h3>Mission events</h3>
-          <p class="editor-hint" style="margin-top:0">Script popups and enemy reinforcements when the player survives, kills troops, or a timer elapses. Included in <strong>Export mission</strong>.</p>
+          <h3>Mission</h3>
+          <p class="editor-hint" style="margin-top:0">Victory rules plus scripted popups and reinforcements. Saved with <strong>Export mission</strong>.</p>
           <div class="editor-row"><label>Mission title</label><input type="text" id="editorMissionTitle" placeholder="Operation name" maxlength="80" /></div>
+          <div class="editor-row"><label>Victory</label>
+            <select id="editorMissionVictoryMode">
+              <option value="domination">Domination</option>
+              <option value="annihilation">Annihilation</option>
+            </select>
+          </div>
+          <p id="editorMissionVictoryHint" class="editor-hint" style="margin:0 0 10px">Capture every enemy-held city.</p>
+          <h4 class="editor-mission-subhead">Scripted events</h4>
           <div class="editor-mission-event-toolbar">
-            <select id="editorMissionEventPick" aria-label="Select mission event"></select>
+            <button type="button" class="editor-btn" id="editorMissionPrevEvent" title="Previous event">←</button>
+            <button type="button" class="editor-btn" id="editorMissionNextEvent" title="Next event">→</button>
             <button type="button" class="editor-btn" id="editorMissionAddEvent">+ Event</button>
             <button type="button" class="editor-btn" id="editorMissionDelEvent" title="Remove selected event">Del</button>
           </div>
+          <p id="editorMissionEventNav" class="editor-mission-event-nav">No scripted events yet</p>
+          <div id="editorMissionEventChips" class="editor-mission-event-chips" aria-label="Mission events"></div>
           <div id="editorMissionEventForm" class="editor-mission-form">
-            <div class="editor-row"><label>Label</label><input type="text" id="editorMissionEvtName" maxlength="64" /></div>
-            <div class="editor-row"><label>Trigger</label>
-              <select id="editorMissionTrigType">
-                <option value="timer">On timer (elapsed)</option>
-                <option value="time_survived">Time survived (alive)</option>
-                <option value="troops_killed">Enemy troops killed</option>
-              </select>
+            <div class="editor-row"><label>Event name</label><input type="text" id="editorMissionEvtName" maxlength="64" placeholder="e.g. Enemy counterattack" /></div>
+            <h4 class="editor-mission-subhead">When should this fire?</h4>
+            <div class="editor-row editor-mission-trig-row">
+              <label>Trigger</label>
+              <div class="editor-mission-trig-btns">
+                <button type="button" class="editor-mission-trig-btn active" data-trig-type="timer">After time passes</button>
+                <button type="button" class="editor-mission-trig-btn" data-trig-type="time_survived">Survive for time</button>
+                <button type="button" class="editor-mission-trig-btn" data-trig-type="troops_killed">Enemy kills reached</button>
+              </div>
             </div>
+            <p id="editorMissionTrigHint" class="editor-mission-trig-hint">Fires once this many in-game seconds have passed, whether or not the player is still alive.</p>
             <div class="editor-row" id="editorMissionTrigSecondsRow"><label>Seconds</label><input type="number" id="editorMissionTrigSeconds" min="0" step="1" value="120" /></div>
             <div class="editor-row" id="editorMissionTrigKillsRow" style="display:none"><label>Kill count</label><input type="number" id="editorMissionTrigKills" min="1" step="50" value="500" /></div>
-            <div class="editor-row"><label>Popup style</label>
+            <h4 class="editor-mission-subhead">Popup message</h4>
+            <div class="editor-row"><label>Style</label>
               <select id="editorMissionPopupStyle">
                 <option value="briefing">Briefing</option>
                 <option value="alert">Alert</option>
                 <option value="victory">Victory</option>
               </select>
             </div>
-            <div class="editor-row"><label>Popup title</label><input type="text" id="editorMissionPopupTitle" maxlength="80" /></div>
-            <div class="editor-row editor-mission-body-row"><label>Popup text</label><textarea id="editorMissionPopupBody" rows="4" maxlength="1200" placeholder="Message shown to the player…"></textarea></div>
+            <div class="editor-row"><label>Title</label><input type="text" id="editorMissionPopupTitle" maxlength="80" /></div>
+            <div class="editor-row editor-mission-body-row"><label>Body</label><textarea id="editorMissionPopupBody" rows="4" maxlength="1200" placeholder="Message shown to the player…"></textarea></div>
             <label class="editor-gen-tgl"><input type="checkbox" id="editorMissionOnce" checked /> Fire once per match</label>
             <h4 class="editor-mission-subhead">Enemy reinforcements</h4>
+            <p class="editor-hint editor-mission-map-hint">For <strong>Map coords</strong> spawns, drag <strong>Drag spawn</strong> onto the map or use <strong>Pick on map</strong>.</p>
             <div id="editorMissionReinfList"></div>
             <button type="button" class="editor-btn" id="editorMissionAddReinf" style="width:100%;margin-top:6px">+ Reinforcement wave</button>
+            <h4 class="editor-mission-subhead">Unit path orders</h4>
+            <p class="editor-hint editor-mission-map-hint">When this event fires, order units to march to a map point. Drag <strong>Drag target</strong> or use <strong>Pick on map</strong>.</p>
+            <div id="editorMissionPathList"></div>
+            <button type="button" class="editor-btn" id="editorMissionAddPath" style="width:100%;margin-top:6px">+ Path order</button>
+            <p id="editorMissionMapPickHint" class="editor-mission-pick-banner hidden">Click the map to place the marker.</p>
+            <button type="button" class="editor-btn hidden" id="editorMissionCancelPick">Cancel map pick</button>
           </div>
         </section>
       </div>
@@ -2135,6 +2578,7 @@
   }
 
   function closeMapEditor() {
+    clearMissionMapPick();
     if (editorFrame != null) {
       cancelAnimationFrame(editorFrame);
       editorFrame = null;
@@ -2501,6 +2945,14 @@
   function onCanvasDrop(ev) {
     ev.preventDefault();
     if (!state.open) return;
+    const markerRaw = ev.dataTransfer.getData("application/x-wod-mission-marker");
+    if (markerRaw) {
+      try {
+        const data = JSON.parse(markerRaw);
+        if (applyMissionMarkerAtWorldPos(data, editorWorldPos(ev))) clearMissionMapPick();
+      } catch (_) { /* ignore */ }
+      return;
+    }
     const raw =
       ev.dataTransfer.getData("application/x-wod-unit") ||
       ev.dataTransfer.getData("text/plain") ||
@@ -2638,6 +3090,12 @@
 
   function onEditorDown(event) {
     if (!state.open) return;
+    if (state.missionMapPick && event.button === 0) {
+      if (handleMissionMapPickClick(editorWorldPos(event))) {
+        event.preventDefault();
+        return;
+      }
+    }
     if (event.button === 1) {
       state.viewPanDrag = { lx: event.clientX, ly: event.clientY };
       state.dragging = true;
@@ -2902,8 +3360,43 @@
       }
       ctx.restore();
     }
+    drawMissionEventMarkers(ctx, toCanvas);
+
     renderFactionBalanceChart();
     state.renderView = null;
+  }
+
+  function drawMissionEventMarkers(ctx, toCanvas) {
+    const m = ensureGameMission();
+    const evt = m.events && m.events[state.missionEventIndex];
+    if (!evt) return;
+    const drawMarker = (wx, wy, color, label) => {
+      if (!Number.isFinite(wx) || !Number.isFinite(wy)) return;
+      const p = toCanvas(wx, wy);
+      const r = Math.max(10, p.scale * 14);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = Math.max(2, p.scale * 2.2);
+      ctx.stroke();
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold ${Math.max(10, r * 0.95)}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, p.x, p.y);
+      ctx.restore();
+    };
+    (evt.reinforcements || []).forEach((rep, i) => {
+      if (rep.anchor === "coords" && rep.x != null && rep.y != null)
+        drawMarker(rep.x, rep.y, "rgba(46, 204, 113, 0.82)", "S" + (i + 1));
+    });
+    (evt.pathOrders || []).forEach((po, i) => {
+      if (po.x != null && po.y != null)
+        drawMarker(po.x, po.y, "rgba(230, 126, 34, 0.88)", "P" + (i + 1));
+    });
   }
 
   function renderSelection() {

@@ -25248,7 +25248,10 @@
                 gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiCount.value, 10) || 1));
 
             let victorySel = document.getElementById('setupVictoryMode');
-            gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
+            if(launchingMission && gameData.mission && gameData.mission.victoryMode)
+                gameData.victoryMode = gameData.mission.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
+            else
+                gameData.victoryMode = (victorySel && victorySel.value === 'annihilation') ? 'annihilation' : 'domination';
             let fogEl = document.getElementById('setupFogOfWar');
             gameData.fogOfWar = !!(fogEl && fogEl.checked);
 
@@ -32829,7 +32832,8 @@
                 let trig = wodMissionTriggerSummary(data);
                 let html = '<p><strong>' + (entry.name || data.mission.title || entry.id) + '</strong></p>';
                 if(entry.description) html += '<p>' + entry.description + '</p>';
-                html += '<p class="wod-map-lib-meta-sub">' + evtN + ' scripted event' + (evtN === 1 ? '' : 's');
+                let vic = (data.mission && data.mission.victoryMode === 'annihilation') ? 'Annihilation' : 'Domination';
+                html += '<p class="wod-map-lib-meta-sub">Victory: ' + vic + ' · ' + evtN + ' scripted event' + (evtN === 1 ? '' : 's');
                 if(trig) html += ' · ' + trig;
                 html += '</p>';
                 if(meta) meta.innerHTML = html;
@@ -35984,7 +35988,7 @@
         }
 
         function wodDefaultMission() {
-            return { version: 1, title: '', events: [] };
+            return { version: 1, title: '', victoryMode: 'domination', events: [] };
         }
         function wodNormalizeMission(raw) {
             if(!raw || typeof raw !== 'object') return null;
@@ -36008,6 +36012,16 @@
                         y: Number.isFinite(r.y) ? r.y : null
                     };
                 }).filter(Boolean) : [];
+                let pathOrders = Array.isArray(evt.pathOrders) ? evt.pathOrders.map(p => {
+                    if(!p || typeof p !== 'object') return null;
+                    if(!Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+                    return {
+                        owner: Math.max(1, parseInt(p.owner, 10) || 2),
+                        scope: p.scope === 'reinforcements' ? 'reinforcements' : 'all',
+                        x: p.x,
+                        y: p.y
+                    };
+                }).filter(Boolean) : [];
                 return {
                     id: String(evt.id || ('evt_' + (i + 1))),
                     name: String(evt.name || ('Event ' + (i + 1))).slice(0, 64),
@@ -36019,13 +36033,15 @@
                         style: ['briefing', 'alert', 'victory'].includes(popup.style) ? popup.style : 'briefing',
                         kicker: String(popup.kicker || '').slice(0, 48)
                     },
-                    reinforcements: reps
+                    reinforcements: reps,
+                    pathOrders
                 };
             }).filter(Boolean) : [];
             if(!events.length) return null;
             return {
                 version: 1,
                 title: String(raw.title || '').slice(0, 80),
+                victoryMode: raw.victoryMode === 'annihilation' ? 'annihilation' : 'domination',
                 events
             };
         }
@@ -36098,7 +36114,8 @@
             return { x: 0, y: 0 };
         }
         function wodSpawnMissionReinforcementGroup(spec) {
-            if(!spec) return;
+            let spawned = [];
+            if(!spec) return spawned;
             let owner = parseInt(spec.owner, 10) || 2;
             let type = spec.type || 'light';
             let count = Math.max(1, Math.min(48, parseInt(spec.count, 10) || 1));
@@ -36107,8 +36124,22 @@
             for(let i = 0; i < count; i++) {
                 let ang = (i / Math.max(1, count)) * Math.PI * 2 + Math.random() * 0.35;
                 let r = spacing * (0.55 + (i % 4) * 0.28);
-                createUnitAt(type, pt.x + Math.cos(ang) * r, pt.y + Math.sin(ang) * r, owner, { startSpawn: true });
+                let u = createUnitAt(type, pt.x + Math.cos(ang) * r, pt.y + Math.sin(ang) * r, owner, { startSpawn: true });
+                if(u) spawned.push(u);
             }
+            return spawned;
+        }
+        function wodMissionApplyPathOrder(spec, spawnedUnits) {
+            if(!spec || !Number.isFinite(spec.x) || !Number.isFinite(spec.y)) return;
+            let owner = parseInt(spec.owner, 10) || 2;
+            let units = [];
+            if(spec.scope === 'reinforcements' && spawnedUnits && spawnedUnits.length) {
+                units = spawnedUnits.filter(u => u && u.owner === owner && u.hp > 0 && u.type !== 'convoy');
+            } else {
+                units = (gameData.entities || []).filter(u => u && u.owner === owner && u.hp > 0 && u.type !== 'convoy');
+            }
+            for(let unit of units)
+                assignUnitMoveAlongWaypoints(unit, [{ x: spec.x, y: spec.y }]);
         }
         function wodHideMissionPopup() {
             let ov = document.getElementById('wodMissionPopupOverlay');
@@ -36152,8 +36183,15 @@
             rt.popupOpen = true;
             rt.resumeSpeed = gameData.speed > 0 ? gameData.speed : (rt.resumeSpeed || 1);
             gameData.speed = 0;
+            let spawnedUnits = [];
             if(evt.reinforcements && evt.reinforcements.length) {
-                for(let r of evt.reinforcements) wodSpawnMissionReinforcementGroup(r);
+                for(let r of evt.reinforcements) {
+                    let batch = wodSpawnMissionReinforcementGroup(r);
+                    if(batch && batch.length) spawnedUnits = spawnedUnits.concat(batch);
+                }
+            }
+            if(evt.pathOrders && evt.pathOrders.length) {
+                for(let po of evt.pathOrders) wodMissionApplyPathOrder(po, spawnedUnits);
             }
             let popup = evt.popup || {};
             if(popup.title || popup.body) {
