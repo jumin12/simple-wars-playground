@@ -9629,7 +9629,7 @@
                 if(!u || u.hp <= 0 || u.type === 'convoy') continue;
                 k++;
             }
-            if(k < 64) return false;
+            if(k < 28) return false;
             let idx = new Uint32Array(k);
             let xs = new Float32Array(k);
             let ys = new Float32Array(k);
@@ -9721,7 +9721,7 @@
             wodEnsureSepWorker();
             if(wodSepBusy) return;
             let kicked = wodKickSepWorker(sepPad, cellSize);
-            if(!kicked) wodRunUnitSeparationSync(sepPad, cellSize);
+            if(!kicked && (gameData._wodSimTick & 1) === 0) wodRunUnitSeparationSync(sepPad, cellSize);
         }
 
         let gameData = {
@@ -17455,8 +17455,8 @@
         const WOD_MORALE_MAX = 100;
         const WOD_UNIT_SPAWN_FX_DUR = 2.0;
         const WOD_OVERHEAD_POP_DUR = 0.55;
-        const WOD_COMBAT_FX_CAP = 128;
-        const WOD_COMBAT_SHOTS_PER_FRAME = 32;
+        const WOD_COMBAT_FX_CAP = 80;
+        const WOD_COMBAT_SHOTS_PER_FRAME = 20;
         const WOD_SPAWN_FX_DRAW_CAP = 8;
         const WOD_FOG_VISION_INTERVAL = 0.35;
         const WOD_FOG_REBUILD_MIN_MS = 480;
@@ -18698,6 +18698,27 @@
             return { x: unit.x + (dx / dist) * muzzleR, y: unit.y + (dy / dist) * muzzleR };
         }
 
+        function wodRefreshCombatCamBounds() {
+            let viewW = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+            let viewH = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+            let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
+            let camL = gameData.camera.x / camZ;
+            let camT = gameData.camera.y / camZ;
+            let pad = Math.max(72, 120 / camZ);
+            gameData._combatCamBounds = {
+                l: camL - pad,
+                r: camL + viewW / camZ + pad,
+                t: camT - pad,
+                b: camT + viewH / camZ + pad
+            };
+        }
+
+        function wodCombatShotInView(mx, my) {
+            let b = gameData._combatCamBounds;
+            if(!b) return true;
+            return mx >= b.l && mx <= b.r && my >= b.t && my <= b.b;
+        }
+
         function wodCombatShotVisualInterval(unit) {
             if(!unit) return 0.12;
             if(unit.type === 'heavy') return 0.26;
@@ -18708,18 +18729,11 @@
 
         function wodEmitCombatShot(attacker, target) {
             if(!attacker || !target) return;
+            if(gameData._combatFx && gameData._combatFx.length >= WOD_COMBAT_FX_CAP) return;
             if(!wodFogCanSeeUnit(attacker) && !wodFogCanSeeUnit(target)) return;
             let tx = target.x, ty = target.y;
             let mx = (attacker.x + tx) * 0.5, my = (attacker.y + ty) * 0.5;
-            let viewW = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
-            let viewH = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
-            let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
-            let camL = gameData.camera.x / camZ;
-            let camR = camL + viewW / camZ;
-            let camT = gameData.camera.y / camZ;
-            let camB = camT + viewH / camZ;
-            let pad = Math.max(80, 140 / camZ);
-            if(mx < camL - pad || mx > camR + pad || my < camT - pad || my > camB + pad) return;
+            if(!wodCombatShotInView(mx, my)) return;
             let m = wodCombatMuzzlePoint(attacker, tx, ty);
             let dx = tx - m.x, dy = ty - m.y;
             let dist = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -18730,15 +18744,13 @@
             let heavy = attacker.type === 'heavy';
             let ship = attacker.type === 'ship';
             let marine = attacker.type === 'marine';
-            let tracerLife = heavy ? 0.3 : (ship ? 0.24 : (marine ? 0.19 : 0.16));
-            let width = heavy ? 4.2 : (ship ? 3.1 : (marine ? 2.5 : 2.1));
+            let tracerLife = heavy ? 0.26 : (ship ? 0.21 : (marine ? 0.17 : 0.14));
+            let width = heavy ? 4.0 : (ship ? 3.0 : (marine ? 2.4 : 2.0));
             let tr = wodCombatFxTake();
             tr.kind = 'tracer';
             tr.x0 = m.x; tr.y0 = m.y; tr.x1 = hx; tr.y1 = hy;
             tr.life = tracerLife; tr.maxLife = tracerLife;
             tr.color = col; tr.width = width; tr.heavy = heavy;
-            tr.ang = Math.atan2(hy - m.y, hx - m.x);
-            tr.len = dist;
             if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
         }
 
@@ -18758,33 +18770,24 @@
         function wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull) {
             let fx = gameData._combatFx;
             if(!fx || !fx.length) return;
-            function inView(wx, wy, pad) {
-                return wx >= camL - pad && wx <= camR + pad && wy >= camT - pad && wy <= camB + pad;
-            }
+            let pad = culPad + 40;
+            let drawCap = gfxLite ? 30 : (fx.length > 44 ? 44 : 58);
             let drawN = 0;
-            let drawCap = gfxLite ? 44 : 80;
             ctx.lineCap = 'round';
-            for(let i = 0; i < fx.length; i++) {
+            for(let i = fx.length - 1; i >= 0; i--) {
                 if(drawN >= drawCap) break;
                 let f = fx[i];
                 if(f.kind !== 'tracer') continue;
                 let mx = (f.x0 + f.x1) * 0.5;
                 let my = (f.y0 + f.y1) * 0.5;
-                if(wodCull && !inView(mx, my, culPad + 40)) continue;
+                if(wodCull && (mx < camL - pad || mx > camR + pad || my < camT - pad || my > camB + pad)) continue;
                 let prog = 1 - f.life / f.maxLife;
                 let hx = f.x0 + (f.x1 - f.x0) * prog;
                 let hy = f.y0 + (f.y1 - f.y0) * prog;
                 let fade = Math.max(0, 1 - prog * 1.05);
-                ctx.globalAlpha = fade * 0.48;
+                ctx.globalAlpha = fade * 0.9;
                 ctx.strokeStyle = f.color;
-                ctx.lineWidth = f.width * 1.75;
-                ctx.beginPath();
-                ctx.moveTo(f.x0, f.y0);
-                ctx.lineTo(hx, hy);
-                ctx.stroke();
-                ctx.globalAlpha = fade * 0.96;
-                ctx.strokeStyle = f.heavy ? '#fff4d6' : '#fff8e8';
-                ctx.lineWidth = f.width;
+                ctx.lineWidth = f.width * (f.heavy ? 1.35 : 1.2);
                 ctx.beginPath();
                 ctx.moveTo(f.x0, f.y0);
                 ctx.lineTo(hx, hy);
@@ -29177,11 +29180,12 @@
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
             wodBeginSimPfBudget(gameData.entities.length);
+            wodRefreshCombatCamBounds();
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             let entN = gameData.entities.length;
             if(touchCamGesture) gameData._combatShotBudget = 0;
-            else if(entN > 220) gameData._combatShotBudget = 16;
-            else if(entN > 140) gameData._combatShotBudget = 24;
+            else if(entN > 220) gameData._combatShotBudget = 10;
+            else if(entN > 140) gameData._combatShotBudget = 14;
             wodUpdateCombatFx(dt);
             if(wodPlayerOrderQueue.length && !wodPlayerOrderPumpScheduled) wodSchedulePlayerOrderPump();
             if(gameState === 'PLAYING') wodRefreshFogVision(dt);
@@ -29483,10 +29487,20 @@
                 });
                 
                 if(enemy && unit.damage > 0 && !unit.retreating && !unit.moraleBroken) {
-                    let attackerHex = getNearestHexToPoint(unit.x, unit.y);
-                    let defenderHex = getNearestHexToPoint(enemy.x, enemy.y);
-                    let atkMod = getTerrainAttackModifier(unit, attackerHex);
-                    let defMod = getTerrainDefenseModifier(enemy, defenderHex);
+                    let atkMod = 1, defMod = 1;
+                    if((gameData._wodSimTick & 3) === 0) {
+                        let attackerHex = getNearestHexToPoint(unit.x, unit.y);
+                        let defenderHex = getNearestHexToPoint(enemy.x, enemy.y);
+                        unit._combatHex = attackerHex;
+                        enemy._combatHex = defenderHex;
+                        atkMod = getTerrainAttackModifier(unit, attackerHex);
+                        defMod = getTerrainDefenseModifier(enemy, defenderHex);
+                        unit._combatAtkMod = atkMod;
+                        unit._combatDefMod = defMod;
+                    } else {
+                        atkMod = unit._combatAtkMod != null ? unit._combatAtkMod : 1;
+                        defMod = enemy._combatDefMod != null ? enemy._combatDefMod : 1;
+                    }
                     let m = unit.morale != null ? unit.morale : WOD_MORALE_MAX;
                     let moraleAtk = 0.18 + 0.82 * Math.max(0, Math.min(1, m / WOD_MORALE_MAX));
                     let interval = unit.attackCooldown * WOD_ATTACK_INTERVAL_MULT;
@@ -29508,7 +29522,7 @@
                         unit._combatShotTimer = (uNum % 89) / 89 * shotInterval * 0.92;
                     }
                     unit._combatShotTimer += dt;
-                    let shotCap = 3;
+                    let shotCap = 2;
                     while(unit._combatShotTimer >= shotInterval && shotCap-- > 0 && (gameData._combatShotBudget || 0) > 0) {
                         unit._combatShotTimer -= shotInterval;
                         wodEmitCombatShot(unit, enemy);
@@ -35007,6 +35021,8 @@
 
             let gfxDecorSkip = wodShouldSimplifyDraw();
             let gfxLite = wodShouldGfxLite();
+            let fxN = gameData._combatFx ? gameData._combatFx.length : 0;
+            if(fxN > 36) gfxLite = true;
             let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
             // Always cull to the camera frustum: without this, desktop "small" battles still iterated/drew every entity every frame — very costly when zoomed in.
             let wodCull = true;
