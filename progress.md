@@ -81,3 +81,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Unit movement stutter fix (2026-06-17)
 - Root causes: frame-rate-dependent draw smoothing (fixed k per frame), collision separation throttled to every 4 frames during large marches, territory/frontline canvas bakes firing on the draw path every ~420–680ms while units claim hexes, and HUD summary rescans every 400ms during play.
 - Fixes: dt-based exponential draw interpolation using accumulated `_frameSimDt`; player-unit separation runs every sim tick; defer/slim territory political bakes while player units march; longer terrain dirty throttle during movement; defer player summary and troop HUD rescans while marching.
+
+## March backward/stop stutter fix (2026-06-17 follow-up)
+- Root cause: prior pass re-enabled collision separation on player marches (every-frame sync + 15% push) while draw smoothing lagged behind logic coords — separation shoves logic position back, smoothed sprite catches up = visible backward hop. Terrain safety checks also ran on moving units and could teleport them. Friendly column blocking fired `isWorldPositionBlockedByUnits` stops every few frames.
+- Fixes: skip all separation while player units march; restore human-march pair skip in sync separation; draw marching units at exact logic position; skip terrain safety on units with targets; no sep worker during player march; co-direction friendly marchers no longer block each other; longer human stuck/block thresholds in columns.
