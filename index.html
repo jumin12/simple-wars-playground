@@ -17444,9 +17444,11 @@
         const WOD_MOVE_SPEED_FACTOR = 0.36;
         const WOD_ATTACK_INTERVAL_MULT = 2.65;
         const WOD_MORALE_MAX = 100;
-        const WOD_UNIT_SPAWN_FX_DUR = 1.0;
+        const WOD_UNIT_SPAWN_FX_DUR = 2.0;
         const WOD_OVERHEAD_POP_DUR = 0.55;
-        const WOD_COMBAT_FX_CAP = 220;
+        const WOD_COMBAT_FX_CAP = 280;
+        const WOD_COMBAT_SHOTS_PER_FRAME = 38;
+        const WOD_FOG_VISION_INTERVAL = 0.28;
         const WOD_VETERAN_XP_THRESHOLD = 100;
         const WOD_VETERAN_STAT_MULT = 1.1;
         /* Starting unit spacing — tight fronts without instant overlap. */
@@ -18430,43 +18432,58 @@
         function wodEmitCombatShot(attacker, target) {
             if(!attacker || !target) return;
             if(!gameData._combatFx) gameData._combatFx = [];
+            if(gameData._combatFx.length >= WOD_COMBAT_FX_CAP) return;
             let tx = target.x, ty = target.y;
             let m = wodCombatMuzzlePoint(attacker, tx, ty);
             let dx = tx - m.x, dy = ty - m.y;
             let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            let hitR = (target.radius || 10) * 0.38;
+            let hitR = (target.radius || 10) * 0.42;
             let hx = tx - (dx / dist) * hitR;
             let hy = ty - (dy / dist) * hitR;
             let col = factionColors[attacker.owner] || '#f1c40f';
             let heavy = attacker.type === 'heavy';
             let ship = attacker.type === 'ship';
-            let tracerLife = heavy ? 0.16 : (ship ? 0.13 : 0.11);
-            let width = heavy ? 2.6 : (ship ? 2.2 : 1.55);
-            gameData._combatFx.push({
+            let marine = attacker.type === 'marine';
+            let tracerLife = heavy ? 0.24 : (ship ? 0.19 : (marine ? 0.15 : 0.13));
+            let width = heavy ? 4.4 : (ship ? 3.2 : (marine ? 2.4 : 2.0));
+            let fx = gameData._combatFx;
+            fx.push({
                 kind: 'tracer', x0: m.x, y0: m.y, x1: hx, y1: hy,
-                life: tracerLife, maxLife: tracerLife, color: col, width: width
+                life: tracerLife, maxLife: tracerLife, color: col, width: width, heavy: heavy
             });
-            gameData._combatFx.push({
+            if(heavy) {
+                fx.push({
+                    kind: 'tracerGlow', x0: m.x, y0: m.y, x1: hx, y1: hy,
+                    life: tracerLife * 1.15, maxLife: tracerLife * 1.15, color: col, width: width * 2.1
+                });
+            }
+            fx.push({
                 kind: 'muzzle', x: m.x, y: m.y,
-                life: 0.1, maxLife: 0.1, color: col,
-                size: heavy ? 7.5 : (ship ? 6.5 : 5.2)
+                life: heavy ? 0.14 : 0.11, maxLife: heavy ? 0.14 : 0.11, color: col,
+                size: heavy ? 11 : (ship ? 8.5 : 6.8), heavy: heavy
             });
-            gameData._combatFx.push({
+            if(!heavy) {
+                fx.push({
+                    kind: 'smoke', x: m.x - (dx / dist) * 4, y: m.y - (dy / dist) * 4,
+                    life: 0.22, maxLife: 0.22, size: width * 2.8
+                });
+            }
+            fx.push({
                 kind: 'impact', x: hx, y: hy,
-                life: 0.13, maxLife: 0.13, color: col,
-                size: heavy ? 6.2 : 4.2
+                life: heavy ? 0.18 : 0.14, maxLife: heavy ? 0.18 : 0.14, color: col,
+                size: heavy ? 9.5 : 5.8, heavy: heavy
             });
-            if(gameData._combatFx.length > WOD_COMBAT_FX_CAP)
-                gameData._combatFx.splice(0, gameData._combatFx.length - WOD_COMBAT_FX_CAP + 40);
         }
 
         function wodUpdateCombatFx(dt) {
             let fx = gameData._combatFx;
             if(!fx || !fx.length) return;
-            for(let i = fx.length - 1; i >= 0; i--) {
+            let w = 0;
+            for(let i = 0; i < fx.length; i++) {
                 fx[i].life -= dt;
-                if(fx[i].life <= 0) fx.splice(i, 1);
+                if(fx[i].life > 0) fx[w++] = fx[i];
             }
+            fx.length = w;
         }
 
         function wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull) {
@@ -18481,62 +18498,99 @@
                 let f = fx[i];
                 let mx = (f.x0 != null && f.x1 != null) ? (f.x0 + f.x1) * 0.5 : f.x;
                 let my = (f.y0 != null && f.y1 != null) ? (f.y0 + f.y1) * 0.5 : f.y;
-                if(wodCull && !inView(mx, my, culPad + 40)) continue;
+                if(wodCull && !inView(mx, my, culPad + 48)) continue;
                 let t = 1 - (f.life / f.maxLife);
-                if(f.kind === 'tracer') {
+                if(f.kind === 'tracerGlow') {
                     let hx = f.x0 + (f.x1 - f.x0) * t;
                     let hy = f.y0 + (f.y1 - f.y0) * t;
-                    let fade = Math.max(0, 1 - t * 1.15);
+                    let fade = Math.max(0, 1 - t * 0.95);
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.globalAlpha = fade * 0.32;
                     ctx.strokeStyle = f.color;
-                    ctx.globalAlpha = fade * (gfxLite ? 0.72 : 0.88);
                     ctx.lineWidth = f.width;
                     ctx.beginPath();
                     ctx.moveTo(f.x0, f.y0);
                     ctx.lineTo(hx, hy);
                     ctx.stroke();
+                    ctx.globalCompositeOperation = 'source-over';
+                } else if(f.kind === 'tracer') {
+                    let hx = f.x0 + (f.x1 - f.x0) * t;
+                    let hy = f.y0 + (f.y1 - f.y0) * t;
+                    let fade = Math.max(0, 1 - t * 1.05);
                     ctx.globalCompositeOperation = 'lighter';
-                    ctx.globalAlpha = fade * 0.95;
-                    ctx.strokeStyle = '#fff8e8';
-                    ctx.lineWidth = Math.max(0.8, f.width * 0.42);
+                    ctx.globalAlpha = fade * (gfxLite ? 0.42 : 0.55);
+                    ctx.strokeStyle = f.color;
+                    ctx.lineWidth = f.width * 1.65;
+                    ctx.beginPath();
+                    ctx.moveTo(f.x0, f.y0);
+                    ctx.lineTo(hx, hy);
+                    ctx.stroke();
+                    ctx.strokeStyle = f.heavy ? '#fff4d6' : '#fff8e8';
+                    ctx.globalAlpha = fade * (gfxLite ? 0.78 : 0.94);
+                    ctx.lineWidth = f.width;
                     ctx.beginPath();
                     ctx.moveTo(f.x0, f.y0);
                     ctx.lineTo(hx, hy);
                     ctx.stroke();
                     ctx.globalCompositeOperation = 'source-over';
                     ctx.fillStyle = '#fffef5';
-                    ctx.globalAlpha = Math.min(1, fade * 1.2);
+                    ctx.globalAlpha = Math.min(1, fade * 1.15);
                     ctx.beginPath();
-                    ctx.arc(hx, hy, f.width * 0.65, 0, Math.PI * 2);
+                    ctx.arc(hx, hy, f.width * (f.heavy ? 0.85 : 0.65), 0, Math.PI * 2);
+                    ctx.fill();
+                } else if(f.kind === 'smoke') {
+                    let r = f.size * (0.4 + t * 1.35);
+                    let a = (1 - t) * 0.38;
+                    ctx.globalAlpha = a;
+                    ctx.fillStyle = 'rgba(90, 96, 104, ' + a + ')';
+                    ctx.beginPath();
+                    ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
                     ctx.fill();
                 } else if(f.kind === 'muzzle') {
-                    let r = f.size * (0.35 + t * 1.1);
-                    let a = (1 - t) * (gfxLite ? 0.55 : 0.78);
+                    let r = f.size * (0.42 + t * 1.25);
+                    let a = (1 - t) * (gfxLite ? 0.62 : 0.88);
                     ctx.globalCompositeOperation = 'lighter';
                     ctx.fillStyle = 'rgba(255, 248, 220, ' + a + ')';
                     ctx.beginPath();
                     ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
                     ctx.fill();
-                    ctx.globalAlpha = a * 0.45;
+                    ctx.globalAlpha = a * 0.5;
                     ctx.fillStyle = f.color;
                     ctx.beginPath();
-                    ctx.arc(f.x, f.y, r * 0.55, 0, Math.PI * 2);
+                    ctx.arc(f.x, f.y, r * 0.52, 0, Math.PI * 2);
                     ctx.fill();
+                    if(f.heavy) {
+                        ctx.globalAlpha = a * 0.35;
+                        ctx.fillStyle = 'rgba(255, 200, 80, ' + (a * 0.35) + ')';
+                        ctx.beginPath();
+                        ctx.arc(f.x, f.y, r * 1.35, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
                     ctx.globalCompositeOperation = 'source-over';
                 } else if(f.kind === 'impact') {
-                    let a = (1 - t) * 0.9;
-                    let sz = f.size * (0.5 + t * 0.9);
+                    let a = (1 - t) * 0.95;
+                    let sz = f.size * (0.55 + t * 1.05);
+                    let sparkN = f.heavy ? (gfxLite ? 5 : 7) : (gfxLite ? 3 : 5);
                     ctx.globalAlpha = a;
+                    ctx.globalCompositeOperation = 'lighter';
+                    ctx.fillStyle = 'rgba(255, 236, 180, ' + (a * 0.75) + ')';
+                    ctx.beginPath();
+                    ctx.arc(f.x, f.y, sz * 0.42, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalCompositeOperation = 'source-over';
                     ctx.strokeStyle = f.color;
-                    ctx.lineWidth = gfxLite ? 1.2 : 1.6;
+                    ctx.lineWidth = gfxLite ? 1.4 : 2.0;
+                    for(let si = 0; si < sparkN; si++) {
+                        let ang = si * (Math.PI * 2 / sparkN) + t * 0.8;
+                        let len = sz * (0.75 + (1 - t) * 0.55);
+                        ctx.beginPath();
+                        ctx.moveTo(f.x, f.y);
+                        ctx.lineTo(f.x + Math.cos(ang) * len, f.y + Math.sin(ang) * len);
+                        ctx.stroke();
+                    }
+                    ctx.fillStyle = 'rgba(255, 240, 200, ' + (a * 0.65) + ')';
                     ctx.beginPath();
-                    ctx.moveTo(f.x - sz, f.y);
-                    ctx.lineTo(f.x + sz, f.y);
-                    ctx.moveTo(f.x, f.y - sz);
-                    ctx.lineTo(f.x, f.y + sz);
-                    ctx.stroke();
-                    ctx.fillStyle = 'rgba(255, 240, 200, ' + (a * 0.7) + ')';
-                    ctx.beginPath();
-                    ctx.arc(f.x, f.y, sz * 0.35, 0, Math.PI * 2);
+                    ctx.arc(f.x, f.y, sz * 0.28, 0, Math.PI * 2);
                     ctx.fill();
                 }
             }
@@ -25390,6 +25444,7 @@
         async function initGame() {
             gameData._encircWork = null;
             gameData._aiSpawnBurst = null;
+            gameData._aiSpawnPulse = null;
             gameData._aiStratWork = null;
             wodInvalidateAiFrontlineHexCache();
             wodCombatFxClear();
@@ -25521,6 +25576,7 @@
             wodMobileUiStatTimer = 0;
             if(gameData) {
                 gameData._aiSpawnBurst = null;
+            gameData._aiSpawnPulse = null;
                 gameData._aiStratWork = null;
                 wodInvalidateAiFrontlineHexCache();
                 wodCombatFxClear();
@@ -27423,6 +27479,7 @@
             gameData.aiFocusTimer = 0;
             gameData._aiStratWork = null;
             gameData._aiSpawnBurst = null;
+            gameData._aiSpawnPulse = null;
             gameData._encircWork = null;
             wodInvalidateAiFrontlineHexCache();
             wodCombatFxClear();
@@ -27487,6 +27544,7 @@
             gameData.aiFrontFocus = s.aiFrontFocus ? JSON.parse(JSON.stringify(s.aiFrontFocus)) : {};
             gameData._aiStratWork = null;
             gameData._aiSpawnBurst = null;
+            gameData._aiSpawnPulse = null;
             gameData._encircWork = null;
             gameData.money = 0;
             gameData.manpower = 0;
@@ -27850,7 +27908,15 @@
                 let centroid = findFrontlineCentroid(owner);
                 let best = null;
                 let bestScore = -Infinity;
-                for(let hex of getOwnerFrontlineHexes(owner)) {
+                let frontHexes = getOwnerFrontlineHexes(owner);
+                if(frontHexes.length > 52) {
+                    let step = frontHexes.length / 52;
+                    let sampled = [];
+                    for(let si = 0; si < 52; si++) sampled.push(frontHexes[Math.floor(si * step)]);
+                    frontHexes = sampled;
+                }
+                for(let hi = 0, hl = frontHexes.length; hi < hl; hi++) {
+                    let hex = frontHexes[hi];
                     let enemyNeighbors = getNeighborHexes(hex).filter(nHex => isClaimableLand(nHex) && nHex.owner !== owner).length;
                     let playerAdj = getNeighborHexes(hex).some(nHex => nHex && nHex.owner === 1) ? 22 : 0;
                     let playerUnits = countPlayerThreatNear(hex.x, hex.y, 200);
@@ -28494,54 +28560,65 @@
         /** Runs one faction's econ/build/spawn work for a periodic AI pulse (spread across frames). */
         function wodRunAiSpawnBurstForOwner(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOwner) {
             let ownerId = typeof ownerKey === 'number' ? ownerKey : parseInt(ownerKey, 10);
-            if(gameData.mp && gameData.mp.enabled && wodMpIsHumanOwner(ownerId)) return;
+            if(gameData.mp && gameData.mp.enabled && wodMpIsHumanOwner(ownerId)) return true;
             let aiCities = aiCitiesByOwner[ownerKey];
-            if(!aiCities || aiCities.length === 0) return;
+            if(!aiCities || aiCities.length === 0) return true;
             let aiNetIncome = (aiIncomeByOwner[ownerKey] || 0) - (upkeepByOwner[ownerId] || 0);
             let troopCap = Math.max(12, aiCities.length * 8 + Math.floor(Math.max(0, aiNetIncome) / 1.25));
             if(gameData.menuAttractMode) troopCap = Math.min(troopCap, 72);
+
+            if(!gameData._aiSpawnPulse) gameData._aiSpawnPulse = {};
+            let pulseKey = String(ownerKey);
+            let pulse = gameData._aiSpawnPulse[pulseKey];
+            if(!pulse) {
+                let cash = gameData.aiMoneyByOwner[ownerKey] || 0;
+                let unitReserve = Math.max(WOD_PRICE_LIGHT * 2.5, WOD_PRICE_HEAVY || WOD_PRICE_LIGHT * 3);
+                let facSpend = 0;
+                while(cash >= WOD_PRICE_FACTORY + unitReserve && facSpend < 1) {
+                    let needFac = aiCities.find(ct => !ct.hasFactory);
+                    if(!needFac) break;
+                    needFac.hasFactory = true;
+                    cash -= WOD_PRICE_FACTORY;
+                    facSpend++;
+                }
+                let hbSpend = 0;
+                while(cash >= WOD_PRICE_HARBOR + unitReserve && hbSpend < 1) {
+                    let needHb = aiCities.find(ct => !ct.hasHarbor && cityHasWaterNeighbor(ct));
+                    if(!needHb) break;
+                    needHb.hasHarbor = true;
+                    cash -= WOD_PRICE_HARBOR;
+                    hbSpend++;
+                }
+                gameData.aiMoneyByOwner[ownerKey] = cash;
+
+                let aiForts = (gameData.forts || []).filter(f => f && f.owner === ownerId).length;
+                let fortCap = Math.max(2, aiCities.length * 2 + 1);
+                if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_FORT && aiForts < fortCap) {
+                    let reserve = aiForts === 0 ? WOD_PRICE_FORT * 1.5 : WOD_PRICE_FORT * 2.1;
+                    if((gameData.aiMoneyByOwner[ownerKey] || 0) >= reserve && Math.random() < (aiForts === 0 ? 0.28 : 0.16))
+                        wodAiTryFortForOwner(ownerId, ownerKey);
+                }
+
+                if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_BRIDGE * 3.1 && Math.random() < 0.22)
+                    wodAiTryBridgeForOwner(ownerId, ownerKey);
+
+                wodAiMaintainFortGuards(ownerId);
+
+                let spawnCap = wodUsesVisualViewportLayout() ? 5 : 6;
+                let spawnsThisTick = Math.min(spawnCap, Math.max(3, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(160, WOD_PRICE_LIGHT))));
+                if(!gameData._aiTrainPick) gameData._aiTrainPick = {};
+                pulse = { spawnsLeft: spawnsThisTick, rotOff: gameData._aiTrainPick[pulseKey] || 0 };
+                gameData._aiSpawnPulse[pulseKey] = pulse;
+            }
+
             let aiTroops = getOwnerUnitCount(ownerId);
-
-            let cash = gameData.aiMoneyByOwner[ownerKey] || 0;
-            let unitReserve = Math.max(WOD_PRICE_LIGHT * 2.5, WOD_PRICE_HEAVY || WOD_PRICE_LIGHT * 3);
-            let facSpend = 0;
-            while(cash >= WOD_PRICE_FACTORY + unitReserve && facSpend < 1) {
-                let needFac = aiCities.find(ct => !ct.hasFactory);
-                if(!needFac) break;
-                needFac.hasFactory = true;
-                cash -= WOD_PRICE_FACTORY;
-                facSpend++;
-            }
-            let hbSpend = 0;
-            while(cash >= WOD_PRICE_HARBOR + unitReserve && hbSpend < 1) {
-                let needHb = aiCities.find(ct => !ct.hasHarbor && cityHasWaterNeighbor(ct));
-                if(!needHb) break;
-                needHb.hasHarbor = true;
-                cash -= WOD_PRICE_HARBOR;
-                hbSpend++;
-            }
-            gameData.aiMoneyByOwner[ownerKey] = cash;
-
-            let aiForts = (gameData.forts || []).filter(f => f && f.owner === ownerId).length;
-            let fortCap = Math.max(2, aiCities.length * 2 + 1);
-            if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_FORT && aiForts < fortCap) {
-                let reserve = aiForts === 0 ? WOD_PRICE_FORT * 1.5 : WOD_PRICE_FORT * 2.1;
-                if((gameData.aiMoneyByOwner[ownerKey] || 0) >= reserve && Math.random() < (aiForts === 0 ? 0.28 : 0.16))
-                    wodAiTryFortForOwner(ownerId, ownerKey);
-            }
-
-            if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_BRIDGE * 3.1 && Math.random() < 0.22)
-                wodAiTryBridgeForOwner(ownerId, ownerKey);
-
-            wodAiMaintainFortGuards(ownerId);
-
-            let spawnCap = wodUsesVisualViewportLayout() ? 5 : 6;
-            let spawnsThisTick = Math.min(spawnCap, Math.max(3, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(160, WOD_PRICE_LIGHT))));
+            let maxSpawnsThisFrame = wodUsesVisualViewportLayout() ? 1 : 2;
+            let spawnedThisFrame = 0;
             let combatSafeCities = aiCities.filter(c => !isCitySiegeBlockedForProduction(c));
             let trainOrder = ['light', 'marine', 'heavy', 'ship'];
-            if(!gameData._aiTrainPick) gameData._aiTrainPick = {};
-            let rotOff = gameData._aiTrainPick[String(ownerKey)] || 0;
-            for(let s = 0; s < spawnsThisTick; s++) {
+            let rotOff = pulse.rotOff;
+            while(pulse.spawnsLeft > 0 && spawnedThisFrame < maxSpawnsThisFrame) {
+                pulse.spawnsLeft--;
                 if(aiCities.length === 0 || aiTroops >= troopCap) break;
                 let brokeSpawnGate = aiNetIncome <= -32 && aiTroops >= Math.floor(troopCap * 0.55);
                 if(brokeSpawnGate || (gameData.aiMoneyByOwner[ownerKey] || 0) < Math.floor(WOD_PRICE_LIGHT * 0.72)) break;
@@ -28554,7 +28631,7 @@
                 });
 
                 let did = false,
-                    start = (rotOff + s) % trainOrder.length;
+                    start = rotOff % trainOrder.length;
                 for(let k = 0; k < trainOrder.length; k++) {
                     let ut = trainOrder[(start + k) % trainOrder.length];
                     if(!canAffordUnit(ownerId, ut)) continue;
@@ -28571,6 +28648,7 @@
                     if(spawnedUnit) {
                         spendForUnit(ownerId, ut);
                         aiTroops++;
+                        spawnedThisFrame++;
                         did = true;
                         rotOff++;
                         break;
@@ -28578,7 +28656,16 @@
                 }
                 if(!did) break;
             }
-            gameData._aiTrainPick[String(ownerKey)] = rotOff % 64;
+            pulse.rotOff = rotOff;
+            if(!gameData._aiTrainPick) gameData._aiTrainPick = {};
+            gameData._aiTrainPick[pulseKey] = rotOff % 64;
+            let done = pulse.spawnsLeft <= 0
+                || aiTroops >= troopCap
+                || combatSafeCities.length === 0
+                || (gameData.aiMoneyByOwner[ownerKey] || 0) < Math.floor(WOD_PRICE_LIGHT * 0.72);
+            if(done) delete gameData._aiSpawnPulse[pulseKey];
+            else if(spawnedThisFrame >= maxSpawnsThisFrame) return false;
+            return true;
         }
 
         /** Finishes chunked AI tactic pass (assigns one formation owner per call, then batches unit retarget). */
@@ -28781,6 +28868,7 @@
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
             wodBeginSimPfBudget(gameData.entities.length);
+            gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             wodUpdateCombatFx(dt);
             if(gameState === 'PLAYING') wodRefreshFogVision(dt);
 
@@ -28899,9 +28987,11 @@
                 let b = gameData._aiSpawnBurst;
                 if(b.idx >= b.keys.length)
                     gameData._aiSpawnBurst = null;
+            gameData._aiSpawnPulse = null;
                 else {
-                    let ownerKey = b.keys[b.idx++];
-                    wodRunAiSpawnBurstForOwner(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOwner);
+                    let ownerKey = b.keys[b.idx];
+                    if(wodRunAiSpawnBurstForOwner(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOwner) !== false)
+                        b.idx++;
                 }
             }
 
@@ -29073,15 +29163,22 @@
                     }
                     wodGrantUnitCombatXp(unit, dealtCas, dmgPerSec * dt);
                     wodStagingMarkCombatOnCityUrbanTile(unit, enemy);
-                    unit._combatShotTimer = (unit._combatShotTimer || 0) + dt;
-                    while(unit._combatShotTimer >= interval) {
+                    if(unit._combatShotTimer == null) {
+                        let uidSalt = (unit.uid || '0').replace(/\D/g, '') || '0';
+                        let uNum = parseInt(uidSalt.slice(-4), 10) || 0;
+                        unit._combatShotTimer = (uNum % 89) / 89 * interval * 0.92;
+                    }
+                    unit._combatShotTimer += dt;
+                    let shotCap = 2;
+                    while(unit._combatShotTimer >= interval && shotCap-- > 0 && (gameData._combatShotBudget || 0) > 0) {
                         unit._combatShotTimer -= interval;
                         wodEmitCombatShot(unit, enemy);
+                        gameData._combatShotBudget--;
                     }
                     unit.activeCombatVisual = Math.min(1, (unit.activeCombatVisual || 0) + dt * 2.2);
                     enemy.activeCombatVisual = Math.min(1, (enemy.activeCombatVisual || 0) + dt * 2.2);
                 } else {
-                    unit._combatShotTimer = 0;
+                    unit._combatShotTimer = null;
                 }
 
                 if(unit.owner > 1 && !unit.target && unit.type !== 'convoy') {
@@ -34327,11 +34424,13 @@
                 return;
             }
             gameData._fogVisionTimer = (gameData._fogVisionTimer || 0) + dt;
-            if(gameData._fogVisionTimer < 0.1 && gameData._fogVisible && gameData._fogVisible.size) return;
+            if(gameData._fogVisionTimer < WOD_FOG_VISION_INTERVAL && gameData._fogVisible && gameData._fogVisible.size) return;
             gameData._fogVisionTimer = 0;
             let owner = wodLocalPlayerOwner();
             if(!gameData._fogExplored) gameData._fogExplored = new Set();
-            let visible = new Set();
+            let visible = gameData._fogVisible;
+            if(!visible) visible = gameData._fogVisible = new Set();
+            else visible.clear();
             let explored = gameData._fogExplored;
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                 let h = gameData.hexList[hi];
@@ -34369,7 +34468,23 @@
                 }
             }
             gameData._fogVisible = visible;
-            gameData._fogCanvasDirty = true;
+            let visSig = visible.size;
+            let moverSig = 0;
+            for(let ei = 0, el = gameData.entities.length; ei < el; ei++) {
+                let u = gameData.entities[ei];
+                if(u.hp <= 0 || u.owner !== owner) continue;
+                moverSig ^= (((u.x / 36) | 0) * 73856093) ^ (((u.y / 36) | 0) * 19349663);
+            }
+            for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                let c = gameData.cities[ci];
+                if(c.owner !== owner) continue;
+                moverSig ^= (c.q * 83492791) ^ (c.r * 49979687);
+            }
+            if(gameData._fogVisSig !== visSig || gameData._fogMoverSig !== moverSig) {
+                gameData._fogVisSig = visSig;
+                gameData._fogMoverSig = moverSig;
+                gameData._fogCanvasDirty = true;
+            }
         }
 
         function wodFogHexVisible(hex) {
@@ -36677,8 +36792,8 @@
             let uid = parseInt((unit.uid || '0').replace(/\D/g, '').slice(-4), 10) || 0;
             ctx.save();
             if(layer === 'back') {
-                let ringR = ur * (0.45 + p * 2.65);
-                let ringA = (1 - p) * (gfxLite ? 0.38 : 0.58);
+                let ringR = ur * (0.38 + p * 2.1);
+                let ringA = (1 - p * 0.85) * (gfxLite ? 0.38 : 0.58);
                 ctx.globalCompositeOperation = 'lighter';
                 let grad = ctx.createRadialGradient(0, 0, ringR * 0.08, 0, 0, ringR);
                 grad.addColorStop(0, 'rgba(255, 248, 225, ' + ringA + ')');
@@ -36691,11 +36806,11 @@
                 let puffN = gfxLite ? 4 : 7;
                 for(let i = 0; i < puffN; i++) {
                     let ang = (i / puffN) * Math.PI * 2 + uid * 0.13;
-                    let dist = ur * (0.28 + p * 1.55);
+                    let dist = ur * (0.22 + p * 1.35);
                     let px = Math.cos(ang) * dist;
-                    let py = Math.sin(ang) * dist - p * ur * 0.42;
-                    let pr = ur * (0.22 + (1 - p) * 0.38);
-                    ctx.fillStyle = 'rgba(220, 228, 238, ' + ((1 - p) * 0.34) + ')';
+                    let py = Math.sin(ang) * dist - p * ur * 0.32;
+                    let pr = ur * (0.2 + (1 - p * 0.75) * 0.42);
+                    ctx.fillStyle = 'rgba(220, 228, 238, ' + ((1 - p * 0.8) * 0.34) + ')';
                     ctx.beginPath();
                     ctx.arc(px, py, pr, 0, Math.PI * 2);
                     ctx.fill();
