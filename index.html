@@ -9688,8 +9688,14 @@
                     if(dist < minDist && dist > 0) {
                         let overlap = minDist - dist;
                         let pushStrength = u1.owner === u2.owner ? 0.42 : 0.48;
-                        if(u1.target && !u1.retreating) pushStrength *= wodMpIsHumanOwner(u1.owner) ? 0.15 : 0.35;
-                        if(u2.target && !u2.retreating) pushStrength *= wodMpIsHumanOwner(u2.owner) ? 0.15 : 0.35;
+                        if(u1.target && !u1.retreating) {
+                            if(wodMpIsHumanOwner(u1.owner)) return;
+                            pushStrength *= 0.35;
+                        }
+                        if(u2.target && !u2.retreating) {
+                            if(wodMpIsHumanOwner(u2.owner)) return;
+                            pushStrength *= 0.35;
+                        }
                         let pushX = (dx / dist) * overlap * pushStrength;
                         let pushY = (dy / dist) * overlap * pushStrength;
                         u1.x -= pushX;
@@ -9720,6 +9726,7 @@
                 wodApplySepWorkerResult(gameData._wodSepApply);
                 gameData._wodSepApply = null;
             }
+            if((gameData._wodPlayerMovingN || 0) > 0) return;
             wodEnsureSepWorker();
             if(wodSepBusy) return;
             let kicked = wodKickSepWorker(sepPad, cellSize);
@@ -18770,9 +18777,17 @@
         }
 
         function wodDeferHeavySimDuringMarch() {
-            let mn = gameData._wodMovingN || 0;
-            let pn = gameData._wodPlayerMovingN || 0;
-            return mn >= 8 || pn >= 4;
+            return (gameData._wodPlayerMovingN || 0) > 0 || (gameData._wodMovingN || 0) >= 4;
+        }
+
+        function wodFlushQueuedTerrainDirty() {
+            if(!gameData._terrDirtyQueued) return;
+            gameData._terrDirtyQueued = false;
+            gameData._terrDirtyNext = 0;
+            gameData._terrDirtyPending = false;
+            wodTerrainPoliticalDirty = true;
+            terrainNeedsUpdate = true;
+            wodTerrainPolWork = null;
         }
 
         function wodUnitSmoothDrawXY(unit) {
@@ -18788,7 +18803,9 @@
                 unit._drawY = unit.y;
                 return { x: unit.x, y: unit.y };
             }
-            let k = unit.target ? 0.78 : 0.62;
+            let k = unit.target
+                ? (wodMpIsHumanOwner(unit.owner) ? 0.36 : 0.78)
+                : 0.62;
             unit._drawX += dx * k;
             unit._drawY += dy * k;
             return { x: unit._drawX, y: unit._drawY };
@@ -29189,7 +29206,7 @@
 
         function updateAiStrategy(dt) {
             if(gameData._aiStratWork) {
-                if(wodDeferHeavySimDuringMarch() && (gameData._wodSimTick & 1)) return;
+                if(wodDeferHeavySimDuringMarch()) return;
                 wodDrainAiStratFormationAndUnits();
                 return;
             }
@@ -29197,6 +29214,7 @@
             if(!wodDeferHeavySimDuringMarch()) gameData.aiStrategyTimer += dt;
             let stratEvery = wodUsesVisualViewportLayout() ? 2.15 : 1.95;
             if(gameData.aiStrategyTimer < stratEvery) return;
+            if(wodDeferHeavySimDuringMarch()) return;
             gameData.aiStrategyTimer = 0;
 
             gameData.aiStrategySerial = (gameData.aiStrategySerial || 0) + 1;
@@ -29247,6 +29265,9 @@
             }
             gameData._wodMovingN = movingN;
             gameData._wodPlayerMovingN = playerMovingN;
+            if((gameData._wodPrevPlayerMovingN || 0) > 0 && playerMovingN === 0)
+                wodFlushQueuedTerrainDirty();
+            gameData._wodPrevPlayerMovingN = playerMovingN;
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             let entN = gameData.entities.length;
             if(touchCamGesture) gameData._combatShotBudget = 0;
@@ -29413,7 +29434,7 @@
             let gridCell = wodMob ? 120 : 96;
             for(let ui = 0; ui < gameData.entities.length; ui++) {
                 let u = gameData.entities[ui];
-                if(!u || u.hp <= 0 || u.type === 'ship') continue;
+                if(!u || u.hp <= 0 || u.type === 'ship' || u.target) continue;
                 let terrainCheckStride = wodHeavyEnts ? 5 : 3;
                 if(((ui + gameData._wodSimTick) % terrainCheckStride) !== 0) continue;
                 let hh = getNearestHexToPoint(u.x, u.y);
@@ -29634,7 +29655,7 @@
             gameData._cityCapTimer = (gameData._cityCapTimer || 0) + dt;
             if(gameData._cityCapTimer >= WOD_CITY_CAPTURE_EVAL_INTERVAL) {
                 gameData._cityCapTimer = 0;
-                wodEvaluateAllCityCaptures();
+                if(!wodDeferHeavySimDuringMarch()) wodEvaluateAllCityCaptures();
             }
 
             if(wodMobHexClaimBatch) {
@@ -29874,6 +29895,10 @@
         }
 
         function wodMarkTerrainPoliticalDirty() {
+            if((gameData._wodPlayerMovingN || 0) > 0) {
+                gameData._terrDirtyQueued = true;
+                return;
+            }
             let now = performance.now();
             let throttleMs = (gameData._wodMovingN || 0) > 8 ? 680 : 420;
             if(gameData._terrDirtyNext && now < gameData._terrDirtyNext) {
@@ -30905,7 +30930,8 @@
                 wodTerrainPoliticalDirty = true;
                 terrainNeedsUpdate = true;
                 wodTerrainPolWork = null;
-                gameData._terrDirtyNext = performance.now() + 380;
+                let marchThrottle = (gameData._wodMovingN || 0) > 8 ? 680 : 420;
+                gameData._terrDirtyNext = performance.now() + marchThrottle;
             }
             if(terrainNeedsUpdate) {
                 let now = performance.now();
@@ -30913,6 +30939,7 @@
                 let ownersChanging = !!(gameData.layers && (gameData.layers.diplomacy || gameData.layers.territory));
                 let livePlay = gameState === 'PLAYING' && !gameData.menuAttractMode;
                 let camBusy = wodIsCamInteracting();
+                let playerMarching = (gameData._wodPlayerMovingN || 0) > 0;
                 let gap;
                 if(forceImmediate) gap = 0;
                 else if(ownersChanging) gap = livePlay ? (wodUsesVisualViewportLayout() ? 720 : 180) : (wodUsesVisualViewportLayout() ? 72 : 48);
@@ -30925,6 +30952,8 @@
                     gap = Math.max(gap, Math.min(420, wodTerrainLastBakeCostMs * 9));
                 if(camBusy && !forceImmediate) {
                     // Keep last baked political frame visible while panning — avoids territory/frontline flicker.
+                } else if(playerMarching && !forceImmediate) {
+                    // Defer territory/diplomacy canvas bakes until the march ends — avoids periodic hitches.
                 } else if(forceImmediate) {
                     if(now >= wodTerrainBakeNextMs) {
                         wodTerrainBakeNextMs = now + gap;
