@@ -9540,7 +9540,6 @@
         }
         function wodKickParallelTroopPowIfEligible() {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode) return;
-            if(wodDeferHeavySimDuringMarch()) return;
             wodEnsurePowWorkers();
             if(wodPowWorkers.length === 0) return;
             let ents = gameData.entities;
@@ -18776,8 +18775,17 @@
             if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
         }
 
-        function wodDeferHeavySimDuringMarch() {
-            return (gameData._wodPlayerMovingN || 0) > 0 || (gameData._wodMovingN || 0) >= 4;
+        function wodPlayerUnitsMarching() {
+            return (gameData._wodPlayerMovingN || 0) > 0;
+        }
+
+        /** Tighter AI/encirclement budgets while the player marches — never blocks sim. */
+        function wodMarchSimBudgetScale() {
+            if(wodPlayerUnitsMarching()) return 0.5;
+            let mn = gameData._wodMovingN || 0;
+            if(mn >= 20) return 0.65;
+            if(mn >= 10) return 0.8;
+            return 1;
         }
 
         function wodFlushQueuedTerrainDirty() {
@@ -23163,12 +23171,10 @@
 
         function updateEncirclements(dt) {
             if(gameData._encircWork) {
-                if(wodDeferHeavySimDuringMarch() && (gameData._wodSimTick & 1)) return;
                 wodEncirclementProcessChunk();
                 return;
             }
-            if(!wodDeferHeavySimDuringMarch())
-                gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
+            gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
             let interval = 0.55 + Math.min(1.0, (gameData.hexList.length || 0) / 50000);
             if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.35, 1.8);
             if(gameData.encirclementTimer < interval) return;
@@ -23235,7 +23241,7 @@
             let list = gameData.hexList;
             let t0 = performance.now();
             // Keep each tick small so encirclement never monopolizes a frame (90ms here caused multi-second "random" freezes).
-            let budgetMs = wodUsesVisualViewportLayout() ? 1.25 : 3.5;
+            let budgetMs = (wodUsesVisualViewportLayout() ? 1.25 : 3.5) * wodMarchSimBudgetScale();
             function overBudget() {
                 return performance.now() - t0 >= budgetMs;
             }
@@ -29054,7 +29060,7 @@
             if(!w) return;
             let keys = w.formationKeys;
             let t0 = performance.now();
-            let budgetMs = wodUsesVisualViewportLayout() ? 1.15 : 2.35;
+            let budgetMs = (wodUsesVisualViewportLayout() ? 1.15 : 2.35) * wodMarchSimBudgetScale();
             function overBudget() {
                 return performance.now() - t0 >= budgetMs;
             }
@@ -29074,7 +29080,8 @@
                 let ents = gameData.entities;
                 let mobMemo = w.mobMemo;
                 // Keep AI pulses incremental on every platform; a full-faction pulse was the source of periodic hitches.
-                let BATCH = wodUsesVisualViewportLayout() ? 22 : 52;
+                let batchBase = wodUsesVisualViewportLayout() ? 22 : 52;
+                let BATCH = Math.max(8, (batchBase * wodMarchSimBudgetScale()) | 0);
                 let nExamined = 0;
                 while(w.ei < ents.length && nExamined < BATCH) {
                     let unit = ents[w.ei++];
@@ -29206,15 +29213,13 @@
 
         function updateAiStrategy(dt) {
             if(gameData._aiStratWork) {
-                if(wodDeferHeavySimDuringMarch()) return;
                 wodDrainAiStratFormationAndUnits();
                 return;
             }
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
-            if(!wodDeferHeavySimDuringMarch()) gameData.aiStrategyTimer += dt;
+            gameData.aiStrategyTimer += dt;
             let stratEvery = wodUsesVisualViewportLayout() ? 2.15 : 1.95;
             if(gameData.aiStrategyTimer < stratEvery) return;
-            if(wodDeferHeavySimDuringMarch()) return;
             gameData.aiStrategyTimer = 0;
 
             gameData.aiStrategySerial = (gameData.aiStrategySerial || 0) + 1;
@@ -29380,7 +29385,7 @@
 
             if(!gameData.aiTimer) gameData.aiTimer = Math.random() * 0.85;
             let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.2 : 2.35;
-            if(!gameData._aiSpawnBurst && !wodDeferHeavySimDuringMarch()) {
+            if(!gameData._aiSpawnBurst) {
                 gameData.aiTimer += dt;
                 if(gameData.aiTimer > aiBurstEvery) {
                     gameData.aiTimer = 0;
@@ -29388,7 +29393,7 @@
                     if(keys.length > 0) gameData._aiSpawnBurst = { keys, idx: 0 };
                 }
             }
-            if(gameData._aiSpawnBurst && gameData._aiSpawnBurst.keys.length && !wodDeferHeavySimDuringMarch()) {
+            if(gameData._aiSpawnBurst && gameData._aiSpawnBurst.keys.length) {
                 let b = gameData._aiSpawnBurst;
                 if(b.idx >= b.keys.length) {
                     gameData._aiSpawnBurst = null;
@@ -29655,7 +29660,7 @@
             gameData._cityCapTimer = (gameData._cityCapTimer || 0) + dt;
             if(gameData._cityCapTimer >= WOD_CITY_CAPTURE_EVAL_INTERVAL) {
                 gameData._cityCapTimer = 0;
-                if(!wodDeferHeavySimDuringMarch()) wodEvaluateAllCityCaptures();
+                wodEvaluateAllCityCaptures();
             }
 
             if(wodMobHexClaimBatch) {
@@ -29895,7 +29900,7 @@
         }
 
         function wodMarkTerrainPoliticalDirty() {
-            if((gameData._wodPlayerMovingN || 0) > 0) {
+            if(wodPlayerUnitsMarching()) {
                 gameData._terrDirtyQueued = true;
                 return;
             }
@@ -30939,7 +30944,7 @@
                 let ownersChanging = !!(gameData.layers && (gameData.layers.diplomacy || gameData.layers.territory));
                 let livePlay = gameState === 'PLAYING' && !gameData.menuAttractMode;
                 let camBusy = wodIsCamInteracting();
-                let playerMarching = (gameData._wodPlayerMovingN || 0) > 0;
+                let playerMarching = wodPlayerUnitsMarching();
                 let gap;
                 if(forceImmediate) gap = 0;
                 else if(ownersChanging) gap = livePlay ? (wodUsesVisualViewportLayout() ? 720 : 180) : (wodUsesVisualViewportLayout() ? 72 : 48);
