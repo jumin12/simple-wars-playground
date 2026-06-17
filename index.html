@@ -22102,6 +22102,62 @@
 
         let wodOrderArrowBuildQueue = [];
         let wodOrderArrowBuildPumpScheduled = false;
+        let wodPlayerOrderQueue = [];
+        let wodPlayerOrderPumpScheduled = false;
+
+        function wodQueuePlayerMoveOrder(unit, worldPoints, opt) {
+            if(!unit || !worldPoints || !worldPoints.length) return;
+            wodPlayerOrderQueue.push({
+                unit,
+                worldPoints: worldPoints.map(w => ({ x: w.x, y: w.y })),
+                opt: opt || null
+            });
+            if(wodPlayerOrderQueue.length > 480) wodPlayerOrderQueue.splice(0, wodPlayerOrderQueue.length - 480);
+            wodSchedulePlayerOrderPump();
+        }
+
+        function wodSchedulePlayerOrderPump() {
+            if(wodPlayerOrderPumpScheduled) return;
+            wodPlayerOrderPumpScheduled = true;
+            requestAnimationFrame(wodPumpPlayerOrderQueue);
+        }
+
+        function wodPumpPlayerOrderQueue() {
+            wodPlayerOrderPumpScheduled = false;
+            if(!wodPlayerOrderQueue.length) return;
+            wodPfSpentMs = 0;
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, 14);
+            let t0 = performance.now();
+            let budgetMs = wodUsesVisualViewportLayout() ? 4.5 : 7;
+            let batch = wodUsesVisualViewportLayout() ? 2 : 5;
+            let n = 0;
+            while(wodPlayerOrderQueue.length && n < batch && performance.now() - t0 < budgetMs) {
+                let job = wodPlayerOrderQueue.shift();
+                if(job.unit && job.unit.hp > 0)
+                    assignUnitMoveAlongWaypoints(job.unit, job.worldPoints, job.opt);
+                n++;
+            }
+            if(wodPlayerOrderQueue.length) wodSchedulePlayerOrderPump();
+        }
+
+        /** Apply move orders immediately for a few units, queue the rest to avoid input hitch. */
+        function wodApplyPlayerMoveOrders(units, pathForUnit) {
+            if(!units || !units.length) return;
+            let syncCap = wodUsesVisualViewportLayout() ? 1 : 3;
+            let syncDone = 0;
+            wodPfSpentMs = 0;
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, syncCap * 5);
+            for(let i = 0; i < units.length; i++) {
+                let pts = pathForUnit(units[i], i);
+                if(!pts || !pts.length) continue;
+                if(syncDone < syncCap) {
+                    assignUnitMoveAlongWaypoints(units[i], pts);
+                    syncDone++;
+                } else {
+                    wodQueuePlayerMoveOrder(units[i], pts);
+                }
+            }
+        }
 
         function wodWorldPointsFromHexMarchPath(unit, hexPath, startPt) {
             if(!hexPath || hexPath.length <= 1) {
@@ -22372,7 +22428,7 @@
             cx /= units.length;
             cy /= units.length;
             let trimR2 = Math.pow(Math.max(20, gameData.hexRadius * 1.45), 2);
-            units.forEach(unit => {
+            wodApplyPlayerMoveOrders(units, (unit) => {
                 let ox = unit.x - cx;
                 let oy = unit.y - cy;
                 let pathPts = [];
@@ -22387,9 +22443,8 @@
                     if(dx * dx + dy * dy < trimR2) pathPts.shift();
                     else break;
                 }
-                assignUnitMoveAlongWaypoints(unit, pathPts);
+                return pathPts;
             });
-            if(units.length > 1) wodFlushOrderArrowBuildQueue(units.length > 48 ? 140 : (units.length > 16 ? 90 : 55));
         }
 
         function findMoraleRoutPoint(unit) {
@@ -25852,6 +25907,10 @@
             animationFrameId = null;
             wodUnitsDrawOrderScratch.length = 0;
             wodMobileUiStatTimer = 0;
+            wodPlayerOrderQueue.length = 0;
+            wodPlayerOrderPumpScheduled = false;
+            wodOrderArrowBuildQueue.length = 0;
+            wodOrderArrowBuildPumpScheduled = false;
             if(gameData) {
                 gameData._aiSpawnBurst = null;
                 gameData._aiSpawnPulse = null;
@@ -29154,6 +29213,7 @@
             wodBeginSimPfBudget(gameData.entities.length);
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             wodUpdateCombatFx(dt);
+            if(wodPlayerOrderQueue.length) wodPumpPlayerOrderQueue();
             if(gameState === 'PLAYING') wodRefreshFogVision(dt);
 
             // Economy (one pass over cities + one over units — avoids triple city scans)
@@ -35475,7 +35535,7 @@
                 let uiPaused = (UI.statsMenu && !UI.statsMenu.classList.contains('hidden')) ||
                     (UI.escMenu && !UI.escMenu.classList.contains('hidden')) ||
                     (wodUsesVisualViewportLayout() && UI.inGameUI && UI.inGameUI.getAttribute('data-mtab'));
-                if(!wodIsCamInteracting() && !uiPaused) {
+                if(!uiPaused) {
                     let simDt = dt * gameData.speed;
                     let baseChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
                     let maxSingleStep = baseChunk * 1.15;
@@ -35905,10 +35965,11 @@
             let rows = Math.ceil(units.length / cols);
             let midCol = (cols - 1) / 2;
             let midRow = (rows - 1) / 2;
-            units.forEach((unit, index) => {
-                let r = Math.floor(index / cols), c = index % cols;
+            wodApplyPlayerMoveOrders(units, (unit) => {
+                let r = units.indexOf(unit);
+                let c = r % cols, row = Math.floor(r / cols);
                 let ox = (c - midCol) * spacing;
-                let oy = (r - midRow) * spacing;
+                let oy = (row - midRow) * spacing;
                 let pathPts = wps.map((w, wi) => {
                     let last = wi === wps.length - 1;
                     return {x: w.x + (last ? ox : 0), y: w.y + (last ? oy : 0)};
@@ -35921,10 +35982,9 @@
                     if(dx * dx + dy * dy < trimR2) pathPts.shift();
                     else break;
                 }
-                assignUnitMoveAlongWaypoints(unit, pathPts);
+                return pathPts;
             });
             showNotification(wps.length === 1 ? 'Marching to waypoint' : `Marching via ${wps.length} waypoints`);
-            if(units.length > 1) wodFlushOrderArrowBuildQueue(units.length > 48 ? 140 : (units.length > 16 ? 90 : 55));
         }
 
         function issueMoveOrder(worldPos) {
@@ -35937,14 +35997,14 @@
             let rows = Math.ceil(units.length / cols);
             let midCol = (cols - 1) / 2;
             let midRow = (rows - 1) / 2;
-            units.forEach((unit, index) => {
-                let r = Math.floor(index / cols), c = index % cols;
-                let tx = worldPos.x + (c - midCol) * spacing;
-                let ty = worldPos.y + (r - midRow) * spacing;
-                if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost)
-                    assignUnitMoveAlongWaypoints(unit, [{ x: tx, y: ty }]);
-            });
-            if(units.length > 1) wodFlushOrderArrowBuildQueue(units.length > 48 ? 140 : (units.length > 16 ? 90 : 55));
+            if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) {
+                wodApplyPlayerMoveOrders(units, (unit, index) => {
+                    let r = Math.floor(index / cols), c = index % cols;
+                    let tx = worldPos.x + (c - midCol) * spacing;
+                    let ty = worldPos.y + (r - midRow) * spacing;
+                    return [{ x: tx, y: ty }];
+                });
+            }
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost)
                 wodMpSendCmd({ kind: 'move', uids: units.map(u => u.uid), x: worldPos.x, y: worldPos.y });
             showNotification(units.length === 1 ? 'Marching' : `Marching (${units.length} units)`);
@@ -35969,12 +36029,14 @@
                     return;
             }
 
-            for(let i = 0; i < units.length; i++) {
-                let t = units.length === 1 ? 0.5 : i / (units.length - 1);
+            wodApplyPlayerMoveOrders(units, (unit, index) => {
+                let t = units.length === 1 ? 0.5 : index / (units.length - 1);
                 let tx = start.x + (end.x - start.x) * t;
                 let ty = start.y + (end.y - start.y) * t;
-                assignUnitMoveTarget(units[i], tx, ty);
-            }
+                let target = findReachableOrderHex(unit, tx, ty);
+                if(!target) return null;
+                return [{ x: target.exactX, y: target.exactY }];
+            });
         }
 
         canvas.addEventListener('mousedown', (e) => {
