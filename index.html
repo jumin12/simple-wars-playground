@@ -18712,11 +18712,11 @@
             let hitR = (target.radius || 10) * 0.42;
             let hx = tx - (dx / dist) * hitR;
             let hy = ty - (dy / dist) * hitR;
-            let col = factionColors[attacker.owner] || '#f1c40f';
+            let col = (gameData._combatTracerAlt = ((gameData._combatTracerAlt | 0) + 1) & 1) ? '#ff9a2e' : '#ffe047';
             let heavy = attacker.type === 'heavy';
             let ship = attacker.type === 'ship';
             let marine = attacker.type === 'marine';
-            let tracerLife = heavy ? 0.2 : (ship ? 0.16 : (marine ? 0.13 : 0.11));
+            let tracerLife = heavy ? 0.14 : (ship ? 0.11 : (marine ? 0.09 : 0.075));
             let width = heavy ? 3.8 : (ship ? 2.8 : (marine ? 2.2 : 1.8));
             let tr = wodCombatFxTake();
             tr.kind = 'tracer';
@@ -29420,22 +29420,23 @@
                     }
                     wodGrantUnitCombatXp(unit, dealtCas, dmgPerSec * dt);
                     wodStagingMarkCombatOnCityUrbanTile(unit, enemy);
-                    if(unit._combatShotTimer == null) {
+                    if(unit._combatVisualTimer == null) {
                         let uidSalt = (unit.uid || '0').replace(/\D/g, '') || '0';
                         let uNum = parseInt(uidSalt.slice(-4), 10) || 0;
-                        unit._combatShotTimer = (uNum % 89) / 89 * interval * 0.92;
+                        unit._combatVisualTimer = (uNum % 89) / 89 * interval * 0.42;
                     }
-                    unit._combatShotTimer += dt;
-                    let shotCap = gameData.entities.length > 120 ? 1 : 2;
-                    while(unit._combatShotTimer >= interval && shotCap-- > 0 && (gameData._combatShotBudget || 0) > 0) {
-                        unit._combatShotTimer -= interval;
+                    unit._combatVisualTimer += dt;
+                    let visualInterval = Math.max(0.04, interval * 0.46);
+                    let shotCap = gameData.entities.length > 120 ? 2 : 3;
+                    while(unit._combatVisualTimer >= visualInterval && shotCap-- > 0 && (gameData._combatShotBudget || 0) > 0) {
+                        unit._combatVisualTimer -= visualInterval;
                         wodEmitCombatShot(unit, enemy);
                         gameData._combatShotBudget--;
                     }
                     unit.activeCombatVisual = Math.min(1, (unit.activeCombatVisual || 0) + dt * 2.2);
                     enemy.activeCombatVisual = Math.min(1, (enemy.activeCombatVisual || 0) + dt * 2.2);
                 } else {
-                    unit._combatShotTimer = null;
+                    unit._combatVisualTimer = null;
                 }
 
                 if(unit.owner > 1 && !unit.target && unit.type !== 'convoy') {
@@ -35646,6 +35647,32 @@
             return true;
         }
 
+        function wodIsMilitaryUnit(unit) {
+            return !!(unit && unit.hp > 0 && unit.type !== 'convoy');
+        }
+
+        /** Player units in a drag box; convoys omitted when any military unit is in the same box. */
+        function wodCollectPlayerBoxSelection(worldL, worldR, worldT, worldB) {
+            let lo = wodLocalPlayerOwner();
+            let hasMilitary = false;
+            for(let i = 0, n = gameData.entities.length; i < n; i++) {
+                let u = gameData.entities[i];
+                if(!wodIsMilitaryUnit(u)) continue;
+                if(u.x < worldL || u.x > worldR || u.y < worldT || u.y > worldB) continue;
+                hasMilitary = true;
+                break;
+            }
+            let batch = [];
+            for(let i = 0, n = gameData.entities.length; i < n; i++) {
+                let unit = gameData.entities[i];
+                if(unit.owner !== lo || unit.hp <= 0) continue;
+                if(unit.x < worldL || unit.x > worldR || unit.y < worldT || unit.y > worldB) continue;
+                if(hasMilitary && unit.type === 'convoy') continue;
+                batch.push(unit);
+            }
+            return batch;
+        }
+
         function initWodHudDeselectOnClick() {
             let root = document.getElementById('inGameUI');
             if(!root || root._wodHudDeselectWired) return;
@@ -36106,12 +36133,7 @@
                     const worldT = (Math.min(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
                     const worldB = (Math.max(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
 
-                    let lo = wodLocalPlayerOwner();
-                    let batch = [];
-                    for(let unit of gameData.entities) {
-                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB)
-                            batch.push(unit);
-                    }
+                    let batch = wodCollectPlayerBoxSelection(worldL, worldR, worldT, worldB);
                     if(batch.length) wodApplyMapSelectionBatch(batch);
                 }
             } else if (e.button === 2 && shiftWaypointDrag.active) {
@@ -36400,12 +36422,7 @@
                     const worldR = (Math.max(cx, dragStart.x) + gameData.camera.x) / gameData.camera.zoom;
                     const worldT = (Math.min(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
                     const worldB = (Math.max(cy, dragStart.y) + gameData.camera.y) / gameData.camera.zoom;
-                    let lo = wodLocalPlayerOwner();
-                    let batch = [];
-                    for(let unit of gameData.entities) {
-                        if(unit.owner === lo && unit.x >= worldL && unit.x <= worldR && unit.y >= worldT && unit.y <= worldB)
-                            batch.push(unit);
-                    }
+                    let batch = wodCollectPlayerBoxSelection(worldL, worldR, worldT, worldB);
                     if(batch.length) wodApplyMapSelectionBatch(batch);
                 }
                 return;
