@@ -19119,8 +19119,10 @@
         }
 
         function getCityUrbanTerrainHexes(city) {
+            if(!city) return [];
+            if(city._urbanHexCache) return city._urbanHexCache;
             let list = [];
-            if(city && city.id) {
+            if(city.id) {
                 for(let h of gameData.hexList) {
                     if(!h || isWaterHex(h)) continue;
                     if(h.type !== 'urban') continue;
@@ -19137,6 +19139,7 @@
                 let ctr = gameData.hexes[`${city.q},${city.r}`];
                 if(ctr && !isWaterHex(ctr)) list.push(ctr);
             }
+            city._urbanHexCache = list;
             return list;
         }
 
@@ -22664,6 +22667,53 @@
             wodEncirclementProcessChunk();
         }
 
+        function wodEncirclementApplyPocket(region, owner, w) {
+            if(!region || !region.length || !w) return;
+            let regionKeys = new Set();
+            for(let ri = 0, rl = region.length; ri < rl; ri++) regionKeys.add(getHexKey(region[ri]));
+            let hasOwnerCity = wodRegionHasOwnerCity(regionKeys, owner);
+            let hasOwnerFort = false;
+            let fortList = gameData.forts;
+            if(fortList && fortList.length) {
+                for(let fi = 0, fl = fortList.length; fi < fl; fi++) {
+                    let ft = fortList[fi];
+                    if(!ft || wodEffectiveFortOwner(ft) !== owner) continue;
+                    if(regionKeys.has(`${ft.q},${ft.r}`)) {
+                        hasOwnerFort = true;
+                        break;
+                    }
+                }
+            }
+            let supplyRelief = hasOwnerCity || hasOwnerFort;
+            let hasOwnerCombatUnit = false;
+            for(let ei = 0, el = gameData.entities.length; ei < el; ei++) {
+                let u = gameData.entities[ei];
+                if(u.owner !== owner) continue;
+                if(wodUnitInsideRegion(u, regionKeys)) {
+                    hasOwnerCombatUnit = true;
+                    break;
+                }
+            }
+            for(let ri = 0, rl = region.length; ri < rl; ri++) {
+                let hk = getHexKey(region[ri]);
+                w.encircledHexes.add(hk);
+                if(supplyRelief) w.encircledReliefHexes.add(hk);
+            }
+            if(!hasOwnerCity && !hasOwnerCombatUnit) {
+                let capturer = wodEncirclementCapturerForPocket(region, owner);
+                if(capturer > 0) {
+                    let savedBatch = batchHexOwner;
+                    let savedDirty = batchHexOwnerDirty;
+                    batchHexOwner = true;
+                    batchHexOwnerDirty = false;
+                    for(let ri = 0, rl = region.length; ri < rl; ri++) setHexOwner(region[ri], capturer);
+                    batchHexOwner = savedBatch;
+                    if(batchHexOwnerDirty) wodMarkTerrainPoliticalDirty();
+                    batchHexOwnerDirty = savedDirty;
+                }
+            }
+        }
+
         function wodEncirclementProcessChunk() {
             let w = gameData._encircWork;
             if(!w) return;
@@ -22671,16 +22721,40 @@
             let t0 = performance.now();
             // Keep each tick small so encirclement never monopolizes a frame (90ms here caused multi-second "random" freezes).
             let budgetMs = wodUsesVisualViewportLayout() ? 1.25 : 3.5;
-            while(w.idx < list.length && performance.now() - t0 < budgetMs) {
-                let start = list[w.idx++];
-                if(!isClaimableLand(start) || start.owner === 0 || w.visited.has(getHexKey(start))) continue;
-                let owner = start.owner;
-                let queue = [start];
-                let region = [];
-                let touchesOpenEdge = false;
-                w.visited.add(getHexKey(start));
+            function overBudget() {
+                return performance.now() - t0 >= budgetMs;
+            }
+
+            if(w.pendingPocket) {
+                wodEncirclementApplyPocket(w.pendingPocket.region, w.pendingPocket.owner, w);
+                w.pendingPocket = null;
+                if(overBudget()) return;
+            }
+
+            while(w.idx < list.length && !overBudget()) {
+                let owner, queue, region, touchesOpenEdge;
+
+                if(w.partialFill) {
+                    owner = w.partialFill.owner;
+                    queue = w.partialFill.queue;
+                    region = w.partialFill.region;
+                    touchesOpenEdge = w.partialFill.touchesOpenEdge;
+                    w.partialFill = null;
+                } else {
+                    let start = list[w.idx++];
+                    if(!isClaimableLand(start) || start.owner === 0 || w.visited.has(getHexKey(start))) continue;
+                    owner = start.owner;
+                    queue = [start];
+                    region = [];
+                    touchesOpenEdge = false;
+                    w.visited.add(getHexKey(start));
+                }
 
                 while(queue.length > 0) {
+                    if(overBudget()) {
+                        w.partialFill = { owner, queue, region, touchesOpenEdge };
+                        return;
+                    }
                     let hex = queue.pop();
                     region.push(hex);
 
@@ -22705,44 +22779,15 @@
                     }
                 }
 
-                if(!touchesOpenEdge) {
-                    let regionKeys = new Set(region.map(hex => getHexKey(hex)));
-                    let hasOwnerCity = wodRegionHasOwnerCity(regionKeys, owner);
-                    let hasOwnerFort = false;
-                    let fortList = gameData.forts;
-                    if(fortList && fortList.length) {
-                        for(let fi = 0, fl = fortList.length; fi < fl; fi++) {
-                            let ft = fortList[fi];
-                            if(!ft || wodEffectiveFortOwner(ft) !== owner) continue;
-                            if(regionKeys.has(`${ft.q},${ft.r}`)) {
-                                hasOwnerFort = true;
-                                break;
-                            }
-                        }
-                    }
-                    let supplyRelief = hasOwnerCity || hasOwnerFort;
-                    let hasOwnerCombatUnit = false;
-                    for(let u of gameData.entities) {
-                        if(u.owner !== owner) continue;
-                        if(wodUnitInsideRegion(u, regionKeys)) {
-                            hasOwnerCombatUnit = true;
-                            break;
-                        }
-                    }
-                    for(let hex of region) {
-                        let hk = getHexKey(hex);
-                        w.encircledHexes.add(hk);
-                        if(supplyRelief) w.encircledReliefHexes.add(hk);
-                    }
-                    if(!hasOwnerCity && !hasOwnerCombatUnit) {
-                        let capturer = wodEncirclementCapturerForPocket(region, owner);
-                        if(capturer > 0) {
-                            for(let hex of region) setHexOwner(hex, capturer);
-                        }
-                    }
+                if(touchesOpenEdge) continue;
+
+                if(overBudget()) {
+                    w.pendingPocket = { region, owner };
+                    return;
                 }
+                wodEncirclementApplyPocket(region, owner, w);
             }
-            if(w.idx < list.length) return;
+            if(w.idx < list.length || w.partialFill || w.pendingPocket) return;
             gameData.encircledHexes = w.encircledHexes;
             gameData.encircledReliefHexes = w.encircledReliefHexes;
             gameData._encircWork = null;
