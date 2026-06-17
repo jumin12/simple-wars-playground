@@ -9540,6 +9540,7 @@
         }
         function wodKickParallelTroopPowIfEligible() {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode) return;
+            if(wodDeferHeavySimDuringMarch()) return;
             wodEnsurePowWorkers();
             if(wodPowWorkers.length === 0) return;
             let ents = gameData.entities;
@@ -9687,14 +9688,8 @@
                     if(dist < minDist && dist > 0) {
                         let overlap = minDist - dist;
                         let pushStrength = u1.owner === u2.owner ? 0.42 : 0.48;
-                        if(u1.target && !u1.retreating) {
-                            if(wodMpIsHumanOwner(u1.owner)) return;
-                            pushStrength *= 0.35;
-                        }
-                        if(u2.target && !u2.retreating) {
-                            if(wodMpIsHumanOwner(u2.owner)) return;
-                            pushStrength *= 0.35;
-                        }
+                        if(u1.target && !u1.retreating) pushStrength *= wodMpIsHumanOwner(u1.owner) ? 0.15 : 0.35;
+                        if(u2.target && !u2.retreating) pushStrength *= wodMpIsHumanOwner(u2.owner) ? 0.15 : 0.35;
                         let pushX = (dx / dist) * overlap * pushStrength;
                         let pushY = (dy / dist) * overlap * pushStrength;
                         u1.x -= pushX;
@@ -9725,11 +9720,16 @@
                 wodApplySepWorkerResult(gameData._wodSepApply);
                 gameData._wodSepApply = null;
             }
-            if((gameData._wodPlayerMovingN || 0) > 0) return;
             wodEnsureSepWorker();
             if(wodSepBusy) return;
             let kicked = wodKickSepWorker(sepPad, cellSize);
-            if(!kicked && (gameData._wodSimTick & 1) === 0) {
+            if(kicked) return;
+            let pn = gameData._wodPlayerMovingN || 0;
+            if(pn > 0) {
+                wodRunUnitSeparationSync(sepPad, cellSize);
+                return;
+            }
+            if((gameData._wodSimTick & 1) === 0) {
                 let mn = gameData._wodMovingN || 0;
                 if(mn < 12 || (gameData._wodSimTick % 4) === 0)
                     wodRunUnitSeparationSync(sepPad, cellSize);
@@ -18775,30 +18775,13 @@
             if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
         }
 
-        function wodPlayerUnitsMarching() {
-            return (gameData._wodPlayerMovingN || 0) > 0;
-        }
-
-        /** Tighter AI/encirclement budgets while the player marches — never blocks sim. */
-        function wodMarchSimBudgetScale() {
-            if(wodPlayerUnitsMarching()) return 0.5;
+        function wodDeferHeavySimDuringMarch() {
             let mn = gameData._wodMovingN || 0;
-            if(mn >= 20) return 0.65;
-            if(mn >= 10) return 0.8;
-            return 1;
+            let pn = gameData._wodPlayerMovingN || 0;
+            return mn >= 8 || pn >= 4;
         }
 
-        function wodFlushQueuedTerrainDirty() {
-            if(!gameData._terrDirtyQueued) return;
-            gameData._terrDirtyQueued = false;
-            gameData._terrDirtyNext = 0;
-            gameData._terrDirtyPending = false;
-            wodTerrainPoliticalDirty = true;
-            terrainNeedsUpdate = true;
-            wodTerrainPolWork = null;
-        }
-
-        function wodUnitSmoothDrawXY(unit) {
+        function wodUnitSmoothDrawXY(unit, simDt) {
             if(unit._drawX == null || unit._drawY == null) {
                 unit._drawX = unit.x;
                 unit._drawY = unit.y;
@@ -18806,14 +18789,20 @@
             }
             let dx = unit.x - unit._drawX;
             let dy = unit.y - unit._drawY;
-            if(dx * dx + dy * dy > 360 * 360) {
+            let distSq = dx * dx + dy * dy;
+            if(distSq > 360 * 360) {
                 unit._drawX = unit.x;
                 unit._drawY = unit.y;
                 return { x: unit.x, y: unit.y };
             }
-            let k = unit.target
-                ? (wodMpIsHumanOwner(unit.owner) ? 0.36 : 0.78)
-                : 0.62;
+            if(distSq < 0.09) {
+                unit._drawX = unit.x;
+                unit._drawY = unit.y;
+                return { x: unit.x, y: unit.y };
+            }
+            let dt = simDt > 0 ? simDt : (1 / 60);
+            let rate = unit.target ? 28 : 20;
+            let k = 1 - Math.exp(-rate * dt);
             unit._drawX += dx * k;
             unit._drawY += dy * k;
             return { x: unit._drawX, y: unit._drawY };
@@ -23171,10 +23160,12 @@
 
         function updateEncirclements(dt) {
             if(gameData._encircWork) {
+                if(wodDeferHeavySimDuringMarch() && (gameData._wodSimTick & 1)) return;
                 wodEncirclementProcessChunk();
                 return;
             }
-            gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
+            if(!wodDeferHeavySimDuringMarch())
+                gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
             let interval = 0.55 + Math.min(1.0, (gameData.hexList.length || 0) / 50000);
             if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.35, 1.8);
             if(gameData.encirclementTimer < interval) return;
@@ -23241,7 +23232,7 @@
             let list = gameData.hexList;
             let t0 = performance.now();
             // Keep each tick small so encirclement never monopolizes a frame (90ms here caused multi-second "random" freezes).
-            let budgetMs = (wodUsesVisualViewportLayout() ? 1.25 : 3.5) * wodMarchSimBudgetScale();
+            let budgetMs = wodUsesVisualViewportLayout() ? 1.25 : 3.5;
             function overBudget() {
                 return performance.now() - t0 >= budgetMs;
             }
@@ -28003,7 +27994,9 @@
             if(dt > 0.1) dt = 0.1;
             menuDemoLastTime = time;
             let speed = gameData.speed > 0 ? gameData.speed : 1;
-            update(dt * speed);
+            let simDt = dt * speed;
+            gameData._frameSimDt = simDt;
+            update(simDt);
             draw();
             menuDemoAnimId = requestAnimationFrame(menuBackgroundLoop);
         }
@@ -29060,7 +29053,7 @@
             if(!w) return;
             let keys = w.formationKeys;
             let t0 = performance.now();
-            let budgetMs = (wodUsesVisualViewportLayout() ? 1.15 : 2.35) * wodMarchSimBudgetScale();
+            let budgetMs = wodUsesVisualViewportLayout() ? 1.15 : 2.35;
             function overBudget() {
                 return performance.now() - t0 >= budgetMs;
             }
@@ -29080,8 +29073,7 @@
                 let ents = gameData.entities;
                 let mobMemo = w.mobMemo;
                 // Keep AI pulses incremental on every platform; a full-faction pulse was the source of periodic hitches.
-                let batchBase = wodUsesVisualViewportLayout() ? 22 : 52;
-                let BATCH = Math.max(8, (batchBase * wodMarchSimBudgetScale()) | 0);
+                let BATCH = wodUsesVisualViewportLayout() ? 22 : 52;
                 let nExamined = 0;
                 while(w.ei < ents.length && nExamined < BATCH) {
                     let unit = ents[w.ei++];
@@ -29213,11 +29205,12 @@
 
         function updateAiStrategy(dt) {
             if(gameData._aiStratWork) {
+                if(wodDeferHeavySimDuringMarch() && (gameData._wodSimTick & 1)) return;
                 wodDrainAiStratFormationAndUnits();
                 return;
             }
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
-            gameData.aiStrategyTimer += dt;
+            if(!wodDeferHeavySimDuringMarch()) gameData.aiStrategyTimer += dt;
             let stratEvery = wodUsesVisualViewportLayout() ? 2.15 : 1.95;
             if(gameData.aiStrategyTimer < stratEvery) return;
             gameData.aiStrategyTimer = 0;
@@ -29270,9 +29263,6 @@
             }
             gameData._wodMovingN = movingN;
             gameData._wodPlayerMovingN = playerMovingN;
-            if((gameData._wodPrevPlayerMovingN || 0) > 0 && playerMovingN === 0)
-                wodFlushQueuedTerrainDirty();
-            gameData._wodPrevPlayerMovingN = playerMovingN;
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             let entN = gameData.entities.length;
             if(touchCamGesture) gameData._combatShotBudget = 0;
@@ -29385,7 +29375,7 @@
 
             if(!gameData.aiTimer) gameData.aiTimer = Math.random() * 0.85;
             let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.2 : 2.35;
-            if(!gameData._aiSpawnBurst) {
+            if(!gameData._aiSpawnBurst && !wodDeferHeavySimDuringMarch()) {
                 gameData.aiTimer += dt;
                 if(gameData.aiTimer > aiBurstEvery) {
                     gameData.aiTimer = 0;
@@ -29393,7 +29383,7 @@
                     if(keys.length > 0) gameData._aiSpawnBurst = { keys, idx: 0 };
                 }
             }
-            if(gameData._aiSpawnBurst && gameData._aiSpawnBurst.keys.length) {
+            if(gameData._aiSpawnBurst && gameData._aiSpawnBurst.keys.length && !wodDeferHeavySimDuringMarch()) {
                 let b = gameData._aiSpawnBurst;
                 if(b.idx >= b.keys.length) {
                     gameData._aiSpawnBurst = null;
@@ -29439,7 +29429,7 @@
             let gridCell = wodMob ? 120 : 96;
             for(let ui = 0; ui < gameData.entities.length; ui++) {
                 let u = gameData.entities[ui];
-                if(!u || u.hp <= 0 || u.type === 'ship' || u.target) continue;
+                if(!u || u.hp <= 0 || u.type === 'ship') continue;
                 let terrainCheckStride = wodHeavyEnts ? 5 : 3;
                 if(((ui + gameData._wodSimTick) % terrainCheckStride) !== 0) continue;
                 let hh = getNearestHexToPoint(u.x, u.y);
@@ -29678,6 +29668,7 @@
             } else {
                 wodMobileUiStatTimer += dt;
                 let hudEvery = wodUsesVisualViewportLayout() ? 0.22 : 0.2;
+                if((gameData._wodPlayerMovingN || 0) > 0) hudEvery = Math.max(hudEvery, 0.38);
                 if(wodMobileUiStatTimer >= hudEvery) {
                     wodMobileUiStatTimer = 0;
                     let loHudSim = wodLocalPlayerOwner();
@@ -29900,12 +29891,12 @@
         }
 
         function wodMarkTerrainPoliticalDirty() {
-            if(wodPlayerUnitsMarching()) {
-                gameData._terrDirtyQueued = true;
-                return;
-            }
             let now = performance.now();
-            let throttleMs = (gameData._wodMovingN || 0) > 8 ? 680 : 420;
+            let mn = gameData._wodMovingN || 0;
+            let pn = gameData._wodPlayerMovingN || 0;
+            let throttleMs = mn > 8 ? 1100 : 520;
+            if(pn > 0) throttleMs = Math.max(throttleMs, 1400);
+            else if(mn > 4) throttleMs = Math.max(throttleMs, 900);
             if(gameData._terrDirtyNext && now < gameData._terrDirtyNext) {
                 gameData._terrDirtyPending = true;
                 return;
@@ -30935,8 +30926,7 @@
                 wodTerrainPoliticalDirty = true;
                 terrainNeedsUpdate = true;
                 wodTerrainPolWork = null;
-                let marchThrottle = (gameData._wodMovingN || 0) > 8 ? 680 : 420;
-                gameData._terrDirtyNext = performance.now() + marchThrottle;
+                gameData._terrDirtyNext = performance.now() + 380;
             }
             if(terrainNeedsUpdate) {
                 let now = performance.now();
@@ -30944,7 +30934,6 @@
                 let ownersChanging = !!(gameData.layers && (gameData.layers.diplomacy || gameData.layers.territory));
                 let livePlay = gameState === 'PLAYING' && !gameData.menuAttractMode;
                 let camBusy = wodIsCamInteracting();
-                let playerMarching = wodPlayerUnitsMarching();
                 let gap;
                 if(forceImmediate) gap = 0;
                 else if(ownersChanging) gap = livePlay ? (wodUsesVisualViewportLayout() ? 720 : 180) : (wodUsesVisualViewportLayout() ? 72 : 48);
@@ -30953,22 +30942,28 @@
                     gap = Math.max(gap, wodUsesVisualViewportLayout() ? 680 : 480);
                 else if(livePlay && (gameData._wodMovingN || 0) > 6)
                     gap = Math.max(gap, wodUsesVisualViewportLayout() ? 520 : 360);
+                if(livePlay && (gameData._wodPlayerMovingN || 0) > 0)
+                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 920 : 640);
                 if(livePlay && !forceImmediate && wodTerrainLastBakeCostMs > 14)
                     gap = Math.max(gap, Math.min(420, wodTerrainLastBakeCostMs * 9));
                 if(camBusy && !forceImmediate) {
                     // Keep last baked political frame visible while panning — avoids territory/frontline flicker.
-                } else if(playerMarching && !forceImmediate) {
-                    // Defer territory/diplomacy canvas bakes until the march ends — avoids periodic hitches.
                 } else if(forceImmediate) {
                     if(now >= wodTerrainBakeNextMs) {
                         wodTerrainBakeNextMs = now + gap;
                         updateTerrainCache();
                     }
                 } else if(now >= wodTerrainBakeNextMs || wodTerrainPolWork) {
-                    let budget = wodUsesVisualViewportLayout() ? (camBusy ? 1.2 : 3.2) : 3.4;
-                    wodStepTerrainPoliticalBake(budget);
-                    if(!terrainNeedsUpdate)
-                        wodTerrainBakeNextMs = now + gap;
+                    let playerMarching = livePlay && (gameData._wodPlayerMovingN || 0) > 0;
+                    if(playerMarching && !wodTerrainPolWork) {
+                        wodTerrainBakeNextMs = now + (wodUsesVisualViewportLayout() ? 320 : 220);
+                    } else {
+                        let budget = wodUsesVisualViewportLayout() ? (camBusy ? 1.2 : 2.4) : 2.6;
+                        if(playerMarching) budget = Math.min(budget, wodUsesVisualViewportLayout() ? 1.4 : 1.8);
+                        wodStepTerrainPoliticalBake(budget);
+                        if(!terrainNeedsUpdate)
+                            wodTerrainBakeNextMs = now + gap;
+                    }
                 }
             }
             ctx.drawImage(terrainCanvas, terrainBounds.minX, terrainBounds.minY);
@@ -35386,7 +35381,7 @@
                     if(!wodFogCanSeeUnit(unit)) continue;
                     if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad)) continue;
                     ctx.save();
-                    let dp = wodUnitSmoothDrawXY(unit);
+                    let dp = wodUnitSmoothDrawXY(unit, gameData._frameSimDt);
                     ctx.translate(dp.x, dp.y);
                     
                     let uColor = factionColors[unit.owner];
@@ -35634,7 +35629,8 @@
             let smInt = wodUsesVisualViewportLayout()
                 ? (entN > 350 ? 2200 : entN > 180 ? 1600 : 950)
                 : 400;
-            if(nowSm - lastPlayerSummaryMs > smInt) {
+            let playerMarching = (gameData._wodPlayerMovingN || 0) > 0;
+            if(nowSm - lastPlayerSummaryMs > smInt && (!playerMarching || nowSm - lastPlayerSummaryMs > smInt * 2.5)) {
                 lastPlayerSummaryMs = nowSm;
                 updatePlayerSummary();
             }
@@ -35681,18 +35677,25 @@
                     let simDt = dt * gameData.speed;
                     let baseChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
                     let maxSingleStep = baseChunk * 1.15;
+                    gameData._frameSimDt = 0;
                     if(simDt <= maxSingleStep) {
                         update(simDt);
+                        gameData._frameSimDt = simDt;
                     } else {
                         let simChunk = baseChunk * Math.max(1, gameData.speed || 1);
                         let simRemain = simDt;
                         while(simRemain > 0.0001) {
                             let step = Math.min(simRemain, simChunk);
                             update(step);
+                            gameData._frameSimDt += step;
                             simRemain -= step;
                         }
                     }
+                } else {
+                    gameData._frameSimDt = 0;
                 }
+            } else {
+                gameData._frameSimDt = 0;
             }
             draw();
             animationFrameId = requestAnimationFrame(gameLoop);

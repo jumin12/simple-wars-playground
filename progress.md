@@ -77,3 +77,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - [x] MP match map isolation pass (Rebuild terrain cache on MP match load; stop restoring menu-attract live map after lobby preview; clear stale live map before host launch/guest join; build host init payload from committed lobby snapshot; remove premature initGame gameLoop before PLAYING.)
 - [x] MP host blank map and client missing units pass (Build init payload from live match state with spawned frontline units; spawn units on client when payload empty; defer terrain bake until canvas visible; default in-game layer flags on match start.)
 - [x] MP unified match-start sync pass (Host and clients apply identical match_start payload via wodMpApplyMatchStartPayload; rebuild hexList/hexes from one source; clear stale terrain caches on map reset; normalize hex terrain colors before bake.)
+
+## Unit movement stutter fix (2026-06-17)
+- Root causes: frame-rate-dependent draw smoothing (fixed k per frame), collision separation throttled to every 4 frames during large marches, territory/frontline canvas bakes firing on the draw path every ~420–680ms while units claim hexes, and HUD summary rescans every 400ms during play.
+- Fixes: dt-based exponential draw interpolation using accumulated `_frameSimDt`; player-unit separation runs every sim tick; defer/slim territory political bakes while player units march; longer terrain dirty throttle during movement; defer player summary and troop HUD rescans while marching.
