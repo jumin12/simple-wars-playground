@@ -9545,7 +9545,7 @@
             let ents = gameData.entities;
             let n = ents.length;
             if(n < 64) return;
-            if(n < 220 && ((gameData._wodSimTick | 0) % 4)) return;
+            if(n < 220 && ((gameData._wodSimTick | 0) % 6)) return;
             let maxP = Math.max(512, n + 64);
             if(!gameData._wodPowOwnPacked || gameData._wodPowOwnPacked.length < maxP) {
                 gameData._wodPowOwnPacked = new Uint16Array(maxP);
@@ -9714,7 +9714,9 @@
         }
         function wodRunUnitSeparation(wodSkipSep, sepPad, cellSize) {
             if(wodSkipSep) return;
-            if(gameData._wodSepApply) {
+            let entN = gameData.entities ? gameData.entities.length : 0;
+            let sepStride = entN > 120 ? 2 : 1;
+            if(gameData._wodSepApply && (gameData._wodSimTick & (sepStride - 1)) === 0) {
                 wodApplySepWorkerResult(gameData._wodSepApply);
                 gameData._wodSepApply = null;
             }
@@ -18334,28 +18336,36 @@
             wodMarkTerrainPoliticalDirty();
         }
 
-        function wodEvaluateAllCityCaptures() {
-            for(let city of gameData.cities) {
-                if(!city || city.owner <= 0) continue;
-                let urban = getCityUrbanTerrainHexes(city);
-                if(urban.length === 0) {
-                    let ch = gameData.hexes[`${city.q},${city.r}`];
-                    if(!ch || ch.owner <= 0 || ch.owner === city.owner) continue;
-                    if(wodCityUrbanHasDefenderCombat(city, city.owner)) continue;
-                    wodExecuteCityCapture(city, ch.owner);
-                    continue;
-                }
-                let capturer = null;
-                for(let uh of urban) {
-                    let hx = gameData.hexes[getHexKey(uh)];
-                    if(!hx || hx.owner <= 0) { capturer = null; break; }
-                    if(capturer == null) capturer = hx.owner;
-                    else if(capturer !== hx.owner) { capturer = null; break; }
-                }
-                if(capturer == null || capturer <= 0 || capturer === city.owner) continue;
-                if(wodCityUrbanHasDefenderCombat(city, city.owner)) continue;
-                wodExecuteCityCapture(city, capturer);
+        function wodEvaluateOneCityCapture(city) {
+            if(!city || city.owner <= 0) return;
+            let urban = getCityUrbanTerrainHexes(city);
+            if(urban.length === 0) {
+                let ch = gameData.hexes[`${city.q},${city.r}`];
+                if(!ch || ch.owner <= 0 || ch.owner === city.owner) return;
+                if(wodCityUrbanHasDefenderCombat(city, city.owner)) return;
+                wodExecuteCityCapture(city, ch.owner);
+                return;
             }
+            let capturer = null;
+            for(let uh of urban) {
+                let hx = gameData.hexes[getHexKey(uh)];
+                if(!hx || hx.owner <= 0) { capturer = null; break; }
+                if(capturer == null) capturer = hx.owner;
+                else if(capturer !== hx.owner) { capturer = null; break; }
+            }
+            if(capturer == null || capturer <= 0 || capturer === city.owner) return;
+            if(wodCityUrbanHasDefenderCombat(city, city.owner)) return;
+            wodExecuteCityCapture(city, capturer);
+        }
+
+        function wodEvaluateAllCityCaptures() {
+            let cities = gameData.cities;
+            if(!cities || !cities.length) return;
+            if(gameData._cityCapIdx == null || gameData._cityCapIdx >= cities.length) gameData._cityCapIdx = 0;
+            let batch = cities.length > 90 ? 4 : (cities.length > 45 ? 7 : cities.length);
+            for(let n = 0; n < batch && gameData._cityCapIdx < cities.length; n++)
+                wodEvaluateOneCityCapture(cities[gameData._cityCapIdx++]);
+            if(gameData._cityCapIdx >= cities.length) gameData._cityCapIdx = 0;
         }
 
         /** Capture flips only when every urban tile for this town is owned by the attacker. */
@@ -18751,6 +18761,8 @@
             tr.x0 = m.x; tr.y0 = m.y; tr.x1 = hx; tr.y1 = hy;
             tr.life = tracerLife; tr.maxLife = tracerLife;
             tr.color = col; tr.width = width; tr.heavy = heavy;
+            attacker._combatTracerAlt = !attacker._combatTracerAlt;
+            tr.alt = attacker._combatTracerAlt ? 1 : 0;
             if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
         }
 
@@ -18785,9 +18797,25 @@
                 let hx = f.x0 + (f.x1 - f.x0) * prog;
                 let hy = f.y0 + (f.y1 - f.y0) * prog;
                 let fade = Math.max(0, 1 - prog * 1.05);
-                ctx.globalAlpha = fade * 0.9;
-                ctx.strokeStyle = f.color;
-                ctx.lineWidth = f.width * (f.heavy ? 1.35 : 1.2);
+                if(f.alt && prog < 0.42) {
+                    ctx.globalAlpha = fade * 0.7;
+                    ctx.fillStyle = f.heavy ? '#fff4d6' : '#fff8e8';
+                    ctx.beginPath();
+                    ctx.arc(f.x0, f.y0, f.width * (f.heavy ? 1.15 : 0.95), 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                if(f.alt) {
+                    ctx.globalAlpha = fade * 0.42;
+                    ctx.strokeStyle = f.color;
+                    ctx.lineWidth = f.width * 2.1;
+                    ctx.beginPath();
+                    ctx.moveTo(f.x0, f.y0);
+                    ctx.lineTo(hx, hy);
+                    ctx.stroke();
+                }
+                ctx.globalAlpha = fade * (f.alt ? 0.98 : 0.88);
+                ctx.strokeStyle = f.alt ? (f.heavy ? '#fff4d6' : '#fff8e8') : f.color;
+                ctx.lineWidth = f.width * (f.alt ? 1.05 : (f.heavy ? 1.35 : 1.2));
                 ctx.beginPath();
                 ctx.moveTo(f.x0, f.y0);
                 ctx.lineTo(hx, hy);
@@ -21964,6 +21992,26 @@
             return chain;
         }
 
+        function wodSmoothPolylinePath(pts, cornerCut) {
+            if(!pts || pts.length < 3) return pts;
+            let hr = gameData.hexRadius || 20;
+            let cut = hr * (cornerCut == null ? 0.34 : cornerCut);
+            let out = [{ x: pts[0].x, y: pts[0].y }];
+            for(let i = 1; i < pts.length - 1; i++) {
+                let a = pts[i - 1], b = pts[i], c = pts[i + 1];
+                let abx = b.x - a.x, aby = b.y - a.y;
+                let bcx = c.x - b.x, bcy = c.y - b.y;
+                let abLen = Math.sqrt(abx * abx + aby * aby) || 1;
+                let bcLen = Math.sqrt(bcx * bcx + bcy * bcy) || 1;
+                let d1 = Math.min(cut, abLen * 0.42);
+                let d2 = Math.min(cut, bcLen * 0.42);
+                out.push({ x: b.x - (abx / abLen) * d1, y: b.y - (aby / abLen) * d1 });
+                out.push({ x: b.x + (bcx / bcLen) * d2, y: b.y + (bcy / bcLen) * d2 });
+            }
+            out.push({ x: pts[pts.length - 1].x, y: pts[pts.length - 1].y });
+            return dedupeNearOrderPathPoints(out);
+        }
+
         function smoothGridPath(path) {
             if(path.length <= 2) return path;
             for(let i = 0; i < path.length; i++) {
@@ -22089,7 +22137,17 @@
             let corridor = wodHexPathToWorldWaypoints(unit, hexPath, endPt);
             let pts = [{x: startPt ? startPt.x : hexPath[0].x, y: startPt ? startPt.y : hexPath[0].y}];
             for(let wi = 0; wi < corridor.length; wi++) pts.push(corridor[wi]);
-            return dedupeNearOrderPathPoints(pts);
+            return wodSmoothPolylinePath(dedupeNearOrderPathPoints(pts));
+        }
+
+        function wodDrainOrderArrowQueueTick() {
+            if(!wodOrderArrowBuildQueue.length) return;
+            wodPfSpentMs = 0;
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, 14);
+            let t0 = performance.now();
+            let budgetMs = wodUsesVisualViewportLayout() ? 3.2 : 5.5;
+            while(wodOrderArrowBuildQueue.length && performance.now() - t0 < budgetMs)
+                wodProcessOrderArrowBuildJob(wodOrderArrowBuildQueue.shift());
         }
 
         function wodEnqueueOrderArrowPathBuild(unit, marchPts) {
@@ -22164,7 +22222,7 @@
                 wodPfSpentMs = 0;
                 wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, wodFogActive() ? 22 : 16);
                 let t0 = performance.now();
-                let budgetMs = wodUsesVisualViewportLayout() ? 3.5 : (wodFogActive() ? 12 : 8);
+                let budgetMs = wodUsesVisualViewportLayout() ? 2.8 : 5;
                 while(wodOrderArrowBuildQueue.length && performance.now() - t0 < budgetMs)
                     wodProcessOrderArrowBuildJob(wodOrderArrowBuildQueue.shift());
                 if(wodOrderArrowBuildQueue.length) wodPumpOrderArrowBuildQueue();
@@ -22181,7 +22239,7 @@
                 for(let i = c; i < unit.fullMarchWaypoints.length; i++)
                     pts.push({x: unit.fullMarchWaypoints[i].x, y: unit.fullMarchWaypoints[i].y});
             }
-            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
+            unit._routeArrowFrozenPts = wodSmoothPolylinePath(dedupeNearOrderPathPoints(pts));
         }
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
@@ -28881,6 +28939,10 @@
             let pulseKey = String(ownerKey);
             let pulse = gameData._aiSpawnPulse[pulseKey];
             if(!pulse) {
+                pulse = { phase: 'econ' };
+                gameData._aiSpawnPulse[pulseKey] = pulse;
+            }
+            if(pulse.phase === 'econ') {
                 let cash = gameData.aiMoneyByOwner[ownerKey] || 0;
                 let unitReserve = Math.max(WOD_PRICE_LIGHT * 2.5, WOD_PRICE_HEAVY || WOD_PRICE_LIGHT * 3);
                 let facSpend = 0;
@@ -28915,13 +28977,12 @@
                 let spawnCap = wodUsesVisualViewportLayout() ? 5 : 6;
                 let spawnsThisTick = Math.min(spawnCap, Math.max(3, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(160, WOD_PRICE_LIGHT))));
                 if(!gameData._aiTrainPick) gameData._aiTrainPick = {};
-                pulse = {
-                    spawnsLeft: spawnsThisTick,
-                    rotOff: gameData._aiTrainPick[pulseKey] || 0,
-                    combatSafeCities: aiCities.filter(c => !isCitySiegeBlockedForProduction(c))
-                };
+                pulse.spawnsLeft = spawnsThisTick;
+                pulse.rotOff = gameData._aiTrainPick[pulseKey] || 0;
+                pulse.combatSafeCities = aiCities.filter(c => !isCitySiegeBlockedForProduction(c));
                 pulse.candidateOrder = pulse.combatSafeCities;
-                gameData._aiSpawnPulse[pulseKey] = pulse;
+                pulse.phase = 'spawn';
+                return false;
             }
 
             let aiTroops = getOwnerUnitCount(ownerId);
@@ -28981,15 +29042,33 @@
         function wodDrainAiStratFormationAndUnits() {
             let w = gameData._aiStratWork;
             if(!w) return;
-            let keys = w.formationKeys;
             let t0 = performance.now();
-            let budgetMs = wodUsesVisualViewportLayout() ? 1.15 : 2.35;
+            let budgetMs = wodUsesVisualViewportLayout() ? 1.0 : 1.85;
             function overBudget() {
                 return performance.now() - t0 >= budgetMs;
             }
+            if(w.phase === 'gather') {
+                let ents = gameData.entities;
+                let batch = wodUsesVisualViewportLayout() ? 36 : 56;
+                let n = 0;
+                while(w.gi < ents.length && n < batch) {
+                    let unit = ents[w.gi++];
+                    n++;
+                    if(unit.owner > 0 && unit.type !== 'convoy' && unit.hp > 0 && !wodMpIsHumanOwner(unit.owner)) {
+                        if(!w.aiGroups[unit.owner]) w.aiGroups[unit.owner] = [];
+                        w.aiGroups[unit.owner].push(unit);
+                    }
+                    if((n & 15) === 0 && overBudget()) return;
+                }
+                if(w.gi < ents.length) return;
+                w.formationKeys = Object.keys(w.aiGroups);
+                w.phase = 'form';
+                w.fi = 0;
+            }
             if(w.phase === 'form') {
-                while(w.fi < keys.length) {
-                    let k = keys[w.fi];
+                let fkeys = w.formationKeys;
+                while(w.fi < fkeys.length) {
+                    let k = fkeys[w.fi];
                     let done = assignAiFormationOrders(parseInt(k, 10), w.aiGroups[k], w.serial);
                     if(!done) return;
                     w.fi++;
@@ -29003,7 +29082,7 @@
                 let ents = gameData.entities;
                 let mobMemo = w.mobMemo;
                 // Keep AI pulses incremental on every platform; a full-faction pulse was the source of periodic hitches.
-                let BATCH = wodUsesVisualViewportLayout() ? 22 : 52;
+                let BATCH = wodUsesVisualViewportLayout() ? 18 : 34;
                 let nExamined = 0;
                 while(w.ei < ents.length && nExamined < BATCH) {
                     let unit = ents[w.ei++];
@@ -29140,34 +29219,26 @@
             }
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
             gameData.aiStrategyTimer += dt;
-            let stratEvery = wodUsesVisualViewportLayout() ? 2.15 : 1.95;
+            let stratEvery = wodUsesVisualViewportLayout() ? 2.35 : 2.15;
             if(gameData.aiStrategyTimer < stratEvery) return;
             gameData.aiStrategyTimer = 0;
 
             gameData.aiStrategySerial = (gameData.aiStrategySerial || 0) + 1;
-            wodBuildAiStratTroopPow();
+            if((gameData._wodSimTick | 0) % 6 === 0) wodBuildAiStratTroopPow();
             if(!gameData.aiFocusTimer) gameData.aiFocusTimer = 0;
-            gameData.aiFocusTimer += 0.65;
-            if(gameData.aiFocusTimer > 4) {
+            gameData.aiFocusTimer += stratEvery;
+            if(gameData.aiFocusTimer > 5.5) {
                 gameData.aiFocusTimer = 0;
                 updateAiFrontFocus();
             }
 
-            let aiGroups = {};
-            for(let unit of gameData.entities) {
-                if(unit.owner > 0 && unit.type !== 'convoy' && unit.hp > 0 && !wodMpIsHumanOwner(unit.owner)) {
-                    if(!aiGroups[unit.owner]) aiGroups[unit.owner] = [];
-                    aiGroups[unit.owner].push(unit);
-                }
-            }
-
             let mobMemo = wodUsesVisualViewportLayout();
-            let formationKeys = Object.keys(aiGroups);
             gameData._aiStratWork = {
-                phase: 'form',
-                formationKeys,
+                phase: 'gather',
+                gi: 0,
+                formationKeys: [],
                 fi: 0,
-                aiGroups,
+                aiGroups: {},
                 serial: gameData.aiStrategySerial,
                 mobMemo,
                 sectorsByOwner: {},
@@ -29292,7 +29363,7 @@
             }
 
             if(!gameData.aiTimer) gameData.aiTimer = Math.random() * 0.85;
-            let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.2 : 2.35;
+            let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.6 : 2.85;
             if(!gameData._aiSpawnBurst) {
                 gameData.aiTimer += dt;
                 if(gameData.aiTimer > aiBurstEvery) {
@@ -29563,6 +29634,7 @@
             }
 
             wodRunUnitSeparation(wodSkipSep, sepPad, gridCell);
+            wodDrainOrderArrowQueueTick();
 
             wodApplyTerritoryClaimBatch();
             gameData._cityCapTimer = (gameData._cityCapTimer || 0) + dt;
@@ -34191,6 +34263,7 @@
                 pts.push({x: w.x, y: w.y});
             }
             let out = dedupeNearOrderPathPoints(pts);
+            if(out.length >= 3) out = wodSmoothPolylinePath(out);
             return out.length >= 2 ? out : null;
         }
 
@@ -34293,15 +34366,29 @@
             for(let unit of units) {
                 let ox = unit.x - cx, oy = unit.y - cy;
                 let pts = previewPts.map(p => ({x: p.x + ox, y: p.y + oy}));
-                ctx.strokeStyle = wodCommandArrowStrokeRgba(unit, 0.88);
+                if(pts.length >= 3) pts = wodSmoothPolylinePath(pts);
+                let strokeCol = wodCommandArrowStrokeRgba(unit, 0.88);
+                let dashPat = wodCommandArrowDashPattern(unit);
+                ctx.strokeStyle = strokeCol;
+                ctx.globalAlpha = 0.26;
+                ctx.lineWidth = lw + 2.2;
+                ctx.setLineDash([]);
+                ctx.beginPath();
+                ctx.moveTo(pts[0].x, pts[0].y);
+                for(let i = 1; i < pts.length; i++)
+                    ctx.lineTo(pts[i].x, pts[i].y);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
                 ctx.lineWidth = lw;
-                ctx.setLineDash(wodCommandArrowDashPattern(unit));
+                ctx.setLineDash(dashPat);
+                if(dashPat.length) ctx.lineDashOffset = -((performance.now() * 0.045) % 28);
                 ctx.beginPath();
                 ctx.moveTo(pts[0].x, pts[0].y);
                 for(let i = 1; i < pts.length; i++)
                     ctx.lineTo(pts[i].x, pts[i].y);
                 ctx.stroke();
                 ctx.setLineDash([]);
+                ctx.lineDashOffset = 0;
                 if(showHead) {
                     let end = pts[pts.length - 1];
                     let prev = pts[pts.length - 2];
@@ -34319,17 +34406,29 @@
             let strokeCol = wodCommandArrowStrokeRgba(unit, isConvoy ? 0.92 : 0.85);
             let dashPat = wodCommandArrowDashPattern(unit);
             let showHead = wodCommandArrowShowsHead();
-            ctx.lineWidth = isConvoy ? 3.5 : 4;
+            let lw = isConvoy ? 3.5 : 4.2;
             ctx.lineCap = 'round';
             ctx.lineJoin = 'round';
             ctx.strokeStyle = strokeCol;
+            ctx.globalAlpha = 0.28;
+            ctx.lineWidth = lw + 2.8;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for(let i = 1; i < points.length; i++)
+                ctx.lineTo(points[i].x, points[i].y);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.lineWidth = lw;
             ctx.setLineDash(dashPat);
+            if(dashPat.length) ctx.lineDashOffset = -((performance.now() * 0.045) % 28);
             ctx.beginPath();
             ctx.moveTo(points[0].x, points[0].y);
             for(let i = 1; i < points.length; i++)
                 ctx.lineTo(points[i].x, points[i].y);
             ctx.stroke();
             ctx.setLineDash([]);
+            ctx.lineDashOffset = 0;
             if(showHead) {
                 let end = points[points.length - 1];
                 let prev = points[points.length - 2];
