@@ -9661,7 +9661,10 @@
             }
             return true;
         }
-        function wodRunUnitSeparationSync(sepPad) {
+        function wodRunUnitSeparationSync(sepPad, cellSize) {
+            let cs = cellSize || (gameData.unitSpatialGrid && gameData.unitSpatialGrid.cellSize) || 96;
+            if(!gameData.unitSpatialGrid || gameData.unitSpatialGrid.cellSize !== cs)
+                gameData.unitSpatialGrid = buildUnitSpatialGrid(cs);
             if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return;
             for(let i = 0, el = gameData.entities.length; i < el; i++) {
                 let u1 = gameData.entities[i];
@@ -9709,7 +9712,7 @@
             }
             wodEnsureSepWorker();
             let kicked = wodKickSepWorker(sepPad, cellSize);
-            if(!kicked) wodRunUnitSeparationSync(sepPad);
+            if(!kicked) wodRunUnitSeparationSync(sepPad, cellSize);
         }
 
         let gameData = {
@@ -23347,14 +23350,22 @@
             gameData._aiStratPowByOwner = by;
         }
 
+        function wodInvalidateAiFrontlineHexCache() {
+            gameData._aiFrontlineHexCache = null;
+        }
+
         function wodCachedFrontlineHexes(owner) {
             let serial = gameData.aiStrategySerial || 0;
-            if(!gameData._aiFrontlineHexCache) gameData._aiFrontlineHexCache = {};
-            let ck = owner + '|' + serial;
-            let hit = gameData._aiFrontlineHexCache[ck];
+            let cache = gameData._aiFrontlineHexCache;
+            if(!cache || cache.serial !== serial) {
+                cache = { serial: serial, byOwner: {} };
+                gameData._aiFrontlineHexCache = cache;
+            }
+            let ow = owner | 0;
+            let hit = cache.byOwner[ow];
             if(hit) return hit;
             hit = getOwnerFrontlineHexes(owner);
-            gameData._aiFrontlineHexCache[ck] = hit;
+            cache.byOwner[ow] = hit;
             return hit;
         }
 
@@ -25203,6 +25214,7 @@
             gameData._encircWork = null;
             gameData._aiSpawnBurst = null;
             gameData._aiStratWork = null;
+            wodInvalidateAiFrontlineHexCache();
             wodTerrainBakeNextMs = 0;
             wodTerrainPolWork = null;
             gameData._fogVisible = null;
@@ -25332,6 +25344,7 @@
             if(gameData) {
                 gameData._aiSpawnBurst = null;
                 gameData._aiStratWork = null;
+                wodInvalidateAiFrontlineHexCache();
                 gameData._lastMapFingerprint = null;
                 gameData._mapGenSeed = null;
                 gameData._wodReuseMapGenSeed = false;
@@ -27232,6 +27245,7 @@
             gameData._aiStratWork = null;
             gameData._aiSpawnBurst = null;
             gameData._encircWork = null;
+            wodInvalidateAiFrontlineHexCache();
             if(gameData._soloPreviewSnapshot && !wodSoloSnapshotValidForMatchStart(gameData._soloPreviewSnapshot))
                 gameData._soloPreviewSnapshot = null;
             let keepMissionMap = !!(opts.keepLiveMap || gameData._launchingMission || gameData._selectedMissionEntry);
@@ -28716,9 +28730,8 @@
             let wodMob = wodUsesVisualViewportLayout();
             let wodSkipSep = wodMob && wodHeavyEnts && (gameData._wodSimTick % 2 === 0);
             let sepPad = wodMob && wodHeavyEnts ? 32 : 42;
-            if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells)
-                gameData.unitSpatialGrid = buildUnitSpatialGrid(wodMob ? 120 : 96);
-            wodRunUnitSeparation(wodSkipSep, sepPad, wodMob ? 120 : 96);
+            let gridCell = wodMob ? 120 : 96;
+            wodRunUnitSeparation(wodSkipSep, sepPad, gridCell);
             for(let ui = 0; ui < gameData.entities.length; ui++) {
                 let u = gameData.entities[ui];
                 if(!u || u.hp <= 0 || u.type === 'ship') continue;
@@ -28727,7 +28740,7 @@
                 let hh = getNearestHexToPoint(u.x, u.y);
                 if(!hh || !canUnitEnterHex(u, hh)) ensureUnitPixelOnWalkableHex(u, 28);
             }
-            gameData.unitSpatialGrid = buildUnitSpatialGrid(wodMob ? 120 : 96);
+            gameData.unitSpatialGrid = buildUnitSpatialGrid(gridCell);
             if(!gameData.citySpatialGrid || !gameData.citySpatialGrid.cells)
                 gameData.citySpatialGrid = buildCitySpatialGrid(wodMob ? 280 : 260);
 
