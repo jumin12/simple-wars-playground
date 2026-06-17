@@ -9610,8 +9610,14 @@
             for(let j = 0, jl = idx.length; j < jl; j++) {
                 let u = gameData.entities[idx[j]];
                 if(!u || u.hp <= 0) continue;
-                u.x = xs[j];
-                u.y = ys[j];
+                let nx = xs[j], ny = ys[j];
+                if(u.target && !u.retreating) {
+                    u.x += (nx - u.x) * 0.38;
+                    u.y += (ny - u.y) * 0.38;
+                } else {
+                    u.x = nx;
+                    u.y = ny;
+                }
             }
         }
         function wodKickSepWorker(sepPad, cellSize) {
@@ -9680,6 +9686,8 @@
                     if(dist < minDist && dist > 0) {
                         let overlap = minDist - dist;
                         let pushStrength = u1.owner === u2.owner ? 0.42 : 0.48;
+                        if(u1.target && !u1.retreating) pushStrength *= 0.4;
+                        if(u2.target && !u2.retreating) pushStrength *= 0.4;
                         let pushX = (dx / dist) * overlap * pushStrength;
                         let pushY = (dy / dist) * overlap * pushStrength;
                         u1.x -= pushX;
@@ -17447,8 +17455,8 @@
         const WOD_MORALE_MAX = 100;
         const WOD_UNIT_SPAWN_FX_DUR = 2.0;
         const WOD_OVERHEAD_POP_DUR = 0.55;
-        const WOD_COMBAT_FX_CAP = 96;
-        const WOD_COMBAT_SHOTS_PER_FRAME = 14;
+        const WOD_COMBAT_FX_CAP = 128;
+        const WOD_COMBAT_SHOTS_PER_FRAME = 32;
         const WOD_SPAWN_FX_DRAW_CAP = 8;
         const WOD_FOG_VISION_INTERVAL = 0.35;
         const WOD_FOG_REBUILD_MIN_MS = 480;
@@ -18690,6 +18698,14 @@
             return { x: unit.x + (dx / dist) * muzzleR, y: unit.y + (dy / dist) * muzzleR };
         }
 
+        function wodCombatShotVisualInterval(unit) {
+            if(!unit) return 0.12;
+            if(unit.type === 'heavy') return 0.26;
+            if(unit.type === 'ship') return 0.19;
+            if(unit.type === 'marine') return 0.15;
+            return 0.11;
+        }
+
         function wodEmitCombatShot(attacker, target) {
             if(!attacker || !target) return;
             if(!wodFogCanSeeUnit(attacker) && !wodFogCanSeeUnit(target)) return;
@@ -18714,8 +18730,8 @@
             let heavy = attacker.type === 'heavy';
             let ship = attacker.type === 'ship';
             let marine = attacker.type === 'marine';
-            let tracerLife = heavy ? 0.2 : (ship ? 0.16 : (marine ? 0.13 : 0.11));
-            let width = heavy ? 3.8 : (ship ? 2.8 : (marine ? 2.2 : 1.8));
+            let tracerLife = heavy ? 0.3 : (ship ? 0.24 : (marine ? 0.19 : 0.16));
+            let width = heavy ? 4.2 : (ship ? 3.1 : (marine ? 2.5 : 2.1));
             let tr = wodCombatFxTake();
             tr.kind = 'tracer';
             tr.x0 = m.x; tr.y0 = m.y; tr.x1 = hx; tr.y1 = hy;
@@ -18746,7 +18762,7 @@
                 return wx >= camL - pad && wx <= camR + pad && wy >= camT - pad && wy <= camB + pad;
             }
             let drawN = 0;
-            let drawCap = gfxLite ? 28 : 56;
+            let drawCap = gfxLite ? 44 : 80;
             ctx.lineCap = 'round';
             for(let i = 0; i < fx.length; i++) {
                 if(drawN >= drawCap) break;
@@ -18759,8 +18775,15 @@
                 let hx = f.x0 + (f.x1 - f.x0) * prog;
                 let hy = f.y0 + (f.y1 - f.y0) * prog;
                 let fade = Math.max(0, 1 - prog * 1.05);
-                ctx.globalAlpha = fade * 0.82;
+                ctx.globalAlpha = fade * 0.48;
                 ctx.strokeStyle = f.color;
+                ctx.lineWidth = f.width * 1.75;
+                ctx.beginPath();
+                ctx.moveTo(f.x0, f.y0);
+                ctx.lineTo(hx, hy);
+                ctx.stroke();
+                ctx.globalAlpha = fade * 0.96;
+                ctx.strokeStyle = f.heavy ? '#fff4d6' : '#fff8e8';
                 ctx.lineWidth = f.width;
                 ctx.beginPath();
                 ctx.moveTo(f.x0, f.y0);
@@ -24174,68 +24197,94 @@
             return engaged ? (1 / 3) : 1;
         }
 
+        function wodUnitArrivedAtTarget(unit) {
+            if(unit.type === 'convoy' && unit.target && unit.target.isCity) {
+                let value = unit.tradeValue || 150;
+                if(unit.owner === 1) gameData.money += value;
+                else gameData.aiMoneyByOwner[unit.owner] = (gameData.aiMoneyByOwner[unit.owner] || 0) + value;
+                unit.hp = 0;
+            }
+            unit.target = null;
+            unit.path = null;
+            unit.orderTarget = null;
+            unit.fullMarchWaypoints = null;
+            unit.marchWpCursor = 0;
+            unit.blockedTimer = 0;
+            unit.stuckTimer = 0;
+        }
+
+        function wodAdvanceUnitPathTarget(unit) {
+            if(unit.path && unit.path.length > 0) {
+                unit.target = unit.path.shift();
+                unit.target.pathPrepared = true;
+                return true;
+            }
+            if(unit.fullMarchWaypoints && unit.marchWpCursor < unit.fullMarchWaypoints.length - 1) {
+                unit.marchWpCursor++;
+                if(assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true}))
+                    return !!unit.target;
+                unit.marchWpCursor = Math.max(0, unit.marchWpCursor - 1);
+                return false;
+            }
+            if(unit.target && unit.target.finalTarget) {
+                unit.target = unit.target.finalTarget;
+                return true;
+            }
+            if(unit.orderTarget) {
+                let hr = gameData.hexRadius || 20;
+                let ogx = unit.orderTarget.x - unit.x,
+                    ogy = unit.orderTarget.y - unit.y;
+                if(ogx * ogx + ogy * ogy > hr * hr * 2.25) {
+                    unit.path = null;
+                    unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: false };
+                    return true;
+                }
+            }
+            wodUnitArrivedAtTarget(unit);
+            return false;
+        }
+
         function moveUnitTowardTarget(unit, dt) {
             if(!unit.target) return;
             preparePathTarget(unit);
             if(!unit.target) return;
-            let dx = unit.target.x - unit.x;
-            let dy = unit.target.y - unit.y;
-            let dist = Math.sqrt(dx*dx + dy*dy);
             let combatSlow = getCombatMovementSlowdownFactor(unit, gameData.unitSpatialGrid);
             let fortZoneSlow = wodFortEnemyMovementSlowdownMultiplier(unit);
             let stepSpeed = unit.speed * getUnitSpeedMultiplier(unit) * WOD_MOVE_SPEED_FACTOR * combatSlow * fortZoneSlow;
-            if(dist <= stepSpeed * dt) {
-                let snapPrevX = unit.x;
-                let snapPrevY = unit.y;
-                unit.x = unit.target.x;
-                unit.y = unit.target.y;
-                ensureUnitPixelOnWalkableHex(unit, 10);
-                wodClaimTerritoryAlongMove(unit, snapPrevX, snapPrevY, unit.x, unit.y);
-                if(unit.path && unit.path.length > 0) {
-                    unit.target = unit.path.shift();
-                    unit.target.pathPrepared = true;
-                    return;
+            let stepLeft = stepSpeed * dt;
+            let guard = 0;
+            while(unit.target && stepLeft > 0.0001 && guard++ < 12) {
+                let dx = unit.target.x - unit.x;
+                let dy = unit.target.y - unit.y;
+                let dist = Math.sqrt(dx * dx + dy * dy);
+                if(dist < 0.001) {
+                    if(!wodAdvanceUnitPathTarget(unit)) return;
+                    continue;
                 }
-                if(unit.fullMarchWaypoints && unit.marchWpCursor < unit.fullMarchWaypoints.length - 1) {
-                    unit.marchWpCursor++;
-                    if(!assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true}))
-                        unit.marchWpCursor = Math.max(0, unit.marchWpCursor - 1);
-                    return;
+                if(stepLeft >= dist) {
+                    let snapPrevX = unit.x;
+                    let snapPrevY = unit.y;
+                    unit.x = unit.target.x;
+                    unit.y = unit.target.y;
+                    ensureUnitPixelOnWalkableHex(unit, 10);
+                    wodClaimTerritoryAlongMove(unit, snapPrevX, snapPrevY, unit.x, unit.y);
+                    stepLeft -= dist;
+                    if(!wodAdvanceUnitPathTarget(unit)) return;
+                    continue;
                 }
-                if(unit.target.finalTarget) {
-                    unit.target = unit.target.finalTarget;
-                    return;
-                }
-                if(unit.orderTarget) {
-                    let hr = gameData.hexRadius || 20;
-                    let ogx = unit.orderTarget.x - unit.x,
-                        ogy = unit.orderTarget.y - unit.y;
-                    if(ogx * ogx + ogy * ogy > hr * hr * 2.25) {
-                        unit.path = null;
-                        unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: false };
-                        return;
-                    }
-                }
-                if(unit.type === 'convoy' && unit.target.isCity) {
-                    let value = unit.tradeValue || 150;
-                    if(unit.owner === 1) gameData.money += value;
-                    else gameData.aiMoneyByOwner[unit.owner] = (gameData.aiMoneyByOwner[unit.owner] || 0) + value;
-                    unit.hp = 0; // Remove unit
-                }
-                unit.target = null;
-                unit.path = null;
-                unit.orderTarget = null;
-                unit.fullMarchWaypoints = null;
-                unit.marchWpCursor = 0;
-                unit.blockedTimer = 0;
-                unit.stuckTimer = 0;
-                return;
+                break;
             }
+            if(!unit.target || stepLeft <= 0.0001) return;
+
+            let dx = unit.target.x - unit.x;
+            let dy = unit.target.y - unit.y;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if(dist < 0.001) return;
 
             let prevX = unit.x;
             let prevY = unit.y;
-            let nx = unit.x + (dx/dist) * stepSpeed * dt;
-            let ny = unit.y + (dy/dist) * stepSpeed * dt;
+            let nx = unit.x + (dx / dist) * stepLeft;
+            let ny = unit.y + (dy / dist) * stepLeft;
             let clampSteps = gameData.entities.length > 220 ? 14 : (gameData.entities.length > 140 ? 20 : 28);
             let terrainClamp = wodClampStepToWalkableTerrain(unit, unit.x, unit.y, nx, ny, clampSteps);
             if(!terrainClamp)
@@ -24289,7 +24338,6 @@
 
             unit.x = nx;
             unit.y = ny;
-            ensureUnitPixelOnWalkableHex(unit, 10);
             wodClaimTerritoryAlongMove(unit, prevX, prevY, unit.x, unit.y);
             unit.blockedTimer = 0;
             let movedSq = (unit.x - prevX) * (unit.x - prevX) + (unit.y - prevY) * (unit.y - prevY);
@@ -29132,8 +29180,8 @@
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             let entN = gameData.entities.length;
             if(touchCamGesture) gameData._combatShotBudget = 0;
-            else if(entN > 200) gameData._combatShotBudget = 5;
-            else if(entN > 120) gameData._combatShotBudget = 9;
+            else if(entN > 220) gameData._combatShotBudget = 16;
+            else if(entN > 140) gameData._combatShotBudget = 24;
             wodUpdateCombatFx(dt);
             if(wodPlayerOrderQueue.length && !wodPlayerOrderPumpScheduled) wodSchedulePlayerOrderPump();
             if(gameState === 'PLAYING') wodRefreshFogVision(dt);
@@ -29286,14 +29334,13 @@
                 }
             }
 
-            // Unit Collision (Separation)
+            // Unit Collision (Separation) — grid built first; separation runs after movement below.
             gameData._wodSimTick = (gameData._wodSimTick | 0) + 1;
             let wodHeavyEnts = gameData.entities.length > 160;
             let wodMob = wodUsesVisualViewportLayout();
             let wodSkipSep = wodMob && wodHeavyEnts && (gameData._wodSimTick % 2 === 0);
             let sepPad = wodMob && wodHeavyEnts ? 32 : 42;
             let gridCell = wodMob ? 120 : 96;
-            wodRunUnitSeparation(wodSkipSep, sepPad, gridCell);
             for(let ui = 0; ui < gameData.entities.length; ui++) {
                 let u = gameData.entities[ui];
                 if(!u || u.hp <= 0 || u.type === 'ship') continue;
@@ -29444,6 +29491,7 @@
                     let moraleAtk = 0.18 + 0.82 * Math.max(0, Math.min(1, m / WOD_MORALE_MAX));
                     let interval = unit.attackCooldown * WOD_ATTACK_INTERVAL_MULT;
                     if(interval < 0.05) interval = 0.05;
+                    let shotInterval = wodCombatShotVisualInterval(unit);
                     let meanRng = 0.95;
                     let dmgPerSec = (unit.damage * atkMod * defMod * meanRng * moraleAtk * wodVeteranStatMult(unit)) / interval;
                     let prevEnemyTanks = enemy.type === 'heavy' ? (enemy.tanks || 0) : 0;
@@ -29457,12 +29505,12 @@
                     if(unit._combatShotTimer == null) {
                         let uidSalt = (unit.uid || '0').replace(/\D/g, '') || '0';
                         let uNum = parseInt(uidSalt.slice(-4), 10) || 0;
-                        unit._combatShotTimer = (uNum % 89) / 89 * interval * 0.92;
+                        unit._combatShotTimer = (uNum % 89) / 89 * shotInterval * 0.92;
                     }
                     unit._combatShotTimer += dt;
-                    let shotCap = 2;
-                    while(unit._combatShotTimer >= interval && shotCap-- > 0 && (gameData._combatShotBudget || 0) > 0) {
-                        unit._combatShotTimer -= interval;
+                    let shotCap = 3;
+                    while(unit._combatShotTimer >= shotInterval && shotCap-- > 0 && (gameData._combatShotBudget || 0) > 0) {
+                        unit._combatShotTimer -= shotInterval;
                         wodEmitCombatShot(unit, enemy);
                         gameData._combatShotBudget--;
                     }
@@ -29499,6 +29547,8 @@
                 updateUnitHealing(unit, dt);
                 claimTerritoryAroundUnit(unit);
             }
+
+            wodRunUnitSeparation(wodSkipSep, sepPad, gridCell);
 
             wodApplyTerritoryClaimBatch();
             gameData._cityCapTimer = (gameData._cityCapTimer || 0) + dt;
