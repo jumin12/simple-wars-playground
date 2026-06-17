@@ -9540,6 +9540,7 @@
         }
         function wodKickParallelTroopPowIfEligible() {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode) return;
+            if(wodDeferHeavySimDuringMarch()) return;
             wodEnsurePowWorkers();
             if(wodPowWorkers.length === 0) return;
             let ents = gameData.entities;
@@ -9722,7 +9723,11 @@
             wodEnsureSepWorker();
             if(wodSepBusy) return;
             let kicked = wodKickSepWorker(sepPad, cellSize);
-            if(!kicked && (gameData._wodSimTick & 1) === 0) wodRunUnitSeparationSync(sepPad, cellSize);
+            if(!kicked && (gameData._wodSimTick & 1) === 0) {
+                let mn = gameData._wodMovingN || 0;
+                if(mn < 12 || (gameData._wodSimTick % 4) === 0)
+                    wodRunUnitSeparationSync(sepPad, cellSize);
+            }
         }
 
         let gameData = {
@@ -18730,11 +18735,11 @@
         }
 
         function wodCombatShotVisualInterval(unit) {
-            if(!unit) return 0.12;
-            if(unit.type === 'heavy') return 0.26;
-            if(unit.type === 'ship') return 0.19;
-            if(unit.type === 'marine') return 0.15;
-            return 0.11;
+            if(!unit) return 0.24;
+            if(unit.type === 'heavy') return 0.52;
+            if(unit.type === 'ship') return 0.38;
+            if(unit.type === 'marine') return 0.30;
+            return 0.22;
         }
 
         function wodEmitCombatShot(attacker, target) {
@@ -18754,7 +18759,7 @@
             let heavy = attacker.type === 'heavy';
             let ship = attacker.type === 'ship';
             let marine = attacker.type === 'marine';
-            let tracerLife = heavy ? 0.26 : (ship ? 0.21 : (marine ? 0.17 : 0.14));
+            let tracerLife = heavy ? 0.36 : (ship ? 0.30 : (marine ? 0.24 : 0.20));
             let width = heavy ? 4.0 : (ship ? 3.0 : (marine ? 2.4 : 2.0));
             let tr = wodCombatFxTake();
             tr.kind = 'tracer';
@@ -18762,6 +18767,12 @@
             tr.life = tracerLife; tr.maxLife = tracerLife;
             tr.color = col; tr.width = width; tr.heavy = heavy;
             if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
+        }
+
+        function wodDeferHeavySimDuringMarch() {
+            let mn = gameData._wodMovingN || 0;
+            let pn = gameData._wodPlayerMovingN || 0;
+            return mn >= 8 || pn >= 4;
         }
 
         function wodUnitSmoothDrawXY(unit) {
@@ -23138,7 +23149,8 @@
                 wodEncirclementProcessChunk();
                 return;
             }
-            gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
+            if(!wodDeferHeavySimDuringMarch())
+                gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
             let interval = 0.55 + Math.min(1.0, (gameData.hexList.length || 0) / 50000);
             if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.35, 1.8);
             if(gameData.encirclementTimer < interval) return;
@@ -29176,11 +29188,12 @@
 
         function updateAiStrategy(dt) {
             if(gameData._aiStratWork) {
+                if(wodDeferHeavySimDuringMarch() && (gameData._wodSimTick & 1)) return;
                 wodDrainAiStratFormationAndUnits();
                 return;
             }
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
-            if((gameData._wodMovingN || 0) < 26) gameData.aiStrategyTimer += dt;
+            if(!wodDeferHeavySimDuringMarch()) gameData.aiStrategyTimer += dt;
             let stratEvery = wodUsesVisualViewportLayout() ? 2.15 : 1.95;
             if(gameData.aiStrategyTimer < stratEvery) return;
             gameData.aiStrategyTimer = 0;
@@ -29223,11 +29236,16 @@
             wodBeginSimPfBudget(gameData.entities.length);
             wodRefreshCombatCamBounds();
             let movingN = 0;
+            let playerMovingN = 0;
             for(let mi = 0, ml = gameData.entities.length; mi < ml; mi++) {
                 let mu = gameData.entities[mi];
-                if(mu && mu.hp > 0 && mu.target) movingN++;
+                if(mu && mu.hp > 0 && mu.target) {
+                    movingN++;
+                    if(wodMpIsHumanOwner(mu.owner)) playerMovingN++;
+                }
             }
             gameData._wodMovingN = movingN;
+            gameData._wodPlayerMovingN = playerMovingN;
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             let entN = gameData.entities.length;
             if(touchCamGesture) gameData._combatShotBudget = 0;
@@ -29340,7 +29358,7 @@
 
             if(!gameData.aiTimer) gameData.aiTimer = Math.random() * 0.85;
             let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.2 : 2.35;
-            if(!gameData._aiSpawnBurst) {
+            if(!gameData._aiSpawnBurst && !wodDeferHeavySimDuringMarch()) {
                 gameData.aiTimer += dt;
                 if(gameData.aiTimer > aiBurstEvery) {
                     gameData.aiTimer = 0;
@@ -29348,7 +29366,7 @@
                     if(keys.length > 0) gameData._aiSpawnBurst = { keys, idx: 0 };
                 }
             }
-            if(gameData._aiSpawnBurst && gameData._aiSpawnBurst.keys.length && (gameData._wodMovingN || 0) < 22) {
+            if(gameData._aiSpawnBurst && gameData._aiSpawnBurst.keys.length && !wodDeferHeavySimDuringMarch()) {
                 let b = gameData._aiSpawnBurst;
                 if(b.idx >= b.keys.length) {
                     gameData._aiSpawnBurst = null;
@@ -29856,12 +29874,13 @@
 
         function wodMarkTerrainPoliticalDirty() {
             let now = performance.now();
+            let throttleMs = (gameData._wodMovingN || 0) > 8 ? 680 : 420;
             if(gameData._terrDirtyNext && now < gameData._terrDirtyNext) {
                 gameData._terrDirtyPending = true;
                 return;
             }
             gameData._terrDirtyPending = false;
-            gameData._terrDirtyNext = now + 380;
+            gameData._terrDirtyNext = now + throttleMs;
             wodTerrainPoliticalDirty = true;
             terrainNeedsUpdate = true;
             wodTerrainPolWork = null;
@@ -30898,7 +30917,9 @@
                 else if(ownersChanging) gap = livePlay ? (wodUsesVisualViewportLayout() ? 720 : 180) : (wodUsesVisualViewportLayout() ? 72 : 48);
                 else gap = livePlay ? (wodUsesVisualViewportLayout() ? 240 : 160) : (wodUsesVisualViewportLayout() ? 92 : 72);
                 if(livePlay && (gameData._wodMovingN || 0) > 14)
-                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 520 : 340);
+                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 680 : 480);
+                else if(livePlay && (gameData._wodMovingN || 0) > 6)
+                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 520 : 360);
                 if(livePlay && !forceImmediate && wodTerrainLastBakeCostMs > 14)
                     gap = Math.max(gap, Math.min(420, wodTerrainLastBakeCostMs * 9));
                 if(camBusy && !forceImmediate) {
@@ -34846,7 +34867,11 @@
                 return;
             }
             gameData._fogVisionTimer = (gameData._fogVisionTimer || 0) + dt;
-            if(gameData._fogVisionTimer < WOD_FOG_VISION_INTERVAL && gameData._fogVisible && gameData._fogVisible.size) return;
+            let fogIv = WOD_FOG_VISION_INTERVAL;
+            let marchN = gameData._wodMovingN || 0;
+            if(marchN > 14) fogIv = 1.15;
+            else if(marchN > 6) fogIv = 0.72;
+            if(gameData._fogVisionTimer < fogIv && gameData._fogVisible && gameData._fogVisible.size) return;
             gameData._fogVisionTimer = 0;
             let owner = wodLocalPlayerOwner();
             if(!gameData._fogExplored) gameData._fogExplored = new Set();
