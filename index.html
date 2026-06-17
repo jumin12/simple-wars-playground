@@ -9711,6 +9711,7 @@
                 gameData._wodSepApply = null;
             }
             wodEnsureSepWorker();
+            if(wodSepBusy) return;
             let kicked = wodKickSepWorker(sepPad, cellSize);
             if(!kicked) wodRunUnitSeparationSync(sepPad, cellSize);
         }
@@ -17450,6 +17451,7 @@
         const WOD_COMBAT_SHOTS_PER_FRAME = 14;
         const WOD_SPAWN_FX_DRAW_CAP = 8;
         const WOD_FOG_VISION_INTERVAL = 0.35;
+        const WOD_FOG_REBUILD_MIN_MS = 480;
         const WOD_SPAWN_FX_FRAME_COUNT = 20;
         const WOD_COMBAT_SPRITE_CACHE_COUNT = 100;
         const WOD_SPAWN_FX_REF_R = 10;
@@ -23792,6 +23794,8 @@
                 gameData._wodWorkerTroopMerged = null;
                 return;
             }
+            if(gameData._aiStratPowCacheTick != null && (gameData._wodSimTick | 0) - gameData._aiStratPowCacheTick < 12)
+                return;
             let p = 0;
             let by = {};
             for(let i = 0, el = gameData.entities.length; i < el; i++) {
@@ -23804,6 +23808,7 @@
             }
             gameData._aiStratPowPlayer = p;
             gameData._aiStratPowByOwner = by;
+            gameData._aiStratPowCacheTick = gameData._wodSimTick | 0;
         }
 
         function wodInvalidateAiFrontlineHexCache() {
@@ -28414,50 +28419,73 @@
                     ensureUnitId(b);
                     return (a.uid || '').localeCompare(b.uid || '');
                 });
-            if(readyUnits.length === 0) return;
+            if(readyUnits.length === 0) return true;
 
             let oid = typeof owner === 'number' ? owner : parseInt(owner, 10);
-            let press = estimatePlayerPressureOnFront(oid);
-            let want = Math.min(20, Math.max(5, Math.ceil(readyUnits.length * 0.52) + Math.min(8, Math.floor(press * 0.85))));
-            let sectors = buildAiFrontlineSectors(oid, want);
-            if(sectors.length === 0) return;
+            let chunkKey = oid + ':' + serial;
+            let ch = gameData._aiFormChunk;
+            if(!ch || ch.key !== chunkKey) {
+                let press = estimatePlayerPressureOnFront(oid);
+                let want = Math.min(20, Math.max(5, Math.ceil(readyUnits.length * 0.52) + Math.min(8, Math.floor(press * 0.85))));
+                let sectors = buildAiFrontlineSectors(oid, want);
+                if(sectors.length === 0) return true;
+                let playerPower = gameData._aiStratPowPlayer;
+                if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
+                let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[oid];
+                if(myPower === undefined) myPower = getOwnerTroopManpower(owner);
+                let ratio = myPower / Math.max(1, playerPower);
+                ch = gameData._aiFormChunk = {
+                    key: chunkKey,
+                    readyUnits,
+                    sectors,
+                    canBreakthrough: ratio >= 1.15,
+                    playerCityTargets: ratio >= 0.95 ? wodAiCollectPlayerCityAttackHexes(oid) : [],
+                    cityStrikerCount: 0,
+                    oid,
+                    serial,
+                    idx: 0
+                };
+                if(ch.playerCityTargets.length) ch.cityStrikerCount = Math.max(1, Math.ceil(readyUnits.length * 0.28));
+            }
 
-            let playerPower = gameData._aiStratPowPlayer;
-            if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
-            let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[oid];
-            if(myPower === undefined) myPower = getOwnerTroopManpower(owner);
-            let ratio = myPower / Math.max(1, playerPower);
-            let canBreakthrough = ratio >= 1.15;
-            let playerCityTargets = wodAiCollectPlayerCityAttackHexes(oid);
-            let cityStrikerCount = playerCityTargets.length && ratio >= 0.95
-                ? Math.max(1, Math.ceil(readyUnits.length * 0.28)) : 0;
-
-            readyUnits.forEach((unit, idx) => {
+            let t0 = performance.now();
+            let budgetMs = wodUsesVisualViewportLayout() ? 1.35 : 2.6;
+            let maxUnits = wodUsesVisualViewportLayout() ? 2 : 3;
+            let assigned = 0;
+            while(ch.idx < ch.readyUnits.length && assigned < maxUnits) {
+                if(performance.now() - t0 >= budgetMs) break;
+                let idx = ch.idx++;
+                let unit = ch.readyUnits[idx];
                 if(unit.target && !unit.holding) {
                     let tdx = unit.target.x - unit.x;
                     let tdy = unit.target.y - unit.y;
-                    if(tdx * tdx + tdy * tdy > Math.pow(gameData.hexRadius * 3.2, 2)) return;
+                    if(tdx * tdx + tdy * tdy > Math.pow(gameData.hexRadius * 3.2, 2)) continue;
                 }
-                if(cityStrikerCount > 0 && idx >= readyUnits.length - cityStrikerCount) {
-                    let tgt = playerCityTargets[idx % playerCityTargets.length];
+                if(ch.cityStrikerCount > 0 && idx >= ch.readyUnits.length - ch.cityStrikerCount) {
+                    let tgt = ch.playerCityTargets[idx % ch.playerCityTargets.length];
                     unit.aiCityStriker = true;
                     wodAiMoveUnitTowardHex(unit, tgt, false, 0.52);
-                    unit.aiFormationSerial = serial;
-                    return;
+                    unit.aiFormationSerial = ch.serial;
+                    assigned++;
+                    continue;
                 }
-                let sector = sectors[idx % sectors.length];
-
-                let support = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 195);
-                let enemies = countNearbyUnits(owner, sector.holdHex.x, sector.holdHex.y, 215, true);
-                let neededSupport = canBreakthrough ? Math.max(2, Math.ceil(enemies * 0.95)) : Math.max(4, Math.ceil(enemies * 1.15) + 2);
-
+                let sector = ch.sectors[idx % ch.sectors.length];
+                let support = countNearbyUnits(ch.oid, sector.holdHex.x, sector.holdHex.y, 195);
+                let enemies = countNearbyUnits(ch.oid, sector.holdHex.x, sector.holdHex.y, 215, true);
+                let neededSupport = ch.canBreakthrough ? Math.max(2, Math.ceil(enemies * 0.95)) : Math.max(4, Math.ceil(enemies * 1.15) + 2);
                 if(support < neededSupport && (unit.hp / unit.maxHp) < 0.82) {
                     wodAiMoveUnitTowardHex(unit, sector.holdHex, true, 0.35);
                 } else {
-                    wodAiMoveUnitTowardHex(unit, canBreakthrough || support >= neededSupport ? sector.attackHex : sector.holdHex, false, 0.46);
+                    wodAiMoveUnitTowardHex(unit, ch.canBreakthrough || support >= neededSupport ? sector.attackHex : sector.holdHex, false, 0.46);
                 }
-                unit.aiFormationSerial = serial;
-            });
+                unit.aiFormationSerial = ch.serial;
+                assigned++;
+            }
+            if(ch.idx >= ch.readyUnits.length) {
+                gameData._aiFormChunk = null;
+                return true;
+            }
+            return false;
         }
 
         /** True when a new fort here would sit inside another friendly fort's combat aura (bonuses do not stack). */
@@ -28833,8 +28861,6 @@
                 if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_BRIDGE * 3.1 && Math.random() < 0.22)
                     wodAiTryBridgeForOwner(ownerId, ownerKey);
 
-                wodAiMaintainFortGuards(ownerId);
-
                 let spawnCap = wodUsesVisualViewportLayout() ? 5 : 6;
                 let spawnsThisTick = Math.min(spawnCap, Math.max(3, Math.floor((gameData.aiMoneyByOwner[ownerKey] || 0) / Math.max(160, WOD_PRICE_LIGHT))));
                 if(!gameData._aiTrainPick) gameData._aiTrainPick = {};
@@ -28843,11 +28869,7 @@
                     rotOff: gameData._aiTrainPick[pulseKey] || 0,
                     combatSafeCities: aiCities.filter(c => !isCitySiegeBlockedForProduction(c))
                 };
-                pulse.candidateOrder = pulse.combatSafeCities.slice().sort((a, b) => {
-                    let aFront = isFrontlineHex(gameData.hexes[`${a.q},${a.r}`], ownerId) ? -2400 : 0;
-                    let bFront = isFrontlineHex(gameData.hexes[`${b.q},${b.r}`], ownerId) ? -2400 : 0;
-                    return (aFront + Math.random() * 120) - (bFront + Math.random() * 120);
-                });
+                pulse.candidateOrder = pulse.combatSafeCities;
                 gameData._aiSpawnPulse[pulseKey] = pulse;
             }
 
@@ -28916,10 +28938,13 @@
             }
             if(w.phase === 'form') {
                 while(w.fi < keys.length) {
-                    let k = keys[w.fi++];
-                    assignAiFormationOrders(parseInt(k, 10), w.aiGroups[k], w.serial);
+                    let k = keys[w.fi];
+                    let done = assignAiFormationOrders(parseInt(k, 10), w.aiGroups[k], w.serial);
+                    if(!done) return;
+                    w.fi++;
                     if(overBudget()) return;
                 }
+                gameData._aiFormChunk = null;
                 w.phase = 'units';
                 w.ei = 0;
             }
@@ -29064,7 +29089,7 @@
             }
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
             gameData.aiStrategyTimer += dt;
-            let stratEvery = wodUsesVisualViewportLayout() ? 2.0 : 1.75;
+            let stratEvery = wodUsesVisualViewportLayout() ? 2.15 : 1.95;
             if(gameData.aiStrategyTimer < stratEvery) return;
             gameData.aiStrategyTimer = 0;
 
@@ -29214,8 +29239,8 @@
                 }
             }
 
-            if(!gameData.aiTimer) gameData.aiTimer = 0;
-            let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.0 : 2.0;
+            if(!gameData.aiTimer) gameData.aiTimer = Math.random() * 0.85;
+            let aiBurstEvery = wodUsesVisualViewportLayout() ? 3.2 : 2.35;
             if(!gameData._aiSpawnBurst) {
                 gameData.aiTimer += dt;
                 if(gameData.aiTimer > aiBurstEvery) {
@@ -29233,6 +29258,31 @@
                     let ownerKey = b.keys[b.idx];
                     if(wodRunAiSpawnBurstForOwner(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOwner) !== false)
                         b.idx++;
+                }
+            }
+
+            if(!gameData._aiFortGuardTimer) gameData._aiFortGuardTimer = 0;
+            gameData._aiFortGuardTimer += dt;
+            if(gameData._aiFortGuardTimer > 14) {
+                gameData._aiFortGuardTimer = 0;
+                if(!gameData._aiFortGuardOwners) {
+                    gameData._aiFortGuardOwners = [];
+                    let seen = new Set();
+                    let forts = gameData.forts;
+                    if(forts) {
+                        for(let fi = 0, fl = forts.length; fi < fl; fi++) {
+                            let ft = forts[fi];
+                            if(ft && ft.owner > 1 && !wodMpIsHumanOwner(ft.owner)) seen.add(ft.owner);
+                        }
+                    }
+                    gameData._aiFortGuardOwners = [...seen];
+                }
+                if(gameData._aiFortGuardOwners.length) {
+                    let o = gameData._aiFortGuardOwners.shift();
+                    wodAiMaintainFortGuards(o);
+                    gameData._aiFortGuardOwners.push(o);
+                } else {
+                    gameData._aiFortGuardOwners = null;
                 }
             }
 
@@ -34718,7 +34768,7 @@
             for(let ei = 0, el = gameData.entities.length; ei < el; ei++) {
                 let u = gameData.entities[ei];
                 if(u.hp <= 0 || u.owner !== owner) continue;
-                moverSig ^= (((u.x / 36) | 0) * 73856093) ^ (((u.y / 36) | 0) * 19349663);
+                moverSig ^= (((u.x / 80) | 0) * 73856093) ^ (((u.y / 80) | 0) * 19349663);
             }
             for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
                 let c = gameData.cities[ci];
@@ -34802,8 +34852,12 @@
             return true;
         }
 
+        let wodFogRebuildNextMs = 0;
         function wodTryRebuildFogCanvas() {
             if(!gameData._fogCanvasDirty || !wodFogActive() || !gameData._fogVisible || !gameData._fogExplored) return;
+            let now = performance.now();
+            if(now < wodFogRebuildNextMs) return;
+            wodFogRebuildNextMs = now + WOD_FOG_REBUILD_MIN_MS;
             wodRebuildFogCanvas();
         }
 
