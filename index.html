@@ -17446,8 +17446,9 @@
         const WOD_MORALE_MAX = 100;
         const WOD_UNIT_SPAWN_FX_DUR = 2.0;
         const WOD_OVERHEAD_POP_DUR = 0.55;
-        const WOD_COMBAT_FX_CAP = 280;
-        const WOD_COMBAT_SHOTS_PER_FRAME = 38;
+        const WOD_COMBAT_FX_CAP = 96;
+        const WOD_COMBAT_SHOTS_PER_FRAME = 14;
+        const WOD_SPAWN_FX_DRAW_CAP = 8;
         const WOD_FOG_VISION_INTERVAL = 0.35;
         const WOD_SPAWN_FX_FRAME_COUNT = 20;
         const WOD_COMBAT_SPRITE_CACHE_COUNT = 100;
@@ -18693,7 +18694,18 @@
 
         function wodEmitCombatShot(attacker, target) {
             if(!attacker || !target) return;
+            if(!wodFogCanSeeUnit(attacker) && !wodFogCanSeeUnit(target)) return;
             let tx = target.x, ty = target.y;
+            let mx = (attacker.x + tx) * 0.5, my = (attacker.y + ty) * 0.5;
+            let viewW = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
+            let viewH = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
+            let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
+            let camL = gameData.camera.x / camZ;
+            let camR = camL + viewW / camZ;
+            let camT = gameData.camera.y / camZ;
+            let camB = camT + viewH / camZ;
+            let pad = Math.max(80, 140 / camZ);
+            if(mx < camL - pad || mx > camR + pad || my < camT - pad || my > camB + pad) return;
             let m = wodCombatMuzzlePoint(attacker, tx, ty);
             let dx = tx - m.x, dy = ty - m.y;
             let dist = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -18704,44 +18716,16 @@
             let heavy = attacker.type === 'heavy';
             let ship = attacker.type === 'ship';
             let marine = attacker.type === 'marine';
-            let tracerLife = heavy ? 0.24 : (ship ? 0.19 : (marine ? 0.15 : 0.13));
-            let width = heavy ? 4.4 : (ship ? 3.2 : (marine ? 2.4 : 2.0));
-            let ang = Math.atan2(hy - m.y, hx - m.x);
+            let tracerLife = heavy ? 0.2 : (ship ? 0.16 : (marine ? 0.13 : 0.11));
+            let width = heavy ? 3.8 : (ship ? 2.8 : (marine ? 2.2 : 1.8));
             let tr = wodCombatFxTake();
             tr.kind = 'tracer';
             tr.x0 = m.x; tr.y0 = m.y; tr.x1 = hx; tr.y1 = hy;
             tr.life = tracerLife; tr.maxLife = tracerLife;
             tr.color = col; tr.width = width; tr.heavy = heavy;
-            tr.ang = ang; tr.len = dist;
-            if(!wodCombatFxPush(tr)) { gameData._combatFxPool.push(tr); return; }
-            if(heavy) {
-                let tg = wodCombatFxTake();
-                tg.kind = 'tracerGlow';
-                tg.x0 = m.x; tg.y0 = m.y; tg.x1 = hx; tg.y1 = hy;
-                tg.life = tracerLife * 1.15; tg.maxLife = tracerLife * 1.15;
-                tg.color = col; tg.width = width * 2.1; tg.heavy = true;
-                tg.ang = ang; tg.len = dist;
-                if(!wodCombatFxPush(tg)) gameData._combatFxPool.push(tg);
-            }
-            let mu = wodCombatFxTake();
-            mu.kind = 'muzzle';
-            mu.x = m.x; mu.y = m.y;
-            mu.life = heavy ? 0.14 : 0.11; mu.maxLife = mu.life;
-            mu.color = col; mu.size = heavy ? 11 : (ship ? 8.5 : 6.8); mu.heavy = heavy;
-            if(!wodCombatFxPush(mu)) gameData._combatFxPool.push(mu);
-            if(!heavy) {
-                let sm = wodCombatFxTake();
-                sm.kind = 'smoke';
-                sm.x = m.x - (dx / dist) * 4; sm.y = m.y - (dy / dist) * 4;
-                sm.life = 0.22; sm.maxLife = 0.22; sm.size = width * 2.8;
-                if(!wodCombatFxPush(sm)) gameData._combatFxPool.push(sm);
-            }
-            let im = wodCombatFxTake();
-            im.kind = 'impact';
-            im.x = hx; im.y = hy;
-            im.life = heavy ? 0.18 : 0.14; im.maxLife = im.life;
-            im.color = col; im.size = heavy ? 9.5 : 5.8; im.heavy = heavy;
-            if(!wodCombatFxPush(im)) gameData._combatFxPool.push(im);
+            tr.ang = Math.atan2(hy - m.y, hx - m.x);
+            tr.len = dist;
+            if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
         }
 
         function wodUpdateCombatFx(dt) {
@@ -18760,120 +18744,33 @@
         function wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull) {
             let fx = gameData._combatFx;
             if(!fx || !fx.length) return;
-            let cache = wodFxCache;
-            let useCache = !!(cache && cache.ready);
             function inView(wx, wy, pad) {
                 return wx >= camL - pad && wx <= camR + pad && wy >= camT - pad && wy <= camB + pad;
             }
-            ctx.save();
+            let drawN = 0;
+            let drawCap = gfxLite ? 28 : 56;
             ctx.lineCap = 'round';
             for(let i = 0; i < fx.length; i++) {
+                if(drawN >= drawCap) break;
                 let f = fx[i];
-                let mx = (f.x0 != null && f.x1 != null) ? (f.x0 + f.x1) * 0.5 : f.x;
-                let my = (f.y0 != null && f.y1 != null) ? (f.y0 + f.y1) * 0.5 : f.y;
-                if(wodCull && !inView(mx, my, culPad + 48)) continue;
-                let ci = wodCombatFxCacheIndex(f);
-                if(f.kind === 'tracer' || f.kind === 'tracerGlow') {
-                    let hx = f.x0 + (f.x1 - f.x0) * (1 - f.life / f.maxLife);
-                    let hy = f.y0 + (f.y1 - f.y0) * (1 - f.life / f.maxLife);
-                    if(useCache && f.ang != null) {
-                        let sheet = f.heavy ? cache.combat.tracerHeavy : cache.combat.tracer;
-                        let spr = sheet[ci];
-                        if(spr) {
-                            let prog = 1 - f.life / f.maxLife;
-                            let drawLen = Math.max(8, (f.len || 40) * Math.max(0.12, prog));
-                            ctx.save();
-                            ctx.translate(f.x0, f.y0);
-                            ctx.rotate(f.ang);
-                            ctx.drawImage(spr, 0, -spr.height * 0.5, drawLen, spr.height);
-                            ctx.restore();
-                            continue;
-                        }
-                    }
-                    let fade = Math.max(0, 1 - (1 - f.life / f.maxLife) * 1.05);
-                    ctx.globalCompositeOperation = 'lighter';
-                    ctx.globalAlpha = fade * (f.kind === 'tracerGlow' ? 0.32 : (gfxLite ? 0.55 : 0.72));
-                    ctx.strokeStyle = f.color;
-                    ctx.lineWidth = f.kind === 'tracerGlow' ? f.width : f.width * 1.65;
-                    ctx.beginPath();
-                    ctx.moveTo(f.x0, f.y0);
-                    ctx.lineTo(hx, hy);
-                    ctx.stroke();
-                    if(f.kind === 'tracer') {
-                        ctx.strokeStyle = f.heavy ? '#fff4d6' : '#fff8e8';
-                        ctx.globalAlpha = fade * 0.94;
-                        ctx.lineWidth = f.width;
-                        ctx.beginPath();
-                        ctx.moveTo(f.x0, f.y0);
-                        ctx.lineTo(hx, hy);
-                        ctx.stroke();
-                    }
-                    ctx.globalCompositeOperation = 'source-over';
-                } else if(f.kind === 'smoke' && useCache) {
-                    let spr = cache.combat.smoke[ci];
-                    if(spr) {
-                        let sc = (f.size || 8) * 0.22;
-                        ctx.drawImage(spr, f.x - spr.width * sc * 0.5, f.y - spr.height * sc * 0.5, spr.width * sc, spr.height * sc);
-                        continue;
-                    }
-                } else if(f.kind === 'muzzle' && useCache) {
-                    let spr = f.heavy ? cache.combat.muzzleHeavy[ci] : cache.combat.muzzle[ci];
-                    if(spr) {
-                        let sc = (f.size || 6) * 0.09;
-                        ctx.drawImage(spr, f.x - spr.width * sc * 0.5, f.y - spr.height * sc * 0.5, spr.width * sc, spr.height * sc);
-                        continue;
-                    }
-                } else if(f.kind === 'impact' && useCache) {
-                    let spr = f.heavy ? cache.combat.impactHeavy[ci] : cache.combat.impact[ci];
-                    if(spr) {
-                        let sc = (f.size || 5) * 0.1;
-                        ctx.drawImage(spr, f.x - spr.width * sc * 0.5, f.y - spr.height * sc * 0.5, spr.width * sc, spr.height * sc);
-                        continue;
-                    }
-                }
-                let t = 1 - (f.life / f.maxLife);
-                if(f.kind === 'smoke') {
-                    let r = f.size * (0.4 + t * 1.35);
-                    let a = (1 - t) * 0.38;
-                    ctx.globalAlpha = a;
-                    ctx.fillStyle = 'rgba(90, 96, 104, ' + a + ')';
-                    ctx.beginPath();
-                    ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
-                    ctx.fill();
-                } else if(f.kind === 'muzzle') {
-                    let r = f.size * (0.42 + t * 1.25);
-                    let a = (1 - t) * (gfxLite ? 0.62 : 0.88);
-                    ctx.globalCompositeOperation = 'lighter';
-                    ctx.fillStyle = 'rgba(255, 248, 220, ' + a + ')';
-                    ctx.beginPath();
-                    ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.globalAlpha = a * 0.5;
-                    ctx.fillStyle = f.color;
-                    ctx.beginPath();
-                    ctx.arc(f.x, f.y, r * 0.52, 0, Math.PI * 2);
-                    ctx.fill();
-                    ctx.globalCompositeOperation = 'source-over';
-                } else if(f.kind === 'impact') {
-                    let a = (1 - t) * 0.95;
-                    let sz = f.size * (0.55 + t * 1.05);
-                    ctx.globalAlpha = a;
-                    ctx.strokeStyle = f.color;
-                    ctx.lineWidth = gfxLite ? 1.4 : 2.0;
-                    let sparkN = f.heavy ? 7 : 5;
-                    for(let si = 0; si < sparkN; si++) {
-                        let ang = si * (Math.PI * 2 / sparkN) + t * 0.8;
-                        let len = sz * (0.75 + (1 - t) * 0.55);
-                        ctx.beginPath();
-                        ctx.moveTo(f.x, f.y);
-                        ctx.lineTo(f.x + Math.cos(ang) * len, f.y + Math.sin(ang) * len);
-                        ctx.stroke();
-                    }
-                }
+                if(f.kind !== 'tracer') continue;
+                let mx = (f.x0 + f.x1) * 0.5;
+                let my = (f.y0 + f.y1) * 0.5;
+                if(wodCull && !inView(mx, my, culPad + 40)) continue;
+                let prog = 1 - f.life / f.maxLife;
+                let hx = f.x0 + (f.x1 - f.x0) * prog;
+                let hy = f.y0 + (f.y1 - f.y0) * prog;
+                let fade = Math.max(0, 1 - prog * 1.05);
+                ctx.globalAlpha = fade * 0.82;
+                ctx.strokeStyle = f.color;
+                ctx.lineWidth = f.width;
+                ctx.beginPath();
+                ctx.moveTo(f.x0, f.y0);
+                ctx.lineTo(hx, hy);
+                ctx.stroke();
+                drawN++;
             }
             ctx.globalAlpha = 1;
-            ctx.globalCompositeOperation = 'source-over';
-            ctx.restore();
         }
 
         function buildCitySpatialGrid(cellSize = 260) {
@@ -22102,6 +21999,7 @@
 
         let wodOrderArrowBuildQueue = [];
         let wodOrderArrowBuildPumpScheduled = false;
+        let wodOrderArrowDeferScheduled = false;
         let wodPlayerOrderQueue = [];
         let wodPlayerOrderPumpScheduled = false;
 
@@ -22236,6 +22134,17 @@
 
         function wodPumpOrderArrowBuildQueue() {
             if(wodOrderArrowBuildPumpScheduled) return;
+            if(wodIsCamInteracting()) {
+                if(!wodOrderArrowDeferScheduled) {
+                    wodOrderArrowDeferScheduled = true;
+                    requestAnimationFrame(() => {
+                        wodOrderArrowDeferScheduled = false;
+                        if(!wodIsCamInteracting() && wodOrderArrowBuildQueue.length)
+                            wodPumpOrderArrowBuildQueue();
+                    });
+                }
+                return;
+            }
             wodOrderArrowBuildPumpScheduled = true;
             requestAnimationFrame(() => {
                 wodOrderArrowBuildPumpScheduled = false;
@@ -29212,8 +29121,12 @@
             gameData._cityCombatStagingKeys = new Set();
             wodBeginSimPfBudget(gameData.entities.length);
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
+            let entN = gameData.entities.length;
+            if(wodIsCamInteracting()) gameData._combatShotBudget = 0;
+            else if(entN > 200) gameData._combatShotBudget = 5;
+            else if(entN > 120) gameData._combatShotBudget = 9;
             wodUpdateCombatFx(dt);
-            if(wodPlayerOrderQueue.length) wodPumpPlayerOrderQueue();
+            if(wodPlayerOrderQueue.length && !wodPlayerOrderPumpScheduled) wodSchedulePlayerOrderPump();
             if(gameState === 'PLAYING') wodRefreshFogVision(dt);
 
             // Economy (one pass over cities + one over units — avoids triple city scans)
@@ -29513,7 +29426,7 @@
                         unit._combatShotTimer = (uNum % 89) / 89 * interval * 0.92;
                     }
                     unit._combatShotTimer += dt;
-                    let shotCap = 2;
+                    let shotCap = gameData.entities.length > 120 ? 1 : 2;
                     while(unit._combatShotTimer >= interval && shotCap-- > 0 && (gameData._combatShotBudget || 0) > 0) {
                         unit._combatShotTimer -= interval;
                         wodEmitCombatShot(unit, enemy);
@@ -29584,7 +29497,7 @@
                 }
             }
             wodSyncFortOwnershipFromTerrain();
-            wodKickParallelTroopPowIfEligible();
+            if(!wodIsCamInteracting()) wodKickParallelTroopPowIfEligible();
             checkCampaignEndConditions(dt);
             wodUpdateMissionEvents(dt);
             if(gameData.mp && gameData.mp.enabled && gameData.mp.isHost) {
@@ -35005,7 +34918,7 @@
             let camB = camT + viewH / gameData.camera.zoom;
 
             let gfxDecorSkip = wodShouldSimplifyDraw();
-            let gfxLite = false;
+            let gfxLite = wodShouldGfxLite();
             let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
             // Always cull to the camera frustum: without this, desktop "small" battles still iterated/drew every entity every frame — very costly when zoomed in.
             let wodCull = true;
@@ -35173,21 +35086,23 @@
                 for(let fti = 0, ftl = gameData.forts.length; fti < ftl; fti++) {
                     let ftf = gameData.forts[fti];
                     if(!wodFogCanSeeFort(ftf)) continue;
-                    if(wodCull && !wodInView(ftf.x, ftf.y, auraPad)) continue;
+                    if(wodCull && !wodInView(ftf.x, ftf.y, gfxDecorSkip ? 24 : auraPad)) continue;
                     let fcol = factionColors[ftf.owner] || '#95a5a6';
-                    ctx.save();
-                    ctx.beginPath();
-                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
-                    ctx.fillStyle = fortAuraFill;
-                    ctx.fill();
-                    ctx.strokeStyle = fortAuraStroke;
-                    ctx.lineWidth = gfxLite ? 2.05 : 2.95;
-                    ctx.setLineDash([11, 8]);
-                    ctx.beginPath();
-                    ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
-                    ctx.stroke();
-                    ctx.setLineDash([]);
-                    ctx.restore();
+                    if(!gfxDecorSkip) {
+                        ctx.save();
+                        ctx.beginPath();
+                        ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
+                        ctx.fillStyle = fortAuraFill;
+                        ctx.fill();
+                        ctx.strokeStyle = fortAuraStroke;
+                        ctx.lineWidth = gfxLite ? 2.05 : 2.95;
+                        ctx.setLineDash([11, 8]);
+                        ctx.beginPath();
+                        ctx.arc(ftf.x, ftf.y, auraR, 0, Math.PI * 2);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                        ctx.restore();
+                    }
                     drawFortSticker(ctx, ftf, fcol, gfxLite, null);
                 }
             }
@@ -35234,12 +35149,13 @@
                 for(let ui = 0, ul = uo.length; ui < ul; ui++) {
                     let unit = uo[ui];
                     if(!wodFogCanSeeUnit(unit)) continue;
-                    if(shouldDrawPlayerUnitOrderPath(unit) || shouldDrawConvoyMovementPath(unit)) {
+                    if(!gfxDecorSkip && (shouldDrawPlayerUnitOrderPath(unit) || shouldDrawConvoyMovementPath(unit))) {
                         if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad)) continue;
                         drawUnitMovementPath(ctx, unit);
                     }
                 }
 
+                let spawnFxDrawn = 0;
                 for(let ui = 0, ul = uo.length; ui < ul; ui++) {
                     let unit = uo[ui];
                     if(!wodFogCanSeeUnit(unit)) continue;
@@ -35250,6 +35166,18 @@
                     
                     let uColor = factionColors[unit.owner];
                     let ur = unit.radius || 10;
+
+                    if(gfxDecorSkip && !unit.selected) {
+                        ctx.beginPath();
+                        ctx.arc(0, 0, ur, 0, Math.PI * 2);
+                        ctx.fillStyle = uColor;
+                        ctx.fill();
+                        ctx.strokeStyle = '#0b0f14';
+                        ctx.lineWidth = 1.2;
+                        ctx.stroke();
+                        ctx.restore();
+                        continue;
+                    }
 
                     let spawnScale = 1;
                     if((unit.spawnFx || 0) > 0) {
@@ -35272,11 +35200,12 @@
                         drawClassicUnitShape(ctx, 'light', ur, uColor);
                     }
 
-                    if((unit.spawnFx || 0) > 0) {
+                    if((unit.spawnFx || 0) > 0 && !gfxDecorSkip && spawnFxDrawn < WOD_SPAWN_FX_DRAW_CAP) {
                         ctx.save();
                         ctx.scale(1 / spawnScale, 1 / spawnScale);
                         wodDrawSpawnFxCached(ctx, unit, ur);
                         ctx.restore();
+                        spawnFxDrawn++;
                     }
 
                     if(!gfxDecorSkip && unit.moraleBroken && unit.type !== 'convoy') {
@@ -35410,20 +35339,20 @@
                         }
                     }
 
-                    if(unit.type !== 'convoy') {
+                    if(unit.type !== 'convoy' && !gfxDecorSkip) {
                         let cvThRow = gfxLite ? 0.04 : 0.06,
                             combatBurstOn = unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
                             (unit.activeCombatVisual || 0) > cvThRow;
                         drawWodUnitOverheadRow(ctx, unit, ur, gfxLite, combatBurstOn);
                     }
 
-                    drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
+                    if(!gfxDecorSkip) drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
                     
                     ctx.restore();
                 }
             }
 
-            if(gameData.layers.units) wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull);
+            if(gameData.layers.units && !gfxDecorSkip) wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull);
 
             if(formationDrag.active) {
                 ctx.beginPath();
@@ -35455,7 +35384,8 @@
             if(gameState !== 'PLAYING') return;
 
             let wodMobileHud = wodUsesVisualViewportLayout();
-            let wodPinchHudOff = wodMobileHud && wodIsCamInteracting();
+            let camBusyHud = wodIsCamInteracting();
+            let wodPinchHudOff = (wodMobileHud || camBusyHud) && camBusyHud;
             let wodSheetOpen = wodMobileHud && UI.inGameUI && UI.inGameUI.getAttribute('data-mtab');
             if(!wodPinchHudOff && !wodSheetOpen) {
             // UI (hidden while on main menu — skip DOM work for attract-mode performance)
@@ -35539,7 +35469,10 @@
                     let simDt = dt * gameData.speed;
                     let baseChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
                     let maxSingleStep = baseChunk * 1.15;
-                    if(simDt <= maxSingleStep) {
+                    let camBusy = wodIsCamInteracting();
+                    if(camBusy) {
+                        update(Math.min(simDt, maxSingleStep));
+                    } else if(simDt <= maxSingleStep) {
                         update(simDt);
                     } else {
                         let simChunk = baseChunk * Math.max(1, gameData.speed || 1);
@@ -35581,7 +35514,13 @@
             return !!(touchCamGesture || isPanning || performance.now() < wodCamInteractUntil);
         }
         function wodShouldSimplifyDraw() {
-            return wodIsCamInteracting();
+            let n = gameData && gameData.entities ? gameData.entities.length : 0;
+            return wodIsCamInteracting() || n > 130;
+        }
+
+        function wodShouldGfxLite() {
+            let n = gameData && gameData.entities ? gameData.entities.length : 0;
+            return wodIsCamInteracting() || n > 90;
         }
 
         let wodPinchCamRafId = null;
@@ -36114,7 +36053,7 @@
             } else if (formationDrag.active) {
                 formationDrag.endWorld = getMouseWorldPos(e);
             } else if (isPanning) {
-                wodBumpCamInteract(220);
+                wodBumpCamInteract(50);
                 let dx = e.clientX - panStart.x;
                 let dy = e.clientY - panStart.y;
                 wodApplyScreenPanDelta(dx, dy);
@@ -36345,7 +36284,6 @@
                 gameData.bridgePlacement.x = w.x;
                 gameData.bridgePlacement.y = w.y;
             } else if(isPanning && wodUsesVisualViewportLayout()) {
-                wodBumpCamInteract(220);
                 let dx = touch.clientX - panStart.x;
                 let dy = touch.clientY - panStart.y;
                 wodApplyScreenPanDelta(dx, dy);
@@ -36642,10 +36580,12 @@
             if(gameData.menuAttractMode) {
                 return;
             }
-            if(keys['w'] || keys['arrowup']) gameData.camera.y -= camSpeed;
-            if(keys['s'] || keys['arrowdown']) gameData.camera.y += camSpeed;
-            if(keys['a'] || keys['arrowleft']) gameData.camera.x -= camSpeed;
-            if(keys['d'] || keys['arrowright']) gameData.camera.x += camSpeed;
+            let moved = false;
+            if(keys['w'] || keys['arrowup']) { gameData.camera.y -= camSpeed; moved = true; }
+            if(keys['s'] || keys['arrowdown']) { gameData.camera.y += camSpeed; moved = true; }
+            if(keys['a'] || keys['arrowleft']) { gameData.camera.x -= camSpeed; moved = true; }
+            if(keys['d'] || keys['arrowright']) { gameData.camera.x += camSpeed; moved = true; }
+            if(moved) wodBumpCamInteract(50);
         }
 
         function wodDefaultMission() {
@@ -37890,7 +37830,8 @@
             unit.tankLosses = 0;
             unit.veteran = false;
             ensureUnitId(unit);
-            if(type !== 'convoy' && !opts.startSpawn) unit.spawnFx = WOD_UNIT_SPAWN_FX_DUR;
+            if(type !== 'convoy' && !opts.startSpawn && (owner === 1 || wodMpIsHumanOwner(owner)))
+                unit.spawnFx = WOD_UNIT_SPAWN_FX_DUR;
             if(type !== 'ship') {
                 let safeHex = opts.startSpawn
                     ? getNearestArmyStartSpawnHex(unit, x, y, 12)
