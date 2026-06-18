@@ -9712,6 +9712,7 @@
             let n = entCount | 0;
             wodPfBudgetMs = n > 200 ? 2.2 : (n > 120 ? 3.0 : (n > 70 ? 3.8 : 4.8));
             if(wodUsesVisualViewportLayout()) wodPfBudgetMs *= 0.75;
+            if((gameData._wodPlayerMovingN || 0) > 0) wodPfBudgetMs *= 2.2;
             let spd = gameData && gameData.speed > 0 ? gameData.speed : 1;
             wodPfBudgetMs *= Math.min(3, spd);
         }
@@ -18784,6 +18785,10 @@
             return mn >= 8 || pn >= 4;
         }
 
+        function wodIsPlayerMarchOrder(unit) {
+            return !!(unit && unit.target && unit.orderTarget && !unit.retreating && wodMpIsHumanOwner(unit.owner));
+        }
+
         function wodUnitSmoothDrawXY(unit, simDt) {
             if(unit.target) {
                 unit._drawX = unit.x;
@@ -20300,6 +20305,7 @@
         /** Keeps unit pixel coords on a hex the unit may occupy (mountains / blocked tiles after jitter or combat shove). */
         function ensureUnitPixelOnWalkableHex(unit, ringMax) {
             if(!unit || unit.hp <= 0 || unit.type === 'ship') return;
+            if(wodIsPlayerMarchOrder(unit)) return;
             if(wodBridgeHexAtPoint(unit, unit.x, unit.y) || wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.2)) return;
             if(wodUnitRouteUsesBridge(unit)) return;
             let ring = ringMax != null ? ringMax : 12;
@@ -20619,24 +20625,11 @@
         function isWorldPositionBlockedByUnits(mover, wx, wy, gapExtra = 5) {
             let mr = mover.radius || 10;
             let found = false;
-            let moverMarching = !!(mover.target && !mover.retreating);
-            let mdx = 0, mdy = 0, mlen = 0;
-            if(moverMarching) {
-                mdx = mover.target.x - mover.x;
-                mdy = mover.target.y - mover.y;
-                mlen = Math.sqrt(mdx * mdx + mdy * mdy);
-            }
+            let playerMarch = wodIsPlayerMarchOrder(mover);
             forEachNearbyUnit(gameData.unitSpatialGrid, wx, wy, mr + 55, (u) => {
                 if(found) return;
                 if(u === mover || u.hp <= 0 || u.type === 'convoy') return;
-                if(moverMarching && u.owner === mover.owner && u.target && !u.retreating && mlen > 0.5) {
-                    let udx = u.target.x - u.x, udy = u.target.y - u.y;
-                    let ulen = Math.sqrt(udx * udx + udy * udy);
-                    if(ulen > 0.5) {
-                        let dot = (mdx / mlen) * (udx / ulen) + (mdy / mlen) * (udy / ulen);
-                        if(dot > 0.55) return;
-                    }
-                }
+                if(playerMarch && u.owner === mover.owner) return;
                 let ur = u.radius || 10;
                 let dx = u.x - wx;
                 let dy = u.y - wy;
@@ -22532,7 +22525,7 @@
                 desired = reachable ? {x: reachable.exactX, y: reachable.exactY, ...(desired.isCity ? {isCity: true} : {})} : desired;
                 unit.orderTarget = reachable ? {x: reachable.exactX, y: reachable.exactY, ...(unit.orderTarget && unit.orderTarget.isCity ? {isCity: true} : {})} : unit.orderTarget;
             }
-            let path = findPathAroundTerrain(unit, targetHex, startHex);
+            let path = findPathAroundTerrain(unit, targetHex, startHex, false, 'auto', wodMpIsHumanOwner(unit.owner));
             if(path.length > 1) {
                 unit._wodPathGiveUpUntil = 0;
                 let endNode = {x: desired.x, y: desired.y};
@@ -24035,6 +24028,7 @@
         }
 
         function replanUnitOrder(unit) {
+            if(wodIsPlayerMarchOrder(unit)) return false;
             if(unit._wodPathGiveUpUntil && performance.now() < unit._wodPathGiveUpUntil) return false;
             let shThrottle = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             if(shThrottle && isWaterHex(shThrottle) && (unit.type === 'marine' || unit.type === 'ship')) {
@@ -24085,7 +24079,7 @@
                 if(convoyCity) finalTarget.isCity = true;
                 unit.orderTarget = finalTarget;
             }
-            let path = findPathAroundTerrain(unit, targetHex, startHex);
+            let path = findPathAroundTerrain(unit, targetHex, startHex, false, 'auto', wodMpIsHumanOwner(unit.owner));
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex && startHex) {
                 let ampPath = findAmphibiousMarchPath(unit, startHex, targetHex);
                 if(wodHexPathLength(ampPath) > 1) path = ampPath;
@@ -24346,6 +24340,7 @@
             if(!unit.target) return;
             preparePathTarget(unit);
             if(!unit.target) return;
+            let playerMarch = wodIsPlayerMarchOrder(unit);
             let combatSlow = getCombatMovementSlowdownFactor(unit, gameData.unitSpatialGrid);
             let fortZoneSlow = wodFortEnemyMovementSlowdownMultiplier(unit);
             let stepSpeed = unit.speed * getUnitSpeedMultiplier(unit) * WOD_MOVE_SPEED_FACTOR * combatSlow * fortZoneSlow;
@@ -24357,6 +24352,7 @@
                 let dist = Math.sqrt(dx * dx + dy * dy);
                 if(dist < 0.001) {
                     if(!wodAdvanceUnitPathTarget(unit)) return;
+                    if(unit.target && !unit.target.pathPrepared && !unit.target.detour) preparePathTarget(unit);
                     continue;
                 }
                 if(stepLeft >= dist) {
@@ -24364,10 +24360,10 @@
                     let snapPrevY = unit.y;
                     unit.x = unit.target.x;
                     unit.y = unit.target.y;
-                    ensureUnitPixelOnWalkableHex(unit, 10);
                     wodClaimTerritoryAlongMove(unit, snapPrevX, snapPrevY, unit.x, unit.y);
                     stepLeft -= dist;
                     if(!wodAdvanceUnitPathTarget(unit)) return;
+                    if(unit.target && !unit.target.pathPrepared && !unit.target.detour) preparePathTarget(unit);
                     continue;
                 }
                 break;
@@ -24388,6 +24384,7 @@
             if(!terrainClamp)
                 terrainClamp = wodTrySidestepClamp(unit, unit.x, unit.y, nx, ny);
             if(!terrainClamp) {
+                if(playerMarch) return;
                 unit.blockedTimer = (unit.blockedTimer || 0) + dt;
                 let replanT = unit.type === 'convoy' ? 0.12 : (unit.type === 'ship' ? 0.18 : 0.25);
                 let curHx = getNearestHexToPoint(unit.x, unit.y);
@@ -24416,6 +24413,7 @@
             nx = terrainClamp.x;
             ny = terrainClamp.y;
             if(unit.type !== 'convoy' && isWorldPositionBlockedByUnits(unit, nx, ny)) {
+                if(playerMarch) return;
                 unit.blockedTimer = (unit.blockedTimer || 0) + dt;
                 let blk = wodMpIsHumanOwner(unit.owner) ? 0.55 : 0.35;
                 let curHx = getNearestHexToPoint(unit.x, unit.y);
@@ -24438,6 +24436,10 @@
             unit.y = ny;
             wodClaimTerritoryAlongMove(unit, prevX, prevY, unit.x, unit.y);
             unit.blockedTimer = 0;
+            if(playerMarch) {
+                unit.stuckTimer = 0;
+                return;
+            }
             let movedSq = (unit.x - prevX) * (unit.x - prevX) + (unit.y - prevY) * (unit.y - prevY);
             if(movedSq < 0.04 && dist > Math.max(10, unit.radius || 10)) {
                 unit.stuckTimer = (unit.stuckTimer || 0) + dt;
@@ -29285,6 +29287,14 @@
             }
             gameData._wodMovingN = movingN;
             gameData._wodPlayerMovingN = playerMovingN;
+            if((gameData._wodPrevPlayerMovingN || 0) > 0 && playerMovingN === 0) {
+                gameData._terrDirtyPending = false;
+                gameData._terrDirtyNext = 0;
+                wodTerrainPoliticalDirty = true;
+                terrainNeedsUpdate = true;
+                wodTerrainPolWork = null;
+            }
+            gameData._wodPrevPlayerMovingN = playerMovingN;
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             let entN = gameData.entities.length;
             if(touchCamGesture) gameData._combatShotBudget = 0;
@@ -30977,11 +30987,10 @@
                     }
                 } else if(now >= wodTerrainBakeNextMs || wodTerrainPolWork) {
                     let playerMarching = livePlay && (gameData._wodPlayerMovingN || 0) > 0;
-                    if(playerMarching && !wodTerrainPolWork) {
-                        wodTerrainBakeNextMs = now + (wodUsesVisualViewportLayout() ? 320 : 220);
+                    if(playerMarching && !forceImmediate) {
+                        wodTerrainBakeNextMs = now + (wodUsesVisualViewportLayout() ? 480 : 320);
                     } else {
                         let budget = wodUsesVisualViewportLayout() ? (camBusy ? 1.2 : 2.4) : 2.6;
-                        if(playerMarching) budget = Math.min(budget, wodUsesVisualViewportLayout() ? 1.4 : 1.8);
                         wodStepTerrainPoliticalBake(budget);
                         if(!terrainNeedsUpdate)
                             wodTerrainBakeNextMs = now + gap;
@@ -35060,6 +35069,10 @@
         function wodTryRebuildFogCanvas() {
             if(!gameData._fogCanvasDirty || !wodFogActive() || !gameData._fogVisible || !gameData._fogExplored) return;
             let now = performance.now();
+            if((gameData._wodPlayerMovingN || 0) > 0) {
+                wodFogRebuildNextMs = now + 600;
+                return;
+            }
             if(now < wodFogRebuildNextMs) return;
             wodFogRebuildNextMs = now + WOD_FOG_REBUILD_MIN_MS;
             wodRebuildFogCanvas();
@@ -35706,7 +35719,9 @@
                     } else {
                         let simChunk = baseChunk * Math.max(1, gameData.speed || 1);
                         let simRemain = simDt;
-                        while(simRemain > 0.0001) {
+                        let marchCap = (gameData._wodPlayerMovingN || 0) > 0 ? 2 : 12;
+                        let steps = 0;
+                        while(simRemain > 0.0001 && steps++ < marchCap) {
                             let step = Math.min(simRemain, simChunk);
                             update(step);
                             gameData._frameSimDt += step;
