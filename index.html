@@ -9310,7 +9310,17 @@
             gameData.layers.territory = false;
             void (async function() {
                 try {
+                    // If the boot splash or menu battlefield is still generating, let them finish first —
+                    // boot warm-up calls update()/generateMap() and would run against the new match's
+                    // half-initialized state (this could pause a fresh match with a false instant defeat).
+                    let bootGuard = 0;
+                    while((window._wodBootBusy || window._wodMenuBootstrapBusy) && bootGuard++ < 600)
+                        await new Promise(r => setTimeout(r, 100));
                     await initGame();
+                    // Re-assert 1x speed: boot warm-up updates may have fired a false
+                    // campaign-end pause between the sync setGameSpeed(1) above and here.
+                    setGameSpeed(1);
+                    gameData._campaignEnded = false;
                 } catch(e) {
                     console.error(e);
                 }
@@ -9596,7 +9606,7 @@
         function wodEnsureSepWorker() {
             if(wodSepWorker || typeof Worker === 'undefined') return;
             try {
-                let code = 'self.onmessage=function(e){var d=e.data,n=d.n,xs=d.xs,ys=d.ys,rs=d.rs,own=d.own,idx=d.idx,cellSize=d.cellSize,sepPad=d.sepPad,ox=new Float32Array(n),oy=new Float32Array(n),i,j,bi,bucket,ddx,ddy,dist,minDist,overlap,px,py,cx,cy,dx,dy,key,cells={};for(i=0;i<n;i++){ox[i]=xs[i];oy[i]=ys[i];}function ck(x,y){return((x/cellSize)|0)+\',\'+((y/cellSize)|0);}for(i=0;i<n;i++){key=ck(xs[i],ys[i]);if(!cells[key])cells[key]=[];cells[key].push(i);}for(i=0;i<n;i++){cx=(ox[i]/cellSize)|0;cy=(oy[i]/cellSize)|0;for(dx=-1;dx<=1;dx++){for(dy=-1;dy<=1;dy++){bucket=cells[(cx+dx)+\',\'+(cy+dy)];if(!bucket)continue;for(bi=0;bi<bucket.length;bi++){j=bucket[bi];if(j<=i)continue;ddx=ox[j]-ox[i];ddy=oy[j]-oy[i];dist=Math.sqrt(ddx*ddx+ddy*ddy);minDist=rs[i]+rs[j]+6;if(dist<minDist&&dist>0){overlap=minDist-dist;px=(ddx/dist)*overlap*(own[i]===own[j]?0.42:0.48);py=(ddy/dist)*overlap*(own[i]===own[j]?0.42:0.48);ox[i]-=px;oy[i]-=py;ox[j]+=px;oy[j]+=py;}}}}}}postMessage({idx:idx,xs:ox,ys:oy,gen:d.gen},[ox.buffer,oy.buffer]);};';
+                let code = 'self.onmessage=function(e){var d=e.data,n=d.n,xs=d.xs,ys=d.ys,rs=d.rs,own=d.own,idx=d.idx,cellSize=d.cellSize,sepPad=d.sepPad,ox=new Float32Array(n),oy=new Float32Array(n),i,j,bi,bucket,ddx,ddy,dist,minDist,overlap,px,py,cx,cy,dx,dy,key,cells={};for(i=0;i<n;i++){ox[i]=xs[i];oy[i]=ys[i];}function ck(x,y){return((x/cellSize)|0)+\',\'+((y/cellSize)|0);}for(i=0;i<n;i++){key=ck(xs[i],ys[i]);if(!cells[key])cells[key]=[];cells[key].push(i);}for(i=0;i<n;i++){cx=(ox[i]/cellSize)|0;cy=(oy[i]/cellSize)|0;for(dx=-1;dx<=1;dx++){for(dy=-1;dy<=1;dy++){bucket=cells[(cx+dx)+\',\'+(cy+dy)];if(!bucket)continue;for(bi=0;bi<bucket.length;bi++){j=bucket[bi];if(j<=i)continue;ddx=ox[j]-ox[i];ddy=oy[j]-oy[i];dist=Math.sqrt(ddx*ddx+ddy*ddy);minDist=rs[i]+rs[j]+6;if(dist<minDist&&dist>0){overlap=minDist-dist;px=(ddx/dist)*overlap*(own[i]===own[j]?0.42:0.48);py=(ddy/dist)*overlap*(own[i]===own[j]?0.42:0.48);ox[i]-=px;oy[i]-=py;ox[j]+=px;oy[j]+=py;}}}}}postMessage({idx:idx,xs:ox,ys:oy,gen:d.gen},[ox.buffer,oy.buffer]);};';
                 wodSepWUrl = URL.createObjectURL(new Blob([code], {type: 'application/javascript'}));
                 wodSepWorker = new Worker(wodSepWUrl);
                 wodSepWorker.onmessage = wodOnSepWorkerResult;
@@ -11562,6 +11572,7 @@
         }
         function bridgeAtHex(hex) {
             if(!hex) return null;
+            if(!gameData.bridges || !gameData.bridges.length) return null;
             if(gameData._bridgeByHexKey) {
                 let br = gameData._bridgeByHexKey[getHexKey(hex)];
                 if(br) return br;
@@ -11597,6 +11608,8 @@
                     }
                 }
             }
+            // Registered deck keys found a hex — skip the full-map fallback scan.
+            if(best) return best;
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                 let h = gameData.hexList[hi];
                 if(!h || !isWaterHex(h)) continue;
@@ -11653,9 +11666,31 @@
             }
             return best;
         }
+        /** Coarse rejection: is the point within any bridge's bounding circle (with margin)? */
+        function wodPointNearAnyBridge(x, y) {
+            let list = gameData.bridges;
+            if(!list || !list.length) return false;
+            for(let bi = 0, bl = list.length; bi < bl; bi++) {
+                let br = list[bi];
+                if(!br) continue;
+                if(br.x == null) wodSyncBridgeWorldCoords(br);
+                let rr = br._nearR2;
+                if(rr == null) {
+                    let half = Math.max(br.w || 0, br.h || 0) * 0.5;
+                    let near = half * 1.6 + (gameData.hexRadius || 20) * 4;
+                    rr = br._nearR2 = near * near;
+                }
+                let dx = x - br.x, dy = y - br.y;
+                if(dx * dx + dy * dy <= rr) return true;
+            }
+            return false;
+        }
         /** Bridge deck tiles stay water terrain; resolve them as land march targets, not ocean orders. */
         function wodBridgeHexAtPoint(unit, x, y) {
             if(!wodUnitUsesLandBridges(unit)) return null;
+            // No bridges on the map (or point nowhere near one) → skip the radius scans entirely.
+            if(!gameData.bridges || !gameData.bridges.length) return null;
+            if(!wodPointNearAnyBridge(x, y)) return null;
             if(gameData.bridges && gameData.bridges.length) {
                 for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
                     let br = gameData.bridges[bi];
@@ -16965,8 +17000,13 @@
             wodRefreshInputRect();
         }
 
+        let _wodVvLayoutCache = null;
         function wodUsesVisualViewportLayout() {
-            return window.matchMedia('(max-width: 900px), (max-height: 520px), (hover: none) and (pointer: coarse)').matches;
+            // matchMedia() is surprisingly expensive and this runs in per-frame hot loops — cache
+            // the MediaQueryList once and just read .matches (kept live by the browser).
+            if(!_wodVvLayoutCache)
+                _wodVvLayoutCache = window.matchMedia('(max-width: 900px), (max-height: 520px), (hover: none) and (pointer: coarse)');
+            return _wodVvLayoutCache.matches;
         }
 
         function wodApplyPlayViewportLock(playLocked) {
@@ -19295,6 +19335,7 @@
         /** Ends solo vs AI matches: domination (default) or annihilation; also handles defeat when the player has no cities. In multiplayer, only the host evaluates end conditions and broadcasts outcomes. */
         function checkCampaignEndConditions(dt) {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
+            if(window._wodBootBusy || window._wodMenuBootstrapBusy || gameData._mapGenInProgress) return;
             if(gameData.mp && gameData.mp.enabled) {
                 if(gameData.mp.isHost) wodMpCheckEndConditionsHost(dt);
                 return;
@@ -23490,16 +23531,45 @@
             return isClaimableLand(hex);
         }
 
-        function wodMinDistSqToEnemyTerritory(x, y, owner) {
-            let best = Infinity;
+        /** Multi-source BFS from all enemy land, cached per owner. Replaces an O(n) full-map
+         *  scan per query (which made unit start-placement O(n^2) and froze match start). */
+        function wodEnsureEnemyDistanceField(owner) {
+            let cache = gameData._enemyDistField;
+            if(!cache) cache = gameData._enemyDistField = {};
+            let f = cache[owner];
+            if(f) return f;
+            let steps = {};
+            let queue = [];
             for(let h of gameData.hexList) {
                 if(!h || !h.owner || h.owner === owner || h.owner === 0) continue;
                 if(!isClaimableLand(h) || isWaterHex(h)) continue;
-                let dx = h.x - x, dy = h.y - y;
-                let d = dx * dx + dy * dy;
-                if(d < best) best = d;
+                steps[getHexKey(h)] = 0;
+                queue.push(h);
             }
-            return best;
+            for(let qi = 0; qi < queue.length; qi++) {
+                let cur = queue[qi];
+                let s = steps[getHexKey(cur)] + 1;
+                for(let dir of hexDirections) {
+                    let nKey = `${cur.q + dir.q},${cur.r + dir.r}`;
+                    if(steps[nKey] !== undefined) continue;
+                    let nHex = gameData.hexes[nKey];
+                    if(!nHex) continue;
+                    steps[nKey] = s;
+                    queue.push(nHex);
+                }
+            }
+            f = { steps, spacing: gameData.hexRadius * 1.35 };
+            cache[owner] = f;
+            return f;
+        }
+        function wodMinDistSqToEnemyTerritory(x, y, owner) {
+            let f = wodEnsureEnemyDistanceField(owner);
+            let h = getNearestHexToPoint(x, y);
+            if(!h) return Infinity;
+            let s = f.steps[getHexKey(h)];
+            if(s === undefined) return Infinity;
+            let d = s * f.spacing;
+            return d * d;
         }
 
         function getNearestArmyStartSpawnHex(unit, x, y, ringMax) {
@@ -23670,6 +23740,7 @@
 
         function spawnInitialFrontlineUnits(ownerIds) {
             if(!ownerIds || ownerIds.length === 0) return;
+            gameData._enemyDistField = null; // territory just changed; rebuild distance fields lazily
             let unitsPerOwner = Math.max(12, Math.min(28, Math.floor(gameData.mapRadius / 3.5))); // Doubled troops
             let minSep = gameData.hexRadius * 2.85;
             let minSepSq = minSep * minSep;
@@ -23967,6 +24038,17 @@
                     let cityBonus = gameData.cities.some(city => city.owner !== unit.owner && city.q === nHex.q && city.r === nHex.r)
                         ? (nHex.owner === 1 ? 140 : 70) : 0;
                     let playerBonus = nHex.owner === 1 ? 95 : 24;
+                    // Prefer pushing into the weakest enemy: compare our fielded manpower vs theirs.
+                    if(nHex.owner > 0 && nHex.owner !== unit.owner) {
+                        let foePow = nHex.owner === 1
+                            ? (gameData._aiStratPowPlayer || 0)
+                            : ((gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[nHex.owner]) || 0);
+                        let myPow2 = (gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[unit.owner]) || 1;
+                        let edge = myPow2 / Math.max(1, foePow);
+                        if(edge > 1.05) playerBonus += Math.min(70, (edge - 1) * 60);
+                    } else if(nHex.owner === 0) {
+                        playerBonus += 30; // free land: expand into neutral ground eagerly
+                    }
                     // Avoid attacking into terrain that gives our unit type a defense penalty.
                     let terrainPenalty = 0;
                     if(unit.type === 'heavy') {
@@ -25937,6 +26019,12 @@
 
             wodBindHudResourceTooltips();
 
+            // Pre-bake the full terrain canvas now (loading overlay still up) so the first
+            // gameplay frame doesn't stall ~350ms on a lazy full rebuild inside draw().
+            if(terrainNeedsUpdate && UI.canvas && UI.canvas.style.display !== 'none') {
+                try { updateTerrainCache(); } catch(_) {}
+            }
+
             lastTime = performance.now();
             if(animationFrameId) cancelAnimationFrame(animationFrameId);
             gameLoop(lastTime);
@@ -26955,6 +27043,16 @@
             if(mapShapePre === 'archipelago') procMapAcceptTriesMax = lobbyPreviewGen ? Math.max(procMapAcceptTriesMax, 16) : (wodFingerReuseMapSeed ? 1 : Math.max(procMapAcceptTriesMax, 34));
             if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
 
+            // Hoisted out of the accept loop: the post-loop fallback paths below use these
+            // (a previous version declared them inside the loop, so exhausting all accept
+            // tries crashed generateMap with a ReferenceError and left a broken map).
+            let seedOffset = 0;
+            let mapShape = mapShapePre;
+            let cols = 0, rows = 0;
+            let factionSlots = 1;
+            let landForCities = [];
+            let landNC = 1;
+
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
                 if(procAttempt > 0 || wodMapGenCooperativeMode()) await wodYieldToMainThread();
                 if(lobbyPreviewGen) {
@@ -26985,18 +27083,18 @@
             gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = []; gameData.bridges = [];
             gameData._wodCitySplitAnglePhase = null;
 
-            let seedOffset = Math.random() * 10000;
+            seedOffset = Math.random() * 10000;
             
             let shapeInput = document.getElementById('setupMapShape');
-            let mapShape = (mog && wodIsProcGenMapShape(mog.mapShape)) ? mog.mapShape : (shapeInput ? shapeInput.value : 'island');
+            mapShape = (mog && wodIsProcGenMapShape(mog.mapShape)) ? mog.mapShape : (shapeInput ? shapeInput.value : 'island');
             gameData.mapShape = mapShape;
             gameData.loadedCustomMap = false;
             gameData._genProfile = wodSampleMapGenProfile(mapShape);
             
             // Generate dense cell grid on the map. The old variable names remain,
             // but these are square-neighbor dots, not hex tiles.
-            let cols = mapR;
-            let rows = Math.floor(mapR * ((gameData._mapSizePreset && gameData._mapSizePreset.rowsMul) || 0.8));
+            cols = mapR;
+            rows = Math.floor(mapR * ((gameData._mapSizePreset && gameData._mapSizePreset.rowsMul) || 0.8));
             let spacing = hr * 1.35;
             let terrainAppliedFromWorker = false;
             try {
@@ -27275,9 +27373,9 @@
                 let aiSync = document.getElementById('setupAI');
                 if(aiSync) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiSync.value, 10) || 1));
             }
-            let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
-            let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
-            let landNC = Math.max(1, landForCities.length);
+            factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
+            landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
+            landNC = Math.max(1, landForCities.length);
 
             if(mapShape === 'archipelago') {
                 let passLand = 0;
@@ -27852,6 +27950,7 @@
             if(UI && UI.canvas) UI.canvas.classList.remove('menu-bg-active');
             if(!opts.keepMp) gameData.mp = null;
             gameData._campaignEnded = false;
+            gameData._enemyDistField = null;
             gameData.aiFrontFocus = {};
             gameData.aiStrategyTimer = 0;
             gameData.aiFocusTimer = 0;
@@ -28067,6 +28166,7 @@
         function wodRunInitialBootToMenu() {
             if(window._wodBootStarted) return;
             window._wodBootStarted = true;
+            window._wodBootBusy = true;
             window._wodBootSettledUntil = performance.now() + 2400;
             let ov = document.getElementById('wodBootOverlay');
             let caption = document.getElementById('wodBootCaption');
@@ -28116,6 +28216,7 @@
                     }
                     gameData._wodSkipMapGenLoader = false;
                     window._wodBootSettledUntil = 0;
+                    window._wodBootBusy = false;
                     if(typeof wodPreloadAncientCivArt === 'function') void wodPreloadAncientCivArt();
                 });
             }
@@ -28174,6 +28275,7 @@
                     if(caption) caption.textContent = 'Could not load. Try refreshing.';
                     if(inner) inner.classList.remove('wod-boot-tween-suppress');
                     gameData._wodSkipMapGenLoader = false;
+                    window._wodBootBusy = false;
                 }
             })();
         }
@@ -28866,7 +28968,7 @@
                 for(let pt of getHexesInRadius(city.q, city.r, 4))
                     addCoastal(gameData.hexes[`${pt.q},${pt.r}`]);
             }
-            if(coastal.length > 96) coastal.length = 96;
+            if(coastal.length > 56) coastal.length = 56;
             let out = [];
             let pairSeen = new Set();
             for(let i = 0; i < coastal.length; i++) {
@@ -28939,6 +29041,9 @@
             let now = performance.now();
             if(!gameData._aiBridgeCooldown) gameData._aiBridgeCooldown = {};
             if(now - (gameData._aiBridgeCooldown[ownerId] || 0) < 82000) return false;
+            // Roll the dice BEFORE the expensive site search — computing candidate sites cost
+            // ~150ms and was thrown away 87% of the time (a recurring frame hitch).
+            if(Math.random() > 0.13) return false;
             let sites = wodAiCollectBridgeCandidateSites(ownerId);
             if(!sites.length) return false;
             let best = null,
@@ -28953,7 +29058,6 @@
                 }
             }
             if(!best || bestScore < MIN_SCORE) return false;
-            if(Math.random() > 0.13) return false;
             if(placeBridgeAt(ownerId, best.x, best.y, best.angle, best.w, best.h, { suppressNotes: true })) {
                 gameData._aiBridgeCooldown[ownerId] = now;
                 return true;
@@ -29206,16 +29310,19 @@
                     let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[unit.owner];
                     if(myPower === undefined) myPower = getOwnerTroopManpower(unit.owner);
                     let strengthRatio = myPower / Math.max(1, playerPower);
-                    let canOverwhelm = strengthRatio >= 1.18;
+                    let canOverwhelm = strengthRatio >= 1.12;
                     let localRatio = (support + 1) / (enemies + 1);
-                    let neededSupport = canOverwhelm ? Math.max(2, Math.ceil(enemies * 0.92) + 1) : Math.max(5, Math.ceil(enemies * 1.2) + 2);
-                    if((!canOverwhelm || localRatio < 1.25) && support < neededSupport && hpRatio < 0.9) {
+                    // Push whenever the local fight is clearly winnable, even without global superiority —
+                    // waiting for a big global edge made the AI stall on quiet fronts.
+                    let localOverrun = localRatio >= 1.6 && support >= 3;
+                    let neededSupport = canOverwhelm ? Math.max(2, Math.ceil(enemies * 0.92) + 1) : Math.max(4, Math.ceil(enemies * 1.1) + 1);
+                    if(!localOverrun && (!canOverwhelm || localRatio < 1.2) && support < neededSupport && hpRatio < 0.9) {
                         wodAiMoveUnitToward(unit,
                             assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.75 + spread,
                             assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.75 - spread * 0.45,
                             true);
                     } else {
-                        let depth = canOverwhelm && localRatio >= 1.35 ? 0.85 : 0.22;
+                        let depth = (canOverwhelm || localOverrun) && localRatio >= 1.35 ? 0.85 : 0.22;
                         wodAiMoveUnitToward(unit,
                             assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.35,
                             assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth - spread * 0.35,
@@ -38142,6 +38249,26 @@
                 cities: gameData.cities.map(c => ({id: c.id, owner: c.owner})),
                 units: gameData.entities.map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp}))
             });
+        };
+
+        window.__wodGetGameData = function() { return gameData; };
+        window.__wodDebug = function() {
+            return {
+                gameState,
+                speed: gameData.speed,
+                mpEnabled: !!(gameData.mp && gameData.mp.enabled),
+                mpIsHost: !!(gameData.mp && gameData.mp.isHost),
+                mpAllReady: !!(gameData.mp && gameData.mp.allReady),
+                menuAttract: !!gameData.menuAttractMode,
+                entities: gameData.entities.length,
+                hexes: gameData.hexList.length,
+                simTick: gameData._wodSimTick | 0,
+                sepWorker: !!wodSepWorker,
+                terrainLastBakeMs: wodTerrainLastBakeCostMs,
+                campaignEnded: !!gameData._campaignEnded,
+                playerCities: gameData.cities.filter(c => c.owner === 1).length,
+                totalCities: gameData.cities.length
+            };
         };
 
         window.advanceTime = function(ms) {
