@@ -22439,13 +22439,43 @@
             let corridor = wodWorldPointsFromHexMarchPath(unit, fullHex, endPt);
             corridor[0] = { x: unit.x, y: unit.y };
             if(corridor.length < 2) return false;
-            unit.fullMarchWaypoints = corridor.map(p => ({ x: p.x, y: p.y }));
-            unit.marchWpCursor = 0;
             unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
             unit.target = unit.path.shift();
             unit.target.pathPrepared = true;
-            if(!fromAdvance) wodSeedOrderArrowCurrentLeg(unit, fullHex);
+            // Keep sparse click waypoints for leg logic; dense corridor lives in unit.path only.
+            // Putting every hex step into fullMarchWaypoints made the arrow builder re-pathfind
+            // between each step and draw huge looping lines on the map.
+            if(!fromAdvance) {
+                unit.fullMarchWaypoints = marchPts.map(p => ({ x: p.x, y: p.y }));
+                unit.marchWpCursor = 0;
+            }
+            let arrowSig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+            unit._routeArrowMarchSig = arrowSig;
+            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(corridor);
+            unit._routeArrowFrozenReady = true;
+            unit._routeArrowProgressIdx = 0;
             return true;
+        }
+
+        function wodPlayerMarchArrowPoints(unit) {
+            if(!unit || !wodMpIsHumanOwner(unit.owner)) return null;
+            if(!unit.target && !(unit.path && unit.path.length) && !unit.orderTarget) return null;
+            let pts = [{ x: unit.x, y: unit.y }];
+            if(unit.target && unit.target.x != null)
+                pts.push({ x: unit.target.x, y: unit.target.y });
+            if(unit.path && unit.path.length) {
+                for(let i = 0; i < unit.path.length; i++)
+                    pts.push({ x: unit.path[i].x, y: unit.path[i].y });
+            }
+            if(unit.orderTarget && unit.orderTarget.x != null) {
+                let last = pts[pts.length - 1];
+                let dx = unit.orderTarget.x - last.x;
+                let dy = unit.orderTarget.y - last.y;
+                if(dx * dx + dy * dy > 4)
+                    pts.push({ x: unit.orderTarget.x, y: unit.orderTarget.y });
+            }
+            let out = dedupeNearOrderPathPoints(pts);
+            return out.length >= 2 ? out : null;
         }
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
@@ -22496,7 +22526,8 @@
             if(!fromAdvance) {
                 unit.fullMarchWaypoints = marchPts;
                 unit.marchWpCursor = 0;
-                wodEnqueueOrderArrowPathBuild(unit, marchPts);
+                if(!wodMpIsHumanOwner(unit.owner))
+                    wodEnqueueOrderArrowPathBuild(unit, marchPts);
                 if(unit.owner === 1) {
                     unit.combatEngaged = false;
                     unit.combatLockTimer = 0;
@@ -22737,12 +22768,23 @@
                 let endNode = {x: desired.x, y: desired.y};
                 if(desired.isCity) endNode.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endNode);
-                unit.target = unit.path.shift();
-                unit.target.pathPrepared = true;
+                if(unit.path.length > 0) {
+                    unit.target = unit.path.shift();
+                    if(unit.target) unit.target.pathPrepared = true;
+                }
+                if(!unit.target) {
+                    unit.target = {
+                        x: desired.x,
+                        y: desired.y,
+                        pathPrepared: true,
+                        ...(desired.isCity ? { isCity: true } : {})
+                    };
+                }
             } else if(targetHex) {
                 if(wodMpIsHumanOwner(unit.owner) && unit.orderTarget) {
                     wodQueuePlayerMoveOrder(unit, [{ x: unit.orderTarget.x, y: unit.orderTarget.y }]);
-                    unit.target.pathPrepared = true;
+                    if(unit.target) unit.target.pathPrepared = true;
+                    else unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: true };
                     invalidateUnitOrderArrowCache(unit);
                     return;
                 }
@@ -22758,8 +22800,9 @@
                         let endNode = {x: desired.x, y: desired.y};
                         if(desired.isCity) endNode.isCity = true;
                         unit.path[unit.path.length - 1] = endNode;
-                        unit.target = unit.path.shift();
-                        unit.target.pathPrepared = true;
+                        unit.target = unit.path.length > 0 ? unit.path.shift() : null;
+                        if(unit.target) unit.target.pathPrepared = true;
+                        else unit.target = { x: desired.x, y: desired.y, pathPrepared: true, ...(desired.isCity ? { isCity: true } : {}) };
                         invalidateUnitOrderArrowCache(unit);
                         return;
                     }
@@ -28757,12 +28800,15 @@
             let distSq = dx * dx + dy * dy;
             let holdDoneR2 = Math.pow(hr * 2.4, 2);
             let marchFarR2 = Math.pow(hr * 6, 2);
+            let arriveR2 = Math.pow(hr * 2.8, 2);
             if(unit.holding) {
                 if(distSq <= holdDoneR2) return true;
                 if(distSq > holdDoneR2 && (unit.stuckTimer || 0) < 0.38 && (unit.blockedTimer || 0) < 0.28)
                     return true;
                 return false;
             }
+            // Reached the attack waypoint — allow a fresh sector assignment as the front shifts.
+            if(distSq <= arriveR2) return false;
             if(distSq > marchFarR2) return true;
             let chSt = getNearestHexToPoint(unit.x, unit.y);
             let nearMtn = chSt && unit.type !== 'ship'
@@ -30314,9 +30360,9 @@
             let now = performance.now();
             let mn = gameData._wodMovingN || 0;
             let pn = gameData._wodPlayerMovingN || 0;
-            let throttleMs = mn > 8 ? 900 : 520;
-            if(pn > 0) throttleMs = Math.max(throttleMs, 900);
-            else if(mn > 4) throttleMs = Math.max(throttleMs, 780);
+            let throttleMs = mn > 8 ? 620 : 380;
+            if(pn > 0) throttleMs = Math.max(throttleMs, 480);
+            else if(mn > 4) throttleMs = Math.max(throttleMs, 520);
             if(gameData._terrDirtyNext && now < gameData._terrDirtyNext) {
                 gameData._terrDirtyPending = true;
                 return;
@@ -31367,7 +31413,7 @@
                 else if(livePlay && (gameData._wodMovingN || 0) > 6)
                     gap = Math.max(gap, wodUsesVisualViewportLayout() ? 520 : 360);
                 if(livePlay && (gameData._wodPlayerMovingN || 0) > 0)
-                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 700 : 460);
+                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 360 : 220);
                 if(livePlay && !forceImmediate && wodTerrainLastBakeCostMs > 14)
                     gap = Math.max(gap, Math.min(420, wodTerrainLastBakeCostMs * 9));
                 if(camBusy && !forceImmediate) {
@@ -31383,7 +31429,7 @@
                     // froze the border/territory paint for the whole march, which made captured
                     // ground look like it wasn't being claimed at all.
                     let budget = playerMarching
-                        ? (wodUsesVisualViewportLayout() ? 0.9 : 1.6)
+                        ? (wodUsesVisualViewportLayout() ? 1.4 : 2.4)
                         : (wodUsesVisualViewportLayout() ? (camBusy ? 1.2 : 2.4) : 2.6);
                     wodStepTerrainPoliticalBake(budget);
                     if(!terrainNeedsUpdate)
@@ -34626,6 +34672,8 @@
         }
 
         function getUnitPathPoints(unit) {
+            let corridor = wodPlayerMarchArrowPoints(unit);
+            if(corridor) return corridor;
             if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
                 let pts = [{x: unit.x, y: unit.y}];
                 let c = unit.marchWpCursor || 0;
@@ -34830,6 +34878,8 @@
         function computePathfindingOrderArrowPoints(unit) {
             if(!unit || unit.hp <= 0) return null;
             try {
+                let liveCorridor = wodPlayerMarchArrowPoints(unit);
+                if(liveCorridor) return liveCorridor;
                 if(wodUnitUsesLegBridgeMarch(unit))
                     return wodWaypointOrderArrowPoints(unit);
                 if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
