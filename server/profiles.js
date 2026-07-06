@@ -220,11 +220,17 @@ function computeCombinedStats(profile) {
     (L.enemyMarineKills || 0) +
     (L.enemyTankKills || 0) +
     (L.enemyShipKills || 0);
+  const unitLosses =
+    (L.ownTroopLosses || 0) +
+    (L.ownMarineLosses || 0) +
+    (L.ownTankLosses || 0) +
+    (L.ownShipLosses || 0);
   return {
+    // wins/defeats = matches won/lost (MP + solo); kills/losses = troops killed/lost.
     wins: (mp.wins || 0) + (L.battlesWon || 0),
-    losses: (mp.losses || 0) + (L.campaignLosses || 0),
+    defeats: (mp.losses || 0) + (L.campaignLosses || 0),
     kills,
-    defeats: L.battlesWon || 0,
+    losses: unitLosses,
     gamesPlayed: (mp.gamesPlayed || 0) + (L.gamesStarted || 0),
   };
 }

@@ -792,9 +792,21 @@ wss.on('connection', (ws) => {
         const peer = onlineByPlayerId.get(pid);
         if (peer) {
           profiles.attachClientProfile(peer, peer.displayName);
+          // Refresh the leaderboard with the server-authoritative post-match stats —
+          // previously match results only landed in profiles, so the rankings never moved.
+          updateLeaderboardEntry(peer, peer.combinedStats);
           try {
             peer.ws.send(JSON.stringify({ t: 'profile', profile: profiles.exportProfile(pid) }));
           } catch (_) {}
+        } else {
+          // Player already disconnected — still update their leaderboard row from the profile.
+          const prof = profiles.getProfile(pid);
+          if (prof) {
+            updateLeaderboardEntry(
+              { playerId: pid, displayName: prof.profile.mpDisplayName || 'Player', unitSkin: prof.profile.unitSkin || 'nato' },
+              profiles.computeCombinedStats(prof),
+            );
+          }
         }
       }
       ws.send(JSON.stringify({ t: 'mp_match_end_ack', updatedPlayerIds: result.updatedPlayerIds || [] }));
@@ -988,6 +1000,10 @@ wss.on('connection', (ws) => {
     }
 
     if (t === 'create_lobby') {
+      if (!client.displayName || !client.playerId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Set a unique display name in your profile before hosting.' }));
+        return;
+      }
       leaveRoom(client);
       let id = genLobbyId();
       while (rooms.has(id)) id = genLobbyId();
@@ -1103,6 +1119,12 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      // Fresh (non-rejoin) joins require a registered, unique display name — enforced
+      // server-side so no client build can slip in as an anonymous duplicate "Player N".
+      if (!client.displayName || !client.playerId) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Set a unique display name in your profile before joining.' }));
+        return;
+      }
       normalizeSeatTypes(room.meta);
       if (!firstFreeHumanSlot(room)) {
         ws.send(JSON.stringify({ t: 'error', msg: 'Lobby full' }));

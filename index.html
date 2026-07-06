@@ -13399,11 +13399,14 @@
             let L = (wodProgress && wodProgress.lifetime) || {};
             let mp = wodMpPublicMpStatsPayload();
             let kills = (L.enemyTroopKills | 0) + (L.enemyTankKills | 0) + (L.enemyMarineKills | 0) + (L.enemyShipKills | 0);
+            let unitLosses = (L.ownTroopLosses | 0) + (L.ownMarineLosses | 0) + (L.ownTankLosses | 0) + (L.ownShipLosses | 0);
             return {
+                // wins/defeats = matches won/lost; kills/losses = troops killed/lost.
+                // ("defeats" previously reported battlesWon — the profile card showed wins twice.)
                 wins: (mp.wins | 0) + (L.battlesWon | 0),
-                losses: (mp.losses | 0) + (L.campaignLosses | 0),
+                defeats: (mp.losses | 0) + (L.campaignLosses | 0),
                 kills,
-                defeats: L.battlesWon | 0,
+                losses: unitLosses,
                 gamesPlayed: (mp.gamesPlayed | 0) + (L.gamesStarted | 0)
             };
         }
@@ -13756,10 +13759,15 @@
                 renderShopSkinThumbCanvas(cv, row.unitSkin || 'nato');
                 let meta = document.createElement('div');
                 meta.className = 'mp-lb-meta';
+                let statBits = [];
+                if(sortKey !== 'wins' && sortKey !== 'defeats' && sortKey !== 'kills')
+                    statBits.push(wodMpEscapeHtml(lab) + ': ' + formatLifetimeBig(st[sortKey] | 0));
+                statBits.push('Wins ' + formatLifetimeBig(st.wins | 0));
+                statBits.push('Defeats ' + formatLifetimeBig(st.defeats | 0));
+                statBits.push('Kills ' + formatLifetimeBig(st.kills | 0));
                 meta.innerHTML =
                     '<div class="mp-lb-name">' + wodMpEscapeHtml(row.displayName || row.playerId || 'Player') + '</div>' +
-                    '<div class="mp-lb-val">' + wodMpEscapeHtml(lab) + ': ' + formatLifetimeBig(st[sortKey] | 0) +
-                    ' · Kills ' + formatLifetimeBig(st.kills | 0) + ' · Wins ' + formatLifetimeBig(st.wins | 0) + '</div>' +
+                    '<div class="mp-lb-val">' + statBits.join(' · ') + '</div>' +
                     '<div class="mp-lb-status ' + (row.online ? 'online' : 'offline') + '">' +
                     (row.online ? 'Online' : 'Offline') + '</div>';
                 let rank = document.createElement('span');
@@ -18848,9 +18856,14 @@
         }
 
         function wodDeferHeavySimDuringMarch() {
-            let mn = gameData._wodMovingN || 0;
+            // NOTE: this must NOT trip on the AI's own marches. It previously returned true
+            // whenever 8+ units were moving in total, which froze the AI's strategy/spawn/
+            // encirclement timers the moment the AI launched an attack wave — the AI visibly
+            // "did something for a few seconds then stopped forever". All the heavy passes are
+            // chunked with per-frame time budgets now, so only defer under an extreme player
+            // march load where every spare millisecond matters.
             let pn = gameData._wodPlayerMovingN || 0;
-            return mn >= 8 || pn >= 4;
+            return pn >= 60;
         }
 
         function wodIsPlayerMarchOrder(unit) {
@@ -21193,6 +21206,10 @@
             if(wodHexKeysEqual(fromHex, toHex)) return [fromHex];
             if(usePortals === undefined) usePortals = true;
             let limit = maxNodes == null ? 9000 : maxNodes;
+            // Wall-clock cap: a node-count limit alone let this BFS run 300ms+ mid-frame on big
+            // maps once the AI got busy. Treat timeout like node exhaustion (callers fall back).
+            let bfsT0 = performance.now();
+            let bfsCeil = gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26;
             let sk = getHexKey(fromHex);
             let q = [fromHex];
             let qi = 0;
@@ -21212,6 +21229,7 @@
                 return path;
             }
             while(qi < q.length && nodes++ < limit) {
+                if((nodes & 255) === 0 && performance.now() - bfsT0 > bfsCeil) return [];
                 let hex = q[qi++];
                 let hk = getHexKey(hex);
                 if(wodHexKeysEqual(hex, toHex)) return rebuildPath(hk);
@@ -21534,8 +21552,15 @@
         function wodFindBestBridgePath(unit, startHex, targetHex) {
             if(!startHex || !targetHex || !gameData.bridges || !gameData.bridges.length) return [];
             wodEnsureBridgePathIndex();
+            // Deadline: each `consider` composes multiple land A*/BFS legs. With several AI-built
+            // bridges on the map this stacked into multi-hundred-ms (worst 1.8s) frame stalls.
+            let bridgeT0 = performance.now();
+            const BRIDGE_SEARCH_MS = 8;
             let best = [],
                 bestLen = Infinity;
+            function overDeadline() {
+                return performance.now() - bridgeT0 > BRIDGE_SEARCH_MS;
+            }
             function consider(merged) {
                 if(!merged || merged.length <= 1) return;
                 if(!wodPathCrossesBridge(merged)) return;
@@ -21547,6 +21572,8 @@
                 }
             }
             for(let bi = 0; bi < gameData.bridges.length; bi++) {
+                if(best.length > 1 && overDeadline()) break;
+                if(overDeadline()) break;
                 let br = gameData.bridges[bi];
                 if(!br) continue;
                 if(!wodBridgeRelevantToMarch(br, startHex, targetHex)) continue;
@@ -21554,8 +21581,11 @@
                 if(!deck.length) continue;
 
                 consider(wodBuildDeckCrossingPath(unit, startHex, targetHex, br, deck));
+                if(overDeadline()) continue;
                 consider(wodTryOpposingBankBridgePath(unit, startHex, targetHex, br, deck));
+                if(overDeadline()) continue;
                 consider(wodForceBridgeCrossingPath(unit, startHex, targetHex, br, deck));
+                if(overDeadline()) continue;
 
                 let endsPick = wodPickBridgeDeckEnds(deck, startHex, targetHex, br);
                 if(endsPick)
