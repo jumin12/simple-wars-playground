@@ -28780,20 +28780,66 @@
         function wodAiStampOrder(unit, holding, holdHex) {
             if(!unit) return;
             unit.holding = !!holding;
-            unit.aiOrderUntil = performance.now() + (holding ? 9000 : 14000);
+            unit.aiOrderUntil = performance.now() + (holding ? 5200 : 9000);
             unit.aiFormationSerial = gameData.aiStrategySerial || 0;
             if(holdHex) unit.aiSectorKey = getHexKey(holdHex);
         }
 
+        function wodAiSectorFightStats(owner, holdHex) {
+            let support = countNearbyUnits(owner, holdHex.x, holdHex.y, 190);
+            let enemies = countNearbyUnits(owner, holdHex.x, holdHex.y, 210, true);
+            let localRatio = (support + 1) / (enemies + 1);
+            let playerPower = gameData._aiStratPowPlayer;
+            if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
+            let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[owner];
+            if(myPower === undefined) myPower = getOwnerTroopManpower(owner);
+            let canOverwhelm = myPower / Math.max(1, playerPower) >= 1.1;
+            let localOverrun = localRatio >= 1.45 && support >= 2;
+            let neededSupport = canOverwhelm
+                ? Math.max(2, Math.ceil(enemies * 0.85))
+                : Math.max(3, Math.ceil(enemies * 0.92) + 1);
+            let shouldPush = localOverrun || support >= neededSupport
+                || (canOverwhelm && localRatio >= 1.12) || enemies <= 0;
+            return { support, enemies, localRatio, canOverwhelm, localOverrun, neededSupport, shouldPush };
+        }
+
+        function wodAiIssueSectorOrder(unit, assignment, hpRatio) {
+            if(!unit || !assignment) return false;
+            let dx = assignment.attackHex.x - assignment.holdHex.x;
+            let dy = assignment.attackHex.y - assignment.holdHex.y;
+            let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            let slot = wodAiUnitSlotOffset(unit, assignment.holdHex, 0.82);
+            let spread = slot.ox;
+            let fight = wodAiSectorFightStats(unit.owner, assignment.holdHex);
+            let support = assignment.support != null ? assignment.support : fight.support;
+            let enemies = assignment.enemies != null ? assignment.enemies : fight.enemies;
+            let localRatio = (support + 1) / (enemies + 1);
+            let shouldPush = fight.shouldPush || localRatio >= 1.35;
+            if(!shouldPush && support < fight.neededSupport && hpRatio < 0.88 && enemies > 0) {
+                wodAiMoveUnitToward(unit,
+                    assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.75 + spread,
+                    assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.75 + slot.oy * 0.45,
+                    true);
+                wodAiStampOrder(unit, true, assignment.holdHex);
+                return true;
+            }
+            let depth = (fight.canOverwhelm || fight.localOverrun) && localRatio >= 1.25 ? 0.92 : 0.58;
+            wodAiMoveUnitToward(unit,
+                assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.35,
+                assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth + slot.oy * 0.35,
+                false);
+            unit.holding = false;
+            wodAiStampOrder(unit, false, assignment.holdHex);
+            return true;
+        }
+
         /** Keep current AI orders until they arrive, settle on a hold line, or get stuck. */
         function wodAiShouldKeepCurrentOrder(unit) {
-            if(!unit || !unit.target || unit.retreating || unit.moraleBroken) return false;
-            if(unit.aiOrderUntil && performance.now() < unit.aiOrderUntil) {
-                if((unit.stuckTimer || 0) < 0.42 && (unit.blockedTimer || 0) < 0.32) return true;
-            }
+            if(!unit || unit.retreating || unit.moraleBroken) return false;
+            if(!unit.target && !unit.orderTarget) return false;
             let hr = gameData.hexRadius || 20;
             let ft = unit.orderTarget
-                || (unit.target.finalTarget ? unit.target.finalTarget : unit.target);
+                || (unit.target && unit.target.finalTarget ? unit.target.finalTarget : unit.target);
             if(!ft || ft.x == null) return false;
             let dx = ft.x - unit.x;
             let dy = ft.y - unit.y;
@@ -28802,10 +28848,24 @@
             let marchFarR2 = Math.pow(hr * 6, 2);
             let arriveR2 = Math.pow(hr * 2.8, 2);
             if(unit.holding) {
-                if(distSq <= holdDoneR2) return true;
-                if(distSq > holdDoneR2 && (unit.stuckTimer || 0) < 0.38 && (unit.blockedTimer || 0) < 0.28)
-                    return true;
-                return false;
+                if(distSq > holdDoneR2) {
+                    if((unit.stuckTimer || 0) < 0.38 && (unit.blockedTimer || 0) < 0.28) return true;
+                    return false;
+                }
+                // Clumped on the rally hex — reassess once enough friendlies are here.
+                let support = countNearbyUnits(unit.owner, unit.x, unit.y, 195);
+                let enemies = countNearbyUnits(unit.owner, unit.x, unit.y, 215, true);
+                let localRatio = (support + 1) / (enemies + 1);
+                if(support >= 3 && localRatio >= 1.15) return false;
+                if(enemies <= 0 && support >= 2) return false;
+                if(unit.aiOrderUntil && performance.now() >= unit.aiOrderUntil - 2200) return false;
+                return true;
+            }
+            if(!unit.target) return false;
+            if(unit.aiOrderUntil && performance.now() < unit.aiOrderUntil) {
+                if((unit.stuckTimer || 0) < 0.42 && (unit.blockedTimer || 0) < 0.32) {
+                    if(distSq > arriveR2) return true;
+                }
             }
             // Reached the attack waypoint — allow a fresh sector assignment as the front shifts.
             if(distSq <= arriveR2) return false;
@@ -28815,7 +28875,8 @@
                 && getNeighborHexes(chSt).some(n => n && n.type === 'mountain');
             let stuckLim = nearMtn ? 0.22 : 0.42;
             let blkLim = nearMtn ? 0.18 : 0.32;
-            return (unit.stuckTimer || 0) < stuckLim && (unit.blockedTimer || 0) < blkLim;
+            if((unit.stuckTimer || 0) >= stuckLim || (unit.blockedTimer || 0) >= blkLim) return false;
+            return distSq > arriveR2 * 1.8;
         }
 
         function wodPickAiSectorForUnit(unit, sectors) {
@@ -28986,7 +29047,7 @@
 
             let t0 = performance.now();
             let budgetMs = wodUsesVisualViewportLayout() ? 1.35 : 2.6;
-            let maxUnits = wodUsesVisualViewportLayout() ? 2 : 3;
+            let maxUnits = wodUsesVisualViewportLayout() ? 3 : 5;
             let assigned = 0;
             while(ch.idx < ch.readyUnits.length && assigned < maxUnits) {
                 if(performance.now() - t0 >= budgetMs) break;
@@ -29002,16 +29063,13 @@
                     continue;
                 }
                 let sector = ch.sectors[idx % ch.sectors.length];
-                let support = countNearbyUnits(ch.oid, sector.holdHex.x, sector.holdHex.y, 195);
-                let enemies = countNearbyUnits(ch.oid, sector.holdHex.x, sector.holdHex.y, 215, true);
-                let neededSupport = ch.canBreakthrough ? Math.max(2, Math.ceil(enemies * 0.95)) : Math.max(4, Math.ceil(enemies * 1.15) + 2);
-                if(support < neededSupport && (unit.hp / unit.maxHp) < 0.82) {
-                    wodAiMoveUnitTowardHex(unit, sector.holdHex, true, 0.35);
-                    wodAiStampOrder(unit, true, sector.holdHex);
-                } else {
-                    wodAiMoveUnitTowardHex(unit, ch.canBreakthrough || support >= neededSupport ? sector.attackHex : sector.holdHex, false, 0.46);
-                    wodAiStampOrder(unit, false, sector.holdHex);
-                }
+                let fight = wodAiSectorFightStats(ch.oid, sector.holdHex);
+                wodAiIssueSectorOrder(unit, {
+                    holdHex: sector.holdHex,
+                    attackHex: sector.attackHex,
+                    support: fight.support,
+                    enemies: fight.enemies
+                }, unit.hp / unit.maxHp);
                 assigned++;
             }
             if(ch.idx >= ch.readyUnits.length) {
@@ -29558,7 +29616,7 @@
                     }
 
                     if(unit.retreating && hpRatio > 0.65) unit.retreating = false;
-                    if(unit.aiFormationSerial === w.serial) continue;
+                    if(unit.aiFormationSerial === w.serial && unit.target && !unit.holding) continue;
                     if(wodAiShouldKeepCurrentOrder(unit)) continue;
 
                     if(unit.target && ((unit.stuckTimer || 0) >= 0.35 || (unit.blockedTimer || 0) >= 0.28)) {
@@ -29607,43 +29665,7 @@
                         continue;
                     }
 
-                    let support = assignment.support != null
-                        ? assignment.support
-                        : countNearbyUnits(unit.owner, assignment.holdHex.x, assignment.holdHex.y, 190);
-                    let enemies = assignment.enemies != null
-                        ? assignment.enemies
-                        : countNearbyUnits(unit.owner, assignment.holdHex.x, assignment.holdHex.y, 210, true);
-                    let dx = assignment.attackHex.x - assignment.holdHex.x;
-                    let dy = assignment.attackHex.y - assignment.holdHex.y;
-                    let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-                    let slot = wodAiUnitSlotOffset(unit, assignment.holdHex, 0.82);
-                    let spread = slot.ox;
-
-                    let playerPower = gameData._aiStratPowPlayer;
-                    if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
-                    let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[unit.owner];
-                    if(myPower === undefined) myPower = getOwnerTroopManpower(unit.owner);
-                    let strengthRatio = myPower / Math.max(1, playerPower);
-                    let canOverwhelm = strengthRatio >= 1.12;
-                    let localRatio = (support + 1) / (enemies + 1);
-                    // Push whenever the local fight is clearly winnable, even without global superiority —
-                    // waiting for a big global edge made the AI stall on quiet fronts.
-                    let localOverrun = localRatio >= 1.6 && support >= 3;
-                    let neededSupport = canOverwhelm ? Math.max(2, Math.ceil(enemies * 0.92) + 1) : Math.max(4, Math.ceil(enemies * 1.1) + 1);
-                    if(!localOverrun && (!canOverwhelm || localRatio < 1.2) && support < neededSupport && hpRatio < 0.9) {
-                        wodAiMoveUnitToward(unit,
-                            assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.75 + spread,
-                            assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.75 + slot.oy * 0.45,
-                            true);
-                        wodAiStampOrder(unit, true, assignment.holdHex);
-                    } else {
-                        let depth = (canOverwhelm || localOverrun) && localRatio >= 1.35 ? 0.85 : 0.22;
-                        wodAiMoveUnitToward(unit,
-                            assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.35,
-                            assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth + slot.oy * 0.35,
-                            false);
-                        wodAiStampOrder(unit, false, assignment.holdHex);
-                    }
+                    wodAiIssueSectorOrder(unit, assignment, hpRatio);
                 }
                 if(w.ei < ents.length) return;
             }
@@ -29658,7 +29680,7 @@
             }
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
             if(!wodDeferHeavySimDuringMarch()) gameData.aiStrategyTimer += dt;
-            let stratEvery = wodUsesVisualViewportLayout() ? 2.15 : 1.95;
+            let stratEvery = wodUsesVisualViewportLayout() ? 1.85 : 1.55;
             if(gameData.aiStrategyTimer < stratEvery) return;
             gameData.aiStrategyTimer = 0;
 
@@ -30071,8 +30093,8 @@
                     unit._combatShotTimer = null;
                 }
 
-                if(unit.owner > 1 && !unit.target && unit.type !== 'convoy') {
-                    // Idle AI without orders: handled by updateAiStrategy / formation.
+                if(unit.owner > 1 && !wodMpIsHumanOwner(unit.owner) && !unit.target && unit.type !== 'convoy' && unit.type !== 'ship' && !unit.moraleBroken && !unit.retreating) {
+                    unit.aiFormationSerial = -1;
                 }
 
                 applyTerrainUnitEffects(unit, dt);
