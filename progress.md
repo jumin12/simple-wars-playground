@@ -98,6 +98,18 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Added dev/test hooks: `window.__wodDebug()`, `window.__wodGetGameData()` (used by Playwright e2e scripts in output/, which is gitignored).
 - Verified via headless Playwright: 90s solo profile — no long tasks >90ms after match start (was 3.7-7s stalls + periodic 170-500ms spikes); solo e2e — select, right-click move order, AI captures territory, esc menu works, no console errors; multiplayer e2e — create lobby, join, launch, identical territory on host+guest, guest move command applied on host, snapshots streaming, no errors.
 
+## Mission look, ship/land, straight-border, hitch pass (2026-07-05 night)
+- **Mission maps upgraded to procedural quality** (regenerate with `node scripts/generate-missions.js`):
+  - `roughenCoasts` cellular pass erases every straight land/water edge (rect fills, map-boundary cuts);
+  - `claimNations` now claims land AND water (like the game's start splits) with low-frequency wobble + per-cell jitter + majority smoothing → organic frontlines, never straight;
+  - `ridge()` uses a bounded random-walk drift + large-scale sway + width variation, so mountain ranges/rivers snake naturally; returns its centerline and all gates/bridges/forts anchor to the REAL feature course (`MapBuilder.nearestOn`);
+  - build-time land-connectivity check: every enemy capital must be reachable from the player capital over land/bridges (naval missions exempt).
+- **Ships can no longer slide through land**: `wodSamplePosOnWalkableTerrain` gave water-only movers (ships/sea convoys) the generous land-unit corner tolerance, letting movement chords cross narrow isthmuses when a water cell existed on the far side. Water-only movers now use a 0.6-radius tolerance. Verified: 3 ships crossing a full archipelago, 360 position samples, 0 land contacts.
+- **Straight borders eliminated in generated maps**:
+  - start-split Voronoi gets `wodStartSplitNoiseMult` — deterministic per-(seed,owner) wave warp of the distance field, so two-faction bisectors are never mathematically straight (stable across the equalizer's iterations);
+  - rectangle-map perimeter water uses a noise-varied waterline depth (1.5–7 cells) instead of a hard |q| cutoff — coasts on rectangle/forest/mountain/desert maps are wavy on all four edges.
+- **Combat hitch root-caused**: `wodAiTryFortForOwner` scored every candidate hex (unit-distance + frontline-distance scans per hex, thousands of candidates) — single calls ran ~240ms on a periodic AI pulse. Now samples ≤140 spread candidates with a 5ms deadline. Also: long-range AI move orders (city strikes/redeploys) route through the budgeted rAF order pump with an interim straight-walk target instead of synchronous multi-search assigns. March profile now: worst gap ~85ms (rare), all pathfind maxima ≤ ~50ms, typical frames clean.
+
 ## AI freeze fix, 10 missions, MP profile/leaderboard pass (2026-07-05 late)
 - **AI "stops after a few seconds" fixed**: `wodDeferHeavySimDuringMarch` froze AI strategy/spawn/encirclement timers whenever 8+ units were moving IN TOTAL — i.e. the AI's own attack wave paused its own brain permanently. Now only defers under an extreme player-march load (60+ player units marching). Verified: AI stays ordered/attacking continuously for 90s+, both with player idle and marching.
 - **Pathfinding wall-clock caps** (the AI's new activity level exposed uncapped searches — 3.1s single-frame stalls): `wodLandBfsPath` gets a 7ms in-play ceiling (26ms in menus), `wodFindBestBridgePath` an 8ms deadline across its composed candidate paths. Post-fix 40s march profile: worst frame gap 100ms once, all pathfind maxima ≤ 38ms.

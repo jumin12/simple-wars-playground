@@ -86,16 +86,32 @@ class MapBuilder {
     }
   }
 
-  /** Thick line of terrain from (q0,r0) to (q1,r1). */
+  /** Thick line of terrain from (q0,r0) to (q1,r1). Drifts like a natural range/river:
+   *  a bounded random walk perpendicular to the line (not per-step jitter, which still
+   *  reads as a straight band), plus width variation along the run. */
   ridge(q0, r0, q1, r1, width, type, opt) {
     opt = opt || {};
     const steps = Math.max(Math.abs(q1 - q0), Math.abs(r1 - r0)) * 2 + 1;
+    const amp = opt.wobble != null ? opt.wobble * 2.2 : 4.5;
+    // Perpendicular unit direction for the drift.
+    const len = Math.hypot(q1 - q0, r1 - r0) || 1;
+    const pq = -(r1 - r0) / len, pr = (q1 - q0) / len;
+    const centerline = [];
+    let drift = 0, vel = 0;
     for (let i = 0; i <= steps; i++) {
       const t = i / steps;
-      const wob = opt.wobble ? Math.round((this.rng() - 0.5) * opt.wobble * 2) : 0;
-      const q = Math.round(q0 + (q1 - q0) * t) + (Math.abs(q1 - q0) < Math.abs(r1 - r0) ? wob : 0);
-      const r = Math.round(r0 + (r1 - r0) * t) + (Math.abs(q1 - q0) >= Math.abs(r1 - r0) ? wob : 0);
-      const w = Math.max(1, Math.round(width * (0.8 + this.rng() * 0.4)));
+      vel += (this.rng() - 0.5) * 1.3;
+      vel *= 0.72;
+      drift += vel;
+      if (drift > amp) drift = amp;
+      if (drift < -amp) drift = -amp;
+      // Gentle extra sine sway so long ridges bend at a large scale too.
+      const sway = Math.sin(t * Math.PI * (1.5 + (this.seedSway || 0))) * amp * 0.7;
+      const off = drift + sway;
+      const q = Math.round(q0 + (q1 - q0) * t + pq * off);
+      const r = Math.round(r0 + (r1 - r0) * t + pr * off);
+      centerline.push({ q, r });
+      const w = Math.max(1, Math.round(width * (0.65 + this.rng() * 0.8)));
       for (let dq = -w; dq <= w; dq++) {
         for (let dr = -w; dr <= w; dr++) {
           if (dq * dq + dr * dr > w * w + 0.5) continue;
@@ -107,6 +123,18 @@ class MapBuilder {
         }
       }
     }
+    return centerline;
+  }
+
+  /** Point on a ridge/river centerline closest to (q,r) — anchors gates/bridges/forts
+   *  to where the feature ACTUALLY drifted, not where it was nominally aimed. */
+  static nearestOn(centerline, q, r) {
+    let best = centerline[0], bestD = Infinity;
+    for (const p of centerline) {
+      const d = (p.q - q) * (p.q - q) + (p.r - r) * (p.r - r);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
   }
 
   /** Scatter patches of a terrain over existing land of another type. */
@@ -118,6 +146,31 @@ class MapBuilder {
     for (let i = 0; i < count && land.length; i++) {
       const c = land[Math.floor(this.rng() * land.length)];
       this.blob(c.q, c.r, radius * (0.6 + this.rng() * 0.8), type, { noise: 0.5, onlyType: opt.over || 'grass' });
+    }
+  }
+
+  /** Cellular roughening of every land/water boundary — kills straight coastlines
+   *  (rect fills and map-edge cuts) and makes shores read like the procedural maps. */
+  roughenCoasts(iterations, prob) {
+    prob = prob == null ? 0.3 : prob;
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
+    for (let it = 0; it < (iterations || 2); it++) {
+      const flips = [];
+      this.each((h) => {
+        if (h.type === 'urban' || h.type === 'mountain') return;
+        let waterN = 0, landN = 0, urbanAdj = false;
+        for (const [dq, dr] of dirs) {
+          const n = this.at(h.q + dq, h.r + dr);
+          if (!n) continue;
+          if (n.type === 'water') waterN++;
+          else landN++;
+          if (n.type === 'urban') urbanAdj = true;
+        }
+        if (urbanAdj) return;
+        if (h.type !== 'water' && waterN >= 2 && this.rng() < prob) flips.push({ h, to: 'water' });
+        else if (h.type === 'water' && landN >= 3 && this.rng() < prob * 0.8) flips.push({ h, to: 'grass' });
+      });
+      for (const f of flips) f.h.type = f.to;
     }
   }
 
@@ -230,18 +283,44 @@ class MapBuilder {
     });
   }
 
-  /** Assign land ownership by nearest seed within maxDist (q/r units); rest stays neutral. */
+  /** Assign ownership (land AND water, like procedural start splits) by nearest seed within
+   *  reach — with low-frequency wobble + per-cell jitter so no frontline is ever a straight
+   *  line, then majority-smoothing passes to keep the border organic instead of speckled. */
   claimNations(seeds, maxDist) {
+    // Per-seed phase offsets give each nation's border its own waviness.
+    const phases = seeds.map(() => this.rng() * Math.PI * 2);
     this.each((h) => {
-      if (h.type === 'water') return;
       if (h.type === 'urban') return; // set by city stamps
       let best = null, bestD = Infinity;
-      for (const s of seeds) {
-        const d = Math.sqrt((h.q - s.q) * (h.q - s.q) + (h.r - s.r) * (h.r - s.r));
+      for (let i = 0; i < seeds.length; i++) {
+        const s = seeds[i];
+        let d = Math.sqrt((h.q - s.q) * (h.q - s.q) + (h.r - s.r) * (h.r - s.r));
+        d += Math.sin(h.q * 0.23 + phases[i]) * 2.2 + Math.cos(h.r * 0.31 + phases[i] * 1.7) * 2.2;
+        d += (this.rng() - 0.5) * 3.4;
         if (d < bestD) { bestD = d; best = s; }
       }
       if (best && bestD <= (best.reach != null ? best.reach : maxDist)) h.owner = best.owner;
+      else h.owner = 0;
     });
+    // Majority smoothing (keeps waviness, removes one-cell speckle).
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
+    for (let pass = 0; pass < 2; pass++) {
+      const changes = [];
+      this.each((h) => {
+        if (h.type === 'urban') return;
+        const counts = {};
+        for (const [dq, dr] of dirs) {
+          const n = this.at(h.q + dq, h.r + dr);
+          if (n && n.owner > 0) counts[n.owner] = (counts[n.owner] || 0) + 1;
+        }
+        let bestOwner = h.owner, bestCount = counts[h.owner] || 0;
+        for (const [ow, c] of Object.entries(counts)) {
+          if (c > bestCount) { bestOwner = parseInt(ow, 10); bestCount = c; }
+        }
+        if (bestOwner !== h.owner && bestCount >= 6) changes.push({ h, owner: bestOwner });
+      });
+      for (const c of changes) c.h.owner = c.owner;
+    }
   }
 
   /** Nearest same-owner roads (cosmetic + trade routes). */
@@ -327,6 +406,7 @@ MISSIONS.push(function m01() {
   b.blob(14, 8, 4, 'swamp', { onlyType: 'grass' });
   // Player staging islet (west)
   b.blob(-28, 2, 6, 'grass', { noise: 0.3 });
+  b.roughenCoasts(2);
   b.coastSand(0.95);
   const pBase = b.city(-28, 2, 1, 'Port Vigil', { factory: true, harbor: true });
   const eTown = b.city(8, -6, 2, 'Seabreak', { factory: false, harbor: true });
@@ -371,13 +451,14 @@ MISSIONS.push(function m02() {
   const b = new MapBuilder(40, 202);
   b.rect(-34, -28, 34, 28, 'grass', { noise: 2 });
   // The river (west-east, wavy) — 3 hexes wide
-  b.ridge(-40, -2, 40, 2, 1, 'water', { wobble: 2, skipUrban: true });
+  const river = b.ridge(-40, -2, 40, 2, 1, 'water', { wobble: 2, skipUrban: true });
   // Terrain texture
   b.scatter('forest', 10, 4);
   b.scatter('hill', 6, 3);
   b.scatter('swamp', 4, 2);
   b.blob(-30, -20, 4, 'mountain', { onlyType: 'grass' });
   b.blob(31, 22, 4, 'mountain', { onlyType: 'grass' });
+  b.roughenCoasts(2);
   b.coastSand(0.55);
   // South = player (loyalists), North = rebels
   const pCap = b.city(-12, 14, 1, 'Kingsport', { factory: true });
@@ -385,11 +466,11 @@ MISSIONS.push(function m02() {
   const eCap = b.city(-10, -14, 2, 'Redhall', { factory: true });
   const eTown = b.city(18, -16, 2, 'Northgate', { factory: false });
   b.claimNations([{ q: 0, r: 16, owner: 1, reach: 60 }, { q: 0, r: -16, owner: 2, reach: 60 }]);
-  // River itself neutral
-  b.each((h) => { if (h.type === 'water') h.owner = 0; });
-  // Two bridges
-  b.bridge(-14, 0, Math.PI / 2, 0);
-  b.bridge(14, 0, Math.PI / 2, 0);
+  // Two bridges anchored to wherever the river actually drifted
+  const bw = MapBuilder.nearestOn(river, -14, 0);
+  const be = MapBuilder.nearestOn(river, 14, 0);
+  b.bridge(bw.q, bw.r, Math.PI / 2, 0);
+  b.bridge(be.q, be.r, Math.PI / 2, 0);
   // Armies mirror each other
   for (let i = 0; i < 5; i++) b.unit('light', 1, -14 + i * 6, 8);
   b.unit('heavy', 1, -12, 11, 'Loyal Guard Armor');
@@ -425,21 +506,24 @@ MISSIONS.push(function m03() {
   const b = new MapBuilder(40, 303);
   b.rect(-36, -28, 36, 28, 'grass', { noise: 2 });
   // Central mountain wall (north-south)
-  b.ridge(0, -30, 0, 30, 2, 'mountain', { wobble: 2, skipUrban: true });
-  // Two passes
-  b.gate(1, -12, 2);
-  b.gate(-1, 14, 2);
+  const wall = b.ridge(0, -30, 0, 30, 2, 'mountain', { wobble: 2, skipUrban: true });
+  // Two passes carved where the wall actually runs
+  const passN = MapBuilder.nearestOn(wall, 0, -12);
+  const passS = MapBuilder.nearestOn(wall, 0, 14);
+  b.gate(passN.q, passN.r, 2);
+  b.gate(passS.q, passS.r, 2);
   b.scatter('forest', 9, 4);
   b.scatter('hill', 8, 3, { where: (h) => Math.abs(h.q) < 12 });
+  b.roughenCoasts(2);
   b.coastSand(0.5);
   const pCap = b.city(-20, 0, 1, 'Westhaven', { factory: true });
   const pTown = b.city(-26, -16, 1, 'Millbrook');
   const eCap = b.city(20, 2, 2, 'Ostmark', { factory: true });
   const eTown = b.city(26, -14, 2, 'Eisenfeld', { factory: true });
   b.claimNations([{ q: -20, r: 0, owner: 1, reach: 60 }, { q: 20, r: 0, owner: 2, reach: 60 }]);
-  // Enemy forts guarding the passes (their side)
-  b.fort(4, -12, 2);
-  b.fort(3, 14, 2);
+  // Enemy forts guarding the passes (their side of each carved gate)
+  b.fort(passN.q + 3, passN.r, 2);
+  b.fort(passS.q + 3, passS.r, 2);
   for (let i = 0; i < 6; i++) b.unit('light', 1, -16 - (i % 3) * 3, -6 + Math.floor(i / 3) * 8);
   b.unit('heavy', 1, -19, 3, '1st Armor Bn.');
   for (let i = 0; i < 7; i++) b.unit('light', 2, 15 + (i % 3) * 3, -8 + Math.floor(i / 3) * 7);
@@ -481,6 +565,7 @@ MISSIONS.push(function m04() {
   b.blob(-6, -14, 3, 'forest', { onlyType: 'grass' });
   b.blob(20, -8, 3, 'hill', { onlyType: 'grass' });
   b.blob(16, 18, 3, 'forest', { onlyType: 'grass' });
+  b.roughenCoasts(2);
   b.coastSand(0.95);
   b.city(-22, 16, 1, 'Anchorhold', { factory: true, harbor: true });
   b.city(-6, -14, 2, 'Coralwatch', { harbor: true });
@@ -530,10 +615,13 @@ MISSIONS.push(function m05() {
   b.scatter('hill', 10, 4);
   b.scatter('swamp', 6, 3);
   // Partial mountain spurs marking the old borders
-  b.ridge(-22, -44, -20, -6, 2, 'mountain', { wobble: 2, skipUrban: true });
-  b.ridge(22, 8, 20, 44, 2, 'mountain', { wobble: 2, skipUrban: true });
-  b.gate(-21, -10, 2);
-  b.gate(21, 12, 2);
+  const spurW = b.ridge(-22, -44, -20, -6, 2, 'mountain', { wobble: 2, skipUrban: true });
+  const spurE = b.ridge(22, 8, 20, 44, 2, 'mountain', { wobble: 2, skipUrban: true });
+  const gw = MapBuilder.nearestOn(spurW, -21, -10);
+  const ge = MapBuilder.nearestOn(spurE, 21, 12);
+  b.gate(gw.q, gw.r, 2);
+  b.gate(ge.q, ge.r, 2);
+  b.roughenCoasts(2);
   b.coastSand(0.5);
   // Player center
   b.city(0, -6, 1, 'Midgard', { factory: true });
@@ -586,24 +674,27 @@ MISSIONS.push(function m06() {
   const b = new MapBuilder(60, 606);
   b.rect(-54, -42, 54, 42, 'grass', { noise: 3 });
   // Great river north-south, 4 wide
-  b.ridge(2, -46, -2, 46, 2, 'water', { wobble: 2, skipUrban: true });
+  const river = b.ridge(2, -46, -2, 46, 2, 'water', { wobble: 2, skipUrban: true });
   b.scatter('forest', 14, 5);
   b.scatter('hill', 8, 4, { where: (h) => h.q > 8 });
   b.scatter('swamp', 5, 3, { where: (h) => Math.abs(h.q) < 10 });
+  b.roughenCoasts(2);
   b.coastSand(0.4);
   b.city(-30, -14, 1, 'Weststrand', { factory: true });
   b.city(-34, 16, 1, 'Lowfield');
   b.city(26, -16, 2, 'Hochburg', { factory: true });
   b.city(32, 14, 2, 'Eastwall', { factory: true });
   b.claimNations([{ q: -30, r: 0, owner: 1, reach: 60 }, { q: 30, r: 0, owner: 2, reach: 60 }]);
-  b.each((h) => { if (h.type === 'water') h.owner = 0; });
-  // Three bridges; enemy forts overlooking each east bank
-  b.bridge(0, -20, 0, 0);
-  b.bridge(0, 2, 0, 0);
-  b.bridge(0, 24, 0, 0);
-  b.fort(6, -20, 2);
-  b.fort(6, 2, 2);
-  b.fort(6, 24, 2);
+  // Three bridges on the river's real course; enemy forts overlooking each east bank
+  const bN = MapBuilder.nearestOn(river, 0, -20);
+  const bC = MapBuilder.nearestOn(river, 0, 2);
+  const bS = MapBuilder.nearestOn(river, 0, 24);
+  b.bridge(bN.q, bN.r, 0, 0);
+  b.bridge(bC.q, bC.r, 0, 0);
+  b.bridge(bS.q, bS.r, 0, 0);
+  b.fort(bN.q + 6, bN.r, 2);
+  b.fort(bC.q + 6, bC.r, 2);
+  b.fort(bS.q + 6, bS.r, 2);
   for (let i = 0; i < 8; i++) b.unit('light', 1, -22 + (i % 4) * 4, -10 + Math.floor(i / 4) * 16);
   b.unit('heavy', 1, -24, 0, '2nd Armor Bn.');
   b.unit('heavy', 1, -20, 4, '5th Armor Bn.');
@@ -643,6 +734,7 @@ MISSIONS.push(function m07() {
   b.rect(-54, -42, 54, 42, 'grass', { noise: 3 });
   b.scatter('forest', 12, 5);
   b.scatter('hill', 12, 4);
+  b.roughenCoasts(2);
   b.coastSand(0.4);
   // Fortress mountain ring around the enemy capital (east)
   const cq = 28, cr = 0, R = 13;
@@ -707,10 +799,14 @@ MISSIONS.push(function m08() {
   b.scatter('hill', 10, 4);
   b.scatter('swamp', 7, 3);
   // Crossed mountain spurs carving the realm into quadrants (with gaps)
-  b.ridge(-36, -30, 34, 28, 2, 'mountain', { wobble: 2, skipUrban: true });
-  b.ridge(-34, 30, 36, -28, 2, 'mountain', { wobble: 2, skipUrban: true });
+  const spurA = b.ridge(-36, -30, 34, 28, 2, 'mountain', { wobble: 2, skipUrban: true });
+  const spurB = b.ridge(-34, 30, 36, -28, 2, 'mountain', { wobble: 2, skipUrban: true });
   b.gate(0, 0, 4);
-  b.gate(-18, -15, 2); b.gate(18, 15, 2); b.gate(-17, 15, 2); b.gate(17, -14, 2);
+  for (const [line, q, r] of [[spurA, -18, -15], [spurA, 18, 15], [spurB, -17, 15], [spurB, 17, -14]]) {
+    const g = MapBuilder.nearestOn(line, q, r);
+    b.gate(g.q, g.r, 2);
+  }
+  b.roughenCoasts(2);
   b.coastSand(0.8);
   // Player NW (smallest), warlords NE / SW / SE
   b.city(-26, -16, 1, 'Havenreach', { factory: true });
@@ -767,11 +863,14 @@ MISSIONS.push(function m09() {
   b.rect(2, -42, 54, 42, 'grass', { noise: 2 });
   b.scatter('forest', 12, 5, { where: (h) => h.q > 14 });
   b.scatter('hill', 8, 4, { where: (h) => h.q > 20 });
-  b.ridge(34, -46, 34, 46, 1, 'mountain', { wobble: 3, skipUrban: true });
-  b.gate(34, -8, 2); b.gate(34, 20, 2);
+  const coastRange = b.ridge(34, -46, 34, 46, 1, 'mountain', { wobble: 3, skipUrban: true });
+  const g1 = MapBuilder.nearestOn(coastRange, 34, -8);
+  const g2 = MapBuilder.nearestOn(coastRange, 34, 20);
+  b.gate(g1.q, g1.r, 2); b.gate(g2.q, g2.r, 2);
   // Player staging islands west
   b.blob(-34, -14, 7, 'grass', { noise: 0.3 });
   b.blob(-36, 16, 7, 'grass', { noise: 0.3 });
+  b.roughenCoasts(2);
   b.coastSand(0.95);
   b.city(-34, -14, 1, 'Staging North', { factory: true, harbor: true });
   b.city(-36, 16, 1, 'Staging South', { harbor: true });
@@ -833,9 +932,12 @@ MISSIONS.push(function m10() {
   b.scatter('swamp', 8, 3);
   // A great lake in the center and two mountain chains
   b.blob(2, 2, 8, 'water', { noise: 0.35 });
-  b.ridge(-16, -46, -14, -4, 2, 'mountain', { wobble: 2, skipUrban: true });
-  b.ridge(16, 6, 18, 46, 2, 'mountain', { wobble: 2, skipUrban: true });
-  b.gate(-15, -22, 2); b.gate(17, 26, 2);
+  const chainW = b.ridge(-16, -46, -14, -4, 2, 'mountain', { wobble: 2, skipUrban: true });
+  const chainE = b.ridge(16, 6, 18, 46, 2, 'mountain', { wobble: 2, skipUrban: true });
+  const gwW = MapBuilder.nearestOn(chainW, -15, -22);
+  const gwE = MapBuilder.nearestOn(chainE, 17, 26);
+  b.gate(gwW.q, gwW.r, 2); b.gate(gwE.q, gwE.r, 2);
+  b.roughenCoasts(2);
   b.coastSand(0.5);
   // Player small western republic
   b.city(-40, -2, 1, 'Libertas', { factory: true });
@@ -896,6 +998,38 @@ MISSIONS.push(function m10() {
   };
 });
 
+/** Land connectivity check (bridges count as crossings): every enemy capital must be
+ *  reachable from the player capital for land-route missions. */
+function checkLandConnectivity(data, file) {
+  const byKey = new Map(data.hexList.map((h) => [h.q + ',' + h.r, h]));
+  const bridgeCells = new Set();
+  for (const br of data.bridges || []) {
+    const bq = Math.round(br.x / SPACING), brr = Math.round(br.y / SPACING);
+    const reach = Math.ceil((br.w / SPACING) * 0.75);
+    for (let dq = -reach; dq <= reach; dq++) {
+      for (let dr = -reach; dr <= reach; dr++) bridgeCells.add((bq + dq) + ',' + (brr + dr));
+    }
+  }
+  const passable = (h, k) => h && h.type !== 'mountain' && (h.type !== 'water' || bridgeCells.has(k));
+  const start = data.cities.find((c) => c.owner === 1);
+  const seen = new Set([start.q + ',' + start.r]);
+  const queue = [start];
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
+  for (let qi = 0; qi < queue.length; qi++) {
+    const cur = queue[qi];
+    for (const [dq, dr] of dirs) {
+      const k = (cur.q + dq) + ',' + (cur.r + dr);
+      if (seen.has(k)) continue;
+      const h = byKey.get(k);
+      if (!passable(h, k)) continue;
+      seen.add(k);
+      queue.push(h);
+    }
+  }
+  const unreachable = data.cities.filter((c) => c.owner > 1 && !seen.has(c.q + ',' + c.r));
+  return unreachable.map((c) => c.name);
+}
+
 /* ---------------- write files + manifest ---------------- */
 function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -921,6 +1055,13 @@ function main() {
       if (u.type === 'ship' && h.type !== 'water') throw new Error(m.file + ': ship ' + u.uid + ' on ' + h.type + ' at ' + h.q + ',' + h.r);
       if (u.type !== 'ship' && (h.type === 'water' || h.type === 'mountain')) throw new Error(m.file + ': ' + u.type + ' ' + u.uid + ' on ' + h.type + ' at ' + h.q + ',' + h.r);
       if (u.type !== 'ship' && h.owner !== 0 && h.owner !== u.owner) throw new Error(m.file + ': ' + u.type + ' ' + u.uid + ' standing on owner-' + h.owner + ' land (unit owner ' + u.owner + ') at ' + h.q + ',' + h.r);
+    }
+    // Connectivity: every enemy capital reachable over land/bridges — except the naval
+    // missions where marines/ships are the intended route.
+    const navalMissions = ['mission_01_first_landing.json', 'mission_04_isle_campaign.json', 'mission_09_ironshore.json'];
+    if (!navalMissions.includes(m.file)) {
+      const cut = checkLandConnectivity(m.data, m.file);
+      if (cut.length) throw new Error(m.file + ': cities unreachable by land: ' + cut.join(', '));
     }
     fs.writeFileSync(path.join(OUT_DIR, m.file), JSON.stringify(m.data));
     manifest.push({

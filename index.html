@@ -10721,9 +10721,15 @@
             let colM = Math.max(1, cols | 0);
             let rowM = Math.max(1, rowCount);
             let hi = 0;
+            // Wavy waterline: a hard |q| >= colM cutoff drew ruler-straight coasts along all
+            // four map edges. Vary the waterline depth with noise along each edge instead.
+            let seed = ((gameData._mapGenSeed >>> 0) || 1) * 0.013;
+            let sp = gameData.hexRadius * 1.35;
             for(let h of gameData.hexList) {
                 if(!h) continue;
-                if(Math.abs(h.q) >= colM || Math.abs(h.r) >= rowM) {
+                let waveQ = 1.5 + fbm(h.y / (sp * 5.2) + seed, seed * 1.7, 3) * 5.5;
+                let waveR = 1.5 + fbm(h.x / (sp * 5.2) + seed + 41.7, seed * 2.3, 3) * 5.5;
+                if(colM - Math.abs(h.q) <= waveQ || rowM - Math.abs(h.r) <= waveR) {
                     wodSetGeneratedTerrainType(h, 'water');
                 }
                 if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
@@ -12069,11 +12075,28 @@
             return seedsByO;
         }
         /** Weighted nearest-seed partition on the full hex grid (land, water, mountains) so diplomacy borders extend through sea like War of Dots. */
+        /** Deterministic spatial wobble for start-split borders. On uniform terrain a pure
+         *  Euclidean Voronoi between two capitals is a mathematically straight bisector — this
+         *  warps each faction's distance field with seeded low-frequency waves so frontiers are
+         *  always organic. Stable per (map seed, owner, hex) so the iterative equalizer converges. */
+        function wodStartSplitNoiseMult(h, ownerIdx) {
+            let seed = (gameData._mapGenSeed >>> 0) || 1;
+            let ph = ((Math.imul(seed ^ Math.imul(ownerIdx + 1, 0x9e3779b1), 0x85ebca6b) >>> 0) / 4294967296) * Math.PI * 2;
+            let sp = gameData.hexRadius * 1.35;
+            let w = Math.sin(h.x / (sp * 7.5) + ph) * 0.6 +
+                Math.cos(h.y / (sp * 6.2) + ph * 1.7) * 0.6 +
+                Math.sin((h.x + h.y) / (sp * 11.4) - ph * 0.6) * 0.45;
+            let hash = ((Math.imul(h.q * 374761393 + h.r * 668265263, seed | 1) >>> 0) / 4294967296) - 0.5;
+            return 1 + w * 0.11 + hash * 0.05;
+        }
         async function wodAssignClaimableLandWeightedVoronoiFromSeeds(ownerIds, seedsByOwner, biasByOwner) {
             if(!ownerIds || ownerIds.length === 0) return;
             let valid = new Set(ownerIds);
             let bias = biasByOwner || {};
             let hi = 0;
+            let ownerIdxByO = {};
+            let oi = 0;
+            for(let o of ownerIds) ownerIdxByO[o] = oi++;
             for(let h of gameData.hexList) {
                 let bestO = 0, bestScore = Infinity;
                 for(let o of ownerIds) {
@@ -12082,8 +12105,8 @@
                     let dx = h.x - s.x, dy = h.y - s.y;
                     let d = dx * dx + dy * dy;
                     let geo = wodTerrainPoliticalDistanceWeight(h);
-                    let score = d * geo - (bias[o] || 0);
-                    if(score < bestScore) {
+                    let score = d * geo * wodStartSplitNoiseMult(h, ownerIdxByO[o]) - (bias[o] || 0);
+                    if(bestScore - score > 0) {
                         bestScore = score;
                         bestO = o;
                     }
@@ -20422,7 +20445,12 @@
             if(h && wodPathTileWalkable(unit, h, wodOrderIntoWater(unit, h))) return true;
             if(!h) return false;
             let hr = gameData.hexRadius || 20;
-            let thresh2 = (hr * 1.14) * (hr * 1.14);
+            // Water-only movers (ships, sea convoys) get a much tighter neighbor tolerance:
+            // the generous radius let their chords slide ACROSS narrow land isthmuses because a
+            // water cell existed on the far side ("boats sailing through land").
+            let waterOnly = unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute);
+            let thresh = hr * (waterOnly ? 0.6 : 1.14);
+            let thresh2 = thresh * thresh;
             let allowWater = wodOrderIntoWater(unit, h);
             for(let d of hexDirections) {
                 let n = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
@@ -29018,10 +29046,21 @@
             let candidates = wodAiCollectFortCandidateHexes(ownerId);
             if(!candidates.length) return false;
 
+            // Scoring is expensive per hex (unit/frontline distance scans) and the candidate set
+            // can be thousands of tiles — unbounded this ran ~240ms and was the periodic combat
+            // hitch. Sample a bounded, spread subset and stop at a wall-clock deadline.
+            if(candidates.length > 140) {
+                let sampled = [];
+                let stride = candidates.length / 140;
+                for(let ci = 0; ci < 140; ci++) sampled.push(candidates[Math.floor(ci * stride)]);
+                candidates = sampled;
+            }
+            let fortT0 = performance.now();
             let bestHex = null,
                 bestScore = 0;
             const MIN_SCORE = 52;
             for(let hex of candidates) {
+                if(performance.now() - fortT0 > 5) break;
                 let s = wodAiScoreFortHex(hex, ownerId);
                 if(s > bestScore) {
                     bestScore = s;
@@ -36292,6 +36331,24 @@
                 unit.marchWpCursor = 0;
                 unit.target = { x, y, pathPrepared: false };
                 unit.holding = !!holdingOpt;
+                return true;
+            }
+            // Long-range AI orders (city strikes, cross-map redeploys) go through the budgeted
+            // rAF order pump instead of running a full multi-search pathfind inside the sim
+            // tick — stacked synchronous assigns were the last visible combat-time hitch.
+            let ddx = x - unit.x, ddy = y - unit.y;
+            let farLimit = (gameData.hexRadius || 20) * 1.35 * 11;
+            if(ddx * ddx + ddy * ddy > farLimit * farLimit) {
+                unit.holding = !!holdingOpt;
+                unit.path = null;
+                unit.fullMarchWaypoints = null;
+                unit.marchWpCursor = 0;
+                unit.orderTarget = { x, y };
+                // Interim straight-walk target keeps the unit visibly moving; terrain clamping
+                // holds it on walkable ground until the pump computes the real path.
+                unit.target = { x, y, pathPrepared: true, legBridge: true };
+                unit._wodLegRepathQueued = true;
+                wodQueuePlayerMoveOrder(unit, [{ x, y }]);
                 return true;
             }
             let reach = findReachableOrderHex(unit, x, y);
