@@ -9594,7 +9594,10 @@
                 wodSepWUrl = null;
             }
             wodSepBusy = false;
-            if(gameData) gameData._wodSepApply = null;
+            if(gameData) {
+                gameData._wodSepApply = null;
+                gameData._wodSepPending = null;
+            }
         }
         function wodOnSepWorkerResult(ev) {
             wodSepBusy = false;
@@ -9618,17 +9621,37 @@
             let idx = d.idx,
                 xs = d.xs,
                 ys = d.ys;
+            // Identity guard: results are index-based and computed a frame or two ago. If a unit
+            // died (splice shifts indices) or a new match replaced the entity list, blind index
+            // application teleports the wrong units (this once flung fresh spawns into the ocean).
+            let pend = gameData._wodSepPending;
+            let uids = pend && pend.gen === d.gen ? pend.uids : null;
+            gameData._wodSepPending = null;
+            if(!uids) return;
+            let sx = pend.sx, sy = pend.sy;
+            let maxPush = (gameData.hexRadius || 20) * 0.9;
+            let maxPush2 = maxPush * maxPush;
             for(let j = 0, jl = idx.length; j < jl; j++) {
                 let u = gameData.entities[idx[j]];
-                if(!u || u.hp <= 0) continue;
-                let nx = xs[j], ny = ys[j];
+                if(!u || u.hp <= 0 || u.uid !== uids[j]) continue;
+                // Apply the worker's separation as a RELATIVE push from the position we sent it,
+                // not an absolute snap — units kept simulating while the worker ran, and snapping
+                // back to a stale absolute position caused a visible pop/stutter during movement.
+                let ddx = xs[j] - sx[j], ddy = ys[j] - sy[j];
+                if(ddx === 0 && ddy === 0) continue;
+                let m2 = ddx * ddx + ddy * ddy;
+                if(m2 > maxPush2) {
+                    let m = Math.sqrt(m2);
+                    ddx = (ddx / m) * maxPush;
+                    ddy = (ddy / m) * maxPush;
+                }
                 if(u.target && !u.retreating) {
                     if(wodMpIsHumanOwner(u.owner)) continue;
-                    u.x += (nx - u.x) * 0.22;
-                    u.y += (ny - u.y) * 0.22;
+                    u.x += ddx * 0.22;
+                    u.y += ddy * 0.22;
                 } else {
-                    u.x = nx;
-                    u.y = ny;
+                    u.x += ddx * 0.55;
+                    u.y += ddy * 0.55;
                 }
             }
         }
@@ -9648,6 +9671,7 @@
             let ys = new Float32Array(k);
             let rs = new Float32Array(k);
             let own = new Uint16Array(k);
+            let uids = new Array(k);
             let pi = 0;
             for(let i = 0, el = ents.length; i < el; i++) {
                 let u = ents[i];
@@ -9657,10 +9681,14 @@
                 ys[pi] = u.y;
                 rs[pi] = u.radius || 10;
                 own[pi] = u.owner | 0;
+                uids[pi] = u.uid;
                 pi++;
             }
             wodSepGen++;
             gameData._wodSepGen = wodSepGen;
+            // Keep copies of the positions we sent: xs/ys buffers get transferred (detached),
+            // and the applier needs the send-time baseline to compute relative pushes.
+            gameData._wodSepPending = { gen: wodSepGen, uids, sx: Float32Array.from(xs), sy: Float32Array.from(ys) };
             wodSepBusy = true;
             try {
                 wodSepWorker.postMessage({
@@ -21672,12 +21700,20 @@
                 return findAmphibiousMarchPath(unit, startHex, targetHex);
             wodEnsureBridgePathIndex();
 
+            let marchT0 = performance.now();
             let landPath = findPathAroundTerrain(unit, targetHex, startHex, true, 'land');
             let landOk = wodHexPathLength(landPath) > 1 && wodPathReachesTarget(landPath, targetHex);
             let landUsesBridge = landOk && wodPathCrossesBridge(landPath);
             if(landUsesBridge) return landPath;
 
-            let blocked = wodMarchBlockedWithoutBridge(unit, startHex, targetHex);
+            // A good-enough land path found and time budget spent: return it rather than
+            // stacking bridge/amphibious refinement searches in the same frame (the
+            // composition reached 35ms per call and stuttered marching columns).
+            if(landOk && (performance.now() - marchT0 > 5 || !wodCanSpendPf())) return landPath;
+
+            // A confirmed land path already proves land connectivity — skip the redundant
+            // full-map BFS (it burned ~5ms per march re-path for nothing).
+            let blocked = landOk ? false : wodMarchBlockedWithoutBridge(unit, startHex, targetHex);
             if(!blocked && landOk && !wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, [])) return landPath;
 
             let bridgeNeeded = blocked || wodBridgeUsefulForMarch(unit, startHex, targetHex);
@@ -21691,6 +21727,9 @@
 
             if(blocked && gameData.bridges && gameData.bridges.length) {
                 if(landOk && landUsesBridge) return landPath;
+                // Deadline guard: callers fall back to greedy steps on [], and a later
+                // re-path retries with fresh budget — better than a 30ms+ frame stall.
+                if(performance.now() - marchT0 > 9) return [];
                 let portalPath = smoothGridPath(wodLandBfsPath(unit, startHex, targetHex, 14000, true));
                 if(portalPath.length > 1 && wodPathReachesTarget(portalPath, targetHex) && wodPathCrossesBridge(portalPath))
                     return portalPath;
@@ -21968,7 +22007,14 @@
                     if(unit.type === 'marine' && !forbidWater) maxVisits = Math.min(maxVisits, 3800);
                 }
 
+                // Wall-clock ceiling: a single uncapped A* could run 30ms+ mid-frame, which showed
+                // up as a visible micro-freeze whenever marching columns re-pathed. Exhausting the
+                // ceiling behaves exactly like exhausting maxVisits (callers fall back to greedy steps).
+                let astT0 = performance.now();
+                let astCeilMs = allowOverBudget ? 10 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 6 : 24);
+                let visitTick = 0;
                 while(open.length > 0 && maxVisits-- > 0) {
+                    if((++visitTick & 255) === 0 && performance.now() - astT0 > astCeilMs) break;
                     let current = heapPop(open, fScore);
                     let currentKey = key(current);
                     if(visited.has(currentKey)) continue;
@@ -22191,7 +22237,9 @@
         /** Apply move orders immediately for a few units, queue the rest to avoid input hitch. */
         function wodApplyPlayerMoveOrders(units, pathForUnit) {
             if(!units || !units.length) return;
-            let syncCap = wodUsesVisualViewportLayout() ? 1 : 3;
+            // Large selections: assign only the first unit synchronously (instant feedback) and
+            // pump the rest — three ~30ms A* assigns in one frame was a visible click hitch.
+            let syncCap = wodUsesVisualViewportLayout() || units.length > 6 ? 1 : 3;
             let syncDone = 0;
             wodPfSpentMs = 0;
             wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, syncCap * 5);
@@ -22317,6 +22365,8 @@
             if(!fromAdvance) invalidateUnitOrderArrowCache(unit);
             unit.blockedTimer = 0;
             unit.stuckTimer = 0;
+            unit._wodLegRepathQueued = false;
+            if(!fromAdvance) unit._wodGreedyStepsLeft = 0;
             unit._wodPathGiveUpUntil = 0;
             unit._wodReplanLandUntil = 0;
             if(!opt || !opt.retainMoraleBroken) unit.moraleBroken = false;
@@ -22531,6 +22581,23 @@
                 unit.target.pathPrepared = true;
                 return;
             }
+            // After a failed full pathfind, keep hopping greedily for a few tiles instead of
+            // re-running a full A* on EVERY hex step — 19 units doing per-hex A* fallbacks
+            // produced 80-100ms frames (the worst of the marching stutter).
+            if((unit._wodGreedyStepsLeft || 0) > 0 && unit.orderTarget) {
+                unit._wodGreedyStepsLeft--;
+                let gtHex = getNearestHexToPoint(unit.orderTarget.x, unit.orderTarget.y);
+                if(gtHex) {
+                    let hop = (unit.type === 'convoy' && unit.convoySeaRoute) || unit.type === 'ship'
+                        ? findGreedyWaterStep(unit, gtHex)
+                        : findGreedyLandStep(unit, gtHex);
+                    if(hop) {
+                        unit.target = {x: hop.x, y: hop.y, pathPrepared: true, landGreedy: true};
+                        return;
+                    }
+                }
+                unit._wodGreedyStepsLeft = 0;
+            }
             let desired = unit.orderTarget ? {x: unit.orderTarget.x, y: unit.orderTarget.y} : {x: unit.target.x, y: unit.target.y};
             if(unit.orderTarget && unit.orderTarget.isCity) desired.isCity = true;
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
@@ -22617,6 +22684,7 @@
                     greedy = findGreedyLandStep(unit, targetHex);
                 if(greedy) {
                     unit.target = {x: greedy.x, y: greedy.y, pathPrepared: true, landGreedy: true};
+                    unit._wodGreedyStepsLeft = 5;
                 } else if(wodUnitPrefersLandOnlyPath(unit)) {
                     unit.path = null;
                     unit.target = {
@@ -24395,6 +24463,18 @@
             }
             if(unit.fullMarchWaypoints && unit.marchWpCursor < unit.fullMarchWaypoints.length - 1) {
                 unit.marchWpCursor++;
+                // Player marches: don't run the leg's A* synchronously mid-frame (a ~30ms pathfind
+                // per leg advance was the visible "micro-freeze while troops move"). The march
+                // waypoints already form a terrain-aware corridor, so just walk straight to the
+                // next waypoint; movement clamping keeps units on walkable ground, and if a unit
+                // gets truly stuck, moveUnitTowardTarget queues a budgeted re-path.
+                if(wodMpIsHumanOwner(unit.owner)) {
+                    let wp = unit.fullMarchWaypoints[unit.marchWpCursor];
+                    unit.path = null;
+                    unit._wodLegRepathQueued = false;
+                    unit.target = { x: wp.x, y: wp.y, pathPrepared: true, legBridge: true };
+                    return true;
+                }
                 if(assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true}))
                     return !!unit.target;
                 unit.marchWpCursor = Math.max(0, unit.marchWpCursor - 1);
@@ -24466,7 +24546,20 @@
             if(!terrainClamp)
                 terrainClamp = wodTrySidestepClamp(unit, unit.x, unit.y, nx, ny);
             if(!terrainClamp) {
-                if(playerMarch) return;
+                if(playerMarch) {
+                    // Straight-line leg hit unwalkable terrain: queue ONE budgeted re-path for this
+                    // leg (rAF pump) instead of a synchronous mid-frame A*, then keep waiting.
+                    // Cooldown prevents a repath storm when a whole column funnels into the same
+                    // obstacle (each storm pathfind cost ~1-2ms and stacked into 80ms+ frames).
+                    let nowLeg = performance.now();
+                    if(unit.target && unit.target.legBridge && !unit._wodLegRepathQueued &&
+                        (!unit._wodLegRepathNextMs || nowLeg >= unit._wodLegRepathNextMs)) {
+                        unit._wodLegRepathQueued = true;
+                        unit._wodLegRepathNextMs = nowLeg + 450;
+                        wodQueuePlayerMoveOrder(unit, [{ x: unit.target.x, y: unit.target.y }], { fromLegAdvance: true });
+                    }
+                    return;
+                }
                 unit.blockedTimer = (unit.blockedTimer || 0) + dt;
                 let replanT = unit.type === 'convoy' ? 0.12 : (unit.type === 'ship' ? 0.18 : 0.25);
                 let curHx = getNearestHexToPoint(unit.x, unit.y);
@@ -27951,6 +28044,10 @@
             if(!opts.keepMp) gameData.mp = null;
             gameData._campaignEnded = false;
             gameData._enemyDistField = null;
+            gameData._wodSepApply = null;
+            gameData._wodSepPending = null;
+            wodSepGen++;
+            gameData._wodSepGen = wodSepGen;
             gameData.aiFrontFocus = {};
             gameData.aiStrategyTimer = 0;
             gameData.aiFocusTimer = 0;
@@ -28211,8 +28308,12 @@
                             ov.classList.add('hidden');
                             ov.setAttribute('aria-busy', 'false');
                         }
-                        if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
-                        if(menuDemoSeeded) resumeMenuBackgroundBattle();
+                        // A match may have started while the splash finished — never pop the
+                        // main menu (and its attract battle) on top of live gameplay.
+                        if(gameState === 'MENU') {
+                            if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                            if(menuDemoSeeded) resumeMenuBackgroundBattle();
+                        }
                     }
                     gameData._wodSkipMapGenLoader = false;
                     window._wodBootSettledUntil = 0;
@@ -29781,6 +29882,12 @@
 
                 updateUnitHealing(unit, dt);
                 if(!unit.target) claimTerritoryAroundUnit(unit);
+                else if((unit.activeCombatVisual || 0) > 0.25 && (gameData._wodSimTick & 3) === 0) {
+                    // Attackers wedged in a firefight never cross a tile boundary, so the
+                    // hex-crossing claim path never fires — the frontline looked frozen even
+                    // though the push was working. Claim around fighting units too.
+                    claimTerritoryAroundUnit(unit);
+                }
             }
 
             wodRunUnitSeparation(wodSkipSep, sepPad, gridCell);
@@ -30033,9 +30140,9 @@
             let now = performance.now();
             let mn = gameData._wodMovingN || 0;
             let pn = gameData._wodPlayerMovingN || 0;
-            let throttleMs = mn > 8 ? 1100 : 520;
-            if(pn > 0) throttleMs = Math.max(throttleMs, 1400);
-            else if(mn > 4) throttleMs = Math.max(throttleMs, 900);
+            let throttleMs = mn > 8 ? 900 : 520;
+            if(pn > 0) throttleMs = Math.max(throttleMs, 900);
+            else if(mn > 4) throttleMs = Math.max(throttleMs, 780);
             if(gameData._terrDirtyNext && now < gameData._terrDirtyNext) {
                 gameData._terrDirtyPending = true;
                 return;
@@ -31082,7 +31189,7 @@
                 else if(livePlay && (gameData._wodMovingN || 0) > 6)
                     gap = Math.max(gap, wodUsesVisualViewportLayout() ? 520 : 360);
                 if(livePlay && (gameData._wodPlayerMovingN || 0) > 0)
-                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 920 : 640);
+                    gap = Math.max(gap, wodUsesVisualViewportLayout() ? 700 : 460);
                 if(livePlay && !forceImmediate && wodTerrainLastBakeCostMs > 14)
                     gap = Math.max(gap, Math.min(420, wodTerrainLastBakeCostMs * 9));
                 if(camBusy && !forceImmediate) {
@@ -31094,14 +31201,15 @@
                     }
                 } else if(now >= wodTerrainBakeNextMs || wodTerrainPolWork) {
                     let playerMarching = livePlay && (gameData._wodPlayerMovingN || 0) > 0;
-                    if(playerMarching && !forceImmediate) {
-                        wodTerrainBakeNextMs = now + (wodUsesVisualViewportLayout() ? 480 : 320);
-                    } else {
-                        let budget = wodUsesVisualViewportLayout() ? (camBusy ? 1.2 : 2.4) : 2.6;
-                        wodStepTerrainPoliticalBake(budget);
-                        if(!terrainNeedsUpdate)
-                            wodTerrainBakeNextMs = now + gap;
-                    }
+                    // Keep baking during player marches (smaller time slices) — fully deferring
+                    // froze the border/territory paint for the whole march, which made captured
+                    // ground look like it wasn't being claimed at all.
+                    let budget = playerMarching
+                        ? (wodUsesVisualViewportLayout() ? 0.9 : 1.6)
+                        : (wodUsesVisualViewportLayout() ? (camBusy ? 1.2 : 2.4) : 2.6);
+                    wodStepTerrainPoliticalBake(budget);
+                    if(!terrainNeedsUpdate)
+                        wodTerrainBakeNextMs = now + gap;
                 }
             }
             ctx.drawImage(terrainCanvas, terrainBounds.minX, terrainBounds.minY);
@@ -31993,13 +32101,18 @@
             period = period || wodGetGamePeriod();
             let col = getUrbanTerrainColor(period);
             if(!gameData.hexList) return;
+            let changed = false;
             for(let h of gameData.hexList) {
-                if(h.type === 'urban') {
+                if(h.type === 'urban' && h.baseColor !== col) {
                     h.baseColor = col;
                     h.renderColor = col;
+                    changed = true;
                 }
             }
-            wodMarkTerrainFullDirty();
+            // Only rebake when a color actually changed — server profile syncs call this
+            // repeatedly mid-match, and an unconditional full rebake cost ~330ms per sync
+            // (the "small freeze every few seconds" during play).
+            if(changed) wodMarkTerrainFullDirty();
         }
 
         function wodRebuildEditorPeriodSelectEl(el) {
