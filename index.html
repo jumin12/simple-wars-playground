@@ -22278,15 +22278,23 @@
             wodPlayerOrderPumpScheduled = false;
             if(!wodPlayerOrderQueue.length) return;
             wodPfSpentMs = 0;
-            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, 14);
+            let qLen = wodPlayerOrderQueue.length;
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, Math.min(56, 14 + qLen * 0.45));
             let t0 = performance.now();
             let budgetMs = wodUsesVisualViewportLayout() ? 4.5 : 7;
+            if(qLen > 12) budgetMs = wodUsesVisualViewportLayout() ? 6.5 : 10;
             let batch = wodUsesVisualViewportLayout() ? 2 : 5;
+            if(qLen > 20) batch = wodUsesVisualViewportLayout() ? 3 : 6;
             let n = 0;
             while(wodPlayerOrderQueue.length && n < batch && performance.now() - t0 < budgetMs) {
                 let job = wodPlayerOrderQueue.shift();
-                if(job.unit && job.unit.hp > 0)
-                    assignUnitMoveAlongWaypoints(job.unit, job.worldPoints, job.opt);
+                if(job.unit && job.unit.hp > 0) {
+                    job.tries = (job.tries || 0) + 1;
+                    if(assignUnitMoveAlongWaypoints(job.unit, job.worldPoints, job.opt))
+                        job.tries = 0;
+                    else if(job.tries < 10)
+                        wodPlayerOrderQueue.push(job);
+                }
                 n++;
             }
             if(wodPlayerOrderQueue.length) wodSchedulePlayerOrderPump();
@@ -22300,13 +22308,15 @@
             let syncCap = wodUsesVisualViewportLayout() || units.length > 6 ? 1 : 3;
             let syncDone = 0;
             wodPfSpentMs = 0;
-            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, syncCap * 5);
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, Math.min(52, syncCap * 5 + units.length * 0.65));
             for(let i = 0; i < units.length; i++) {
                 let pts = pathForUnit(units[i], i);
                 if(!pts || !pts.length) continue;
                 if(syncDone < syncCap) {
-                    assignUnitMoveAlongWaypoints(units[i], pts);
-                    syncDone++;
+                    if(assignUnitMoveAlongWaypoints(units[i], pts))
+                        syncDone++;
+                    else
+                        wodQueuePlayerMoveOrder(units[i], pts);
                 } else {
                     wodQueuePlayerMoveOrder(units[i], pts);
                 }
@@ -22417,6 +22427,27 @@
             unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
         }
 
+        /** Build one terrain-aware corridor for a player march and queue it in unit.path. */
+        function wodTryAssignPlayerCorridorPath(unit, marchPts, exactLast, fromAdvance) {
+            if(!unit || !marchPts || !marchPts.length || !wodMpIsHumanOwner(unit.owner)) return false;
+            wodPfSpentMs = 0;
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, fromAdvance ? 18 : 28);
+            let startPt = { x: unit.x, y: unit.y };
+            let fullHex = buildConcatenatedHexPath(unit, marchPts, startPt, true);
+            if(fullHex.length <= 1) return false;
+            let endPt = exactLast ? { x: exactLast.x, y: exactLast.y } : marchPts[marchPts.length - 1];
+            let corridor = wodWorldPointsFromHexMarchPath(unit, fullHex, endPt);
+            corridor[0] = { x: unit.x, y: unit.y };
+            if(corridor.length < 2) return false;
+            unit.fullMarchWaypoints = corridor.map(p => ({ x: p.x, y: p.y }));
+            unit.marchWpCursor = 0;
+            unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
+            unit.target = unit.path.shift();
+            unit.target.pathPrepared = true;
+            if(!fromAdvance) wodSeedOrderArrowCurrentLeg(unit, fullHex);
+            return true;
+        }
+
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
             if(!worldPoints || worldPoints.length === 0) return false;
             let fromAdvance = !!(opt && opt.fromLegAdvance);
@@ -22470,6 +22501,13 @@
                     unit.combatEngaged = false;
                     unit.combatLockTimer = 0;
                 }
+            }
+
+            if(wodMpIsHumanOwner(unit.owner)) {
+                let corridorPts = fromAdvance ? marchPts.slice(cursor) : marchPts;
+                if(wodTryAssignPlayerCorridorPath(unit, corridorPts, exactLast, fromAdvance))
+                    return true;
+                return false;
             }
 
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
@@ -22536,6 +22574,7 @@
                 if(!fromAdvance) wodSeedOrderArrowCurrentLeg(unit, path);
                 return true;
             }
+            if(wodMpIsHumanOwner(unit.owner)) return false;
             unit.path = null;
             unit.target = {x: reachNext.exactX, y: reachNext.exactY, pathPrepared: true};
             return true;
@@ -22635,6 +22674,7 @@
 
         function preparePathTarget(unit) {
             if(!unit.target || unit.target.pathPrepared || unit.target.detour) return;
+            if(wodIsPlayerMarchOrder(unit) && unit.path && unit.path.length > 0) return;
             if(unit._wodPathGiveUpUntil && performance.now() < unit._wodPathGiveUpUntil) {
                 unit.target.pathPrepared = true;
                 return;
@@ -22642,7 +22682,7 @@
             // After a failed full pathfind, keep hopping greedily for a few tiles instead of
             // re-running a full A* on EVERY hex step — 19 units doing per-hex A* fallbacks
             // produced 80-100ms frames (the worst of the marching stutter).
-            if((unit._wodGreedyStepsLeft || 0) > 0 && unit.orderTarget) {
+            if(!wodMpIsHumanOwner(unit.owner) && (unit._wodGreedyStepsLeft || 0) > 0 && unit.orderTarget) {
                 unit._wodGreedyStepsLeft--;
                 let gtHex = getNearestHexToPoint(unit.orderTarget.x, unit.orderTarget.y);
                 if(gtHex) {
@@ -22700,6 +22740,12 @@
                 unit.target = unit.path.shift();
                 unit.target.pathPrepared = true;
             } else if(targetHex) {
+                if(wodMpIsHumanOwner(unit.owner) && unit.orderTarget) {
+                    wodQueuePlayerMoveOrder(unit, [{ x: unit.orderTarget.x, y: unit.orderTarget.y }]);
+                    unit.target.pathPrepared = true;
+                    invalidateUnitOrderArrowCache(unit);
+                    return;
+                }
                 let spacing = gameData.hexRadius * 1.35;
                 let minChainDist2 = spacing * spacing * 2.8;
                 let dxFar = startHex.x - targetHex.x, dyFar = startHex.y - targetHex.y;
@@ -24521,18 +24567,6 @@
             }
             if(unit.fullMarchWaypoints && unit.marchWpCursor < unit.fullMarchWaypoints.length - 1) {
                 unit.marchWpCursor++;
-                // Player marches: don't run the leg's A* synchronously mid-frame (a ~30ms pathfind
-                // per leg advance was the visible "micro-freeze while troops move"). The march
-                // waypoints already form a terrain-aware corridor, so just walk straight to the
-                // next waypoint; movement clamping keeps units on walkable ground, and if a unit
-                // gets truly stuck, moveUnitTowardTarget queues a budgeted re-path.
-                if(wodMpIsHumanOwner(unit.owner)) {
-                    let wp = unit.fullMarchWaypoints[unit.marchWpCursor];
-                    unit.path = null;
-                    unit._wodLegRepathQueued = false;
-                    unit.target = { x: wp.x, y: wp.y, pathPrepared: true, legBridge: true };
-                    return true;
-                }
                 if(assignUnitMoveAlongWaypoints(unit, unit.fullMarchWaypoints, {fromLegAdvance: true}))
                     return !!unit.target;
                 unit.marchWpCursor = Math.max(0, unit.marchWpCursor - 1);
@@ -24605,16 +24639,14 @@
                 terrainClamp = wodTrySidestepClamp(unit, unit.x, unit.y, nx, ny);
             if(!terrainClamp) {
                 if(playerMarch) {
-                    // Straight-line leg hit unwalkable terrain: queue ONE budgeted re-path for this
-                    // leg (rAF pump) instead of a synchronous mid-frame A*, then keep waiting.
-                    // Cooldown prevents a repath storm when a whole column funnels into the same
-                    // obstacle (each storm pathfind cost ~1-2ms and stacked into 80ms+ frames).
-                    let nowLeg = performance.now();
-                    if(unit.target && unit.target.legBridge && !unit._wodLegRepathQueued &&
-                        (!unit._wodLegRepathNextMs || nowLeg >= unit._wodLegRepathNextMs)) {
-                        unit._wodLegRepathQueued = true;
-                        unit._wodLegRepathNextMs = nowLeg + 450;
-                        wodQueuePlayerMoveOrder(unit, [{ x: unit.target.x, y: unit.target.y }], { fromLegAdvance: true });
+                    unit.blockedTimer = (unit.blockedTimer || 0) + dt;
+                    if(unit.blockedTimer > 0.22 && unit.orderTarget) {
+                        let dest = [{ x: unit.orderTarget.x, y: unit.orderTarget.y }];
+                        if(wodTryAssignPlayerCorridorPath(unit, dest, unit.orderTarget, false)) {
+                            unit.blockedTimer = 0;
+                            unit.stuckTimer = 0;
+                            return;
+                        }
                     }
                     return;
                 }
@@ -26057,6 +26089,9 @@
             await wodEnsureFxPrecache();
             wodTerrainBakeNextMs = 0;
             wodTerrainPolWork = null;
+            gameData._wodPolBakeAgain = false;
+            wodGfxLiteLatch = false;
+            wodGfxSimplifyLatch = false;
             gameData._fogVisible = null;
             gameData._fogExplored = new Set();
             gameData._fogVisionTimer = 0;
@@ -28688,6 +28723,55 @@
             }
         }
 
+        function wodAiUnitSlotOffset(unit, hex, jitterScale) {
+            let js = jitterScale == null ? 0.22 : jitterScale;
+            let j = gameData.hexRadius * js;
+            let h = 0;
+            let s = (unit && unit.uid ? unit.uid : 'u') + ':' + (hex ? hex.q + ',' + hex.r : '0,0');
+            for(let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+            let a = ((h & 0xffff) / 0xffff) * Math.PI * 2;
+            let rmag = (((h >> 16) & 0x7fff) / 0x7fff - 0.5) * j;
+            return { ox: Math.cos(a) * rmag, oy: Math.sin(a) * rmag };
+        }
+
+        function wodAiStampOrder(unit, holding, holdHex) {
+            if(!unit) return;
+            unit.holding = !!holding;
+            unit.aiOrderUntil = performance.now() + (holding ? 9000 : 14000);
+            unit.aiFormationSerial = gameData.aiStrategySerial || 0;
+            if(holdHex) unit.aiSectorKey = getHexKey(holdHex);
+        }
+
+        /** Keep current AI orders until they arrive, settle on a hold line, or get stuck. */
+        function wodAiShouldKeepCurrentOrder(unit) {
+            if(!unit || !unit.target || unit.retreating || unit.moraleBroken) return false;
+            if(unit.aiOrderUntil && performance.now() < unit.aiOrderUntil) {
+                if((unit.stuckTimer || 0) < 0.42 && (unit.blockedTimer || 0) < 0.32) return true;
+            }
+            let hr = gameData.hexRadius || 20;
+            let ft = unit.orderTarget
+                || (unit.target.finalTarget ? unit.target.finalTarget : unit.target);
+            if(!ft || ft.x == null) return false;
+            let dx = ft.x - unit.x;
+            let dy = ft.y - unit.y;
+            let distSq = dx * dx + dy * dy;
+            let holdDoneR2 = Math.pow(hr * 2.4, 2);
+            let marchFarR2 = Math.pow(hr * 6, 2);
+            if(unit.holding) {
+                if(distSq <= holdDoneR2) return true;
+                if(distSq > holdDoneR2 && (unit.stuckTimer || 0) < 0.38 && (unit.blockedTimer || 0) < 0.28)
+                    return true;
+                return false;
+            }
+            if(distSq > marchFarR2) return true;
+            let chSt = getNearestHexToPoint(unit.x, unit.y);
+            let nearMtn = chSt && unit.type !== 'ship'
+                && getNeighborHexes(chSt).some(n => n && n.type === 'mountain');
+            let stuckLim = nearMtn ? 0.22 : 0.42;
+            let blkLim = nearMtn ? 0.18 : 0.32;
+            return (unit.stuckTimer || 0) < stuckLim && (unit.blockedTimer || 0) < blkLim;
+        }
+
         function wodPickAiSectorForUnit(unit, sectors) {
             if(!sectors || !sectors.length) return null;
             let best = null;
@@ -28862,16 +28946,12 @@
                 if(performance.now() - t0 >= budgetMs) break;
                 let idx = ch.idx++;
                 let unit = ch.readyUnits[idx];
-                if(unit.target && !unit.holding) {
-                    let tdx = unit.target.x - unit.x;
-                    let tdy = unit.target.y - unit.y;
-                    if(tdx * tdx + tdy * tdy > Math.pow(gameData.hexRadius * 3.2, 2)) continue;
-                }
+                if(wodAiShouldKeepCurrentOrder(unit)) continue;
                 if(ch.cityStrikerCount > 0 && idx >= ch.readyUnits.length - ch.cityStrikerCount) {
                     let tgt = ch.playerCityTargets[idx % ch.playerCityTargets.length];
                     unit.aiCityStriker = true;
                     wodAiMoveUnitTowardHex(unit, tgt, false, 0.52);
-                    unit.aiFormationSerial = ch.serial;
+                    wodAiStampOrder(unit, false, tgt);
                     assigned++;
                     continue;
                 }
@@ -28881,10 +28961,11 @@
                 let neededSupport = ch.canBreakthrough ? Math.max(2, Math.ceil(enemies * 0.95)) : Math.max(4, Math.ceil(enemies * 1.15) + 2);
                 if(support < neededSupport && (unit.hp / unit.maxHp) < 0.82) {
                     wodAiMoveUnitTowardHex(unit, sector.holdHex, true, 0.35);
+                    wodAiStampOrder(unit, true, sector.holdHex);
                 } else {
                     wodAiMoveUnitTowardHex(unit, ch.canBreakthrough || support >= neededSupport ? sector.attackHex : sector.holdHex, false, 0.46);
+                    wodAiStampOrder(unit, false, sector.holdHex);
                 }
-                unit.aiFormationSerial = ch.serial;
                 assigned++;
             }
             if(ch.idx >= ch.readyUnits.length) {
@@ -29432,14 +29513,9 @@
 
                     if(unit.retreating && hpRatio > 0.65) unit.retreating = false;
                     if(unit.aiFormationSerial === w.serial) continue;
-                    if(unit.target && !unit.holding) {
-                        let nearMtn = false;
-                        let chSt = getNearestHexToPoint(unit.x, unit.y);
-                        if(chSt && unit.type !== 'ship')
-                            nearMtn = getNeighborHexes(chSt).some(n => n && n.type === 'mountain');
-                        let stuckLim = nearMtn ? 0.22 : 0.42;
-                        let blkLim = nearMtn ? 0.18 : 0.32;
-                        if((unit.stuckTimer || 0) < stuckLim && (unit.blockedTimer || 0) < blkLim) continue;
+                    if(wodAiShouldKeepCurrentOrder(unit)) continue;
+
+                    if(unit.target && ((unit.stuckTimer || 0) >= 0.35 || (unit.blockedTimer || 0) >= 0.28)) {
                         let ft = unit.orderTarget || (unit.target.finalTarget
                             ? { x: unit.target.finalTarget.x, y: unit.target.finalTarget.y }
                             : { x: unit.target.x, y: unit.target.y });
@@ -29460,20 +29536,42 @@
                         sectors = buildAiFrontlineSectors(unit.owner, Math.min(24, Math.max(8, Math.ceil(readyN * 0.42))));
                         w.sectorsByOwner[unit.owner] = sectors;
                     }
-                    let assignment = wodPickAiSectorForUnit(unit, sectors);
+                    let assignment = null;
+                    if(unit.aiSectorKey && sectors && sectors.length) {
+                        for(let si = 0; si < sectors.length; si++) {
+                            if(getHexKey(sectors[si].holdHex) === unit.aiSectorKey) {
+                                assignment = {
+                                    holdHex: sectors[si].holdHex,
+                                    attackHex: sectors[si].attackHex,
+                                    support: countNearbyUnits(unit.owner, sectors[si].holdHex.x, sectors[si].holdHex.y, 190),
+                                    enemies: countNearbyUnits(unit.owner, sectors[si].holdHex.x, sectors[si].holdHex.y, 210, true)
+                                };
+                                break;
+                            }
+                        }
+                    }
+                    if(!assignment) assignment = wodPickAiSectorForUnit(unit, sectors);
                     if(!assignment) assignment = findAiFrontlineAssignment(unit);
                     if(!assignment) {
                         let fallback = findNearestOwnedHex(unit.owner, unit.x, unit.y, true);
-                        if(fallback) wodAiMoveUnitTowardHex(unit, fallback, false, 0.15);
+                        if(fallback) {
+                            wodAiMoveUnitTowardHex(unit, fallback, false, 0.15);
+                            wodAiStampOrder(unit, false, fallback);
+                        }
                         continue;
                     }
 
-                    let support = countNearbyUnits(unit.owner, assignment.holdHex.x, assignment.holdHex.y, 190);
-                    let enemies = countNearbyUnits(unit.owner, assignment.holdHex.x, assignment.holdHex.y, 210, true);
+                    let support = assignment.support != null
+                        ? assignment.support
+                        : countNearbyUnits(unit.owner, assignment.holdHex.x, assignment.holdHex.y, 190);
+                    let enemies = assignment.enemies != null
+                        ? assignment.enemies
+                        : countNearbyUnits(unit.owner, assignment.holdHex.x, assignment.holdHex.y, 210, true);
                     let dx = assignment.attackHex.x - assignment.holdHex.x;
                     let dy = assignment.attackHex.y - assignment.holdHex.y;
                     let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-                    let spread = (Math.random() - 0.5) * gameData.hexRadius * 0.9;
+                    let slot = wodAiUnitSlotOffset(unit, assignment.holdHex, 0.82);
+                    let spread = slot.ox;
 
                     let playerPower = gameData._aiStratPowPlayer;
                     if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
@@ -29489,14 +29587,16 @@
                     if(!localOverrun && (!canOverwhelm || localRatio < 1.2) && support < neededSupport && hpRatio < 0.9) {
                         wodAiMoveUnitToward(unit,
                             assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.75 + spread,
-                            assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.75 - spread * 0.45,
+                            assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.75 + slot.oy * 0.45,
                             true);
+                        wodAiStampOrder(unit, true, assignment.holdHex);
                     } else {
                         let depth = (canOverwhelm || localOverrun) && localRatio >= 1.35 ? 0.85 : 0.22;
                         wodAiMoveUnitToward(unit,
                             assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.35,
-                            assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth - spread * 0.35,
+                            assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth + slot.oy * 0.35,
                             false);
+                        wodAiStampOrder(unit, false, assignment.holdHex);
                     }
                 }
                 if(w.ei < ents.length) return;
@@ -30030,6 +30130,11 @@
             terrainNeedsUpdate = false;
             wodTerrainPolWork = null;
             if(costMs > 0) wodTerrainLastBakeCostMs = costMs;
+            if(gameData._wodPolBakeAgain) {
+                gameData._wodPolBakeAgain = false;
+                wodTerrainPoliticalDirty = true;
+                terrainNeedsUpdate = true;
+            }
         }
 
         function wodEnsureTerritoryOverlayCtx(w, h) {
@@ -30220,6 +30325,10 @@
             gameData._terrDirtyNext = now + throttleMs;
             wodTerrainPoliticalDirty = true;
             terrainNeedsUpdate = true;
+            if(wodTerrainPolWork) {
+                gameData._wodPolBakeAgain = true;
+                return;
+            }
             wodTerrainPolWork = null;
         }
         function wodMarkTerrainFullDirty() {
@@ -34678,9 +34787,51 @@
             return deduped;
         }
 
+        function wodUnitUsesLegBridgeMarch(unit) {
+            return false;
+        }
+
+        function wodBuildStrokePreviewPath(strokePts, unit) {
+            if(!strokePts || strokePts.length < 2 || !unit) return strokePts;
+            if(!gameData.uiSettings || !gameData.uiSettings.orderArrowsUsePathfinding) return strokePts;
+            try {
+                let simplified = simplifyPathStrokeForOrders(strokePts);
+                if(simplified.length < 2) return strokePts;
+                let seg = buildConcatenatedHexPath(unit, simplified.slice(1), { x: unit.x, y: unit.y }, true);
+                if(seg.length > 1) {
+                    let out = wodWorldPointsFromHexMarchPath(unit, seg, { x: unit.x, y: unit.y });
+                    if(out.length >= 2) return out;
+                }
+            } catch(_) {}
+            return strokePts;
+        }
+
+        function wodRefreshPathStrokePreview() {
+            if(!pathOrderStroke.active || !pathOrderStroke.pts || pathOrderStroke.pts.length === 0) {
+                gameData.pathStrokePreview = null;
+                return;
+            }
+            if(pathOrderStroke.pts.length < 2) {
+                gameData.pathStrokePreview = pathOrderStroke.pts.slice();
+                return;
+            }
+            let now = performance.now();
+            if(now - pathStrokePreviewAt < 100) {
+                gameData.pathStrokePreview = pathOrderStroke.pts.slice();
+                return;
+            }
+            pathStrokePreviewAt = now;
+            let lead = getMovableSelectedUnits()[0];
+            gameData.pathStrokePreview = lead
+                ? wodBuildStrokePreviewPath(pathOrderStroke.pts, lead)
+                : pathOrderStroke.pts.slice();
+        }
+
         function computePathfindingOrderArrowPoints(unit) {
             if(!unit || unit.hp <= 0) return null;
             try {
+                if(wodUnitUsesLegBridgeMarch(unit))
+                    return wodWaypointOrderArrowPoints(unit);
                 if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
                     wodEnsureOrderArrowFrozen(unit);
                     let marchSig = wodMarchArrowSignature(unit);
@@ -35548,17 +35699,7 @@
                     if(!wodFogCanSeeCity(city)) continue;
                     let isSel = !!city.selected;
                     if(wodCull && !isSel && !wodInView(city.x, city.y, culPad)) continue;
-                    if(gfxLite && city.owner !== 0) {
-                        ctx.beginPath();
-                        ctx.arc(city.x, city.y, 13, 0, Math.PI * 2);
-                        ctx.fillStyle = factionColors[city.owner];
-                        ctx.fill();
-                        ctx.strokeStyle = '#0b0f14';
-                        ctx.lineWidth = 1.5;
-                        ctx.stroke();
-                    } else {
-                        drawCitySkinMarker(ctx, city);
-                    }
+                    drawCitySkinMarker(ctx, city);
 
                     if(isSel) {
                         ctx.beginPath();
@@ -36036,6 +36177,7 @@
         let cameraStart = {x: 0, y: 0};
         let formationDrag = {active: false, startWorld: {x: 0, y: 0}, endWorld: {x: 0, y: 0}};
         let pathOrderStroke = {active: false, pts: [], moved: false};
+        let pathStrokePreviewAt = 0;
         let shiftWaypointDrag = {active: false, startClient: {x: 0, y: 0}};
         let mobileOrderMode = 'move';
         let touchCamGesture = null;
@@ -36051,13 +36193,21 @@
         function wodIsCamInteracting() {
             return !!(touchCamGesture || isPanning || performance.now() < wodCamInteractUntil);
         }
+        let wodGfxLiteLatch = false;
+        let wodGfxSimplifyLatch = false;
         function wodShouldSimplifyDraw() {
+            if(touchCamGesture) return true;
             let n = gameData && gameData.entities ? gameData.entities.length : 0;
-            return !!touchCamGesture || n > 130;
+            if(!wodGfxSimplifyLatch && n > 140) wodGfxSimplifyLatch = true;
+            else if(wodGfxSimplifyLatch && n < 110) wodGfxSimplifyLatch = false;
+            return wodGfxSimplifyLatch;
         }
         function wodShouldGfxLite() {
+            if(touchCamGesture) return true;
             let n = gameData && gameData.entities ? gameData.entities.length : 0;
-            return !!touchCamGesture || n > 90;
+            if(!wodGfxLiteLatch && n > 100) wodGfxLiteLatch = true;
+            else if(wodGfxLiteLatch && n < 78) wodGfxLiteLatch = false;
+            return wodGfxLiteLatch;
         }
 
         let wodPinchCamRafId = null;
@@ -36333,24 +36483,6 @@
                 unit.holding = !!holdingOpt;
                 return true;
             }
-            // Long-range AI orders (city strikes, cross-map redeploys) go through the budgeted
-            // rAF order pump instead of running a full multi-search pathfind inside the sim
-            // tick — stacked synchronous assigns were the last visible combat-time hitch.
-            let ddx = x - unit.x, ddy = y - unit.y;
-            let farLimit = (gameData.hexRadius || 20) * 1.35 * 11;
-            if(ddx * ddx + ddy * ddy > farLimit * farLimit) {
-                unit.holding = !!holdingOpt;
-                unit.path = null;
-                unit.fullMarchWaypoints = null;
-                unit.marchWpCursor = 0;
-                unit.orderTarget = { x, y };
-                // Interim straight-walk target keeps the unit visibly moving; terrain clamping
-                // holds it on walkable ground until the pump computes the real path.
-                unit.target = { x, y, pathPrepared: true, legBridge: true };
-                unit._wodLegRepathQueued = true;
-                wodQueuePlayerMoveOrder(unit, [{ x, y }]);
-                return true;
-            }
             let reach = findReachableOrderHex(unit, x, y);
             if(!reach && wodUnitPrefersLandOnlyPath(unit)) {
                 let resolved = wodResolveLandMarchHex(unit, x, y);
@@ -36364,9 +36496,8 @@
 
         function wodAiMoveUnitTowardHex(unit, hex, holdingOpt, jitterScale) {
             if(!hex) return false;
-            let js = jitterScale == null ? 0.22 : jitterScale;
-            let j = gameData.hexRadius * js;
-            return wodAiMoveUnitToward(unit, hex.x + (Math.random() - 0.5) * j, hex.y + (Math.random() - 0.5) * j, holdingOpt);
+            let slot = wodAiUnitSlotOffset(unit, hex, jitterScale);
+            return wodAiMoveUnitToward(unit, hex.x + slot.ox, hex.y + slot.oy, holdingOpt);
         }
 
         function seedPlayerShiftWaypointsFromActiveMarch(units) {
@@ -36603,7 +36734,7 @@
                 if(dx * dx + dy * dy > 110) {
                     pathOrderStroke.pts.push(w);
                     pathOrderStroke.moved = true;
-                    gameData.pathStrokePreview = pathOrderStroke.pts.slice();
+                    wodRefreshPathStrokePreview();
                 }
             } else if (formationDrag.active) {
                 formationDrag.endWorld = getMouseWorldPos(e);
@@ -36829,7 +36960,7 @@
                 if(dx * dx + dy * dy > 110) {
                     pathOrderStroke.pts.push(w);
                     pathOrderStroke.moved = true;
-                    gameData.pathStrokePreview = pathOrderStroke.pts.slice();
+                    wodRefreshPathStrokePreview();
                 }
             } else if(formationDrag.active) {
                 formationDrag.endWorld = getWorldPosFromClientXY(touch.clientX, touch.clientY);
