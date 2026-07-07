@@ -1,7 +1,9 @@
 /**
- * Generates the 10 hand-crafted campaign missions into missions/*.json.
- * Each mission is a full map export (format "simple-wars-mission") with an
- * authored layout, starting armies, economy, and scripted events.
+ * Generates the 10 missions into missions/*.json.
+ * Each mission uses a PROCEDURALLY GENERATED base map (the same fbm-noise terrain
+ * algorithm as in-game skirmish maps, ported from map-gen-worker.js) with
+ * hand-drawn details layered on top: mountain walls, rivers, gates, cities,
+ * forts, bridges, starting armies, economy, and scripted events.
  *
  * Run: node scripts/generate-missions.js   (then commit missions/)
  */
@@ -21,6 +23,162 @@ function mulberry32(seed) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/* ---------------- procedural terrain (ported from map-gen-worker.js) ----------------
+ * Deterministic fbm-noise terrain, identical to the in-game skirmish generator, so
+ * mission maps read exactly like generated maps. Hand-drawn details (mountain walls,
+ * rivers, gates, cities, forts) are layered on top by each mission builder. */
+function mix(a, b, t) { return a * (1 - t) + b * t; }
+function nHash(n) { const s = Math.sin(n) * 43758.5453123; return s - Math.floor(s); }
+function noise2(x, y) {
+  const p = [Math.floor(x), Math.floor(y)];
+  const f = [x - p[0], y - p[1]];
+  f[0] = f[0] * f[0] * (3.0 - 2.0 * f[0]);
+  f[1] = f[1] * f[1] * (3.0 - 2.0 * f[1]);
+  const n = p[0] + p[1] * 57.0;
+  return mix(mix(nHash(n + 0.0), nHash(n + 1.0), f[0]), mix(nHash(n + 57.0), nHash(n + 58.0), f[0]), f[1]);
+}
+function fbm(x, y, octaves) {
+  let v = 0, a = 0.5;
+  for (let i = 0; i < octaves; i++) { v += a * noise2(x, y); x *= 2; y *= 2; a *= 0.5; }
+  return v;
+}
+
+/** Per-cell terrain type from the skirmish generator's algorithm. */
+function procTerrainType(q, r, x, y, ctx) {
+  const { mapR, rows, mapShape, gp, seedOffset } = ctx;
+  const scale = 0.004;
+  const radial = mapShape === 'island' || mapShape === 'ring' || mapShape === 'archipelago';
+  const rect = mapShape === 'rectangle' || mapShape === 'forest' || mapShape === 'mountain' || mapShape === 'desert';
+  let islandRadialDist = 0;
+  const warpX = fbm(x * scale + seedOffset, y * scale + seedOffset, 3) * 260;
+  const warpY = fbm(x * scale + seedOffset + 100, y * scale + seedOffset + 100, 3) * 260;
+  let mask = 1.0;
+
+  if (radial) {
+    // Optional mask recenter (gp.centerQ/centerR) lets missions push the landmass
+    // off-center, e.g. an eastern continent with an open western sea.
+    const rx = x - (gp.centerQ || 0) * SPACING;
+    const ry = y - (gp.centerR || 0) * SPACING;
+    const normX = rx / (mapR * SPACING * 0.95);
+    const normY = ry / (rows * SPACING * 0.95);
+    const sx = normX * (gp.stretchX != null ? gp.stretchX : 1);
+    const sy = normY * (gp.stretchY != null ? gp.stretchY : 1);
+    let dist = Math.sqrt(sx * sx + sy * sy);
+    islandRadialDist = dist;
+    const angle = Math.atan2(ry, rx);
+    const radialWarp =
+      (fbm(Math.cos(angle) * 2.4 + seedOffset, Math.sin(angle) * 2.4 + seedOffset, 4) - 0.5) *
+      (gp.coastNoiseAmp != null ? gp.coastNoiseAmp : 0.45);
+    mask = 1.12 - dist + radialWarp;
+    if (mapShape === 'archipelago') {
+      const punch = gp.archipelagoCenterClearFrac != null ? gp.archipelagoCenterClearFrac : 0.55;
+      mask -= Math.max(0, punch - dist) * 1.62;
+      const cells = fbm(x * scale * 1.35 + seedOffset + 444, y * scale * 1.35 + seedOffset + 444, 4);
+      mask -= Math.max(0, cells - 0.32) * 0.72;
+      const ch = fbm(x * scale * 2 + seedOffset + 2444, y * scale * 2 + seedOffset + 2444, 4);
+      mask -= Math.max(0, ch - 0.38) * 0.52;
+    } else {
+      if (gp.islandMode === 'elongated') mask += Math.cos(angle * 2.05 + seedOffset * 0.02) * 0.07;
+      if (gp.islandMode === 'broken') {
+        const cuts = fbm(x * scale * 1.85 + seedOffset + 1444, y * scale * 1.85 + seedOffset + 1444, 5);
+        mask -= Math.max(0, cuts - 0.31) * 0.78;
+        mask += (fbm(x * scale * 0.72 + seedOffset + 1888, y * scale * 0.72 + seedOffset + 1888, 3) - 0.5) * 0.12;
+      }
+      if (gp.islandMode === 'wide') mask += 0.055 - Math.abs(sy) * 0.11;
+    }
+    const ellFrac = Math.sqrt(normX * normX + normY * normY);
+    mask -= Math.pow(Math.max(0, ellFrac - 0.9), 1.55) * 0.58;
+  }
+
+  const continent = fbm((x + warpX) * scale + seedOffset, (y + warpY) * scale + seedOffset, 6);
+  const detail = fbm(x * scale * 3 + seedOffset + 2000, y * scale * 3 + seedOffset + 2000, 4);
+  const elev = continent * 0.88 + detail * 0.12 + (mask - 0.55);
+  const moist = fbm((x + warpX) * scale + seedOffset + 5000, (y + warpY) * scale + seedOffset + 5000, 4);
+  const mo = moist + (gp.moistShift != null ? gp.moistShift : 0);
+  const fb = gp.forestMoistBoost != null ? gp.forestMoistBoost : 0;
+  let type = 'water';
+
+  if (rect) {
+    const wx = x + warpX, wy = y + warpY;
+    const u = wx * scale, v = wy * scale;
+    const macro = continent;
+    const meso = fbm(wx * scale * 1.42 + seedOffset + 6110, wy * scale * 1.42 + seedOffset + 6110, 5);
+    const heightCore = macro * 0.45 + meso * 0.42 + detail * 0.13;
+    const valleySoft = macro * meso + (1 - macro) * 0.06;
+    let heightLand = Math.max(0.02, Math.min(0.93, heightCore - valleySoft * 0.17));
+    const hiMicro = (fbm(wx * scale * 5.9 + seedOffset + 7211, wy * scale * 5.9 + seedOffset + 7211, 3) - 0.5) * 0.028;
+    const hiMeso = (fbm(wx * scale * 8.4 + seedOffset + 1122, wy * scale * 8.4 + seedOffset + 1122, 2) - 0.5) * 0.018;
+    heightLand = Math.max(0.02, Math.min(0.93, heightLand + hiMicro + hiMeso));
+    const edgePad = Math.max(Math.abs(q) / Math.max(mapR, 1), Math.abs(r) / Math.max(rows, 1));
+    const interior = Math.max(0.08, 1 - edgePad * 0.72);
+    let ridge = fbm(wx * scale * 2.45 + seedOffset + 6500, wy * scale * 2.45 + seedOffset + 6500, 5);
+    const riverCorridor = Math.abs(Math.sin(u * 1.12 + v * 0.88 + seedOffset * 0.019)) * (0.32 + interior * 0.28);
+    ridge = ridge - riverCorridor * 0.24;
+    ridge += (fbm(wx * scale * 6.15 + seedOffset + 3301, wy * scale * 6.15 + seedOffset + 3301, 3) - 0.5) * 0.038;
+    const coastalEdge = edgePad > 0.88;
+    const lakeNoise = fbm(wx * scale * 1.72 + seedOffset + 7010, wy * scale * 1.72 + seedOffset + 7010, 4);
+    const lakeBlob =
+      !coastalEdge && macro < 0.21 && ridge < 0.3 && moist > 0.56 && moist < 0.84 && heightCore < 0.29 && lakeNoise > 0.61;
+    let ridgeNeed = 0.5 + (1 - interior) * 0.07;
+    let landNeed = 0.51 + (1 - interior) * 0.05;
+    if (gp.rectBiomePreset === 'mountain') { ridgeNeed -= 0.065; landNeed -= 0.055; }
+    const isMountain = ridge > ridgeNeed && heightLand > landNeed && !lakeBlob;
+    if (lakeBlob) type = 'water';
+    else if (isMountain) {
+      const passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 4);
+      const valleyWave = Math.sin(u * -1.95 + v * 1.42 + meso * 0.5 + seedOffset * 0.45);
+      const valleyBreak = heightLand < 0.64 && Math.abs(valleyWave) < 0.24;
+      if (valleyBreak && passNoise > 0.34) type = 'hill';
+      else if (ridge < 0.62 && passNoise > 0.38) type = 'hill';
+      else type = heightLand > 0.72 ? 'hill' : 'mountain';
+    } else if (heightLand > 0.49 && ridge > 0.58) type = 'hill';
+    else if (heightLand < 0.34 && ridge < 0.48 && macro < 0.46) type = 'swamp';
+    else {
+      const bioJ = (fbm(wx * scale * 4.35 + seedOffset + 9120, wy * scale * 4.35 + seedOffset + 9120, 4) - 0.5) * 0.045;
+      const patch = fbm(wx * scale * 2.12 + seedOffset + 8140, wy * scale * 2.12 + seedOffset + 8140, 5);
+      let bio = moist * 0.72 + (heightLand - 0.38) * 0.28 + (interior - 0.5) * 0.08 + patch * 0.04 + bioJ;
+      const acc = gp.biomeAccent;
+      if (acc === 'marsh') bio += 0.072 + edgePad * 0.038;
+      else if (acc === 'dry') bio -= 0.078;
+      else if (acc === 'rugged') bio += (heightLand - 0.43) * 0.065;
+      else if (acc === 'flat_low_mtns') bio -= 0.035;
+      if (bio < 0.255) type = 'sand';
+      else if (bio < 0.495) type = 'grass';
+      else if (bio < 0.735) type = 'forest';
+      else type = 'swamp';
+    }
+  } else if (elev < (gp.waterElevThresh != null ? gp.waterElevThresh : 0.43)) type = 'water';
+  else if (elev < (gp.waterElevThresh != null ? gp.waterElevThresh : 0.43) + 0.05) type = 'sand';
+  else {
+    let mTh0 = gp.mountElevThresh != null ? gp.mountElevThresh : 0.86;
+    if (radial) {
+      const pk = fbm(x * scale * 2.55 + seedOffset + 7711, y * scale * 2.55 + seedOffset + 7711, 5);
+      const pk2 = fbm(x * scale * 5.1 + seedOffset + 3322, y * scale * 5.1 + seedOffset + 3322, 4);
+      let j = (gp.mountainPeakJitter != null ? gp.mountainPeakJitter : 0.09) * (pk - 0.5) * 2.2;
+      const st = gp.mountainStyle || 'default';
+      if (st === 'scattered') j += (pk2 - 0.5) * 0.13;
+      else if (st === 'low') j += 0.095;
+      else if (st === 'mixed') j += (pk * pk2 - 0.28) * 0.11;
+      mTh0 += j;
+    }
+    if (elev > mTh0) {
+      const passNoise = fbm(x * scale * 5 + seedOffset + 3000, y * scale * 5 + seedOffset + 3000, 3);
+      if (passNoise > 0.6) type = 'hill';
+      else type = 'mountain';
+    } else if (elev > mTh0 - 0.08 && mo < 0.5) type = 'hill';
+    else {
+      const st = gp.sandThresh != null ? gp.sandThresh : 0.35;
+      const gt = gp.grassThresh != null ? gp.grassThresh : 0.6;
+      const ft = gp.forestThresh != null ? gp.forestThresh : 0.8;
+      if (mo < st + fb * 0.02) type = 'sand';
+      else if (mo < gt + fb) type = 'grass';
+      else if (mo < ft + fb * 0.5) type = 'forest';
+      else type = 'swamp';
+    }
+  }
+  return type;
 }
 
 /* ---------------- map builder ---------------- */
@@ -50,6 +208,111 @@ class MapBuilder {
   set(q, r, type) { const h = this.at(q, r); if (h) h.type = type; }
   each(fn) { for (const h of this.hexes.values()) fn(h); }
   isLand(h) { return h && h.type !== 'water'; }
+
+  /** Fill the whole grid with procedural terrain from the in-game skirmish generator.
+   *  mapShape: 'island' | 'archipelago' | 'rectangle' | 'forest' | 'mountain' | 'desert'.
+   *  gp: generation profile overrides (thresholds, islandMode, stretch, biomeAccent...). */
+  generateBase(mapShape, seedOffset, gp) {
+    this.mapShape = mapShape;
+    const ctx = { mapR: this.cols, rows: this.rows, mapShape, gp: gp || {}, seedOffset: seedOffset || 0 };
+    this.each((h) => { h.type = procTerrainType(h.q, h.r, h.x, h.y, ctx); });
+    this.smooth();
+    if (mapShape === 'island' || mapShape === 'archipelago') this.edgeWaterBuffer(4);
+  }
+
+  /** Speckle removal identical to the game's off-thread smoothing pass. */
+  smooth() {
+    const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
+    for (let pass = 0; pass < 3; pass++) {
+      const changes = [];
+      this.each((h) => {
+        if (h.type === 'urban') return;
+        if (h.type === 'water') {
+          let landN = 0;
+          for (const [dq, dr] of dirs) {
+            const nb = this.at(h.q + dq, h.r + dr);
+            if (nb && nb.type !== 'water' && nb.type !== 'mountain') landN++;
+          }
+          if (landN >= 6) changes.push([h, 'grass']);
+          return;
+        }
+        if (h.type === 'mountain') return;
+        const counts = {};
+        let same = 0, landTotal = 0;
+        for (const [dq, dr] of dirs) {
+          const nb = this.at(h.q + dq, h.r + dr);
+          if (!nb || nb.type === 'water' || nb.type === 'mountain' || nb.type === 'urban') continue;
+          landTotal++;
+          counts[nb.type] = (counts[nb.type] || 0) + 1;
+          if (nb.type === h.type) same++;
+        }
+        if (landTotal < 2) return;
+        let best = h.type, bestC = 0;
+        for (const t in counts) { if (counts[t] > bestC) { bestC = counts[t]; best = t; } }
+        const need = pass === 0 ? 4 : 3;
+        if (same <= 1 && bestC >= 3) changes.push([h, best]);
+        else if (best !== h.type && bestC >= need && bestC >= landTotal - 2) changes.push([h, best]);
+      });
+      for (const c of changes) c[0].type = c[1];
+    }
+  }
+
+  /** Hard water ring (with a noisy inner boundary) so island-family maps never touch
+   *  the map boundary and the forced coast still reads organic. */
+  edgeWaterBuffer(tiles) {
+    this.each((h) => {
+      const ed = Math.min(
+        h.q + this.cols, this.cols - h.q,
+        h.r + this.rows, this.rows - h.r
+      );
+      const wob = (fbm(h.x * 0.02 + 91, h.y * 0.02 + 91, 2) - 0.5) * 3;
+      if (ed <= tiles + wob || ed <= 2) h.type = 'water';
+    });
+  }
+
+  /** Guarantee walkable land in a disc — used to seat cities/spawns on procedural bases.
+   *  Keeps existing non-water, non-mountain terrain; converts water/mountain to grass. */
+  ensureLand(cq, cr, radius) {
+    for (let dq = -radius; dq <= radius; dq++) {
+      for (let dr = -radius; dr <= radius; dr++) {
+        if (dq * dq + dr * dr > radius * radius + 0.5) continue;
+        const h = this.at(cq + dq, cr + dr);
+        if (!h) continue;
+        if (h.type === 'water' || h.type === 'mountain') h.type = 'grass';
+      }
+    }
+  }
+
+  /** Guarantee open water in a disc — carves channels / clears ship lanes. */
+  ensureWater(cq, cr, radius) {
+    for (let dq = -radius; dq <= radius; dq++) {
+      for (let dr = -radius; dr <= radius; dr++) {
+        if (dq * dq + dr * dr > radius * radius + 0.5) continue;
+        const h = this.at(cq + dq, cr + dr);
+        if (h && h.type !== 'urban') h.type = 'water';
+      }
+    }
+  }
+
+  /** Carve a walkable land corridor between two points (turns water/mountain into grass
+   *  along a drifting line) so authored objectives stay land-connected on procedural bases. */
+  landCorridor(q0, r0, q1, r1, width) {
+    const steps = Math.max(Math.abs(q1 - q0), Math.abs(r1 - r0)) * 2 + 1;
+    const len = Math.hypot(q1 - q0, r1 - r0) || 1;
+    const pq = -(r1 - r0) / len, pr = (q1 - q0) / len;
+    let drift = 0, vel = 0;
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      vel += (this.rng() - 0.5) * 0.9;
+      vel *= 0.75;
+      drift += vel;
+      if (drift > 3) drift = 3;
+      if (drift < -3) drift = -3;
+      const q = Math.round(q0 + (q1 - q0) * t + pq * drift);
+      const r = Math.round(r0 + (r1 - r0) * t + pr * drift);
+      this.ensureLand(q, r, width);
+    }
+  }
 
   /** Noisy-edged filled circle of terrain (q/r units). */
   blob(cq, cr, radius, type, opt) {
@@ -352,7 +615,9 @@ class MapBuilder {
     for (let dq = -w; dq <= w; dq++) {
       for (let dr = -w; dr <= w; dr++) {
         const h = this.at(q + dq, r + dr);
-        if (h && h.type === 'mountain') h.type = 'hill';
+        if (!h) continue;
+        if (h.type === 'mountain') h.type = 'hill';
+        else if (h.type === 'water') h.type = 'grass';
       }
     }
   }
@@ -366,7 +631,7 @@ class MapBuilder {
     }
     return {
       mapSize: this.size,
-      mapShape: 'island',
+      mapShape: this.mapShape || 'island',
       hexList,
       cities: this.cities,
       roads: this.buildRoads(),
@@ -398,16 +663,23 @@ const MISSIONS = [];
  * ========================================================================= */
 MISSIONS.push(function m01() {
   const b = new MapBuilder(40, 101);
-  // Enemy island (east/center)
-  b.blob(10, 0, 22, 'grass', { noise: 0.22 });
-  b.blob(18, -10, 9, 'forest', { onlyType: 'grass' });
-  b.blob(22, 12, 7, 'forest', { onlyType: 'grass' });
-  b.blob(26, 0, 5, 'hill', { onlyType: 'grass' });
-  b.blob(14, 8, 4, 'swamp', { onlyType: 'grass' });
-  // Player staging islet (west)
+  // Generated island base, pushed east so the west stays open sea for the landing.
+  b.generateBase('island', 101, {
+    islandMode: 'blob', centerQ: 9, stretchX: 1.05, stretchY: 0.92, coastNoiseAmp: 0.42,
+    waterElevThresh: 0.44, sandThresh: 0.33, grassThresh: 0.58, forestThresh: 0.78,
+    mountElevThresh: 0.9, moistShift: 0.02, forestMoistBoost: 0.03,
+    mountainStyle: 'low', mountainPeakJitter: 0.08, biomeAccent: 'balanced',
+  });
+  // Hand-drawn: player staging islet west, with a guaranteed open strait between.
+  b.ensureWater(-18, 1, 5);
   b.blob(-28, 2, 6, 'grass', { noise: 0.3 });
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.95);
+  b.ensureLand(-28, 2, 3);
+  b.ensureLand(8, -6, 3);
+  b.ensureLand(20, 4, 3);
+  b.ensureWater(-19, 2, 2);
+  b.ensureWater(-19, 5, 2);
   const pBase = b.city(-28, 2, 1, 'Port Vigil', { factory: true, harbor: true });
   const eTown = b.city(8, -6, 2, 'Seabreak', { factory: false, harbor: true });
   const eCap = b.city(20, 4, 2, 'Highmoor', { factory: true, harbor: false });
@@ -449,17 +721,20 @@ MISSIONS.push(function m01() {
  * ========================================================================= */
 MISSIONS.push(function m02() {
   const b = new MapBuilder(40, 202);
-  b.rect(-34, -28, 34, 28, 'grass', { noise: 2 });
-  // The river (west-east, wavy) — 3 hexes wide
+  // Generated continent base (rectangle pipeline: organic biomes, hills, lakes).
+  b.generateBase('rectangle', 202, {
+    islandMode: 'none', waterElevThresh: 0.44, sandThresh: 0.34, grassThresh: 0.58,
+    forestThresh: 0.8, mountElevThresh: 0.88, moistShift: 0.0, forestMoistBoost: 0.0,
+    biomeAccent: 'balanced',
+  });
+  // Hand-drawn: the Greywater river splitting loyalist south from rebel north.
   const river = b.ridge(-40, -2, 40, 2, 1, 'water', { wobble: 2, skipUrban: true });
-  // Terrain texture
-  b.scatter('forest', 10, 4);
-  b.scatter('hill', 6, 3);
-  b.scatter('swamp', 4, 2);
-  b.blob(-30, -20, 4, 'mountain', { onlyType: 'grass' });
-  b.blob(31, 22, 4, 'mountain', { onlyType: 'grass' });
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.55);
+  b.ensureLand(-12, 14, 3);
+  b.ensureLand(16, 18, 3);
+  b.ensureLand(-10, -14, 3);
+  b.ensureLand(18, -16, 3);
   // South = player (loyalists), North = rebels
   const pCap = b.city(-12, 14, 1, 'Kingsport', { factory: true });
   const pTown = b.city(16, 18, 1, 'Southmarch', { factory: false });
@@ -504,18 +779,29 @@ MISSIONS.push(function m02() {
  * ========================================================================= */
 MISSIONS.push(function m03() {
   const b = new MapBuilder(40, 303);
-  b.rect(-36, -28, 36, 28, 'grass', { noise: 2 });
-  // Central mountain wall (north-south)
+  // Generated rugged base (mountain-preset rectangle pipeline).
+  b.generateBase('mountain', 303, {
+    islandMode: 'none', rectBiomePreset: 'mountain',
+    waterElevThresh: 0.43, sandThresh: 0.33, grassThresh: 0.57, forestThresh: 0.79,
+    mountElevThresh: 0.85, moistShift: -0.01, forestMoistBoost: 0.0, biomeAccent: 'rugged',
+  });
+  // Hand-drawn: the Iron Spine — a solid central mountain wall with exactly two passes.
   const wall = b.ridge(0, -30, 0, 30, 2, 'mountain', { wobble: 2, skipUrban: true });
-  // Two passes carved where the wall actually runs
   const passN = MapBuilder.nearestOn(wall, 0, -12);
   const passS = MapBuilder.nearestOn(wall, 0, 14);
   b.gate(passN.q, passN.r, 2);
   b.gate(passS.q, passS.r, 2);
-  b.scatter('forest', 9, 4);
-  b.scatter('hill', 8, 3, { where: (h) => Math.abs(h.q) < 12 });
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.5);
+  b.ensureLand(-20, 0, 3);
+  b.ensureLand(-26, -16, 3);
+  b.ensureLand(20, 2, 3);
+  b.ensureLand(26, -14, 3);
+  // Keep each capital connected to its side of the wall.
+  b.landCorridor(-20, 0, passN.q - 3, passN.r, 1);
+  b.landCorridor(-20, 0, passS.q - 3, passS.r, 1);
+  b.landCorridor(20, 2, passN.q + 3, passN.r, 1);
+  b.landCorridor(20, 2, passS.q + 3, passS.r, 1);
   const pCap = b.city(-20, 0, 1, 'Westhaven', { factory: true });
   const pTown = b.city(-26, -16, 1, 'Millbrook');
   const eCap = b.city(20, 2, 2, 'Ostmark', { factory: true });
@@ -556,17 +842,25 @@ MISSIONS.push(function m03() {
  * ========================================================================= */
 MISSIONS.push(function m04() {
   const b = new MapBuilder(40, 404);
-  // Player home island SW
-  b.blob(-22, 16, 9, 'grass', { noise: 0.3 });
-  // Three enemy islands
-  b.blob(-6, -14, 8, 'grass', { noise: 0.3 });
-  b.blob(20, -8, 8, 'grass', { noise: 0.3 });
-  b.blob(16, 18, 7, 'grass', { noise: 0.3 });
-  b.blob(-6, -14, 3, 'forest', { onlyType: 'grass' });
-  b.blob(20, -8, 3, 'hill', { onlyType: 'grass' });
-  b.blob(16, 18, 3, 'forest', { onlyType: 'grass' });
-  b.roughenCoasts(2);
+  // Generated archipelago base — scattered organic isles.
+  b.generateBase('archipelago', 404, {
+    islandMode: 'blob', archipelagoCenterClearFrac: 0.5,
+    stretchX: 1.0, stretchY: 1.0, coastNoiseAmp: 0.55,
+    waterElevThresh: 0.45, sandThresh: 0.34, grassThresh: 0.58, forestThresh: 0.78,
+    mountElevThresh: 0.93, moistShift: 0.03, forestMoistBoost: 0.04,
+    mountainStyle: 'low', mountainPeakJitter: 0.06, biomeAccent: 'balanced',
+  });
+  // Hand-drawn: guarantee the four key isles exist where the scenario needs them.
+  b.blob(-22, 16, 7, 'grass', { noise: 0.3, onlyType: 'water' });
+  b.blob(-6, -14, 6, 'grass', { noise: 0.3, onlyType: 'water' });
+  b.blob(20, -8, 6, 'grass', { noise: 0.3, onlyType: 'water' });
+  b.blob(16, 18, 6, 'grass', { noise: 0.3, onlyType: 'water' });
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.95);
+  b.ensureLand(-22, 16, 3);
+  b.ensureLand(-6, -14, 3);
+  b.ensureLand(20, -8, 3);
+  b.ensureLand(16, 18, 3);
   b.city(-22, 16, 1, 'Anchorhold', { factory: true, harbor: true });
   b.city(-6, -14, 2, 'Coralwatch', { harbor: true });
   b.city(20, -8, 2, 'Palmreach', { harbor: true, factory: true });
@@ -610,19 +904,34 @@ MISSIONS.push(function m04() {
  * ========================================================================= */
 MISSIONS.push(function m05() {
   const b = new MapBuilder(60, 505);
-  b.rect(-54, -40, 54, 40, 'grass', { noise: 3 });
-  b.scatter('forest', 16, 5);
-  b.scatter('hill', 10, 4);
-  b.scatter('swamp', 6, 3);
-  // Partial mountain spurs marking the old borders
+  // Generated continent base.
+  b.generateBase('rectangle', 505, {
+    islandMode: 'none', waterElevThresh: 0.435, sandThresh: 0.33, grassThresh: 0.58,
+    forestThresh: 0.79, mountElevThresh: 0.87, moistShift: 0.01, forestMoistBoost: 0.02,
+    biomeAccent: 'balanced',
+  });
+  // Hand-drawn: partial mountain spurs marking the old borders, each with one gate.
   const spurW = b.ridge(-22, -44, -20, -6, 2, 'mountain', { wobble: 2, skipUrban: true });
   const spurE = b.ridge(22, 8, 20, 44, 2, 'mountain', { wobble: 2, skipUrban: true });
   const gw = MapBuilder.nearestOn(spurW, -21, -10);
   const ge = MapBuilder.nearestOn(spurE, 21, 12);
   b.gate(gw.q, gw.r, 2);
   b.gate(ge.q, ge.r, 2);
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.5);
+  b.ensureLand(0, -6, 3);
+  b.ensureLand(-4, 18, 3);
+  b.ensureLand(-38, -10, 3);
+  b.ensureLand(-40, 16, 3);
+  b.ensureLand(38, -12, 3);
+  b.ensureLand(40, 14, 3);
+  b.landCorridor(0, -6, -4, 18, 1);
+  b.landCorridor(-38, -10, -40, 16, 1);
+  b.landCorridor(38, -12, 40, 14, 1);
+  b.landCorridor(0, -6, gw.q + 3, gw.r, 1);
+  b.landCorridor(-38, -10, gw.q - 3, gw.r, 1);
+  b.landCorridor(0, -6, ge.q - 3, ge.r, 1);
+  b.landCorridor(38, -12, ge.q + 3, ge.r, 1);
   // Player center
   b.city(0, -6, 1, 'Midgard', { factory: true });
   b.city(-4, 18, 1, 'Southden');
@@ -672,14 +981,22 @@ MISSIONS.push(function m05() {
  * ========================================================================= */
 MISSIONS.push(function m06() {
   const b = new MapBuilder(60, 606);
-  b.rect(-54, -42, 54, 42, 'grass', { noise: 3 });
-  // Great river north-south, 4 wide
+  // Generated continent base with marshy accents near the valley.
+  b.generateBase('rectangle', 606, {
+    islandMode: 'none', waterElevThresh: 0.435, sandThresh: 0.33, grassThresh: 0.57,
+    forestThresh: 0.78, mountElevThresh: 0.88, moistShift: 0.03, forestMoistBoost: 0.02,
+    biomeAccent: 'marsh',
+  });
+  // Hand-drawn: the great Greywater river north-south.
   const river = b.ridge(2, -46, -2, 46, 2, 'water', { wobble: 2, skipUrban: true });
-  b.scatter('forest', 14, 5);
-  b.scatter('hill', 8, 4, { where: (h) => h.q > 8 });
-  b.scatter('swamp', 5, 3, { where: (h) => Math.abs(h.q) < 10 });
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.4);
+  b.ensureLand(-30, -14, 3);
+  b.ensureLand(-34, 16, 3);
+  b.ensureLand(26, -16, 3);
+  b.ensureLand(32, 14, 3);
+  b.landCorridor(-30, -14, -34, 16, 1);
+  b.landCorridor(26, -16, 32, 14, 1);
   b.city(-30, -14, 1, 'Weststrand', { factory: true });
   b.city(-34, 16, 1, 'Lowfield');
   b.city(26, -16, 2, 'Hochburg', { factory: true });
@@ -731,22 +1048,32 @@ MISSIONS.push(function m06() {
  * ========================================================================= */
 MISSIONS.push(function m07() {
   const b = new MapBuilder(60, 707);
-  b.rect(-54, -42, 54, 42, 'grass', { noise: 3 });
-  b.scatter('forest', 12, 5);
-  b.scatter('hill', 12, 4);
-  b.roughenCoasts(2);
+  // Generated wintry highland base (forest-preset rectangle pipeline).
+  b.generateBase('forest', 707, {
+    islandMode: 'none', rectBiomePreset: 'forest',
+    waterElevThresh: 0.435, sandThresh: 0.32, grassThresh: 0.56, forestThresh: 0.76,
+    mountElevThresh: 0.87, moistShift: 0.04, forestMoistBoost: 0.05, biomeAccent: 'balanced',
+  });
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.4);
-  // Fortress mountain ring around the enemy capital (east)
+  // Hand-drawn: fortress mountain ring around the enemy capital (east)
   const cq = 28, cr = 0, R = 13;
+  b.ensureLand(cq, cr, R + 3);
   for (let a = 0; a < 360; a += 3) {
     const q = Math.round(cq + Math.cos((a * Math.PI) / 180) * R);
     const r = Math.round(cr + Math.sin((a * Math.PI) / 180) * R * 0.8);
-    b.blob(q, r, 2, 'mountain', { noise: 0.3, onlyType: 'grass' });
+    b.blob(q, r, 2, 'mountain', { noise: 0.3 });
   }
   // Three gates into the ring
   b.gate(cq - R, cr, 2);
   b.gate(cq + 2, cr - Math.round(R * 0.8), 2);
   b.gate(cq + 3, cr + Math.round(R * 0.8), 2);
+  b.ensureLand(6, -20, 3);
+  b.ensureLand(-34, -6, 3);
+  b.ensureLand(-28, 18, 3);
+  b.landCorridor(-34, -6, cq - R - 3, cr, 1);
+  b.landCorridor(-34, -6, -28, 18, 1);
+  b.landCorridor(-34, -6, 6, -20, 1);
   b.city(cq, cr, 2, 'Citadel Karsk', { factory: true, incomeBonus: 4 });
   b.city(6, -20, 2, 'Outpost Verd', { factory: false });
   b.city(-34, -6, 1, 'Fieldcamp Alpha', { factory: true });
@@ -794,11 +1121,14 @@ MISSIONS.push(function m07() {
  * ========================================================================= */
 MISSIONS.push(function m08() {
   const b = new MapBuilder(60, 808);
-  b.blob(0, 0, 46, 'grass', { noise: 0.18 });
-  b.scatter('forest', 16, 5);
-  b.scatter('hill', 10, 4);
-  b.scatter('swamp', 7, 3);
-  // Crossed mountain spurs carving the realm into quadrants (with gaps)
+  // Generated big-island base for the old realm.
+  b.generateBase('island', 808, {
+    islandMode: 'blob', stretchX: 1.08, stretchY: 0.94, coastNoiseAmp: 0.4,
+    waterElevThresh: 0.42, sandThresh: 0.32, grassThresh: 0.57, forestThresh: 0.77,
+    mountElevThresh: 0.9, moistShift: 0.02, forestMoistBoost: 0.03,
+    mountainStyle: 'low', mountainPeakJitter: 0.08, biomeAccent: 'balanced',
+  });
+  // Hand-drawn: crossed mountain spurs carving the realm into quadrants (with gaps)
   const spurA = b.ridge(-36, -30, 34, 28, 2, 'mountain', { wobble: 2, skipUrban: true });
   const spurB = b.ridge(-34, 30, 36, -28, 2, 'mountain', { wobble: 2, skipUrban: true });
   b.gate(0, 0, 4);
@@ -806,8 +1136,22 @@ MISSIONS.push(function m08() {
     const g = MapBuilder.nearestOn(line, q, r);
     b.gate(g.q, g.r, 2);
   }
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.8);
+  b.ensureLand(-26, -16, 3);
+  b.ensureLand(24, -18, 3);
+  b.ensureLand(34, -8, 3);
+  b.ensureLand(-28, 16, 3);
+  b.ensureLand(-36, 8, 3);
+  b.ensureLand(26, 18, 3);
+  b.ensureLand(36, 10, 3);
+  b.landCorridor(-26, -16, 0, 0, 1);
+  b.landCorridor(24, -18, 0, 0, 1);
+  b.landCorridor(-28, 16, 0, 0, 1);
+  b.landCorridor(26, 18, 0, 0, 1);
+  b.landCorridor(24, -18, 34, -8, 1);
+  b.landCorridor(-28, 16, -36, 8, 1);
+  b.landCorridor(26, 18, 36, 10, 1);
   // Player NW (smallest), warlords NE / SW / SE
   b.city(-26, -16, 1, 'Havenreach', { factory: true });
   b.city(24, -18, 2, 'Wolfkeep', { factory: true });
@@ -859,19 +1203,33 @@ MISSIONS.push(function m08() {
  * ========================================================================= */
 MISSIONS.push(function m09() {
   const b = new MapBuilder(60, 909);
-  // Enemy continent east
-  b.rect(2, -42, 54, 42, 'grass', { noise: 2 });
-  b.scatter('forest', 12, 5, { where: (h) => h.q > 14 });
-  b.scatter('hill', 8, 4, { where: (h) => h.q > 20 });
+  // Generated island base pushed hard east — an enemy continent with open sea west.
+  b.generateBase('island', 909, {
+    islandMode: 'wide', centerQ: 26, stretchX: 0.82, stretchY: 0.95, coastNoiseAmp: 0.4,
+    waterElevThresh: 0.42, sandThresh: 0.34, grassThresh: 0.58, forestThresh: 0.78,
+    mountElevThresh: 0.89, moistShift: 0.0, forestMoistBoost: 0.02,
+    mountainStyle: 'default', mountainPeakJitter: 0.09, biomeAccent: 'balanced',
+  });
+  // Hand-drawn: keep the landing strait open, then the interior coast range + 2 gates.
+  b.each((h) => { if (h.q < -14 && h.type !== 'water') h.type = 'water'; });
+  b.ensureLand(12, -18, 4);
+  b.ensureLand(14, 20, 4);
+  b.ensureLand(44, 2, 4);
   const coastRange = b.ridge(34, -46, 34, 46, 1, 'mountain', { wobble: 3, skipUrban: true });
   const g1 = MapBuilder.nearestOn(coastRange, 34, -8);
   const g2 = MapBuilder.nearestOn(coastRange, 34, 20);
   b.gate(g1.q, g1.r, 2); b.gate(g2.q, g2.r, 2);
+  b.landCorridor(12, -18, 14, 20, 1);
+  b.landCorridor(12, -18, g1.q - 3, g1.r, 1);
+  b.landCorridor(44, 2, g1.q + 3, g1.r, 1);
+  b.landCorridor(44, 2, g2.q + 3, g2.r, 1);
   // Player staging islands west
   b.blob(-34, -14, 7, 'grass', { noise: 0.3 });
   b.blob(-36, 16, 7, 'grass', { noise: 0.3 });
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.95);
+  b.ensureLand(-34, -14, 3);
+  b.ensureLand(-36, 16, 3);
   b.city(-34, -14, 1, 'Staging North', { factory: true, harbor: true });
   b.city(-36, 16, 1, 'Staging South', { harbor: true });
   b.city(12, -18, 2, 'Ironshore', { factory: true, harbor: true });
@@ -926,19 +1284,39 @@ MISSIONS.push(function m09() {
  * ========================================================================= */
 MISSIONS.push(function m10() {
   const b = new MapBuilder(60, 1010);
-  b.rect(-54, -42, 54, 42, 'grass', { noise: 3 });
-  b.scatter('forest', 18, 5);
-  b.scatter('hill', 12, 4);
-  b.scatter('swamp', 8, 3);
-  // A great lake in the center and two mountain chains
+  // Generated world-continent base.
+  b.generateBase('rectangle', 1010, {
+    islandMode: 'none', waterElevThresh: 0.43, sandThresh: 0.33, grassThresh: 0.575,
+    forestThresh: 0.785, mountElevThresh: 0.875, moistShift: 0.01, forestMoistBoost: 0.02,
+    biomeAccent: 'balanced',
+  });
+  // Hand-drawn: a great lake in the center and two mountain chains with gates.
   b.blob(2, 2, 8, 'water', { noise: 0.35 });
   const chainW = b.ridge(-16, -46, -14, -4, 2, 'mountain', { wobble: 2, skipUrban: true });
   const chainE = b.ridge(16, 6, 18, 46, 2, 'mountain', { wobble: 2, skipUrban: true });
   const gwW = MapBuilder.nearestOn(chainW, -15, -22);
   const gwE = MapBuilder.nearestOn(chainE, 17, 26);
   b.gate(gwW.q, gwW.r, 2); b.gate(gwE.q, gwE.r, 2);
-  b.roughenCoasts(2);
+  b.roughenCoasts(1, 0.2);
   b.coastSand(0.5);
+  b.ensureLand(-40, -2, 3);
+  b.ensureLand(-44, 18, 3);
+  b.ensureLand(6, -30, 3);
+  b.ensureLand(30, -32, 3);
+  b.ensureLand(40, -4, 3);
+  b.ensureLand(44, 16, 3);
+  b.ensureLand(0, 32, 3);
+  b.ensureLand(-24, 34, 3);
+  b.landCorridor(-40, -2, -44, 18, 1);
+  b.landCorridor(-40, -2, gwW.q - 3, gwW.r, 1);
+  b.landCorridor(6, -30, gwW.q + 3, gwW.r, 1);
+  b.landCorridor(6, -30, 30, -32, 1);
+  b.landCorridor(30, -32, 40, -4, 1);
+  b.landCorridor(40, -4, 44, 16, 1);
+  b.landCorridor(44, 16, gwE.q + 3, gwE.r, 1);
+  b.landCorridor(0, 32, gwE.q - 3, gwE.r, 1);
+  b.landCorridor(0, 32, -24, 34, 1);
+  b.landCorridor(-24, 34, -44, 18, 1);
   // Player small western republic
   b.city(-40, -2, 1, 'Libertas', { factory: true });
   b.city(-44, 18, 1, 'Freehold');

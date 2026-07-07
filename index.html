@@ -4694,16 +4694,6 @@
             width: 100%;
             margin: 0;
         }
-        .wod-campaign-placeholder {
-            margin: 0 0 20px;
-            padding: 16px;
-            border-radius: 10px;
-            border: 1px dashed rgba(255, 255, 255, 0.18);
-            background: rgba(0, 0, 0, 0.2);
-            color: #95a5a6;
-            font-size: 0.92rem;
-            line-height: 1.5;
-        }
         .wod-mission-row {
             display: block;
             width: 100%;
@@ -4735,6 +4725,34 @@
             font-size: 0.8rem;
             color: #9db3c7;
             line-height: 1.4;
+        }
+        .wod-mission-row.locked {
+            opacity: 0.55;
+            cursor: not-allowed;
+            filter: grayscale(0.5);
+        }
+        .wod-mission-row.locked:hover {
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+        .wod-mission-row.completed .wod-mission-row-title {
+            color: #7ee2a8;
+        }
+        .wod-mission-row-badge {
+            display: inline-block;
+            margin-left: 8px;
+            padding: 1px 8px;
+            border-radius: 10px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            vertical-align: 1px;
+        }
+        .wod-mission-row-badge.lock {
+            background: rgba(255, 255, 255, 0.08);
+            color: #95a5a6;
+        }
+        .wod-mission-row-badge.done {
+            background: rgba(46, 204, 113, 0.16);
+            color: #7ee2a8;
         }
 
         #mapLibraryPanel.overlay {
@@ -7062,7 +7080,6 @@
                 <h2>Play vs AI</h2>
                 <p class="wod-map-lib-sub">Choose how you want to play a solo match against computer opponents.</p>
                 <div class="wod-play-mode-btns">
-                    <button type="button" class="menu-btn wod-play-mode-btn" onclick="showPanel('campaign')">Campaign</button>
                     <button type="button" class="menu-btn wod-play-mode-btn" onclick="showPanel('missions')">Missions</button>
                     <button type="button" class="menu-btn wod-play-mode-btn" onclick="wodOpenSkirmishSetup()">Skirmish</button>
                 </div>
@@ -7070,21 +7087,10 @@
             </div>
         </div>
 
-        <div id="campaignPanel" class="overlay hidden">
-            <div class="panel wod-play-mode-panel">
-                <h2>Campaign</h2>
-                <p class="wod-map-lib-sub">Linked scenarios with story progression and persistent unlocks — <strong>coming soon</strong>.</p>
-                <div class="wod-campaign-placeholder">
-                    <p>Placeholder for a future campaign map and mission chain.</p>
-                </div>
-                <button type="button" class="menu-btn" onclick="showPanel('playMode')">Back</button>
-            </div>
-        </div>
-
         <div id="missionsPanel" class="overlay hidden">
             <div class="panel panel-wide wod-map-lib-panel">
                 <h2 style="margin-top:0">Missions</h2>
-                <p class="wod-map-lib-sub">Scripted scenarios with popups, timers, kill goals, and reinforcements. Drop mission JSON into <strong>missions/</strong>, run <code>npm run missions:sync</code>, commit both the JSON and <code>manifest.json</code>, then refresh. Large maps may take a few seconds to load.</p>
+                <p class="wod-map-lib-sub">A 10-mission chain of scripted scenarios. Win a mission to unlock the next one. Progress is saved in this browser.</p>
                 <div class="wod-map-lib-layout">
                     <div class="wod-map-lib-list-column">
                         <div class="wod-map-lib-list" id="wodMissionList" aria-label="Mission list"></div>
@@ -10200,6 +10206,10 @@
             gameData.mapRadius = p.mapRadius;
             gameData.hexRadius = p.hexRadius;
             gameData._mapSizePreset = p;
+            // Loaded custom/mission maps carry their own authored grid spacing — never let
+            // a size preset skew pixel→hex lookups on them (see WOD.loadMapData).
+            if(gameData.loadedCustomMap && gameData._loadedMapHexRadius)
+                gameData.hexRadius = gameData._loadedMapHexRadius;
             return p;
         }
         function wodPlayableLandFraction() {
@@ -17652,7 +17662,8 @@
                     gamesStarted: 0
                 },
                 profile: { gold: 1000, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
-                multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 }
+                multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
+                missions: { completed: {} }
             };
         }
 
@@ -17668,7 +17679,10 @@
                     friendRequestsOut: Array.isArray(o.profile && o.profile.friendRequestsOut) ? o.profile.friendRequestsOut.slice() : (base.profile.friendRequestsOut || []),
                     friendRequestsIn: Array.isArray(o.profile && o.profile.friendRequestsIn) ? o.profile.friendRequestsIn.slice() : (base.profile.friendRequestsIn || [])
                 }),
-                multiplayer: Object.assign({}, base.multiplayer, o.multiplayer || {})
+                multiplayer: Object.assign({}, base.multiplayer, o.multiplayer || {}),
+                missions: {
+                    completed: Object.assign({}, base.missions.completed, (o.missions && o.missions.completed) || {})
+                }
             };
         }
 
@@ -19406,12 +19420,38 @@
             if(gameData._campaignEnded) return;
             gameData._campaignEnded = true;
             setGameSpeed(0, true);
+            wodRecordMissionCompleted();
             openCampaignBattleSummary('victory', message, message);
             if(countAsBattleWon && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                 wodBumpLifetime('battlesWon', 1);
                 checkWodAchievements();
                 scheduleSaveWodProgress();
             }
+        }
+
+        /** Marks the active mission as completed in persistent progress (unlocks the next one). */
+        function wodRecordMissionCompleted() {
+            if(gameState !== 'PLAYING' || gameData.menuAttractMode) return;
+            let entry = gameData._selectedMissionEntry;
+            if(!entry || !entry.id || !gameData.mission) return;
+            if(!wodProgress) return;
+            if(!wodProgress.missions) wodProgress.missions = { completed: {} };
+            if(!wodProgress.missions.completed) wodProgress.missions.completed = {};
+            if(wodProgress.missions.completed[entry.id]) return;
+            wodProgress.missions.completed[entry.id] = true;
+            persistWodProgressNow();
+            showNotification('Mission complete — next mission unlocked!');
+        }
+
+        function wodIsMissionCompleted(missionId) {
+            return !!(wodProgress && wodProgress.missions && wodProgress.missions.completed && wodProgress.missions.completed[missionId]);
+        }
+
+        /** Mission N is playable when it is the first mission or the previous one is completed. */
+        function wodIsMissionUnlocked(index, catalog) {
+            if(index <= 0) return true;
+            let prev = catalog[index - 1];
+            return !!(prev && wodIsMissionCompleted(prev.id));
         }
 
         function triggerCampaignDefeat(message) {
@@ -21329,7 +21369,8 @@
             // Wall-clock cap: a node-count limit alone let this BFS run 300ms+ mid-frame on big
             // maps once the AI got busy. Treat timeout like node exhaustion (callers fall back).
             let bfsT0 = performance.now();
-            let bfsCeil = gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26;
+            let bfsRelaxed = unit && unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
+            let bfsCeil = bfsRelaxed ? 22 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26);
             let sk = getHexKey(fromHex);
             let q = [fromHex];
             let qi = 0;
@@ -21857,7 +21898,7 @@
             return false;
         }
 
-        function wodPickLandArmyMarchPath(unit, startHex, targetHex) {
+        function wodPickLandArmyMarchPath(unit, startHex, targetHex, allowOverBudget) {
             if(!startHex || !targetHex) return [];
             if(wodHexKeysEqual(startHex, targetHex)) return [startHex];
             if(wodOrderIntoWater(unit, targetHex) && wodIsOpenWaterHex(targetHex))
@@ -21865,7 +21906,7 @@
             wodEnsureBridgePathIndex();
 
             let marchT0 = performance.now();
-            let landPath = findPathAroundTerrain(unit, targetHex, startHex, true, 'land');
+            let landPath = findPathAroundTerrain(unit, targetHex, startHex, true, 'land', allowOverBudget);
             let landOk = wodHexPathLength(landPath) > 1 && wodPathReachesTarget(landPath, targetHex);
             let landUsesBridge = landOk && wodPathCrossesBridge(landPath);
             if(landUsesBridge) return landPath;
@@ -21873,7 +21914,15 @@
             // A good-enough land path found and time budget spent: return it rather than
             // stacking bridge/amphibious refinement searches in the same frame (the
             // composition reached 35ms per call and stuttered marching columns).
-            if(landOk && (performance.now() - marchT0 > 5 || !wodCanSpendPf())) return landPath;
+            if(landOk && (performance.now() - marchT0 > 5 || (!allowOverBudget && !wodCanSpendPf()))) return landPath;
+
+            // Human orders: a truncated A* can miss narrow passes through long mountain
+            // walls even though the map is land-connected. A capped BFS is cheap (~7ms)
+            // and complete — rescue the order before falling into bridge/amphibious code.
+            if(!landOk && allowOverBudget && wodUnitPrefersLandOnlyPath(unit)) {
+                let rescue = smoothGridPath(wodLandBfsPath(unit, startHex, targetHex, 26000, false));
+                if(rescue.length > 1 && wodPathReachesTarget(rescue, targetHex)) return rescue;
+            }
 
             // A confirmed land path already proves land connectivity — skip the redundant
             // full-map BFS (it burned ~5ms per march re-path for nothing).
@@ -22213,8 +22262,11 @@
                 // ceiling behaves exactly like exhausting maxVisits (callers fall back to greedy steps).
                 let astT0 = performance.now();
                 // 14ms for human orders: 10ms truncated long map-crossing searches, which fell
-                // back to straight-line march targets ("paths break and go straight").
-                let astCeilMs = allowOverBudget ? 14 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 6 : 24);
+                // back to straight-line march targets ("paths break and go straight"). The
+                // relax window covers nested calls (e.g. via wodPickLandArmyMarchPath) that
+                // don't carry the allowOverBudget flag themselves.
+                let astRelaxed = unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
+                let astCeilMs = (allowOverBudget || astRelaxed) ? 14 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 6 : 24);
                 let visitTick = 0;
                 while(open.length > 0 && maxVisits-- > 0) {
                     if((++visitTick & 255) === 0 && performance.now() - astT0 > astCeilMs) break;
@@ -22240,8 +22292,8 @@
             }
 
             if(pathMode === 'land') return wodStorePfPath(runPathAst(true).path);
-            if(pathMode === 'army') return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex));
-            if(wodUnitPrefersLandOnlyPath(unit)) return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex));
+            if(pathMode === 'army') return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex, allowOverBudget));
+            if(wodUnitPrefersLandOnlyPath(unit)) return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex, allowOverBudget));
             return wodStorePfPath(runPathAst(false).path);
             } finally {
                 wodPfChargeMs(performance.now() - pfT0);
@@ -22452,7 +22504,7 @@
                         let sHex = getNearestWalkableHexForUnit(u, u.x, u.y);
                         let tHex = getNearestHexToPoint(tgt.x, tgt.y);
                         if(sHex && tHex) {
-                            let chain = buildGreedyLandHexChain(u, sHex, tHex, 64);
+                            let chain = buildGreedyLandHexChain(u, sHex, tHex, 140);
                             if(chain.length > 1) {
                                 u.orderTarget = { x: tgt.x, y: tgt.y };
                                 u.path = chain.slice(1).map(h => ({ x: h.x, y: h.y, pathPrepared: true }));
@@ -22471,17 +22523,41 @@
         /** Clone an already-computed lead corridor onto another unit of the same march group
          * with a start→end interpolated offset. No pathfinding — this is what lets a 50-unit
          * selection get orders + arrows in ONE frame instead of trickling in over seconds.
-         * Terrain clamps + the blocked-repath (450ms budgeted re-path per unit) clean up any
-         * offset lane that clips bad terrain. */
+         * Offset points that land on mountains (or water on a land march) are shrunk back
+         * toward the lead's proven lane; the budgeted blocked-repath cleans up the rest. */
         function wodAssignGroupCorridorClone(unit, leadCorridor, offS, offE, exactLast, intoWater, marchPts) {
             if(!unit || !leadCorridor || leadCorridor.length < 2) return false;
             let nPts = leadCorridor.length;
             let corridor = [{ x: unit.x, y: unit.y }];
+            let landUnit = isLandArmyUnit(unit);
             for(let k = 1; k < nPts; k++) {
                 let t = k / (nPts - 1);
                 let ox = offS.x + (offE.x - offS.x) * t;
                 let oy = offS.y + (offE.y - offS.y) * t;
-                corridor.push({ x: leadCorridor[k].x + ox, y: leadCorridor[k].y + oy });
+                let px = leadCorridor[k].x + ox;
+                let py = leadCorridor[k].y + oy;
+                if(landUnit) {
+                    // Validate the offset lane: the lead corridor is a real path, so pulling
+                    // the offset toward zero always converges on walkable terrain. Water is
+                    // only bad when the LEAD point is on land (amphibious legs keep water).
+                    let leadHx = getNearestHexToPoint(leadCorridor[k].x, leadCorridor[k].y);
+                    let leadOnLand = leadHx && !isWaterHex(leadHx);
+                    let hx = getNearestHexToPoint(px, py);
+                    let bad = hx && (hx.type === 'mountain' || (leadOnLand && isWaterHex(hx) && !isBridgeHex(hx)));
+                    if(bad) {
+                        for(let f of [0.6, 0.3, 0]) {
+                            let cx = leadCorridor[k].x + ox * f;
+                            let cy = leadCorridor[k].y + oy * f;
+                            let ch = getNearestHexToPoint(cx, cy);
+                            if(ch && ch.type !== 'mountain' && (!leadOnLand || !isWaterHex(ch) || isBridgeHex(ch))) {
+                                px = cx;
+                                py = cy;
+                                break;
+                            }
+                        }
+                    }
+                }
+                corridor.push({ x: px, y: py });
             }
             corridor = dedupeNearOrderPathPoints(corridor);
             if(corridor.length < 2) return false;
@@ -23109,7 +23185,12 @@
             } else if(targetHex) {
                 if(wodMpIsHumanOwner(unit.owner) && unit.orderTarget) {
                     wodQueuePlayerMoveOrder(unit, [{ x: unit.orderTarget.x, y: unit.orderTarget.y }]);
-                    if(unit.target) unit.target.pathPrepared = true;
+                    // While the full pathfind retries in the queue, hop greedily around
+                    // terrain instead of marching a straight line into mountains.
+                    let waitHop = wodUnitPrefersLandOnlyPath(unit) || unit.type === 'marine'
+                        ? findGreedyLandStep(unit, targetHex) : null;
+                    if(waitHop) unit.target = { x: waitHop.x, y: waitHop.y, pathPrepared: true, landGreedy: true };
+                    else if(unit.target) unit.target.pathPrepared = true;
                     else unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: true };
                     invalidateUnitOrderArrowCache(unit);
                     return;
@@ -25014,12 +25095,51 @@
             if(!terrainClamp) {
                 if(playerMarch) {
                     unit.blockedTimer = (unit.blockedTimer || 0) + dt;
-                    if(unit.blockedTimer > 0.22 && unit.orderTarget) {
-                        let dest = [{ x: unit.orderTarget.x, y: unit.orderTarget.y }];
-                        if(wodTryAssignPlayerCorridorPath(unit, dest, unit.orderTarget, false)) {
+                    // Wedged on a mountain hex (edge-riding let the unit slip on): every
+                    // outgoing chord fails the walkability clamp, so repaths assign fresh
+                    // corridors the unit can never start. Slide it back onto walkable
+                    // ground first — then the normal march resumes.
+                    let wedgeHex = getNearestHexToPoint(unit.x, unit.y);
+                    if(wedgeHex && wedgeHex.type === 'mountain' && unit.type !== 'ship') {
+                        let esc = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+                        if(esc && esc !== wedgeHex) {
+                            let ex = esc.x - unit.x, ey = esc.y - unit.y;
+                            let el = Math.sqrt(ex * ex + ey * ey) || 1;
+                            let slide = Math.min(stepSpeed * dt, el);
+                            unit.x += (ex / el) * slide;
+                            unit.y += (ey / el) * slide;
                             unit.blockedTimer = 0;
-                            unit.stuckTimer = 0;
                             return;
+                        }
+                    }
+                    if(unit.blockedTimer > 0.22 && unit.orderTarget) {
+                        let nowMs = performance.now();
+                        if(!unit._wodBlockedRepathUntil || nowMs >= unit._wodBlockedRepathUntil) {
+                            let dest = [{ x: unit.orderTarget.x, y: unit.orderTarget.y }];
+                            if(wodTryAssignPlayerCorridorPath(unit, dest, unit.orderTarget, false)) {
+                                unit.blockedTimer = 0;
+                                unit.stuckTimer = 0;
+                                unit._wodBlockedRepathUntil = 0;
+                                return;
+                            }
+                            // Don't spam a failing full A* every frame — cool down and
+                            // slide around the obstacle in the meantime.
+                            unit._wodBlockedRepathUntil = nowMs + 420;
+                        }
+                        if(wodUnitPrefersLandOnlyPath(unit) || unit.type === 'marine') {
+                            let goalHex = getNearestHexToPoint(unit.orderTarget.x, unit.orderTarget.y);
+                            let hop = goalHex ? findGreedyLandStep(unit, goalHex) : null;
+                            if(hop) {
+                                unit.target = { x: hop.x, y: hop.y, pathPrepared: true, landGreedy: true };
+                                unit.blockedTimer = 0;
+                                return;
+                            }
+                            let detour = findLocalDetourHex(unit, unit.target.x, unit.target.y);
+                            if(detour) {
+                                unit.target = { x: detour.x, y: detour.y, detour: true, finalTarget: { x: unit.orderTarget.x, y: unit.orderTarget.y } };
+                                unit.blockedTimer = 0;
+                                return;
+                            }
                         }
                     }
                     return;
@@ -34574,17 +34694,34 @@
             if(empty) empty.classList.add('hidden');
             if(layout) layout.style.display = 'flex';
             for(let entry of wodMissionCatalog) {
+                let idx = wodMissionCatalog.indexOf(entry);
+                let unlocked = wodIsMissionUnlocked(idx, wodMissionCatalog);
+                let done = wodIsMissionCompleted(entry.id);
                 let btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = 'wod-mission-row';
+                btn.className = 'wod-mission-row' + (unlocked ? '' : ' locked') + (done ? ' completed' : '');
                 btn.dataset.missionId = entry.id;
+                let badge = done ? '<span class="wod-mission-row-badge done">✓ Completed</span>'
+                    : (unlocked ? '' : '<span class="wod-mission-row-badge lock">🔒 Locked</span>');
                 btn.innerHTML =
-                    '<span class="wod-mission-row-title">' + (entry.name || entry.id) + '</span>' +
-                    (entry.description ? '<span class="wod-mission-row-desc">' + entry.description + '</span>' : '');
-                btn.addEventListener('click', () => wodSelectMissionEntry(entry));
+                    '<span class="wod-mission-row-title">' + (entry.name || entry.id) + badge + '</span>' +
+                    (unlocked && entry.description ? '<span class="wod-mission-row-desc">' + entry.description + '</span>'
+                        : (!unlocked ? '<span class="wod-mission-row-desc">Complete the previous mission to unlock.</span>' : ''));
+                if(unlocked) {
+                    btn.addEventListener('click', () => wodSelectMissionEntry(entry));
+                } else {
+                    btn.addEventListener('click', () => showNotification('Locked — complete the previous mission first.'));
+                }
                 list.appendChild(btn);
             }
-            if(wodMissionCatalog.length === 1) wodSelectMissionEntry(wodMissionCatalog[0]);
+            // Auto-select the first uncompleted unlocked mission so the player can just hit Start.
+            let auto = null;
+            for(let i = 0; i < wodMissionCatalog.length; i++) {
+                if(!wodIsMissionUnlocked(i, wodMissionCatalog)) break;
+                auto = wodMissionCatalog[i];
+                if(!wodIsMissionCompleted(auto.id)) break;
+            }
+            if(auto) wodSelectMissionEntry(auto);
         }
 
         async function wodApplyMissionEntry(entry) {
@@ -34626,6 +34763,10 @@
                 let entry = wodMissionCatalog.find(m => m.id === _wodSelectedMissionId);
                 if(!entry) {
                     showNotification('Select a mission first.');
+                    return;
+                }
+                if(!wodIsMissionUnlocked(wodMissionCatalog.indexOf(entry), wodMissionCatalog)) {
+                    showNotification('Locked — complete the previous mission first.');
                     return;
                 }
                 btn.disabled = true;
@@ -39282,6 +39423,21 @@
                     if(hex.owner === undefined || hex.owner === null) hex.owner = 0;
                     gameData.hexes[`${hex.q},${hex.r}`] = hex;
                 }
+                // Trust the DATA's grid spacing over the size preset: mission/editor maps are
+                // authored at a fixed spacing, and a preset mismatch (e.g. size-40 preset says
+                // hexRadius 18 but the file was built at hexRadius 20) skews every pixel→hex
+                // lookup — pathfinding, terrain clamps, walkability — so units marched into
+                // mountains and got stuck on the smaller mission maps.
+                gameData._loadedMapHexRadius = null;
+                for(let hex of gameData.hexList) {
+                    let nb = gameData.hexes[`${hex.q + 1},${hex.r}`];
+                    if(nb) {
+                        let sp = Math.abs(nb.x - hex.x);
+                        if(sp > 4) gameData._loadedMapHexRadius = sp / 1.35;
+                        break;
+                    }
+                }
+                if(gameData._loadedMapHexRadius) gameData.hexRadius = gameData._loadedMapHexRadius;
                 gameData.loadedCustomMap = true;
                 if(mapData.factionColors && mapData.factionColors.length) {
                     for(let i = 0; i < Math.min(mapData.factionColors.length, factionColors.length); i++)
