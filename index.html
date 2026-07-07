@@ -7590,7 +7590,7 @@
 
                 <div class="esc-help-block">
                     <h4>Terrain, movement & combat tilt</h4>
-                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Light infantry</strong> and <strong>armor</strong> path on land in all eight hex directions (no corner-cutting through peaks), cross <strong>constructed bridges</strong> as land, and avoid ocean unless you order them in or a short water shortcut saves a long detour (slow, drowning upkeep). <strong>Marines</strong> thrive on ocean hexes while amphibious; land regiments stranded in deep ocean hexes (<code>inWater</code> in code) suffer drowning upkeep about <strong>−2%</strong> max HP per second and severe march slowdown plus morale linkage. <strong>Ships</strong> fight only from water.</p>
+                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Light infantry</strong> and <strong>armor</strong> path on land in all eight hex directions (no corner-cutting through peaks), cross <strong>constructed bridges</strong> as land, and avoid ocean unless you order them in, no land route exists, or a short water shortcut saves a long detour. Ordering them across water to a land objective embarks them automatically: while actively marching under orders they cross at reduced speed with light attrition (about <strong>−0.6%</strong> max HP per second). <strong>Marines</strong> thrive on ocean hexes while amphibious; land regiments <em>stranded</em> in deep ocean without orders suffer far harsher drowning upkeep (about <strong>−2%</strong> max HP per second) and severe march slowdown plus morale linkage. <strong>Ships</strong> fight only from water.</p>
                     <p class="esc-help-prose"><strong>Attack %</strong> scales outgoing strikes vs the same regiment on baseline <strong>grass</strong>; <strong>Dmg taken %</strong> scales how hostile hits resolve on you (<strong>below 100%</strong> absorbs better; above 100% means more exposed).</p>
                     <p class="esc-help-prose esc-help-matrix-footnote"><strong>Ocean headers:</strong> <em>Ocean M/S</em> = marines &amp; ships on ocean (amphib for marines); <em>Ocean drown ΔI</em> / <em>ΔA</em> = light infantry vs armor caught drowning in ocean—same wording as unit cards (<strong>Atk</strong> + <strong>Dmg taken</strong> rows).</p>
                     <div class="wod-help-terrain-combat-mount"></div>
@@ -20449,7 +20449,10 @@
             // the generous radius let their chords slide ACROSS narrow land isthmuses because a
             // water cell existed on the far side ("boats sailing through land").
             let waterOnly = unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute);
-            let thresh = hr * (waterOnly ? 0.6 : 1.14);
+            // Mountain samples get the same tight tolerance as water-only movers: the
+            // generous 1.14 radius let straight-walking units slide clean through
+            // one-tile mountain walls along hex seams ("marching through mountains").
+            let thresh = hr * (waterOnly || h.type === 'mountain' ? 0.6 : 1.14);
             let thresh2 = thresh * thresh;
             let allowWater = wodOrderIntoWater(unit, h);
             for(let d of hexDirections) {
@@ -21037,6 +21040,61 @@
             return chain;
         }
 
+        /** Bounded BFS over open-water tiles — rescues amphibious legs when the greedy
+         * chain stalls on concave coastlines (the main reason cross-water orders failed). */
+        function wodWaterBfsPath(unit, fromHex, toHex, maxNodes) {
+            if(!fromHex || !toHex || !wodIsOpenWaterHex(fromHex) || !wodIsOpenWaterHex(toHex)) return [];
+            if(wodHexKeysEqual(fromHex, toHex)) return [fromHex];
+            let limit = maxNodes == null ? 9000 : maxNodes;
+            let bfsT0 = performance.now();
+            let bfsCeil = gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26;
+            let sk = getHexKey(fromHex);
+            let tk = getHexKey(toHex);
+            let q = [fromHex];
+            let qi = 0;
+            let parent = Object.create(null);
+            parent[sk] = null;
+            let seen = new Set([sk]);
+            let nodes = 0;
+            while(qi < q.length) {
+                if((++nodes & 255) === 0 && performance.now() - bfsT0 > bfsCeil) return [];
+                if(nodes > limit) return [];
+                let cur = q[qi++];
+                let ck = getHexKey(cur);
+                if(ck === tk) {
+                    let path = [];
+                    let walk = ck;
+                    while(walk != null) {
+                        path.unshift(gameData.hexes[walk]);
+                        walk = parent[walk];
+                    }
+                    return smoothGridPath(path);
+                }
+                for(let di = 0; di < hexDirections.length; di++) {
+                    let d = hexDirections[di];
+                    let n = gameData.hexes[`${cur.q + d.q},${cur.r + d.r}`];
+                    if(!wodIsOpenWaterHex(n)) continue;
+                    let nk = getHexKey(n);
+                    if(seen.has(nk)) continue;
+                    seen.add(nk);
+                    parent[nk] = ck;
+                    q.push(n);
+                }
+            }
+            return [];
+        }
+
+        /** Water leg that actually reaches its goal: greedy chain first (cheap), BFS rescue second. */
+        function wodAmphibiousWaterLeg(unit, fromW, toW, maxSteps) {
+            if(!fromW || !toW) return [];
+            if(wodHexKeysEqual(fromW, toW)) return [fromW];
+            let chain = buildGreedyAmphibiousWaterChain(unit, fromW, toW, maxSteps);
+            if(chain.length > 1 && wodHexKeysEqual(chain[chain.length - 1], toW)) return chain;
+            let bfs = wodWaterBfsPath(unit, fromW, toW, 12000);
+            if(bfs.length > 1) return bfs;
+            return chain;
+        }
+
         function wodNearestOpenWaterHex(unit, fromHex, towardHex, maxRing) {
             if(!fromHex || !towardHex) return null;
             let best = null,
@@ -21072,13 +21130,16 @@
             return best;
         }
 
-        /** Land tile beside open water for stepping between a land approach and a water goal. */
+        /** Land tile beside open water for stepping between a land approach and a water goal.
+         * Searches around the LAND side of the leg — searching around the water bias meant
+         * that for islands further apart than the ring the start island's shore was never
+         * found, and cross-water orders to land objectives silently failed. */
         function wodFindAmphibiousShoreCrossing(unit, landBiasHex, waterBiasHex, maxRing) {
             if(!unit || !landBiasHex || !waterBiasHex) return null;
             maxRing = maxRing == null ? 18 : maxRing;
             let best = null,
                 bestScore = Infinity;
-            let pts = getHexesInRadius(waterBiasHex.q, waterBiasHex.r, maxRing);
+            let pts = getHexesInRadius(landBiasHex.q, landBiasHex.r, maxRing);
             for(let pi = 0; pi < pts.length; pi++) {
                 let land = gameData.hexes[`${pts[pi].q},${pts[pi].r}`];
                 if(!land || isWaterHex(land) || isBridgeHex(land) || land.type === 'mountain') continue;
@@ -21153,7 +21214,12 @@
             if(!path || !path.length || !targetHex) return false;
             let last = path[path.length - 1];
             if(wodHexKeysEqual(last, targetHex)) return true;
-            return wodHexStepDistance(last, targetHex) <= 1.12;
+            // wodHexStepDistance only classifies a step as straight/diagonal — it is NOT a
+            // distance. Using it here accepted any path ending in the target's row/column
+            // as "arrived", so units marched half-way and stopped. Require true adjacency.
+            let dq = Math.abs(last.q - targetHex.q);
+            let dr = Math.abs(last.r - targetHex.r);
+            return dq <= 1 && dr <= 1;
         }
 
         function wodResolveBridgePathLeg(unit, fromHex, toHex, maxNodes) {
@@ -21670,16 +21736,28 @@
             return [];
         }
 
-        function wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex) {
+        function wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex, looseEstimate) {
             if(!startHex || !targetHex) return Infinity;
+            let sp = (gameData.hexRadius || 20) * 1.35;
+            // Greedy chains stall on concave coastlines. When the caller has NO land route
+            // (looseEstimate), fall back to a straight-line estimate — the real path build
+            // validates reachability with a BFS afterwards. When a land route exists, stay
+            // strict: only a clean greedy chain justifies trading it for a water shortcut.
+            function waterSteps(a, b, cap) {
+                let chain = buildGreedyAmphibiousWaterChain(unit, a, b, cap);
+                if(chain.length > 1 && wodHexKeysEqual(chain[chain.length - 1], b)) return chain.length;
+                if(!looseEstimate) return Infinity;
+                let dx = b.x - a.x, dy = b.y - a.y;
+                return Math.max(2, Math.ceil(Math.sqrt(dx * dx + dy * dy) / sp));
+            }
             if(wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(targetHex))
-                return buildGreedyAmphibiousWaterChain(unit, startHex, targetHex, 64).length;
+                return waterSteps(startHex, targetHex, 64);
             let shoreA = wodNearestOpenWaterHex(unit, startHex, targetHex, 7);
             let shoreB = wodNearestOpenWaterHex(unit, targetHex, startHex, 7);
             if(!shoreA || !shoreB) return Infinity;
             let landA = getHexKey(shoreA) === getHexKey(startHex) ? 0 : 2;
             let landB = getHexKey(shoreB) === getHexKey(targetHex) ? 0 : 2;
-            let water = buildGreedyAmphibiousWaterChain(unit, shoreA, shoreB, 56).length;
+            let water = waterSteps(shoreA, shoreB, 56);
             return landA + water + landB;
         }
 
@@ -21690,7 +21768,9 @@
             if(wodHexPathLength(bridgePath) > 1) return false;
             let bestLand = wodHexPathLength(landPath);
             if(bestLand <= 1) {
-                let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex);
+                // No land route at all — accept a loose (straight-line) estimate so genuine
+                // island-to-island orders still trigger the amphibious compose.
+                let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex, true);
                 return isFinite(est) && est >= 2;
             }
             let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex);
@@ -21818,41 +21898,71 @@
             let cacheKey = getHexKey(startHex) + '>' + getHexKey(targetHex);
             if(unit._wodAmpPathKey === cacheKey && unit._wodAmpPath && unit._wodAmpPath.length)
                 return unit._wodAmpPath.slice();
+            // Failure cooldown: without it every blocked-unit replan re-ran the full
+            // shore-crossing + BFS compose (~30-50ms worst) several times a second.
+            if(unit._wodAmpFailKey === cacheKey && performance.now() < (unit._wodAmpFailUntil || 0))
+                return [];
+            // Deadline across the whole compose: shore searches + land legs + water BFS can
+            // stack to 40ms+ in one frame; aborting behaves like a failed pathfind (callers
+            // fall back to greedy hops and the fail cooldown stops immediate retries).
+            let ampT0 = performance.now();
+            let ampCeil = gameState === 'PLAYING' && !gameData.menuAttractMode ? 9 : 30;
+            function ampOverBudget() {
+                return performance.now() - ampT0 > ampCeil;
+            }
             let out = [];
             let startW = wodIsOpenWaterHex(startHex);
             let tgtW = wodIsOpenWaterHex(targetHex);
             if(startW && tgtW) {
-                let chain = buildGreedyAmphibiousWaterChain(unit, startHex, targetHex, 72);
+                let chain = wodAmphibiousWaterLeg(unit, startHex, targetHex, 72);
                 out = chain.length > 1 ? smoothGridPath(chain) : chain;
             } else if(!startW && tgtW) {
                 let crossing = wodFindAmphibiousShoreCrossing(unit, startHex, targetHex, 20);
-                if(crossing) {
+                if(crossing && !ampOverBudget()) {
                     let landLeg = wodFindLandApproachPath(unit, startHex, crossing.landHex);
-                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, crossing.waterHex, targetHex, 72);
+                    let waterLeg = wodAmphibiousWaterLeg(unit, crossing.waterHex, targetHex, 72);
                     if(wodHexKeysEqual(crossing.waterHex, targetHex)) waterLeg = [crossing.waterHex];
                     out = wodMergeHexPaths(landLeg, waterLeg);
                 }
             } else if(startW && !tgtW) {
                 let crossing = wodFindAmphibiousShoreCrossing(unit, targetHex, startHex, 20);
-                if(crossing) {
-                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, startHex, crossing.waterHex, 72);
+                if(crossing && !ampOverBudget()) {
+                    let waterLeg = wodAmphibiousWaterLeg(unit, startHex, crossing.waterHex, 72);
                     let landLeg = wodFindLandApproachPath(unit, crossing.landHex, targetHex);
                     out = wodMergeHexPaths(waterLeg, landLeg);
                 }
             } else {
+                // land -> water -> land: pick the crossing pair, then validate every leg —
+                // a partial (stalled) water leg used to send whole columns into the open
+                // ocean to drown without ever reaching the far shore.
                 let crossA = wodFindAmphibiousShoreCrossing(unit, startHex, targetHex, 24);
-                let crossB = wodFindAmphibiousShoreCrossing(unit, targetHex, startHex, 24);
-                if(crossA && crossB) {
+                let crossB = crossA && !ampOverBudget()
+                    ? wodFindAmphibiousShoreCrossing(unit, targetHex, startHex, 24) : null;
+                if(crossA && crossB && !ampOverBudget()) {
                     let landA = wodFindLandApproachPath(unit, startHex, crossA.landHex);
-                    let waterLeg = buildGreedyAmphibiousWaterChain(unit, crossA.waterHex, crossB.waterHex, 96);
-                    if(wodHexPathLength(waterLeg) > 1) {
+                    let waterLeg = ampOverBudget() ? []
+                        : wodAmphibiousWaterLeg(unit, crossA.waterHex, crossB.waterHex, 96);
+                    let waterOk = wodHexPathLength(waterLeg) > 1 &&
+                        wodPathReachesTarget(waterLeg, crossB.waterHex);
+                    if(waterOk && !ampOverBudget()) {
                         let landB = wodFindLandApproachPath(unit, crossB.landHex, targetHex);
                         out = wodMergeHexPaths(wodMergeHexPaths(landA, waterLeg), landB);
                     }
                 }
             }
+            if(out.length > 1 && !tgtW && !wodPathReachesTarget(out, targetHex)) {
+                // Never hand back a truncated amphibious route to a land objective — callers
+                // treat any path as marchable and units end up stranded mid-ocean.
+                out = [];
+            }
             unit._wodAmpPathKey = cacheKey;
             unit._wodAmpPath = out.length ? out.slice() : [];
+            if(!out.length) {
+                unit._wodAmpFailKey = cacheKey;
+                unit._wodAmpFailUntil = performance.now() + 1600;
+            } else {
+                unit._wodAmpFailKey = null;
+            }
             return out;
         }
 
@@ -22215,7 +22325,7 @@
             return smoothed;
         }
 
-        function buildConcatenatedHexPath(unit, worldWaypoints, startPt, allowOverBudget) {
+        function buildConcatenatedHexPath(unit, worldWaypoints, startPt, allowOverBudget, opts) {
             if(!worldWaypoints || worldWaypoints.length === 0) return [];
             let sx = startPt ? startPt.x : unit.x;
             let sy = startPt ? startPt.y : unit.y;
@@ -22229,7 +22339,11 @@
             unit.orderTarget = null;
             unit._wodAmpPathKey = null;
             unit._wodAmpPath = null;
-            unit._wodArrowPathBuild = true;
+            // Real move orders (forOrder) must be allowed to compose amphibious water legs;
+            // the arrow-build flag exists only to keep pure arrow-preview rebuilds cheap.
+            // Marking ORDER corridors as arrow builds made land units refuse to cross water
+            // toward land objectives entirely (the "can't cross water" bug).
+            unit._wodArrowPathBuild = !(opts && opts.forOrder);
             try {
                 for(let wp of worldWaypoints) {
                     let reach = findReachableOrderHex(unit, wp.x, wp.y);
@@ -22433,12 +22547,15 @@
             wodPfSpentMs = 0;
             wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, fromAdvance ? 18 : 28);
             let startPt = { x: unit.x, y: unit.y };
-            let fullHex = buildConcatenatedHexPath(unit, marchPts, startPt, true);
+            let fullHex = buildConcatenatedHexPath(unit, marchPts, startPt, true, { forOrder: true });
             if(fullHex.length <= 1) return false;
             let endPt = exactLast ? { x: exactLast.x, y: exactLast.y } : marchPts[marchPts.length - 1];
             let corridor = wodWorldPointsFromHexMarchPath(unit, fullHex, endPt);
             corridor[0] = { x: unit.x, y: unit.y };
             if(corridor.length < 2) return false;
+            // Amphibious corridors need the into-water flag so movement clamps, stuck logic
+            // and terrain-safety checks treat the water legs as legal.
+            if(wodPathCrossesOpenWater(fullHex)) unit._wodOrderIntoWater = true;
             unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
             unit.target = unit.path.shift();
             unit.target.pathPrepared = true;
@@ -22538,11 +22655,13 @@
                 let corridorPts = fromAdvance ? marchPts.slice(cursor) : marchPts;
                 if(wodTryAssignPlayerCorridorPath(unit, corridorPts, exactLast, fromAdvance))
                     return true;
-                return false;
+                // Corridor build failed (A* budget exhausted / blocked terrain). Fall through
+                // to the generic leg assignment below — its greedy/amphibious fallbacks keep
+                // the unit moving legally instead of leaving it frozen with a stale arrow.
             }
 
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
-            let path = findPathAroundTerrain(unit, reachNext.hex, startHex);
+            let path = findPathAroundTerrain(unit, reachNext.hex, startHex, false, 'auto', wodMpIsHumanOwner(unit.owner));
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex) {
                 let ampPath = findAmphibiousMarchPath(unit, startHex, reachNext.hex);
                 if(wodHexPathLength(ampPath) > 1) path = ampPath;
@@ -22941,7 +23060,11 @@
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             unit.inWater = !!(sea && unit.type !== 'marine');
             if(unit.inWater) {
-                applyDamage(unit, unit.maxHp * 0.02 * dt, 0);
+                // Ordered crossings (active march with a destination) drown far slower than
+                // stranded units — otherwise any island-to-island order was a death sentence
+                // and cross-water attacks never worked in practice.
+                let embarked = !!(unit.target && (unit._wodOrderIntoWater || unit.orderTarget));
+                applyDamage(unit, unit.maxHp * (embarked ? 0.006 : 0.02) * dt, 0);
                 unit.waterFlash = 0.35;
             } else if(unit.waterFlash) {
                 unit.waterFlash = Math.max(0, unit.waterFlash - dt);
@@ -23169,7 +23292,8 @@
 
                 function getUnitSpeedMultiplier(unit) {
             let onBridge = wodUnitOnBridgeDeck(unit);
-            let waterSlow = onBridge ? 1 : (unit.amphibInWater ? 0.62 : (unit.inWater ? 0.28 : 1));
+            let embarked = !!(unit.inWater && unit.target && (unit._wodOrderIntoWater || unit.orderTarget));
+            let waterSlow = onBridge ? 1 : (unit.amphibInWater ? 0.62 : (unit.inWater ? (embarked ? 0.46 : 0.28) : 1));
             let water = waterSlow;
             if(unit.type === 'convoy') return water;
             let m = unit.morale != null ? unit.morale : WOD_MORALE_MAX;
@@ -28815,22 +28939,36 @@
             let enemies = assignment.enemies != null ? assignment.enemies : fight.enemies;
             let localRatio = (support + 1) / (enemies + 1);
             let shouldPush = fight.shouldPush || localRatio >= 1.35;
-            if(!shouldPush && support < fight.neededSupport && hpRatio < 0.88 && enemies > 0) {
-                wodAiMoveUnitToward(unit,
+            let wantHold = !shouldPush && support < fight.neededSupport && hpRatio < 0.88 && enemies > 0;
+            if(wantHold) {
+                // Escalation valve: a sector that never accumulates enough support used to
+                // re-issue hold orders forever — whole groups sat parked at the frontline.
+                // After ~22s of continuous holding, commit to the attack anyway.
+                let now = performance.now();
+                if(!unit.aiHoldStartAt) unit.aiHoldStartAt = now;
+                else if(now - unit.aiHoldStartAt > 22000) wantHold = false;
+            }
+            if(wantHold) {
+                let moved = wodAiMoveUnitToward(unit,
                     assignment.holdHex.x - (dx / len) * gameData.hexRadius * 0.75 + spread,
                     assignment.holdHex.y - (dy / len) * gameData.hexRadius * 0.75 + slot.oy * 0.45,
                     true);
-                wodAiStampOrder(unit, true, assignment.holdHex);
-                return true;
+                // Only stamp when the move actually assigned a target — stamping a failed
+                // move left holding=true with no target and no way to accumulate stuck
+                // timers, so wodAiShouldKeepCurrentOrder parked the unit permanently.
+                if(moved) wodAiStampOrder(unit, true, assignment.holdHex);
+                else unit.holding = false;
+                return moved;
             }
+            unit.aiHoldStartAt = 0;
             let depth = (fight.canOverwhelm || fight.localOverrun) && localRatio >= 1.25 ? 0.92 : 0.58;
-            wodAiMoveUnitToward(unit,
+            let moved = wodAiMoveUnitToward(unit,
                 assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.35,
                 assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth + slot.oy * 0.35,
                 false);
             unit.holding = false;
-            wodAiStampOrder(unit, false, assignment.holdHex);
-            return true;
+            if(moved) wodAiStampOrder(unit, false, assignment.holdHex);
+            return moved;
         }
 
         /** Keep current AI orders until they arrive, settle on a hold line, or get stuck. */
@@ -28848,6 +28986,9 @@
             let marchFarR2 = Math.pow(hr * 6, 2);
             let arriveR2 = Math.pow(hr * 2.8, 2);
             if(unit.holding) {
+                // No target means nothing will ever move this unit or grow its stuck
+                // timers (they only tick while moving) — release it for retasking.
+                if(!unit.target) return false;
                 if(distSq > holdDoneR2) {
                     if((unit.stuckTimer || 0) < 0.38 && (unit.blockedTimer || 0) < 0.28) return true;
                     return false;
@@ -34551,6 +34692,22 @@
             }
         }
 
+        /** Direction anchor for the arrowhead: walk back along the polyline until we are far
+         * enough from the tip that the angle is stable. Using just points[len-2] let 1-3px
+         * degenerate final segments (exact-click substitution, dedupe leftovers) spin the
+         * head sideways. */
+        function wodCommandArrowHeadAnchor(pts) {
+            if(!pts || pts.length < 2) return null;
+            let end = pts[pts.length - 1];
+            let minD2 = 100; // 10px lookback
+            for(let i = pts.length - 2; i >= 0; i--) {
+                let dx = end.x - pts[i].x;
+                let dy = end.y - pts[i].y;
+                if(dx * dx + dy * dy >= minD2) return pts[i];
+            }
+            return pts[0];
+        }
+
         function wodStrokeCommandArrowHead(ctx, end, prev, size) {
             let angle = Math.atan2(end.y - prev.y, end.x - prev.x);
             ctx.beginPath();
@@ -34961,7 +35118,7 @@
                 ctx.setLineDash([]);
                 if(showHead) {
                     let end = pts[pts.length - 1];
-                    let prev = pts[pts.length - 2];
+                    let prev = wodCommandArrowHeadAnchor(pts) || pts[pts.length - 2];
                     wodStrokeCommandArrowHead(ctx, end, prev, 12);
                 }
             }
@@ -34989,7 +35146,7 @@
             ctx.setLineDash([]);
             if(showHead) {
                 let end = points[points.length - 1];
-                let prev = points[points.length - 2];
+                let prev = wodCommandArrowHeadAnchor(points) || points[points.length - 2];
                 wodStrokeCommandArrowHead(ctx, end, prev, 14);
             }
             ctx.restore();
