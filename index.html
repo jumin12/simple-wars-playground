@@ -10627,10 +10627,15 @@
         async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset) {
             if(!wodMapShapeUsesRadialIslandMask(gameData.mapShape)) return;
             let cx = 0, cy = 0, n = 0;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
             for(let h of gameData.hexList) {
                 cx += h.x;
                 cy += h.y;
                 n++;
+                if(h.x < minX) minX = h.x;
+                if(h.x > maxX) maxX = h.x;
+                if(h.y < minY) minY = h.y;
+                if(h.y > maxY) maxY = h.y;
             }
             if(!n) return;
             cx /= n;
@@ -10644,13 +10649,33 @@
             let pad = Math.max(1, bufferTiles || 5);
             let inner = maxR - hr * pad * 2.6;
             let fadeW = hr * (pad + 7.5);
+            // Rectangular edge buffer: the radial ring alone let land touch the middle of
+            // each map edge (the ring radius is the CORNER distance, so edge midpoints sit
+            // far inside it). Islands must never contact the map boundary on any side.
+            let sp = hr * 1.35;
+            let hardEdge = sp * pad;
+            let sandEdge = hardEdge + sp * 3.2;
             let hi = 0;
             for(let h of gameData.hexList) {
+                let ed = Math.min(h.x - minX, maxX - h.x, h.y - minY, maxY - h.y);
+                if(ed <= sandEdge) {
+                    // Small noise on the inner boundary keeps the forced coast organic.
+                    let wob = fbm(h.x * 0.016 + (seedOffset || 0) + 5150, h.y * 0.016 + (seedOffset || 0) + 5150, 2);
+                    let waterLine = hardEdge + sp * (wob - 0.5) * 1.6;
+                    if(ed <= Math.max(sp * 1.5, waterLine)) {
+                        wodSetGeneratedTerrainType(h, 'water');
+                    } else if(!isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') {
+                        wodSetGeneratedTerrainType(h, 'sand');
+                    }
+                    if((++hi & wodMapGenLoopYieldMask(1023)) === 0) await wodMapGenYieldSlice();
+                    continue;
+                }
                 let d = Math.hypot(h.x - cx, h.y - cy);
-                if(d < inner) continue;
-                let t = (d - inner) / Math.max(fadeW, 1);
-                if(t > 0.58) wodSetGeneratedTerrainType(h, 'water');
-                else if(t > 0.34 && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') wodSetGeneratedTerrainType(h, 'sand');
+                if(d >= inner) {
+                    let t = (d - inner) / Math.max(fadeW, 1);
+                    if(t > 0.58) wodSetGeneratedTerrainType(h, 'water');
+                    else if(t > 0.34 && !isWaterHex(h) && h.type !== 'mountain' && h.type !== 'urban') wodSetGeneratedTerrainType(h, 'sand');
+                }
                 if((++hi & wodMapGenLoopYieldMask(1023)) === 0) await wodMapGenYieldSlice();
             }
         }
@@ -21047,7 +21072,8 @@
             if(wodHexKeysEqual(fromHex, toHex)) return [fromHex];
             let limit = maxNodes == null ? 9000 : maxNodes;
             let bfsT0 = performance.now();
-            let bfsCeil = gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26;
+            let bfsRelaxed = unit && unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
+            let bfsCeil = bfsRelaxed ? 22 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26);
             let sk = getHexKey(fromHex);
             let tk = getHexKey(toHex);
             let q = [fromHex];
@@ -21906,7 +21932,8 @@
             // stack to 40ms+ in one frame; aborting behaves like a failed pathfind (callers
             // fall back to greedy hops and the fail cooldown stops immediate retries).
             let ampT0 = performance.now();
-            let ampCeil = gameState === 'PLAYING' && !gameData.menuAttractMode ? 9 : 30;
+            let ampRelaxed = unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
+            let ampCeil = ampRelaxed ? 26 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 9 : 30);
             function ampOverBudget() {
                 return performance.now() - ampT0 > ampCeil;
             }
@@ -21942,8 +21969,10 @@
                     let landA = wodFindLandApproachPath(unit, startHex, crossA.landHex);
                     let waterLeg = ampOverBudget() ? []
                         : wodAmphibiousWaterLeg(unit, crossA.waterHex, crossB.waterHex, 96);
-                    let waterOk = wodHexPathLength(waterLeg) > 1 &&
-                        wodPathReachesTarget(waterLeg, crossB.waterHex);
+                    // Same water hex on both shores (single-point crossing between adjacent
+                    // bays) is a legal zero-travel water leg.
+                    let waterOk = wodHexKeysEqual(crossA.waterHex, crossB.waterHex) ||
+                        (wodHexPathLength(waterLeg) > 1 && wodPathReachesTarget(waterLeg, crossB.waterHex));
                     if(waterOk && !ampOverBudget()) {
                         let landB = wodFindLandApproachPath(unit, crossB.landHex, targetHex);
                         out = wodMergeHexPaths(wodMergeHexPaths(landA, waterLeg), landB);
@@ -21995,6 +22024,10 @@
                 }
             }
             if(!allowOverBudget && !wodCanSpendPf()) return [];
+            // Human orders get relaxed wall-clock ceilings in the amphibious compose too —
+            // island-to-island orders across big oceans exceeded the 7-9ms sim budgets and
+            // silently failed, leaving units to march the straight line instead.
+            if(allowOverBudget) unit._wodPfRelaxUntil = performance.now() + 60;
             let pfT0 = performance.now();
             try {
             if(pathMode === 'water') return findAmphibiousMarchPath(unit, startHex, targetHex);
@@ -22179,7 +22212,9 @@
                 // up as a visible micro-freeze whenever marching columns re-pathed. Exhausting the
                 // ceiling behaves exactly like exhausting maxVisits (callers fall back to greedy steps).
                 let astT0 = performance.now();
-                let astCeilMs = allowOverBudget ? 10 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 6 : 24);
+                // 14ms for human orders: 10ms truncated long map-crossing searches, which fell
+                // back to straight-line march targets ("paths break and go straight").
+                let astCeilMs = allowOverBudget ? 14 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 6 : 24);
                 let visitTick = 0;
                 while(open.length > 0 && maxVisits-- > 0) {
                     if((++visitTick & 255) === 0 && performance.now() - astT0 > astCeilMs) break;
@@ -22408,21 +22443,161 @@
                         job.tries = 0;
                     else if(job.tries < 10)
                         wodPlayerOrderQueue.push(job);
+                    else {
+                        // Final fallback after repeated pathfind failures: a greedy
+                        // terrain-following chain so the unit still routes AROUND mountains
+                        // and water instead of marching a straight line into them.
+                        let u = job.unit;
+                        let tgt = job.worldPoints[job.worldPoints.length - 1];
+                        let sHex = getNearestWalkableHexForUnit(u, u.x, u.y);
+                        let tHex = getNearestHexToPoint(tgt.x, tgt.y);
+                        if(sHex && tHex) {
+                            let chain = buildGreedyLandHexChain(u, sHex, tHex, 64);
+                            if(chain.length > 1) {
+                                u.orderTarget = { x: tgt.x, y: tgt.y };
+                                u.path = chain.slice(1).map(h => ({ x: h.x, y: h.y, pathPrepared: true }));
+                                u.target = u.path.shift();
+                                u.target.pathPrepared = true;
+                                invalidateUnitOrderArrowCache(u);
+                            }
+                        }
+                    }
                 }
                 n++;
             }
             if(wodPlayerOrderQueue.length) wodSchedulePlayerOrderPump();
         }
 
+        /** Clone an already-computed lead corridor onto another unit of the same march group
+         * with a start→end interpolated offset. No pathfinding — this is what lets a 50-unit
+         * selection get orders + arrows in ONE frame instead of trickling in over seconds.
+         * Terrain clamps + the blocked-repath (450ms budgeted re-path per unit) clean up any
+         * offset lane that clips bad terrain. */
+        function wodAssignGroupCorridorClone(unit, leadCorridor, offS, offE, exactLast, intoWater, marchPts) {
+            if(!unit || !leadCorridor || leadCorridor.length < 2) return false;
+            let nPts = leadCorridor.length;
+            let corridor = [{ x: unit.x, y: unit.y }];
+            for(let k = 1; k < nPts; k++) {
+                let t = k / (nPts - 1);
+                let ox = offS.x + (offE.x - offS.x) * t;
+                let oy = offS.y + (offE.y - offS.y) * t;
+                corridor.push({ x: leadCorridor[k].x + ox, y: leadCorridor[k].y + oy });
+            }
+            corridor = dedupeNearOrderPathPoints(corridor);
+            if(corridor.length < 2) return false;
+            wodApplyCorridorExactEnd(corridor, exactLast);
+            invalidateUnitOrderArrowCache(unit);
+            unit.blockedTimer = 0;
+            unit.stuckTimer = 0;
+            unit._wodLegRepathQueued = false;
+            unit._wodGreedyStepsLeft = 0;
+            unit._wodPathGiveUpUntil = 0;
+            unit._wodReplanLandUntil = 0;
+            unit.moraleBroken = false;
+            unit._wodOrderIntoWater = !!intoWater;
+            unit._wodAmpPathKey = null;
+            unit._wodAmpPath = null;
+            unit.orderTarget = { x: exactLast.x, y: exactLast.y, intoWater: !!intoWater };
+            unit.fullMarchWaypoints = marchPts.map(p => ({ x: p.x, y: p.y }));
+            unit.marchWpCursor = 0;
+            unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
+            unit.target = unit.path.shift();
+            unit.target.pathPrepared = true;
+            if(unit.owner === 1) {
+                unit.combatEngaged = false;
+                unit.combatLockTimer = 0;
+            }
+            unit._routeArrowMarchSig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(corridor);
+            unit._routeArrowFrozenReady = true;
+            unit._routeArrowProgressIdx = 0;
+            return true;
+        }
+
         /** Apply move orders immediately for a few units, queue the rest to avoid input hitch. */
         function wodApplyPlayerMoveOrders(units, pathForUnit) {
             if(!units || !units.length) return;
-            // Large selections: assign only the first unit synchronously (instant feedback) and
-            // pump the rest — three ~30ms A* assigns in one frame was a visible click hitch.
+            wodPfSpentMs = 0;
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, Math.min(52, 15 + units.length * 0.65));
+            // Group fast path: pathfind ONCE for a lead land unit near the selection centroid,
+            // then clone the corridor (offset per unit) onto every other land unit. Previously
+            // only the first unit was assigned synchronously and the rest pumped over frames —
+            // arrows appeared one at a time and late-queue units fell back to straight lines.
+            if(units.length > 2) {
+                let cx = 0, cy = 0, nL = 0;
+                for(let u of units) {
+                    if(isLandArmyUnit(u)) { cx += u.x; cy += u.y; nL++; }
+                }
+                let leadIdx = -1;
+                if(nL >= 2) {
+                    cx /= nL;
+                    cy /= nL;
+                    let bestD = Infinity;
+                    for(let i = 0; i < units.length; i++) {
+                        if(!isLandArmyUnit(units[i])) continue;
+                        let dx = units[i].x - cx, dy = units[i].y - cy;
+                        let d = dx * dx + dy * dy;
+                        if(d < bestD) { bestD = d; leadIdx = i; }
+                    }
+                }
+                if(leadIdx >= 0) {
+                    let lead = units[leadIdx];
+                    let leadStart = { x: lead.x, y: lead.y };
+                    let leadPts = pathForUnit(lead, leadIdx);
+                    if(leadPts && leadPts.length && assignUnitMoveAlongWaypoints(lead, leadPts) && lead.target) {
+                        let leadCorridor = [{ x: leadStart.x, y: leadStart.y }, { x: lead.target.x, y: lead.target.y }];
+                        if(lead.path) {
+                            for(let pi = 0; pi < lead.path.length; pi++)
+                                leadCorridor.push({ x: lead.path[pi].x, y: lead.path[pi].y });
+                        }
+                        let leadClick = leadPts[leadPts.length - 1];
+                        let leadWater = !!lead._wodOrderIntoWater;
+                        let tile = (gameData.hexRadius || 20) * 1.35;
+                        // Generous caps: the cloned lane is only a first-frame hint — any unit
+                        // whose lane clips bad terrain re-paths itself within ~0.25s via the
+                        // budgeted blocked-repath. Queuing instead just meant no arrow at all.
+                        let maxOffE2 = Math.pow(tile * 40, 2);
+                        let maxOffS2 = Math.pow(tile * 80, 2);
+                        for(let i = 0; i < units.length; i++) {
+                            if(i === leadIdx) continue;
+                            let u = units[i];
+                            let pts = pathForUnit(u, i);
+                            if(!pts || !pts.length) continue;
+                            let cloned = false;
+                            if(isLandArmyUnit(u) && leadCorridor.length >= 2) {
+                                let last = pts[pts.length - 1];
+                                let offE = { x: last.x - leadClick.x, y: last.y - leadClick.y };
+                                let offS = { x: u.x - leadStart.x, y: u.y - leadStart.y };
+                                if(offE.x * offE.x + offE.y * offE.y <= maxOffE2 &&
+                                    offS.x * offS.x + offS.y * offS.y <= maxOffS2) {
+                                    let reach = findReachableOrderHex(u, last.x, last.y);
+                                    // Lead clicked LAND but this unit's formation offset fell in
+                                    // the ocean — shrink the offset toward the group target until
+                                    // it lands, instead of sending the unit swimming.
+                                    if(reach && reach.intoWater && !leadWater) {
+                                        for(let t of [0.7, 0.45, 0.2, 0]) {
+                                            let cand = findReachableOrderHex(u, leadClick.x + offE.x * t, leadClick.y + offE.y * t);
+                                            if(cand && !cand.intoWater) {
+                                                reach = cand;
+                                                offE = { x: reach.exactX - leadClick.x, y: reach.exactY - leadClick.y };
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    let exact = reach ? { x: reach.exactX, y: reach.exactY } : { x: last.x, y: last.y };
+                                    let water = reach ? !!reach.intoWater : leadWater;
+                                    cloned = wodAssignGroupCorridorClone(u, leadCorridor, offS, offE, exact, water, pts);
+                                }
+                            }
+                            if(!cloned) wodQueuePlayerMoveOrder(u, pts);
+                        }
+                        return;
+                    }
+                }
+            }
+            // Small selections / no land lead: assign a few synchronously, pump the rest.
             let syncCap = wodUsesVisualViewportLayout() || units.length > 6 ? 1 : 3;
             let syncDone = 0;
-            wodPfSpentMs = 0;
-            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, Math.min(52, syncCap * 5 + units.length * 0.65));
             for(let i = 0; i < units.length; i++) {
                 let pts = pathForUnit(units[i], i);
                 if(!pts || !pts.length) continue;
@@ -22541,6 +22716,29 @@
             unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
         }
 
+        /** Snap a corridor's final point to the exact click target, dropping trailing points
+         * that would double back at the tip (the source of Z-shaped / sideways arrowheads
+         * and the arrival-time re-path jog). */
+        function wodApplyCorridorExactEnd(corridor, exactEnd) {
+            if(!corridor || corridor.length < 2 || !exactEnd || exactEnd.x == null) return;
+            let hr = gameData.hexRadius || 20;
+            let near2 = Math.pow(hr * 1.35 * 1.3, 2);
+            while(corridor.length > 2) {
+                let a = corridor[corridor.length - 2];
+                let b = corridor[corridor.length - 1];
+                let bex = exactEnd.x - b.x, bey = exactEnd.y - b.y;
+                if(bex * bex + bey * bey > near2) break;
+                let abx = b.x - a.x, aby = b.y - a.y;
+                let aex = exactEnd.x - a.x, aey = exactEnd.y - a.y;
+                let len2 = abx * abx + aby * aby;
+                // The click lies before b along the last segment — keeping b would overshoot
+                // and double back. Drop it.
+                if(len2 <= 1 || abx * aex + aby * aey < len2) corridor.pop();
+                else break;
+            }
+            corridor[corridor.length - 1] = { x: exactEnd.x, y: exactEnd.y };
+        }
+
         /** Build one terrain-aware corridor for a player march and queue it in unit.path. */
         function wodTryAssignPlayerCorridorPath(unit, marchPts, exactLast, fromAdvance) {
             if(!unit || !marchPts || !marchPts.length || !wodMpIsHumanOwner(unit.owner)) return false;
@@ -22553,6 +22751,7 @@
             let corridor = wodWorldPointsFromHexMarchPath(unit, fullHex, endPt);
             corridor[0] = { x: unit.x, y: unit.y };
             if(corridor.length < 2) return false;
+            wodApplyCorridorExactEnd(corridor, endPt);
             // Amphibious corridors need the into-water flag so movement clamps, stuck logic
             // and terrain-safety checks treat the water legs as legal.
             if(wodPathCrossesOpenWater(fullHex)) unit._wodOrderIntoWater = true;
@@ -22588,8 +22787,16 @@
                 let last = pts[pts.length - 1];
                 let dx = unit.orderTarget.x - last.x;
                 let dy = unit.orderTarget.y - last.y;
-                if(dx * dx + dy * dy > 4)
-                    pts.push({ x: unit.orderTarget.x, y: unit.orderTarget.y });
+                let d2 = dx * dx + dy * dy;
+                let hr = gameData.hexRadius || 20;
+                // Close to the corridor end: REPLACE the last point instead of appending —
+                // appending drew a tiny doubled-back tail that bent the arrowhead sideways.
+                if(d2 > 4) {
+                    if(d2 <= Math.pow(hr * 1.35 * 1.25, 2) && pts.length >= 2)
+                        pts[pts.length - 1] = { x: unit.orderTarget.x, y: unit.orderTarget.y };
+                    else
+                        pts.push({ x: unit.orderTarget.x, y: unit.orderTarget.y });
+                }
             }
             let out = dedupeNearOrderPathPoints(pts);
             return out.length >= 2 ? out : null;
@@ -24434,7 +24641,7 @@
                 let mireHold = hexMountainProximityScore(hex) * 2400;
                 let score = dx * dx + dy * dy - enemyPressure * 25000 * Math.min(1.15, Math.max(0.55, aggression))
                     - support * 12000 + enemies * 8000 - encirclePressure + holdBonus + cityDefenseBonus + mireHold + guardPull;
-                if(aggression < 1.05) score += 28000;
+                if(aggression < 0.9) score += 22000;
                 if(focus) {
                     let fdx = hex.x - focus.x;
                     let fdy = hex.y - focus.y;
@@ -27712,6 +27919,9 @@
             await wodPaintCoastalSandAllLand();
             await wodCoalesceTerrainSpeckles(2);
             await wodEnsureMountainLandOutlets();
+            // Re-run last: speckle coalescing / rivers / biome blends can re-add land at the
+            // boundary, and island maps must never touch the map edge.
+            await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
             wodCaptureTerrainPoliticsBase();
 
             if(!wodMapLandFractionAcceptable(mapShape)) {
@@ -28917,14 +29127,55 @@
             if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
             let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[owner];
             if(myPower === undefined) myPower = getOwnerTroopManpower(owner);
-            let canOverwhelm = myPower / Math.max(1, playerPower) >= 1.1;
-            let localOverrun = localRatio >= 1.45 && support >= 2;
+            let canOverwhelm = myPower / Math.max(1, playerPower) >= 1.02;
+            let localOverrun = localRatio >= 1.3 && support >= 2;
             let neededSupport = canOverwhelm
-                ? Math.max(2, Math.ceil(enemies * 0.85))
-                : Math.max(3, Math.ceil(enemies * 0.92) + 1);
+                ? Math.max(2, Math.ceil(enemies * 0.7))
+                : Math.max(2, Math.ceil(enemies * 0.85));
             let shouldPush = localOverrun || support >= neededSupport
-                || (canOverwhelm && localRatio >= 1.12) || enemies <= 0;
+                || (canOverwhelm && localRatio >= 1.05) || enemies <= 1;
             return { support, enemies, localRatio, canOverwhelm, localOverrun, neededSupport, shouldPush };
+        }
+
+        /** Own cities with enemy combat units nearby, computed once per strategy pulse. */
+        function wodAiThreatenedCities(w, owner) {
+            if(!w.threatByOwner) w.threatByOwner = {};
+            let cached = w.threatByOwner[owner];
+            if(cached) return cached;
+            let out = [];
+            for(let c of gameData.cities) {
+                if(c.owner !== owner) continue;
+                let enemies = countNearbyUnits(owner, c.x, c.y, 300, true);
+                if(enemies <= 0) continue;
+                out.push({
+                    city: c,
+                    enemies,
+                    defenders: countNearbyUnits(owner, c.x, c.y, 240),
+                    assigned: 0
+                });
+            }
+            w.threatByOwner[owner] = out;
+            return out;
+        }
+
+        /** Nearest own city under attack that still needs defenders — cities always outrank
+         * frontline expansion (losing a city loses production AND can cascade into defeat). */
+        function wodAiPickThreatenedCityForUnit(w, unit) {
+            let list = wodAiThreatenedCities(w, unit.owner);
+            if(!list.length) return null;
+            let hr = gameData.hexRadius || 20;
+            let reach2 = Math.pow(hr * 1.35 * 26, 2);
+            let best = null, bestD = Infinity;
+            for(let rec of list) {
+                if(rec.defenders + rec.assigned >= rec.enemies + 2) continue;
+                let dx = rec.city.x - unit.x, dy = rec.city.y - unit.y;
+                let d = dx * dx + dy * dy;
+                if(d > reach2 || d >= bestD) continue;
+                bestD = d;
+                best = rec;
+            }
+            if(best) best.assigned++;
+            return best ? best.city : null;
         }
 
         function wodAiIssueSectorOrder(unit, assignment, hpRatio) {
@@ -28943,10 +29194,10 @@
             if(wantHold) {
                 // Escalation valve: a sector that never accumulates enough support used to
                 // re-issue hold orders forever — whole groups sat parked at the frontline.
-                // After ~22s of continuous holding, commit to the attack anyway.
+                // After ~14s of continuous holding, commit to the attack anyway.
                 let now = performance.now();
                 if(!unit.aiHoldStartAt) unit.aiHoldStartAt = now;
-                else if(now - unit.aiHoldStartAt > 22000) wantHold = false;
+                else if(now - unit.aiHoldStartAt > 14000) wantHold = false;
             }
             if(wantHold) {
                 let moved = wodAiMoveUnitToward(unit,
@@ -29172,10 +29423,30 @@
                 let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[oid];
                 if(myPower === undefined) myPower = getOwnerTroopManpower(owner);
                 let ratio = myPower / Math.max(1, playerPower);
+                // Main effort: concentrate most of the army on the 1-2 most promising
+                // sectors (own mass already nearby, weak enemy presence, city objectives)
+                // instead of spreading one unit per sector across the whole front — the
+                // spread is why the AI never assembled a winning attack anywhere.
+                let mainIdx = [];
+                {
+                    let scored = [];
+                    for(let si = 0; si < sectors.length; si++) {
+                        let s = sectors[si];
+                        let sup = countNearbyUnits(oid, s.holdHex.x, s.holdHex.y, 260);
+                        let en = countNearbyUnits(oid, s.holdHex.x, s.holdHex.y, 260, true);
+                        let cityObj = gameData.cities.some(c => c.owner !== oid &&
+                            (c.x - s.attackHex.x) * (c.x - s.attackHex.x) + (c.y - s.attackHex.y) * (c.y - s.attackHex.y) < 260 * 260) ? 6 : 0;
+                        scored.push({ si, sc: sup * 2 - en * 1.5 + cityObj - si * 0.35 });
+                    }
+                    scored.sort((a, b) => b.sc - a.sc);
+                    for(let k = 0; k < Math.min(2, scored.length); k++) mainIdx.push(scored[k].si);
+                }
                 ch = gameData._aiFormChunk = {
                     key: chunkKey,
                     readyUnits,
                     sectors,
+                    mainIdx,
+                    mainCount: Math.ceil(readyUnits.length * 0.62),
                     canBreakthrough: ratio >= 1.15,
                     playerCityTargets: ratio >= 0.95 ? wodAiCollectPlayerCityAttackHexes(oid) : [],
                     cityStrikerCount: 0,
@@ -29203,7 +29474,20 @@
                     assigned++;
                     continue;
                 }
-                let sector = ch.sectors[idx % ch.sectors.length];
+                let sector;
+                if(ch.mainIdx && ch.mainIdx.length && idx < ch.mainCount) {
+                    // Main-effort units mass on the nearest of the top sectors.
+                    let bestSi = ch.mainIdx[0], bestD = Infinity;
+                    for(let mi = 0; mi < ch.mainIdx.length; mi++) {
+                        let s = ch.sectors[ch.mainIdx[mi]];
+                        let dx = s.holdHex.x - unit.x, dy = s.holdHex.y - unit.y;
+                        let d = dx * dx + dy * dy;
+                        if(d < bestD) { bestD = d; bestSi = ch.mainIdx[mi]; }
+                    }
+                    sector = ch.sectors[bestSi];
+                } else {
+                    sector = ch.sectors[idx % ch.sectors.length];
+                }
                 let fight = wodAiSectorFightStats(ch.oid, sector.holdHex);
                 wodAiIssueSectorOrder(unit, {
                     holdHex: sector.holdHex,
@@ -29614,7 +29898,14 @@
                     rotOff: gameData._aiTrainPick[pulseKey] || 0,
                     combatSafeCities: aiCities.filter(c => !isCitySiegeBlockedForProduction(c))
                 };
-                pulse.candidateOrder = pulse.combatSafeCities;
+                // Spawn reinforcements at the cities closest to the current front focus so
+                // fresh units join the fight instead of trickling from the rear one by one.
+                let focus = gameData.aiFrontFocus && gameData.aiFrontFocus[ownerId];
+                pulse.candidateOrder = focus
+                    ? pulse.combatSafeCities.slice().sort((a, b) =>
+                        ((a.x - focus.x) * (a.x - focus.x) + (a.y - focus.y) * (a.y - focus.y)) -
+                        ((b.x - focus.x) * (b.x - focus.x) + (b.y - focus.y) * (b.y - focus.y)))
+                    : pulse.combatSafeCities;
                 gameData._aiSpawnPulse[pulseKey] = pulse;
             }
 
@@ -29771,6 +30062,17 @@
                         unit.marchWpCursor = 0;
                         unit.stuckTimer = 0;
                         unit.blockedTimer = 0;
+                    }
+
+                    // City defense outranks frontline pushes: divert nearby units to any own
+                    // city with attackers and not enough defenders.
+                    let defCity = wodAiPickThreatenedCityForUnit(w, unit);
+                    if(defCity) {
+                        let defHex = gameData.hexes[`${defCity.q},${defCity.r}`];
+                        if(defHex && wodAiMoveUnitTowardHex(unit, defHex, false, 0.5)) {
+                            wodAiStampOrder(unit, false, defHex);
+                            continue;
+                        }
                     }
 
                     let sectors = w.sectorsByOwner[unit.owner];
