@@ -181,7 +181,13 @@ function recomputeAchievements(profile) {
     (L.harborsBuilt || 0) >= 12 &&
     (L.peakMoneyHeld || 0) >= 20000 &&
     (L.peakFieldManpower || 0) >= 50000 &&
-    (L.battlesWon || 0) >= 5;
+    (L.battlesWon || 0) >= 5 &&
+    (L.missionsCompleted || 0) >= 10 &&
+    (L.campaignsWon || 0) >= 1 &&
+    (L.campaignBattlesWon || 0) >= 10 &&
+    !!(A.periodNapoleonic || owned.napoleonic) &&
+    !!(A.periodAncient || owned.ancient) &&
+    !!(A.periodMedieval || owned.medieval);
   if (met) {
     A.goldenChipMaster = true;
     profile.profile.ownedUnitSkins.goldenChip = true;

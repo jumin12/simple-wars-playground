@@ -17300,7 +17300,7 @@
         function purchaseUnitSkin(skin) {
             if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { nato: true };
             if(skin === 'goldenChip') {
-                showNotification('Complete all ten achievements to unlock Sovereign chip.');
+                showNotification('Complete all achievements to unlock Sovereign chip.');
                 return;
             }
             if(skin === 'nato') {
@@ -18044,7 +18044,8 @@
                 },
                 profile: { gold: 0, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
-                missions: { completed: {} }
+                missions: { completed: {} },
+                achievementGoldGranted: {}
             };
         }
 
@@ -18063,7 +18064,8 @@
                 multiplayer: Object.assign({}, base.multiplayer, o.multiplayer || {}),
                 missions: {
                     completed: Object.assign({}, base.missions.completed, (o.missions && o.missions.completed) || {})
-                }
+                },
+                achievementGoldGranted: Object.assign({}, base.achievementGoldGranted, o.achievementGoldGranted || {})
             };
         }
 
@@ -18154,19 +18156,6 @@
             if(wodProgress.achievements.goldenChipMaster) gameData.ownedUnitSkins.goldenChip = true;
         }
 
-        function allRegularWodAchievementsMet(L) {
-            L = L || {};
-            return (L.battlesWon || 0) >= 1
-                && (L.citiesCaptured || 0) >= 15
-                && (L.enemyTankKills || 0) >= 200
-                && (L.enemyShipKills || 0) >= 40
-                && (L.convoysCaptured || 0) >= 30
-                && (L.factoriesBuilt || 0) >= 12
-                && (L.harborsBuilt || 0) >= 12
-                && (L.peakMoneyHeld || 0) >= 20000
-                && (L.peakFieldManpower || 0) >= 50000
-                && (L.battlesWon || 0) >= 5;
-        }
 
         function flushGameProfileToWod() {
             if(!wodProgress) return;
@@ -18290,10 +18279,74 @@
             return Math.floor(n).toString();
         }
 
+        const WOD_GOLD_PER_VICTORY = 10;
+        const WOD_GOLD_PER_ACHIEVEMENT = 10;
+
+        function wodGrantGold(amount, notifyMsg) {
+            if(!amount || amount <= 0 || !wodProgress) return;
+            gameData.gold = (gameData.gold || 0) + amount;
+            flushGameProfileToWod();
+            if(typeof updateSkinShop === 'function') updateSkinShop();
+            scheduleSaveWodProgress();
+            if(notifyMsg) showNotification(notifyMsg);
+        }
+
+        function wodGrantVictoryGold() {
+            wodGrantGold(WOD_GOLD_PER_VICTORY, 'Victory — +' + WOD_GOLD_PER_VICTORY + ' gold');
+        }
+
+        function wodAchievementBadgeDefs(L, A) {
+            L = L || {};
+            A = A || {};
+            let owned = gameData.ownedUnitSkins || {};
+            let badgeFlavor = wodPeriodFlavor('modern');
+            return [
+                { id: 'brokenShield', title: 'Broken shield', prog: L.battlesWon || 0, need: 1 },
+                { id: 'townTaker', title: 'Town taker', prog: L.citiesCaptured || 0, need: 15 },
+                { id: 'tankHunter', title: badgeFlavor.achHunter, prog: L.enemyTankKills || 0, need: 200 },
+                { id: 'depthCharge', title: 'Depth charge', prog: L.enemyShipKills || 0, need: 40 },
+                { id: 'merchantMarine', title: 'Merchant marine', prog: L.convoysCaptured || 0, need: 30 },
+                { id: 'industrial', title: badgeFlavor.achIndustrial, prog: L.factoriesBuilt || 0, need: 12 },
+                { id: 'admiralty', title: badgeFlavor.achAdmiralty, prog: L.harborsBuilt || 0, need: 12 },
+                { id: 'fortunesOfWar', title: 'Fortunes of war', prog: L.peakMoneyHeld || 0, need: 20000 },
+                { id: 'grandHost', title: 'Grand host', prog: L.peakFieldManpower || 0, need: 50000 },
+                { id: 'warmaster', title: 'Warmaster', prog: L.battlesWon || 0, need: 5 },
+                { id: 'firstLanding', title: 'First landing', prog: L.missionsCompleted || 0, need: 1 },
+                { id: 'missionChain', title: 'Mission chain', prog: L.missionsCompleted || 0, need: 5 },
+                { id: 'fullDeployment', title: 'Full deployment', prog: L.missionsCompleted || 0, need: 10 },
+                { id: 'ashenVictory', title: 'Ashen victory', prog: L.campaignsWon || 0, need: 1 },
+                { id: 'regionalCommander', title: 'Regional commander', prog: L.campaignBattlesWon || 0, need: 10 },
+                { id: 'periodNapoleonic', title: 'Age of Napoleon', prog: (A.periodNapoleonic || owned.napoleonic) ? 1 : 0, need: 1 },
+                { id: 'periodAncient', title: 'Classical world', prog: (A.periodAncient || owned.ancient) ? 1 : 0, need: 1 },
+                { id: 'periodMedieval', title: 'High medieval', prog: (A.periodMedieval || owned.medieval) ? 1 : 0, need: 1 },
+                { id: 'sovereignChip', title: 'Sovereign chip', prog: A.goldenChipMaster ? 1 : 0, need: 1 }
+            ];
+        }
+
+        function allWodAchievementsMet(L, A) {
+            for(let r of wodAchievementBadgeDefs(L, A)) {
+                if(r.id === 'sovereignChip') continue;
+                if((r.prog || 0) < r.need) return false;
+            }
+            return true;
+        }
+
+        function wodGrantNewAchievementGold() {
+            if(!wodProgress) return;
+            if(!wodProgress.achievementGoldGranted) wodProgress.achievementGoldGranted = {};
+            let paid = wodProgress.achievementGoldGranted;
+            let L = wodProgress.lifetime, A = wodProgress.achievements;
+            for(let r of wodAchievementBadgeDefs(L, A)) {
+                if(r.prog < r.need || paid[r.id]) continue;
+                paid[r.id] = true;
+                wodGrantGold(WOD_GOLD_PER_ACHIEVEMENT, 'Achievement: ' + r.title + ' — +' + WOD_GOLD_PER_ACHIEVEMENT + ' gold');
+            }
+        }
+
         function checkWodAchievements() {
             if(!wodProgress) return;
             let L = wodProgress.lifetime, A = wodProgress.achievements;
-            if(!A.goldenChipMaster && allRegularWodAchievementsMet(L)) {
+            if(!A.goldenChipMaster && allWodAchievementsMet(L, A)) {
                 A.goldenChipMaster = true;
                 if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = {};
                 gameData.ownedUnitSkins.goldenChip = true;
@@ -18302,6 +18355,7 @@
                 scheduleSaveWodProgress();
                 updateSkinShop();
             }
+            wodGrantNewAchievementGold();
             let achPanel = document.getElementById('achievementsPanel');
             if(achPanel && !achPanel.classList.contains('hidden')) renderAchievementsUi();
         }
@@ -18315,26 +18369,31 @@
             if(!badges || !stats) return;
             let L = wodProgress.lifetime, A = wodProgress.achievements;
             let badgeFlavor = wodPeriodFlavor('modern');
-            let rows = [
-                { title: 'Broken shield', desc: 'Eliminate an enemy faction by capturing all of their cities.', prog: L.battlesWon || 0, need: 1 },
-                { title: 'Town taker', desc: 'Capture 15 enemy cities (lifetime).', prog: L.citiesCaptured || 0, need: 15 },
-                { title: badgeFlavor.achHunter, desc: badgeFlavor.achHunterDesc, prog: L.enemyTankKills || 0, need: 200 },
-                { title: 'Depth charge', desc: 'Sink 40 enemy warships (lifetime).', prog: L.enemyShipKills || 0, need: 40 },
-                { title: 'Merchant marine', desc: 'Capture 30 enemy trade convoys (lifetime).', prog: L.convoysCaptured || 0, need: 30 },
-                { title: badgeFlavor.achIndustrial, desc: badgeFlavor.achIndustrialDesc, prog: L.factoriesBuilt || 0, need: 12 },
-                { title: badgeFlavor.achAdmiralty, desc: badgeFlavor.achAdmiraltyDesc, prog: L.harborsBuilt || 0, need: 12 },
-                { title: 'Fortunes of war', desc: 'Hold at least $20,000 cash at once in a campaign.', prog: L.peakMoneyHeld || 0, need: 20000 },
-                { title: 'Grand host', desc: 'Field at least 50,000 troops on the map at once.', prog: L.peakFieldManpower || 0, need: 50000 },
-                { title: 'Warmaster', desc: 'Eliminate 5 enemy factions across all campaigns (last city captured).', prog: L.battlesWon || 0, need: 5 },
-                { title: 'First landing', desc: 'Complete your first mission.', prog: L.missionsCompleted || 0, need: 1 },
-                { title: 'Mission chain', desc: 'Complete 5 missions.', prog: L.missionsCompleted || 0, need: 5 },
-                { title: 'Full deployment', desc: 'Complete all 10 missions.', prog: L.missionsCompleted || 0, need: 10 },
-                { title: 'Ashen victory', desc: 'Win The Ashen Front campaign.', prog: L.campaignsWon || 0, need: 1 },
-                { title: 'Regional commander', desc: 'Win 10 campaign battles.', prog: L.campaignBattlesWon || 0, need: 10 },
-                { title: 'Age of Napoleon', desc: 'Unlock the Napoleonic era in the Shop.', prog: A.periodNapoleonic ? 1 : 0, need: 1 },
-                { title: 'Classical world', desc: 'Unlock the Ancient era in the Shop.', prog: A.periodAncient ? 1 : 0, need: 1 },
-                { title: 'High medieval', desc: 'Unlock the Medieval era in the Shop.', prog: A.periodMedieval ? 1 : 0, need: 1 }
-            ];
+            let rows = wodAchievementBadgeDefs(L, A).filter(r => r.id !== 'sovereignChip').map(r => ({
+                title: r.title,
+                desc: ({
+                    brokenShield: 'Eliminate an enemy faction by capturing all of their cities.',
+                    townTaker: 'Capture 15 enemy cities (lifetime).',
+                    tankHunter: badgeFlavor.achHunterDesc,
+                    depthCharge: 'Sink 40 enemy warships (lifetime).',
+                    merchantMarine: 'Capture 30 enemy trade convoys (lifetime).',
+                    industrial: badgeFlavor.achIndustrialDesc,
+                    admiralty: badgeFlavor.achAdmiraltyDesc,
+                    fortunesOfWar: 'Hold at least $20,000 cash at once in a campaign.',
+                    grandHost: 'Field at least 50,000 troops on the map at once.',
+                    warmaster: 'Eliminate 5 enemy factions across all campaigns (last city captured).',
+                    firstLanding: 'Complete your first mission.',
+                    missionChain: 'Complete 5 missions.',
+                    fullDeployment: 'Complete all 10 missions.',
+                    ashenVictory: 'Win The Ashen Front campaign.',
+                    regionalCommander: 'Win 10 campaign battles.',
+                    periodNapoleonic: 'Unlock the Napoleonic era in the Shop.',
+                    periodAncient: 'Unlock the Ancient era in the Shop.',
+                    periodMedieval: 'Unlock the Medieval era in the Shop.'
+                })[r.id] || '',
+                prog: r.prog,
+                need: r.need
+            }));
             let html = '<div class="ach-grid">' + rows.map((r) => {
                 let ok = r.prog >= r.need;
                 let pct = r.need > 0 ? Math.min(100, (r.prog / r.need) * 100) : 0;
@@ -19818,6 +19877,9 @@
             wodRecordMissionCompleted();
             if(gameData._campaignRun) wodCampaignAfterBattle(true);
             openCampaignBattleSummary('victory', message, message);
+            if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+                wodGrantVictoryGold();
+            }
             if(countAsBattleWon && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                 wodBumpLifetime('battlesWon', 1);
                 checkWodAchievements();
