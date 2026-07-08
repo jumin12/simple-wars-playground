@@ -1071,6 +1071,14 @@
             pointer-events: none !important;
         }
 
+        /* Campaign battles: army is fixed — hide the Units recruit tab entirely. */
+        #inGameUI.wod-campaign-battle .wod-m-tab[data-wod-mtab="units"],
+        #inGameUI.wod-campaign-battle #wodMUnitsBundle,
+        #inGameUI.wod-campaign-battle #wodPcProdTabUnits,
+        #inGameUI.wod-campaign-battle #wodPcProdPaneUnits {
+            display: none !important;
+        }
+
         .mp-host-dlg {
             position: fixed;
             inset: 0;
@@ -2000,12 +2008,15 @@
         .mp-lb-status {
             font-size: 11px;
             margin-top: 2px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
         }
         .mp-lb-status.online {
             color: #7bed9f;
         }
         .mp-lb-status.offline {
-            opacity: 0.65;
+            color: #95a5a6;
+            opacity: 0.85;
         }
         .mp-friend-row.pending-in {
             border-color: rgba(52, 152, 219, 0.45);
@@ -5135,6 +5146,49 @@
         }
         .wod-camp-unit .hpbar i.low { background: #e67e22; }
         .wod-camp-unit .vet { color: #d4af37; font-weight: 700; }
+        .wod-camp-unit .wod-camp-unit-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            flex: 1;
+        }
+        .wod-camp-unit .wod-camp-unit-title {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .wod-camp-unit .wod-camp-vet-tag {
+            color: #d4af37;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
+        .wod-camp-unit .wod-camp-unit-right {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .wod-camp-unit .wod-camp-del {
+            flex: 0 0 auto;
+            margin: 0;
+            padding: 2px 7px;
+            font-size: 0.68rem;
+            line-height: 1.2;
+            border-radius: 4px;
+            border: 1px solid rgba(231, 76, 60, 0.45);
+            background: rgba(231, 76, 60, 0.12);
+            color: #ff9d8f;
+            cursor: pointer;
+        }
+        .wod-camp-unit .wod-camp-del:hover {
+            background: rgba(231, 76, 60, 0.28);
+        }
+        .wod-camp-unit.wod-camp-unit--vet {
+            border-color: rgba(212, 175, 55, 0.35);
+            background: rgba(212, 175, 55, 0.06);
+        }
         .wod-camp-shop {
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -8709,7 +8763,7 @@
                     <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="build" aria-selected="false" aria-label="Factories, harbors, forts">
                         <span class="wod-m-tab-glyph" aria-hidden="true">B</span><span class="wod-m-tab-lbl">Buildings</span>
                     </button>
-                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="units" aria-selected="false" aria-label="Train combat units">
+                    <button type="button" class="wod-m-tab" role="tab" data-wod-mtab="units" aria-selected="false" aria-label="Train combat units" id="wodMTabUnits">
                         <span class="wod-m-tab-glyph" aria-hidden="true">U</span><span class="wod-m-tab-lbl">Units</span>
                     </button>
                 </nav>
@@ -8790,7 +8844,7 @@
                 </div>
             </div>
 
-            <div class="wod-m-units-bundle">
+            <div class="wod-m-units-bundle" id="wodMUnitsBundle">
                 <div class="wod-m-sheet wod-m-sheet--units">
                     <div class="wod-m-sheet-banner">
                         <span class="wod-m-sheet-title">Army</span>
@@ -8814,7 +8868,7 @@
                             <button type="button" class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned terrain. Forts can be built close together; aura bonuses do not stack.">Build Fort ($1.5k)</button>
                             <button type="button" class="build-btn" onclick="beginBridgeBuild()" title="Costs $2000. Span a river; mouse wheel or Q/E rotates.">Build Bridge ($2k)</button>
                         </div>
-                        <div class="wod-pc-prod-pane" data-wod-pc-pane="units" role="tabpanel">
+                        <div class="wod-pc-prod-pane" data-wod-pc-pane="units" role="tabpanel" id="wodPcProdPaneUnits">
                             <button type="button" class="build-btn" onclick="buyUnit('light')" title="Train light infantry ($500).">Train Light Infantry ($500, 1k MP)</button>
                             <button type="button" class="build-btn" onclick="buyUnit('marine')" title="Train marines ($500).">Train Marines ($500, 1k MP)</button>
                             <button type="button" class="build-btn" onclick="buyUnit('heavy')" title="Train armor ($4000).">Train Armor ($4k, 1k MP)</button>
@@ -8824,7 +8878,7 @@
                 </div>
                 <div class="wod-pc-prod-tabs" role="tablist">
                     <button type="button" class="wod-pc-prod-tab active" data-wod-pc-pane="structures" role="tab" aria-selected="true">Structures</button>
-                    <button type="button" class="wod-pc-prod-tab" data-wod-pc-pane="units" role="tab" aria-selected="false">Units</button>
+                    <button type="button" class="wod-pc-prod-tab" data-wod-pc-pane="units" role="tab" aria-selected="false" id="wodPcProdTabUnits">Units</button>
                     <button type="button" class="wod-pc-prod-toggle" id="wodPcProdToggle" title="Expand or hide production tray" aria-expanded="false">▲</button>
                 </div>
             </div>
@@ -9161,6 +9215,9 @@
             }
 
             function setPane(panelId, expand) {
+                if(panelId === 'units' && gameData && gameData._campaignRun) {
+                    panelId = 'structures';
+                }
                 tabs.forEach(t => {
                     let on = t.getAttribute('data-wod-pc-pane') === panelId;
                     t.classList.toggle('active', on);
@@ -9228,6 +9285,10 @@
                     if(root.getAttribute('data-build-picking') && typeof exitBuildPlacementMode === 'function')
                         exitBuildPlacementMode();
                     let id = btn.getAttribute('data-wod-mtab');
+                    if(id === 'units' && gameData && gameData._campaignRun) {
+                        showNotification('Campaign: recruit between battles on the war map.');
+                        return;
+                    }
                     if(id === 'intel') {
                         toggleWodStatsPanel();
                         syncTabAria();
@@ -9893,6 +9954,7 @@
                     setGameSpeed(1);
                     gameData._campaignEnded = false;
                     if(gameData._campaignRun) wodCampaignOnBattleStart();
+                    wodSyncCampaignBattleHud();
                 } catch(e) {
                     console.error(e);
                 }
@@ -9913,6 +9975,7 @@
             gameData._missionRuntime = null;
             gameData._selectedMissionEntry = null;
             gameData._launchingMission = false;
+            wodSyncCampaignBattleHud();
             if(gameData && gameData.mp && gameData.mp.enabled && gameState === 'PLAYING')
                 wodMpLeaveActiveMatch();
             wodApplyPlayViewportLock(false);
@@ -10526,6 +10589,27 @@
                 root.classList.add('wod-mp-match');
                 setGameSpeed(1);
             } else root.classList.remove('wod-mp-match');
+        }
+        function wodSyncCampaignBattleHud() {
+            let root = document.getElementById('inGameUI');
+            if(!root) return;
+            let camp = !!(gameData && gameData._campaignRun);
+            root.classList.toggle('wod-campaign-battle', camp);
+            if(camp) {
+                // Force production UI off the Units pane if it was open.
+                let unitsTab = document.getElementById('wodPcProdTabUnits');
+                if(unitsTab && unitsTab.classList.contains('active')) {
+                    let structTab = root.querySelector('.wod-pc-prod-tab[data-wod-pc-pane="structures"]');
+                    if(structTab) structTab.click();
+                }
+                if(root.getAttribute('data-mtab') === 'units') {
+                    root.removeAttribute('data-mtab');
+                    document.querySelectorAll('.wod-m-tab').forEach(b => {
+                        b.classList.toggle('active', false);
+                        b.setAttribute('aria-selected', 'false');
+                    });
+                }
+            }
         }
         function wodMpIsHumanOwner(owner) {
             if(!gameData.mp || !gameData.mp.enabled) return owner === 1;
@@ -13946,7 +14030,18 @@
                 for(let ed of s.entities) {
                     let ex = byUid.get(ed.uid);
                     if(ex) {
+                        let jumpX = ed.x - ex.x, jumpY = ed.y - ex.y;
                         ex.x = ed.x; ex.y = ed.y; ex.hp = ed.hp; ex.owner = ed.owner;
+                        if(ed.maxHp != null) ex.maxHp = ed.maxHp;
+                        if(ed.manpower != null) ex.manpower = ed.manpower;
+                        if(ed.maxManpower != null) ex.maxManpower = ed.maxManpower;
+                        if(ed.tanks != null) ex.tanks = ed.tanks;
+                        if(ed.maxTanks != null) ex.maxTanks = ed.maxTanks;
+                        if(ed.xp != null) ex.xp = ed.xp;
+                        if(ed.kills != null) ex.kills = ed.kills;
+                        if(ed.losses != null) ex.losses = ed.losses;
+                        if(ed.veteran != null) ex.veteran = !!ed.veteran;
+                        if(ed.name) ex.name = ed.name;
                         ex.morale = ed.morale; ex.moraleBroken = ed.moraleBroken; ex.retreating = ed.retreating;
                         ex.shake = ed.shake != null ? ed.shake : ex.shake;
                         ex.activeCombatVisual = ed.activeCombatVisual != null ? ed.activeCombatVisual : ex.activeCombatVisual;
@@ -13963,14 +14058,23 @@
                         if(ed.fullMarchWaypoints) ex.fullMarchWaypoints = ed.fullMarchWaypoints.map(p => Object.assign({}, p));
                         else ex.fullMarchWaypoints = null;
                         ex.marchWpCursor = ed.marchWpCursor || 0;
+                        // Large host snaps must not leave smooth-draw coords far from auth
+                        // position — that made deselected units fail frustum culling and vanish.
+                        if(jumpX * jumpX + jumpY * jumpY > 64 * 64 || ex._drawX == null) {
+                            ex._drawX = ex.x;
+                            ex._drawY = ex.y;
+                        }
                         next.push(ex);
                     } else {
                         let nu = wodEntityFromNet(ed);
                         ensureUnitId(nu);
+                        nu._drawX = nu.x;
+                        nu._drawY = nu.y;
                         next.push(nu);
                     }
                 }
                 gameData.entities = next;
+                wodMpRevalidateSelectionAfterSnap();
             }
             if(s.hudByOwner && gameData.mp && gameData.mp.enabled && gameData.mp.localSlot) {
                 let hb = s.hudByOwner[gameData.mp.localSlot];
@@ -14031,6 +14135,30 @@
         let wodMpLobbyCount = 1;
         let _wodMpClientSnapPending = null;
         let _wodMpClientSnapRaf = 0;
+        function wodMpRevalidateSelectionAfterSnap() {
+            if(!gameData.selection) gameData.selection = [];
+            let live = new Set(gameData.entities || []);
+            let kept = [];
+            for(let i = 0; i < gameData.selection.length; i++) {
+                let s = gameData.selection[i];
+                if(!s) continue;
+                if(s.hp !== undefined && !s.id) {
+                    // Unit: must still be in the live entity list with hp.
+                    if(!live.has(s) || s.hp <= 0) {
+                        s.selected = false;
+                        continue;
+                    }
+                }
+                s.selected = true;
+                kept.push(s);
+            }
+            gameData.selection = kept;
+            // Clear orphan selected flags on entities no longer in the selection list.
+            for(let i = 0, n = gameData.entities.length; i < n; i++) {
+                let u = gameData.entities[i];
+                if(u && u.selected && kept.indexOf(u) < 0) u.selected = false;
+            }
+        }
         function wodMpScheduleClientSnapApply(payload) {
             if(!payload) return;
             _wodMpClientSnapPending = payload;
@@ -14449,15 +14577,17 @@
             let out = [];
             for(let f of friends) {
                 if(byId[f.playerId]) {
-                    let row = byId[f.playerId];
-                    if(row.online == null) row.online = !!presence[f.playerId];
+                    let row = Object.assign({}, byId[f.playerId]);
+                    // Presence query is authoritative for friends scope when available.
+                    if(presence[f.playerId] != null) row.online = true;
+                    else if(row.online == null) row.online = false;
                     out.push(row);
                     continue;
                 }
                 let cachedRow = cached[f.playerId];
                 if(cachedRow && friendIds.has(cachedRow.playerId)) {
                     let row = Object.assign({}, cachedRow);
-                    if(row.online == null) row.online = !!presence[f.playerId];
+                    row.online = !!presence[f.playerId];
                     out.push(row);
                     continue;
                 }
@@ -14534,11 +14664,14 @@
                     if(k === sortKey) return '<span class="mp-lb-val-primary">' + wodMpEscapeHtml(lab) + ' ' + val + '</span>';
                     return wodMpEscapeHtml(lab) + ' ' + val;
                 });
+                let isOnline = !!row.online;
+                if(row.playerId && row.playerId === myId && typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen)
+                    isOnline = true;
                 meta.innerHTML =
                     '<div class="mp-lb-name">' + wodMpEscapeHtml(row.displayName || row.playerId || 'Player') + '</div>' +
                     '<div class="mp-lb-val">' + statBits.join(' · ') + '</div>' +
-                    '<div class="mp-lb-status ' + (row.online ? 'online' : 'offline') + '">' +
-                    (row.online ? 'Online' : 'Offline') + '</div>';
+                    '<div class="mp-lb-status ' + (isOnline ? 'online' : 'offline') + '">' +
+                    (isOnline ? '● Online' : '○ Offline') + '</div>';
                 let rank = document.createElement('span');
                 rank.className = 'mp-lb-rank';
                 rank.textContent = String(start + i + 1);
@@ -14686,12 +14819,19 @@
             let list = Array.isArray(rows) ? rows : [];
             let byId = {};
             for(let r of list) {
-                if(r && r.playerId) byId[r.playerId] = r;
+                if(r && r.playerId) byId[r.playerId] = Object.assign({}, r);
             }
             window._wodMpLbCacheById = byId;
             try {
+                // Never persist online flags — they go stale the moment the cache is written.
+                let persistRows = list.map(r => {
+                    if(!r) return r;
+                    let copy = Object.assign({}, r);
+                    delete copy.online;
+                    return copy;
+                });
                 localStorage.setItem('wodMpLbCache', JSON.stringify({
-                    rows: list,
+                    rows: persistRows,
                     sort: sortKey || 'wins',
                     scope: scope || 'global',
                     at: Date.now()
@@ -14700,14 +14840,16 @@
         }
         function wodMpLoadCachedLeaderboardRows() {
             if(window._wodMpLbCacheById && Object.keys(window._wodMpLbCacheById).length)
-                return Object.values(window._wodMpLbCacheById);
+                return Object.values(window._wodMpLbCacheById).map(r => Object.assign({}, r));
             try {
                 let raw = localStorage.getItem('wodMpLbCache');
                 if(!raw) return [];
                 let data = JSON.parse(raw);
                 if(!data || !Array.isArray(data.rows)) return [];
-                wodMpCacheLeaderboardRows(data.rows, data.sort, data.scope);
-                return data.rows;
+                // Disk cache is offline until a fresh server response arrives.
+                let rows = data.rows.map(r => r ? Object.assign({}, r, { online: false }) : r);
+                wodMpCacheLeaderboardRows(rows, data.sort, data.scope);
+                return rows;
             } catch(_) {
                 return [];
             }
@@ -14732,6 +14874,7 @@
                 wodMpQueryFriendPresence();
             }
             if(tabId === 'rankings') {
+                wodMpQueryFriendPresence();
                 wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
             }
             if(tabId === 'browse') {
@@ -36583,6 +36726,27 @@
             return unit;
         }
 
+        function wodRogueIsRosterVeteran(u) {
+            return !!(u && (u.veteran || (u.xp || 0) >= WOD_VETERAN_XP_THRESHOLD));
+        }
+
+        /** Dismiss a roster unit between battles; refunds half its recruit cost (rounded). */
+        function wodRogueRosterDelete(unitId) {
+            let c = wodRogueLoad();
+            if(!c || c.over || !unitId) return false;
+            let idx = c.roster.findIndex(u => u && u.id === unitId);
+            if(idx < 0) return false;
+            let u = c.roster[idx];
+            let cost = WOD_ROGUE_UNIT_COSTS[u.type] || 0;
+            let refund = Math.floor(cost * 0.5);
+            c.roster.splice(idx, 1);
+            c.points += refund;
+            wodRogueLogPush('Dismissed ' + u.name + (refund ? ' (+' + refund + ' req refund).' : '.'));
+            wodRogueSave();
+            return true;
+        }
+        window.wodRogueRosterDelete = wodRogueRosterDelete;
+
         /* ------------------------- campaign map painting ------------------------- */
         function wodRogueEnsureWorldCells() {
             let c = wodRogueLoad();
@@ -36961,14 +37125,34 @@
                 }
                 for(let u of c.roster) {
                     let row = document.createElement('div');
-                    row.className = 'wod-camp-unit';
+                    let isVet = wodRogueIsRosterVeteran(u);
+                    row.className = 'wod-camp-unit' + (isVet ? ' wod-camp-unit--vet' : '');
                     let hpFrac = Math.max(0, Math.min(1, u.hp / u.maxHp));
+                    let vetLabel = isVet
+                        ? '<span class="wod-camp-vet-tag">★ Veteran' + ((u.xp | 0) ? ' · ' + Math.floor(u.xp) + ' XP' : '') + '</span>'
+                        : ((u.xp | 0) > 0 ? '<span class="wod-camp-vet-tag" style="color:#95a5a6;font-weight:500">' + Math.floor(u.xp) + ' XP</span>' : '');
                     row.innerHTML =
-                        '<span>' + (u.veteran ? '<span class="vet">★</span> ' : '') + u.name +
-                        ' <span style="color:#7f9bb3">(' + (WOD_ROGUE_UNIT_LABEL[u.type] || u.type) + ')</span></span>' +
-                        '<span class="hpbar"><i class="' + (hpFrac < 0.45 ? 'low' : '') + '" style="width:' + Math.round(hpFrac * 100) + '%"></i></span>';
+                        '<div class="wod-camp-unit-meta">' +
+                            '<span class="wod-camp-unit-title">' + (isVet ? '<span class="vet">★</span> ' : '') + u.name +
+                            ' <span style="color:#7f9bb3">(' + (WOD_ROGUE_UNIT_LABEL[u.type] || u.type) + ')</span></span>' +
+                            vetLabel +
+                        '</div>' +
+                        '<div class="wod-camp-unit-right">' +
+                            '<span class="hpbar"><i class="' + (hpFrac < 0.45 ? 'low' : '') + '" style="width:' + Math.round(hpFrac * 100) + '%"></i></span>' +
+                            (c.over ? '' : '<button type="button" class="wod-camp-del" data-camp-del="' + u.id + '" title="Dismiss unit (50% refund)">✕</button>') +
+                        '</div>';
                     roster.appendChild(row);
                 }
+                roster.querySelectorAll('[data-camp-del]').forEach(btn => {
+                    btn.addEventListener('click', (ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        let id = btn.getAttribute('data-camp-del');
+                        if(!id) return;
+                        if(!confirm('Dismiss this unit from your army? You get half the recruit cost back.')) return;
+                        if(wodRogueRosterDelete(id)) wodRefreshCampaignPanel();
+                    });
+                });
             }
             // Shop.
             let shop = document.getElementById('wodCampShop');
@@ -37081,12 +37265,13 @@
                 unit.losses = r.losses || 0;
                 unit.tankKills = r.tankKills || 0;
                 unit.tankLosses = r.tankLosses || 0;
-                unit.veteran = !!r.veteran;
+                unit.veteran = !!(r.veteran || (r.xp || 0) >= WOD_VETERAN_XP_THRESHOLD);
                 unit._campRosterId = r.id;
             }
             // Fixed army: no recruiting, no starting treasury to spend on units.
             gameData.money = 0;
             gameData.manpower = 0;
+            wodSyncCampaignBattleHud();
             // Field the node's garrison: top up each AI owner toward the planned
             // composition (intel shown on the map is honest, fuzz aside).
             let owners = [];
@@ -37174,7 +37359,8 @@
                 r.losses = u.losses || 0;
                 r.tankKills = u.tankKills || 0;
                 r.tankLosses = u.tankLosses || 0;
-                r.veteran = !!u.veteran;
+                r.veteran = !!(u.veteran || (u.xp || 0) >= WOD_VETERAN_XP_THRESHOLD);
+                if(r.veteran) u.veteran = true;
                 r.battles = (r.battles || 0) + 1;
                 kept.push(r);
             }
@@ -37201,9 +37387,10 @@
                     nodeState.owner = 'player';
                     wodRogueLogPush('Turn ' + c.turn + ': ' + node.name + ' falls to the Remnant!' + (lost ? ' Lost ' + lost + ' unit' + (lost === 1 ? '' : 's') + '.' : ''));
                 }
-                let reward = Math.round((320 + (node.diff || 0) * 90 + (run.defense ? 60 : 0)) * D.rewardMult);
-                c.points += reward;
-                wodRogueLogPush('+' + reward + ' requisition from high command.');
+                // Every won battle grants requisition for the shop — never skip this.
+                let reward = Math.max(200, Math.round((320 + (node.diff || 0) * 90 + (run.defense ? 60 : 0)) * D.rewardMult));
+                c.points = (c.points | 0) + reward;
+                wodRogueLogPush('+' + reward + ' requisition from high command. (Army budget: ' + c.points + ')');
             } else {
                 if(run.defense) {
                     delete c.alerts[run.nodeId];
@@ -37212,7 +37399,7 @@
                 } else {
                     wodRogueLogPush('Turn ' + c.turn + ': the assault on ' + node.name + ' fails.' + (lost ? ' Lost ' + lost + ' unit' + (lost === 1 ? '' : 's') + '.' : ''));
                 }
-                c.points += 120;
+                c.points = (c.points | 0) + 120;
             }
             wodRogueWarTick(c);
             // End-of-run checks.
@@ -37235,6 +37422,7 @@
             wodRogueSave();
             gameData._campaignRun = null;
             gameData._wodReturnToCampaign = true;
+            wodSyncCampaignBattleHud();
         }
 
         /** The living war: each turn the front moves without you — income ticks, the
@@ -39000,7 +39188,11 @@
                     let unit = uo[ui];
                     if(!wodFogCanSeeUnit(unit)) continue;
                     if(shouldDrawPlayerUnitOrderPath(unit) || shouldDrawConvoyMovementPath(unit)) {
-                        if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad)) continue;
+                        // Cull against both auth and smooth-draw positions so MP snap
+                        // lag cannot hide a unit the moment it is deselected.
+                        let dx = unit._drawX != null ? unit._drawX : unit.x;
+                        let dy = unit._drawY != null ? unit._drawY : unit.y;
+                        if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad) && !wodInView(dx, dy, culPad)) continue;
                         drawUnitMovementPath(ctx, unit);
                     }
                 }
@@ -39009,7 +39201,9 @@
                 for(let ui = 0, ul = uo.length; ui < ul; ui++) {
                     let unit = uo[ui];
                     if(!wodFogCanSeeUnit(unit)) continue;
-                    if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad)) continue;
+                    let dx = unit._drawX != null ? unit._drawX : unit.x;
+                    let dy = unit._drawY != null ? unit._drawY : unit.y;
+                    if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad) && !wodInView(dx, dy, culPad)) continue;
                     ctx.save();
                     let dp = wodUnitSmoothDrawXY(unit, gameData._frameSimDt);
                     ctx.translate(dp.x, dp.y);

@@ -42,7 +42,7 @@ const MP_DISCONNECT_GRACE_MS = 22500;
 const MP_STALE_CONNECTION_MS = 90000;
 
 function sanitizePlayerId(id) {
-  const s = String(id || '').trim().slice(0, 32);
+  const s = String(id || '').trim().toUpperCase().slice(0, 32);
   if (!/^WOD-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(s)) return '';
   return s;
 }
@@ -389,13 +389,13 @@ function buildLeaderboardRows(sortKey, filterIds) {
       if (bv !== av) return bv - av;
       return (b.updatedAt || 0) - (a.updatedAt || 0);
     })
-    .map((r) => ({
+            .map((r) => ({
       playerId: r.playerId,
       displayName: r.displayName,
       unitSkin: r.unitSkin,
       stats: r.stats,
       updatedAt: r.updatedAt,
-      online: onlineByPlayerId.has(r.playerId),
+      online: !!(r.playerId && onlineByPlayerId.has(sanitizePlayerId(r.playerId))),
     }));
 }
 
