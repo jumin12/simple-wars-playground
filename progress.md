@@ -194,6 +194,27 @@ Original prompt: as a single index.html file, make a game that is a combination 
   - Verified end-to-end (`output/test-campaign.cjs`): buy 5 units → persisted; launch node battle → 5/5 roster deployed, recruit blocked, briefing shows; force win → countdown → victory → node captured, +320 req, wounded unit's 40hp persisted, turn advanced, war-tick log entries, panel reopens. Panel screenshot reviewed (`output/shot-campaign.cjs`).
 - Missions sequential-unlock regression PASS with the new countdown (`output/test-mission-complete.cjs`).
 
+## Generated campaign worlds, terrain polish, AI unjam pass (2026-07-07 late night)
+- **Campaign v2 — fully generated worlds** (save key `simplewarsRogueCampaign.v2`):
+  - Every campaign generates its own continent (seeded fbm with silhouette variety), regions, node graph, names (syllable pools themed by local terrain: Port/Isles, Pass/Fort, Forest, Fens, Wastes...), briefs, and garrisons. Node positions are adaptive poisson scatter on land; edges are 2-3 nearest neighbors with union-find connectivity repair; difficulty ramps HQ→capital; 1-2 industry regions.
+  - **Pre-campaign settings screen** (no save = setup mode): difficulty (Easy/Normal/Hard/Brutal — scales garrisons, AI economy, counterattack chance, rewards), campaign length (Short 9 / Standard 13 / Long 18 / Epic 24 regions with growing world size), starting requisition (default **3000 — double the old army**), and a 🎲 regenerate button to reroll worlds until one looks right.
+  - **Battle maps mirror the campaign map**: each node samples the terrain around it (water/mountain/forest/sand fractions) to pick its battle map shape (island/archipelago/mountain/forest/desert/rectangle) and size (40/60/80 by depth). Verified: node.shape === battle mapShape.
+  - **Node intel on click**: difficulty stars, terrain + battlefield size, fuzzy-but-honest garrison intel ("5-9 infantry · 1-3 armor · 1-3 warships") — the garrison actually fielded at battle start tops the AI up to the planned composition.
+  - **Campaign stats strip**: battles (W-L), enemy troops killed, troops lost, units destroyed — accumulated from real match stats every battle.
+  - **One local save with Delete save** (replaces abandon); v1 saves are cleared.
+- **Terrain generation quality** (in-game worker + inline pass + mission builder, all in sync):
+  - Isolated 1-2 cell "ponds" wedged in land are filled with the dominant surrounding biome (was: only fully-surrounded cells).
+  - Single-cell biomes with zero same-type neighbors dissolve into the local majority.
+  - **Square island edges fixed**: the rectangular edge water buffer wobbled only ±0.8 tiles, drawing visibly straight coasts along all four sides; now two-octave noise with ±6.5-tile amplitude. Longest straight coast run measured 5-9 cells across seeds (was: whole map sides).
+  - **No unclaimed land**: mission `claimNations` now assigns ALL land to the nearest nation (reach only limits water claims) — all 10 missions regenerated, 0 unclaimed land cells in every file.
+- **AI unjam pass** (from a full audit of the strategy/movement stack — the "groups freeze" bug was several stacked deadlocks):
+  - `wodAiShouldKeepCurrentOrder`: stuck/blocked release now runs BEFORE the far-march keep (rear column units were renewed forever); pair-sized rally clumps release at support≥2; missing `aiOrderUntil` counts as expired; fresh orders get a 2.6s grace before stutter-release (prevented corridor-rebuild oscillation).
+  - Hold-escalation clock no longer resets on FAILED push moves (hold→fail→hold cycle); `holding` clears on arrival; `wodAiMoveUnitToward` flags holding only on success.
+  - **Ghost-through-friendlies**: AI units friend-jammed >3s pass through their own troops (like player marches always did), with separation push-back suspended while ghosting and a slow decay so the window persists through the squeeze.
+  - **9s watchdog**: any AI unit with a far target that hasn't moved ~2 tiles in 9s (and isn't fighting) gets orders cleared, neighbors spread, and a ghost window — catch-all for grind states the timers miss.
+  - Fresh AI spawns march to the front focus immediately; formation pass sorts idle units first and scales per-frame throughput with the idle backlog.
+  - Verified (`output/test-ai-active.cjs`, 210 sim-s, 2 AIs): max idle streak ~6 sim-s, worst frozen-with-far-target ~30 sim-s (was 86-144), AI inflicts thousands of casualties on an idle player. All regressions pass: mountain march, mountain clicks, skirmish smoke, campaign e2e, mission locking, terrain quality (0 ponds, 0 edge land, 0 unclaimed, straightest coast run ≤9).
+
 ## March stutter deep fix (2026-06-17 thorough pass)
 - Root causes confirmed: (1) `ensureUnitPixelOnWalkableHex` random jitter on every waypoint snap; (2) `blockedTimer`/`stuckTimer` replans every 0.25–1.15s causing detours/repath; (3) friendly blocking in formations with different waypoints; (4) pathfinding budget exhaustion mid-march; (5) terrain/fog canvas bakes during draw; (6) multi-step catch-up after frame hitches.
 - Fixes: `wodIsPlayerMarchOrder` guard — no terrain snap jitter, no replan/detour/stuck logic, no friendly blocking for player columns; immediate re-path after waypoint advance; PF budget boost + allowOverBudget for human pathfind; skip terrain/fog bakes entirely during player march with flush on march end; cap sim catch-up to 2 steps while marching.

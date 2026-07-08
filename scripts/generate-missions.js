@@ -220,7 +220,9 @@ class MapBuilder {
     if (mapShape === 'island' || mapShape === 'archipelago') this.edgeWaterBuffer(4);
   }
 
-  /** Speckle removal identical to the game's off-thread smoothing pass. */
+  /** Speckle removal identical to the game's off-thread smoothing pass:
+   *  fills isolated 1-2 cell ponds with the dominant surrounding biome and
+   *  dissolves single-cell biomes that have no same-type neighbor. */
   smooth() {
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]];
     for (let pass = 0; pass < 3; pass++) {
@@ -228,12 +230,22 @@ class MapBuilder {
       this.each((h) => {
         if (h.type === 'urban') return;
         if (h.type === 'water') {
-          let landN = 0;
+          let landN = 0, waterAdj = 0;
+          const landCounts = {};
           for (const [dq, dr] of dirs) {
             const nb = this.at(h.q + dq, h.r + dr);
-            if (nb && nb.type !== 'water' && nb.type !== 'mountain') landN++;
+            if (!nb) continue;
+            if (nb.type === 'water') { waterAdj++; continue; }
+            if (nb.type === 'mountain' || nb.type === 'urban') continue;
+            landN++;
+            landCounts[nb.type] = (landCounts[nb.type] || 0) + 1;
           }
-          if (landN >= 6) changes.push([h, 'grass']);
+          if (landN >= 6 || (waterAdj <= 1 && landN >= 4)) {
+            let fillT = 'grass', fillC = 0;
+            for (const t in landCounts) { if (landCounts[t] > fillC) { fillC = landCounts[t]; fillT = t; } }
+            if (fillT === 'sand' && landCounts.grass) fillT = 'grass';
+            changes.push([h, fillT]);
+          }
           return;
         }
         if (h.type === 'mountain') return;
@@ -251,22 +263,24 @@ class MapBuilder {
         for (const t in counts) { if (counts[t] > bestC) { bestC = counts[t]; best = t; } }
         const need = pass === 0 ? 4 : 3;
         if (same <= 1 && bestC >= 3) changes.push([h, best]);
+        else if (same === 0 && bestC >= 2) changes.push([h, best]);
         else if (best !== h.type && bestC >= need && bestC >= landTotal - 2) changes.push([h, best]);
       });
       for (const c of changes) c[0].type = c[1];
     }
   }
 
-  /** Hard water ring (with a noisy inner boundary) so island-family maps never touch
-   *  the map boundary and the forced coast still reads organic. */
+  /** Hard water ring (with a strongly noised inner boundary) so island-family maps
+   *  never touch the map boundary and the forced coast never reads as a straight cut. */
   edgeWaterBuffer(tiles) {
     this.each((h) => {
       const ed = Math.min(
         h.q + this.cols, this.cols - h.q,
         h.r + this.rows, this.rows - h.r
       );
-      const wob = (fbm(h.x * 0.02 + 91, h.y * 0.02 + 91, 2) - 0.5) * 3;
-      if (ed <= tiles + wob || ed <= 2) h.type = 'water';
+      const wob = (fbm(h.x * 0.006 + 91, h.y * 0.006 + 91, 3) - 0.5) * 9
+        + (fbm(h.x * 0.021 + 417, h.y * 0.021 + 417, 2) - 0.5) * 3.5;
+      if (ed <= tiles + 3 + wob || ed <= 2) h.type = 'water';
     });
   }
 
@@ -562,7 +576,10 @@ class MapBuilder {
         d += (this.rng() - 0.5) * 3.4;
         if (d < bestD) { bestD = d; best = s; }
       }
-      if (best && bestD <= (best.reach != null ? best.reach : maxDist)) h.owner = best.owner;
+      // LAND is always claimed by the nearest nation (generated maps split all land at
+      // start — neutral land pockets read as bugs). Reach only limits WATER claims.
+      if (h.type !== 'water') h.owner = best ? best.owner : 0;
+      else if (best && bestD <= (best.reach != null ? best.reach : maxDist)) h.owner = best.owner;
       else h.owner = 0;
     });
     // Majority smoothing (keeps waviness, removes one-cell speckle).

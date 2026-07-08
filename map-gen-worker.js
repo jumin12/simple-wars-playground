@@ -59,12 +59,34 @@
             for (let i = 0; i < hexList.length; i++) {
                 let h = hexList[i];
                 if (h.type === 'water') {
-                    let landN = 0;
+                    // Isolated 1-2 cell "ponds" between land cells read as glitches —
+                    // fill with the dominant surrounding land biome.
+                    let landN = 0,
+                        waterAdj = 0;
+                    let landCounts = {};
                     for (let d = 0; d < NEIGHBOR_DR.length; d++) {
                         let nb = map.get(key(h.q + NEIGHBOR_DR[d][0], h.r + NEIGHBOR_DR[d][1]));
-                        if (nb && nb.type !== 'water' && nb.type !== 'mountain') landN++;
+                        if (!nb) continue;
+                        if (nb.type === 'water') {
+                            waterAdj++;
+                            continue;
+                        }
+                        if (nb.type === 'mountain' || nb.type === 'urban') continue;
+                        landN++;
+                        landCounts[nb.type] = (landCounts[nb.type] || 0) + 1;
                     }
-                    if (landN >= 6) changes.push([h, 'grass']);
+                    if (landN >= 6 || (waterAdj <= 1 && landN >= 4)) {
+                        let fillT = 'grass',
+                            fillC = 0;
+                        for (let t in landCounts) {
+                            if (landCounts[t] > fillC) {
+                                fillC = landCounts[t];
+                                fillT = t;
+                            }
+                        }
+                        if (fillT === 'sand' && landCounts.grass) fillT = 'grass';
+                        changes.push([h, fillT]);
+                    }
                     continue;
                 }
                 if (h.type === 'mountain') continue;
@@ -89,6 +111,8 @@
                 }
                 let need = pass === 0 ? 4 : 3;
                 if (same <= 1 && bestC >= 3) changes.push([h, best]);
+                // Single-cell biome with NO same-type neighbor at all.
+                else if (same === 0 && bestC >= 2) changes.push([h, best]);
                 else if (best !== h.type && bestC >= need && bestC >= landTotal - 2) changes.push([h, best]);
             }
             for (let c = 0; c < changes.length; c++) changes[c][0].type = changes[c][1];
