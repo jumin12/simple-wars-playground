@@ -410,17 +410,81 @@ function buildOutcomesFromLastSnap(room) {
   return outcomes;
 }
 
-function buildMatchEndParticipants(room, outcomes) {
+function isHumanSeat(meta, slot) {
+  const st = (meta && meta.seatTypes) || [];
+  const s = slot | 0;
+  if (s < 1 || s > st.length) return false;
+  return (st[s - 1] || 'human') === 'human';
+}
+
+/** True when another human player (any seat) remains besides leftSlot. */
+function otherHumanPlayersRemain(room, leftSlot) {
+  if (!room) return false;
   const map = room.seatByPlayerId || {};
-  const out = [];
+  const meta = room.meta || {};
   for (const [pid, slot] of Object.entries(map)) {
     const s = slot | 0;
-    if (!s) continue;
-    const oc = outcomes[String(s)] || outcomes[s];
-    if (oc !== 'won' && oc !== 'lost') continue;
-    out.push({ slot: s, playerId: sanitizePlayerId(pid) });
+    if (!s || s === (leftSlot | 0)) continue;
+    if (!sanitizePlayerId(pid)) continue;
+    if (isHumanSeat(meta, s)) return true;
   }
-  return out.filter((p) => p.playerId);
+  return false;
+}
+
+function cancelAllMatchReconnectGrace(room) {
+  if (!room || !room.pendingReconnect) return;
+  for (const [, pending] of room.pendingReconnect) {
+    if (pending && pending.timer) clearTimeout(pending.timer);
+  }
+  room.pendingReconnect.clear();
+}
+
+function endMatchAsLastHuman(room) {
+  if (!room || !room.matchStarted) return;
+  cancelAllMatchReconnectGrace(room);
+  finalizeAbandonedMatch(room);
+  rooms.delete(room.id);
+  broadcastLobbyList();
+}
+
+function buildMatchEndParticipants(room, outcomes) {
+  const map = room.seatByPlayerId || {};
+  const seen = new Set();
+  const out = [];
+  const add = (slot, playerId) => {
+    const s = slot | 0;
+    const pid = sanitizePlayerId(playerId);
+    if (!s || !pid || seen.has(pid)) return;
+    const oc = outcomes[String(s)] || outcomes[s];
+    if (oc !== 'won' && oc !== 'lost') return;
+    seen.add(pid);
+    out.push({ slot: s, playerId: pid });
+  };
+  for (const [pid, slot] of Object.entries(map)) add(slot, pid);
+  return out;
+}
+
+function mergeMatchEndParticipants(room, clientParticipants, outcomes) {
+  const merged = [];
+  const seen = new Set();
+  const add = (slot, playerId) => {
+    const s = slot | 0;
+    const pid = sanitizePlayerId(playerId);
+    if (!s || !pid || seen.has(pid)) return;
+    const oc = outcomes[String(s)] || outcomes[s];
+    if (oc !== 'won' && oc !== 'lost') return;
+    seen.add(pid);
+    merged.push({ slot: s, playerId: pid });
+  };
+  if (Array.isArray(clientParticipants)) {
+    for (const part of clientParticipants) {
+      if (!part || typeof part !== 'object') continue;
+      add(part.slot, part.playerId);
+    }
+  }
+  const map = (room && room.seatByPlayerId) || {};
+  for (const [pid, slot] of Object.entries(map)) add(slot, pid);
+  return merged;
 }
 
 function finalizeAbandonedMatch(room) {
@@ -495,9 +559,17 @@ function disconnectClientFromMatch(client, immediate) {
   const idx = room.clients.indexOf(client);
   if (idx >= 0) room.clients.splice(idx, 1);
   if (wasHost && room.clients.length > 0) migrateMatchHostIfNeeded(room);
+  if (room.clients.length === 0 && !otherHumanPlayersRemain(room, leftSlot)) {
+    endMatchAsLastHuman(room);
+    client.room = null;
+    client.slot = 0;
+    client.isHost = false;
+    return;
+  }
 
   if (immediate) {
     markSlotDisconnectedInMatch(room, leftSlot);
+    if (room.clients.length === 0 && !otherHumanPlayersRemain(room, leftSlot)) endMatchAsLastHuman(room);
     client.room = null;
     client.slot = 0;
     client.isHost = false;
@@ -509,6 +581,7 @@ function disconnectClientFromMatch(client, immediate) {
     cancelMatchReconnectGrace(room, leftSlot);
     const timer = setTimeout(() => {
       markSlotDisconnectedInMatch(room, leftSlot);
+      if (room.clients.length === 0 && !otherHumanPlayersRemain(room, leftSlot)) endMatchAsLastHuman(room);
     }, MP_DISCONNECT_GRACE_MS);
     room.pendingReconnect.set(leftSlot, { timer, playerId: sanitizePlayerId(client.playerId) });
     try {
@@ -757,7 +830,10 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'profile_failed', msg: result.msg || 'Sync rejected' }));
         return;
       }
-      if (client.playerId === playerId) profiles.attachClientProfile(client, client.displayName);
+      if (client.playerId === playerId) {
+        profiles.attachClientProfile(client, client.displayName);
+        updateLeaderboardEntry(client, client.combinedStats);
+      }
       ws.send(JSON.stringify({ t: 'profile', profile: result.profile }));
       return;
     }
@@ -783,7 +859,12 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', msg: 'Only the host can report match results' }));
         return;
       }
-      const result = profiles.recordMpMatchEnd(client.playerId, client.room, msg);
+      const outcomes = msg.outcomes && typeof msg.outcomes === 'object' ? msg.outcomes : {};
+      const participants = mergeMatchEndParticipants(client.room, msg.participants, outcomes);
+      const result = profiles.recordMpMatchEnd(client.playerId, client.room, {
+        outcomes,
+        participants,
+      });
       if (!result.ok) {
         ws.send(JSON.stringify({ t: 'error', msg: result.msg || 'Could not record match' }));
         return;
