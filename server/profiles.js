@@ -296,11 +296,6 @@ function computeCombinedStats(profile) {
   };
 }
 
-function forEachStoredProfile(fn) {
-  if (typeof fn !== 'function') return;
-  for (const [id, prof] of profiles) fn(id, prof);
-}
-
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
@@ -362,6 +357,10 @@ function getProfile(playerId) {
   if (!id) return null;
   if (!profiles.has(id)) profiles.set(id, defaultProfile(id));
   return profiles.get(id);
+}
+
+function getAllPlayerIds() {
+  return [...profiles.keys()].filter((id) => sanitizePlayerId(id));
 }
 
 function exportProfile(playerId) {
@@ -446,6 +445,10 @@ function syncProgress(playerId, payload) {
     }
     if (Array.isArray(cp.friendRequestsIn)) {
       cur.friendRequestsIn = mergeFriendRequestsArrays(cur.friendRequestsIn, cp.friendRequestsIn);
+    }
+    if (cp.mpDisplayName != null) {
+      const name = String(cp.mpDisplayName || '').trim().slice(0, 24);
+      if (name) cur.mpDisplayName = name;
     }
   }
 
@@ -583,6 +586,7 @@ function attachClientProfile(client, displayName) {
 module.exports = {
   loadProfilesFromDisk,
   getProfile,
+  getAllPlayerIds,
   exportProfile,
   syncProgress,
   shopPurchase,
@@ -592,7 +596,6 @@ module.exports = {
   attachClientProfile,
   validateEquippedSkin,
   computeCombinedStats,
-  forEachStoredProfile,
   skinIsOwned,
   sanitizePlayerId,
 };

@@ -14299,11 +14299,14 @@
             if(!pending || !wodProgress || !wodProgress.profile) return;
             wodProgress.profile.mpDisplayName = pending;
             window._wodMpPendingDisplayName = '';
+            wodMpClearDisplayNameEditing();
             scheduleSaveWodProgress();
             wodMpSetDisplayNameFieldInvalid(false);
+            wodMpSyncDisplayNameFieldFromProfile();
         }
         function wodMpHandleDisplayNameRejected(detail) {
             window._wodMpPendingDisplayName = '';
+            wodMpClearDisplayNameEditing();
             wodMpRevertDisplayNameField();
             let msg = (detail && detail.msg) ? detail.msg : 'That display name is already taken.';
             wodMpSetDisplayNameFieldInvalid(true, msg);
@@ -14437,6 +14440,7 @@
             let friends = wodMpGetFriendsList().filter(f => f && f.playerId);
             let friendIds = new Set(friends.map(f => f.playerId));
             let byId = {};
+            let cached = window._wodMpLbCacheById || {};
             for(let r of (serverRows || [])) {
                 if(r && r.playerId && friendIds.has(r.playerId)) byId[r.playerId] = r;
             }
@@ -14450,23 +14454,30 @@
                     out.push(row);
                     continue;
                 }
-                let online = !!presence[f.playerId];
+                let cachedRow = cached[f.playerId];
+                if(cachedRow && friendIds.has(cachedRow.playerId)) {
+                    let row = Object.assign({}, cachedRow);
+                    if(row.online == null) row.online = !!presence[f.playerId];
+                    out.push(row);
+                    continue;
+                }
+                let pres = presence[f.playerId];
+                let isOnline = !!pres;
                 if(f.playerId === wodProgress.profile.playerId) {
                     out.push({
                         playerId: f.playerId,
                         displayName: wodProgress.profile.mpDisplayName || f.displayName || f.playerId,
                         unitSkin: gameData.unitSkin || f.unitSkin || 'nato',
                         stats: wodMpCombinedStats(),
-                        online: true
+                        online: isOnline || !!(WodMultiplayer.api && WodMultiplayer.api.socketOpen)
                     });
                 } else {
-                    let cachedStats = (f.stats && typeof f.stats === 'object') ? f.stats : null;
                     out.push({
                         playerId: f.playerId,
-                        displayName: f.displayName || f.playerId,
-                        unitSkin: f.unitSkin || 'nato',
-                        stats: cachedStats || { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 },
-                        online: online
+                        displayName: (pres && pres.displayName) || f.displayName || f.playerId,
+                        unitSkin: (pres && pres.unitSkin) || f.unitSkin || 'nato',
+                        stats: (cachedRow && cachedRow.stats) || { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 },
+                        online: isOnline
                     });
                 }
             }
@@ -14476,85 +14487,7 @@
             if((window._wodMpLbScope || 'global') !== 'friends') return;
             wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', 'friends');
         }
-        function wodMpRefreshLeaderboardIfVisible() {
-            let tab = document.querySelector('.mp-hub-tab[data-mp-tab="rankings"].active');
-            if(!tab) return;
-            wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
-        }
         const WOD_MP_LB_PAGE_SIZE = 5;
-        const WOD_MP_LB_CACHE_KEY = 'wodMpLeaderboardCache_v1';
-        function wodMpLoadLeaderboardCache(scope) {
-            try {
-                let raw = localStorage.getItem(WOD_MP_LB_CACHE_KEY);
-                if(!raw) return [];
-                let data = JSON.parse(raw);
-                let bucket = data && data[scope || 'global'];
-                return (bucket && Array.isArray(bucket.rows)) ? bucket.rows : [];
-            } catch(_) { return []; }
-        }
-        function wodMpSaveLeaderboardCache(scope, rows, sortKey) {
-            try {
-                let data = {};
-                try {
-                    let raw = localStorage.getItem(WOD_MP_LB_CACHE_KEY);
-                    if(raw) data = JSON.parse(raw) || {};
-                } catch(_) {}
-                data[scope || 'global'] = {
-                    rows: (rows || []).slice(),
-                    sort: sortKey || 'wins',
-                    updatedAt: Date.now()
-                };
-                localStorage.setItem(WOD_MP_LB_CACHE_KEY, JSON.stringify(data));
-            } catch(_) {}
-        }
-        function wodMpMergeLeaderboardCacheRows(serverRows, scope) {
-            let byId = {};
-            for(let r of wodMpLoadLeaderboardCache(scope)) {
-                if(r && r.playerId) byId[r.playerId] = r;
-            }
-            for(let r of (serverRows || [])) {
-                if(r && r.playerId) byId[r.playerId] = r;
-            }
-            wodEnsurePlayerId();
-            let myId = wodProgress.profile.playerId || '';
-            if(myId) {
-                let mine = byId[myId];
-                let localStats = wodMpCombinedStats();
-                let localName = wodProgress.profile.mpDisplayName || wodMpGetDisplayName() || myId;
-                let localSkin = gameData.unitSkin || wodProgress.profile.unitSkin || 'nato';
-                if(!mine) {
-                    byId[myId] = {
-                        playerId: myId,
-                        displayName: localName,
-                        unitSkin: localSkin,
-                        stats: localStats,
-                        online: !!(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen)
-                    };
-                } else {
-                    mine.stats = localStats;
-                    if(localName) mine.displayName = localName;
-                    if(localSkin) mine.unitSkin = localSkin;
-                }
-            }
-            return Object.values(byId);
-        }
-        function wodMpPersistFriendStatsFromLeaderboard(rows) {
-            if(!wodProgress || !wodProgress.profile || !Array.isArray(wodProgress.profile.friends)) return;
-            let changed = false;
-            for(let row of rows || []) {
-                if(!row || !row.playerId) continue;
-                let f = wodProgress.profile.friends.find(x => x && x.playerId === row.playerId);
-                if(!f) continue;
-                if(row.displayName && f.displayName !== row.displayName) { f.displayName = row.displayName; changed = true; }
-                if(row.unitSkin && f.unitSkin !== row.unitSkin) { f.unitSkin = row.unitSkin; changed = true; }
-                if(row.stats && typeof row.stats === 'object') {
-                    f.stats = Object.assign({}, row.stats);
-                    f.statsUpdatedAt = row.updatedAt || Date.now();
-                    changed = true;
-                }
-            }
-            if(changed) scheduleSaveWodProgress();
-        }
         function wodMpRenderLeaderboardPage() {
             let rows = window._wodMpLbRows || [];
             let sortKey = window._wodMpLbSort || 'wins';
@@ -14570,7 +14503,7 @@
                 let scope = window._wodMpLbScope || 'global';
                 host.innerHTML = '<p class="mp-hub-pane-lead">' + (scope === 'friends'
                     ? 'No friend stats yet — add friends and play to compare rankings.'
-                    : 'No rankings cached yet — connect to multiplayer to load global standings.') + '</p>';
+                    : 'No rankings yet — players appear here after registering a display name.') + '</p>';
                 if(pager) pager.hidden = true;
                 return;
             }
@@ -14645,9 +14578,10 @@
         function wodMpRenderLeaderboard(rows, sortKey, scope) {
             window._wodMpLbSort = sortKey || window._wodMpLbSort || 'wins';
             window._wodMpLbScope = scope || window._wodMpLbScope || 'global';
+            if(window._wodMpLbScope !== 'friends')
+                wodMpCacheLeaderboardRows(rows, window._wodMpLbSort, window._wodMpLbScope);
             if(window._wodMpLbScope === 'friends') rows = wodMpMergeFriendsLeaderboardRows(rows);
             window._wodMpLbRows = wodMpSortLeaderboardRows(rows, window._wodMpLbSort);
-            wodMpPersistFriendStatsFromLeaderboard(window._wodMpLbRows);
             if(window._wodMpLbPage == null) window._wodMpLbPage = 0;
             wodMpRenderLeaderboardPage();
         }
@@ -14662,19 +14596,17 @@
             document.querySelectorAll('#mpLbScope [data-lb-scope]').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-lb-scope') === window._wodMpLbScope);
             });
-            let cached = wodMpLoadLeaderboardCache(window._wodMpLbScope);
-            if(cached.length)
-                wodMpRenderLeaderboard(cached, window._wodMpLbSort, window._wodMpLbScope);
             let friendIds = null;
             if(window._wodMpLbScope === 'friends')
                 friendIds = wodMpGetFriendsList().map(f => f && f.playerId).filter(Boolean);
             if(WodMultiplayer.api && WodMultiplayer.api.socketOpen)
                 WodMultiplayer.requestLeaderboard(window._wodMpLbSort, friendIds);
-            else if(!cached.length) {
+            else {
+                let cached = wodMpLoadCachedLeaderboardRows();
                 if(window._wodMpLbScope === 'friends')
-                    wodMpRenderLeaderboard([], window._wodMpLbSort, 'friends');
+                    wodMpRenderLeaderboard(cached, window._wodMpLbSort, 'friends');
                 else
-                    wodMpRenderLeaderboard([], window._wodMpLbSort, 'global');
+                    wodMpRenderLeaderboard(cached, window._wodMpLbSort, 'global');
             }
         }
         function wodMpShareProfileLink() {
@@ -14742,7 +14674,43 @@
         function wodMpSyncDisplayNameFieldFromProfile() {
             let el = document.getElementById('mpDisplayName');
             if(!el || !wodProgress || !wodProgress.profile) return;
-            el.value = wodProgress.profile.mpDisplayName || '';
+            if(el === document.activeElement || el._wodMpEditing) return;
+            let saved = wodProgress.profile.mpDisplayName || '';
+            if(el.value !== saved) el.value = saved;
+        }
+        function wodMpClearDisplayNameEditing() {
+            let el = document.getElementById('mpDisplayName');
+            if(el) el._wodMpEditing = false;
+        }
+        function wodMpCacheLeaderboardRows(rows, sortKey, scope) {
+            let list = Array.isArray(rows) ? rows : [];
+            let byId = {};
+            for(let r of list) {
+                if(r && r.playerId) byId[r.playerId] = r;
+            }
+            window._wodMpLbCacheById = byId;
+            try {
+                localStorage.setItem('wodMpLbCache', JSON.stringify({
+                    rows: list,
+                    sort: sortKey || 'wins',
+                    scope: scope || 'global',
+                    at: Date.now()
+                }));
+            } catch(_) {}
+        }
+        function wodMpLoadCachedLeaderboardRows() {
+            if(window._wodMpLbCacheById && Object.keys(window._wodMpLbCacheById).length)
+                return Object.values(window._wodMpLbCacheById);
+            try {
+                let raw = localStorage.getItem('wodMpLbCache');
+                if(!raw) return [];
+                let data = JSON.parse(raw);
+                if(!data || !Array.isArray(data.rows)) return [];
+                wodMpCacheLeaderboardRows(data.rows, data.sort, data.scope);
+                return data.rows;
+            } catch(_) {
+                return [];
+            }
         }
         function wodMpSwitchHubTab(tabId) {
             document.querySelectorAll('.mp-hub-tab[data-mp-tab]').forEach(btn => {
@@ -16631,15 +16599,11 @@
             addEventListener('wod-mp-Leaderboard', (ev) => {
                 let d = ev.detail || {};
                 let scope = window._wodMpLbScope || d.scope || 'global';
-                let sort = d.sort || window._wodMpLbSort || 'wins';
-                let rows = wodMpMergeLeaderboardCacheRows(d.rows, scope);
-                wodMpSaveLeaderboardCache(scope, rows, sort);
-                wodMpRenderLeaderboard(rows, sort, scope);
+                wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', scope);
             });
             addEventListener('wod-mp-Registered', (ev) => {
                 if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
                 wodMpConfirmRegisteredDisplayName();
-                wodMpRefreshLeaderboardIfVisible();
             });
             addEventListener('wod-mp-Profile', (ev) => {
                 if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
@@ -16711,6 +16675,9 @@
                     wodMpRefreshMpPanelState();
                     wodMpRenderLobbyList(WodMultiplayer.api.lobbies || []);
                     void wodMpTryJoinLobbyFromUrl();
+                    let rankPane = document.getElementById('mpPaneRankings');
+                    if(rankPane && rankPane.classList.contains('active'))
+                        wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
                 })
                 .catch((e) => {
                     let m = e && e.message ? e.message : String(e);
@@ -16723,6 +16690,7 @@
         function wodMpWireLobbyUi() {
             wodMpInitGlobalHandlers();
             wodEnsurePlayerId();
+            wodMpLoadCachedLeaderboardRows();
             wodMpSyncDisplayNameFieldFromProfile();
             wodMpRefreshLocalMpStatsReadout();
             if(window._wodMpUiWired) {
@@ -16739,17 +16707,31 @@
             let mpDn = document.getElementById('mpDisplayName');
             if(mpDn && !mpDn._wodMpBound) {
                 mpDn._wodMpBound = true;
-                mpDn.addEventListener('change', () => {
+                mpDn.addEventListener('input', () => {
+                    mpDn._wodMpEditing = true;
+                    wodMpSetDisplayNameFieldInvalid(false);
+                });
+                mpDn.addEventListener('focus', () => {
+                    mpDn._wodMpEditing = true;
+                });
+                mpDn.addEventListener('blur', () => {
                     let newName = mpDn.value.trim().slice(0, 24);
                     if(!newName) {
+                        wodMpClearDisplayNameEditing();
                         wodMpRevertDisplayNameField();
-                        wodMpSetDisplayNameFieldInvalid(true, 'Enter a display name.');
-                        showNotification('Enter a display name.');
+                        return;
+                    }
+                    let saved = (wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName) || '';
+                    if(newName === saved) {
+                        wodMpClearDisplayNameEditing();
                         return;
                     }
                     wodMpSetDisplayNameFieldInvalid(false);
                     wodMpRegisterWithServer();
                     wodMpPushLobbyProfile();
+                });
+                mpDn.addEventListener('keydown', (ev) => {
+                    if(ev.key === 'Enter') mpDn.blur();
                 });
             }
             document.querySelectorAll('.mp-hub-tab[data-mp-tab]').forEach(btn => {
@@ -17149,6 +17131,7 @@
                 let d = ev.detail || {};
                 wodMpSetFriendPresence(d.online);
                 wodMpRenderFriendsList();
+                wodMpRefreshFriendsLeaderboardIfVisible();
                 let seatDlg = document.getElementById('mpSeatInviteDlg');
                 if(seatDlg && !seatDlg.classList.contains('hidden') && _wodMpSeatInviteSlot)
                     wodMpOpenSeatInviteDlg(_wodMpSeatInviteSlot);
@@ -18715,6 +18698,11 @@
                 friendRequestsOut: wodProgress.profile.friendRequestsOut,
                 friendRequestsIn: wodProgress.profile.friendRequestsIn
             } : null;
+            let localDisplayName = (wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName) || '';
+            let mpEl = document.getElementById('mpDisplayName');
+            let editingName = !!(mpEl && (mpEl === document.activeElement || mpEl._wodMpEditing));
+            if(editingName && mpEl && mpEl.value.trim())
+                localDisplayName = mpEl.value.trim().slice(0, 24);
             wodProgress = wodMergeProgressObject({
                 achievements: profile.achievements,
                 lifetime: profile.lifetime,
@@ -18722,6 +18710,8 @@
                 multiplayer: profile.multiplayer,
                 profile: Object.assign({}, profile.profile || {}, { playerId: keepPlayerId || (profile.profile && profile.profile.playerId) || '' })
             });
+            if(editingName && localDisplayName && wodProgress.profile)
+                wodProgress.profile.mpDisplayName = localDisplayName;
             if(localFriends && wodProgress.profile) {
                 wodProgress.profile.friends = wodMpMergeFriendEntries(localFriends.friends, wodProgress.profile.friends);
                 wodProgress.profile.friendRequestsOut = wodMpMergeFriendEntries(localFriends.friendRequestsOut, wodProgress.profile.friendRequestsOut);
@@ -18733,7 +18723,6 @@
             if(typeof updateSkinShop === 'function') updateSkinShop();
             if(typeof wodMpRefreshLocalMpStatsReadout === 'function') wodMpRefreshLocalMpStatsReadout();
             if(typeof wodMpRenderFriendsList === 'function') wodMpRenderFriendsList();
-            if(typeof wodMpRefreshLeaderboardIfVisible === 'function') wodMpRefreshLeaderboardIfVisible();
             persistWodProgressNow();
             scheduleCloudSyncProgress();
         }
@@ -18746,6 +18735,7 @@
                     unitSkin: wodProgress.profile.unitSkin,
                     aiUnitSkin: wodProgress.profile.aiUnitSkin,
                     equippedShopMapId: wodProgress.profile.equippedShopMapId,
+                    mpDisplayName: wodProgress.profile.mpDisplayName || '',
                     friends: wodProgress.profile.friends,
                     friendRequestsOut: wodProgress.profile.friendRequestsOut,
                     friendRequestsIn: wodProgress.profile.friendRequestsIn
