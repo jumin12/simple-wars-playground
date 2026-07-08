@@ -656,8 +656,8 @@ class MapBuilder {
       forts: this.forts,
       bridges: this.bridges,
       savedStartEconomy: true,
-      money: opt.money != null ? opt.money : 10000,
-      manpower: opt.manpower != null ? opt.manpower : 5000,
+      money: opt.money != null ? opt.money : 20000,
+      manpower: opt.manpower != null ? opt.manpower : 10000,
       aiMoneyByOwner: opt.aiMoney || {},
       aiManpowerByOwner: opt.aiManpower || {},
       mission: opt.mission,
@@ -712,7 +712,7 @@ MISSIONS.push(function m01() {
     file: 'mission_01_first_landing.json',
     entry: { name: '1 · First Landing', description: 'Beach invasion — land on the island and take both towns. (Easy)', aiCount: 1 },
     data: b.export({
-      money: 12000, manpower: 6000,
+      money: 20000, manpower: 12000,
       aiMoney: { 1: 0, 2: 3500 }, aiManpower: { 1: 0, 2: 4000 },
       mission: {
         version: 1, title: 'First Landing', victoryMode: 'domination',
@@ -772,7 +772,7 @@ MISSIONS.push(function m02() {
     file: 'mission_02_brothers_at_war.json',
     entry: { name: '2 · Brothers at War', description: 'Civil war — cross the river and crush the rebellion.', aiCount: 1 },
     data: b.export({
-      money: 10000, manpower: 5000,
+      money: 18000, manpower: 10000,
       aiMoney: { 1: 0, 2: 6000 }, aiManpower: { 1: 0, 2: 5000 },
       mission: {
         version: 1, title: 'Brothers at War', victoryMode: 'domination',
@@ -835,7 +835,7 @@ MISSIONS.push(function m03() {
     file: 'mission_03_mountain_passes.json',
     entry: { name: '3 · The Mountain Passes', description: 'Nation vs nation — force the two fortified passes.', aiCount: 1 },
     data: b.export({
-      money: 10000, manpower: 5000,
+      money: 18000, manpower: 10000,
       aiMoney: { 1: 0, 2: 8000 }, aiManpower: { 1: 0, 2: 6000 },
       mission: {
         version: 1, title: 'The Mountain Passes', victoryMode: 'domination',
@@ -897,7 +897,7 @@ MISSIONS.push(function m04() {
     file: 'mission_04_isle_campaign.json',
     entry: { name: '4 · Isle Campaign', description: 'Island hopping — take three enemy isles with marines and gunboats.', aiCount: 1 },
     data: b.export({
-      money: 11000, manpower: 6000,
+      money: 19000, manpower: 12000,
       aiMoney: { 1: 0, 2: 9000 }, aiManpower: { 1: 0, 2: 6000 },
       mission: {
         version: 1, title: 'Isle Campaign', victoryMode: 'domination',
@@ -971,7 +971,7 @@ MISSIONS.push(function m05() {
     file: 'mission_05_two_front_gambit.json',
     entry: { name: '5 · Two-Front Gambit', description: 'Two hostile nations, one on each border. Survive, then conquer both.', aiCount: 2 },
     data: b.export({
-      money: 12000, manpower: 7000,
+      money: 20000, manpower: 14000,
       aiMoney: { 1: 0, 2: 8000, 3: 8000 }, aiManpower: { 1: 0, 2: 6000, 3: 6000 },
       mission: {
         version: 1, title: 'Two-Front Gambit', victoryMode: 'domination',
@@ -1038,7 +1038,7 @@ MISSIONS.push(function m06() {
     file: 'mission_06_greywater_crossing.json',
     entry: { name: '6 · The Greywater Crossing', description: 'Force a fortified river line over three defended bridges.', aiCount: 1 },
     data: b.export({
-      money: 11000, manpower: 6000,
+      money: 19000, manpower: 12000,
       aiMoney: { 1: 0, 2: 12000 }, aiManpower: { 1: 0, 2: 8000 },
       mission: {
         version: 1, title: 'The Greywater Crossing', victoryMode: 'domination',
@@ -1110,7 +1110,7 @@ MISSIONS.push(function m07() {
     file: 'mission_07_winter_citadel.json',
     entry: { name: '7 · Winter Citadel', description: 'Break into a fortified mountain ring held by a rich garrison.', aiCount: 1 },
     data: b.export({
-      money: 12000, manpower: 7000,
+      money: 20000, manpower: 14000,
       aiMoney: { 1: 0, 2: 15000 }, aiManpower: { 1: 0, 2: 10000 },
       mission: {
         version: 1, title: 'Winter Citadel', victoryMode: 'domination',
@@ -1192,7 +1192,7 @@ MISSIONS.push(function m08() {
     file: 'mission_08_shattered_realm.json',
     entry: { name: '8 · The Shattered Realm', description: 'Four-way war of warlords. You start smallest — unify the realm.', aiCount: 3 },
     data: b.export({
-      money: 10000, manpower: 6000,
+      money: 18000, manpower: 12000,
       aiMoney: { 1: 0, 2: 11000, 3: 11000, 4: 11000 }, aiManpower: { 1: 0, 2: 8000, 3: 8000, 4: 8000 },
       mission: {
         version: 1, title: 'The Shattered Realm', victoryMode: 'domination',
@@ -1274,7 +1274,7 @@ MISSIONS.push(function m09() {
     file: 'mission_09_ironshore.json',
     entry: { name: '9 · Ironshore', description: 'D-Day. Storm a fortified coast under fire and crack the mainland. (Hard)', aiCount: 1 },
     data: b.export({
-      money: 14000, manpower: 9000,
+      money: 24000, manpower: 16000,
       aiMoney: { 1: 0, 2: 18000 }, aiManpower: { 1: 0, 2: 12000 },
       mission: {
         version: 1, title: 'Ironshore', victoryMode: 'domination',
@@ -1365,7 +1365,7 @@ MISSIONS.push(function m10() {
     file: 'mission_10_world_at_war.json',
     entry: { name: '10 · World at War', description: 'Finale — three empires against your small republic. (Very hard)', aiCount: 3 },
     data: b.export({
-      money: 13000, manpower: 8000,
+      money: 22000, manpower: 15000,
       aiMoney: { 1: 0, 2: 15000, 3: 18000, 4: 20000 }, aiManpower: { 1: 0, 2: 10000, 3: 12000, 4: 12000 },
       mission: {
         version: 1, title: 'World at War', victoryMode: 'domination',

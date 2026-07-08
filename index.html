@@ -4802,21 +4802,21 @@
             padding: 14px 14px 16px;
             color: #d9e6f2;
         }
-        .wod-camp-set-row {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            font-size: 0.8rem;
-            color: #9db3c7;
+        .wod-camp-setup .setup-row {
+            margin-bottom: 0;
         }
-        .wod-camp-set-row select,
-        .wod-camp-set-row input {
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 6px;
-            color: #ecf0f1;
-            padding: 7px 9px;
-            font: inherit;
+        .wod-camp-setup .setup-row label {
+            font-size: 16px;
+            color: #fff;
+        }
+        .wod-camp-setup .setup-row input,
+        .wod-camp-setup .setup-row select {
+            background: #2c3e50;
+            color: white;
+            border: 1px solid #7f8c8d;
+            padding: 8px;
+            border-radius: 4px;
+            width: 150px;
         }
         .wod-camp-set-hint {
             margin: 0;
@@ -7319,7 +7319,7 @@
                 <div class="wod-camp-header">
                     <div>
                         <h2 style="margin:0">The Ashen Front</h2>
-                        <p class="wod-map-lib-sub" style="margin:4px 0 0" id="wodCampSubtitle">A roguelike campaign — one army, one war. Losses are forever.</p>
+                        <p class="wod-map-lib-sub" style="margin:4px 0 0" id="wodCampSubtitle">Conquer the war map region by region. One army carries your cause — every wound and loss sticks.</p>
                     </div>
                     <div class="wod-camp-status" id="wodCampStatus"></div>
                 </div>
@@ -7332,26 +7332,29 @@
                     <div class="wod-camp-side">
                         <div class="wod-camp-setup" id="wodCampSetup" style="display:none">
                             <h3 style="margin:0">New campaign</h3>
-                            <label class="wod-camp-set-row">Difficulty
+                            <div class="setup-row">
+                                <label>Difficulty:</label>
                                 <select id="wodCampSetDiff">
                                     <option value="easy">Easy</option>
                                     <option value="normal" selected>Normal</option>
                                     <option value="hard">Hard</option>
                                     <option value="brutal">Brutal</option>
                                 </select>
-                            </label>
-                            <label class="wod-camp-set-row">Campaign length
+                            </div>
+                            <div class="setup-row">
+                                <label>Campaign length:</label>
                                 <select id="wodCampSetLen">
                                     <option value="short">Short — 9 regions</option>
                                     <option value="medium" selected>Standard — 13 regions</option>
                                     <option value="long">Long — 18 regions</option>
                                     <option value="epic">Epic — 24 regions</option>
                                 </select>
-                            </label>
-                            <label class="wod-camp-set-row">Starting requisition
+                            </div>
+                            <div class="setup-row">
+                                <label>Starting requisition:</label>
                                 <input type="number" id="wodCampSetPts" min="600" max="12000" step="100" value="3000">
-                            </label>
-                            <p class="wod-camp-set-hint">3000 points fields roughly a dozen units — twice the old expeditionary force. Terrain on the map shapes each region's battlefield.</p>
+                            </div>
+                            <p class="wod-camp-set-hint">Spend requisition to field your opening army. Each region on the map becomes its own battle — terrain shapes how you fight.</p>
                             <button type="button" class="menu-btn" id="wodCampRegenBtn">🎲 Generate new world</button>
                             <button type="button" class="menu-btn wod-camp-launch" id="wodCampBeginBtn">Begin campaign</button>
                         </div>
@@ -7378,7 +7381,7 @@
         <div id="missionsPanel" class="overlay hidden">
             <div class="panel panel-wide wod-map-lib-panel">
                 <h2 style="margin-top:0">Missions</h2>
-                <p class="wod-map-lib-sub">A 10-mission chain of scripted scenarios. Win a mission to unlock the next one. Progress is saved in this browser.</p>
+                <p class="wod-map-lib-sub">Ten linked battles across land and sea. Win each mission to unlock the next.</p>
                 <div class="wod-map-lib-layout">
                     <div class="wod-map-lib-list-column">
                         <div class="wod-map-lib-list" id="wodMissionList" aria-label="Mission list"></div>
@@ -7392,8 +7395,8 @@
                     </div>
                 </div>
                 <div id="wodMissionEmpty" class="shop-empty-state hidden">
-                    <p><strong>No missions found</strong></p>
-                    <p>Export a mission from the map editor, save it under <code>missions/</code>, then run <code>npm run missions:sync</code>.</p>
+                    <p><strong>No missions available</strong></p>
+                    <p>Missions could not be loaded. Return to the main menu and try again.</p>
                 </div>
                 <button type="button" class="menu-btn" onclick="showPanel('playMode')" style="margin-top:16px">Back</button>
             </div>
@@ -19861,7 +19864,7 @@
             // every combat unit is a defeat even in domination mode.
             if(gameData._campaignRun) {
                 if(wodTickEndCountdown('campArmyLost', countPlayerCombatUnitsExcludingConvoys() === 0, simDt, 'Your army is destroyed! Defeat in', true)) {
-                    triggerCampaignDefeat('Defeat — your expeditionary army was destroyed.');
+                    triggerCampaignDefeat('Defeat — your army was destroyed.');
                     return;
                 }
                 if(gameData._endCountdowns && gameData._endCountdowns.campArmyLost) return;
@@ -35210,7 +35213,7 @@
             void wodFetchMissionData(entry).then(data => {
                 if(_wodSelectedMissionId !== entry.id) return;
                 if(!data) {
-                    if(meta) meta.innerHTML = '<p><strong>' + (entry.name || entry.id) + '</strong></p><p class="wod-map-lib-meta-sub" style="color:#e74c3c">Could not load mission file. Ensure it is in missions/ and deployed with manifest.json.</p>';
+                    if(meta) meta.innerHTML = '<p><strong>' + (entry.name || entry.id) + '</strong></p><p class="wod-map-lib-meta-sub" style="color:#e74c3c">Could not load this mission. Try again from the main menu.</p>';
                     if(cv) wodPaintMissionPreviewPlaceholder(cv, 'Load failed');
                     return;
                 }
@@ -35219,7 +35222,7 @@
                 let html = '<p><strong>' + (entry.name || data.mission.title || entry.id) + '</strong></p>';
                 if(entry.description) html += '<p>' + entry.description + '</p>';
                 let vic = (data.mission && data.mission.victoryMode === 'annihilation') ? 'Annihilation' : 'Domination';
-                html += '<p class="wod-map-lib-meta-sub">Victory: ' + vic + ' · ' + evtN + ' scripted event' + (evtN === 1 ? '' : 's');
+                html += '<p class="wod-map-lib-meta-sub">Victory: ' + vic + ' · ' + evtN + ' battle event' + (evtN === 1 ? '' : 's');
                 if(trig) html += ' · ' + trig;
                 html += '</p>';
                 if(meta) meta.innerHTML = html;
@@ -35338,7 +35341,7 @@
                     btn.disabled = !_wodSelectedMissionId;
                     if(!ok) {
                         gameData._launchingMission = false;
-                        showNotification('Could not load mission file. Check missions/ folder and refresh.');
+                        showNotification('Could not load the selected mission.');
                         return;
                     }
                     startGame('ai', { mission: true });
@@ -36138,7 +36141,7 @@
             if(!c) {
                 // ---------- setup mode ----------
                 let d = wodRogueDraft();
-                if(sub) sub.textContent = 'Set up your war: pick a difficulty, campaign length and army budget, generate a world you like, then begin.';
+                if(sub) sub.textContent = 'Choose difficulty, campaign length, and your opening army budget. Generate a war map, then march.';
                 let diffEl = document.getElementById('wodCampSetDiff');
                 let lenEl = document.getElementById('wodCampSetLen');
                 let ptsEl = document.getElementById('wodCampSetPts');
@@ -36146,11 +36149,11 @@
                 if(lenEl && lenEl.value !== d.length) lenEl.value = d.length;
                 if(ptsEl && document.activeElement !== ptsEl) ptsEl.value = String(d.startPoints);
                 let status = document.getElementById('wodCampStatus');
-                if(status) status.innerHTML = '<span>New campaign</span><span class="wod-camp-turn">world seed ' + (d.seed >>> 0).toString(16) + '</span>';
+                if(status) status.innerHTML = '<span>New campaign</span><span class="wod-camp-turn">Generate your war map below</span>';
                 let statsEl = document.getElementById('wodCampStats');
                 if(statsEl) statsEl.innerHTML = '';
                 let log = document.getElementById('wodCampLog');
-                if(log) log.innerHTML = '<p>The map shows the war to come — each region is a battle, its terrain shaping the battlefield you\u2019ll fight on. Regenerate until the world looks right.</p>';
+                if(log) log.innerHTML = '<p>Each region on the map is a battle. Regenerate the world until the front lines look right, then begin your campaign.</p>';
                 wodRoguePaintMap();
                 return;
             }
@@ -36179,7 +36182,7 @@
             }
             if(sub) {
                 if(c.over) sub.textContent = c.won ? 'Victory — the Iron Concord has fallen. Delete the save to wage a new war.' : 'Campaign over — the Remnant is spent. Delete the save to try again.';
-                else sub.textContent = 'A roguelike campaign — one army, one war. Losses are forever.';
+                else sub.textContent = 'One army, one war — every casualty is permanent.';
             }
             // Node info + intel.
             let info = document.getElementById('wodCampNodeInfo');
