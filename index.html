@@ -10531,9 +10531,23 @@
             if(!gameData.mp || !gameData.mp.enabled) return owner === 1;
             if(!wodMpSeatTypeIsHuman(owner)) return false;
             if(wodMpIsSlotEliminated(owner)) return false;
+            let localSlot = gameData.mp.localSlot | 0;
+            if(localSlot > 0 && owner === localSlot && wodMpMatchCanPlay()) return true;
             let conn = gameData.mp.connectedSlots;
             if(conn && conn.length && conn.indexOf(owner) < 0) return false;
             return true;
+        }
+        /** Keep the local human seat in connectedSlots (rejoin snaps can arrive before host marks reconnect). */
+        function wodMpEnsureLocalSlotConnected() {
+            if(!gameData.mp || !gameData.mp.enabled) return;
+            let slot = gameData.mp.localSlot | 0;
+            if(!slot || !wodMpSeatTypeIsHuman(slot)) return;
+            if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
+            if(gameData.mp.connectedSlots.indexOf(slot) < 0) gameData.mp.connectedSlots.push(slot);
+            if(gameData.mp.aiControlledSlots) {
+                let ai = gameData.mp.aiControlledSlots.indexOf(slot);
+                if(ai >= 0) gameData.mp.aiControlledSlots.splice(ai, 1);
+            }
         }
         /** Freeze seat→playerId mapping at match start so disconnected players still get match-end stats. */
         function wodMpFreezeSeatPlayerMap() {
@@ -13907,10 +13921,20 @@
                 }
             }
             if(s.hexOwners && s.hexOwners.length === gameData.hexList.length) {
+                batchHexOwner = true;
+                batchHexOwnerDirty = false;
                 for(let i = 0; i < gameData.hexList.length; i++) {
                     let h = gameData.hexList[i];
-                    if(h.owner !== s.hexOwners[i]) setHexOwner(h, s.hexOwners[i]);
+                    let no = s.hexOwners[i];
+                    if(h.owner !== no) {
+                        h.owner = no;
+                        h.renderColor = h.baseColor;
+                        gameData._landIncomeCacheDirty = true;
+                        batchHexOwnerDirty = true;
+                    }
                 }
+                batchHexOwner = false;
+                if(batchHexOwnerDirty) wodMarkTerrainPoliticalDirty();
             }
             if(Array.isArray(s.forts)) {
                 gameData.forts = s.forts.map(f => Object.assign({}, f));
@@ -13923,9 +13947,13 @@
                 }
             }
             if(Array.isArray(s.bridges)) {
-                gameData.bridges = s.bridges.map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
-                for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
-                wodRebuildBridgeHexIndex();
+                let nextBridges = s.bridges.map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+                let nextSig = nextBridges.length + ':' + nextBridges.map(b => b && b.id).join(',');
+                if(nextSig !== gameData._bridgeIndexSig) {
+                    gameData.bridges = nextBridges;
+                    for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+                    wodRebuildBridgeHexIndex();
+                }
             }
             if(s.entities) {
                 let byUid = new Map(gameData.entities.map(e => [e.uid, e]));
@@ -14007,6 +14035,8 @@
             }
             if(s.connectedSlots && gameData.mp && gameData.mp.enabled && Array.isArray(s.connectedSlots))
                 gameData.mp.connectedSlots = s.connectedSlots.slice();
+            if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost)
+                wodMpEnsureLocalSlotConnected();
             if(s.matchEnd) wodMpClientApplyMatchEnd(s.matchEnd);
             if(s.allReady && gameData.mp && gameData.mp.enabled && !gameData.mp.allReady)
                 wodMpFinalizeMatchStart();
@@ -14014,6 +14044,20 @@
 
         let wodMpSnapSeq = 0;
         let wodMpLobbyCount = 1;
+        let _wodMpClientSnapPending = null;
+        let _wodMpClientSnapRaf = 0;
+        function wodMpScheduleClientSnapApply(payload) {
+            if(!payload) return;
+            _wodMpClientSnapPending = payload;
+            if(_wodMpClientSnapRaf) return;
+            _wodMpClientSnapRaf = requestAnimationFrame(() => {
+                _wodMpClientSnapRaf = 0;
+                let p = _wodMpClientSnapPending;
+                _wodMpClientSnapPending = null;
+                if(p) wodMpApplySnapPayload(p);
+                if(_wodMpClientSnapPending) wodMpScheduleClientSnapApply(_wodMpClientSnapPending);
+            });
+        }
         function wodMpHostEmitSnapshot() {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost) return;
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.connected) return;
@@ -17114,7 +17158,11 @@
             });
             addEventListener('wod-mp-PlayerReconnected', (ev) => {
                 let slot = ev.detail && ev.detail.slot | 0;
-                if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
+                if(!gameData.mp || !gameData.mp.enabled || !slot) return;
+                if(gameState !== 'PLAYING') {
+                    if(slot === (gameData.mp.localSlot | 0)) wodMpEnsureLocalSlotConnected();
+                    return;
+                }
                 if(gameData.mp.isHost) wodMpHostMarkSlotReconnected(slot);
                 else {
                     if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
@@ -17190,6 +17238,8 @@
                         return;
                     }
                     if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
+                    wodMpEnsureLocalSlotConnected();
+                    if(gameData.mp.isHost && mySlot) wodMpHostMarkSlotReconnected(mySlot);
                     if(!gameData.hexList || !gameData.hexList.length) {
                         showNotification('Host map data was empty — cannot rejoin.');
                         gameState = 'MENU';
@@ -17404,7 +17454,7 @@
             });
             addEventListener('wod-mp-Snap', (ev) => {
                 if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) return;
-                if(ev.detail && ev.detail.payload) wodMpApplySnapPayload(ev.detail.payload);
+                if(ev.detail && ev.detail.payload) wodMpScheduleClientSnapApply(ev.detail.payload);
             });
             addEventListener('wod-mp-RemoteCmd', (ev) => {
                 if(!gameData.mp || !gameData.mp.isHost) return;
@@ -39170,11 +39220,33 @@
             lastTime = time;
             let mpWaiting = gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay();
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
-                if(UI.escMenu.classList.contains('hidden') && gameData.speed > 0) updateCamera(dt * gameData.speed);
-                let lo = wodLocalPlayerOwner();
-                gameData._uiTroopCache = getOwnerTroopManpower(lo);
-                gameData._uiTankCache = getOwnerTanks(lo);
-                gameData._uiShipCache = getOwnerShipCount(lo);
+                let simDt = dt * (gameData.speed || 0);
+                gameData._frameSimDt = simDt > 0 ? simDt : (1 / 60);
+                if(UI.escMenu.classList.contains('hidden') && gameData.speed > 0) updateCamera(simDt);
+                gameData._mpClientHudAcc = (gameData._mpClientHudAcc || 0) + dt;
+                if(gameData._mpClientHudAcc >= 0.22) {
+                    gameData._mpClientHudAcc = 0;
+                    let lo = wodLocalPlayerOwner();
+                    gameData._uiTroopCache = getOwnerTroopManpower(lo);
+                    gameData._uiTankCache = getOwnerTanks(lo);
+                    gameData._uiShipCache = getOwnerShipCount(lo);
+                }
+                gameData._mpClientMoveScanAcc = (gameData._mpClientMoveScanAcc || 0) + dt;
+                if(gameData._mpClientMoveScanAcc >= 0.15) {
+                    gameData._mpClientMoveScanAcc = 0;
+                    let mn = 0, pn = 0, loM = wodLocalPlayerOwner();
+                    let ents = gameData.entities;
+                    for(let ei = 0, el = ents ? ents.length : 0; ei < el; ei++) {
+                        let e = ents[ei];
+                        if(!e || e.hp <= 0) continue;
+                        if(e.target || (e.path && e.path.length)) {
+                            mn++;
+                            if(e.owner === loM) pn++;
+                        }
+                    }
+                    gameData._wodMovingN = mn;
+                    gameData._wodPlayerMovingN = pn;
+                }
                 draw();
                 animationFrameId = requestAnimationFrame(gameLoop);
                 return;
