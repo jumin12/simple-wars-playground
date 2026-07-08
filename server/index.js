@@ -598,16 +598,38 @@ function countMatchHumanPlayers(room) {
   return n;
 }
 
+function roomConnectedSlots(room) {
+  if (!room) return [];
+  return room.clients
+    .map((c) => c.slot | 0)
+    .filter((s) => s > 0)
+    .sort((a, b) => a - b);
+}
+
+function patchRoomSnapConnectedSlots(room) {
+  if (!room || !room.lastSnap || !room.lastSnap.payload) return;
+  room.lastSnap.payload.connectedSlots = roomConnectedSlots(room);
+}
+
+function cleanupEmptyMultiplayerRooms() {
+  for (const room of rooms.values()) {
+    const pending = room.pendingReconnect ? room.pendingReconnect.size : 0;
+    if (room.clients.length > 0 || pending > 0) continue;
+    if (room.matchStarted) finalizeAbandonedMatch(room);
+    rooms.delete(room.id);
+  }
+}
+
 function maybeEndMatchWhenEmpty(room) {
-  if (!room || !room.matchStarted) return;
-  if (countMatchHumanPlayers(room) > 0) {
-    broadcastLobbyList();
+  if (!room) return;
+  const pending = room.pendingReconnect ? room.pendingReconnect.size : 0;
+  if (room.clients.length > 0 || pending > 0) {
+    if (room.matchStarted) broadcastLobbyList();
     return;
   }
-  const pending = room.pendingReconnect ? room.pendingReconnect.size : 0;
-  if (room.clients.length > 0 || pending > 0) return;
-  finalizeAbandonedMatch(room);
+  if (room.matchStarted) finalizeAbandonedMatch(room);
   rooms.delete(room.id);
+  broadcastLobbyList();
 }
 
 function migrateMatchHostIfNeeded(room) {
@@ -661,8 +683,8 @@ function disconnectClientFromMatch(client, immediate) {
   const idx = room.clients.indexOf(client);
   if (idx >= 0) room.clients.splice(idx, 1);
   if (wasHost && room.clients.length > 0) migrateMatchHostIfNeeded(room);
-  if (room.clients.length === 0 && !otherHumanPlayersRemain(room, leftSlot)) {
-    endMatchAsLastHuman(room);
+  if (room.clients.length === 0) {
+    maybeEndMatchWhenEmpty(room);
     client.room = null;
     client.slot = 0;
     client.isHost = false;
@@ -671,7 +693,7 @@ function disconnectClientFromMatch(client, immediate) {
 
   if (immediate) {
     markSlotDisconnectedInMatch(room, leftSlot);
-    if (room.clients.length === 0 && !otherHumanPlayersRemain(room, leftSlot)) endMatchAsLastHuman(room);
+    if (room.clients.length === 0) maybeEndMatchWhenEmpty(room);
     client.room = null;
     client.slot = 0;
     client.isHost = false;
@@ -683,7 +705,7 @@ function disconnectClientFromMatch(client, immediate) {
     cancelMatchReconnectGrace(room, leftSlot);
     const timer = setTimeout(() => {
       markSlotDisconnectedInMatch(room, leftSlot);
-      if (room.clients.length === 0 && !otherHumanPlayersRemain(room, leftSlot)) endMatchAsLastHuman(room);
+      if (room.clients.length === 0) maybeEndMatchWhenEmpty(room);
     }, MP_DISCONNECT_GRACE_MS);
     room.pendingReconnect.set(leftSlot, { timer, playerId: sanitizePlayerId(client.playerId) });
     try {
@@ -1297,6 +1319,7 @@ wss.on('connection', (ws) => {
         client.room = room;
         client.slot = rejoinSlot;
         room.clients.push(client);
+        patchRoomSnapConnectedSlots(room);
         const hostLive = room.clients.some((c) => c.isHost && c.ws.readyState === 1);
         if (!hostLive) {
           room.host = client;
@@ -1583,6 +1606,8 @@ setInterval(() => {
       } catch (_) {}
     }
   });
+  cleanupEmptyMultiplayerRooms();
+  broadcastLobbyList();
 }, 15000);
 
 loadLeaderboardFromDisk();

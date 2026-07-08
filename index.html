@@ -10537,18 +10537,6 @@
             if(conn && conn.length && conn.indexOf(owner) < 0) return false;
             return true;
         }
-        /** Keep the local human seat in connectedSlots (rejoin snaps can arrive before host marks reconnect). */
-        function wodMpEnsureLocalSlotConnected() {
-            if(!gameData.mp || !gameData.mp.enabled) return;
-            let slot = gameData.mp.localSlot | 0;
-            if(!slot || !wodMpSeatTypeIsHuman(slot)) return;
-            if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
-            if(gameData.mp.connectedSlots.indexOf(slot) < 0) gameData.mp.connectedSlots.push(slot);
-            if(gameData.mp.aiControlledSlots) {
-                let ai = gameData.mp.aiControlledSlots.indexOf(slot);
-                if(ai >= 0) gameData.mp.aiControlledSlots.splice(ai, 1);
-            }
-        }
         /** Freeze seat→playerId mapping at match start so disconnected players still get match-end stats. */
         function wodMpFreezeSeatPlayerMap() {
             if(!gameData.mp || !gameData.mp.enabled) return;
@@ -10618,6 +10606,17 @@
             if(gameData.mp.aiControlledSlots.indexOf(slot) < 0) gameData.mp.aiControlledSlots.push(slot);
             showNotification('Seat ' + slot + ' disconnected — AI controls their forces until they return.');
             wodMpHostEmitSnapshot();
+        }
+        function wodMpEnsureLocalSlotConnected() {
+            if(!gameData.mp || !gameData.mp.enabled) return;
+            let slot = gameData.mp.localSlot | 0;
+            if(!slot || !wodMpSeatTypeIsHuman(slot)) return;
+            if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
+            if(gameData.mp.connectedSlots.indexOf(slot) < 0) gameData.mp.connectedSlots.push(slot);
+            if(gameData.mp.aiControlledSlots) {
+                let ai = gameData.mp.aiControlledSlots.indexOf(slot);
+                if(ai >= 0) gameData.mp.aiControlledSlots.splice(ai, 1);
+            }
         }
         function wodMpHostMarkSlotReconnected(slot) {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost || !slot) return;
@@ -13921,20 +13920,10 @@
                 }
             }
             if(s.hexOwners && s.hexOwners.length === gameData.hexList.length) {
-                batchHexOwner = true;
-                batchHexOwnerDirty = false;
                 for(let i = 0; i < gameData.hexList.length; i++) {
                     let h = gameData.hexList[i];
-                    let no = s.hexOwners[i];
-                    if(h.owner !== no) {
-                        h.owner = no;
-                        h.renderColor = h.baseColor;
-                        gameData._landIncomeCacheDirty = true;
-                        batchHexOwnerDirty = true;
-                    }
+                    if(h.owner !== s.hexOwners[i]) setHexOwner(h, s.hexOwners[i]);
                 }
-                batchHexOwner = false;
-                if(batchHexOwnerDirty) wodMarkTerrainPoliticalDirty();
             }
             if(Array.isArray(s.forts)) {
                 gameData.forts = s.forts.map(f => Object.assign({}, f));
@@ -13947,13 +13936,9 @@
                 }
             }
             if(Array.isArray(s.bridges)) {
-                let nextBridges = s.bridges.map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
-                let nextSig = nextBridges.length + ':' + nextBridges.map(b => b && b.id).join(',');
-                if(nextSig !== gameData._bridgeIndexSig) {
-                    gameData.bridges = nextBridges;
-                    for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
-                    wodRebuildBridgeHexIndex();
-                }
+                gameData.bridges = s.bridges.map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
+                for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
+                wodRebuildBridgeHexIndex();
             }
             if(s.entities) {
                 let byUid = new Map(gameData.entities.map(e => [e.uid, e]));
@@ -14033,10 +14018,10 @@
                 if(s.encircledReliefKeys != null) gameData.encircledReliefHexes = new Set(s.encircledReliefKeys);
                 if(s.cityWarKeys != null) gameData._mpSyncCityWarKeys = new Set(s.cityWarKeys);
             }
-            if(s.connectedSlots && gameData.mp && gameData.mp.enabled && Array.isArray(s.connectedSlots))
+            if(s.connectedSlots && gameData.mp && gameData.mp.enabled && Array.isArray(s.connectedSlots)) {
                 gameData.mp.connectedSlots = s.connectedSlots.slice();
-            if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost)
                 wodMpEnsureLocalSlotConnected();
+            }
             if(s.matchEnd) wodMpClientApplyMatchEnd(s.matchEnd);
             if(s.allReady && gameData.mp && gameData.mp.enabled && !gameData.mp.allReady)
                 wodMpFinalizeMatchStart();
@@ -17158,11 +17143,7 @@
             });
             addEventListener('wod-mp-PlayerReconnected', (ev) => {
                 let slot = ev.detail && ev.detail.slot | 0;
-                if(!gameData.mp || !gameData.mp.enabled || !slot) return;
-                if(gameState !== 'PLAYING') {
-                    if(slot === (gameData.mp.localSlot | 0)) wodMpEnsureLocalSlotConnected();
-                    return;
-                }
+                if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
                 if(gameData.mp.isHost) wodMpHostMarkSlotReconnected(slot);
                 else {
                     if(!gameData.mp.connectedSlots) gameData.mp.connectedSlots = [];
@@ -17239,7 +17220,6 @@
                     }
                     if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
                     wodMpEnsureLocalSlotConnected();
-                    if(gameData.mp.isHost && mySlot) wodMpHostMarkSlotReconnected(mySlot);
                     if(!gameData.hexList || !gameData.hexList.length) {
                         showNotification('Host map data was empty — cannot rejoin.');
                         gameState = 'MENU';
@@ -17247,6 +17227,7 @@
                     }
                     wodMpFreezeSeatPlayerMap();
                     gameData.mp.allReady = true;
+                    if(gameData.mp.isHost) wodMpHostMarkSlotReconnected(gameData.mp.localSlot);
                     wodMpRefreshSyncOverlay();
                     setGameSpeed(1, true);
                     wodMpFlushStatsToServer();
@@ -17355,6 +17336,8 @@
                 gameData.mp.localSlot = WodMultiplayer.api.slot;
                 gameData.mp.allReady = true;
                 if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
+                wodMpEnsureLocalSlotConnected();
+                wodMpHostEmitSnapshot();
                 wodMpFreezeSeatPlayerMap();
                 wodMpRefreshSyncOverlay();
                 setGameSpeed(1, true);
