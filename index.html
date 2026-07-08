@@ -14460,11 +14460,12 @@
                         online: true
                     });
                 } else {
+                    let cachedStats = (f.stats && typeof f.stats === 'object') ? f.stats : null;
                     out.push({
                         playerId: f.playerId,
                         displayName: f.displayName || f.playerId,
                         unitSkin: f.unitSkin || 'nato',
-                        stats: { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 },
+                        stats: cachedStats || { wins: 0, losses: 0, kills: 0, defeats: 0, gamesPlayed: 0 },
                         online: online
                     });
                 }
@@ -14475,7 +14476,85 @@
             if((window._wodMpLbScope || 'global') !== 'friends') return;
             wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', 'friends');
         }
+        function wodMpRefreshLeaderboardIfVisible() {
+            let tab = document.querySelector('.mp-hub-tab[data-mp-tab="rankings"].active');
+            if(!tab) return;
+            wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
+        }
         const WOD_MP_LB_PAGE_SIZE = 5;
+        const WOD_MP_LB_CACHE_KEY = 'wodMpLeaderboardCache_v1';
+        function wodMpLoadLeaderboardCache(scope) {
+            try {
+                let raw = localStorage.getItem(WOD_MP_LB_CACHE_KEY);
+                if(!raw) return [];
+                let data = JSON.parse(raw);
+                let bucket = data && data[scope || 'global'];
+                return (bucket && Array.isArray(bucket.rows)) ? bucket.rows : [];
+            } catch(_) { return []; }
+        }
+        function wodMpSaveLeaderboardCache(scope, rows, sortKey) {
+            try {
+                let data = {};
+                try {
+                    let raw = localStorage.getItem(WOD_MP_LB_CACHE_KEY);
+                    if(raw) data = JSON.parse(raw) || {};
+                } catch(_) {}
+                data[scope || 'global'] = {
+                    rows: (rows || []).slice(),
+                    sort: sortKey || 'wins',
+                    updatedAt: Date.now()
+                };
+                localStorage.setItem(WOD_MP_LB_CACHE_KEY, JSON.stringify(data));
+            } catch(_) {}
+        }
+        function wodMpMergeLeaderboardCacheRows(serverRows, scope) {
+            let byId = {};
+            for(let r of wodMpLoadLeaderboardCache(scope)) {
+                if(r && r.playerId) byId[r.playerId] = r;
+            }
+            for(let r of (serverRows || [])) {
+                if(r && r.playerId) byId[r.playerId] = r;
+            }
+            wodEnsurePlayerId();
+            let myId = wodProgress.profile.playerId || '';
+            if(myId) {
+                let mine = byId[myId];
+                let localStats = wodMpCombinedStats();
+                let localName = wodProgress.profile.mpDisplayName || wodMpGetDisplayName() || myId;
+                let localSkin = gameData.unitSkin || wodProgress.profile.unitSkin || 'nato';
+                if(!mine) {
+                    byId[myId] = {
+                        playerId: myId,
+                        displayName: localName,
+                        unitSkin: localSkin,
+                        stats: localStats,
+                        online: !!(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen)
+                    };
+                } else {
+                    mine.stats = localStats;
+                    if(localName) mine.displayName = localName;
+                    if(localSkin) mine.unitSkin = localSkin;
+                }
+            }
+            return Object.values(byId);
+        }
+        function wodMpPersistFriendStatsFromLeaderboard(rows) {
+            if(!wodProgress || !wodProgress.profile || !Array.isArray(wodProgress.profile.friends)) return;
+            let changed = false;
+            for(let row of rows || []) {
+                if(!row || !row.playerId) continue;
+                let f = wodProgress.profile.friends.find(x => x && x.playerId === row.playerId);
+                if(!f) continue;
+                if(row.displayName && f.displayName !== row.displayName) { f.displayName = row.displayName; changed = true; }
+                if(row.unitSkin && f.unitSkin !== row.unitSkin) { f.unitSkin = row.unitSkin; changed = true; }
+                if(row.stats && typeof row.stats === 'object') {
+                    f.stats = Object.assign({}, row.stats);
+                    f.statsUpdatedAt = row.updatedAt || Date.now();
+                    changed = true;
+                }
+            }
+            if(changed) scheduleSaveWodProgress();
+        }
         function wodMpRenderLeaderboardPage() {
             let rows = window._wodMpLbRows || [];
             let sortKey = window._wodMpLbSort || 'wins';
@@ -14491,7 +14570,7 @@
                 let scope = window._wodMpLbScope || 'global';
                 host.innerHTML = '<p class="mp-hub-pane-lead">' + (scope === 'friends'
                     ? 'No friend stats yet — add friends and play to compare rankings.'
-                    : 'No rankings yet — play while connected to appear here.') + '</p>';
+                    : 'No rankings cached yet — connect to multiplayer to load global standings.') + '</p>';
                 if(pager) pager.hidden = true;
                 return;
             }
@@ -14568,6 +14647,7 @@
             window._wodMpLbScope = scope || window._wodMpLbScope || 'global';
             if(window._wodMpLbScope === 'friends') rows = wodMpMergeFriendsLeaderboardRows(rows);
             window._wodMpLbRows = wodMpSortLeaderboardRows(rows, window._wodMpLbSort);
+            wodMpPersistFriendStatsFromLeaderboard(window._wodMpLbRows);
             if(window._wodMpLbPage == null) window._wodMpLbPage = 0;
             wodMpRenderLeaderboardPage();
         }
@@ -14582,15 +14662,20 @@
             document.querySelectorAll('#mpLbScope [data-lb-scope]').forEach(btn => {
                 btn.classList.toggle('active', btn.getAttribute('data-lb-scope') === window._wodMpLbScope);
             });
+            let cached = wodMpLoadLeaderboardCache(window._wodMpLbScope);
+            if(cached.length)
+                wodMpRenderLeaderboard(cached, window._wodMpLbSort, window._wodMpLbScope);
             let friendIds = null;
             if(window._wodMpLbScope === 'friends')
                 friendIds = wodMpGetFriendsList().map(f => f && f.playerId).filter(Boolean);
             if(WodMultiplayer.api && WodMultiplayer.api.socketOpen)
                 WodMultiplayer.requestLeaderboard(window._wodMpLbSort, friendIds);
-            else if(window._wodMpLbScope === 'friends')
-                wodMpRenderLeaderboard([], window._wodMpLbSort, 'friends');
-            else if(window._wodMpLbScope === 'global')
-                wodMpRenderLeaderboard([], window._wodMpLbSort, 'global');
+            else if(!cached.length) {
+                if(window._wodMpLbScope === 'friends')
+                    wodMpRenderLeaderboard([], window._wodMpLbSort, 'friends');
+                else
+                    wodMpRenderLeaderboard([], window._wodMpLbSort, 'global');
+            }
         }
         function wodMpShareProfileLink() {
             wodEnsurePlayerId();
@@ -16546,11 +16631,15 @@
             addEventListener('wod-mp-Leaderboard', (ev) => {
                 let d = ev.detail || {};
                 let scope = window._wodMpLbScope || d.scope || 'global';
-                wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', scope);
+                let sort = d.sort || window._wodMpLbSort || 'wins';
+                let rows = wodMpMergeLeaderboardCacheRows(d.rows, scope);
+                wodMpSaveLeaderboardCache(scope, rows, sort);
+                wodMpRenderLeaderboard(rows, sort, scope);
             });
             addEventListener('wod-mp-Registered', (ev) => {
                 if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
                 wodMpConfirmRegisteredDisplayName();
+                wodMpRefreshLeaderboardIfVisible();
             });
             addEventListener('wod-mp-Profile', (ev) => {
                 if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
@@ -18644,6 +18733,7 @@
             if(typeof updateSkinShop === 'function') updateSkinShop();
             if(typeof wodMpRefreshLocalMpStatsReadout === 'function') wodMpRefreshLocalMpStatsReadout();
             if(typeof wodMpRenderFriendsList === 'function') wodMpRenderFriendsList();
+            if(typeof wodMpRefreshLeaderboardIfVisible === 'function') wodMpRefreshLeaderboardIfVisible();
             persistWodProgressNow();
             scheduleCloudSyncProgress();
         }

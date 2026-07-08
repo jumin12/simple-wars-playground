@@ -296,6 +296,11 @@ function computeCombinedStats(profile) {
   };
 }
 
+function forEachStoredProfile(fn) {
+  if (typeof fn !== 'function') return;
+  for (const [id, prof] of profiles) fn(id, prof);
+}
+
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
@@ -587,6 +592,7 @@ module.exports = {
   attachClientProfile,
   validateEquippedSkin,
   computeCombinedStats,
+  forEachStoredProfile,
   skinIsOwned,
   sanitizePlayerId,
 };

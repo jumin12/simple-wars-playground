@@ -311,6 +311,57 @@ function updateLeaderboardEntry(client, combinedStats) {
   scheduleLeaderboardSave();
 }
 
+function leaderboardRowFromProfile(playerId, profile) {
+  if (!playerId || !profile) return null;
+  const stats = profiles.computeCombinedStats(profile);
+  const name = String((profile.profile && profile.profile.mpDisplayName) || '').trim();
+  const hasActivity =
+    stats.gamesPlayed > 0 || stats.wins > 0 || stats.kills > 0 || stats.defeats > 0;
+  if (!name && !hasActivity) return null;
+  return {
+    playerId,
+    displayName: sanitizeDisplayName(name || 'Player'),
+    unitSkin: sanitizeUnitSkin(profile.profile && profile.profile.unitSkin),
+    stats: sanitizeCombinedStats(stats),
+    updatedAt: Math.max(0, parseInt(profile.updatedAt, 10) || 0),
+  };
+}
+
+function mergeProfileIntoLeaderboard(playerId) {
+  const pid = sanitizePlayerId(playerId);
+  if (!pid) return;
+  const prof = profiles.getProfile(pid);
+  if (!prof) return;
+  const incoming = leaderboardRowFromProfile(pid, prof);
+  if (!incoming) return;
+  const existing = leaderboard.get(pid);
+  if (!existing) {
+    leaderboard.set(pid, incoming);
+    return;
+  }
+  leaderboard.set(pid, {
+    playerId: pid,
+    displayName: incoming.displayName || existing.displayName || 'Player',
+    unitSkin: incoming.unitSkin || existing.unitSkin || 'nato',
+    stats: incoming.stats,
+    updatedAt: Math.max(incoming.updatedAt || 0, existing.updatedAt || 0),
+  });
+}
+
+function ensureAllProfilesInLeaderboard() {
+  profiles.forEachStoredProfile((playerId) => mergeProfileIntoLeaderboard(playerId));
+  scheduleLeaderboardSave();
+}
+
+function ensureLeaderboardIdsPresent(ids) {
+  if (!Array.isArray(ids)) return;
+  for (const raw of ids) {
+    const pid = sanitizePlayerId(raw);
+    if (!pid) continue;
+    if (!leaderboard.has(pid)) mergeProfileIntoLeaderboard(pid);
+  }
+}
+
 function cooldownBlocked(map, key, ms) {
   const last = map.get(key) || 0;
   return Date.now() - last < ms;
@@ -321,13 +372,21 @@ function markCooldown(map, key) {
 }
 
 function buildLeaderboardRows(sortKey, filterIds) {
+  ensureAllProfilesInLeaderboard();
   const key = ['wins', 'kills', 'losses', 'defeats', 'gamesPlayed'].includes(sortKey)
     ? sortKey
     : 'wins';
   let rows = [...leaderboard.values()].filter((r) => r && r.playerId);
   if (Array.isArray(filterIds) && filterIds.length) {
-    const set = new Set(filterIds);
+    ensureLeaderboardIdsPresent(filterIds);
+    const set = new Set(filterIds.map((id) => sanitizePlayerId(id)).filter(Boolean));
     rows = rows.filter((r) => set.has(r.playerId));
+    for (const id of set) {
+      if (!rows.some((r) => r.playerId === id)) {
+        const row = leaderboard.get(id);
+        if (row) rows.push(row);
+      }
+    }
   }
   return rows
     .sort((a, b) => {
@@ -1614,6 +1673,7 @@ loadLeaderboardFromDisk();
 loadFriendRemovalsFromDisk();
 loadFriendRequestsFromDisk();
 profiles.loadProfilesFromDisk();
+ensureAllProfilesInLeaderboard();
 
 server.listen(PORT, () => {
   console.log(`simple-wars-mp listening on ${PORT} (max ${MAX_PLAYERS} players / room)`);
