@@ -6,7 +6,7 @@ const path = require('path');
 
 const PROFILES_FILE = path.join(__dirname, 'player-profiles.json');
 const SAVE_DEBOUNCE_MS = 1500;
-const DEFAULT_GOLD = 1000;
+const DEFAULT_GOLD = 0;
 const SHOP_SKIN_COST = 100;
 const SHOP_ANCIENT_CIV_GAUL_COST = 100;
 const SHOP_ANCIENT_CIV_PACK_COST = 200;
@@ -42,6 +42,7 @@ const LIFETIME_KEYS = [
   'peakFieldManpower', 'battlesWon', 'campaignLosses', 'citiesCaptured', 'convoysCaptured',
   'factoriesBuilt', 'harborsBuilt', 'fortsBuilt', 'peakMoneyHeld',
   'unitsBuiltLight', 'unitsBuiltHeavy', 'unitsBuiltShip', 'unitsBuiltMarine', 'gamesStarted',
+  'missionsCompleted', 'campaignsWon', 'campaignBattlesWon',
 ];
 
 const LIFETIME_MAX_JUMP = {
@@ -52,6 +53,7 @@ const LIFETIME_MAX_JUMP = {
   peakFieldManpower: 100000, peakMoneyHeld: 500000,
   unitsBuiltLight: 200, unitsBuiltHeavy: 80, unitsBuiltShip: 40, unitsBuiltMarine: 80,
   gamesStarted: 5,
+  missionsCompleted: 10, campaignsWon: 3, campaignBattlesWon: 30,
 };
 
 /** @type {Map<string, object>} */
