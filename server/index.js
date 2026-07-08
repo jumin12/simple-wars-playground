@@ -14,6 +14,7 @@ const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
 const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
 const FRIEND_REMOVALS_FILE = path.join(__dirname, 'friend-removals.json');
+const FRIEND_REQUESTS_FILE = path.join(__dirname, 'friend-requests-pending.json');
 const LEADERBOARD_SAVE_DEBOUNCE_MS = 2000;
 const FRIEND_REMOVALS_SAVE_DEBOUNCE_MS = 2000;
 
@@ -24,6 +25,9 @@ const onlineByPlayerId = new Map();
 const leaderboard = new Map();
 /** @type {Map<string, object[]>} */
 const pendingFriendRemovals = new Map();
+const pendingFriendRequests = new Map();
+let friendRequestsSaveTimer = null;
+const FRIEND_REQUESTS_SAVE_DEBOUNCE_MS = 2000;
 let leaderboardSaveTimer = null;
 let friendRemovalsSaveTimer = null;
 const friendRequestCooldown = new Map();
@@ -33,7 +37,7 @@ const FRIEND_REQUEST_COOLDOWN_MS = 30000;
 const LOBBY_INVITE_COOLDOWN_MS = 45000;
 const LOBBY_INVITE_DEDUPE_MS = 60000;
 /** Grace before a dropped connection is treated as a full disconnect (AI takeover). */
-const MP_DISCONNECT_GRACE_MS = 45000;
+const MP_DISCONNECT_GRACE_MS = 22500;
 /** Close idle sockets that stop responding to pings (proxies often drop ~60s idle WS). */
 const MP_STALE_CONNECTION_MS = 90000;
 
@@ -210,6 +214,89 @@ function flushFriendRemovalsForClient(client) {
   for (const entry of list) sendFriendRemovedNotice(client, entry);
   pendingFriendRemovals.delete(targetId);
   scheduleFriendRemovalsSave();
+}
+
+function loadFriendRequestsFromDisk() {
+  try {
+    if (!fs.existsSync(FRIEND_REQUESTS_FILE)) return;
+    const raw = fs.readFileSync(FRIEND_REQUESTS_FILE, 'utf8');
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object') return;
+    for (const [id, rows] of Object.entries(data)) {
+      const targetId = sanitizePlayerId(id);
+      if (!targetId || !Array.isArray(rows)) continue;
+      const list = [];
+      for (const row of rows) {
+        if (!row || typeof row !== 'object') continue;
+        const fromPlayerId = sanitizePlayerId(row.fromPlayerId);
+        if (!fromPlayerId) continue;
+        list.push({
+          fromPlayerId,
+          fromName: sanitizeDisplayName(row.fromName),
+          unitSkin: sanitizeUnitSkin(row.unitSkin),
+          at: Math.max(0, parseInt(row.at, 10) || 0),
+        });
+      }
+      if (list.length) pendingFriendRequests.set(targetId, list);
+    }
+  } catch (err) {
+    console.warn('[friend-requests] load failed:', err.message);
+  }
+}
+
+function scheduleFriendRequestsSave() {
+  if (friendRequestsSaveTimer) return;
+  friendRequestsSaveTimer = setTimeout(() => {
+    friendRequestsSaveTimer = null;
+    try {
+      const data = Object.fromEntries(pendingFriendRequests);
+      fs.writeFileSync(FRIEND_REQUESTS_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[friend-requests] save failed:', err.message);
+    }
+  }, FRIEND_REQUESTS_SAVE_DEBOUNCE_MS);
+}
+
+function queueFriendRequest(targetId, entry) {
+  if (!targetId || !entry || !entry.fromPlayerId) return;
+  const list = pendingFriendRequests.get(targetId) || [];
+  if (!list.some((row) => row.fromPlayerId === entry.fromPlayerId)) {
+    list.push({
+      fromPlayerId: entry.fromPlayerId,
+      fromName: sanitizeDisplayName(entry.fromName),
+      unitSkin: sanitizeUnitSkin(entry.unitSkin),
+      at: entry.at || Date.now(),
+    });
+    pendingFriendRequests.set(targetId, list);
+    scheduleFriendRequestsSave();
+  }
+}
+
+function sendFriendRequestNotice(client, entry) {
+  if (!client || !client.ws || client.ws.readyState !== 1 || !entry) return false;
+  try {
+    client.ws.send(
+      JSON.stringify({
+        t: 'friend_request',
+        fromPlayerId: entry.fromPlayerId,
+        fromName: entry.fromName || 'Player',
+        unitSkin: entry.unitSkin || 'nato',
+      }),
+    );
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function flushFriendRequestsForClient(client) {
+  const targetId = client && client.playerId;
+  if (!targetId) return;
+  const list = pendingFriendRequests.get(targetId);
+  if (!list || !list.length) return;
+  for (const entry of list) sendFriendRequestNotice(client, entry);
+  pendingFriendRequests.delete(targetId);
+  scheduleFriendRequestsSave();
 }
 
 function updateLeaderboardEntry(client, combinedStats) {
@@ -500,8 +587,23 @@ function finalizeAbandonedMatch(room) {
   if (result.ok) room._matchEndRecorded = true;
 }
 
+function countMatchHumanPlayers(room) {
+  if (!room || !room.matchStarted) return 0;
+  const map = room.seatByPlayerId || {};
+  let n = 0;
+  for (const [pid, slot] of Object.entries(map)) {
+    if (!sanitizePlayerId(pid)) continue;
+    if (isHumanSeat(room.meta, slot | 0)) n++;
+  }
+  return n;
+}
+
 function maybeEndMatchWhenEmpty(room) {
   if (!room || !room.matchStarted) return;
+  if (countMatchHumanPlayers(room) > 0) {
+    broadcastLobbyList();
+    return;
+  }
   const pending = room.pendingReconnect ? room.pendingReconnect.size : 0;
   if (room.clients.length > 0 || pending > 0) return;
   finalizeAbandonedMatch(room);
@@ -673,18 +775,35 @@ function countOnline() {
 function getLobbyListPublic() {
   const out = [];
   for (const room of rooms.values()) {
-    if (room.matchStarted) continue;
     normalizeSeatTypes(room.meta);
     const cap = lobbyCap();
+    const inProgress = !!room.matchStarted;
+    const connected = room.clients.length;
+    const disc = room.disconnectedSlots ? room.disconnectedSlots.size : 0;
+    let listRank = 0;
+    if (inProgress) listRank = connected > 0 ? 1 : 2;
+    const seatMap = room.seatByPlayerId || {};
     out.push({
       id: room.id,
       name: room.name,
-      players: room.clients.length,
+      players: connected,
       max: cap,
       locked: !!room.password,
-      meta: metaWire(room),
+      inProgress,
+      matchInProgress: inProgress,
+      disconnectedCount: disc,
+      listRank,
+      rejoinPlayerIds: Object.keys(seatMap).filter((id) => sanitizePlayerId(id)),
+      meta: inProgress
+        ? { ...room.meta, matchInProgress: true, occupiedSlots: room.clients.map((c) => c.slot).sort((a, b) => a - b) }
+        : metaWire(room),
     });
   }
+  out.sort((a, b) => {
+    if (a.listRank !== b.listRank) return a.listRank - b.listRank;
+    if (!a.inProgress && !b.inProgress) return (b.players | 0) - (a.players | 0);
+    return String(a.name || '').localeCompare(String(b.name || ''));
+  });
   return out;
 }
 
@@ -806,6 +925,7 @@ wss.on('connection', (ws) => {
       }
       ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId, profile: result.profile || null }));
       flushFriendRemovalsForClient(client);
+      flushFriendRequestsForClient(client);
       return;
     }
 
@@ -945,23 +1065,23 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', msg: 'Wait before sending another friend request to this player' }));
         return;
       }
-      const target = onlineByPlayerId.get(targetId);
-      if (!target || target.ws.readyState !== 1) {
-        ws.send(JSON.stringify({ t: 'error', msg: 'Player is offline' }));
+      const fromName = client.displayName || 'Player';
+      const unitSkin = client.unitSkin || 'nato';
+      if (!profiles.recordFriendRequest(fromId, fromName, unitSkin, targetId)) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Could not send friend request (already friends or pending).' }));
         return;
       }
       markCooldown(friendRequestCooldown, reqKey);
-      try {
-        target.ws.send(
-          JSON.stringify({
-            t: 'friend_request',
-            fromPlayerId: fromId,
-            fromName: client.displayName || 'Player',
-            unitSkin: client.unitSkin || 'nato',
-          }),
-        );
-      } catch (_) {}
-      ws.send(JSON.stringify({ t: 'friend_request_sent', targetPlayerId: targetId }));
+      const entry = {
+        fromPlayerId: fromId,
+        fromName,
+        unitSkin,
+        at: Date.now(),
+      };
+      const target = onlineByPlayerId.get(targetId);
+      const delivered = target ? sendFriendRequestNotice(target, entry) : false;
+      if (!delivered) queueFriendRequest(targetId, entry);
+      ws.send(JSON.stringify({ t: 'friend_request_sent', targetPlayerId: targetId, persisted: true }));
       return;
     }
 
@@ -969,22 +1089,29 @@ wss.on('connection', (ws) => {
       const fromId = sanitizePlayerId(msg.fromPlayerId);
       const toId = client.playerId;
       if (!fromId || !toId) return;
-      const requester = onlineByPlayerId.get(fromId);
-      if (!requester || requester.ws.readyState !== 1) {
-        ws.send(JSON.stringify({ t: 'error', msg: 'That player is no longer online' }));
-        return;
-      }
       const accept = !!msg.accept;
+      profiles.applyFriendRequestReply(fromId, toId, accept, client.displayName, client.unitSkin);
+      const requester = onlineByPlayerId.get(fromId);
+      if (requester && requester.ws.readyState === 1) {
+        try {
+          requester.ws.send(
+            JSON.stringify({
+              t: 'friend_request_reply',
+              fromPlayerId: toId,
+              fromName: client.displayName || 'Player',
+              unitSkin: client.unitSkin || 'nato',
+              accept,
+            }),
+          );
+        } catch (_) {}
+        if (accept) {
+          try {
+            requester.ws.send(JSON.stringify({ t: 'profile', profile: profiles.exportProfile(fromId) }));
+          } catch (_) {}
+        }
+      }
       try {
-        requester.ws.send(
-          JSON.stringify({
-            t: 'friend_request_reply',
-            fromPlayerId: toId,
-            fromName: client.displayName || 'Player',
-            unitSkin: client.unitSkin || 'nato',
-            accept,
-          }),
-        );
+        ws.send(JSON.stringify({ t: 'profile', profile: profiles.exportProfile(toId) }));
       } catch (_) {}
       return;
     }
@@ -1460,6 +1587,7 @@ setInterval(() => {
 
 loadLeaderboardFromDisk();
 loadFriendRemovalsFromDisk();
+loadFriendRequestsFromDisk();
 profiles.loadProfilesFromDisk();
 
 server.listen(PORT, () => {

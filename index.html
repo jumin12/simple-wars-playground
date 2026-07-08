@@ -1878,6 +1878,33 @@
             gap: 10px;
             flex-wrap: wrap;
         }
+        @media (max-width: 720px) {
+            .mp-hub-foot {
+                justify-content: center;
+                width: 100%;
+            }
+            .mp-hub-foot .menu-btn {
+                width: 100%;
+                max-width: 260px;
+                margin-left: auto !important;
+                margin-right: auto !important;
+            }
+        }
+        .mp-lobby-row--match {
+            border-color: rgba(212, 175, 55, 0.35);
+            background: rgba(212, 175, 55, 0.06);
+        }
+        .mp-lobby-row--waiting {
+            opacity: 0.82;
+        }
+        .mp-lobby-status {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #d4af37;
+            margin-top: 2px;
+        }
         .mp-profile-stats-actions {
             margin-top: 10px;
         }
@@ -7758,7 +7785,7 @@
                                 <button type="button" class="mp-hub-tab" id="mpTabRankings" data-mp-tab="rankings" role="tab" aria-selected="false">Rankings</button>
                             </div>
                             <div id="mpPaneBrowse" class="mp-hub-pane active" data-mp-pane="browse" role="tabpanel">
-                                <p class="mp-hub-pane-lead">Join an open lobby. Password-protected games prompt for a password when you join.</p>
+                                <p class="mp-hub-pane-lead">Open lobbies appear first. Ongoing matches are listed below — rejoin if you were disconnected.</p>
                                 <div id="mpLobbyList"></div>
                             </div>
                             <div id="mpPaneHost" class="mp-hub-pane" data-mp-pane="host" role="tabpanel" hidden>
@@ -10668,9 +10695,12 @@
         }
         function wodMpLeaveActiveMatch() {
             if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING') return false;
-            if(gameData.mp.isHost) wodMpHostEndMatchForQuit(gameData.mp.localSlot);
-            else if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendCmd)
+            wodMpFlushStatsToServer();
+            if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.leaveLobby)
+                WodMultiplayer.leaveLobby();
+            else if(!gameData.mp.isHost && typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendCmd)
                 WodMultiplayer.sendCmd({ kind: 'forfeit' });
+            wodMpClearSession();
             return true;
         }
         function wodGetActiveFactionSlotsForMap() {
@@ -14615,11 +14645,18 @@
             let hostForm = document.getElementById('mpHostForm');
             if(hostForm) hostForm.classList.toggle('visible', tabId === 'host');
             if(tabId === 'friends') {
+                wodCloudFetchProfile();
                 wodMpRenderFriendsList();
                 wodMpQueryFriendPresence();
             }
             if(tabId === 'rankings') {
                 wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
+            }
+            if(tabId === 'browse') {
+                if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen)
+                    WodMultiplayer.requestLobbyList();
+                else
+                    wodMpRenderLobbyList([]);
             }
         }
         function wodMpSendFriendRequest(rawId) {
@@ -16304,63 +16341,100 @@
             let el = document.getElementById('mpOnlineCount');
             if(el) el.textContent = (n != null && n >= 0) ? String(n) : '—';
         }
+        function wodMpMergeFriendEntries(localArr, remoteArr) {
+            let out = [];
+            let seen = new Set();
+            for(let arr of [remoteArr, localArr]) {
+                if(!Array.isArray(arr)) continue;
+                for(let r of arr) {
+                    if(!r || !r.playerId || seen.has(r.playerId)) continue;
+                    seen.add(r.playerId);
+                    out.push(Object.assign({}, r));
+                }
+            }
+            return out;
+        }
         function wodMpRenderLobbyList(lobbies) {
             let el = document.getElementById('mpLobbyList');
             if(!el) return;
-            let myId = (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.code) ? WodMultiplayer.api.code : '';
+            wodEnsurePlayerId();
+            let myLobbyId = (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.code) ? WodMultiplayer.api.code : '';
+            let myPlayerId = (wodProgress && wodProgress.profile && wodProgress.profile.playerId) ? wodProgress.profile.playerId : '';
             if(!lobbies || lobbies.length === 0) {
-                el.innerHTML = '<p class="mp-hub-pane-lead" style="margin:12px">No open lobbies. Switch to the Host tab to create one.</p>';
+                el.innerHTML = '<p class="mp-hub-pane-lead" style="margin:12px">No open lobbies. Switch to the Host tab to create one, or check back for ongoing matches to rejoin.</p>';
                 return;
             }
             el.innerHTML = lobbies.map(l => {
                 let meta = l.meta || {};
+                let inProgress = !!(l.inProgress || l.matchInProgress || meta.matchInProgress);
                 let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel, meta.fogOfWar ? 'Fog' : '']
                     .filter(Boolean).join(' · ');
-                if(!detail) detail = 'Host still configuring map';
+                if(!detail) detail = inProgress ? 'Match in progress' : 'Host still configuring map';
                 let name = wodMpEscapeHtml(l.name || 'Game');
                 let selfNm = (wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName) ? String(wodProgress.profile.mpDisplayName).trim() : '';
-                let joinPart = myId === l.id
-                    ? '<span style="font-size:12px;opacity:0.85">' + (selfNm ? (wodMpEscapeHtml(selfNm) + ' — you\'re in this lobby') : 'You\'re in this lobby') + '</span>'
-                    : '<button type="button" class="build-btn mp-join-btn" data-id="' + wodMpEscapeHtml(l.id) + '" data-locked="' + (l.locked ? '1' : '0') + '">Join</button>';
-                return '<div class="mp-lobby-row">' +
+                let canRejoin = inProgress && myPlayerId && Array.isArray(l.rejoinPlayerIds) && l.rejoinPlayerIds.indexOf(myPlayerId) >= 0;
+                let rowClass = 'mp-lobby-row' + (inProgress ? ' mp-lobby-row--match' : '') + (inProgress && (l.players | 0) === 0 ? ' mp-lobby-row--waiting' : '');
+                let status = '';
+                if(inProgress) {
+                    if((l.players | 0) > 0) status = '<div class="mp-lobby-status">Match in progress · ' + (l.players | 0) + ' connected</div>';
+                    else status = '<div class="mp-lobby-status">Waiting for players to rejoin</div>';
+                }
+                let joinPart = '';
+                if(canRejoin && myLobbyId !== l.id)
+                    joinPart = '<button type="button" class="build-btn mp-rejoin-btn" data-id="' + wodMpEscapeHtml(l.id) + '" data-locked="' + (l.locked ? '1' : '0') + '">Rejoin</button>';
+                else if(myLobbyId === l.id)
+                    joinPart = '<span style="font-size:12px;opacity:0.85">' + (selfNm ? (wodMpEscapeHtml(selfNm) + ' — you\'re in this lobby') : 'You\'re in this lobby') + '</span>';
+                else if(!inProgress)
+                    joinPart = '<button type="button" class="build-btn mp-join-btn" data-id="' + wodMpEscapeHtml(l.id) + '" data-locked="' + (l.locked ? '1' : '0') + '">Join</button>';
+                else
+                    joinPart = '<span style="font-size:12px;opacity:0.65">In progress</span>';
+                return '<div class="' + rowClass + '">' +
                     '<div style="min-width:0;flex:1">' +
                     '<div style="font-weight:700">' + name + (l.locked ? ' <span title="Password required">🔒</span>' : '') + '</div>' +
                     '<div style="font-size:12px;opacity:0.85">' + wodMpEscapeHtml(detail) + '</div>' +
-                    '<div style="font-size:12px;opacity:0.75">' + (l.players | 0) + ' / ' + (l.max || WOD_MP_MAX_PLAYERS) + ' players</div>' +
+                    status +
+                    '<div style="font-size:12px;opacity:0.75">' + (inProgress
+                        ? ((l.disconnectedCount | 0) + ' disconnected · ' + (l.players | 0) + ' online')
+                        : ((l.players | 0) + ' / ' + (l.max || WOD_MP_MAX_PLAYERS) + ' players')) + '</div>' +
                     '</div>' + joinPart + '</div>';
             }).join('');
-            el.querySelectorAll('.mp-join-btn').forEach(btn => {
-                btn.onclick = () => wodMpJoinLobbyFromList(btn.getAttribute('data-id'), btn.getAttribute('data-locked') === '1');
+            el.querySelectorAll('.mp-join-btn, .mp-rejoin-btn').forEach(btn => {
+                btn.onclick = () => wodMpJoinLobbyFromList(btn.getAttribute('data-id'), btn.getAttribute('data-locked') === '1', {
+                    rejoin: btn.classList.contains('mp-rejoin-btn')
+                });
             });
         }
-        async function wodMpJoinLobbyFromList(id, locked) {
+        async function wodMpJoinLobbyFromList(id, locked, opts) {
+            opts = opts || {};
             let st = document.getElementById('mpStatus');
-            if(!wodMpRequireRegisteredDisplayName('joining a lobby')) return;
+            if(!wodMpRequireRegisteredDisplayName(opts.rejoin ? 'rejoining a match' : 'joining a lobby')) return;
             await wodMpEnsureConnected();
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.socketOpen) {
                 if(st) st.textContent = 'Could not reach multiplayer server.';
                 return;
             }
-            if(WodMultiplayer.api.code && WodMultiplayer.api.code !== id) {
+            if(WodMultiplayer.api.code && WodMultiplayer.api.code !== id && gameState !== 'PLAYING') {
                 showNotification('Leave your current lobby first, then join another.');
                 return;
             }
-            if(WodMultiplayer.api.code === id) return;
+            if(WodMultiplayer.api.code === id && !opts.rejoin) return;
             let pw = '';
             if(locked) {
                 pw = prompt('This lobby requires a password:') || '';
                 if(!pw) { if(st) st.textContent = 'Password required.'; return; }
             }
             try {
-                if(st) st.textContent = 'Joining…';
+                if(st) st.textContent = opts.rejoin ? 'Rejoining match…' : 'Joining…';
                 wodEnsurePlayerId();
                 await WodMultiplayer.joinLobby(id, pw, { playerId: wodProgress.profile.playerId || '' });
                 wodMpLobbyCount = Math.max(wodMpLobbyCount, WodMultiplayer.api.slot | 0, 1);
-                if(st) st.textContent = 'Joined — waiting for host to launch.';
+                if(opts.rejoin || (window._wodMpSession && window._wodMpSession.inMatch))
+                    if(st) st.textContent = 'Rejoining match…';
+                else if(st) st.textContent = 'Joined — waiting for host to launch.';
                 wodMpRefreshMpPanelState();
                 wodMpRenderLobbyList(WodMultiplayer.api.lobbies);
             } catch(e) {
-                let m = e && e.message ? String(e.message) : 'Join failed';
+                let m = e && e.message ? String(e.message) : (opts.rejoin ? 'Rejoin failed' : 'Join failed');
                 if(st) st.textContent = m;
                 showNotification(m);
             }
@@ -17341,9 +17415,6 @@
                     let slot = d.fromSlot | 0;
                     if(!slot) return;
                     wodMpHostMarkSlotDisconnected(slot);
-                    let hs = gameData.mp.humanSlots || [];
-                    let active = (gameData.mp.connectedSlots || []).filter(s => hs.indexOf(s) >= 0);
-                    if(active.length === 0) wodMpHostEndMatchForQuit(slot);
                     return;
                 }
                 if(d.cmd.kind === 'move') {
@@ -18517,6 +18588,11 @@
         function wodApplyServerProfile(profile) {
             if(!profile || typeof profile !== 'object') return;
             let keepPlayerId = (wodProgress && wodProgress.profile && wodProgress.profile.playerId) || '';
+            let localFriends = (wodProgress && wodProgress.profile) ? {
+                friends: wodProgress.profile.friends,
+                friendRequestsOut: wodProgress.profile.friendRequestsOut,
+                friendRequestsIn: wodProgress.profile.friendRequestsIn
+            } : null;
             wodProgress = wodMergeProgressObject({
                 achievements: profile.achievements,
                 lifetime: profile.lifetime,
@@ -18524,12 +18600,19 @@
                 multiplayer: profile.multiplayer,
                 profile: Object.assign({}, profile.profile || {}, { playerId: keepPlayerId || (profile.profile && profile.profile.playerId) || '' })
             });
+            if(localFriends && wodProgress.profile) {
+                wodProgress.profile.friends = wodMpMergeFriendEntries(localFriends.friends, wodProgress.profile.friends);
+                wodProgress.profile.friendRequestsOut = wodMpMergeFriendEntries(localFriends.friendRequestsOut, wodProgress.profile.friendRequestsOut);
+                wodProgress.profile.friendRequestsIn = wodMpMergeFriendEntries(localFriends.friendRequestsIn, wodProgress.profile.friendRequestsIn);
+            }
             applyWodProfileToGame();
             syncGoldenChipUnlockFromAchievements();
             if(typeof renderAchievementsUi === 'function') renderAchievementsUi();
             if(typeof updateSkinShop === 'function') updateSkinShop();
             if(typeof wodMpRefreshLocalMpStatsReadout === 'function') wodMpRefreshLocalMpStatsReadout();
+            if(typeof wodMpRenderFriendsList === 'function') wodMpRenderFriendsList();
             persistWodProgressNow();
+            scheduleCloudSyncProgress();
         }
         function wodBuildCloudSyncPayload() {
             flushGameProfileToWod();

@@ -163,6 +163,59 @@ function sanitizeFriendRequests(arr) {
   return out.slice(0, 100);
 }
 
+function mergeFriendRequestsArrays(a, b) {
+  const merged = sanitizeFriendRequests(a);
+  const seen = new Set(merged.map((r) => r.playerId));
+  for (const r of sanitizeFriendRequests(b)) {
+    if (!seen.has(r.playerId)) {
+      merged.push(r);
+      seen.add(r.playerId);
+    }
+  }
+  return merged.slice(0, 100);
+}
+
+function recordFriendRequest(fromId, fromName, fromSkin, toId) {
+  const from = sanitizePlayerId(fromId);
+  const to = sanitizePlayerId(toId);
+  if (!from || !to || from === to) return false;
+  const fp = getProfile(from);
+  const tp = getProfile(to);
+  if ((tp.profile.friends || []).some((f) => f && f.playerId === from)) return false;
+  const outEntry = { playerId: to, fromName: String(fromName || '').trim().slice(0, 24), unitSkin: sanitizeSkin(fromSkin) };
+  const inEntry = { playerId: from, fromName: String(fromName || '').trim().slice(0, 24), unitSkin: sanitizeSkin(fromSkin) };
+  fp.profile.friendRequestsOut = mergeFriendRequestsArrays(fp.profile.friendRequestsOut, [outEntry]);
+  tp.profile.friendRequestsIn = mergeFriendRequestsArrays(tp.profile.friendRequestsIn, [inEntry]);
+  fp.updatedAt = Date.now();
+  tp.updatedAt = Date.now();
+  scheduleSave();
+  return true;
+}
+
+function applyFriendRequestReply(fromId, toId, accept, toName, toSkin) {
+  const from = sanitizePlayerId(fromId);
+  const to = sanitizePlayerId(toId);
+  if (!from || !to) return false;
+  const fp = getProfile(from);
+  const tp = getProfile(to);
+  fp.profile.friendRequestsOut = (fp.profile.friendRequestsOut || []).filter((r) => r && r.playerId !== to);
+  tp.profile.friendRequestsIn = (tp.profile.friendRequestsIn || []).filter((r) => r && r.playerId !== from);
+  if (accept) {
+    const a = { playerId: to, displayName: String(toName || '').trim().slice(0, 24), unitSkin: sanitizeSkin(toSkin) };
+    const b = { playerId: from, displayName: String(fp.profile.mpDisplayName || '').trim().slice(0, 24) || 'Player', unitSkin: sanitizeSkin(fp.profile.unitSkin) };
+    if (!(fp.profile.friends || []).some((f) => f && f.playerId === to)) {
+      fp.profile.friends = sanitizeFriendsList([...(fp.profile.friends || []), a]);
+    }
+    if (!(tp.profile.friends || []).some((f) => f && f.playerId === from)) {
+      tp.profile.friends = sanitizeFriendsList([...(tp.profile.friends || []), b]);
+    }
+  }
+  fp.updatedAt = Date.now();
+  tp.updatedAt = Date.now();
+  scheduleSave();
+  return true;
+}
+
 function recomputeAchievements(profile) {
   const A = profile.achievements;
   const L = profile.lifetime || defaultLifetime();
@@ -383,8 +436,12 @@ function syncProgress(playerId, payload) {
       }
     }
     if (Array.isArray(cp.friends)) cur.friends = sanitizeFriendsList(cp.friends);
-    if (Array.isArray(cp.friendRequestsOut)) cur.friendRequestsOut = sanitizeFriendRequests(cp.friendRequestsOut);
-    if (Array.isArray(cp.friendRequestsIn)) cur.friendRequestsIn = sanitizeFriendRequests(cp.friendRequestsIn);
+    if (Array.isArray(cp.friendRequestsOut)) {
+      cur.friendRequestsOut = mergeFriendRequestsArrays(cur.friendRequestsOut, cp.friendRequestsOut);
+    }
+    if (Array.isArray(cp.friendRequestsIn)) {
+      cur.friendRequestsIn = mergeFriendRequestsArrays(cur.friendRequestsIn, cp.friendRequestsIn);
+    }
   }
 
   recomputeAchievements(profile);
@@ -525,6 +582,8 @@ module.exports = {
   syncProgress,
   shopPurchase,
   recordMpMatchEnd,
+  recordFriendRequest,
+  applyFriendRequestReply,
   attachClientProfile,
   validateEquippedSkin,
   computeCombinedStats,
