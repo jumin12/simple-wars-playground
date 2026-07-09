@@ -12370,7 +12370,8 @@
             }
             return out;
         }
-        /** Drop near-duplicates, collinear midpoints, and sharp reverse kinks from arrow polylines. */
+        /** Drop near-duplicates, collinear midpoints, and sharp reverse kinks from arrow polylines.
+         * Display-only — never run this on unit.path movement corridors (it collapses bridge decks). */
         function wodCleanOrderArrowPolyline(pts) {
             if(!pts || pts.length < 2) return pts || [];
             let hr = gameData.hexRadius || 20;
@@ -12453,7 +12454,8 @@
                     out[out.length - 1] = exactEnd;
                 }
             }
-            return wodCleanOrderArrowPolyline(out);
+            // Keep dense bridge deck points for movement — arrow display cleans separately.
+            return out;
         }
         /** Shift the next path waypoint onto unit.target; returns false if the path is empty. */
         function wodTakeNextPathTarget(unit) {
@@ -22067,6 +22069,7 @@
 
         function wodUnitRouteUsesBridge(unit) {
             if(!wodUnitUsesLandBridges(unit)) return false;
+            if(unit._wodRouteUsesBridge) return true;
             if(wodUnitPointOnBridgeRoute(unit, unit.x, unit.y, 1.06)) return true;
             if(unit.target && wodUnitPointOnBridgeRoute(unit, unit.target.x, unit.target.y, 1.14)) return true;
             if(unit.orderTarget && wodUnitPointOnBridgeRoute(unit, unit.orderTarget.x, unit.orderTarget.y, 1.1)) return true;
@@ -22443,32 +22446,33 @@
             return best ? {hex: best, exactX: best.x, exactY: best.y} : null;
         }
 
-        /** Snap ship/sea-convoy orders to open water only — never land or bridge deck. */
+        /** Accept ship/sea-convoy orders only when the click is already on open water.
+         * Land clicks return null so the ship stays put (including in mixed land+ship groups). */
         function wodResolveShipMarchHex(unit, x, y) {
             if(!unit || (unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute))) return null;
             let coord = pixelToHex(x, y);
             let direct = gameData.hexes[`${coord.q},${coord.r}`];
             if(direct && wodIsOpenWaterHex(direct) && canUseHexForMovement(unit, direct)) {
-                // Keep the click only when it still samples as water (no shoreline land pixels).
                 if(wodSamplePosOnWalkableTerrain(unit, x, y))
                     return { hex: direct, exactX: x, exactY: y };
                 return { hex: direct, exactX: direct.x, exactY: direct.y };
             }
+            // Only a tiny shoreline fudge — never pull a land click across the map onto water.
+            let hr = gameData.hexRadius || 20;
+            let maxD2 = hr * hr * 1.15;
             let best = null,
                 bestScore = Infinity;
-            for(let pt of getHexesInRadius(coord.q, coord.r, 22)) {
+            for(let pt of getHexesInRadius(coord.q, coord.r, 1)) {
                 let hex = gameData.hexes[`${pt.q},${pt.r}`];
                 if(!hex || !wodIsOpenWaterHex(hex) || !canUseHexForMovement(unit, hex)) continue;
                 let dx = x - hex.x,
                     dy = y - hex.y;
                 let score = dx * dx + dy * dy;
-                if(score < bestScore) {
+                if(score <= maxD2 && score < bestScore) {
                     bestScore = score;
                     best = hex;
                 }
             }
-            if(!best) best = findBestReachableHexToward(unit, x, y);
-            if(best && !wodIsOpenWaterHex(best)) best = null;
             return best ? { hex: best, exactX: best.x, exactY: best.y } : null;
         }
 
@@ -23263,7 +23267,10 @@
             // Deadline: each `consider` composes multiple land A*/BFS legs. With several AI-built
             // bridges on the map this stacked into multi-hundred-ms (worst 1.8s) frame stalls.
             let bridgeT0 = performance.now();
-            const BRIDGE_SEARCH_MS = 8;
+            // Human bridge marches need more time — 8ms often timed out before composing a
+            // deck crossing, leaving units stuck at the shore with greedy water hops.
+            let human = wodMpIsHumanOwner(unit.owner);
+            const BRIDGE_SEARCH_MS = human ? 22 : 8;
             let best = [],
                 bestLen = Infinity;
             function overDeadline() {
@@ -24046,13 +24053,26 @@
                     else if(job.tries < 10)
                         wodPlayerOrderQueue.push(job);
                     else {
-                        // Final fallback after repeated pathfind failures: a greedy
-                        // terrain-following chain so the unit still routes AROUND mountains
-                        // and water instead of marching a straight line into them.
+                        // Final fallback after repeated pathfind failures: try a portal bridge
+                        // path first, then a greedy land chain — never a straight water hop.
                         let u = job.unit;
                         let tgt = job.worldPoints[job.worldPoints.length - 1];
                         let sHex = getNearestWalkableHexForUnit(u, u.x, u.y);
-                        let tHex = getNearestHexToPoint(tgt.x, tgt.y);
+                        let tReach = findReachableOrderHex(u, tgt.x, tgt.y);
+                        let tHex = tReach ? tReach.hex : getNearestHexToPoint(tgt.x, tgt.y);
+                        if(sHex && tHex && wodUnitPrefersLandOnlyPath(u) && !wodOrderIntoWater(u, tHex)) {
+                            let bridgeAlt = wodTryPortalBridgeMarchPath(u, sHex, tHex);
+                            if(wodHexPathLength(bridgeAlt) > 1) {
+                                u.orderTarget = { x: tgt.x, y: tgt.y };
+                                if(wodPathCrossesBridge(bridgeAlt)) u._wodRouteUsesBridge = true;
+                                u.path = wodHexPathToWorldWaypoints(u, bridgeAlt, { x: tgt.x, y: tgt.y });
+                                if(wodTakeNextPathTarget(u)) {
+                                    invalidateUnitOrderArrowCache(u);
+                                    n++;
+                                    continue;
+                                }
+                            }
+                        }
                         if(sHex && tHex) {
                             let chain = buildGreedyLandHexChain(u, sHex, tHex, 140);
                             if(chain.length > 1) {
@@ -24244,7 +24264,8 @@
             let corridor = wodHexPathToWorldWaypoints(unit, hexPath, endPt);
             let pts = [{x: startPt ? startPt.x : hexPath[0].x, y: startPt ? startPt.y : hexPath[0].y}];
             for(let wi = 0; wi < corridor.length; wi++) pts.push(corridor[wi]);
-            return wodCleanOrderArrowPolyline(dedupeNearOrderPathPoints(pts));
+            // Dedup only — do not kink-clean; that collapses bridge deck corridors used for movement.
+            return dedupeNearOrderPathPoints(pts);
         }
 
         function wodEnqueueOrderArrowPathBuild(unit, marchPts) {
@@ -24386,6 +24407,7 @@
             // Amphibious corridors need the into-water flag so movement clamps, stuck logic
             // and terrain-safety checks treat the water legs as legal.
             if(wodPathCrossesOpenWater(fullHex)) unit._wodOrderIntoWater = true;
+            if(wodPathCrossesBridge(fullHex)) unit._wodRouteUsesBridge = true;
             unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
             if(!wodTakeNextPathTarget(unit)) return false;
             // Keep sparse click waypoints for leg logic; dense corridor lives in unit.path only.
@@ -24446,6 +24468,7 @@
 
             if(!fromAdvance) {
                 unit._wodOrderIntoWater = false;
+                unit._wodRouteUsesBridge = false;
                 unit._wodAmpPathKey = null;
                 unit._wodAmpPath = null;
             }
@@ -24503,6 +24526,13 @@
                 let ampPath = findAmphibiousMarchPath(unit, startHex, reachNext.hex);
                 if(wodHexPathLength(ampPath) > 1) path = ampPath;
             }
+            // First-order bridge rescue (parity with replanUnitOrder): try portal/composed
+            // bridge paths before greedy hops that walk into open water at the shore.
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex &&
+                !wodOrderIntoWater(unit, reachNext.hex)) {
+                let bridgeAlt = wodTryPortalBridgeMarchPath(unit, startHex, reachNext.hex);
+                if(wodHexPathLength(bridgeAlt) > 1) path = bridgeAlt;
+            }
             if(path.length <= 1 && unit.type === 'marine' && reachNext.hex && startHex && isWaterHex(startHex) && isWaterHex(reachNext.hex)) {
                 let hop = findGreedyWaterStep(unit, reachNext.hex, { fromHex: startHex });
                 if(hop) {
@@ -24545,6 +24575,22 @@
                         return true;
                     }
                 }
+                // Prefer a single portal bridge hop toward the far shore over a land-greedy
+                // step that may aim into open water beside the deck.
+                if(!wodOrderIntoWater(unit, reachNext.hex) && startHex) {
+                    let bridgeAlt = wodTryPortalBridgeMarchPath(unit, startHex, reachNext.hex);
+                    if(wodHexPathLength(bridgeAlt) > 1) {
+                        if(wodPathCrossesBridge(bridgeAlt)) unit._wodRouteUsesBridge = true;
+                        let exactNext = {x: reachNext.exactX, y: reachNext.exactY};
+                        unit.path = wodHexPathToWorldWaypoints(unit, bridgeAlt, exactNext);
+                        if(!wodTakeNextPathTarget(unit)) {
+                            unit.path = null;
+                            unit.target = {x: reachNext.exactX, y: reachNext.exactY, pathPrepared: true};
+                        }
+                        if(!fromAdvance) wodSeedOrderArrowCurrentLeg(unit, bridgeAlt);
+                        return true;
+                    }
+                }
                 let hop = findGreedyLandStep(unit, reachNext.hex);
                 if(hop) {
                     unit.path = null;
@@ -24554,6 +24600,7 @@
             }
             if(path.length > 1) {
                 if(wodPathCrossesOpenWater(path)) unit._wodOrderIntoWater = true;
+                if(wodPathCrossesBridge(path)) unit._wodRouteUsesBridge = true;
                 let exactNext = {x: reachNext.exactX, y: reachNext.exactY};
                 unit.path = wodHexPathToWorldWaypoints(unit, path, exactNext);
                 if(!wodTakeNextPathTarget(unit)) {
@@ -24613,6 +24660,23 @@
             cy /= units.length;
             let trimR2 = Math.pow(Math.max(20, gameData.hexRadius * 1.45), 2);
             wodApplyPlayerMoveOrders(units, (unit) => {
+                // Ocean units stay put when the stroke ends on land (mixed land+ship groups).
+                if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                    let end = strokePts[strokePts.length - 1];
+                    let sea = wodResolveShipMarchHex(unit, end.x, end.y);
+                    if(!sea) return null;
+                    let ox = unit.x - cx,
+                        oy = unit.y - cy;
+                    let pathPts = [];
+                    for(let i = 0; i < strokePts.length - 1; i++) {
+                        let sx = strokePts[i].x + ox,
+                            sy = strokePts[i].y + oy;
+                        if(wodResolveShipMarchHex(unit, sx, sy))
+                            pathPts.push({ x: sx, y: sy });
+                    }
+                    pathPts.push({ x: sea.exactX, y: sea.exactY });
+                    return pathPts.length ? pathPts : null;
+                }
                 let ox = unit.x - cx;
                 let oy = unit.y - cy;
                 let pathPts = [];
@@ -26396,6 +26460,7 @@
                     if(alt.length > 1) {
                         let endPt = { x: finalTarget.x, y: finalTarget.y };
                         if(convoyCity) endPt.isCity = true;
+                        if(wodPathCrossesBridge(alt)) unit._wodRouteUsesBridge = true;
                         unit.path = wodHexPathToWorldWaypoints(unit, alt, endPt);
                         if(!wodTakeNextPathTarget(unit)) {
                             unit.path = null;
@@ -26427,6 +26492,7 @@
             }
             if(path.length > 1) {
                 if(wodPathCrossesOpenWater(path)) unit._wodOrderIntoWater = true;
+                if(wodPathCrossesBridge(path)) unit._wodRouteUsesBridge = true;
                 let endPt = {x: finalTarget.x, y: finalTarget.y};
                 if(convoyCity) endPt.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endPt);
@@ -40969,22 +41035,33 @@
             let midCol = (cols - 1) / 2;
             let midRow = (rows - 1) / 2;
             if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) {
+                let marched = 0,
+                    shipsHeld = 0;
                 wodApplyPlayerMoveOrders(units, (unit, index) => {
                     let r = Math.floor(index / cols), c = index % cols;
                     let tx = worldPos.x + (c - midCol) * spacing;
                     let ty = worldPos.y + (r - midRow) * spacing;
-                    // Ships/sea convoys: snap to open water (or skip) so land clicks never become order targets.
+                    // Ships: only accept open-water clicks. Land clicks → stay still (even in mixed groups).
                     if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
                         let sea = wodResolveShipMarchHex(unit, tx, ty);
-                        if(!sea) return null;
+                        if(!sea) { shipsHeld++; return null; }
+                        marched++;
                         return [{ x: sea.exactX, y: sea.exactY }];
                     }
+                    marched++;
                     return [{ x: tx, y: ty }];
                 });
+                if(marched === 0 && shipsHeld > 0)
+                    showNotification(shipsHeld === 1 ? 'Ships stay in water' : 'Ships stay in water');
+                else if(shipsHeld > 0)
+                    showNotification(`Marching (${marched}) · ships held`);
+                else
+                    showNotification(marched === 1 ? 'Marching' : `Marching (${marched} units)`);
+            } else {
+                showNotification(units.length === 1 ? 'Marching' : `Marching (${units.length} units)`);
             }
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost)
                 wodMpSendCmd({ kind: 'move', uids: units.map(u => u.uid), x: worldPos.x, y: worldPos.y });
-            showNotification(units.length === 1 ? 'Marching' : `Marching (${units.length} units)`);
         }
 
         function issueLineFormationOrder(start, end) {
