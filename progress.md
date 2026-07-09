@@ -225,3 +225,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Rankings online/offline**: leaderboard cache no longer persists stale `online` flags; rankings tab refreshes friend presence; status shows `? Online` / `? Offline` with clearer styling; server normalizes player IDs to uppercase before the online map lookup.
 - **Campaign**: Units recruit tab hidden during campaign battles (`wod-campaign-battle` HUD class); every win grants requisition (min 200, logged with new budget); roster rows show Veteran ? + XP and a dismiss button (50% refund); veteran flag syncs from XP threshold after battles.
 - Verified: `output/test-campaign-fixes.cjs` — buy/delete/veteran UI, win reward, HUD class, draw-pos cull logic all OK.
+
+## Campaign region battle maps + aggressive AI (2026-07-08)
+- **Region-zoomed battle maps**: launching a campaign battle now builds the map from the war-map cells around that node (`wodRogueBuildRegionBattleMap`) instead of a random similarly-shaped procgen map. City names come from the region's `towns` list (region name on the player's capital).
+- **Split deployment**: roster units are distributed across owned cities (ships to nearby water) rather than stacked on one home city.
+- **Aggressive campaign AI**: Concord pushes instead of camping hold lines (lower push threshold, deeper attack depth, more city strikers, faster strategy pulse via `_campaignAiAggressive`).
+- Verified: `output/test-campaign-region.cjs` — region terrain/names, 6 units split 3/3 across 2 cities, aggression flag set.

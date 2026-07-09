@@ -9972,6 +9972,8 @@
             if(gameData._campaignRun && !gameData._campaignRun.synced && gameState === 'PLAYING')
                 wodCampaignAfterBattle(false);
             gameData._campaignRun = null;
+            gameData._campaignRegionMap = null;
+            gameData._campaignAiAggressive = false;
             gameData._missionRuntime = null;
             gameData._selectedMissionEntry = null;
             gameData._launchingMission = false;
@@ -27903,7 +27905,8 @@
 
             // Solo / skirmish — apply Setup panel variables (must not run for multiplayer).
             let launchingMission = !!(gameData._launchingMission || gameData._selectedMissionEntry);
-            wodPrepareForNewMatch({ keepMp: false, keepLiveMap: launchingMission });
+            let launchingCampaign = !!(gameData._campaignRun && gameData._campaignRegionMap);
+            wodPrepareForNewMatch({ keepMp: false, keepLiveMap: launchingMission || launchingCampaign });
             let mapSizeEl = document.getElementById('setupMapSize');
             let sizePreset = wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
             let newRadius = sizePreset.mapRadius;
@@ -27940,6 +27943,20 @@
                         if(!ok) throw new Error('Mission map could not be loaded');
                     }
                     wodSyncSetupControlsFromLoadedMap();
+                    await assignStartingCities();
+                    wodCaptureTerrainPoliticsBase();
+                } else if(launchingCampaign) {
+                    // Region battle map already loaded in wodRogueStartBattle.
+                    if(!gameData.loadedCustomMap || !gameData.hexList.length) {
+                        let regionMap = gameData._campaignRegionMap || wodRogueBuildRegionBattleMap(gameData._campaignRun.nodeId);
+                        if(regionMap && window.WOD && typeof WOD.loadMapData === 'function') {
+                            WOD.loadMapData(regionMap);
+                            gameData.loadedCustomMap = true;
+                        } else {
+                            throw new Error('Campaign region map could not be loaded');
+                        }
+                    }
+                    // Keep authored city names/ownership from the zoomed war-map region.
                     await assignStartingCities();
                     wodCaptureTerrainPoliticsBase();
                 } else {
@@ -30596,8 +30613,10 @@
             let support = assignment.support != null ? assignment.support : fight.support;
             let enemies = assignment.enemies != null ? assignment.enemies : fight.enemies;
             let localRatio = (support + 1) / (enemies + 1);
-            let shouldPush = fight.shouldPush || localRatio >= 1.35;
-            let wantHold = !shouldPush && support < fight.neededSupport && hpRatio < 0.88 && enemies > 0;
+            let campAggro = !!(gameData._campaignRun || gameData._campaignAiAggressive);
+            let shouldPush = fight.shouldPush || localRatio >= (campAggro ? 0.85 : 1.35);
+            // Campaign battles: Concord presses the attack instead of camping hold lines.
+            let wantHold = !campAggro && !shouldPush && support < fight.neededSupport && hpRatio < 0.88 && enemies > 0;
             if(wantHold) {
                 // Escalation valve: a sector that never accumulates enough support used to
                 // re-issue hold orders forever — whole groups sat parked at the frontline.
@@ -30618,7 +30637,9 @@
                 else unit.holding = false;
                 return moved;
             }
-            let depth = (fight.canOverwhelm || fight.localOverrun) && localRatio >= 1.25 ? 0.92 : 0.58;
+            let depth = campAggro
+                ? ((fight.canOverwhelm || fight.localOverrun || localRatio >= 1.0) ? 1.35 : 1.05)
+                : ((fight.canOverwhelm || fight.localOverrun) && localRatio >= 1.25 ? 0.92 : 0.58);
             let moved = wodAiMoveUnitToward(unit,
                 assignment.holdHex.x + (dx / len) * gameData.hexRadius * depth + spread * 0.35,
                 assignment.holdHex.y + (dy / len) * gameData.hexRadius * depth + slot.oy * 0.35,
@@ -30870,20 +30891,22 @@
                     scored.sort((a, b) => b.sc - a.sc);
                     for(let k = 0; k < Math.min(2, scored.length); k++) mainIdx.push(scored[k].si);
                 }
+                let campAggro = !!(gameData._campaignRun || gameData._campaignAiAggressive);
                 ch = gameData._aiFormChunk = {
                     key: chunkKey,
                     readyUnits,
                     sectors,
                     mainIdx,
-                    mainCount: Math.ceil(readyUnits.length * 0.62),
-                    canBreakthrough: ratio >= 1.15,
-                    playerCityTargets: ratio >= 0.95 ? wodAiCollectPlayerCityAttackHexes(oid) : [],
+                    mainCount: Math.ceil(readyUnits.length * (campAggro ? 0.78 : 0.62)),
+                    canBreakthrough: ratio >= (campAggro ? 0.7 : 1.15),
+                    playerCityTargets: ratio >= (campAggro ? 0.55 : 0.95) ? wodAiCollectPlayerCityAttackHexes(oid) : [],
                     cityStrikerCount: 0,
                     oid,
                     serial,
                     idx: 0
                 };
-                if(ch.playerCityTargets.length) ch.cityStrikerCount = Math.max(1, Math.ceil(readyUnits.length * 0.28));
+                if(ch.playerCityTargets.length)
+                    ch.cityStrikerCount = Math.max(1, Math.ceil(readyUnits.length * (campAggro ? 0.48 : 0.28)));
             }
 
             let t0 = performance.now();
@@ -31597,6 +31620,7 @@
             if(!gameData.aiStrategyTimer) gameData.aiStrategyTimer = 0;
             if(!wodDeferHeavySimDuringMarch()) gameData.aiStrategyTimer += dt;
             let stratEvery = wodUsesVisualViewportLayout() ? 1.85 : 1.55;
+            if(gameData._campaignRun || gameData._campaignAiAggressive) stratEvery *= 0.62;
             if(gameData.aiStrategyTimer < stratEvery) return;
             gameData.aiStrategyTimer = 0;
 
@@ -36497,18 +36521,28 @@
                     name: p.hq ? null : p.capital ? null : wodRogueMakeName(rng, terr, used),
                     x: (p.gx + 0.5) / W,
                     y: (p.gy + 0.5) / H,
+                    gx: p.gx,
+                    gy: p.gy,
                     shape, size, diff,
                     ai: p.capital ? 2 : 1,
                     hq: !!p.hq,
                     capital: !!p.capital,
                     industry: false,
-                    gar
+                    gar,
+                    towns: []
                 };
                 if(p.hq) {
                     node.name = wodRogueMakeName(rng, 'grass', used).replace(/ .*/, '') + ' Landing';
                     node.gar = { light: 0, heavy: 0, ship: 0 };
                 }
                 if(p.capital) node.name = wodRogueMakeName(rng, 'grass', used);
+                // Named settlements inside this region — reused as battle-map city names.
+                let townN = node.hq ? 2 : (node.capital ? 4 : (2 + (diff >= 3 ? 1 : 0) + (rng() < 0.45 ? 1 : 0)));
+                node.towns.push(node.name);
+                while(node.towns.length < townN) {
+                    let tn = wodRogueMakeName(rng, terr, used);
+                    if(node.towns.indexOf(tn) < 0) node.towns.push(tn);
+                }
                 nodes.push(node);
             }
             // Industry nodes: 1 (short) or 2 elsewhere, from the middle of the map.
@@ -37195,21 +37229,273 @@
         }
 
         /* --------------------------- battle launch --------------------------- */
+        function wodRogueEnsureNodeTowns(node, c) {
+            if(!node) return [];
+            if(Array.isArray(node.towns) && node.towns.length) return node.towns;
+            let used = new Set();
+            for(let n of (c && c.world && c.world.nodes) || []) {
+                if(n && n.name) used.add(n.name);
+                if(n && Array.isArray(n.towns)) for(let t of n.towns) used.add(t);
+            }
+            let seed = ((c && c.seed) || 1) ^ wodRogueMul32((node.id || 0) + 17, 0x9e3779b9);
+            let rng = wodRogueRng(seed >>> 0 || 0x51ed270b);
+            let terr = node.shape === 'archipelago' || node.shape === 'island' ? 'water'
+                : node.shape === 'mountain' ? 'mountain'
+                : node.shape === 'forest' ? 'forest'
+                : node.shape === 'desert' ? 'sand' : 'grass';
+            let towns = [node.name || 'Front'];
+            let want = node.hq ? 2 : (node.capital ? 4 : 3);
+            while(towns.length < want) {
+                let tn = wodRogueMakeName(rng, terr, used);
+                if(towns.indexOf(tn) < 0) towns.push(tn);
+            }
+            node.towns = towns;
+            return towns;
+        }
+
+        /**
+         * Build a battle map by zooming into the war-map cells around a region node.
+         * City names come from the node's towns list so the battlefield matches the
+         * area being attacked rather than a random similarly-shaped map.
+         */
+        function wodRogueBuildRegionBattleMap(nodeId) {
+            let c = wodRogueLoad();
+            let node = wodRogueNodeTemplate(nodeId);
+            if(!c || !node) return null;
+            let world = wodRogueEnsureWorldCells();
+            if(!world || !world.cells || !world.W) return null;
+            let W = world.W, H = world.H, cells = world.cells;
+            let sizeVal = node.size || 60;
+            let preset = wodMapSizePreset(sizeVal);
+            let mapR = preset.mapRadius;
+            let hr = preset.hexRadius;
+            let rows = Math.floor(mapR * (preset.rowsMul || 0.8));
+            let spacing = hr * 1.35;
+            let cx = node.gx != null ? (node.gx | 0) : Math.round(node.x * W);
+            let cy = node.gy != null ? (node.gy | 0) : Math.round(node.y * H);
+            // Zoom window: cover the battle grid with a bit of padding so coasts stay visible.
+            let halfCellsX = Math.max(10, Math.ceil(mapR * 0.42));
+            let halfCellsY = Math.max(8, Math.ceil(rows * 0.42));
+            let x0 = Math.max(0, Math.min(W - 1, cx - halfCellsX));
+            let x1 = Math.max(0, Math.min(W - 1, cx + halfCellsX));
+            let y0 = Math.max(0, Math.min(H - 1, cy - halfCellsY));
+            let y1 = Math.max(0, Math.min(H - 1, cy + halfCellsY));
+            // If the window is clipped by the world edge, shift it back toward the node.
+            if(x1 - x0 < halfCellsX * 2) {
+                if(x0 === 0) x1 = Math.min(W - 1, x0 + halfCellsX * 2);
+                else x0 = Math.max(0, x1 - halfCellsX * 2);
+            }
+            if(y1 - y0 < halfCellsY * 2) {
+                if(y0 === 0) y1 = Math.min(H - 1, y0 + halfCellsY * 2);
+                else y0 = Math.max(0, y1 - halfCellsY * 2);
+            }
+            let cellW = Math.max(1, x1 - x0 + 1);
+            let cellH = Math.max(1, y1 - y0 + 1);
+            let seed = (c.seed ^ wodRogueMul32(nodeId + 91, 0x85ebca6b)) >>> 0;
+            let rng = wodRogueRng(seed || 0x51ed270b);
+            let aiCount = Math.max(1, node.ai || 1);
+            let owners = [1];
+            for(let o = 2; o <= aiCount + 1; o++) owners.push(o);
+            let defense = !!(c.alerts && c.alerts[nodeId]);
+            // Attacker comes from the west of the zoomed region; defender holds the east.
+            // On defense missions the player already owns the region, so flip sides.
+            let playerSide = defense ? 'east' : 'west';
+
+            let hexList = [];
+            let hexes = {};
+            for(let r = -rows; r <= rows; r++) {
+                for(let q = -mapR; q <= mapR; q++) {
+                    let u = (q + mapR) / Math.max(1, mapR * 2);
+                    let v = (r + rows) / Math.max(1, rows * 2);
+                    let gx = Math.max(x0, Math.min(x1, x0 + Math.floor(u * (cellW - 0.0001))));
+                    let gy = Math.max(y0, Math.min(y1, y0 + Math.floor(v * (cellH - 0.0001))));
+                    let t = cells[gy * W + gx] || 'grass';
+                    // Soften pure mountain walls so battles stay playable.
+                    if(t === 'mountain' && rng() < 0.18) t = 'hill';
+                    let x = q * spacing, y = r * spacing;
+                    let hex = {
+                        q, r, x, y,
+                        type: t,
+                        owner: 0,
+                        baseColor: null,
+                        renderColor: null
+                    };
+                    hexList.push(hex);
+                    hexes[`${q},${r}`] = hex;
+                }
+            }
+
+            function isLandHex(h) {
+                return h && h.type !== 'water' && h.type !== 'mountain';
+            }
+            function pickLandSites(side, count, avoid) {
+                let pool = [];
+                for(let h of hexList) {
+                    if(!isLandHex(h)) continue;
+                    let onSide = side === 'west' ? h.q < -mapR * 0.12 : h.q > mapR * 0.12;
+                    if(!onSide) continue;
+                    // Prefer interior land away from the map rim.
+                    let edge = Math.max(Math.abs(h.q) / mapR, Math.abs(h.r) / Math.max(rows, 1));
+                    if(edge > 0.88) continue;
+                    pool.push(h);
+                }
+                pool.sort((a, b) => {
+                    let ae = Math.abs(a.q) + Math.abs(a.r) * 0.35;
+                    let be = Math.abs(b.q) + Math.abs(b.r) * 0.35;
+                    return ae - be;
+                });
+                let out = [];
+                let minDist = Math.max(hr * 14, mapR * hr * 0.22);
+                for(let h of pool) {
+                    if(out.length >= count) break;
+                    let tooClose = out.some(c => {
+                        let dx = c.x - h.x, dy = c.y - h.y;
+                        return Math.sqrt(dx * dx + dy * dy) < minDist;
+                    }) || (avoid || []).some(c => {
+                        let dx = c.x - h.x, dy = c.y - h.y;
+                        return Math.sqrt(dx * dx + dy * dy) < minDist * 0.85;
+                    });
+                    if(tooClose) continue;
+                    out.push(h);
+                }
+                // Fallback: any land on that side.
+                if(out.length < count) {
+                    for(let h of pool) {
+                        if(out.length >= count) break;
+                        if(out.indexOf(h) >= 0) continue;
+                        out.push(h);
+                    }
+                }
+                return out;
+            }
+
+            let townNames = wodRogueEnsureNodeTowns(node, c).slice();
+            while(townNames.length < 4) {
+                let used = new Set(townNames);
+                for(let n of c.world.nodes || []) if(n && n.name) used.add(n.name);
+                townNames.push(wodRogueMakeName(rng, node.shape === 'desert' ? 'sand' : 'grass', used));
+            }
+            if(c) wodRogueSave();
+            let citiesPerSide = Math.max(2, Math.min(4, Math.ceil(townNames.length / 2)));
+            let playerSites = pickLandSites(playerSide, citiesPerSide, []);
+            let enemySites = pickLandSites(playerSide === 'west' ? 'east' : 'west', citiesPerSide, playerSites);
+            // Ensure at least one city each.
+            if(!playerSites.length) {
+                let any = hexList.find(isLandHex);
+                if(any) playerSites = [any];
+            }
+            if(!enemySites.length) {
+                let any = hexList.find(h => isLandHex(h) && playerSites.indexOf(h) < 0);
+                if(any) enemySites = [any];
+            }
+
+            let cities = [];
+            let nameIdx = 0;
+            function addCity(site, owner, isCapital) {
+                if(!site) return;
+                let nm = townNames[nameIdx % townNames.length] || (node.name + ' ' + (nameIdx + 1));
+                nameIdx++;
+                // First player city keeps the region name when attacking/defending that region.
+                if(owner === 1 && isCapital) nm = node.name || nm;
+                let cid = 'city_' + cities.length;
+                let city = {
+                    id: cid,
+                    name: nm,
+                    x: site.x, y: site.y, q: site.q, r: site.r,
+                    owner,
+                    hasFactory: !!isCapital,
+                    hasHarbor: false,
+                    hp: 1000, maxHp: 1000,
+                    urbanStyle: (seed + cities.length) % 4,
+                    incomeBonus: 0,
+                    manpowerBonus: 0
+                };
+                cities.push(city);
+                site.owner = owner;
+                // Stamp a compact urban footprint.
+                for(let dq = -2; dq <= 2; dq++) {
+                    for(let dr = -2; dr <= 2; dr++) {
+                        if(dq * dq + dr * dr > 5) continue;
+                        let th = hexes[`${site.q + dq},${site.r + dr}`];
+                        if(!th || th.type === 'water' || th.type === 'mountain') continue;
+                        th.type = 'urban';
+                        th.cityId = cid;
+                        th.urbanVariant = (seed + Math.abs(dq) + Math.abs(dr)) % 5;
+                        th.owner = owner;
+                    }
+                }
+                // Claim a blob of surrounding land for starting territory.
+                let claimR = Math.max(5, Math.floor(mapR * 0.18));
+                for(let dq = -claimR; dq <= claimR; dq++) {
+                    for(let dr = -claimR; dr <= claimR; dr++) {
+                        if(dq * dq + dr * dr > claimR * claimR) continue;
+                        let th = hexes[`${site.q + dq},${site.r + dr}`];
+                        if(!th || th.type === 'water' || th.type === 'mountain') continue;
+                        if(th.owner === 0) th.owner = owner;
+                    }
+                }
+            }
+            for(let i = 0; i < playerSites.length; i++) addCity(playerSites[i], 1, i === 0);
+            // Split enemy cities across AI owners when the capital has 2 armies.
+            for(let i = 0; i < enemySites.length; i++) {
+                let ow = owners[1 + (i % Math.max(1, owners.length - 1))];
+                addCity(enemySites[i], ow, i < (owners.length - 1));
+            }
+
+            // Fill remaining unclaimed land by nearest city (keeps a clear front).
+            for(let h of hexList) {
+                if(h.owner !== 0 || h.type === 'water' || h.type === 'mountain') continue;
+                let best = null, bd = Infinity;
+                for(let city of cities) {
+                    let dx = city.x - h.x, dy = city.y - h.y;
+                    let d = dx * dx + dy * dy;
+                    if(d < bd) { bd = d; best = city; }
+                }
+                if(best) h.owner = best.owner;
+            }
+
+            let roads = [];
+            for(let i = 0; i < cities.length; i++) {
+                let c1 = cities[i];
+                let best = null, bd = Infinity;
+                for(let j = 0; j < cities.length; j++) {
+                    if(i === j) continue;
+                    let c2 = cities[j];
+                    let dx = c1.x - c2.x, dy = c1.y - c2.y;
+                    let d = dx * dx + dy * dy;
+                    if(d < bd) { bd = d; best = c2; }
+                }
+                if(best) roads.push({ from: c1, to: best });
+            }
+
+            return {
+                mapSize: mapR,
+                mapShape: node.shape || 'rectangle',
+                hexList,
+                cities,
+                roads,
+                entities: [],
+                forts: [],
+                bridges: [],
+                savedStartEconomy: false,
+                _campaignRegion: true,
+                _regionNodeId: nodeId,
+                _regionName: node.name
+            };
+        }
+
         function wodRogueStartBattle(nodeId) {
             let c = wodRogueLoad();
             let node = wodRogueNodeTemplate(nodeId);
             if(!c || !node || c.over || !wodRogueNodePlayable(nodeId) || !c.roster.length) return;
             let defense = !!c.alerts[nodeId];
             gameData._campaignRun = { nodeId, defense, synced: false };
-            gameData.loadedCustomMap = false;
             gameData._selectedMissionEntry = null;
             gameData.mission = null;
-            // Deterministic battle map per node + attempt (a retry gets fresh ground).
             let st = c.nodesState[nodeId];
             gameData._mapGenSeed = (c.seed ^ wodRogueMul32(nodeId + 13, 0x9e3779b9) ^ wodRogueMul32((st.battles || 0) + 1, 0x85ebca6b)) >>> 0;
             if(!gameData._mapGenSeed) gameData._mapGenSeed = 0x51ed270b;
             gameData._wodReuseMapGenSeed = true;
-            gameData._mapGenOptions = { mapShape: node.shape };
             let sizeEl = document.getElementById('setupMapSize');
             if(sizeEl) sizeEl.value = String(node.size);
             let aiEl = document.getElementById('setupAI');
@@ -37219,6 +37505,18 @@
             let vmEl = document.getElementById('setupVictoryMode');
             if(vmEl) vmEl.value = 'domination';
             wodApplyGamePeriod(wodGetCampaignGamePeriod(), { saveProfile: true });
+            // Zoom the war-map region into a playable battle map (same terrain + town names).
+            let regionMap = wodRogueBuildRegionBattleMap(nodeId);
+            if(regionMap && window.WOD && typeof WOD.loadMapData === 'function') {
+                WOD.loadMapData(regionMap);
+                gameData.loadedCustomMap = true;
+                gameData._campaignRegionMap = regionMap;
+                gameData._mapGenOptions = { units: false, cities: false, territory: false };
+            } else {
+                gameData.loadedCustomMap = false;
+                gameData._campaignRegionMap = null;
+                gameData._mapGenOptions = { mapShape: node.shape };
+            }
             startGame('ai');
         }
 
@@ -37234,46 +37532,9 @@
             if(!node) return;
             c.nodesState[run.nodeId].battles = (c.nodesState[run.nodeId].battles || 0) + 1;
             wodRogueSave();
-            // Remove default player units.
-            gameData.entities = gameData.entities.filter(u => !(u && u.owner === 1));
+            // Field AI armies first (spawnInitialFrontlineUnits clears entities).
+            gameData.entities = [];
             gameData.selection = [];
-            // Deploy the roster near the player start city (ships to open water).
-            let home = gameData.cities.find(cc => cc.owner === 1 && cc.hasFactory) || gameData.cities.find(cc => cc.owner === 1);
-            let hx = home ? home.x : 0, hy = home ? home.y : 0;
-            let spacing = Math.max(30, (gameData.hexRadius || 20) * 1.6);
-            let landIdx = 0, shipIdx = 0;
-            for(let r of c.roster) {
-                let unit;
-                if(r.type === 'ship') {
-                    let w = wodRogueFindDeployWaterHex(hx, hy, shipIdx++);
-                    unit = createUnitAt('ship', w ? w.x : hx, w ? w.y : hy, 1, { startSpawn: true });
-                } else {
-                    let col = landIdx % 6, row = (landIdx / 6) | 0;
-                    landIdx++;
-                    unit = createUnitAt(r.type, hx + (col - 2.5) * spacing, hy + spacing * 1.5 + row * spacing, 1, { startSpawn: true });
-                }
-                if(!unit) continue;
-                unit.name = r.name;
-                unit.hp = Math.max(1, Math.min(r.maxHp, r.hp));
-                unit.maxHp = r.maxHp;
-                unit.manpower = Math.max(50, Math.min(r.maxManpower, r.manpower));
-                unit.maxManpower = r.maxManpower;
-                unit.tanks = Math.min(r.maxTanks, r.tanks);
-                unit.maxTanks = r.maxTanks;
-                unit.xp = r.xp || 0;
-                unit.kills = r.kills || 0;
-                unit.losses = r.losses || 0;
-                unit.tankKills = r.tankKills || 0;
-                unit.tankLosses = r.tankLosses || 0;
-                unit.veteran = !!(r.veteran || (r.xp || 0) >= WOD_VETERAN_XP_THRESHOLD);
-                unit._campRosterId = r.id;
-            }
-            // Fixed army: no recruiting, no starting treasury to spend on units.
-            gameData.money = 0;
-            gameData.manpower = 0;
-            wodSyncCampaignBattleHud();
-            // Field the node's garrison: top up each AI owner toward the planned
-            // composition (intel shown on the map is honest, fuzz aside).
             let owners = [];
             for(let o = 2; o <= (node.ai || 1) + 1; o++) owners.push(o);
             let diff = node.diff || 0;
@@ -37281,6 +37542,9 @@
             for(let o of owners) {
                 gameData.aiMoneyByOwner[o] = Math.round((5200 + diff * 3400) * D.mult);
                 gameData.aiManpowerByOwner[o] = Math.round((4600 + diff * 2400) * D.mult);
+            }
+            if(owners.length && typeof spawnInitialFrontlineUnits === 'function') {
+                try { spawnInitialFrontlineUnits(owners); } catch(_) {}
             }
             let gar = node.gar || { light: 0, heavy: 0, ship: 0 };
             let have = { light: 0, heavy: 0, ship: 0 };
@@ -37303,6 +37567,63 @@
                     }
                 }
             }
+            // Strip any leftover player units, then split the roster across owned cities.
+            gameData.entities = gameData.entities.filter(u => !(u && u.owner === 1));
+            let playerCities = gameData.cities.filter(cc => cc && cc.owner === 1);
+            if(!playerCities.length) {
+                let home = gameData.cities.find(cc => cc.owner === 1 && cc.hasFactory) || gameData.cities.find(cc => cc.owner === 1);
+                if(home) playerCities = [home];
+            }
+            let spacing = Math.max(30, (gameData.hexRadius || 20) * 1.6);
+            let landByCity = playerCities.map(() => 0);
+            let shipIdx = 0;
+            let cityCursor = 0;
+            for(let ri = 0; ri < c.roster.length; ri++) {
+                let r = c.roster[ri];
+                let unit;
+                if(r.type === 'ship') {
+                    let home = playerCities[cityCursor % Math.max(1, playerCities.length)] || playerCities[0];
+                    let hx = home ? home.x : 0, hy = home ? home.y : 0;
+                    let w = wodRogueFindDeployWaterHex(hx, hy, shipIdx++);
+                    unit = createUnitAt('ship', w ? w.x : hx, w ? w.y : hy, 1, { startSpawn: true });
+                    cityCursor++;
+                } else {
+                    let city = playerCities[cityCursor % Math.max(1, playerCities.length)] || playerCities[0];
+                    cityCursor++;
+                    if(!city) continue;
+                    let ci = playerCities.indexOf(city);
+                    if(ci < 0) ci = 0;
+                    let slot = landByCity[ci] || 0;
+                    landByCity[ci] = slot + 1;
+                    let col = slot % 4, row = (slot / 4) | 0;
+                    unit = createUnitAt(r.type,
+                        city.x + (col - 1.5) * spacing,
+                        city.y + spacing * 1.2 + row * spacing,
+                        1, { startSpawn: true });
+                }
+                if(!unit) continue;
+                unit.name = r.name;
+                unit.hp = Math.max(1, Math.min(r.maxHp, r.hp));
+                unit.maxHp = r.maxHp;
+                unit.manpower = Math.max(50, Math.min(r.maxManpower, r.manpower));
+                unit.maxManpower = r.maxManpower;
+                unit.tanks = Math.min(r.maxTanks, r.tanks);
+                unit.maxTanks = r.maxTanks;
+                unit.xp = r.xp || 0;
+                unit.kills = r.kills || 0;
+                unit.losses = r.losses || 0;
+                unit.tankKills = r.tankKills || 0;
+                unit.tankLosses = r.tankLosses || 0;
+                unit.veteran = !!(r.veteran || (r.xp || 0) >= WOD_VETERAN_XP_THRESHOLD);
+                unit._campRosterId = r.id;
+            }
+            // Fixed army: no recruiting, no starting treasury to spend on units.
+            gameData.money = 0;
+            gameData.manpower = 0;
+            wodSyncCampaignBattleHud();
+            // Campaign AI should press the attack, not sit on hold lines.
+            gameData._campaignAiAggressive = true;
+            gameData.aiStrategyTimer = 99;
             // Story briefing.
             let kicker = run.defense ? 'Counterattack at ' + node.name : 'War turn ' + c.turn;
             let title = run.defense ? 'Hold ' + node.name : node.name;
@@ -37421,6 +37742,8 @@
             }
             wodRogueSave();
             gameData._campaignRun = null;
+            gameData._campaignRegionMap = null;
+            gameData._campaignAiAggressive = false;
             gameData._wodReturnToCampaign = true;
             wodSyncCampaignBattleHud();
         }
