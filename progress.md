@@ -347,6 +347,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Assault waves sit just offshore (`r` ~ `-3..-7`); still **zero** Allies on beach sand.
 - Rebuild: `node scripts/generate-store-missions.js`.
 
+## Normandy thin England + Brittany west (2026-07-09)
+- England shrunk to a Channel-facing strip (`r` -26..-18, ~1300 land hexes); far north is open sea.
+- Left side of map is Brittany/western France (Saint-Malo, Rennes) instead of empty Atlantic.
+- Assault/navy shifted east of Cotentin onto open water (`q` ? -26); zero Allies on land/sand.
+- Rebuild: `node scripts/generate-store-missions.js`.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.

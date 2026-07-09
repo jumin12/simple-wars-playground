@@ -44,9 +44,8 @@ if (!MapBuilder || !ev) throw new Error('Could not load MapBuilder/ev from gener
 /**
  * Operation Overlord — Normandy, 6 June 1944.
  *
- * Continents (not an island): southern England fills the north edge of the map;
- * Normandy / France fills the south; the English Channel is a continuous sea belt
- * between them. Cotentin juts north into the Channel; beaches west→east:
+ * Thin southern England across the Channel from Normandy/Brittany France;
+ * Cotentin juts north into the Channel; beaches west→east:
  *   Utah · Pointe du Hoc · Omaha · Gold · Juno · Sword
  *
  * Assault waves start in the Channel just off their beaches (landing craft).
@@ -63,7 +62,7 @@ function buildNormandyDDay() {
       q,
       r,
       12,
-      (h) => h.type === 'water' && h.r <= -2 && h.r >= -7 && h.q > -52 && h.q < 48
+      (h) => h.type === 'water' && h.r <= -2 && h.r >= -7 && h.q > -30 && h.q < 48
     );
     if (!snap) throw new Error('no Channel water near ' + q + ',' + r + ' for ' + (name || type));
     q = snap.q;
@@ -135,72 +134,86 @@ function buildNormandyDDay() {
   });
 
   // Layout (axial r increases south):
-  //   England ........ r <= -18
-  //   Channel ........ r -17 .. -1  (open sea; Cotentin may occupy west only)
-  //   Cotentin tip ... ~ r=-10
-  //   Beaches ........ r 0..2
-  //   France ......... r >= 1
+  //   Open sea north of England
+  //   Thin southern England .... r -26 .. -18
+  //   Channel .................. r -17 .. -1  (Cotentin west only)
+  //   Cotentin tip ............. ~ r=-10
+  //   Beaches .................. r 0..2
+  //   France / Brittany ........ r >= 1 (extends west)
   b.each((h) => {
     if (h.r >= -17 && h.r <= -1) h.type = 'water';
   });
 
-  // —— Southern England (visible northern continent) ——
-  b.rect(-55, -55, 55, -18, 'grass', { noise: 1.6 });
+  // —— Thin southern England (NOT a massive northern continent) ——
   b.each((h) => {
-    if (h.r <= -18 && h.type === 'water') h.type = 'grass';
+    if (h.r < -28) h.type = 'water';
   });
-  // Soft English south coast.
+  b.rect(-42, -26, 42, -18, 'grass', { noise: 1.4 });
   b.each((h) => {
-    if (h.r < -22 || h.r > -18) return;
-    const wob = Math.sin(h.q * 0.12) * 1.4 + (b.rng() - 0.5) * 1.2;
-    if (h.r > -19.2 + wob && h.type !== 'urban') h.type = 'sand';
+    if (h.r >= -26 && h.r <= -18 && h.type === 'water') h.type = 'grass';
   });
-  for (let i = 0; i < 10; i++) {
-    b.blob(Math.round(-40 + b.rng() * 80), Math.round(-48 + b.rng() * 22), 2 + b.rng() * 2.8, 'forest', {
-      noise: 0.35,
+  b.each((h) => {
+    if (h.type === 'urban') return;
+    if (h.r >= -28 && h.r < -26) {
+      const wob = Math.sin(h.q * 0.1) * 1.5;
+      if (h.r < -26.5 + wob) h.type = 'water';
+      else if (h.type === 'water') h.type = 'grass';
+    }
+    if (h.r >= -20 && h.r <= -18) {
+      const wob = Math.sin(h.q * 0.12) * 1.2 + (b.rng() - 0.5);
+      if (h.r > -19.0 + wob) h.type = 'sand';
+    }
+  });
+  for (let i = 0; i < 6; i++) {
+    b.blob(Math.round(-30 + b.rng() * 60), Math.round(-25 + b.rng() * 5), 1.8 + b.rng() * 2, 'forest', {
+      noise: 0.3,
     });
   }
-  // English Channel ports hinterland.
-  b.ensureLand(-12, -28, 4);
-  b.ensureLand(6, -30, 4);
-  b.ensureLand(-28, -26, 3);
-  b.ensureLand(26, -28, 3);
+  b.ensureLand(-10, -22, 3);
+  b.ensureLand(8, -23, 3);
+  b.ensureLand(-26, -21, 2);
+  b.ensureLand(24, -22, 2);
 
-  // —— France / Normandy mainland ——
-  b.rect(-48, 1, 52, 55, 'grass', { noise: 1.8 });
+  // —— France / Normandy + Brittany (west) ——
+  b.rect(-58, 1, 52, 55, 'grass', { noise: 1.8 });
   b.each((h) => {
     if (h.r >= 1 && h.type === 'water') h.type = 'grass';
   });
+  // Brittany / western France mass (left side of map).
+  b.blob(-52, 12, 14, 'grass', { noise: 0.28 });
+  b.blob(-56, 22, 12, 'grass', { noise: 0.26 });
+  b.blob(-48, 28, 10, 'grass', { noise: 0.24 });
+  b.blob(-54, 6, 8, 'grass', { noise: 0.22 });
+  b.ensureLand(-52, 14, 5);
+  b.ensureLand(-56, 24, 4);
+  b.ensureLand(-48, 8, 3);
 
   // Cotentin peninsula — west Normandy jutting north into the Channel.
-  // Tip near Cherbourg ~ r=-10; must leave open water to England (r<=-18).
-  b.blob(-40, -4, 11, 'grass', { noise: 0.26 });
-  b.blob(-42, -9, 7, 'grass', { noise: 0.22 });
-  b.blob(-36, 1, 8, 'grass', { noise: 0.24 });
-  b.blob(-34, 6, 5, 'grass', { noise: 0.2 });
-  b.ensureLand(-42, -9, 4);
-  b.ensureLand(-40, -4, 4);
+  b.blob(-40, -4, 10, 'grass', { noise: 0.24 });
+  b.blob(-42, -8, 6, 'grass', { noise: 0.2 });
+  b.blob(-36, 1, 7, 'grass', { noise: 0.22 });
+  b.blob(-34, 6, 5, 'grass', { noise: 0.18 });
+  b.ensureLand(-42, -8, 3);
+  b.ensureLand(-40, -4, 3);
   b.ensureLand(-36, 1, 3);
   b.ensureLand(-32, 5, 3);
-  // Cap Cotentin tip ONLY (west Normandy) — never touch England.
+  // Cap Cotentin tip ONLY — never touch England.
   b.each((h) => {
     if (h.type === 'urban') return;
     if (h.q >= -50 && h.q <= -26 && h.r < -10) h.type = 'water';
   });
 
-  // Atlantic / Golfe de St-Malo west of Cotentin (France's left edge).
+  // Soft Atlantic fringe far west only (keep Brittany land).
   b.each((h) => {
     if (h.type === 'urban') return;
-    if (h.q < -52) h.type = 'water';
-    // Soft Atlantic bite on the west Cotentin shore.
-    if (h.q < -48 && h.r >= -8 && h.r <= 20 && h.type !== 'urban') {
-      const bite = -50 + Math.sin(h.r * 0.2) * 1.5;
+    if (h.q < -64) h.type = 'water';
+    if (h.q < -58 && h.r >= -6 && h.r <= 40) {
+      const bite = -61 + Math.sin(h.r * 0.15) * 2;
       if (h.q < bite) h.type = 'water';
     }
   });
-  b.ensureWater(-54, -6, 5);
-  b.ensureWater(-52, 4, 5);
-  b.ensureWater(-50, 14, 4);
+  b.ensureWater(-66, 8, 4);
+  b.ensureWater(-64, 20, 3);
 
   // Baie du Grand Vey (water gap Cotentin ↔ Bessin / Omaha).
   b.blob(-22, 1, 4.5, 'water', { noise: 0.3 });
@@ -264,24 +277,38 @@ function buildNormandyDDay() {
     );
   }
 
-  // Inland corridors only (never across Channel).
-  b.landCorridor(-40, -8, -34, 2, 1);
+  // Inland corridors (never across Channel).
+  b.landCorridor(-52, 14, -40, -4, 1);
+  b.landCorridor(-40, -4, -34, 2, 1);
   b.landCorridor(-34, 2, -24, 10, 1);
   b.landCorridor(-24, 10, -10, 18, 1);
   b.landCorridor(-8, 4, 6, 8, 1);
   b.landCorridor(6, 8, 24, 14, 1);
   b.landCorridor(24, 14, 30, 26, 1);
 
-  b.roughenCoasts(1, 0.12);
-  b.coastSand(0.55);
+  // Brittany woods.
+  for (let i = 0; i < 8; i++) {
+    b.blob(
+      Math.round(-58 + b.rng() * 14),
+      Math.round(8 + b.rng() * 28),
+      1.8 + b.rng() * 2.4,
+      'forest',
+      { noise: 0.35 }
+    );
+  }
 
-  // ===== FINAL Channel seal (authoritative) =====
-  // England: all r <= -18 is land.
-  // Mid-Channel: r in [-17, -1] is water UNLESS Cotentin body (q -50..-26, r >= -10).
-  // Never flood England when capping Cotentin.
+  b.roughenCoasts(1, 0.12);
+  b.coastSand(0.5);
+
+  // ===== FINAL Channel seal =====
+  // Thin England only: r in [-26, -18] land; north of that stays water.
   b.each((h) => {
     if (h.type === 'urban') return;
-    if (h.r <= -18) {
+    if (h.r < -28) {
+      h.type = 'water';
+      return;
+    }
+    if (h.r >= -26 && h.r <= -18) {
       if (h.type === 'water') h.type = 'grass';
       return;
     }
@@ -291,23 +318,25 @@ function buildNormandyDDay() {
       h.type = 'water';
     }
   });
-  // Re-stamp Cotentin core after seal (west Normandy only).
-  b.blob(-40, -4, 9, 'grass', { noise: 0.18 });
-  b.blob(-42, -8, 5.5, 'grass', { noise: 0.16 });
-  b.ensureLand(-42, -8, 3);
+  // Re-stamp Cotentin + Brittany after seal.
+  b.blob(-40, -4, 8, 'grass', { noise: 0.16 });
+  b.blob(-42, -7, 5, 'grass', { noise: 0.14 });
+  b.blob(-52, 14, 10, 'grass', { noise: 0.2 });
+  b.ensureLand(-42, -7, 3);
   b.ensureLand(-40, -4, 3);
-  // Cap Cotentin tip again — Cotentin q-range ONLY.
+  b.ensureLand(-52, 14, 4);
+  // Cap Cotentin tip — Cotentin q-range ONLY.
   b.each((h) => {
     if (h.type === 'urban') return;
     if (h.q >= -50 && h.q <= -26 && h.r < -10) h.type = 'water';
-    if (h.q < -52) h.type = 'water';
+    if (h.q < -64) h.type = 'water';
   });
-  // Re-assert England after any Cotentin work.
+  // Re-assert thin England strip; keep far north water.
   b.each((h) => {
     if (h.type === 'urban') return;
-    if (h.r <= -18 && h.type === 'water') h.type = 'grass';
+    if (h.r < -28) h.type = 'water';
+    else if (h.r >= -26 && h.r <= -18 && h.type === 'water') h.type = 'grass';
   });
-  // Soft English south coast sand again.
   b.each((h) => {
     if (h.r < -22 || h.r > -18 || h.type === 'urban') return;
     const wob = Math.sin(h.q * 0.12) * 1.2;
@@ -322,9 +351,9 @@ function buildNormandyDDay() {
   b.rect(14, 0, 22, 2, 'sand', { noise: 0.7 });
   b.rect(24, 0, 34, 2, 'sand', { noise: 0.7 });
   b.blob(-18, 1, 2.2, 'hill', { noise: 0.12 });
-  b.coastSand(0.3);
+  b.coastSand(0.28);
 
-  // Flood accidental mid-Channel land (not Cotentin, not England).
+  // Flood accidental mid-Channel land (not Cotentin).
   b.each((h) => {
     if (h.type === 'urban' || h.type === 'water') return;
     if (h.r >= -16 && h.r <= -2) {
@@ -332,18 +361,20 @@ function buildNormandyDDay() {
       if (!cotentin) h.type = 'water';
     }
   });
-  // Final England guarantee.
+  // Final England size lock: only the thin strip.
   b.each((h) => {
-    if (h.r <= -18 && h.type === 'water' && h.type !== 'urban') h.type = 'grass';
+    if (h.type === 'urban') return;
+    if (h.r < -28) h.type = 'water';
+    if (h.r >= -26 && h.r <= -18 && h.type === 'water') h.type = 'grass';
   });
 
-  // Cities — England closer to Channel so ports read on the map.
-  b.city(-12, -28, 1, 'Portsmouth', { factory: true, harbor: true, incomeBonus: 50 });
-  b.city(8, -30, 1, 'Southampton', { factory: true, harbor: true, incomeBonus: 30 });
-  b.city(-30, -26, 1, 'Plymouth', { factory: false, harbor: true });
-  b.city(28, -28, 1, 'Dover', { factory: false, harbor: true });
+  // Cities — England on the thin strip; Brittany towns on the west.
+  b.city(-10, -22, 1, 'Portsmouth', { factory: true, harbor: true, incomeBonus: 50 });
+  b.city(8, -23, 1, 'Southampton', { factory: true, harbor: true, incomeBonus: 30 });
+  b.city(-26, -21, 1, 'Plymouth', { factory: false, harbor: true });
+  b.city(24, -22, 1, 'Dover', { factory: false, harbor: true });
 
-  b.city(-42, -8, 2, 'Cherbourg', { factory: true, harbor: true, incomeBonus: 40 });
+  b.city(-42, -7, 2, 'Cherbourg', { factory: true, harbor: true, incomeBonus: 40 });
   b.city(-38, -2, 2, 'Valognes', { factory: false });
   b.city(-32, 3, 2, 'Sainte-Mère-Église', { factory: false });
   b.city(-24, 10, 2, 'Carentan', { factory: false });
@@ -353,11 +384,13 @@ function buildNormandyDDay() {
   b.city(24, 14, 2, 'Caen', { factory: true, incomeBonus: 30 });
   b.city(32, 3, 2, 'Ouistreham', { factory: false, harbor: true });
   b.city(30, 26, 2, 'Falaise', { factory: true });
+  b.city(-54, 16, 2, 'Saint-Malo', { factory: false, harbor: true });
+  b.city(-50, 28, 2, 'Rennes', { factory: true });
 
   // Ownership.
   b.each((h) => {
     if (h.type === 'urban') return;
-    if (h.r <= -18) {
+    if (h.r >= -26 && h.r <= -18) {
       h.owner = h.type === 'water' ? 0 : 1;
       return;
     }
@@ -377,15 +410,15 @@ function buildNormandyDDay() {
     }
   }
 
-  // Atlantic Wall strongpoints (beach / bluff line).
+  // Atlantic Wall strongpoints.
   const wallForts = [
-    [-34, 1], [-30, 1], [-32, 2], // Utah
-    [-18, 1], // Pointe du Hoc
-    [-10, 1], [-6, 2], [-2, 2], [0, 2], // Omaha
-    [4, 1], [8, 2], [12, 2], // Gold
-    [16, 1], [20, 2], // Juno
-    [26, 1], [30, 2], [34, 2], // Sword
-    [-44, -6], [-40, -10], // Cherbourg ring
+    [-34, 1], [-30, 1], [-32, 2],
+    [-18, 1],
+    [-10, 1], [-6, 2], [-2, 2], [0, 2],
+    [4, 1], [8, 2], [12, 2],
+    [16, 1], [20, 2],
+    [26, 1], [30, 2], [34, 2],
+    [-44, -5], [-40, -9],
   ];
   for (const [fq, fr] of wallForts) b.fort(fq, fr, 2);
 
@@ -422,33 +455,33 @@ function buildNormandyDDay() {
   manFort(30, 2);
   manFort(34, 2);
 
-  // Allied assault waves — just off the beaches (r ~ -3..-5), never on sand.
+  // Allied assault — shifted RIGHT into open Channel water (east of Cotentin), never on land.
   for (let i = 0; i < 5; i++) {
-    assaultAfloat('marine', 1, -34 + (i % 3), -4 - Math.floor(i / 3), i === 0 ? '4th Inf. Div. (Utah)' : null);
+    assaultAfloat('marine', 1, -26 + (i % 3), -4 - Math.floor(i / 3), i === 0 ? '4th Inf. Div. (Utah)' : null);
   }
-  assaultAfloat('heavy', 1, -32, -5, '70th Tank Bn. (DD)');
+  assaultAfloat('heavy', 1, -24, -5, '70th Tank Bn. (DD)');
   for (let i = 0; i < 4; i++) {
-    assaultAfloat('marine', 1, -4 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '1st Inf. Div. (Omaha)' : null);
+    assaultAfloat('marine', 1, -2 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '1st Inf. Div. (Omaha)' : null);
   }
   for (let i = 0; i < 4; i++) {
-    assaultAfloat('marine', 1, -10 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '29th Inf. Div. (Omaha)' : null);
+    assaultAfloat('marine', 1, -8 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '29th Inf. Div. (Omaha)' : null);
   }
-  assaultAfloat('heavy', 1, -8, -5, '741st Tank Bn. (DD)');
-  assaultAfloat('heavy', 1, -4, -5, '743rd Tank Bn.');
-  assaultAfloat('marine', 1, -18, -3, '2nd Ranger Bn. (Pointe du Hoc)');
+  assaultAfloat('heavy', 1, -6, -5, '741st Tank Bn. (DD)');
+  assaultAfloat('heavy', 1, -2, -5, '743rd Tank Bn.');
+  assaultAfloat('marine', 1, -16, -3, '2nd Ranger Bn. (Pointe du Hoc)');
   for (let i = 0; i < 4; i++) {
-    assaultAfloat('marine', 1, 6 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '50th Inf. Div. (Gold)' : null);
+    assaultAfloat('marine', 1, 8 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '50th Inf. Div. (Gold)' : null);
   }
-  assaultAfloat('heavy', 1, 8, -5, '8th Armoured Bde.');
-  assaultAfloat('marine', 1, 10, -3, '47 Royal Marine Commando');
+  assaultAfloat('heavy', 1, 10, -5, '8th Armoured Bde.');
+  assaultAfloat('marine', 1, 12, -3, '47 Royal Marine Commando');
   for (let i = 0; i < 4; i++) {
-    assaultAfloat('marine', 1, 16 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '3rd Cdn Inf. Div. (Juno)' : null);
+    assaultAfloat('marine', 1, 18 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '3rd Cdn Inf. Div. (Juno)' : null);
   }
-  assaultAfloat('heavy', 1, 18, -5, '2nd Cdn Armoured Bde.');
+  assaultAfloat('heavy', 1, 20, -5, '2nd Cdn Armoured Bde.');
   for (let i = 0; i < 4; i++) {
-    assaultAfloat('marine', 1, 28 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '3rd Inf. Div. (Sword)' : null);
+    assaultAfloat('marine', 1, 30 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '3rd Inf. Div. (Sword)' : null);
   }
-  assaultAfloat('heavy', 1, 30, -5, '27th Armoured Bde.');
+  assaultAfloat('heavy', 1, 32, -5, '27th Armoured Bde.');
 
   // Airborne inland only (not on beaches). Clear ownership so Allied drops can place.
   function dropZone(q, r, rad) {
@@ -471,20 +504,20 @@ function buildNormandyDDay() {
   b.unit('marine', 1, 34, 5, '6th Airborne Div.');
   b.unit('marine', 1, 36, 6, '9th Para Bn. (Merville)');
 
-  // Allied navy — behind the assault waves in the Channel.
-  b.unit('ship', 1, -32, -8, 'Force U (Utah)');
-  b.unit('ship', 1, -8, -9, 'Force O (Omaha)');
-  b.unit('ship', 1, 8, -8, 'Force G (Gold)');
-  b.unit('ship', 1, 18, -8, 'Force J (Juno)');
-  b.unit('ship', 1, 28, -8, 'Force S (Sword)');
-  b.unit('ship', 1, -12, -12, 'USS Texas');
-  b.unit('ship', 1, -6, -13, 'USS Arkansas');
-  b.unit('ship', 1, 4, -12, 'HMS Belfast');
-  b.unit('ship', 1, 14, -12, 'HMCS Algonquin');
-  b.unit('ship', 1, 24, -12, 'HMS Warspite');
-  b.unit('ship', 1, -26, -11, 'USS Nevada');
+  // Allied navy — behind assault, also shifted right of Cotentin.
+  b.unit('ship', 1, -24, -8, 'Force U (Utah)');
+  b.unit('ship', 1, -6, -9, 'Force O (Omaha)');
+  b.unit('ship', 1, 10, -8, 'Force G (Gold)');
+  b.unit('ship', 1, 20, -8, 'Force J (Juno)');
+  b.unit('ship', 1, 30, -8, 'Force S (Sword)');
+  b.unit('ship', 1, -10, -12, 'USS Texas');
+  b.unit('ship', 1, -4, -13, 'USS Arkansas');
+  b.unit('ship', 1, 6, -12, 'HMS Belfast');
+  b.unit('ship', 1, 16, -12, 'HMCS Algonquin');
+  b.unit('ship', 1, 26, -12, 'HMS Warspite');
+  b.unit('ship', 1, -20, -11, 'USS Nevada');
 
-  // Follow-on in England (clear pads away from city urban clusters).
+  // Follow-on in thin England.
   function englandPad(q, r) {
     b.ensureLand(q, r, 2);
     for (let dq = -2; dq <= 2; dq++) {
@@ -496,15 +529,15 @@ function buildNormandyDDay() {
       }
     }
   }
-  englandPad(-18, -24);
-  englandPad(-4, -24);
-  englandPad(6, -24);
-  englandPad(-26, -22);
-  for (let i = 0; i < 3; i++) b.unit('light', 1, -18 + i, -24, i === 0 ? '1st Corps Reserve' : null);
-  b.unit('heavy', 1, -4, -24, 'Guards Armoured Div.');
-  b.unit('heavy', 1, 6, -24, '7th Armoured Div. (Desert Rats)');
-  b.unit('heavy', 1, -26, -22, '2nd Armored Div. (US)');
-  b.unit('light', 1, 2, -24, '51st Highland Div.');
+  englandPad(-16, -22);
+  englandPad(-2, -22);
+  englandPad(10, -22);
+  englandPad(-22, -20);
+  for (let i = 0; i < 3; i++) b.unit('light', 1, -16 + i, -22, i === 0 ? '1st Corps Reserve' : null);
+  b.unit('heavy', 1, -2, -22, 'Guards Armoured Div.');
+  b.unit('heavy', 1, 10, -22, '7th Armoured Div. (Desert Rats)');
+  b.unit('heavy', 1, -22, -20, '2nd Armored Div. (US)');
+  b.unit('light', 1, 4, -22, '51st Highland Div.');
 
   // German inland reserves (Wall already manned above).
   b.ensureLand(-40, -4, 2);
@@ -522,6 +555,7 @@ function buildNormandyDDay() {
   b.unit('light', 2, -12, 16, 'LXXXIV Corps HQ');
   b.unit('light', 2, 8, 10, 'Bayeux Garrison');
   b.unit('light', 2, 32, 24, 'Falaise Depot');
+  b.unit('light', 2, -52, 18, 'Saint-Malo Garrison');
 
   return {
     file: 'normandy-dday.json',
@@ -551,7 +585,7 @@ function buildNormandyDDay() {
             { type: 'timer', seconds: 1 },
             {
               title: 'Operation Neptune',
-              body: '0530, 6 June 1944. Your assault divisions wait just off the Norman beaches — England holds the north shore of the Channel, France the south, open water between. H-Hour: Utah 0630, British/Canadian beaches 0725. Airborne are already inland. Issue your own orders when ready.',
+              body: '0530, 6 June 1944. Your assault divisions wait just off the Norman beaches — a thin strip of southern England to the north, Normandy and Brittany to the south, open Channel between. H-Hour: Utah 0630, British/Canadian beaches 0725. Issue your own orders when ready.',
               style: 'briefing',
               kicker: 'Store Mission · One-shot',
             }
