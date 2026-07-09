@@ -7656,7 +7656,7 @@
                             <div class="wod-camp-shop" id="wodCampShop"></div>
                             <div class="wod-camp-actions">
                                 <button type="button" class="menu-btn" id="wodCampHealBtn">Field repairs</button>
-                                <button type="button" class="menu-btn wod-camp-danger" id="wodCampResetBtn">Delete save</button>
+                                <button type="button" class="menu-btn wod-camp-danger" id="wodCampResetBtn">Surrender</button>
                             </div>
                         </div>
                     </div>
@@ -20345,9 +20345,15 @@
             subEl.textContent = reasonLine || headline || '';
 
             let elapsedSec = (performance.now() - (gameData.gameSessionStartedPerfMs || performance.now())) / 1000;
-            let modeKey = gameData.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
-            let victoryLabel = modeKey === 'annihilation' ? 'Annihilation' : 'Domination';
-            let victoryRule = WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || '';
+            let campMeta = gameData._lastCampaignBattleMeta || null;
+            let campRun = gameData._campaignRun || (campMeta ? { defense: !!campMeta.defense, holdSec: campMeta.holdSec || 0 } : null);
+            let modeKey = (campRun && campRun.defense) ? 'defense'
+                : (gameData.victoryMode === 'annihilation' ? 'annihilation' : 'domination');
+            let victoryLabel = modeKey === 'annihilation' ? 'Annihilation'
+                : (modeKey === 'defense' ? 'Defense' : 'Domination');
+            let victoryRule = modeKey === 'defense'
+                ? ('Hold for ' + wodFormatHoldClock(campRun.holdSec || 120) + ' or capture all enemy cities.')
+                : (WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || '');
 
             let lo = wodLocalPlayerOwner();
             let plyCities, enCities, enArmies, plyArmies, plyIncomeAcc, aiIncomeAcc;
@@ -20416,6 +20422,25 @@
             let townsCapSummary = isMp
                 ? ((gameData.sessionCitiesCapturedByOwner && gameData.sessionCitiesCapturedByOwner[lo]) || 0)
                 : (gameData.sessionCitiesCaptured || 0);
+            let campUnitsLostThisBattle = 0;
+            if(campMeta) {
+                campUnitsLostThisBattle = campMeta.unitsLost | 0;
+                if(subEl) {
+                    subEl.textContent = (subEl.textContent ? subEl.textContent + ' · ' : '') +
+                        campUnitsLostThisBattle + ' unit' + (campUnitsLostThisBattle === 1 ? '' : 's') + ' lost' +
+                        (campMeta.unitsLostTotal != null ? ' (' + campMeta.unitsLostTotal + ' campaign total)' : '');
+                }
+            } else if(campRun) {
+                let before = campRun.rosterAtStart | 0;
+                let aliveNow = 0;
+                for(let u of gameData.entities || []) if(u && u.owner === lo && u.hp > 0 && u._campRosterId) aliveNow++;
+                if(!before) before = aliveNow;
+                campUnitsLostThisBattle = Math.max(0, before - aliveNow);
+                if(subEl) {
+                    subEl.textContent = (subEl.textContent ? subEl.textContent + ' · ' : '') +
+                        campUnitsLostThisBattle + ' unit' + (campUnitsLostThisBattle === 1 ? '' : 's') + ' lost';
+                }
+            }
 
             let csYouLbl = isMp ? mpSelfNameEsc : 'You';
 
@@ -20620,12 +20645,31 @@
             let active = null;
             if(cds) for(let k in cds) { if(!active || cds[k].left < active.left) active = cds[k]; }
             if(!active || gameData._campaignEnded || gameState !== 'PLAYING' || gameData.menuAttractMode) {
+                // Fall through to defense hold banner when no end-countdown is active.
+                if(gameData._campaignRun && gameData._campaignRun.defense && !gameData._campaignEnded && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+                    wodUpdateCampaignDefenseHoldBanner();
+                    return;
+                }
                 el.classList.add('hidden');
                 return;
             }
             let secs = Math.max(0, Math.ceil(active.left));
             el.textContent = active.label + ' — ' + secs + 's';
             el.classList.toggle('wod-endcd-danger', active.danger === true);
+            el.classList.remove('hidden');
+        }
+
+        function wodUpdateCampaignDefenseHoldBanner() {
+            let el = document.getElementById('wodEndCountdownBanner');
+            let run = gameData._campaignRun;
+            if(!el || !run || !run.defense || gameData._campaignEnded || gameState !== 'PLAYING' || gameData.menuAttractMode) return;
+            // Prefer end-condition countdowns when they are active.
+            let cds = gameData._endCountdowns;
+            if(cds) for(let k in cds) { if(cds[k]) return; }
+            let need = run.holdSec || 120;
+            let left = Math.max(0, need - (run.holdElapsed || 0));
+            el.textContent = 'Hold the line — ' + wodFormatHoldClock(left) + ' remaining (or take all enemy cities)';
+            el.classList.remove('wod-endcd-danger');
             el.classList.remove('hidden');
         }
 
@@ -20658,6 +20702,26 @@
                     return;
                 }
                 if(gameData._endCountdowns && gameData._endCountdowns.campArmyLost) return;
+                // Defense: survive the hold timer OR capture all enemy cities.
+                let run = gameData._campaignRun;
+                if(run.defense) {
+                    let camp = wodRogueLoad();
+                    let need = run.holdSec || wodRogueDefenseHoldSeconds(camp && camp.settings && camp.settings.difficulty);
+                    run.holdSec = need;
+                    run.holdElapsed = (run.holdElapsed || 0) + simDt;
+                    wodUpdateCampaignDefenseHoldBanner();
+                    if(wodTickEndCountdown('domination', !anyEnemyOwnedCityRemains(), simDt, 'All enemy cities captured! Victory in')) {
+                        triggerCampaignVictory('Victory — counterattack broken: all enemy cities captured.', false);
+                        return;
+                    }
+                    // Survive the hold even while a city-capture countdown is running.
+                    if(run.holdElapsed >= need && playerControlsAnyCity() && countPlayerCombatUnitsExcludingConvoys() > 0) {
+                        triggerCampaignVictory('Victory — held the line for ' + wodFormatHoldClock(need) + '.', false);
+                        return;
+                    }
+                    if(gameData._endCountdowns && gameData._endCountdowns.domination) return;
+                    return;
+                }
             }
             let mode = gameData.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
             if(mode === 'domination') {
@@ -36274,12 +36338,22 @@
         const WOD_ROGUE_UNIT_COSTS = { light: 200, marine: 260, heavy: 480, ship: 420 };
         const WOD_ROGUE_UNIT_LABEL = { light: 'Infantry', marine: 'Marines', heavy: 'Armor', ship: 'Warship' };
         const WOD_ROGUE_DIFF_PRESETS = {
-            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 3600, blockChance: 0.28 },
-            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 4500, blockChance: 0.38 },
-            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 5600, blockChance: 0.48 },
-            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 7000, blockChance: 0.58 }
+            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 3600, blockChance: 0.28, defenseHoldSec: 90 },
+            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 4500, blockChance: 0.38, defenseHoldSec: 120 },
+            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 5600, blockChance: 0.48, defenseHoldSec: 180 },
+            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 7000, blockChance: 0.58, defenseHoldSec: 240 }
         };
         const WOD_ROGUE_MAX_FORCED_DEFENSES = 5;
+        function wodRogueDefenseHoldSeconds(difficulty) {
+            let D = WOD_ROGUE_DIFF_PRESETS[difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
+            return Math.max(60, D.defenseHoldSec | 0 || 120);
+        }
+        function wodFormatHoldClock(sec) {
+            sec = Math.max(0, Math.ceil(sec || 0));
+            let m = (sec / 60) | 0;
+            let s = sec % 60;
+            return m + ':' + (s < 10 ? '0' : '') + s;
+        }
         const WOD_ROGUE_LENGTH_PRESETS = {
             short: { label: 'Short — 9 regions', nodes: 9, W: 170, H: 104 },
             medium: { label: 'Standard — 13 regions', nodes: 13, W: 210, H: 128 },
@@ -37059,7 +37133,11 @@
             let reset = document.getElementById('wodCampResetBtn');
             if(reset) reset.addEventListener('click', () => {
                 let c = wodRogueLoad();
-                if(c && !c.over && c.turn > 1 && !confirm('Delete this campaign save? Your army and war progress are lost forever.')) return;
+                if(!c) return;
+                let msg = c.over
+                    ? 'Surrender this campaign and delete the save? You can start a new war afterward.'
+                    : 'Surrender this campaign? This deletes your save — your army and war progress are lost forever.';
+                if(!confirm(msg)) return;
                 wodRogueDeleteSave();
                 wodRefreshCampaignPanel();
             });
@@ -37204,10 +37282,11 @@
                     '<span><strong>' + (s.battles || 0) + '</strong> battles (' + (s.wins || 0) + 'W-' + (s.defeats || 0) + 'L)</span>' +
                     '<span><strong>' + Math.round(s.kills || 0).toLocaleString() + '</strong> enemy troops killed</span>' +
                     '<span><strong>' + Math.round(s.losses || 0).toLocaleString() + '</strong> troops lost</span>' +
-                    '<span><strong>' + (s.unitsLost || 0) + '</strong> units destroyed</span>';
+                    '<span><strong>' + (s.unitsLost || 0) + '</strong> units lost</span>' +
+                    '<span><strong>' + (s.unitsBought || 0) + '</strong> units recruited</span>';
             }
             if(sub) {
-                if(c.over) sub.textContent = c.won ? 'Victory — the Iron Concord has fallen. Delete the save to wage a new war.' : 'Campaign over — the Remnant is spent. Delete the save to try again.';
+                if(c.over) sub.textContent = c.won ? 'Victory — the Iron Concord has fallen. Surrender the save to wage a new war.' : 'Campaign over — the Remnant is spent. Surrender the save to try again.';
                 else if(wodRogueAdvanceBlocked(c))
                     sub.textContent = 'Roads blocked — defend the threatened region before the front can advance again.';
                 else sub.textContent = 'One army, one war — every casualty is permanent.';
@@ -37238,7 +37317,13 @@
                     if(blocked && st.owner === 'enemy')
                         blockNote = '<p style="color:#ff9d8f">Advance blocked — clear the Concord counterattack first.</p>';
                     else if(blocked && alert)
-                        blockNote = '<p style="color:#ffd968">This defense must be fought before the front can move again.</p>';
+                        blockNote = '<p style="color:#ffd968">This defense must be fought before the front can move again. Hold ' +
+                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
+                            ' or take all enemy cities.</p>';
+                    else if(alert)
+                        blockNote = '<p style="color:#ffd968">Defense: hold ' +
+                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
+                            ' or capture every enemy city.</p>';
                     info.innerHTML = '<h3>' + node.name + (node.industry ? ' 🏭' : node.capital ? ' ★' : node.hq ? ' ⚑' : '') + '</h3>' +
                         tag +
                         '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield</p>' +
@@ -37329,7 +37414,7 @@
                 healBtn.disabled = c.over || hc <= 0 || c.points < hc;
             }
             let resetBtn = document.getElementById('wodCampResetBtn');
-            if(resetBtn) resetBtn.textContent = 'Delete save';
+            if(resetBtn) resetBtn.textContent = 'Surrender';
             // War log (newest first).
             let log = document.getElementById('wodCampLog');
             if(log) {
@@ -37601,7 +37686,8 @@
             let node = wodRogueNodeTemplate(nodeId);
             if(!c || !node || c.over || !wodRogueNodePlayable(nodeId) || !c.roster.length) return;
             let defense = !!c.alerts[nodeId];
-            gameData._campaignRun = { nodeId, defense, synced: false };
+            let holdSec = defense ? wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty) : 0;
+            gameData._campaignRun = { nodeId, defense, synced: false, holdSec, holdElapsed: 0 };
             gameData._selectedMissionEntry = null;
             gameData.mission = null;
             let st = c.nodesState[nodeId];
@@ -37732,15 +37818,20 @@
             // Fixed army: no recruiting mid-battle, but start with cash/MP for structures.
             gameData.money = 12000;
             gameData.manpower = 8000;
+            if(run) run.rosterAtStart = c.roster.length;
             wodSyncCampaignBattleHud();
+            if(run && run.defense) wodUpdateCampaignDefenseHoldBanner();
             // Campaign AI should press the attack, not sit on hold lines.
             gameData._campaignAiAggressive = true;
             gameData.aiStrategyTimer = 99;
             // Story briefing.
             let kicker = run.defense ? 'Counterattack at ' + node.name : 'War turn ' + c.turn;
             let title = run.defense ? 'Hold ' + node.name : node.name;
+            let holdSec = run.holdSec || (run.defense ? wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty) : 0);
+            if(run.defense && !run.holdSec) run.holdSec = holdSec;
             let body = (run.defense
-                ? 'The Iron Concord is counterattacking ' + node.name + '. Everything we took here is at stake — throw them back.'
+                ? 'The Iron Concord is counterattacking ' + node.name + '. Hold for ' +
+                  wodFormatHoldClock(holdSec) + ' or capture every enemy city to throw them back.'
                 : node.brief) +
                 '\n\nYour army is all you have: ' + c.roster.length + ' units. There are no reinforcements — every loss is permanent.';
             setGameSpeed(0, true);
@@ -37807,6 +37898,12 @@
             c.stats.unitsLost += lost;
             c.stats.kills += (gameData.playerKills || 0);
             c.stats.losses += (gameData.casualties || 0);
+            gameData._lastCampaignBattleMeta = {
+                defense: !!run.defense,
+                holdSec: run.holdSec || 0,
+                unitsLost: lost,
+                unitsLostTotal: c.stats.unitsLost
+            };
             // Outcome.
             let nodeState = c.nodesState[run.nodeId];
             if(won) {

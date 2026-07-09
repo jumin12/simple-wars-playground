@@ -243,3 +243,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Farm building** ($1200): boosts manpower growth (+5 raw); build UI, icons, AI, capture clear, MP sync.
 - **Factory cash bump**: factory money bonus 10 → 15 raw (+50%).
 - Verified: `output/test-farm-econ.cjs` — farm build, factory income, start points, battle treasury.
+
+## Campaign defense hold + surrender (2026-07-08)
+- **Units lost** shown on the campaign stats strip (plus units recruited); battle summary notes units lost this fight and campaign total.
+- **Defense battles**: win by surviving a difficulty-scaled hold (Easy 90s / Normal 120s / Hard 180s / Brutal 240s) **or** capturing all enemy cities; hold timer banner during the fight.
+- **Surrender**: "Delete save" replaced with **Surrender**; always confirms that the save will be deleted.
+- Verified: `output/test-defense-surrender.cjs`.
