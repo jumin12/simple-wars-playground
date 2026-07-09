@@ -19907,7 +19907,8 @@
                 let dx = x - hex.x,
                     dy = y - hex.y;
                 let score = dx * dx + dy * dy;
-                if(isBridgeHex(hex)) score *= 0.72;
+                // Prefer pure land over nearby bridge tiles for land formation snaps.
+                if(isBridgeHex(hex)) score *= 1.35;
                 if(score < bestScore) {
                     bestScore = score;
                     best = hex;
@@ -21966,8 +21967,16 @@
                 return { hex: direct, exactX: x, exactY: y, intoWater: false };
             if(direct && wodHexWalkableForLandPath(unit, direct, false) && !isBridgeHex(direct) && !isWaterHex(direct))
                 return { hex: direct, exactX: x, exactY: y, intoWater: false };
+            // Pure land near a bridge stays on land — radius bridge scans must not steal
+            // formation slots / short land marches onto the deck.
+            let nearestLand = getNearestHexToPoint(x, y);
+            if(nearestLand && !isWaterHex(nearestLand) && !isBridgeHex(nearestLand) &&
+                nearestLand.type !== 'mountain' && wodHexWalkableForLandPath(unit, nearestLand, false))
+                return { hex: nearestLand, exactX: x, exactY: y, intoWater: false };
             let bridgeHex = wodBridgeHexAtPoint(unit, x, y);
-            if(bridgeHex) return { hex: bridgeHex, exactX: x, exactY: y, intoWater: false };
+            if(bridgeHex && (wodPointOnBridgeForUnit(unit, x, y, 1.05) ||
+                (nearestLand && (wodIsOpenWaterHex(nearestLand) || isBridgeHex(nearestLand)))))
+                return { hex: bridgeHex, exactX: x, exactY: y, intoWater: false };
             if(direct && isWaterHex(direct) && !isBridgeHex(direct) && direct.type !== 'mountain') {
                 let bestW = null,
                     bestWd = Infinity;
@@ -22001,7 +22010,8 @@
                         sy = hex.y - startHex.y;
                     score += (sx * sx + sy * sy) * 0.18;
                 }
-                if(isBridgeHex(hex)) score *= 0.92;
+                // Prefer pure land over nearby bridge tiles for land clicks.
+                if(isBridgeHex(hex)) score *= 1.35;
                 else score += hexMountainProximityScore(hex) * 420;
                 if(score < bestScore) {
                     bestScore = score;
@@ -23229,6 +23239,9 @@
         }
 
         function wodMarchBlockedWithoutBridge(unit, startHex, targetHex) {
+            if(!startHex || !targetHex) return true;
+            // Same tile (or already there) is reachable without a bridge.
+            if(wodHexKeysEqual(startHex, targetHex)) return false;
             return wodLandBfsPath(unit, startHex, targetHex, 8000, false).length <= 1;
         }
 
@@ -23605,11 +23618,15 @@
         /** Last-resort bridge routing when composed paths fail but portals exist. */
         function wodTryPortalBridgeMarchPath(unit, startHex, targetHex) {
             if(!unit || !startHex || !targetHex || !wodUnitUsesLandBridges(unit)) return [];
-            if(!wodMarchBlockedWithoutBridge(unit, startHex, targetHex) &&
-                !wodBridgeUsefulForMarch(unit, startHex, targetHex)) return [];
+            // Same hex / same-shore land marches must NOT detour onto a nearby bridge and back —
+            // that broke land formations drawn beside rivers.
+            if(wodHexKeysEqual(startHex, targetHex)) return [];
+            let landBlocked = wodMarchBlockedWithoutBridge(unit, startHex, targetHex);
+            if(!landBlocked) return [];
             wodEnsureBridgePathIndex();
             let bridgePath = wodFindBestBridgePath(unit, startHex, targetHex);
-            if(bridgePath.length > 1 && wodPathReachesTarget(bridgePath, targetHex))
+            if(bridgePath.length > 1 && wodPathReachesTarget(bridgePath, targetHex) &&
+                wodPathCrossesBridge(bridgePath))
                 return bridgePath;
             let portalPath = smoothGridPath(wodLandBfsPath(unit, startHex, targetHex, 14000, true));
             if(portalPath.length > 1 && wodPathReachesTarget(portalPath, targetHex) && wodPathCrossesBridge(portalPath))
@@ -24393,7 +24410,9 @@
             for(let k = 0; k < n; k++) {
                 let p = leadCorridor[k];
                 if(!p) continue;
-                if(wodPointOnBridgeForUnit(probe, p.x, p.y, 1.35) || wodBridgeHexAtPoint(probe, p.x, p.y)) {
+                // Only true deck occupancy — wodBridgeHexAtPoint's radius scan falsely marks
+                // land beside bridges and collapses land formations onto the deck.
+                if(wodPointOnBridgeForUnit(probe, p.x, p.y, 1.05)) {
                     onB[k] = true;
                     any = true;
                     continue;
@@ -24437,7 +24456,7 @@
             for(let k = 0; k < leadCorridor.length; k++) {
                 let p = leadCorridor[k];
                 if(!p) continue;
-                if(wodPointOnBridgeForUnit(probe, p.x, p.y, 1.35) || wodBridgeHexAtPoint(probe, p.x, p.y))
+                if(wodPointOnBridgeForUnit(probe, p.x, p.y, 1.05))
                     return Math.max(0, k);
                 let h = getNearestHexToPoint(p.x, p.y);
                 if(h && isBridgeHex(h)) return Math.max(0, k);
@@ -25191,9 +25210,27 @@
             // First-order bridge rescue (parity with replanUnitOrder): try portal/composed
             // bridge paths before greedy hops that walk into open water at the shore.
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex &&
-                !wodOrderIntoWater(unit, reachNext.hex)) {
+                !wodOrderIntoWater(unit, reachNext.hex) &&
+                !wodHexKeysEqual(startHex, reachNext.hex) &&
+                wodMarchBlockedWithoutBridge(unit, startHex, reachNext.hex)) {
                 let bridgeAlt = wodTryPortalBridgeMarchPath(unit, startHex, reachNext.hex);
                 if(wodHexPathLength(bridgeAlt) > 1) path = bridgeAlt;
+            }
+            // Same-hex / already-on-tile land orders (formation slots beside a bridge): march
+            // straight to the exact pixel — never invent a bridge detour.
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext && startHex &&
+                wodHexKeysEqual(startHex, reachNext.hex) && !wodOrderIntoWater(unit, reachNext.hex)) {
+                unit._wodRouteUsesBridge = false;
+                unit.path = null;
+                unit.target = { x: reachNext.exactX, y: reachNext.exactY, pathPrepared: true };
+                if(!fromAdvance) {
+                    unit._routeArrowFrozenPts = wodCleanOrderArrowPolyline([
+                        { x: unit.x, y: unit.y },
+                        { x: reachNext.exactX, y: reachNext.exactY }
+                    ]);
+                    unit._routeArrowFrozenReady = true;
+                }
+                return true;
             }
             if(path.length <= 1 && unit.type === 'marine' && reachNext.hex && startHex && isWaterHex(startHex) && isWaterHex(reachNext.hex)) {
                 let hop = findGreedyWaterStep(unit, reachNext.hex, { fromHex: startHex });
@@ -25239,7 +25276,9 @@
                 }
                 // Prefer a single portal bridge hop toward the far shore over a land-greedy
                 // step that may aim into open water beside the deck.
-                if(!wodOrderIntoWater(unit, reachNext.hex) && startHex) {
+                if(!wodOrderIntoWater(unit, reachNext.hex) && startHex &&
+                    !wodHexKeysEqual(startHex, reachNext.hex) &&
+                    wodMarchBlockedWithoutBridge(unit, startHex, reachNext.hex)) {
                     let bridgeAlt = wodTryPortalBridgeMarchPath(unit, startHex, reachNext.hex);
                     if(wodHexPathLength(bridgeAlt) > 1) {
                         if(wodPathCrossesBridge(bridgeAlt)) unit._wodRouteUsesBridge = true;
@@ -41804,8 +41843,28 @@
                     if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
                         let h = getNearestHexToPoint(px, py);
                         if(h && (wodIsOpenWaterHex(h) || isBridgeHex(h))) {
-                            let snap = wodSnapLandArmyOrderPoint(unit, px, py, { allowDistantBridge: true });
-                            if(snap) return { x: snap.x, y: snap.y };
+                            let landNear = null,
+                                landD = Infinity;
+                            let jc = pixelToHex(px, py);
+                            for(let pt of getHexesInRadius(jc.q, jc.r, 2)) {
+                                let lh = gameData.hexes[`${pt.q},${pt.r}`];
+                                if(!lh || lh.type === 'mountain' || isWaterHex(lh) || isBridgeHex(lh)) continue;
+                                if(!wodHexWalkableForLandPath(unit, lh, false)) continue;
+                                let dx = lh.x - px,
+                                    dy = lh.y - py;
+                                let d = dx * dx + dy * dy;
+                                if(d < landD) {
+                                    landD = d;
+                                    landNear = lh;
+                                }
+                            }
+                            let hr = gameData.hexRadius || 20;
+                            if(landNear && landD <= Math.pow(hr * 2.4, 2))
+                                return { x: landNear.x, y: landNear.y };
+                            if(wodPointOnBridgeForUnit(unit, px, py, 1.05) || wodIsOpenWaterHex(h)) {
+                                let snap = wodSnapLandArmyOrderPoint(unit, px, py);
+                                if(snap) return { x: snap.x, y: snap.y };
+                            }
                         }
                     }
                     return { x: px, y: py };
@@ -41891,12 +41950,34 @@
                     if(!sea) return null;
                     return [{ x: sea.exactX, y: sea.exactY }];
                 }
-                // Land formation slots: only snap water/deck clicks — land near a river stays put.
+                // Land formation slots: keep land on land. Only snap when the slot is
+                // actually on open water/deck AND no nearby pure-land hex can hold it —
+                // shoreline slots near bridges used to yank onto the deck.
                 if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
                     let h = getNearestHexToPoint(tx, ty);
                     if(h && (wodIsOpenWaterHex(h) || isBridgeHex(h))) {
-                        let snap = wodSnapLandArmyOrderPoint(unit, tx, ty, { allowDistantBridge: true });
-                        if(snap) return [{ x: snap.x, y: snap.y }];
+                        let landNear = null,
+                            landD = Infinity;
+                        let jc = pixelToHex(tx, ty);
+                        for(let pt of getHexesInRadius(jc.q, jc.r, 2)) {
+                            let lh = gameData.hexes[`${pt.q},${pt.r}`];
+                            if(!lh || lh.type === 'mountain' || isWaterHex(lh) || isBridgeHex(lh)) continue;
+                            if(!wodHexWalkableForLandPath(unit, lh, false)) continue;
+                            let dx = lh.x - tx,
+                                dy = lh.y - ty;
+                            let d = dx * dx + dy * dy;
+                            if(d < landD) {
+                                landD = d;
+                                landNear = lh;
+                            }
+                        }
+                        let hr = gameData.hexRadius || 20;
+                        if(landNear && landD <= Math.pow(hr * 2.4, 2))
+                            return [{ x: landNear.x, y: landNear.y }];
+                        if(wodPointOnBridgeForUnit(unit, tx, ty, 1.05) || wodIsOpenWaterHex(h)) {
+                            let snap = wodSnapLandArmyOrderPoint(unit, tx, ty);
+                            if(snap) return [{ x: snap.x, y: snap.y }];
+                        }
                     }
                 }
                 let target = findReachableOrderHex(unit, tx, ty);

@@ -304,4 +304,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## AI bridge crossings (2026-07-09)
 - Enemy land marches now use the same dense corridor path (exact-end + kink strip) when bridges exist, get higher bridge-search / PF budgets, and rescue via `wodTryPortalBridgeMarchPath` in `preparePathTarget`.
 - AI no longer arrives mid-deck when friend-blocked, prefers advancing the deck path when blocked on a bridge, and snaps river-jitter targets onto land/deck instead of `intoWater` orders.
-- Shore hexes are no longer remapped onto nearby bridges in `findPathAroundTerrain` / `getNearestWalkableHexForUnit` (that turned shore?shore into deck stubs / water chords). Bridge-start hex paths densify the full deck run in `wodHexPathToWorldWaypoints`.
+- Shore hexes are no longer remapped onto nearby bridges in `findPathAroundTerrain` / `getNearestWalkableHexForUnit` (that turned shore-to-shore into deck stubs / water chords). Bridge-start hex paths densify the full deck run in `wodHexPathToWorldWaypoints`.
+
+## Land formations near bridges stay on land (2026-07-09)
+- Same-shore / same-hex land orders no longer trigger bridge rescue (portal paths that looped onto the deck and back).
+- Bridge funnel detection and land-march resolve ignore radius false-positives from `wodBridgeHexAtPoint`; formation/shift slots that sit on water beside a shore snap to nearby land instead of the deck.
