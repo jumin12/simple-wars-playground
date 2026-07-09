@@ -341,6 +341,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Removed all player `pathOrders` from Normandy events; engine `wodMissionApplyPathOrder` also skips owner 1 / local player.
 - Rebuild: `node scripts/generate-store-missions.js`.
 
+## Normandy England restore + nearshore assault (2026-07-09)
+- Bug: Cotentin tip-cap flooded **all** land north of `r=-14`, wiping England. Cap is now Cotentin q-range only; England re-asserted at `r<=-18` (~5800 land hexes) with ports closer to the Channel.
+- West France: Atlantic bite west of Cotentin; Cotentin tip ~`r=-10`; Channel still open (no land bridge).
+- Assault waves sit just offshore (`r` ~ `-3..-7`); still **zero** Allies on beach sand.
+- Rebuild: `node scripts/generate-store-missions.js`.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
