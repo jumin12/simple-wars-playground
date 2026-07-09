@@ -267,3 +267,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Bridges**: AI can span rivers toward enemy/neutral shores when units are nearby and the crossing helps the front focus — not only own-to-own channels.
 - **Anti-spam**: tighter per-faction bridge cap (max 3), ~95s cooldown, strong score penalty near existing bridges, cash cushion before building.
 - Verified: `output/test-ai-farm-bridge.cjs`.
+
+## Fix pathPrepared crash on move orders (2026-07-08)
+- **Bug**: `wodHexPathToWorldWaypoints` could return `[]` (empty bridge corridors), then callers did `unit.target = unit.path.shift()` and set `pathPrepared` on `undefined` ? crash on issue/replan move.
+- **Fix**: always emit a fallback waypoint from hex conversion; add `wodTakeNextPathTarget` and use it everywhere that shifts the next path node (assign, replan, convoy init, path advance, marine greedy chain).
+- Verified: Playwright unit checks for empty/null path + bridge waypoint conversion; no `pathPrepared` page errors.

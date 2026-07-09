@@ -12371,13 +12371,38 @@
                     let next = j < hexPath.length ? hexPath[j] : null;
                     let corridor = wodBridgeDeckCorridorWaypoints(br, prev, run, next);
                     for(let ci = 0; ci < corridor.length; ci++) wodPushWaypointDedup(out, corridor[ci]);
+                    // Bridge corridor can be empty (degenerate deck) — keep a hex center so callers
+                    // never shift() an empty path and crash on pathPrepared.
+                    if(!corridor.length) wodPushWaypointDedup(out, { x: h.x, y: h.y });
                     i = j - 1;
                     continue;
                 }
                 wodPushWaypointDedup(out, { x: h.x, y: h.y });
             }
-            if(exactEnd && out.length) out[out.length - 1] = exactEnd;
+            if(!out.length) {
+                let endHex = hexPath[hexPath.length - 1];
+                if(exactEnd) out.push({ x: exactEnd.x, y: exactEnd.y });
+                else if(endHex) out.push({ x: endHex.x, y: endHex.y });
+            } else if(exactEnd) {
+                out[out.length - 1] = exactEnd;
+            }
             return out;
+        }
+        /** Shift the next path waypoint onto unit.target; returns false if the path is empty. */
+        function wodTakeNextPathTarget(unit) {
+            if(!unit || !unit.path || !unit.path.length) {
+                if(unit) unit.target = null;
+                return false;
+            }
+            let next = unit.path.shift();
+            while(next == null && unit.path.length) next = unit.path.shift();
+            if(!next) {
+                unit.target = null;
+                return false;
+            }
+            unit.target = next;
+            unit.target.pathPrepared = true;
+            return true;
         }
         function bridgeAtHex(hex) {
             if(!hex) return null;
@@ -23929,9 +23954,7 @@
                             if(chain.length > 1) {
                                 u.orderTarget = { x: tgt.x, y: tgt.y };
                                 u.path = chain.slice(1).map(h => ({ x: h.x, y: h.y, pathPrepared: true }));
-                                u.target = u.path.shift();
-                                u.target.pathPrepared = true;
-                                invalidateUnitOrderArrowCache(u);
+                                if(wodTakeNextPathTarget(u)) invalidateUnitOrderArrowCache(u);
                             }
                         }
                     }
@@ -23998,8 +24021,7 @@
             unit.fullMarchWaypoints = marchPts.map(p => ({ x: p.x, y: p.y }));
             unit.marchWpCursor = 0;
             unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
-            unit.target = unit.path.shift();
-            unit.target.pathPrepared = true;
+            if(!wodTakeNextPathTarget(unit)) return false;
             if(unit.owner === 1) {
                 unit.combatEngaged = false;
                 unit.combatLockTimer = 0;
@@ -24265,8 +24287,7 @@
             // and terrain-safety checks treat the water legs as legal.
             if(wodPathCrossesOpenWater(fullHex)) unit._wodOrderIntoWater = true;
             unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
-            unit.target = unit.path.shift();
-            unit.target.pathPrepared = true;
+            if(!wodTakeNextPathTarget(unit)) return false;
             // Keep sparse click waypoints for leg logic; dense corridor lives in unit.path only.
             // Putting every hex step into fullMarchWaypoints made the arrow builder re-pathfind
             // between each step and draw huge looping lines on the map.
@@ -24435,8 +24456,10 @@
                 if(wodPathCrossesOpenWater(path)) unit._wodOrderIntoWater = true;
                 let exactNext = {x: reachNext.exactX, y: reachNext.exactY};
                 unit.path = wodHexPathToWorldWaypoints(unit, path, exactNext);
-                unit.target = unit.path.shift();
-                unit.target.pathPrepared = true;
+                if(!wodTakeNextPathTarget(unit)) {
+                    unit.path = null;
+                    unit.target = {x: reachNext.exactX, y: reachNext.exactY, pathPrepared: true};
+                }
                 if(!fromAdvance) wodSeedOrderArrowCurrentLeg(unit, path);
                 return true;
             }
@@ -24603,11 +24626,8 @@
                 let endNode = {x: desired.x, y: desired.y};
                 if(desired.isCity) endNode.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endNode);
-                if(unit.path.length > 0) {
-                    unit.target = unit.path.shift();
-                    if(unit.target) unit.target.pathPrepared = true;
-                }
-                if(!unit.target) {
+                if(!wodTakeNextPathTarget(unit)) {
+                    unit.path = null;
                     unit.target = {
                         x: desired.x,
                         y: desired.y,
@@ -24640,9 +24660,10 @@
                         let endNode = {x: desired.x, y: desired.y};
                         if(desired.isCity) endNode.isCity = true;
                         unit.path[unit.path.length - 1] = endNode;
-                        unit.target = unit.path.length > 0 ? unit.path.shift() : null;
-                        if(unit.target) unit.target.pathPrepared = true;
-                        else unit.target = { x: desired.x, y: desired.y, pathPrepared: true, ...(desired.isCity ? { isCity: true } : {}) };
+                        if(!wodTakeNextPathTarget(unit)) {
+                            unit.path = null;
+                            unit.target = { x: desired.x, y: desired.y, pathPrepared: true, ...(desired.isCity ? { isCity: true } : {}) };
+                        }
                         invalidateUnitOrderArrowCache(unit);
                         return;
                     }
@@ -26266,8 +26287,15 @@
                         let endPt = { x: finalTarget.x, y: finalTarget.y };
                         if(convoyCity) endPt.isCity = true;
                         unit.path = wodHexPathToWorldWaypoints(unit, alt, endPt);
-                        unit.target = unit.path.shift();
-                        unit.target.pathPrepared = true;
+                        if(!wodTakeNextPathTarget(unit)) {
+                            unit.path = null;
+                            unit.target = {
+                                x: endPt.x,
+                                y: endPt.y,
+                                pathPrepared: true,
+                                ...(convoyCity ? { isCity: true } : {})
+                            };
+                        }
                         unit._wodReplanLandUntil = 0;
                         return true;
                     }
@@ -26292,8 +26320,15 @@
                 let endPt = {x: finalTarget.x, y: finalTarget.y};
                 if(convoyCity) endPt.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endPt);
-                unit.target = unit.path.shift();
-                unit.target.pathPrepared = true;
+                if(!wodTakeNextPathTarget(unit)) {
+                    unit.path = null;
+                    unit.target = {
+                        x: endPt.x,
+                        y: endPt.y,
+                        pathPrepared: true,
+                        ...(convoyCity ? { isCity: true } : {})
+                    };
+                }
                 unit._wodReplanLandUntil = 0;
                 unit._wodReplanAmpUntil = 0;
                 return true;
@@ -26336,8 +26371,10 @@
             if(path.length > 1) {
                 let endPt = {x: destHex.x, y: destHex.y, isCity: true};
                 convoy.path = wodHexPathToWorldWaypoints(convoy, path, endPt);
-                convoy.target = convoy.path.shift();
-                convoy.target.pathPrepared = true;
+                if(!wodTakeNextPathTarget(convoy)) {
+                    convoy.path = null;
+                    convoy.target = {x: destHex.x, y: destHex.y, isCity: true, pathPrepared: true};
+                }
             } else {
                 let hop = convoy.convoySeaRoute ? findGreedyWaterStep(convoy, destHex) : findGreedyLandStep(convoy, destHex);
                 if(hop) {
@@ -26453,9 +26490,7 @@
 
         function wodAdvanceUnitPathTarget(unit) {
             if(unit.path && unit.path.length > 0) {
-                unit.target = unit.path.shift();
-                unit.target.pathPrepared = true;
-                return true;
+                if(wodTakeNextPathTarget(unit)) return true;
             }
             if(unit.fullMarchWaypoints && unit.marchWpCursor < unit.fullMarchWaypoints.length - 1) {
                 unit.marchWpCursor++;
