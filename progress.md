@@ -335,6 +335,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Events retimed to Neptune: briefing, shore bombardment, H-Hour, Bloody Omaha, airborne link-up, 21st Panzer, Mulberry, Cherbourg.
 - Towns now include Dover; 14 cities, 8 events. Rebuild: `node scripts/generate-store-missions.js`.
 
+## Normandy Channel seal + no player auto-orders (2026-07-09)
+- Hard Channel seal: England `r<=-30`, Cotentin tip capped at `r=-14`, mid-belt flooded so **France never land-connects to Britain**.
+- Assault waves mid-Channel only (`r<=-10`); **no Allied troops on beach sand**. German infantry **man Atlantic Wall forts**.
+- Removed all player `pathOrders` from Normandy events; engine `wodMissionApplyPathOrder` also skips owner 1 / local player.
+- Rebuild: `node scripts/generate-store-missions.js`.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
