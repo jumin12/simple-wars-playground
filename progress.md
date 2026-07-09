@@ -329,6 +329,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Ownership fix so England seeds no longer claim the Cotentin; beach sand left contested for assault landings.
 - 13 cities, 18 forts, 89 units, 7 events. Rebuild: `node scripts/generate-store-missions.js`.
 
+## Normandy continents + offshore assault (2026-07-09)
+- Map is no longer an island: contiguous **England** (north) and **France** (south) with a continuous **English Channel** belt; Cotentin still juts north.
+- Assault infantry/armor start **afloat in the Channel** just off Utah?Sword; airborne stay inland; **no German navy**.
+- Events retimed to Neptune: briefing, shore bombardment, H-Hour, Bloody Omaha, airborne link-up, 21st Panzer, Mulberry, Cherbourg.
+- Towns now include Dover; 14 cities, 8 events. Rebuild: `node scripts/generate-store-missions.js`.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.

@@ -44,183 +44,260 @@ if (!MapBuilder || !ev) throw new Error('Could not load MapBuilder/ev from gener
 /**
  * Operation Overlord — Normandy, 6 June 1944.
  *
- * Map axes (game coords): north = English Channel (−r), south = inland France (+r),
- * west = Cotentin / Cherbourg (−q), east = Orne / Sword / Caen (+q).
+ * Continents (not an island): southern England fills the north edge of the map;
+ * Normandy / France fills the south; the English Channel is a continuous sea belt
+ * between them. Cotentin juts north into the Channel; beaches west→east:
+ *   Utah · Pointe du Hoc · Omaha · Gold · Juno · Sword
  *
- * Beach belt west→east along the Channel shore:
- *   Utah (E Cotentin) · Pointe du Hoc · Omaha · Gold · Juno · Sword
- *
- * Player = SHAEF / Allied Expeditionary Force (UK staging + invasion fleet).
- * Enemy  = German 7th Army (LXXXIV Corps + Cherbourg fortress + 21st Panzer).
+ * Assault waves start in the Channel just off their beaches (landing craft).
+ * German 7th Army has no navy — Atlantic Wall + inland panzer reserve only.
  */
 function buildNormandyDDay() {
   const b = new MapBuilder(72, 19440606);
+  const SP = 27;
 
-  // Wide Norman landmass, Channel-open north, Cotentin bias west.
-  b.generateBase('island', 1944, {
-    islandMode: 'wide',
-    centerQ: 2,
-    centerR: 16,
-    stretchX: 1.72,
-    stretchY: 0.68,
-    coastNoiseAmp: 0.34,
-    waterElevThresh: 0.47,
-    sandThresh: 0.33,
-    grassThresh: 0.55,
-    forestThresh: 0.74,
-    mountElevThresh: 0.93,
-    moistShift: 0.015,
-    forestMoistBoost: 0.05,
+  /** Place a land unit on Channel water (landing craft / LCT approach). */
+  function assaultAfloat(type, owner, q, r, name) {
+    const snap = b.nearestWhere(q, r, 14, (h) => h.type === 'water');
+    if (!snap) throw new Error('no Channel water near ' + q + ',' + r + ' for ' + (name || type));
+    q = snap.q;
+    r = snap.r;
+    b.unitSeq++;
+    const base = {
+      type,
+      owner,
+      name:
+        name ||
+        (type === 'heavy' ? 'Armor Bn.' : type === 'marine' ? 'Marine Coy.' : 'Infantry Coy.'),
+      x: q * SP + (b.rng() - 0.5) * 10,
+      y: r * SP + (b.rng() - 0.5) * 10,
+      target: null,
+      hp: 100,
+      maxHp: 100,
+      manpower: 1000,
+      maxManpower: 1000,
+      tanks: 0,
+      maxTanks: 0,
+      selected: false,
+      shake: 0,
+      activeCombatVisual: 0,
+      morale: 100,
+      maxMorale: 100,
+      moraleBroken: false,
+      xp: 0,
+      kills: 0,
+      losses: 0,
+      tankKills: 0,
+      tankLosses: 0,
+      veteran: false,
+      uid: 'mu_' + b.unitSeq,
+      speed: 15,
+      damage: 8,
+      range: 50,
+      attackCooldown: 2.0,
+      radius: 12,
+    };
+    if (type === 'heavy') {
+      Object.assign(base, {
+        hp: 300,
+        maxHp: 300,
+        speed: 10,
+        damage: 18,
+        range: 60,
+        attackCooldown: 2.8,
+        radius: 16,
+        tanks: 500,
+        maxTanks: 500,
+      });
+    }
+    b.entities.push(base);
+    return base;
+  }
+
+  // Full continental rectangle, then carve Channel + Atlantic.
+  b.generateBase('rectangle', 1944, {
+    waterElevThresh: 0.22,
+    sandThresh: 0.3,
+    grassThresh: 0.52,
+    forestThresh: 0.72,
+    mountElevThresh: 0.94,
+    moistShift: 0.01,
+    forestMoistBoost: 0.04,
     mountainStyle: 'low',
-    mountainPeakJitter: 0.05,
+    mountainPeakJitter: 0.04,
     biomeAccent: 'balanced',
   });
 
-  // —— English Channel (entire northern third) ——
+  // English Channel belt between England (north) and France (south).
   b.each((h) => {
-    if (h.r < -10) h.type = 'water';
+    if (h.r >= -28 && h.r <= -2) h.type = 'water';
   });
-  b.ensureWater(0, -30, 18);
-  b.ensureWater(-24, -26, 10);
-  b.ensureWater(24, -26, 10);
-  b.ensureWater(-8, -38, 8);
-  b.ensureWater(8, -40, 7);
+  b.ensureWater(0, -16, 22);
+  b.ensureWater(-30, -14, 12);
+  b.ensureWater(30, -14, 12);
 
-  // —— Cotentin peninsula (Cherbourg tip north into the Channel) ——
-  // Real Cotentin juts north; Utah sits on its *east* shore facing the Baie du Grand Vey.
-  b.blob(-40, -14, 11, 'grass', { noise: 0.32 });
-  b.blob(-42, -22, 7, 'grass', { noise: 0.28 });
-  b.blob(-36, -4, 8, 'grass', { noise: 0.3 });
-  b.blob(-34, 4, 6, 'grass', { noise: 0.28 });
-  b.ensureLand(-42, -20, 5);
-  b.ensureLand(-40, -12, 4);
+  // Southern England — full northern continent to the map edge.
+  b.rect(-55, -55, 55, -28, 'grass', { noise: 1.8 });
+  b.each((h) => {
+    if (h.r <= -28 && h.type === 'water') h.type = 'grass';
+  });
+  for (let i = 0; i < 10; i++) {
+    b.blob(Math.round(-40 + b.rng() * 80), Math.round(-48 + b.rng() * 14), 2 + b.rng() * 3, 'forest', {
+      noise: 0.4,
+    });
+  }
+
+  // France / Normandy — southern continent to the map edge.
+  b.rect(-50, 2, 55, 55, 'grass', { noise: 2.0 });
+  b.each((h) => {
+    if (h.r >= 2 && h.type === 'water') h.type = 'grass';
+  });
+
+  // Cotentin peninsula north into the Channel.
+  b.blob(-40, -10, 12, 'grass', { noise: 0.3 });
+  b.blob(-42, -18, 8, 'grass', { noise: 0.28 });
+  b.blob(-36, -2, 8, 'grass', { noise: 0.28 });
+  b.ensureLand(-42, -18, 5);
+  b.ensureLand(-40, -10, 4);
   b.ensureLand(-36, -2, 4);
   b.ensureLand(-32, 4, 3);
-  // West Cotentin Atlantic face stays watery (no landing beaches there on D-Day).
-  b.ensureWater(-52, -16, 6);
-  b.ensureWater(-50, -6, 5);
-
-  // Baie du Grand Vey / Carentan estuary — water gap between Cotentin and Bessin.
-  b.blob(-22, 2, 5, 'water', { noise: 0.35 });
-  b.blob(-20, 6, 4, 'water', { noise: 0.3 });
-  b.ensureWater(-24, 0, 3);
-  b.ensureWater(-18, 4, 3);
-
-  // Main Norman mainland (Bessin → Calvados → Caen plain).
-  b.rect(-16, 0, 48, 44, 'grass', { noise: 2.2 });
-  b.ensureLand(-8, 8, 6);
-  b.ensureLand(8, 10, 6);
-  b.ensureLand(24, 14, 7);
-  b.ensureLand(32, 22, 5);
-
-  // Long invasion beach belt (sand) — Utah on Cotentin east shore, then Omaha→Sword.
-  // Utah (east Cotentin)
-  b.rect(-36, -6, -28, 0, 'sand', { noise: 1.2 });
-  // Pointe du Hoc cliffs (rocky headland between Utah and Omaha)
-  b.blob(-18, -3, 3.2, 'hill', { noise: 0.18 });
-  b.blob(-18, -1, 2.2, 'mountain', { noise: 0.12 });
-  b.rect(-20, -4, -16, 0, 'sand', { noise: 0.8 });
-  // Omaha (Vierville → Colleville bluffs)
-  b.rect(-12, -4, 0, 1, 'sand', { noise: 1.1 });
-  b.blob(-8, 1, 2.5, 'hill', { noise: 0.2 }); // coastal bluffs
-  b.blob(-4, 2, 2.2, 'hill', { noise: 0.2 });
-  // Gold (Asnelles → Ver-sur-Mer)
-  b.rect(2, -3, 12, 1, 'sand', { noise: 1.0 });
-  // Juno (Courseulles → Saint-Aubin)
-  b.rect(14, -3, 22, 1, 'sand', { noise: 1.0 });
-  // Sword (Lion-sur-Mer → Ouistreham)
-  b.rect(24, -3, 34, 1, 'sand', { noise: 1.0 });
-
-  // Fill residual Channel-edge water along the beach latitudes with sand (tidal flats).
+  // Atlantic west of Cotentin.
   b.each((h) => {
-    if (h.r < -5 || h.r > 2) return;
-    if (h.type !== 'water') return;
-    // Keep the Grand Vey / estuary open.
-    if (h.q > -26 && h.q < -16) return;
-    if (b.rng() > 0.18) h.type = 'sand';
+    if (h.q < -50 && h.type !== 'urban') h.type = 'water';
   });
+  b.ensureWater(-54, -12, 7);
+  b.ensureWater(-52, -2, 6);
 
-  // Carentan marsh / Prairies Marécageuses (flooded for defense, 1944).
+  // Baie du Grand Vey.
+  b.blob(-22, 0, 5, 'water', { noise: 0.35 });
+  b.blob(-20, 5, 4, 'water', { noise: 0.3 });
+  b.ensureWater(-24, -1, 3);
+  b.ensureWater(-18, 3, 3);
+
+  // Keep open Channel (except Cotentin land).
+  b.ensureWater(0, -12, 16);
+  b.ensureWater(20, -10, 8);
+  b.ensureWater(-10, -10, 6);
+
+  // Beaches.
+  b.rect(-36, -2, -28, 2, 'sand', { noise: 1.1 });
+  b.blob(-18, -1, 3, 'hill', { noise: 0.18 });
+  b.blob(-18, 1, 2, 'mountain', { noise: 0.12 });
+  b.rect(-20, -2, -16, 2, 'sand', { noise: 0.8 });
+  b.rect(-12, -2, 0, 2, 'sand', { noise: 1.0 });
+  b.blob(-8, 3, 2.4, 'hill', { noise: 0.2 });
+  b.blob(-4, 3, 2.2, 'hill', { noise: 0.2 });
+  b.rect(2, -2, 12, 2, 'sand', { noise: 1.0 });
+  b.rect(14, -2, 22, 2, 'sand', { noise: 1.0 });
+  b.rect(24, -2, 34, 2, 'sand', { noise: 1.0 });
+
+  // Carentan marshes.
   b.blob(-24, 8, 5, 'swamp', { noise: 0.4 });
   b.blob(-22, 12, 4, 'swamp', { noise: 0.35 });
   b.blob(-28, 10, 3, 'swamp', { noise: 0.3 });
 
-  // River Vire (Carentan → Isigny corridor) and River Orne (Caen → Ouistreham).
+  // Vire & Orne.
   b.ridge(-24, 8, -10, 4, 1, 'water', { wobble: 2.2, skipUrban: true });
   b.ridge(24, 14, 32, 0, 1, 'water', { wobble: 1.8, skipUrban: true });
-  // Canal de Caen à la Mer (east bank of Orne — 6th Airborne DZ).
   b.ridge(28, 12, 34, 0, 0, 'water', { wobble: 1.2, skipUrban: true });
 
-  // Bocage hedgerow country: Cotentin + Saint-Lô hinterland (dense forest patches).
-  for (let i = 0; i < 14; i++) {
+  // Bocage west / thinner east.
+  for (let i = 0; i < 16; i++) {
     b.blob(
-      Math.round(-40 + b.rng() * 22),
-      Math.round(-8 + b.rng() * 28),
+      Math.round(-42 + b.rng() * 24),
+      Math.round(-6 + b.rng() * 28),
       1.6 + b.rng() * 2.4,
       'forest',
       { noise: 0.45 }
     );
   }
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 8; i++) {
     b.blob(
-      Math.round(-14 + b.rng() * 18),
+      Math.round(-12 + b.rng() * 16),
       Math.round(10 + b.rng() * 20),
-      1.8 + b.rng() * 2.2,
+      1.8 + b.rng() * 2.0,
       'forest',
       { noise: 0.4 }
     );
   }
-  // Caen plain stays more open (fewer forests east of Bayeux).
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 4; i++) {
     b.blob(
-      Math.round(10 + b.rng() * 28),
-      Math.round(8 + b.rng() * 22),
-      1.2 + b.rng() * 1.6,
+      Math.round(12 + b.rng() * 26),
+      Math.round(10 + b.rng() * 20),
+      1.2 + b.rng() * 1.5,
       'forest',
       { noise: 0.35 }
     );
   }
 
-  // Land corridors so authored cities stay connected over bocage/marsh.
-  b.landCorridor(-40, -18, -34, 2, 1);
+  b.landCorridor(-40, -16, -34, 2, 1);
   b.landCorridor(-34, 2, -24, 10, 1);
   b.landCorridor(-24, 10, -10, 18, 1);
   b.landCorridor(-8, 4, 6, 8, 1);
   b.landCorridor(6, 8, 24, 14, 1);
   b.landCorridor(24, 14, 30, 26, 1);
-  b.landCorridor(-6, 4, -10, 18, 1);
-  // Beach exits inland
-  b.landCorridor(-32, -2, -30, 4, 1);
-  b.landCorridor(-6, 0, -4, 6, 1);
-  b.landCorridor(8, 0, 6, 8, 1);
-  b.landCorridor(18, 0, 20, 8, 1);
-  b.landCorridor(30, 0, 26, 12, 1);
+  b.landCorridor(-32, 0, -30, 4, 1);
+  b.landCorridor(-6, 1, -4, 6, 1);
+  b.landCorridor(8, 1, 6, 8, 1);
+  b.landCorridor(18, 1, 20, 8, 1);
+  b.landCorridor(30, 1, 26, 12, 1);
 
-  b.roughenCoasts(1, 0.2);
-  b.coastSand(0.9);
+  b.roughenCoasts(2, 0.2);
+  b.coastSand(0.85);
 
-  // —— Southern England staging (Portsmouth / Southampton / Plymouth) ——
-  b.blob(-10, -46, 7, 'grass', { noise: 0.22 });
-  b.blob(6, -48, 6, 'grass', { noise: 0.22 });
-  b.blob(-28, -44, 5, 'grass', { noise: 0.25 }); // Plymouth / Force U embarkation
-  b.ensureLand(-10, -46, 4);
-  b.ensureLand(6, -48, 3);
-  b.ensureLand(-28, -44, 3);
-  b.ensureWater(-10, -38, 3);
-  b.ensureWater(6, -40, 3);
-  b.ensureWater(-28, -36, 3);
+  // Re-assert Channel after roughen: water between England and France except Cotentin.
+  b.each((h) => {
+    if (h.type === 'urban') return;
+    const cotentinLand = h.q >= -48 && h.q <= -28 && h.r >= -20 && h.r <= 2 && h.type !== 'water';
+    if (h.r >= -24 && h.r <= -3) {
+      if (cotentinLand) return;
+      if (h.type === 'sand' && h.r >= -3) return;
+      h.type = 'water';
+    }
+  });
+  b.blob(-40, -12, 9, 'grass', { noise: 0.25 });
+  b.blob(-42, -18, 6, 'grass', { noise: 0.22 });
+  b.ensureLand(-42, -18, 4);
+  b.ensureLand(-40, -10, 3);
+  b.each((h) => {
+    if (h.q < -50 && h.type !== 'urban') h.type = 'water';
+  });
+  // Beaches again after Channel wipe.
+  b.rect(-36, -2, -28, 2, 'sand', { noise: 0.9 });
+  b.rect(-20, -2, -16, 2, 'sand', { noise: 0.7 });
+  b.rect(-12, -2, 0, 2, 'sand', { noise: 0.9 });
+  b.rect(2, -2, 12, 2, 'sand', { noise: 0.9 });
+  b.rect(14, -2, 22, 2, 'sand', { noise: 0.9 });
+  b.rect(24, -2, 34, 2, 'sand', { noise: 0.9 });
+  b.blob(-18, 0, 2.5, 'hill', { noise: 0.15 });
+  b.coastSand(0.45);
 
-  // —— Cities (historical relative placement) ——
-  // England
-  b.city(-10, -46, 1, 'Portsmouth', { factory: true, harbor: true, incomeBonus: 50 });
-  b.city(6, -48, 1, 'Southampton', { factory: true, harbor: true, incomeBonus: 30 });
-  b.city(-28, -44, 1, 'Plymouth', { factory: false, harbor: true });
-  // Cotentin
-  b.city(-42, -20, 2, 'Cherbourg', { factory: true, harbor: true, incomeBonus: 40 });
-  b.city(-38, -8, 2, 'Valognes', { factory: false });
+  // England must stay land to the north edge.
+  b.each((h) => {
+    if (h.r <= -28 && h.type === 'water') h.type = 'grass';
+  });
+  // France must stay land to the south edge.
+  b.each((h) => {
+    if (h.r >= 4 && h.type === 'water' && h.q > -48) {
+      // keep rivers/marshes; only fill accidental Channel bleed
+      if (h.r < 6 && Math.abs(h.q) < 40) return;
+    }
+    if (h.r >= 8 && h.type === 'water' && !(h.q > -28 && h.q < -16) && !(h.q > 20 && h.q < 36)) {
+      // leave authored rivers; fill random ponds far inland
+      if (b.rng() < 0.15) h.type = 'grass';
+    }
+  });
+
+  // Cities.
+  b.city(-12, -40, 1, 'Portsmouth', { factory: true, harbor: true, incomeBonus: 50 });
+  b.city(8, -42, 1, 'Southampton', { factory: true, harbor: true, incomeBonus: 30 });
+  b.city(-30, -38, 1, 'Plymouth', { factory: false, harbor: true });
+  b.city(28, -40, 1, 'Dover', { factory: false, harbor: true });
+
+  b.city(-42, -16, 2, 'Cherbourg', { factory: true, harbor: true, incomeBonus: 40 });
+  b.city(-38, -6, 2, 'Valognes', { factory: false });
   b.city(-32, 2, 2, 'Sainte-Mère-Église', { factory: false });
   b.city(-24, 10, 2, 'Carentan', { factory: false });
-  // Bessin / Calvados
   b.city(-6, 4, 2, 'Isigny-sur-Mer', { factory: false });
   b.city(-10, 18, 2, 'Saint-Lô', { factory: true });
   b.city(6, 8, 2, 'Bayeux', { factory: false });
@@ -228,181 +305,132 @@ function buildNormandyDDay() {
   b.city(32, 2, 2, 'Ouistreham', { factory: false, harbor: true });
   b.city(30, 26, 2, 'Falaise', { factory: true });
 
-  // Guarantee walkable beach exits before placing assault waves.
-  b.ensureLand(-34, -3, 3);
-  b.ensureLand(-8, -2, 3);
-  b.ensureLand(8, -1, 3);
-  b.ensureLand(18, -1, 3);
-  b.ensureLand(30, -1, 3);
-  b.ensureLand(-18, -1, 2);
-  b.ensureLand(-36, 0, 2);
-  b.ensureLand(34, 0, 2);
-  // Re-paint sand on those exits so they still read as beaches.
-  for (const [q, r] of [[-34, -3], [-32, -2], [-8, -2], [-4, -1], [8, -1], [18, -1], [30, -1]]) {
-    const h = b.at(q, r);
-    if (h && h.type !== 'urban' && h.type !== 'water') h.type = 'sand';
-  }
-
-  b.claimNations([
-    { q: -10, r: -46, owner: 1, reach: 11 },
-    { q: 6, r: -48, owner: 1, reach: 10 },
-    { q: -28, r: -44, owner: 1, reach: 9 },
-    { q: 4, r: 16, owner: 2, reach: 78 },
-  ]);
-
-  // England seeds can bleed onto the Cotentin — force all French land/water south of the
-  // Channel staging gap back to German control, then leave the beach sand contested.
+  // Ownership: England Allied, France German, Channel open, beaches contested.
   b.each((h) => {
     if (h.type === 'urban') return;
-    // Keep English staging islands Allied.
-    if (h.r <= -36) {
-      if (h.type !== 'water') h.owner = 1;
+    if (h.r <= -28) {
+      h.owner = h.type === 'water' ? 0 : 1;
       return;
     }
-    // Channel water stays neutral / open.
-    if (h.type === 'water' && h.r < -6) {
+    if (h.type === 'water') {
       h.owner = 0;
       return;
     }
-    // Invasion beaches: contested (assault waves can stand here).
-    if (h.type === 'sand' && h.r >= -5 && h.r <= 2) {
+    if (h.type === 'sand' && h.r >= -3 && h.r <= 3) {
       h.owner = 0;
       return;
     }
-    // Rest of Normandy = German 7th Army.
-    if (h.r > -36) h.owner = 2;
+    h.owner = 2;
   });
+  for (const c of b.cities) {
+    for (const h of b.hexes.values()) {
+      if (h.cityId === c.id) h.owner = c.owner;
+    }
+  }
 
-  // —— Atlantic Wall strongpoints (named sectors) ——
-  // Utah / Crisbecq–Azeville area
-  b.fort(-34, -4, 2);
-  b.fort(-30, -2, 2);
-  b.fort(-32, 0, 2);
-  // Pointe du Hoc (Ranger objective)
-  b.fort(-18, -2, 2);
-  // Omaha: WN62 / WN72 style bluff positions (Vierville, St-Laurent, Colleville)
-  b.fort(-10, -1, 2);
-  b.fort(-6, 0, 2);
-  b.fort(-2, 0, 2);
-  b.fort(0, 1, 2);
-  // Gold: Longues-sur-Mer battery area + Asnelles
-  b.fort(4, -1, 2);
-  b.fort(8, 0, 2);
-  b.fort(12, 0, 2);
-  // Juno: Courseulles / Bernières
-  b.fort(16, -1, 2);
-  b.fort(20, 0, 2);
-  // Sword: Lion / Ouistreham / Riva-Bella
-  b.fort(26, -1, 2);
-  b.fort(30, 0, 2);
-  b.fort(34, 1, 2);
-  // Cherbourg fortress ring
-  b.fort(-44, -18, 2);
-  b.fort(-40, -22, 2);
+  // Atlantic Wall.
+  b.fort(-34, -1, 2);
+  b.fort(-30, 0, 2);
+  b.fort(-32, 1, 2);
+  b.fort(-18, 0, 2);
+  b.fort(-10, 0, 2);
+  b.fort(-6, 1, 2);
+  b.fort(-2, 1, 2);
+  b.fort(0, 2, 2);
+  b.fort(4, 0, 2);
+  b.fort(8, 1, 2);
+  b.fort(12, 1, 2);
+  b.fort(16, 0, 2);
+  b.fort(20, 1, 2);
+  b.fort(26, 0, 2);
+  b.fort(30, 1, 2);
+  b.fort(34, 2, 2);
+  b.fort(-44, -14, 2);
+  b.fort(-40, -18, 2);
 
-  // —— Allied OOB (assault forces on/near the beaches + fleet offshore) ——
-  // Marines must stand on land/sand (not open Channel). Ships stay in water north of the belt.
-  // US VII Corps — Utah Beach: 4th Infantry Division (east Cotentin sand)
+  // Allied assault waves IN THE CHANNEL just off each beach.
   for (let i = 0; i < 5; i++) {
-    b.unit('marine', 1, -34 + (i % 3), -4 + Math.floor(i / 3) * 2, i === 0 ? '4th Inf. Div. (Utah)' : null);
+    assaultAfloat('marine', 1, -34 + (i % 3), -6 - Math.floor(i / 3), i === 0 ? '4th Inf. Div. (Utah)' : null);
   }
-  b.unit('heavy', 1, -32, -2, '70th Tank Bn. (DD)');
-  // 82nd Airborne — west of Merderet / Sainte-Mère-Église
-  b.unit('marine', 1, -36, -2, '82nd Airborne Div.');
-  b.unit('marine', 1, -38, 0, '505th PIR');
-  // 101st Airborne — east toward Carentan exits
-  b.unit('marine', 1, -30, 2, '101st Airborne Div.');
-  b.unit('marine', 1, -28, 4, '506th PIR');
-
-  // US V Corps — Omaha: 1st ID east, 29th ID west on the bluff beaches
+  assaultAfloat('heavy', 1, -32, -7, '70th Tank Bn. (DD)');
   for (let i = 0; i < 4; i++) {
-    b.unit('marine', 1, -4 + (i % 2), -3 + Math.floor(i / 2) * 2, i === 0 ? '1st Inf. Div. (Omaha)' : null);
+    assaultAfloat('marine', 1, -4 + (i % 2), -6 - Math.floor(i / 2), i === 0 ? '1st Inf. Div. (Omaha)' : null);
   }
   for (let i = 0; i < 4; i++) {
-    b.unit('marine', 1, -10 + (i % 2), -3 + Math.floor(i / 2) * 2, i === 0 ? '29th Inf. Div. (Omaha)' : null);
+    assaultAfloat('marine', 1, -10 + (i % 2), -6 - Math.floor(i / 2), i === 0 ? '29th Inf. Div. (Omaha)' : null);
   }
-  b.unit('heavy', 1, -8, -1, '741st Tank Bn. (DD)');
-  b.unit('heavy', 1, -4, -1, '743rd Tank Bn.');
-  b.unit('marine', 1, -18, -2, '2nd Ranger Bn. (Pointe du Hoc)');
-
-  // British XXX Corps — Gold: 50th (Northumbrian) + 8th Armoured
+  assaultAfloat('heavy', 1, -8, -7, '741st Tank Bn. (DD)');
+  assaultAfloat('heavy', 1, -4, -7, '743rd Tank Bn.');
+  assaultAfloat('marine', 1, -18, -5, '2nd Ranger Bn. (Pointe du Hoc)');
   for (let i = 0; i < 4; i++) {
-    b.unit('marine', 1, 6 + (i % 2), -2 + Math.floor(i / 2) * 2, i === 0 ? '50th Inf. Div. (Gold)' : null);
+    assaultAfloat('marine', 1, 6 + (i % 2), -6 - Math.floor(i / 2), i === 0 ? '50th Inf. Div. (Gold)' : null);
   }
-  b.unit('heavy', 1, 8, 0, '8th Armoured Bde.');
-  b.unit('marine', 1, 10, 1, '47 Royal Marine Commando');
-
-  // Canadian 3rd Infantry — Juno + 2nd Canadian Armoured
+  assaultAfloat('heavy', 1, 8, -7, '8th Armoured Bde.');
+  assaultAfloat('marine', 1, 10, -5, '47 Royal Marine Commando');
   for (let i = 0; i < 4; i++) {
-    b.unit('marine', 1, 16 + (i % 2), -2 + Math.floor(i / 2) * 2, i === 0 ? '3rd Cdn Inf. Div. (Juno)' : null);
+    assaultAfloat('marine', 1, 16 + (i % 2), -6 - Math.floor(i / 2), i === 0 ? '3rd Cdn Inf. Div. (Juno)' : null);
   }
-  b.unit('heavy', 1, 18, 0, '2nd Cdn Armoured Bde.');
-
-  // British I Corps — Sword: 3rd Infantry + 27th Armoured; 6th Airborne east of Orne
+  assaultAfloat('heavy', 1, 18, -7, '2nd Cdn Armoured Bde.');
   for (let i = 0; i < 4; i++) {
-    b.unit('marine', 1, 28 + (i % 2), -2 + Math.floor(i / 2) * 2, i === 0 ? '3rd Inf. Div. (Sword)' : null);
+    assaultAfloat('marine', 1, 28 + (i % 2), -6 - Math.floor(i / 2), i === 0 ? '3rd Inf. Div. (Sword)' : null);
   }
-  b.unit('heavy', 1, 30, 0, '27th Armoured Bde.');
-  b.unit('marine', 1, 34, -2, '6th Airborne Div.');
-  b.unit('marine', 1, 36, 0, '9th Para Bn. (Merville)');
+  assaultAfloat('heavy', 1, 30, -7, '27th Armoured Bde.');
 
-  // Naval Task Forces + bombardment ships (Channel)
-  b.unit('ship', 1, -32, -18, 'Force U (Utah)');
-  b.unit('ship', 1, -8, -20, 'Force O (Omaha)');
-  b.unit('ship', 1, 8, -18, 'Force G (Gold)');
-  b.unit('ship', 1, 18, -18, 'Force J (Juno)');
-  b.unit('ship', 1, 28, -18, 'Force S (Sword)');
-  b.unit('ship', 1, -12, -24, 'USS Texas');
-  b.unit('ship', 1, -6, -26, 'USS Arkansas');
-  b.unit('ship', 1, 4, -24, 'HMS Belfast');
-  b.unit('ship', 1, 14, -24, 'HMCS Algonquin');
-  b.unit('ship', 1, 24, -24, 'HMS Warspite');
-  b.unit('ship', 1, -26, -22, 'USS Nevada');
+  // Airborne already inland (night drop).
+  b.ensureLand(-36, 0, 2);
+  b.ensureLand(-30, 3, 2);
+  b.ensureLand(34, 0, 2);
+  b.unit('marine', 1, -36, 0, '82nd Airborne Div.');
+  b.unit('marine', 1, -38, 1, '505th PIR');
+  b.unit('marine', 1, -30, 3, '101st Airborne Div.');
+  b.unit('marine', 1, -28, 5, '506th PIR');
+  b.unit('marine', 1, 34, 0, '6th Airborne Div.');
+  b.unit('marine', 1, 36, 1, '9th Para Bn. (Merville)');
 
-  // Follow-on / floating reserve in England
-  for (let i = 0; i < 3; i++) b.unit('light', 1, -12 + i, -44, i === 0 ? '1st Corps Reserve' : null);
-  b.unit('heavy', 1, -8, -44, 'Guards Armoured Div.');
-  b.unit('heavy', 1, 4, -46, '7th Armoured Div. (Desert Rats)');
-  b.unit('heavy', 1, -26, -42, '2nd Armored Div. (US)');
-  b.unit('light', 1, 2, -46, '51st Highland Div.');
+  // Allied navy only.
+  b.unit('ship', 1, -32, -10, 'Force U (Utah)');
+  b.unit('ship', 1, -8, -11, 'Force O (Omaha)');
+  b.unit('ship', 1, 8, -10, 'Force G (Gold)');
+  b.unit('ship', 1, 18, -10, 'Force J (Juno)');
+  b.unit('ship', 1, 28, -10, 'Force S (Sword)');
+  b.unit('ship', 1, -12, -14, 'USS Texas');
+  b.unit('ship', 1, -6, -15, 'USS Arkansas');
+  b.unit('ship', 1, 4, -14, 'HMS Belfast');
+  b.unit('ship', 1, 14, -14, 'HMCS Algonquin');
+  b.unit('ship', 1, 24, -14, 'HMS Warspite');
+  b.unit('ship', 1, -26, -13, 'USS Nevada');
 
-  // —— German OOB (7th Army, 6 June morning) ——
-  // Keep defenders off urban stamps (unit() refuses urban tiles).
-  b.ensureLand(-40, -16, 3);
-  b.ensureLand(-38, -10, 2);
-  b.ensureLand(-44, -14, 2);
-  // 709th Static — east Cotentin / Utah beaches (just inland of sand)
-  for (let i = 0; i < 4; i++) b.unit('light', 2, -34 + i, 1, i === 0 ? '709th Inf. Div.' : null);
-  b.unit('light', 2, -30, 3, '919th Grenadier Regt.');
-  // 91st Luftlande — Cotentin inland (Carentan–Valognes)
+  // Follow-on in England.
+  for (let i = 0; i < 3; i++) b.unit('light', 1, -14 + i, -38, i === 0 ? '1st Corps Reserve' : null);
+  b.unit('heavy', 1, -8, -38, 'Guards Armoured Div.');
+  b.unit('heavy', 1, 4, -40, '7th Armoured Div. (Desert Rats)');
+  b.unit('heavy', 1, -28, -36, '2nd Armored Div. (US)');
+  b.unit('light', 1, 2, -40, '51st Highland Div.');
+
+  // German land OOB only — no Kriegsmarine.
+  b.ensureLand(-40, -12, 3);
+  b.ensureLand(-38, -8, 2);
+  b.ensureLand(-44, -12, 2);
+  for (let i = 0; i < 4; i++) b.unit('light', 2, -34 + i, 2, i === 0 ? '709th Inf. Div.' : null);
+  b.unit('light', 2, -30, 4, '919th Grenadier Regt.');
   b.unit('light', 2, -36, -4, '91st Luftlande Div.');
-  b.unit('light', 2, -34, 5, '6th Parachute Regt.');
-  // 243rd Static — west Cotentin
-  b.unit('light', 2, -44, -14, '243rd Inf. Div.');
-  // Cherbourg Festung (around the city, not on urban hexes)
-  b.unit('light', 2, -40, -16, 'Cherbourg Fortress');
-  b.unit('light', 2, -38, -18, 'Harbour Defence Bn.');
-  // 352nd Infantry — Omaha (recently moved to coast)
-  for (let i = 0; i < 5; i++) b.unit('light', 2, -10 + i, 3, i === 0 ? '352nd Inf. Div.' : null);
-  b.unit('heavy', 2, -6, 5, '352nd Assault Gun Bn.');
-  b.unit('light', 2, -8, 7, '916th Grenadier Regt.');
-  // 716th Static — Gold / Juno / Sword
-  for (let i = 0; i < 3; i++) b.unit('light', 2, 8 + i * 4, 3, i === 0 ? '716th Inf. Div.' : null);
-  b.unit('light', 2, 18, 4, '736th Grenadier Regt.');
-  b.unit('light', 2, 28, 3, '441st Ost Bn.');
-  // 21st Panzer — south/east of Caen (only panzer division in sector on D-Day morning)
+  b.unit('light', 2, -34, 6, '6th Parachute Regt.');
+  b.unit('light', 2, -44, -12, '243rd Inf. Div.');
+  b.unit('light', 2, -40, -12, 'Cherbourg Fortress');
+  b.unit('light', 2, -38, -14, 'Harbour Defence Bn.');
+  for (let i = 0; i < 5; i++) b.unit('light', 2, -10 + i, 4, i === 0 ? '352nd Inf. Div.' : null);
+  b.unit('heavy', 2, -6, 6, '352nd Assault Gun Bn.');
+  b.unit('light', 2, -8, 8, '916th Grenadier Regt.');
+  for (let i = 0; i < 3; i++) b.unit('light', 2, 8 + i * 4, 4, i === 0 ? '716th Inf. Div.' : null);
+  b.unit('light', 2, 18, 5, '736th Grenadier Regt.');
+  b.unit('light', 2, 28, 4, '441st Ost Bn.');
   b.unit('heavy', 2, 26, 18, '21st Panzer Div.');
   b.unit('heavy', 2, 22, 20, '22nd Panzer Regt.');
   b.unit('light', 2, 24, 12, '192nd Panzergrenadier');
   b.unit('light', 2, 28, 10, '125th Panzergrenadier');
-  // Inland HQ / static garrisons (offset from city stamps)
   b.unit('light', 2, -12, 16, 'LXXXIV Corps HQ');
   b.unit('light', 2, 8, 10, 'Bayeux Garrison');
   b.unit('light', 2, 32, 24, 'Falaise Depot');
-  // Kriegsmarine
-  b.unit('ship', 2, -20, -14, '5th S-Boat Flotilla');
-  b.unit('ship', 2, 12, -12, 'Channel Patrol');
-  b.unit('ship', 2, -40, -28, 'Cherbourg Destroyer');
 
   return {
     file: 'normandy-dday.json',
@@ -410,7 +438,7 @@ function buildNormandyDDay() {
       id: 'normandy-dday',
       name: 'D-Day: Normandy',
       description:
-        '6 June 1944 — Utah, Omaha, Gold, Juno and Sword. Break the Atlantic Wall, link the airborne, and seize Cherbourg and Caen. (One-shot store mission)',
+        '6 June 1944 — cross the Channel from England, storm Utah–Sword, and break into Normandy. No German navy; the Atlantic Wall and 21st Panzer stand in your way. (One-shot)',
       price: 200,
       file: 'normandy-dday.json',
       aiCount: 1,
@@ -431,71 +459,81 @@ function buildNormandyDDay() {
             'Briefing',
             { type: 'timer', seconds: 1 },
             {
-              title: 'Operation Overlord',
-              body: '0600, 6 June 1944. Five assault beaches run from the Cotentin to the Orne: Utah (4th Inf.), Omaha (1st & 29th), Gold (50th), Juno (3rd Canadian), Sword (3rd British). 82nd/101st hold the Merderet–Carentan exits; 6th Airborne holds the Orne bridges. The 709th, 352nd and 716th man the Wall — 21st Panzer waits near Caen.',
+              title: 'Operation Neptune',
+              body: '0530, 6 June 1944. Your assault divisions are in the transport area just off the Norman coast. England holds the north shore of the Channel; France the south. H-Hour: Utah 0630, British/Canadian beaches 0725. Airborne dropped overnight — link up after you are ashore. The Kriegsmarine will not contest the crossing; the Wall and 21st Panzer will.',
               style: 'briefing',
               kicker: 'Store Mission · One-shot',
             }
           ),
           ev(
-            'dday_tide',
+            'dday_bombardment',
+            'Naval bombardment',
+            { type: 'timer', seconds: 45 },
+            {
+              title: 'Shore bombardment',
+              body: 'Warspite, Texas, Belfast and the bombardment groups open on the Atlantic Wall. Landing craft are forming up — drive for the beach exits the moment the ramps drop.',
+              style: 'alert',
+            },
+            [],
+            [{ owner: 1, scope: 'all', x: 0, y: 120 }]
+          ),
+          ev(
+            'dday_hhour',
             'H-Hour',
             { type: 'timer', seconds: 90 },
             {
               title: 'H-Hour',
-              body: 'First waves hit the shingle. Force U and Force O open fire — push the beach exits at Utah and Omaha before the rising tide pins the landing craft.',
+              body: '0630 Utah / 0725 Gold–Juno–Sword. First waves hit the shingle. Get off the beaches — every minute under the bluff guns costs a company.',
               style: 'alert',
-            },
-            [],
-            [{ owner: 1, scope: 'all', x: 0, y: 100 }]
+            }
           ),
           ev(
             'dday_omaha',
-            'Bloody Omaha',
+            'Omaha crisis',
             { type: 'timer', seconds: 180 },
             {
               title: 'Bloody Omaha',
-              body: 'WN strongpoints of the 352nd have Dog and Easy Red zeroed. V Corps is pinned under the bluffs — silence Vierville and St-Laurent or the lodgement dies on the sand.',
+              body: 'V Corps is pinned on Dog and Easy Red. The 352nd Infantry — not the static troops intelligence expected — owns the draws. Blow the wire, take Vierville and St-Laurent, or the lodgement dies in the surf.',
               style: 'alert',
             },
             [{ owner: 2, type: 'light', count: 5, anchor: 'faction_city', cityOwner: 2 }]
           ),
           ev(
             'dday_airborne',
-            'Airborne link-up',
+            'Airborne confirmed',
             { type: 'timer', seconds: 300 },
             {
-              title: 'Airborne bridgehead',
-              body: 'Sainte-Mère-Église is reported held. 101st is fighting toward Carentan; 6th Airborne still holds the Orne and Merville. Follow-on waves are clearing Utah exits — link up and seal the Cotentin.',
+              title: 'Airborne bridgeheads',
+              body: 'Sainte-Mère-Église is in American hands. 101st is fighting the causeways to Carentan; 6th Airborne still holds the Orne bridges and the Merville battery. Push inland and join them.',
               style: 'victory',
             },
             [
-              { owner: 1, type: 'marine', count: 4, anchor: 'player_city' },
+              { owner: 1, type: 'marine', count: 3, anchor: 'player_city' },
               { owner: 1, type: 'ship', count: 1, anchor: 'player_city' },
             ]
           ),
           ev(
             'dday_panzer',
-            '21st Panzer counterattack',
+            '21st Panzer',
             { type: 'timer', seconds: 420 },
             {
-              title: 'Panzers from Caen',
-              body: '21st Panzer Division is driving north from Caen into the Juno–Sword gap toward Lion-sur-Mer. Hold the beachhead or cut them off before they reach the sea.',
+              title: 'Only panzers in sector',
+              body: '21st Panzer Division — the only German armour released on D-Day morning — is counter-attacking from Caen toward the Juno–Sword gap and the sea at Lion-sur-Mer. Hold the beachhead.',
               style: 'alert',
             },
             [
               { owner: 2, type: 'heavy', count: 3, anchor: 'faction_city', cityOwner: 2 },
               { owner: 2, type: 'light', count: 5, anchor: 'faction_city', cityOwner: 2 },
             ],
-            [{ owner: 2, scope: 'reinforcements', x: 400, y: -280 }]
+            [{ owner: 2, scope: 'reinforcements', x: 450, y: -300 }]
           ),
           ev(
             'dday_mulberry',
-            'Mulberry harbours',
+            'Mulberry',
             { type: 'troops_killed', count: 2200 },
             {
-              title: 'Artificial harbours',
-              body: 'Mulberry A (Omaha) and Mulberry B (Gold / Arromanches) are going in. Fresh armour — including 7th Armoured and US 2nd Armored — is crossing. Exploit before Panzer Lehr and 12th SS can close.',
+              title: 'Mulberry harbours',
+              body: 'Phoenix caissons are going in off Omaha (Mulberry A) and Arromanches (Mulberry B). Follow-on divisions can unload — bring 7th Armoured and US 2nd Armored across before 12th SS and Panzer Lehr arrive from the east.',
               style: 'victory',
             },
             [
@@ -506,21 +544,22 @@ function buildNormandyDDay() {
           ),
           ev(
             'dday_cherbourg',
-            'Drive on Cherbourg',
+            'Cherbourg',
             { type: 'time_survived', seconds: 600 },
             {
-              title: 'Cotentin sealed',
-              body: 'VII Corps can turn north up the peninsula. Cherbourg’s deep-water port is the prize — take Valognes and the fortress before the garrison demolishes the docks.',
+              title: 'Objective: Cherbourg',
+              body: 'Bradley orders VII Corps north. Seal the Cotentin at its base, then take Valognes and Cherbourg before the fortress garrison wrecks the only deep-water port the Allies will have until Antwerp.',
               style: 'briefing',
             },
             [{ owner: 1, type: 'marine', count: 4, anchor: 'player_city' }],
-            [{ owner: 1, scope: 'reinforcements', x: -1000, y: -200 }]
+            [{ owner: 1, scope: 'reinforcements', x: -1000, y: -150 }]
           ),
         ],
       },
     }),
   };
 }
+
 
 function validateMission(m) {
   const data = m.data;
