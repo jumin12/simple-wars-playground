@@ -280,3 +280,15 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Fix bridge pathing + ships stay still on land orders (2026-07-09)
 - **Bridge movement**: stop kink-cleaning movement corridors (that collapsed deck paths to ~2 points); portal-bridge rescue on first order + order-queue fallback; flag `_wodRouteUsesBridge` so shore-to-deck clamps allow transit; longer human bridge search budget (22ms).
 - **Ships in mixed groups**: land clicks return null (tiny shoreline fudge only) so ocean units stay put while land units march; stroke orders use the same rule.
+
+## Group bridge crossings funnel onto the deck (2026-07-09)
+- Group corridor clones used to keep formation lateral offsets across bridges, so units marched in parallel into the river.
+- Bridge segments of the lead path now collapse offsets to the lead deck lane (approach funnel + exit ease-out); followers inherit `_wodRouteUsesBridge`.
+
+## Drawn formation/stroke river crossings (2026-07-09)
+- Drawn strokes and line-formation slots offset units into open water beside bridges, which became amphibious `intoWater` orders.
+- Land stroke/formation waypoints now snap to bridge deck or shore (never open water), collapse lateral offset across the crossing, and concatenated order pathfinding re-snaps mid-stroke water samples the same way.
+
+## Group bridge pathing: pathfind to join, then ride lead deck (2026-07-09)
+- Offset corridor clones for 3+ unit groups sent flank units straight through open water toward the first deck waypoint (`pathPrepared` chords, no follower pathfind).
+- Bridge group orders now use `wodAssignGroupBridgeCorridor`: each follower pathfinds to the lead's bridge join, then follows the lead deck/exit lane; plain offset clones refuse bridge routes and blocked chords; queued followers reuse the same join assignment.

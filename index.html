@@ -19757,6 +19757,132 @@
             return !!unit && (unit.type === 'light' || unit.type === 'heavy');
         }
 
+        /** Snap a drawn-stroke / formation waypoint for land armies onto land or a bridge deck.
+         * Open-water stroke points must NOT become intoWater amphibious orders — that makes
+         * formation offsets march into the river instead of funneling across the bridge. */
+        function wodSnapLandArmyOrderPoint(unit, x, y) {
+            if(!unit || x == null || y == null) return null;
+            if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) return null;
+            let probe = unit;
+            let bh = wodBridgeHexAtPoint(probe, x, y);
+            if(bh) {
+                let br = bridgeAtHex(bh);
+                // Keep the click only when it is physically on the deck rect. Lateral
+                // formation slots that merely resolve near a bridge hex (but sit in the
+                // river) must snap onto the deck axis — never keep the water pixel.
+                let onDeck = !!(br && wodPointInBridgeRect(x, y, br, 1.05)) ||
+                    wodPointOnBridgeForUnit(probe, x, y, 1.05);
+                if(onDeck && !wodIsOpenWaterHex(getNearestHexToPoint(x, y)))
+                    return { x: x, y: y, hex: bh, intoWater: false };
+                if(br) {
+                    let deckPt = wodBridgeDeckPointForHex(bh, br, null, null);
+                    return { x: deckPt.x, y: deckPt.y, hex: bh, intoWater: false };
+                }
+                return { x: bh.x, y: bh.y, hex: bh, intoWater: false };
+            }
+            if(gameData.bridges && gameData.bridges.length) {
+                wodEnsureBridgePathIndex();
+                let bestBr = null,
+                    bestBrD = Infinity;
+                let hr = gameData.hexRadius || 20;
+                let maxD2 = Math.pow(hr * 1.35 * 5.5, 2);
+                let coord = pixelToHex(x, y);
+                let direct = gameData.hexes[`${coord.q},${coord.r}`];
+                let overWater = !!(direct && wodIsOpenWaterHex(direct));
+                for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
+                    let br = gameData.bridges[bi];
+                    if(!br) continue;
+                    if(br.x == null) wodSyncBridgeWorldCoords(br);
+                    let dx = x - br.x,
+                        dy = y - br.y;
+                    let d = dx * dx + dy * dy;
+                    // Prefer bridges whose deck is near the stroke point (river crossing).
+                    // When the click is open water, allow a wider pull toward the nearest bridge.
+                    let allow = d <= maxD2 || wodPointInBridgeRect(x, y, br, 2.4) ||
+                        (overWater && d <= Math.pow(hr * 1.35 * 10, 2));
+                    if(allow && d < bestBrD) {
+                        bestBrD = d;
+                        bestBr = br;
+                    }
+                }
+                if(bestBr) {
+                    let deckH = wodBridgeWaterHexNearPoint(bestBr, x, y) ||
+                        (bestBr.hexKeys && bestBr.hexKeys.length ? gameData.hexes[bestBr.hexKeys[Math.floor(bestBr.hexKeys.length / 2)]] : null);
+                    if(deckH && isBridgeHex(deckH)) {
+                        let deckPt = wodBridgeDeckPointForHex(deckH, bestBr, null, null);
+                        return { x: deckPt.x, y: deckPt.y, hex: deckH, intoWater: false };
+                    }
+                    return { x: bestBr.x, y: bestBr.y, hex: null, intoWater: false };
+                }
+            }
+            let land = wodResolveLandMarchHex(unit, x, y);
+            if(land && !land.intoWater)
+                return { x: land.exactX, y: land.exactY, hex: land.hex, intoWater: false };
+            // Water click with no usable bridge: snap to nearest land shore, never open water.
+            let coord = pixelToHex(x, y);
+            let best = null,
+                bestScore = Infinity;
+            for(let pt of getHexesInRadius(coord.q, coord.r, 16)) {
+                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                if(!hex || hex.type === 'mountain') continue;
+                if(isWaterHex(hex) && !isBridgeHex(hex)) continue;
+                if(!wodHexWalkableForLandPath(unit, hex, false) && !isBridgeHex(hex)) continue;
+                let dx = x - hex.x,
+                    dy = y - hex.y;
+                let score = dx * dx + dy * dy;
+                if(isBridgeHex(hex)) score *= 0.72;
+                if(score < bestScore) {
+                    bestScore = score;
+                    best = hex;
+                }
+            }
+            return best ? { x: best.x, y: best.y, hex: best, intoWater: false } : null;
+        }
+
+        /** Offset a drawn stroke for one land unit, collapsing lateral offset across bridges
+         * and snapping any water samples onto deck/shore so the group funnels across. */
+        function wodOffsetStrokePathForLandUnit(unit, strokePts, cx, cy) {
+            if(!unit || !strokePts || strokePts.length < 1) return null;
+            let ox = unit.x - cx,
+                oy = unit.y - cy;
+            let base = [];
+            for(let i = 0; i < strokePts.length; i++) {
+                let p = strokePts[i];
+                let snap = wodSnapLandArmyOrderPoint(unit, p.x, p.y);
+                if(snap) base.push({ x: snap.x, y: snap.y });
+                else base.push({ x: p.x, y: p.y });
+            }
+            if(base.length < 1) return null;
+            let funnel = wodLeadCorridorBridgeFunnelScales(base);
+            // Also funnel when the raw stroke crosses open water even if snap missed a bridge.
+            if(!funnel) {
+                let waterHit = false;
+                for(let i = 0; i < strokePts.length; i++) {
+                    let h = getNearestHexToPoint(strokePts[i].x, strokePts[i].y);
+                    if(h && wodIsOpenWaterHex(h)) { waterHit = true; break; }
+                }
+                if(waterHit) {
+                    funnel = new Array(base.length).fill(1);
+                    let mid0 = Math.max(0, Math.floor(base.length * 0.25));
+                    let mid1 = Math.min(base.length - 1, Math.ceil(base.length * 0.75));
+                    for(let k = mid0; k <= mid1; k++) funnel[k] = 0;
+                    for(let k = Math.max(0, mid0 - 3); k < mid0; k++)
+                        funnel[k] = (mid0 - k) / 3;
+                    for(let k = mid1 + 1; k <= Math.min(base.length - 1, mid1 + 2); k++)
+                        funnel[k] = (k - mid1) / 2;
+                }
+            }
+            let pathPts = [];
+            for(let i = 0; i < base.length; i++) {
+                let s = funnel ? (funnel[i] == null ? 1 : funnel[i]) : 1;
+                let px = base[i].x + ox * s;
+                let py = base[i].y + oy * s;
+                let again = wodSnapLandArmyOrderPoint(unit, px, py);
+                pathPts.push(again ? { x: again.x, y: again.y } : { x: px, y: py });
+            }
+            return pathPts;
+        }
+
         function canCaptureFromFrontline(unit, hex) {
             if (!canUnitEnterHex(unit, hex)) return false;
             if (hex.owner === unit.owner) return true;
@@ -23991,6 +24117,17 @@
             try {
                 for(let wp of worldWaypoints) {
                     let reach = findReachableOrderHex(unit, wp.x, wp.y);
+                    // Drawn formation / stroke waypoints that still land in open water should
+                    // route via bridge/shore for land armies — never force amphibious mid-stroke.
+                    if(reach && reach.intoWater && (opts && opts.forOrder) &&
+                        wodUnitPrefersLandOnlyPath(unit) && !wodOrderIntoWater(unit, reach.hex)) {
+                        let snap = wodSnapLandArmyOrderPoint(unit, wp.x, wp.y);
+                        if(snap && snap.hex) reach = { hex: snap.hex, exactX: snap.x, exactY: snap.y, intoWater: false };
+                        else if(snap) {
+                            let h = getNearestWalkableHexForUnit(unit, snap.x, snap.y);
+                            if(h) reach = { hex: h, exactX: snap.x, exactY: snap.y, intoWater: false };
+                        }
+                    }
                     if(!reach) continue;
                     unit._wodOrderIntoWater = !!reach.intoWater;
                     let seg = findPathAroundTerrain(unit, reach.hex, prevHex, false, 'auto', allowOverBudget);
@@ -24048,7 +24185,22 @@
                 let job = wodPlayerOrderQueue.shift();
                 if(job.unit && job.unit.hp > 0) {
                     job.tries = (job.tries || 0) + 1;
-                    if(assignUnitMoveAlongWaypoints(job.unit, job.worldPoints, job.opt))
+                    let assigned = false;
+                    if(job.opt && job.opt.groupBridgeCorridor && job.opt.groupBridgeCorridor.length >= 2) {
+                        let last = job.worldPoints[job.worldPoints.length - 1];
+                        let exact = job.opt.groupBridgeExact || last;
+                        assigned = wodAssignGroupBridgeCorridor(
+                            job.unit,
+                            job.opt.groupBridgeCorridor,
+                            { x: exact.x, y: exact.y },
+                            false,
+                            job.worldPoints,
+                            { routeUsesBridge: true }
+                        );
+                    }
+                    if(!assigned)
+                        assigned = assignUnitMoveAlongWaypoints(job.unit, job.worldPoints, job.opt);
+                    if(assigned)
                         job.tries = 0;
                     else if(job.tries < 10)
                         wodPlayerOrderQueue.push(job);
@@ -24088,16 +24240,187 @@
             if(wodPlayerOrderQueue.length) wodSchedulePlayerOrderPump();
         }
 
+        /** Per-point lateral-offset scales for cloning a lead corridor across a bridge.
+         * Formation offsets beside the deck send units into open water; collapse to the
+         * lead lane on approach + deck, then ease back out after the exit. */
+        function wodLeadCorridorBridgeFunnelScales(leadCorridor) {
+            if(!leadCorridor || leadCorridor.length < 2) return null;
+            let n = leadCorridor.length;
+            let onB = new Array(n).fill(false);
+            let probe = { type: 'light', owner: 1 };
+            let any = false;
+            for(let k = 0; k < n; k++) {
+                let p = leadCorridor[k];
+                if(!p) continue;
+                if(wodPointOnBridgeForUnit(probe, p.x, p.y, 1.35) || wodBridgeHexAtPoint(probe, p.x, p.y)) {
+                    onB[k] = true;
+                    any = true;
+                    continue;
+                }
+                let h = getNearestHexToPoint(p.x, p.y);
+                if(h && isBridgeHex(h)) {
+                    onB[k] = true;
+                    any = true;
+                }
+            }
+            if(!any) return null;
+            let first = -1,
+                last = -1;
+            for(let k = 0; k < n; k++) {
+                if(!onB[k]) continue;
+                if(first < 0) first = k;
+                last = k;
+            }
+            if(first < 0) return null;
+            let scales = new Array(n).fill(1);
+            let approach = Math.min(6, Math.max(2, Math.floor(n * 0.18)));
+            let exit = Math.min(3, Math.max(1, Math.floor(n * 0.08)));
+            for(let k = 0; k < n; k++) {
+                if(k >= first && k <= last) scales[k] = 0;
+                else if(k < first && k >= first - approach) scales[k] = (first - k) / approach;
+                else if(k > last && k <= last + exit) scales[k] = (k - last) / exit;
+            }
+            return scales;
+        }
+
+        /** Find the corridor index where the group should join the lead's bridge lane
+         * (start of approach funnel / first deck point). */
+        function wodLeadCorridorBridgeJoinIndex(leadCorridor, funnel) {
+            if(!leadCorridor || leadCorridor.length < 2) return -1;
+            if(funnel) {
+                for(let k = 0; k < funnel.length; k++) {
+                    if(funnel[k] < 1) return Math.max(0, k);
+                }
+            }
+            let probe = { type: 'light', owner: 1 };
+            for(let k = 0; k < leadCorridor.length; k++) {
+                let p = leadCorridor[k];
+                if(!p) continue;
+                if(wodPointOnBridgeForUnit(probe, p.x, p.y, 1.35) || wodBridgeHexAtPoint(probe, p.x, p.y))
+                    return Math.max(0, k);
+                let h = getNearestHexToPoint(p.x, p.y);
+                if(h && isBridgeHex(h)) return Math.max(0, k);
+            }
+            return -1;
+        }
+
+        /** True when any consecutive corridor chord cuts terrain the unit cannot cross. */
+        function wodCorridorHasBlockedChord(unit, corridor) {
+            if(!unit || !corridor || corridor.length < 2) return false;
+            for(let i = 1; i < corridor.length; i++) {
+                let a = corridor[i - 1],
+                    b = corridor[i];
+                if(!a || !b) continue;
+                if(!wodSegmentClearsTerrainForUnit(unit, a.x, a.y, b.x, b.y)) return true;
+            }
+            return false;
+        }
+
+        /**
+         * Bridge-aware group assignment: pathfind each follower to the lead's bridge join
+         * point, then follow the lead's deck/exit lane (no lateral river offsets). Offset
+         * clones alone send flank units straight through open water to the first deck waypoint.
+         */
+        function wodAssignGroupBridgeCorridor(unit, leadCorridor, exactLast, intoWater, marchPts, opt) {
+            if(!unit || !leadCorridor || leadCorridor.length < 2) return false;
+            if(!isLandArmyUnit(unit) && !wodUnitPrefersLandOnlyPath(unit)) return false;
+            let funnel = wodLeadCorridorBridgeFunnelScales(leadCorridor);
+            let joinIdx = wodLeadCorridorBridgeJoinIndex(leadCorridor, funnel);
+            if(joinIdx < 0) joinIdx = 0;
+            // Prefer joining slightly before the deck so the approach hex path can use portals.
+            let approachIdx = Math.max(0, joinIdx - 1);
+            let joinPt = leadCorridor[approachIdx] || leadCorridor[joinIdx];
+            if(!joinPt) return false;
+
+            let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+            let joinHex = getNearestWalkableHexForUnit(unit, joinPt.x, joinPt.y) ||
+                getNearestHexToPoint(joinPt.x, joinPt.y);
+            if(!startHex || !joinHex) return false;
+
+            let approachHex = findPathAroundTerrain(unit, joinHex, startHex, false, 'auto', true);
+            if(approachHex.length <= 1 && !wodOrderIntoWater(unit, joinHex)) {
+                let alt = wodTryPortalBridgeMarchPath(unit, startHex, joinHex);
+                if(wodHexPathLength(alt) > 1) approachHex = alt;
+            }
+            // Already near the join — skip approach and ride the lead lane.
+            let nearJoin = false;
+            if(approachHex.length <= 1) {
+                let dx = unit.x - joinPt.x,
+                    dy = unit.y - joinPt.y;
+                let hr = gameData.hexRadius || 20;
+                if(dx * dx + dy * dy <= Math.pow(hr * 1.35 * 2.2, 2) &&
+                    wodSegmentClearsTerrainForUnit(unit, unit.x, unit.y, joinPt.x, joinPt.y))
+                    nearJoin = true;
+                else return false;
+            }
+
+            let corridor = [{ x: unit.x, y: unit.y }];
+            if(!nearJoin) {
+                let approachWorld = wodHexPathToWorldWaypoints(unit, approachHex, joinPt);
+                for(let wi = 0; wi < approachWorld.length; wi++)
+                    corridor.push({ x: approachWorld[wi].x, y: approachWorld[wi].y });
+            } else {
+                corridor.push({ x: joinPt.x, y: joinPt.y });
+            }
+            // Ride the lead lane from the join through deck + exit (offsets collapsed).
+            for(let k = approachIdx + 1; k < leadCorridor.length; k++) {
+                let s = funnel ? (funnel[k] == null ? 1 : funnel[k]) : 1;
+                let p = leadCorridor[k];
+                if(!p) continue;
+                if(s < 0.35) corridor.push({ x: p.x, y: p.y });
+                else {
+                    // After exit, allow a little formation spread toward exactLast later.
+                    corridor.push({ x: p.x, y: p.y });
+                }
+            }
+            corridor = dedupeNearOrderPathPoints(corridor);
+            if(corridor.length < 2) return false;
+            if(wodCorridorHasBlockedChord(unit, corridor)) return false;
+            wodApplyCorridorExactEnd(corridor, exactLast, unit);
+
+            invalidateUnitOrderArrowCache(unit);
+            unit.blockedTimer = 0;
+            unit.stuckTimer = 0;
+            unit._wodLegRepathQueued = false;
+            unit._wodGreedyStepsLeft = 0;
+            unit._wodPathGiveUpUntil = 0;
+            unit._wodReplanLandUntil = 0;
+            unit.moraleBroken = false;
+            unit._wodOrderIntoWater = !!intoWater;
+            unit._wodRouteUsesBridge = true;
+            unit._wodAmpPathKey = null;
+            unit._wodAmpPath = null;
+            unit.orderTarget = { x: exactLast.x, y: exactLast.y, intoWater: !!intoWater };
+            unit.fullMarchWaypoints = marchPts.map(p => ({ x: p.x, y: p.y }));
+            unit.marchWpCursor = 0;
+            unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
+            if(!wodTakeNextPathTarget(unit)) return false;
+            if(unit.owner === 1) {
+                unit.combatEngaged = false;
+                unit.combatLockTimer = 0;
+            }
+            unit._routeArrowMarchSig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
+            unit._routeArrowFrozenPts = wodCleanOrderArrowPolyline(dedupeNearOrderPathPoints(corridor));
+            unit._routeArrowFrozenReady = true;
+            unit._routeArrowProgressIdx = 0;
+            return true;
+        }
+
         /** Clone an already-computed lead corridor onto another unit of the same march group
          * with a start→end interpolated offset. No pathfinding — this is what lets a 50-unit
          * selection get orders + arrows in ONE frame instead of trickling in over seconds.
          * Offset points that land on mountains (or water on a land march) are shrunk back
-         * toward the lead's proven lane; the budgeted blocked-repath cleans up the rest. */
-        function wodAssignGroupCorridorClone(unit, leadCorridor, offS, offE, exactLast, intoWater, marchPts) {
+         * toward the lead's proven lane; the budgeted blocked-repath cleans up the rest.
+         * Bridge crossings must NOT use this — use wodAssignGroupBridgeCorridor instead. */
+        function wodAssignGroupCorridorClone(unit, leadCorridor, offS, offE, exactLast, intoWater, marchPts, opt) {
             if(!unit || !leadCorridor || leadCorridor.length < 2) return false;
+            // Bridge routes need per-follower approach pathfinding — offset clones cut water.
+            if(opt && opt.routeUsesBridge) return false;
             let nPts = leadCorridor.length;
             let corridor = [{ x: unit.x, y: unit.y }];
             let landUnit = isLandArmyUnit(unit);
+            let funnel = landUnit ? wodLeadCorridorBridgeFunnelScales(leadCorridor) : null;
+            if(funnel) return false;
             for(let k = 1; k < nPts; k++) {
                 let t = k / (nPts - 1);
                 let ox = offS.x + (offE.x - offS.x) * t;
@@ -24129,6 +24452,8 @@
             }
             corridor = dedupeNearOrderPathPoints(corridor);
             if(corridor.length < 2) return false;
+            // Reject clones whose first chord (or any chord) cuts water/mountains.
+            if(wodCorridorHasBlockedChord(unit, corridor)) return false;
             wodApplyCorridorExactEnd(corridor, exactLast, unit);
             invalidateUnitOrderArrowCache(unit);
             unit.blockedTimer = 0;
@@ -24139,6 +24464,7 @@
             unit._wodReplanLandUntil = 0;
             unit.moraleBroken = false;
             unit._wodOrderIntoWater = !!intoWater;
+            unit._wodRouteUsesBridge = false;
             unit._wodAmpPathKey = null;
             unit._wodAmpPath = null;
             unit.orderTarget = { x: exactLast.x, y: exactLast.y, intoWater: !!intoWater };
@@ -24151,7 +24477,7 @@
                 unit.combatLockTimer = 0;
             }
             unit._routeArrowMarchSig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
-            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(corridor);
+            unit._routeArrowFrozenPts = wodCleanOrderArrowPolyline(dedupeNearOrderPathPoints(corridor));
             unit._routeArrowFrozenReady = true;
             unit._routeArrowProgressIdx = 0;
             return true;
@@ -24195,12 +24521,16 @@
                         }
                         let leadClick = leadPts[leadPts.length - 1];
                         let leadWater = !!lead._wodOrderIntoWater;
+                        let leadBridge = !!lead._wodRouteUsesBridge || !!wodLeadCorridorBridgeFunnelScales(leadCorridor);
                         let tile = (gameData.hexRadius || 20) * 1.35;
                         // Generous caps: the cloned lane is only a first-frame hint — any unit
                         // whose lane clips bad terrain re-paths itself within ~0.25s via the
                         // budgeted blocked-repath. Queuing instead just meant no arrow at all.
                         let maxOffE2 = Math.pow(tile * 40, 2);
                         let maxOffS2 = Math.pow(tile * 80, 2);
+                        // Bridge groups: pathfind a few followers to the join synchronously so
+                        // they don't sit stuck at the shore waiting on the order queue.
+                        let bridgeSyncLeft = leadBridge ? (wodUsesVisualViewportLayout() ? 2 : 4) : 0;
                         for(let i = 0; i < units.length; i++) {
                             if(i === leadIdx) continue;
                             let u = units[i];
@@ -24229,10 +24559,32 @@
                                     }
                                     let exact = reach ? { x: reach.exactX, y: reach.exactY } : { x: last.x, y: last.y };
                                     let water = reach ? !!reach.intoWater : leadWater;
-                                    cloned = wodAssignGroupCorridorClone(u, leadCorridor, offS, offE, exact, water, pts);
+                                    if(leadBridge) {
+                                        // Pathfind to bridge join + ride lead deck — never offset-clone across water.
+                                        if(bridgeSyncLeft > 0) {
+                                            cloned = wodAssignGroupBridgeCorridor(u, leadCorridor, exact, water, pts, {
+                                                routeUsesBridge: true
+                                            });
+                                            if(cloned) bridgeSyncLeft--;
+                                        }
+                                    } else {
+                                        cloned = wodAssignGroupCorridorClone(u, leadCorridor, offS, offE, exact, water, pts, {
+                                            routeUsesBridge: false
+                                        });
+                                    }
                                 }
                             }
-                            if(!cloned) wodQueuePlayerMoveOrder(u, pts);
+                            if(!cloned) {
+                                if(leadBridge && isLandArmyUnit(u)) {
+                                    // Queue with a marker so the pump prefers bridge-join assignment.
+                                    wodQueuePlayerMoveOrder(u, pts, {
+                                        groupBridgeCorridor: leadCorridor,
+                                        groupBridgeExact: pts[pts.length - 1]
+                                    });
+                                } else {
+                                    wodQueuePlayerMoveOrder(u, pts);
+                                }
+                            }
                         }
                         return;
                     }
@@ -24677,13 +25029,21 @@
                     pathPts.push({ x: sea.exactX, y: sea.exactY });
                     return pathPts.length ? pathPts : null;
                 }
-                let ox = unit.x - cx;
-                let oy = unit.y - cy;
-                let pathPts = [];
-                for(let i = 0; i < strokePts.length - 1; i++)
-                    pathPts.push({x: strokePts[i].x + ox, y: strokePts[i].y + oy});
-                let end = strokePts[strokePts.length - 1];
-                pathPts.push({x: end.x + ox, y: end.y + oy});
+                let pathPts;
+                if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
+                    // Collapse formation offset across bridges and snap water samples to deck/shore
+                    // so drawn strokes funnel across the river instead of swimming in parallel.
+                    pathPts = wodOffsetStrokePathForLandUnit(unit, strokePts, cx, cy);
+                } else {
+                    let ox = unit.x - cx;
+                    let oy = unit.y - cy;
+                    pathPts = [];
+                    for(let i = 0; i < strokePts.length - 1; i++)
+                        pathPts.push({x: strokePts[i].x + ox, y: strokePts[i].y + oy});
+                    let end = strokePts[strokePts.length - 1];
+                    pathPts.push({x: end.x + ox, y: end.y + oy});
+                }
+                if(!pathPts || !pathPts.length) return null;
                 while(pathPts.length > 1) {
                     let p = pathPts[0];
                     let dx = p.x - unit.x;
@@ -41007,9 +41367,27 @@
                 let c = r % cols, row = Math.floor(r / cols);
                 let ox = (c - midCol) * spacing;
                 let oy = (row - midRow) * spacing;
+                if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                    let last = wps[wps.length - 1];
+                    let sea = wodResolveShipMarchHex(unit, last.x + ox, last.y + oy);
+                    if(!sea) return null;
+                    let pathPts = [];
+                    for(let wi = 0; wi < wps.length - 1; wi++) {
+                        let seaWp = wodResolveShipMarchHex(unit, wps[wi].x, wps[wi].y);
+                        if(seaWp) pathPts.push({ x: seaWp.exactX, y: seaWp.exactY });
+                    }
+                    pathPts.push({ x: sea.exactX, y: sea.exactY });
+                    return pathPts.length ? pathPts : null;
+                }
                 let pathPts = wps.map((w, wi) => {
                     let last = wi === wps.length - 1;
-                    return {x: w.x + (last ? ox : 0), y: w.y + (last ? oy : 0)};
+                    let px = w.x + (last ? ox : 0);
+                    let py = w.y + (last ? oy : 0);
+                    if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
+                        let snap = wodSnapLandArmyOrderPoint(unit, px, py);
+                        if(snap) return { x: snap.x, y: snap.y };
+                    }
+                    return { x: px, y: py };
                 });
                 let trimR2 = Math.pow(Math.max(20, gameData.hexRadius * 1.45), 2);
                 while(pathPts.length > 1) {
@@ -41087,6 +41465,16 @@
                 let t = units.length === 1 ? 0.5 : index / (units.length - 1);
                 let tx = start.x + (end.x - start.x) * t;
                 let ty = start.y + (end.y - start.y) * t;
+                if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                    let sea = wodResolveShipMarchHex(unit, tx, ty);
+                    if(!sea) return null;
+                    return [{ x: sea.exactX, y: sea.exactY }];
+                }
+                // Land formation slots that land in the river snap to bridge/shore — never swim.
+                if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
+                    let snap = wodSnapLandArmyOrderPoint(unit, tx, ty);
+                    if(snap) return [{ x: snap.x, y: snap.y }];
+                }
                 let target = findReachableOrderHex(unit, tx, ty);
                 if(!target) return null;
                 return [{ x: target.exactX, y: target.exactY }];
