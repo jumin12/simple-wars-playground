@@ -19965,6 +19965,13 @@
             return !!(targetHex && isWaterHex(targetHex) && !isBridgeHex(targetHex));
         }
 
+        /** True when a land army is physically standing on open water (embarked / stranded). */
+        function wodUnitStandingOnOpenWater(unit) {
+            if(!unit || !wodUnitPrefersLandOnlyPath(unit)) return false;
+            let h = getNearestHexToPoint(unit.x, unit.y);
+            return !!(h && wodIsOpenWaterHex(h));
+        }
+
         function wodSetMarchOrderFlags(unit, resolved) {
             unit._wodOrderIntoWater = !!(resolved && resolved.intoWater);
         }
@@ -22379,7 +22386,9 @@
                 let onBridge = wodBridgeHexAtPoint(unit, x, y);
                 if(onBridge) return onBridge;
             }
-            let allowWater = wodOrderIntoWater(unit, null);
+            // Land armies already on open water must keep that hex as the path start —
+            // otherwise water→land orders snap to a distant shore and amphib routing never runs.
+            let allowWater = wodOrderIntoWater(unit, null) || wodUnitStandingOnOpenWater(unit);
             let primary = getNearestHexToPoint(x, y);
             if(primary && wodPathTileWalkable(unit, primary, allowWater)) return primary;
             let center = pixelToHex(x, y);
@@ -23847,7 +23856,9 @@
 
         function wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return false;
-            if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex)) return false;
+            // Already afloat → land: always use amphibious compose.
+            if(wodIsOpenWaterHex(startHex) && targetHex && !wodIsOpenWaterHex(targetHex)) return true;
+            if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex) && !wodIsOpenWaterHex(startHex)) return false;
             if(wodOrderIntoWater(unit, targetHex)) return true;
             if(wodHexPathLength(bridgePath) > 1) return false;
             let bestLand = wodHexPathLength(landPath);
@@ -23901,7 +23912,7 @@
 
         function wodTryAmphibiousMarchFallback(unit, startHex, targetHex) {
             if(!wodUnitPrefersLandOnlyPath(unit) || !startHex || !targetHex) return [];
-            if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex)) return [];
+            if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex) && !wodIsOpenWaterHex(startHex)) return [];
             let waterPath = findAmphibiousMarchPath(unit, startHex, targetHex);
             return wodHexPathLength(waterPath) > 1 ? waterPath : [];
         }
@@ -23919,6 +23930,9 @@
             if(!startHex || !targetHex) return [];
             if(wodHexKeysEqual(startHex, targetHex)) return [startHex];
             if(wodOrderIntoWater(unit, targetHex) && wodIsOpenWaterHex(targetHex))
+                return findAmphibiousMarchPath(unit, startHex, targetHex);
+            // Water→land: unit is already afloat; compose amphibious path to shore.
+            if(wodIsOpenWaterHex(startHex) && !wodIsOpenWaterHex(targetHex))
                 return findAmphibiousMarchPath(unit, startHex, targetHex);
             wodEnsureBridgePathIndex();
 
@@ -24073,7 +24087,8 @@
             if(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length)
                 wodEnsureBridgePathIndex();
             let pathAllowWater = pathMode === 'water' || wodOrderIntoWater(unit, targetHex) ||
-                wodOrderIntoWater(unit, startHex) || !!unit._wodOrderIntoWater;
+                wodOrderIntoWater(unit, startHex) || !!unit._wodOrderIntoWater ||
+                wodIsOpenWaterHex(startHex);
             // Only remap onto the deck when the hex/point is actually on the bridge —
             // wodBridgeHexAtPoint's radius scan used to yank nearby shore hexes onto the
             // deck, turning shore→shore marches into deck→deck stubs that never exit.
@@ -25360,10 +25375,15 @@
 
             let reachLast = findReachableOrderHex(unit, lastWp.x, lastWp.y);
             let exactLast = reachLast ? {x: reachLast.exactX, y: reachLast.exactY} : {x: lastWp.x, y: lastWp.y};
+            // Land army already afloat ordering onto land: keep embark flags so pathfinding
+            // and drowning clamps treat the march as amphibious (water→land).
+            let standingWater = wodUnitStandingOnOpenWater(unit);
+            let destIntoWater = !!(reachLast && reachLast.intoWater);
+            let embarkFromWater = standingWater && !destIntoWater;
             unit.orderTarget = reachLast
-                ? { x: exactLast.x, y: exactLast.y, intoWater: !!reachLast.intoWater }
-                : exactLast;
-            wodSetMarchOrderFlags(unit, reachLast || { intoWater: false });
+                ? { x: exactLast.x, y: exactLast.y, intoWater: destIntoWater || embarkFromWater }
+                : { x: exactLast.x, y: exactLast.y, intoWater: embarkFromWater };
+            wodSetMarchOrderFlags(unit, { intoWater: destIntoWater || embarkFromWater });
 
             if(!fromAdvance) {
                 unit.fullMarchWaypoints = marchPts;

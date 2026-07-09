@@ -353,6 +353,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Assault/navy shifted east of Cotentin onto open water (`q` ? -26); zero Allies on land/sand.
 - Rebuild: `node scripts/generate-store-missions.js`.
 
+## Water?land pathing + England/rivers polish (2026-07-09)
+- Fix: land armies standing on open water can path to land on the first order (embark flags + amphib compose). No more ?nudge in water first? workaround.
+- England: organic Channel strip with Solent bite + Isle of Wight, downs/forest patches (not a flat slab).
+- Rivers re-stamped after Channel seal: Vire, Douve, Orne (to Ouistreham), Seulles.
+- Rebuild: `node scripts/generate-store-missions.js`.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.

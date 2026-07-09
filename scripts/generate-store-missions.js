@@ -144,28 +144,57 @@ function buildNormandyDDay() {
     if (h.r >= -17 && h.r <= -1) h.type = 'water';
   });
 
-  // —— Thin southern England (NOT a massive northern continent) ——
+  // —— Thin southern England (Channel coast strip, organic — not a flat slab) ——
   b.each((h) => {
-    if (h.r < -28) h.type = 'water';
+    if (h.r < -30) h.type = 'water';
   });
-  b.rect(-42, -26, 42, -18, 'grass', { noise: 1.4 });
-  b.each((h) => {
-    if (h.r >= -26 && h.r <= -18 && h.type === 'water') h.type = 'grass';
-  });
+  // Core Hampshire / Dorset / Sussex belt.
+  b.blob(-8, -22, 16, 'grass', { noise: 0.32 });
+  b.blob(10, -23, 14, 'grass', { noise: 0.3 });
+  b.blob(-26, -21, 11, 'grass', { noise: 0.28 });
+  b.blob(26, -22, 10, 'grass', { noise: 0.28 });
+  b.blob(0, -24, 12, 'grass', { noise: 0.26 });
+  b.rect(-36, -25, 36, -19, 'grass', { noise: 2.2 });
+  // Soft north edge into open sea (not a ruler cut).
   b.each((h) => {
     if (h.type === 'urban') return;
-    if (h.r >= -28 && h.r < -26) {
-      const wob = Math.sin(h.q * 0.1) * 1.5;
-      if (h.r < -26.5 + wob) h.type = 'water';
+    if (h.r < -28) {
+      h.type = 'water';
+      return;
+    }
+    if (h.r >= -28 && h.r <= -25) {
+      const wob =
+        Math.sin(h.q * 0.09) * 2.2 +
+        Math.sin(h.q * 0.21 + 1.3) * 1.1 +
+        (b.rng() - 0.5) * 1.4;
+      if (h.r < -26.2 + wob) h.type = 'water';
       else if (h.type === 'water') h.type = 'grass';
     }
-    if (h.r >= -20 && h.r <= -18) {
-      const wob = Math.sin(h.q * 0.12) * 1.2 + (b.rng() - 0.5);
-      if (h.r > -19.0 + wob) h.type = 'sand';
+  });
+  // Solent / Isle of Wight bite south of Portsmouth–Southampton.
+  b.blob(0, -17, 4.5, 'water', { noise: 0.35 });
+  b.blob(-2, -16, 3.2, 'water', { noise: 0.3 });
+  b.blob(4, -16, 2.8, 'water', { noise: 0.28 });
+  // Isle of Wight remnant south of the Solent.
+  b.blob(2, -15, 2.4, 'grass', { noise: 0.2 });
+  b.ensureLand(2, -15, 1);
+  // South coast sand / chalk cliffs feel.
+  b.each((h) => {
+    if (h.type === 'urban' || h.type === 'water') return;
+    if (h.r < -22 || h.r > -17) return;
+    const wob = Math.sin(h.q * 0.11) * 1.4 + Math.sin(h.q * 0.27) * 0.8;
+    if (h.r > -19.4 + wob) {
+      h.type = b.rng() < 0.22 ? 'hill' : 'sand';
     }
   });
-  for (let i = 0; i < 6; i++) {
-    b.blob(Math.round(-30 + b.rng() * 60), Math.round(-25 + b.rng() * 5), 1.8 + b.rng() * 2, 'forest', {
+  // Downs / New Forest / Weald patches.
+  b.blob(-14, -23, 3.5, 'forest', { noise: 0.3 });
+  b.blob(-4, -24, 3.2, 'forest', { noise: 0.28 });
+  b.blob(12, -24, 2.8, 'forest', { noise: 0.28 });
+  b.blob(-22, -22, 2.4, 'hill', { noise: 0.2 });
+  b.blob(18, -23, 2.2, 'hill', { noise: 0.18 });
+  for (let i = 0; i < 5; i++) {
+    b.blob(Math.round(-28 + b.rng() * 56), Math.round(-25 + b.rng() * 5), 1.5 + b.rng() * 1.8, 'forest', {
       noise: 0.3,
     });
   }
@@ -244,9 +273,16 @@ function buildNormandyDDay() {
   b.blob(-22, 12, 3.5, 'swamp', { noise: 0.3 });
   b.blob(-28, 10, 2.8, 'swamp', { noise: 0.28 });
 
-  // Vire & Orne (inland only).
-  b.ridge(-24, 8, -10, 5, 1, 'water', { wobble: 2.0, skipUrban: true });
-  b.ridge(24, 14, 32, 3, 1, 'water', { wobble: 1.6, skipUrban: true });
+  // Rivers (historical courses, inland only — re-stamped again after Channel seal).
+  // Vire: Saint-Lô → Isigny / Baie du Grand Vey.
+  b.ridge(-10, 18, -18, 4, 1, 'water', { wobble: 1.8, skipUrban: true });
+  // Douve: Carentan marshes toward Utah / Cotentin base.
+  b.ridge(-24, 10, -30, 3, 0, 'water', { wobble: 1.4, skipUrban: true });
+  // Orne: Falaise → Caen → Ouistreham (Channel mouth).
+  b.ridge(30, 26, 24, 14, 1, 'water', { wobble: 1.5, skipUrban: true });
+  b.ridge(24, 14, 32, 2, 1, 'water', { wobble: 1.3, skipUrban: true });
+  // Seulles (light): between Bayeux and Caen toward Gold/Juno.
+  b.ridge(8, 10, 10, 2, 0, 'water', { wobble: 1.2, skipUrban: true });
 
   // Bocage.
   for (let i = 0; i < 14; i++) {
@@ -301,19 +337,19 @@ function buildNormandyDDay() {
   b.coastSand(0.5);
 
   // ===== FINAL Channel seal =====
-  // Thin England only: r in [-26, -18] land; north of that stays water.
+  // England: keep organic strip; do NOT flood-fill every water cell (preserve Solent).
+  // Mid-Channel: water except Cotentin body.
   b.each((h) => {
     if (h.type === 'urban') return;
     if (h.r < -28) {
       h.type = 'water';
       return;
     }
-    if (h.r >= -26 && h.r <= -18) {
-      if (h.type === 'water') h.type = 'grass';
-      return;
-    }
     const cotentin = h.q >= -50 && h.q <= -26 && h.r >= -10 && h.r <= 2;
     if (h.r >= -17 && h.r <= -1) {
+      // Keep Isle of Wight / Solent pockets around q~0..6, r~-17..-15
+      const solent = h.q >= -4 && h.q <= 8 && h.r >= -17 && h.r <= -14;
+      if (solent) return;
       if (cotentin && h.type !== 'water') return;
       h.type = 'water';
     }
@@ -331,16 +367,31 @@ function buildNormandyDDay() {
     if (h.q >= -50 && h.q <= -26 && h.r < -10) h.type = 'water';
     if (h.q < -64) h.type = 'water';
   });
-  // Re-assert thin England strip; keep far north water.
+  // Re-assert England land core (not Solent water).
+  b.blob(-8, -22, 12, 'grass', { noise: 0.18 });
+  b.blob(10, -23, 10, 'grass', { noise: 0.16 });
+  b.blob(-26, -21, 8, 'grass', { noise: 0.16 });
+  b.blob(26, -22, 7, 'grass', { noise: 0.16 });
+  b.ensureLand(-10, -22, 2);
+  b.ensureLand(8, -23, 2);
+  b.ensureLand(-26, -21, 2);
+  b.ensureLand(24, -22, 2);
+  // Solent + Isle of Wight again after England re-stamp.
+  b.blob(0, -17, 4.2, 'water', { noise: 0.28 });
+  b.blob(-2, -16, 3.0, 'water', { noise: 0.24 });
+  b.blob(2, -15, 2.2, 'grass', { noise: 0.16 });
+  b.ensureLand(2, -15, 1);
+  // South coast sand.
+  b.each((h) => {
+    if (h.type === 'urban' || h.type === 'water') return;
+    if (h.r < -22 || h.r > -17) return;
+    const wob = Math.sin(h.q * 0.11) * 1.3;
+    if (h.r > -19.2 + wob) h.type = 'sand';
+  });
+  // Far north stays sea.
   b.each((h) => {
     if (h.type === 'urban') return;
     if (h.r < -28) h.type = 'water';
-    else if (h.r >= -26 && h.r <= -18 && h.type === 'water') h.type = 'grass';
-  });
-  b.each((h) => {
-    if (h.r < -22 || h.r > -18 || h.type === 'urban') return;
-    const wob = Math.sin(h.q * 0.12) * 1.2;
-    if (h.r > -19.0 + wob) h.type = 'sand';
   });
 
   // Beaches on French shore only.
@@ -353,20 +404,25 @@ function buildNormandyDDay() {
   b.blob(-18, 1, 2.2, 'hill', { noise: 0.12 });
   b.coastSand(0.28);
 
-  // Flood accidental mid-Channel land (not Cotentin).
+  // Flood accidental mid-Channel land (not Cotentin, not Solent/Wight).
   b.each((h) => {
     if (h.type === 'urban' || h.type === 'water') return;
     if (h.r >= -16 && h.r <= -2) {
       const cotentin = h.q >= -50 && h.q <= -26 && h.r >= -10;
-      if (!cotentin) h.type = 'water';
+      const wight = h.q >= -2 && h.q <= 6 && h.r >= -16 && h.r <= -14;
+      if (!cotentin && !wight) h.type = 'water';
     }
   });
-  // Final England size lock: only the thin strip.
-  b.each((h) => {
-    if (h.type === 'urban') return;
-    if (h.r < -28) h.type = 'water';
-    if (h.r >= -26 && h.r <= -18 && h.type === 'water') h.type = 'grass';
-  });
+
+  // Re-stamp rivers AFTER seal/beaches so Channel wipe cannot erase them.
+  b.ridge(-10, 18, -18, 4, 1, 'water', { wobble: 1.6, skipUrban: true }); // Vire
+  b.ridge(-24, 10, -30, 3, 0, 'water', { wobble: 1.2, skipUrban: true }); // Douve
+  b.ridge(30, 26, 24, 14, 1, 'water', { wobble: 1.3, skipUrban: true }); // Orne upper
+  b.ridge(24, 14, 32, 2, 1, 'water', { wobble: 1.1, skipUrban: true }); // Orne to Ouistreham
+  b.ridge(8, 10, 10, 2, 0, 'water', { wobble: 1.0, skipUrban: true }); // Seulles
+  // Keep Carentan marsh wet.
+  b.blob(-24, 8, 3.5, 'swamp', { noise: 0.25 });
+  b.blob(-22, 12, 2.8, 'swamp', { noise: 0.22 });
 
   // Cities — England on the thin strip; Brittany towns on the west.
   b.city(-10, -22, 1, 'Portsmouth', { factory: true, harbor: true, incomeBonus: 50 });
