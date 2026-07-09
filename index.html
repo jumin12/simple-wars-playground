@@ -31338,12 +31338,15 @@
             return true;
         }
 
-        function wodAiWaterSeparatesOwnedShores(a, b, ownerId) {
-            if(!a || !b || !ownerId) return false;
-            let samples = 7;
+        /** True when the segment a→b is mostly open water (a river/channel to bridge). */
+        function wodAiWaterSeparatesShores(a, b) {
+            if(!a || !b) return false;
+            let samples = 9;
             let water = 0,
+                landMid = 0,
                 blocked = 0;
-            for(let si = 1; si < samples; si++) {
+            // Skip the first/last samples — those sit on the shore tiles themselves.
+            for(let si = 2; si <= samples - 2; si++) {
                 let t = si / samples;
                 let px = a.x + (b.x - a.x) * t;
                 let py = a.y + (b.y - a.y) * t;
@@ -31358,10 +31361,12 @@
                 }
                 if(isWaterHex(h)) water++;
                 else if(h.type === 'mountain' || h.type === 'urban') blocked++;
-                else if(h.owner !== ownerId) blocked++;
-                else blocked++;
+                else landMid++;
             }
-            return water >= 2 && blocked === 0;
+            return water >= 2 && blocked === 0 && landMid === 0;
+        }
+        function wodAiWaterSeparatesOwnedShores(a, b, ownerId) {
+            return !!(a && b && ownerId && a.owner === ownerId && b.owner === ownerId && wodAiWaterSeparatesShores(a, b));
         }
 
         function wodAiBridgeAlreadyServesShores(a, b) {
@@ -31381,57 +31386,105 @@
         function wodAiCollectBridgeCandidateSites(ownerId) {
             let hr = gameData.hexRadius || 20;
             let spacing = hr * 1.35;
-            let minDist2 = Math.pow(spacing * 2.35, 2);
-            let maxDist2 = Math.pow(spacing * 5.1, 2);
-            let coastal = [];
-            let coastalSeen = new Set();
-            function addCoastal(h) {
+            let minDist2 = Math.pow(spacing * 2.2, 2);
+            let maxDist2 = Math.pow(spacing * 5.4, 2);
+            let ownCoast = [];
+            let farCoast = [];
+            let ownSeen = new Set();
+            let farSeen = new Set();
+            function addOwnCoast(h) {
                 if(!h || h.owner !== ownerId || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') return;
                 if(!getNeighborHexes(h).some(n => n && isWaterHex(n) && !isBridgeHex(n))) return;
                 let k = getHexKey(h);
-                if(coastalSeen.has(k)) return;
-                coastalSeen.add(k);
-                coastal.push(h);
+                if(ownSeen.has(k)) return;
+                ownSeen.add(k);
+                ownCoast.push(h);
+            }
+            function addFarCoast(h) {
+                if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') return;
+                // Far shore: enemy land, neutral land, or own land across a river.
+                if(h.owner === ownerId) return;
+                if(!getNeighborHexes(h).some(n => n && isWaterHex(n) && !isBridgeHex(n))) return;
+                let k = getHexKey(h);
+                if(farSeen.has(k)) return;
+                farSeen.add(k);
+                farCoast.push(h);
             }
             for(let h of getOwnerFrontlineHexes(ownerId)) {
-                addCoastal(h);
-                for(let n of getNeighborHexes(h)) addCoastal(n);
+                addOwnCoast(h);
+                for(let n of getNeighborHexes(h)) {
+                    addOwnCoast(n);
+                    // Walk a short water corridor to the opposite shore (rivers can be 2–4 tiles wide).
+                    if(n && isWaterHex(n) && !isBridgeHex(n)) {
+                        let waterQ = [n];
+                        let waterSeen = new Set([getHexKey(n)]);
+                        for(let wi = 0; wi < waterQ.length && wi < 18; wi++) {
+                            let wh = waterQ[wi];
+                            for(let nn of getNeighborHexes(wh)) {
+                                if(!nn) continue;
+                                if(isWaterHex(nn) && !isBridgeHex(nn)) {
+                                    let wk = getHexKey(nn);
+                                    if(waterSeen.has(wk)) continue;
+                                    waterSeen.add(wk);
+                                    if(waterQ.length < 18) waterQ.push(nn);
+                                } else {
+                                    addFarCoast(nn);
+                                    addOwnCoast(nn);
+                                }
+                            }
+                        }
+                    }
+                }
             }
             for(let city of gameData.cities) {
                 if(city.owner !== ownerId) continue;
                 for(let pt of getHexesInRadius(city.q, city.r, 4))
-                    addCoastal(gameData.hexes[`${pt.q},${pt.r}`]);
+                    addOwnCoast(gameData.hexes[`${pt.q},${pt.r}`]);
             }
-            if(coastal.length > 56) coastal.length = 56;
+            // Also keep own-to-own river links (internal channels).
+            let ownLinkCoast = ownCoast.slice();
+            if(ownCoast.length > 48) ownCoast.length = 48;
+            if(farCoast.length > 64) farCoast.length = 64;
+            if(ownLinkCoast.length > 40) ownLinkCoast.length = 40;
+
             let out = [];
             let pairSeen = new Set();
-            for(let i = 0; i < coastal.length; i++) {
-                for(let j = i + 1; j < coastal.length; j++) {
-                    let a = coastal[i],
-                        b = coastal[j];
-                    let dx = b.x - a.x,
-                        dy = b.y - a.y;
-                    let dist2 = dx * dx + dy * dy;
-                    if(dist2 < minDist2 || dist2 > maxDist2) continue;
-                    let pk = getHexKey(a) + '|' + getHexKey(b);
-                    if(pairSeen.has(pk)) continue;
-                    pairSeen.add(pk);
-                    if(!wodAiWaterSeparatesOwnedShores(a, b, ownerId)) continue;
-                    if(wodAiBridgeAlreadyServesShores(a, b)) continue;
-                    let dist = Math.sqrt(dist2);
-                    let dims = wodBridgeDefaultDims();
-                    let w = Math.min(dims.w * 1.18, Math.max(dims.w * 0.92, dist * 1.06));
-                    out.push({
-                        x: (a.x + b.x) * 0.5,
-                        y: (a.y + b.y) * 0.5,
-                        angle: Math.atan2(dy, dx),
-                        w: w,
-                        h: dims.h,
-                        shoreA: a,
-                        shoreB: b,
-                        span: dist
-                    });
-                }
+            function pushPair(a, b, kind) {
+                let dx = b.x - a.x,
+                    dy = b.y - a.y;
+                let dist2 = dx * dx + dy * dy;
+                if(dist2 < minDist2 || dist2 > maxDist2) return;
+                let ka = getHexKey(a),
+                    kb = getHexKey(b);
+                let pk = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+                if(pairSeen.has(pk)) return;
+                pairSeen.add(pk);
+                if(!wodAiWaterSeparatesShores(a, b)) return;
+                if(wodAiBridgeAlreadyServesShores(a, b)) return;
+                let dist = Math.sqrt(dist2);
+                let dims = wodBridgeDefaultDims();
+                let w = Math.min(dims.w * 1.18, Math.max(dims.w * 0.92, dist * 1.06));
+                out.push({
+                    x: (a.x + b.x) * 0.5,
+                    y: (a.y + b.y) * 0.5,
+                    angle: Math.atan2(dy, dx),
+                    w: w,
+                    h: dims.h,
+                    shoreA: a,
+                    shoreB: b,
+                    span: dist,
+                    kind: kind || 'link'
+                });
+            }
+            // Offensive / river-crossing: own shore → enemy/neutral shore.
+            for(let i = 0; i < ownCoast.length; i++) {
+                for(let j = 0; j < farCoast.length; j++)
+                    pushPair(ownCoast[i], farCoast[j], farCoast[j].owner > 0 ? 'assault' : 'expand');
+            }
+            // Internal own-to-own river links.
+            for(let i = 0; i < ownLinkCoast.length; i++) {
+                for(let j = i + 1; j < ownLinkCoast.length; j++)
+                    pushPair(ownLinkCoast[i], ownLinkCoast[j], 'link');
             }
             return out;
         }
@@ -31442,13 +31495,25 @@
             if(wodBridgePlacementError(br, ownerId)) return -1e9;
             let hr = gameData.hexRadius || 20;
             let tilePx = hr * 1.35;
-            let score = 40;
-            if(isFrontlineHex(site.shoreA, ownerId) || isFrontlineHex(site.shoreB, ownerId)) score += 72;
-            for(let n of getNeighborHexes(site.shoreB)) {
-                if(n && n.owner > 0 && n.owner !== ownerId) {
-                    score += 38;
-                    break;
-                }
+            let score = 36;
+            let far = site.shoreB && site.shoreB.owner !== ownerId ? site.shoreB : site.shoreA;
+            let near = far === site.shoreB ? site.shoreA : site.shoreB;
+            if(site.kind === 'assault') score += 88;
+            else if(site.kind === 'expand') score += 48;
+            else score += 28;
+            if(isFrontlineHex(near, ownerId)) score += 64;
+            if(far && far.owner > 0 && far.owner !== ownerId) score += 52;
+            // Units waiting on the near shore make the bridge useful now.
+            let armyNear = nearestFriendlyLandArmyDistSq(near.x, near.y, ownerId);
+            if(armyNear <= Math.pow(tilePx * 7, 2)) score += 70;
+            else if(armyNear <= Math.pow(tilePx * 12, 2)) score += 28;
+            else score -= 70;
+            // Prefer sites that open a path toward the current front focus.
+            let focus = gameData.aiFrontFocus && gameData.aiFrontFocus[ownerId];
+            if(focus && far) {
+                let before = (near.x - focus.x) * (near.x - focus.x) + (near.y - focus.y) * (near.y - focus.y);
+                let after = (far.x - focus.x) * (far.x - focus.x) + (far.y - focus.y) * (far.y - focus.y);
+                if(after + Math.pow(tilePx * 2, 2) < before) score += 46;
             }
             let nearestBridgeSq = Infinity;
             for(let bi = 0, bl = (gameData.bridges || []).length; bi < bl; bi++) {
@@ -31458,32 +31523,34 @@
                     dy = other.y - site.y;
                 nearestBridgeSq = Math.min(nearestBridgeSq, dx * dx + dy * dy);
             }
-            if(nearestBridgeSq < Math.pow(tilePx * 11, 2)) score -= 220;
-            else if(nearestBridgeSq < Math.pow(tilePx * 18, 2)) score -= 55;
-            if(nearestFriendlyLandArmyDistSq(site.shoreA.x, site.shoreA.y, ownerId) > Math.pow(tilePx * 13, 2)) score -= 85;
-            score -= site.span * 0.018;
+            // Hard anti-spam: refuse sites too close to an existing bridge.
+            if(nearestBridgeSq < Math.pow(tilePx * 14, 2)) score -= 260;
+            else if(nearestBridgeSq < Math.pow(tilePx * 22, 2)) score -= 70;
+            score -= site.span * 0.02;
             return score;
         }
 
         function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey) {
             if(!gameData.hexList || !gameData.hexList.length) return false;
-            if(wodPlayerTreasury(ownerId) < WOD_PRICE_BRIDGE * 3.1) return false;
+            // Keep a cash cushion so bridges don't starve unit production.
+            if(wodPlayerTreasury(ownerId) < WOD_PRICE_BRIDGE * 2.4) return false;
             let aiCities = gameData.cities.filter(c => c && c.owner === ownerId).length;
             let aiBridges = (gameData.bridges || []).filter(b => b && b.owner === ownerId).length;
-            let bridgeCap = Math.max(1, Math.min(4, Math.floor(aiCities * 0.42) + 1));
+            // Tight cap — bridges are situational, not a spam build.
+            let bridgeCap = Math.max(1, Math.min(3, Math.floor(aiCities * 0.35) + 1));
             if(aiBridges >= bridgeCap) return false;
             let now = performance.now();
             if(!gameData._aiBridgeCooldown) gameData._aiBridgeCooldown = {};
-            if(now - (gameData._aiBridgeCooldown[ownerId] || 0) < 82000) return false;
-            // Roll the dice BEFORE the expensive site search — computing candidate sites cost
-            // ~150ms and was thrown away 87% of the time (a recurring frame hitch).
-            if(Math.random() > 0.13) return false;
+            // ~95s between bridge attempts per faction.
+            if(now - (gameData._aiBridgeCooldown[ownerId] || 0) < 95000) return false;
+            // Cheap gate before the site search (still rare, but more often when useful).
+            if(Math.random() > 0.28) return false;
             let sites = wodAiCollectBridgeCandidateSites(ownerId);
             if(!sites.length) return false;
             let best = null,
                 bestScore = 0;
-            const MIN_SCORE = 58;
-            let limit = Math.min(sites.length, 28);
+            const MIN_SCORE = 96;
+            let limit = Math.min(sites.length, 36);
             for(let si = 0; si < limit; si++) {
                 let sc = wodAiScoreBridgeSite(sites[si], ownerId);
                 if(sc > bestScore) {
@@ -31492,10 +31559,21 @@
                 }
             }
             if(!best || bestScore < MIN_SCORE) return false;
-            if(placeBridgeAt(ownerId, best.x, best.y, best.angle, best.w, best.h, { suppressNotes: true })) {
-                gameData._aiBridgeCooldown[ownerId] = now;
-                return true;
+            // Try the best few sites — footprint validation can reject a high-scoring candidate.
+            let ranked = sites
+                .map(s => ({ s, sc: wodAiScoreBridgeSite(s, ownerId) }))
+                .filter(x => x.sc >= MIN_SCORE)
+                .sort((a, b) => b.sc - a.sc)
+                .slice(0, 3);
+            for(let ri = 0; ri < ranked.length; ri++) {
+                let site = ranked[ri].s;
+                if(placeBridgeAt(ownerId, site.x, site.y, site.angle, site.w, site.h, { suppressNotes: true })) {
+                    gameData._aiBridgeCooldown[ownerId] = now;
+                    return true;
+                }
             }
+            // Still cool down briefly after a failed search so we don't thrash every pulse.
+            gameData._aiBridgeCooldown[ownerId] = now - 60000;
             return false;
         }
 
@@ -31515,6 +31593,8 @@
             if(!pulse) {
                 let cash = gameData.aiMoneyByOwner[ownerKey] || 0;
                 let unitReserve = Math.max(WOD_PRICE_LIGHT * 2.5, WOD_PRICE_HEAVY || WOD_PRICE_LIGHT * 3);
+                // Farms are cheaper and pay manpower — allow with a lighter cash cushion.
+                let farmReserve = Math.max(WOD_PRICE_LIGHT * 1.6, WOD_PRICE_FARM * 0.35);
                 let facSpend = 0;
                 while(cash >= WOD_PRICE_FACTORY + unitReserve && facSpend < 1) {
                     let needFac = aiCities.find(ct => !ct.hasFactory);
@@ -31523,6 +31603,14 @@
                     cash -= WOD_PRICE_FACTORY;
                     facSpend++;
                 }
+                let farmSpend = 0;
+                while(cash >= WOD_PRICE_FARM + farmReserve && farmSpend < 1) {
+                    let needFarm = aiCities.find(ct => !ct.hasFarm);
+                    if(!needFarm) break;
+                    needFarm.hasFarm = true;
+                    cash -= WOD_PRICE_FARM;
+                    farmSpend++;
+                }
                 let hbSpend = 0;
                 while(cash >= WOD_PRICE_HARBOR + unitReserve && hbSpend < 1) {
                     let needHb = aiCities.find(ct => !ct.hasHarbor && cityHasWaterNeighbor(ct));
@@ -31530,14 +31618,6 @@
                     needHb.hasHarbor = true;
                     cash -= WOD_PRICE_HARBOR;
                     hbSpend++;
-                }
-                let farmSpend = 0;
-                while(cash >= WOD_PRICE_FARM + unitReserve && farmSpend < 1) {
-                    let needFarm = aiCities.find(ct => !ct.hasFarm);
-                    if(!needFarm) break;
-                    needFarm.hasFarm = true;
-                    cash -= WOD_PRICE_FARM;
-                    farmSpend++;
                 }
                 gameData.aiMoneyByOwner[ownerKey] = cash;
 
@@ -31549,7 +31629,8 @@
                         wodAiTryFortForOwner(ownerId, ownerKey);
                 }
 
-                if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_BRIDGE * 3.1 && Math.random() < 0.22)
+                // Bridges only when cash is healthy and a river crossing would help the front.
+                if((gameData.aiMoneyByOwner[ownerKey] || 0) >= WOD_PRICE_BRIDGE * 2.4 && Math.random() < 0.34)
                     wodAiTryBridgeForOwner(ownerId, ownerKey);
 
                 let spawnCap = wodUsesVisualViewportLayout() ? 5 : 6;

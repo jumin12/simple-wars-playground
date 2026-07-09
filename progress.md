@@ -261,3 +261,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Server**: `syncProgress` stores and merges gold, achievements, achievement gold grants, missions, owned skins, and MP stats without regressing.
 - Returning players with a wiped grant map are reconciled (mark already-met badges paid, no re-grant spam).
 - Verified: `output/test-progress-persist.cjs`, `output/test-server-progress-persist.cjs`.
+
+## AI farms + smarter river bridges (2026-07-08)
+- **Farms**: AI builds farms earlier (lighter cash reserve than factories/harbors) so manpower income comes online.
+- **Bridges**: AI can span rivers toward enemy/neutral shores when units are nearby and the crossing helps the front focus — not only own-to-own channels.
+- **Anti-spam**: tighter per-faction bridge cap (max 3), ~95s cooldown, strong score penalty near existing bridges, cash cushion before building.
+- Verified: `output/test-ai-farm-bridge.cjs`.
