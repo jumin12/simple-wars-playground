@@ -7633,15 +7633,11 @@
                                     <option value="epic">Epic — 24 regions</option>
                                 </select>
                             </div>
-                            <div class="setup-row">
-                                <label>Starting requisition:</label>
-                                <input type="number" id="wodCampSetPts" min="600" max="12000" step="100" value="3000">
-                            </div>
                             <div class="setup-row hidden" id="wodCampGamePeriodRow">
                                 <label>Time period:</label>
                                 <select id="wodCampGamePeriod" title="Themed unit names and buildings for campaign battles"></select>
                             </div>
-                            <p class="wod-camp-set-hint">Spend requisition to field your opening army. Each region on the map becomes its own battle — terrain shapes how you fight.</p>
+                            <p class="wod-camp-set-hint" id="wodCampSetHint">Starting requisition scales with difficulty. Spend it to field your opening army — each region becomes its own battle.</p>
                             <button type="button" class="menu-btn" id="wodCampRegenBtn">🎲 Generate new world</button>
                             <button type="button" class="menu-btn wod-camp-launch" id="wodCampBeginBtn">Begin campaign</button>
                         </div>
@@ -36218,11 +36214,12 @@
         const WOD_ROGUE_UNIT_COSTS = { light: 200, marine: 260, heavy: 480, ship: 420 };
         const WOD_ROGUE_UNIT_LABEL = { light: 'Infantry', marine: 'Marines', heavy: 'Armor', ship: 'Warship' };
         const WOD_ROGUE_DIFF_PRESETS = {
-            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95 },
-            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0 },
-            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12 },
-            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28 }
+            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 2400, blockChance: 0.28 },
+            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 3000, blockChance: 0.38 },
+            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 3800, blockChance: 0.48 },
+            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 4800, blockChance: 0.58 }
         };
+        const WOD_ROGUE_MAX_FORCED_DEFENSES = 5;
         const WOD_ROGUE_LENGTH_PRESETS = {
             short: { label: 'Short — 9 regions', nodes: 9, W: 170, H: 104 },
             medium: { label: 'Standard — 13 regions', nodes: 13, W: 210, H: 128 },
@@ -36616,16 +36613,22 @@
         }
 
         /* ------------------------- save / load / draft ------------------------- */
+        function wodRogueStartPointsForDifficulty(diffKey) {
+            let D = WOD_ROGUE_DIFF_PRESETS[diffKey] || WOD_ROGUE_DIFF_PRESETS.normal;
+            return D.startPoints || WOD_ROGUE_DEFAULT_POINTS;
+        }
         function wodRogueFreshDraft() {
             return {
                 seed: ((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0) || 0x1234abcd,
                 difficulty: 'normal',
                 length: 'medium',
-                startPoints: WOD_ROGUE_DEFAULT_POINTS
+                startPoints: wodRogueStartPointsForDifficulty('normal')
             };
         }
         function wodRogueDraft() {
             if(!_wodRogueDraft) _wodRogueDraft = wodRogueFreshDraft();
+            // Keep draft start points synced to the selected difficulty (no custom budget).
+            _wodRogueDraft.startPoints = wodRogueStartPointsForDifficulty(_wodRogueDraft.difficulty);
             return _wodRogueDraft;
         }
 
@@ -36666,24 +36669,27 @@
             let nodesState = {};
             for(let n of world.nodes) nodesState[n.id] = { owner: n.hq ? 'player' : 'enemy', battles: 0 };
             let campPeriod = wodGetCampaignGamePeriod();
+            let startPts = wodRogueStartPointsForDifficulty(d.difficulty);
             wodRogue = {
                 version: 2,
                 seed: d.seed,
                 settings: {
                     difficulty: d.difficulty,
                     length: d.length,
-                    startPoints: Math.max(600, Math.min(12000, d.startPoints | 0) || WOD_ROGUE_DEFAULT_POINTS),
+                    startPoints: startPts,
                     gamePeriod: campPeriod
                 },
                 worldEnc: { W: world.W, H: world.H, cells: wodRogueEncodeCells(world.cells) },
                 world: { nodes: world.nodes, edges: world.edges },
-                points: Math.max(600, Math.min(12000, d.startPoints | 0) || WOD_ROGUE_DEFAULT_POINTS),
+                points: startPts,
                 unitSeq: 0,
                 roster: [],
                 nodesState,
                 turn: 1,
                 alerts: {},
-                log: ['The Federation Remnant lands. The war for the Ashen Front begins.'],
+                blockedAdvance: false,
+                forcedDefenses: 0,
+                log: ['The Federation Remnant lands. The war for the Ashen Front begins. Starting requisition: ' + startPts + '.'],
                 stats: { battles: 0, wins: 0, defeats: 0, unitsLost: 0, unitsBought: 0, kills: 0, losses: 0 },
                 over: false,
                 won: false
@@ -36711,13 +36717,23 @@
             }
             return out;
         }
+        function wodRogueHasActiveAlerts(c) {
+            if(!c || !c.alerts) return false;
+            return Object.keys(c.alerts).some(id => c.nodesState[id] && c.nodesState[id].owner === 'player');
+        }
+        /** When a roadblock is up, only the threatened region(s) can be fought — no advancing. */
+        function wodRogueAdvanceBlocked(c) {
+            return !!(c && c.blockedAdvance && wodRogueHasActiveAlerts(c));
+        }
         function wodRogueNodePlayable(id) {
             let c = wodRogueLoad();
             if(!c || c.over) return false;
             let st = c.nodesState[id];
             if(!st) return false;
+            let alert = !!c.alerts[id];
+            if(wodRogueAdvanceBlocked(c)) return alert && st.owner === 'player';
             if(st.owner === 'enemy') return wodRogueNeighbors(id).some(n => c.nodesState[n] && c.nodesState[n].owner === 'player');
-            return !!c.alerts[id];
+            return alert;
         }
         function wodRogueHqNode() { return wodRogueNodes().find(n => n.hq) || null; }
         function wodRogueCapitalNode() { return wodRogueNodes().find(n => n.capital) || null; }
@@ -36861,6 +36877,7 @@
             }
             // Edges.
             ctx2.lineWidth = 2;
+            let advanceBlocked = !!(c && wodRogueAdvanceBlocked(c));
             for(let [a, b] of edges) {
                 let na = nodes.find(n => n.id === a), nb = nodes.find(n => n.id === b);
                 if(!na || !nb) continue;
@@ -36868,14 +36885,23 @@
                 let oa = c ? c.nodesState[a].owner : (na.hq ? 'player' : 'enemy');
                 let ob = c ? c.nodesState[b].owner : (nb.hq ? 'player' : 'enemy');
                 let isFront = oa !== ob;
-                ctx2.strokeStyle = isFront ? 'rgba(255,214,90,0.75)' : 'rgba(255,255,255,0.22)';
-                ctx2.setLineDash(isFront ? [] : [5, 5]);
+                // Roadblock: front connections look sealed until the defense is fought.
+                if(advanceBlocked && isFront) {
+                    ctx2.strokeStyle = 'rgba(231,76,60,0.85)';
+                    ctx2.setLineDash([4, 5]);
+                    ctx2.lineWidth = 3;
+                } else {
+                    ctx2.strokeStyle = isFront ? 'rgba(255,214,90,0.75)' : 'rgba(255,255,255,0.22)';
+                    ctx2.setLineDash(isFront ? [] : [5, 5]);
+                    ctx2.lineWidth = 2;
+                }
                 ctx2.beginPath();
                 ctx2.moveTo(pa.x, pa.y);
                 ctx2.lineTo(pb.x, pb.y);
                 ctx2.stroke();
             }
             ctx2.setLineDash([]);
+            ctx2.lineWidth = 2;
             // Nodes.
             let selId = _wodRogueSelectedNode;
             for(let n of nodes) {
@@ -36983,10 +37009,9 @@
                 let d = wodRogueDraft();
                 let diffEl = document.getElementById('wodCampSetDiff');
                 let lenEl = document.getElementById('wodCampSetLen');
-                let ptsEl = document.getElementById('wodCampSetPts');
                 if(diffEl) d.difficulty = diffEl.value;
                 if(lenEl) d.length = lenEl.value;
-                if(ptsEl) d.startPoints = parseInt(ptsEl.value, 10) || WOD_ROGUE_DEFAULT_POINTS;
+                d.startPoints = wodRogueStartPointsForDifficulty(d.difficulty);
                 wodApplyGamePeriod(wodGetCampaignGamePeriod(), { saveProfile: true });
                 wodRogueBegin();
                 wodRefreshCampaignPanel();
@@ -37006,6 +37031,7 @@
                     let lenEl = document.getElementById('wodCampSetLen');
                     if(diffEl) d.difficulty = diffEl.value;
                     if(lenEl) d.length = lenEl.value;
+                    d.startPoints = wodRogueStartPointsForDifficulty(d.difficulty);
                     _wodRogueWorldCache = null;
                     wodRefreshCampaignPanel();
                 });
@@ -37071,10 +37097,14 @@
                 if(sub) sub.textContent = 'Choose difficulty, campaign length, and your opening army budget. Generate a war map, then march.';
                 let diffEl = document.getElementById('wodCampSetDiff');
                 let lenEl = document.getElementById('wodCampSetLen');
-                let ptsEl = document.getElementById('wodCampSetPts');
                 if(diffEl && diffEl.value !== d.difficulty) diffEl.value = d.difficulty;
                 if(lenEl && lenEl.value !== d.length) lenEl.value = d.length;
-                if(ptsEl && document.activeElement !== ptsEl) ptsEl.value = String(d.startPoints);
+                let hint = document.getElementById('wodCampSetHint');
+                if(hint) {
+                    let D = WOD_ROGUE_DIFF_PRESETS[d.difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
+                    hint.textContent = 'Starting requisition: ' + (D.startPoints || WOD_ROGUE_DEFAULT_POINTS) +
+                        ' (' + D.label + '). Spend it to field your opening army — each region becomes its own battle.';
+                }
                 let status = document.getElementById('wodCampStatus');
                 if(status) status.innerHTML = '<span>New campaign</span><span class="wod-camp-turn">Generate your war map below</span>';
                 let statsEl = document.getElementById('wodCampStats');
@@ -37088,8 +37118,15 @@
             // ---------- active mode ----------
             if(c.settings && c.settings.gamePeriod) wodSyncPeriodSelectEl(document.getElementById('wodCampActiveGamePeriod'), c.settings.gamePeriod);
             if(_wodRogueSelectedNode == null || (!wodRogueNodeTemplate(_wodRogueSelectedNode))) {
-                let firstPlayable = wodRogueNodes().find(n => wodRogueNodePlayable(n.id));
+                let firstPlayable = null;
+                if(wodRogueAdvanceBlocked(c)) {
+                    firstPlayable = wodRogueNodes().find(n => c.alerts[n.id] && c.nodesState[n.id] && c.nodesState[n.id].owner === 'player');
+                }
+                if(!firstPlayable) firstPlayable = wodRogueNodes().find(n => wodRogueNodePlayable(n.id));
                 _wodRogueSelectedNode = firstPlayable ? firstPlayable.id : null;
+            } else if(wodRogueAdvanceBlocked(c) && !wodRogueNodePlayable(_wodRogueSelectedNode)) {
+                let alertNode = wodRogueNodes().find(n => c.alerts[n.id] && c.nodesState[n.id] && c.nodesState[n.id].owner === 'player');
+                if(alertNode) _wodRogueSelectedNode = alertNode.id;
             }
             wodRoguePaintMap();
             let status = document.getElementById('wodCampStatus');
@@ -37111,6 +37148,8 @@
             }
             if(sub) {
                 if(c.over) sub.textContent = c.won ? 'Victory — the Iron Concord has fallen. Delete the save to wage a new war.' : 'Campaign over — the Remnant is spent. Delete the save to try again.';
+                else if(wodRogueAdvanceBlocked(c))
+                    sub.textContent = 'Roads blocked — defend the threatened region before the front can advance again.';
                 else sub.textContent = 'One army, one war — every casualty is permanent.';
             }
             // Node info + intel.
@@ -37123,30 +37162,42 @@
                         ? '<h3>The war is won</h3><p>' + (wodRogueCapitalNode() || {}).name + ' has fallen after ' + c.turn + ' turns. The Ashen Front is quiet at last.</p>'
                         : '<h3>The war is lost</h3><p>The Federation Remnant can no longer field an army. History will remember that you tried.</p>';
                 } else if(!node) {
-                    info.innerHTML = '<p>Select a region on the map. Highlighted regions can be attacked or must be defended.</p>';
+                    info.innerHTML = wodRogueAdvanceBlocked(c)
+                        ? '<p>The Concord has sealed the roads. Select the ⚠ region and defend it before you can advance.</p>'
+                        : '<p>Select a region on the map. Highlighted regions can be attacked or must be defended.</p>';
                 } else {
                     let st = c.nodesState[node.id];
                     let alert = !!c.alerts[node.id];
+                    let blocked = wodRogueAdvanceBlocked(c);
                     let tag = alert ? '<span class="wod-camp-node-tag alert">UNDER ATTACK — defend it</span>'
                         : st.owner === 'player' ? '<span class="wod-camp-node-tag friendly">Held by the Remnant</span>'
                         : '<span class="wod-camp-node-tag hostile">Iron Concord — ' + '★'.repeat(node.diff + 1) + '</span>';
                     let intel = st.owner === 'enemy' || alert ? '<p class="wod-camp-intel"><strong>Intel:</strong> ' + wodRogueNodeIntel(node) +
                         (node.ai > 1 ? ' · two commands' : '') + '</p>' : '';
+                    let blockNote = '';
+                    if(blocked && st.owner === 'enemy')
+                        blockNote = '<p style="color:#ff9d8f">Advance blocked — clear the Concord counterattack first.</p>';
+                    else if(blocked && alert)
+                        blockNote = '<p style="color:#ffd968">This defense must be fought before the front can move again.</p>';
                     info.innerHTML = '<h3>' + node.name + (node.industry ? ' 🏭' : node.capital ? ' ★' : node.hq ? ' ⚑' : '') + '</h3>' +
                         tag +
                         '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield</p>' +
                         '<p>' + node.brief + '</p>' +
                         (node.industry ? '<p style="color:#d4af37">Holding these foundries: +80 requisition every turn.</p>' : '') +
+                        blockNote +
                         intel;
                 }
             }
             if(launch) {
                 let playable = node && wodRogueNodePlayable(node.id) && c.roster.length > 0;
                 launch.disabled = !playable;
-                launch.textContent = !node ? 'Launch battle'
-                    : c.roster.length === 0 ? 'No army — recruit units below'
-                    : c.alerts[node.id] ? 'Defend ' + node.name
-                    : c.nodesState[node.id].owner === 'enemy' ? 'Attack ' + node.name : 'Launch battle';
+                if(!node) launch.textContent = 'Launch battle';
+                else if(c.roster.length === 0) launch.textContent = 'No army — recruit units below';
+                else if(c.alerts[node.id]) launch.textContent = 'Defend ' + node.name;
+                else if(wodRogueAdvanceBlocked(c) && c.nodesState[node.id].owner === 'enemy')
+                    launch.textContent = 'Roads blocked — defend first';
+                else if(c.nodesState[node.id].owner === 'enemy') launch.textContent = 'Attack ' + node.name;
+                else launch.textContent = 'Launch battle';
             }
             // Roster.
             let roster = document.getElementById('wodCampRoster');
@@ -37703,24 +37754,28 @@
                 scheduleSaveWodProgress();
                 if(run.defense) {
                     delete c.alerts[run.nodeId];
+                    c.blockedAdvance = false;
                     wodRogueLogPush('Turn ' + c.turn + ': the counterattack on ' + node.name + ' is thrown back.' + (lost ? ' Lost ' + lost + ' unit' + (lost === 1 ? '' : 's') + '.' : ''));
                 } else {
                     nodeState.owner = 'player';
                     wodRogueLogPush('Turn ' + c.turn + ': ' + node.name + ' falls to the Remnant!' + (lost ? ' Lost ' + lost + ' unit' + (lost === 1 ? '' : 's') + '.' : ''));
                 }
-                // Every won battle grants requisition for the shop — never skip this.
-                let reward = Math.max(200, Math.round((320 + (node.diff || 0) * 90 + (run.defense ? 60 : 0)) * D.rewardMult));
+                // Wins and successful defenses both grant requisition; defenses pay a bit more.
+                // Scales with node difficulty and campaign difficulty preset.
+                let baseReward = 320 + (node.diff || 0) * 90 + (run.defense ? 140 : 0);
+                let reward = Math.max(200, Math.round(baseReward * D.rewardMult));
                 c.points = (c.points | 0) + reward;
                 wodRogueLogPush('+' + reward + ' requisition from high command. (Army budget: ' + c.points + ')');
             } else {
                 if(run.defense) {
                     delete c.alerts[run.nodeId];
+                    c.blockedAdvance = false;
                     nodeState.owner = 'enemy';
                     wodRogueLogPush('Turn ' + c.turn + ': ' + node.name + ' is overrun by the Concord counterattack.');
                 } else {
                     wodRogueLogPush('Turn ' + c.turn + ': the assault on ' + node.name + ' fails.' + (lost ? ' Lost ' + lost + ' unit' + (lost === 1 ? '' : 's') + '.' : ''));
                 }
-                c.points = (c.points | 0) + 120;
+                c.points = (c.points | 0) + Math.max(80, Math.round(120 * D.rewardMult));
             }
             wodRogueWarTick(c);
             // End-of-run checks.
@@ -37752,6 +37807,8 @@
          * Concord probes your lines, and unanswered counterattacks take ground back. */
         function wodRogueWarTick(c) {
             c.turn++;
+            if(c.forcedDefenses == null) c.forcedDefenses = 0;
+            if(c.blockedAdvance == null) c.blockedAdvance = false;
             let D = WOD_ROGUE_DIFF_PRESETS[c.settings.difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
             let rng = wodRogueRng((c.seed ^ wodRogueMul32(c.turn, 0xc2b2ae35)) >>> 0);
             // Unanswered alerts fall.
@@ -37766,6 +37823,7 @@
                     }
                 }
             }
+            if(!wodRogueHasActiveAlerts(c)) c.blockedAdvance = false;
             // Turn income (+industry bonuses).
             let income = 60;
             for(let n of wodRogueNodes()) {
@@ -37773,9 +37831,10 @@
             }
             c.points += income;
             // New counterattack: a player border region (HQ exempt until the endgame).
+            // Sometimes this seals the roads (forced defense) — at most 5 times per campaign.
             let held = Object.values(c.nodesState).filter(n => n.owner === 'player').length;
             let total = wodRogueNodes().length;
-            if(c.turn > 2 && rng() < D.counterChance) {
+            if(c.turn > 2 && rng() < D.counterChance && !wodRogueHasActiveAlerts(c)) {
                 let targets = wodRogueNodes().filter(n =>
                     c.nodesState[n.id].owner === 'player' &&
                     !c.alerts[n.id] &&
@@ -37784,7 +37843,17 @@
                 if(targets.length) {
                     let t = targets[(rng() * targets.length) | 0];
                     c.alerts[t.id] = c.turn;
-                    wodRogueLogPush('Concord columns are massing against ' + t.name + ' — defend it this turn or lose it.');
+                    let canForce = (c.forcedDefenses | 0) < WOD_ROGUE_MAX_FORCED_DEFENSES;
+                    let forceChance = D.blockChance != null ? D.blockChance : 0.38;
+                    if(canForce && rng() < forceChance) {
+                        c.blockedAdvance = true;
+                        c.forcedDefenses = (c.forcedDefenses | 0) + 1;
+                        wodRogueLogPush('Concord columns seal the roads around ' + t.name +
+                            ' — defend it before the front can advance again (' +
+                            c.forcedDefenses + '/' + WOD_ROGUE_MAX_FORCED_DEFENSES + ').');
+                    } else {
+                        wodRogueLogPush('Concord columns are massing against ' + t.name + ' — defend it this turn or lose it.');
+                    }
                 }
             }
             // Flavor.

@@ -230,4 +230,10 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Region-zoomed battle maps**: launching a campaign battle now builds the map from the war-map cells around that node (`wodRogueBuildRegionBattleMap`) instead of a random similarly-shaped procgen map. City names come from the region's `towns` list (region name on the player's capital).
 - **Split deployment**: roster units are distributed across owned cities (ships to nearby water) rather than stacked on one home city.
 - **Aggressive campaign AI**: Concord pushes instead of camping hold lines (lower push threshold, deeper attack depth, more city strikers, faster strategy pulse via `_campaignAiAggressive`).
-- Verified: `output/test-campaign-region.cjs` — region terrain/names, 6 units split 3/3 across 2 cities, aggression flag set.
+- Verified: `output/test-campaign-region.cjs` ? region terrain/names, 6 units split 3/3 across 2 cities, aggression flag set.
+
+## Campaign roadblocks + difficulty-scaled points (2026-07-08)
+- **Forced defenses**: counterattacks sometimes block further advances (`blockedAdvance`) until the player defends at least once; chance scales with difficulty (`blockChance`); capped at 5 per campaign (`forcedDefenses` / `WOD_ROGUE_MAX_FORCED_DEFENSES`).
+- **Defense rewards**: successful defenses grant requisition like victories (extra +140 base), scaled by `rewardMult`.
+- **Starting points by difficulty**: Easy 2400 / Normal 3000 / Hard 3800 / Brutal 4800; custom starting-requisition input removed.
+- Verified: `output/test-campaign-blocks.cjs` ? start points, roadblock lock, defense playable, cap 5, defense reward > attack on hard.
