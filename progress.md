@@ -272,3 +272,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Bug**: `wodHexPathToWorldWaypoints` could return `[]` (empty bridge corridors), then callers did `unit.target = unit.path.shift()` and set `pathPrepared` on `undefined` ? crash on issue/replan move.
 - **Fix**: always emit a fallback waypoint from hex conversion; add `wodTakeNextPathTarget` and use it everywhere that shifts the next path node (assign, replan, convoy init, path advance, marine greedy chain).
 - Verified: Playwright unit checks for empty/null path + bridge waypoint conversion; no `pathPrepared` page errors.
+
+## Fix bridge/water order arrows + ship land orders (2026-07-09)
+- **Arrows**: bridge deck corridors now sweep in travel direction (was always min?max, causing triangular loops); caps for water?bridge; polyline cleaner drops reverse kinks/collinear midpoints; arrow seed no longer appends straight chords across remaining waypoints.
+- **Ships**: open water only (not bridge deck/land); `wodResolveShipMarchHex` snaps land clicks to nearest open water; issue/replan/prepare fallbacks refuse land targets.

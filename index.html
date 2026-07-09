@@ -12309,7 +12309,9 @@
             }
             out.push(pt);
         }
-        /** Dense deck corridor along the bridge axis — avoids jumping between gapped bridge hex centers. */
+        /** Dense deck corridor along the bridge axis — avoids jumping between gapped bridge hex centers.
+         * Sweep direction follows travel (prev→next). Always sweeping min→max caused triangular
+         * loops when marching the opposite way across the deck. */
         function wodBridgeDeckCorridorWaypoints(br, prevHex, deckRun, nextHex) {
             if(!br || !deckRun || !deckRun.length) return [];
             wodSyncBridgeWorldCoords(br);
@@ -12318,9 +12320,11 @@
             let cos = Math.cos(ang),
                 sin = Math.sin(ang);
             let out = [];
-            if(prevHex && !isBridgeHex(prevHex) && !isWaterHex(prevHex)) {
-                let capSign = wodBridgeHexBankSign(br, prevHex);
-                if(capSign) out.push(wodBridgeCapPoint(br, capSign));
+            let entrySign = 0,
+                exitSign = 0;
+            if(prevHex && !isBridgeHex(prevHex)) {
+                entrySign = wodBridgeHexBankSign(br, prevHex) || wodBridgeCapSignForApproach(br, prevHex.x, prevHex.y);
+                if(entrySign) out.push(wodBridgeCapPoint(br, entrySign));
             }
             let minLx = Infinity,
                 maxLx = -Infinity;
@@ -12341,21 +12345,77 @@
                 maxLx = Math.min(hwCap, mid + hr * 0.55);
                 span = maxLx - minLx;
             }
-            let steps = Math.max(4, Math.ceil(span / (hr * 0.72)));
+            // Travel along the axis in the direction of the march, not always min→max.
+            let startLx = minLx,
+                endLx = maxLx;
+            if(entrySign < 0) { startLx = minLx; endLx = maxLx; }
+            else if(entrySign > 0) { startLx = maxLx; endLx = minLx; }
+            else if(prevHex && nextHex) {
+                let plx = (prevHex.x - br.x) * cos + (prevHex.y - br.y) * sin;
+                let nlx = (nextHex.x - br.x) * cos + (nextHex.y - br.y) * sin;
+                if(nlx < plx) { startLx = maxLx; endLx = minLx; }
+            } else if(prevHex) {
+                let plx = (prevHex.x - br.x) * cos + (prevHex.y - br.y) * sin;
+                if(plx > (minLx + maxLx) * 0.5) { startLx = maxLx; endLx = minLx; }
+            }
+            let travel = endLx - startLx;
+            let steps = Math.max(4, Math.ceil(Math.abs(travel) / (hr * 0.72)));
             for(let si = 0; si <= steps; si++) {
-                let lx = minLx + (span * si) / steps;
+                let lx = startLx + (travel * si) / steps;
                 out.push({ x: br.x + lx * cos, y: br.y + lx * sin });
             }
-            if(nextHex && !isBridgeHex(nextHex) && !isWaterHex(nextHex)) {
-                let capSign = wodBridgeHexBankSign(br, nextHex);
-                if(capSign) out.push(wodBridgeCapPoint(br, capSign));
+            if(nextHex && !isBridgeHex(nextHex)) {
+                exitSign = wodBridgeHexBankSign(br, nextHex) || wodBridgeCapSignForApproach(br, nextHex.x, nextHex.y);
+                if(exitSign) out.push(wodBridgeCapPoint(br, exitSign));
             }
             return out;
+        }
+        /** Drop near-duplicates, collinear midpoints, and sharp reverse kinks from arrow polylines. */
+        function wodCleanOrderArrowPolyline(pts) {
+            if(!pts || pts.length < 2) return pts || [];
+            let hr = gameData.hexRadius || 20;
+            let min2 = Math.pow(hr * 0.32, 2);
+            let out = [{ x: pts[0].x, y: pts[0].y }];
+            for(let i = 1; i < pts.length; i++) {
+                let p = pts[i];
+                if(!p || p.x == null) continue;
+                let q = out[out.length - 1];
+                let dx = p.x - q.x,
+                    dy = p.y - q.y;
+                if(dx * dx + dy * dy < min2) continue;
+                if(out.length >= 2) {
+                    let a = out[out.length - 2];
+                    let abx = q.x - a.x,
+                        aby = q.y - a.y;
+                    let bpx = p.x - q.x,
+                        bpy = p.y - q.y;
+                    let ab2 = abx * abx + aby * aby;
+                    let bp2 = bpx * bpx + bpy * bpy;
+                    if(ab2 > 1 && bp2 > 1) {
+                        let inv = 1 / Math.sqrt(ab2 * bp2);
+                        let dot = (abx * bpx + aby * bpy) * inv;
+                        if(dot < -0.45) {
+                            // Sharp reverse (triangle/Z kink) — drop the middle point.
+                            out.pop();
+                            q = out[out.length - 1];
+                            dx = p.x - q.x;
+                            dy = p.y - q.y;
+                            if(dx * dx + dy * dy < min2) continue;
+                        } else if(dot > 0.994) {
+                            out[out.length - 1] = { x: p.x, y: p.y };
+                            continue;
+                        }
+                    }
+                }
+                out.push({ x: p.x, y: p.y });
+            }
+            return out.length >= 2 ? out : pts.slice(0, 2);
         }
         function wodHexPathToWorldWaypoints(unit, hexPath, exactEnd) {
             if(!hexPath || hexPath.length <= 1) return [];
             let out = [];
             let useBridges = wodUnitUsesLandBridges(unit);
+            let waterOnly = unit && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute));
             for(let i = 1; i < hexPath.length; i++) {
                 let h = hexPath[i];
                 if(useBridges && isBridgeHex(h)) {
@@ -12381,12 +12441,19 @@
             }
             if(!out.length) {
                 let endHex = hexPath[hexPath.length - 1];
-                if(exactEnd) out.push({ x: exactEnd.x, y: exactEnd.y });
+                if(exactEnd && !(waterOnly && !wodSamplePosOnWalkableTerrain(unit, exactEnd.x, exactEnd.y)))
+                    out.push({ x: exactEnd.x, y: exactEnd.y });
                 else if(endHex) out.push({ x: endHex.x, y: endHex.y });
             } else if(exactEnd) {
-                out[out.length - 1] = exactEnd;
+                // Ships/sea convoys: never replace the last water waypoint with a land click.
+                if(waterOnly) {
+                    if(wodSamplePosOnWalkableTerrain(unit, exactEnd.x, exactEnd.y))
+                        out[out.length - 1] = { x: exactEnd.x, y: exactEnd.y };
+                } else {
+                    out[out.length - 1] = exactEnd;
+                }
             }
-            return out;
+            return wodCleanOrderArrowPolyline(out);
         }
         /** Shift the next path waypoint onto unit.target; returns false if the path is empty. */
         function wodTakeNextPathTarget(unit) {
@@ -19628,10 +19695,10 @@
                 if (hex.type === 'mountain') return false;
                 return isWaterHex(hex) || isClaimableLand(hex);
             }
-            if (unit.type === 'ship') return isWaterHex(hex);
+            if (unit.type === 'ship') return wodIsOpenWaterHex(hex);
             if (unit.type === 'convoy') {
                 if (unit.convoySeaRoute) {
-                    if (!isWaterHex(hex)) return false;
+                    if (!wodIsOpenWaterHex(hex)) return false;
                     return true;
                 }
                 if (isBridgeHex(hex)) return true;
@@ -19648,12 +19715,12 @@
         /** Tiles land armies may use in A* — land + bridge; open water only when allowOpenWater. */
         function wodHexWalkableForLandPath(unit, hex, allowOpenWater) {
             if(!hex || !unit) return false;
-            if(unit.type === 'ship') return isWaterHex(hex);
+            if(unit.type === 'ship') return wodIsOpenWaterHex(hex);
             if(unit.type === 'marine') {
                 if(hex.type === 'mountain') return false;
                 return isWaterHex(hex) || isClaimableLand(hex);
             }
-            if(unit.type === 'convoy' && unit.convoySeaRoute) return isWaterHex(hex);
+            if(unit.type === 'convoy' && unit.convoySeaRoute) return wodIsOpenWaterHex(hex);
             if(unit.type === 'convoy') {
                 if(isBridgeHex(hex)) return true;
                 if(!isClaimableLand(hex) || hex.type === 'mountain') return false;
@@ -22347,6 +22414,11 @@
                 let land = wodResolveLandMarchHex(unit, x, y);
                 if(land) return land;
             }
+            if(unit && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute))) {
+                let sea = wodResolveShipMarchHex(unit, x, y);
+                if(sea) return sea;
+                return null;
+            }
             let bh = wodBridgeHexAtPoint(unit, x, y);
             if(bh) return { hex: bh, exactX: x, exactY: y, intoWater: false };
             let targetCoord = pixelToHex(x, y);
@@ -22369,6 +22441,35 @@
             }
             best = best || findBestReachableHexToward(unit, x, y);
             return best ? {hex: best, exactX: best.x, exactY: best.y} : null;
+        }
+
+        /** Snap ship/sea-convoy orders to open water only — never land or bridge deck. */
+        function wodResolveShipMarchHex(unit, x, y) {
+            if(!unit || (unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute))) return null;
+            let coord = pixelToHex(x, y);
+            let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            if(direct && wodIsOpenWaterHex(direct) && canUseHexForMovement(unit, direct)) {
+                // Keep the click only when it still samples as water (no shoreline land pixels).
+                if(wodSamplePosOnWalkableTerrain(unit, x, y))
+                    return { hex: direct, exactX: x, exactY: y };
+                return { hex: direct, exactX: direct.x, exactY: direct.y };
+            }
+            let best = null,
+                bestScore = Infinity;
+            for(let pt of getHexesInRadius(coord.q, coord.r, 22)) {
+                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                if(!hex || !wodIsOpenWaterHex(hex) || !canUseHexForMovement(unit, hex)) continue;
+                let dx = x - hex.x,
+                    dy = y - hex.y;
+                let score = dx * dx + dy * dy;
+                if(score < bestScore) {
+                    bestScore = score;
+                    best = hex;
+                }
+            }
+            if(!best) best = findBestReachableHexToward(unit, x, y);
+            if(best && !wodIsOpenWaterHex(best)) best = null;
+            return best ? { hex: best, exactX: best.x, exactY: best.y } : null;
         }
 
         function findBestReachableHexToward(unit, x, y) {
@@ -23750,11 +23851,14 @@
             opt = opt || {};
             let cur = opt.fromHex || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             if(!cur || !isWaterHex(cur) || !targetHex) return null;
+            let waterOnly = unit && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute));
+            if(waterOnly && !wodIsOpenWaterHex(cur)) return null;
             let best = null;
             let bestScore = Infinity;
             for(let dir of cardinalHexDirections) {
                 let nHex = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
                 if(!isWaterHex(nHex) || !canUseHexForMovement(unit, nHex)) continue;
+                if(waterOnly && !wodIsOpenWaterHex(nHex)) continue;
                 let dx = targetHex.x - nHex.x;
                 let dy = targetHex.y - nHex.y;
                 let d = dx * dx + dy * dy;
@@ -24140,7 +24244,7 @@
             let corridor = wodHexPathToWorldWaypoints(unit, hexPath, endPt);
             let pts = [{x: startPt ? startPt.x : hexPath[0].x, y: startPt ? startPt.y : hexPath[0].y}];
             for(let wi = 0; wi < corridor.length; wi++) pts.push(corridor[wi]);
-            return dedupeNearOrderPathPoints(pts);
+            return wodCleanOrderArrowPolyline(dedupeNearOrderPathPoints(pts));
         }
 
         function wodEnqueueOrderArrowPathBuild(unit, marchPts) {
@@ -24183,7 +24287,7 @@
                 if(out.length >= 2 && unit._routeArrowBuildGen === job.gen && unit._routeArrowMarchSig === job.sig) {
                     let oldPts = unit._routeArrowFrozenPts;
                     let oldIdx = unit._routeArrowProgressIdx || 0;
-                    unit._routeArrowFrozenPts = out;
+                    unit._routeArrowFrozenPts = wodCleanOrderArrowPolyline(out);
                     unit._routeArrowFrozenReady = true;
                     if(oldPts && oldPts.length > 1) {
                         let ratio = oldIdx / (oldPts.length - 1);
@@ -24226,13 +24330,9 @@
             if(!unit || !hexPath || hexPath.length <= 1 || !unit._routeArrowMarchSig) return;
             let legPts = wodWorldPointsFromHexMarchPath(unit, hexPath, {x: unit.x, y: unit.y});
             if(legPts.length < 2) return;
-            let pts = legPts.slice();
-            if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 1) {
-                let c = (unit.marchWpCursor || 0) + 1;
-                for(let i = c; i < unit.fullMarchWaypoints.length; i++)
-                    pts.push({x: unit.fullMarchWaypoints[i].x, y: unit.fullMarchWaypoints[i].y});
-            }
-            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(pts);
+            // Only seed the current pathfound leg. Appending remaining click waypoints as
+            // straight chords cut across water/bridges and drew triangular loops.
+            unit._routeArrowFrozenPts = wodCleanOrderArrowPolyline(dedupeNearOrderPathPoints(legPts));
         }
 
         /** Snap a corridor's final point to the exact click target, dropping trailing points
@@ -24297,7 +24397,7 @@
             }
             let arrowSig = marchPts.map(w => Math.round(w.x / 8) + ',' + Math.round(w.y / 8)).join(';');
             unit._routeArrowMarchSig = arrowSig;
-            unit._routeArrowFrozenPts = dedupeNearOrderPathPoints(corridor);
+            unit._routeArrowFrozenPts = wodCleanOrderArrowPolyline(dedupeNearOrderPathPoints(corridor));
             unit._routeArrowFrozenReady = true;
             unit._routeArrowProgressIdx = 0;
             return true;
@@ -24328,7 +24428,7 @@
                         pts.push({ x: unit.orderTarget.x, y: unit.orderTarget.y });
                 }
             }
-            let out = dedupeNearOrderPathPoints(pts);
+            let out = wodCleanOrderArrowPolyline(dedupeNearOrderPathPoints(pts));
             return out.length >= 2 ? out : null;
         }
 
@@ -24710,6 +24810,16 @@
                         unit.target = { x: reach.exactX, y: reach.exactY, ...(desired.isCity ? { isCity: true } : {}) };
                     } else {
                         unit.target = { x: desired.x, y: desired.y, ...(desired.isCity ? { isCity: true } : {}) };
+                    }
+                } else if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                    unit.path = null;
+                    let reach = wodResolveShipMarchHex(unit, desired.x, desired.y);
+                    if(reach) {
+                        unit.orderTarget = { x: reach.exactX, y: reach.exactY };
+                        unit.target = { x: reach.exactX, y: reach.exactY, pathPrepared: true };
+                    } else {
+                        unit.target = null;
+                        unit.orderTarget = null;
                     }
                 } else {
                     let t = {x: desired.x, y: desired.y, pathPrepared: true};
@@ -26342,6 +26452,12 @@
                 let t = {x: targetHex.x, y: targetHex.y, pathPrepared: true};
                 if(convoyCity) t.isCity = true;
                 unit.target = t;
+                return true;
+            }
+            if(targetHex && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute))) {
+                if(!wodIsOpenWaterHex(targetHex)) return false;
+                unit.path = null;
+                unit.target = { x: targetHex.x, y: targetHex.y, pathPrepared: true };
                 return true;
             }
             if(targetHex) {
@@ -40857,6 +40973,12 @@
                     let r = Math.floor(index / cols), c = index % cols;
                     let tx = worldPos.x + (c - midCol) * spacing;
                     let ty = worldPos.y + (r - midRow) * spacing;
+                    // Ships/sea convoys: snap to open water (or skip) so land clicks never become order targets.
+                    if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                        let sea = wodResolveShipMarchHex(unit, tx, ty);
+                        if(!sea) return null;
+                        return [{ x: sea.exactX, y: sea.exactY }];
+                    }
                     return [{ x: tx, y: ty }];
                 });
             }
