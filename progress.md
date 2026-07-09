@@ -224,7 +224,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **MP units disappearing on deselect**: frustum cull used auth `unit.x/y` while drawing used smoothed `_drawX/_drawY`. Selected units bypassed cull, so deselect could hide units that still looked on-screen (especially after host snaps). Cull now checks both positions; large snap jumps reset smooth coords; selection is revalidated after each client snap.
 - **Rankings online/offline**: leaderboard cache no longer persists stale `online` flags; rankings tab refreshes friend presence; status shows `? Online` / `? Offline` with clearer styling; server normalizes player IDs to uppercase before the online map lookup.
 - **Campaign**: Units recruit tab hidden during campaign battles (`wod-campaign-battle` HUD class); every win grants requisition (min 200, logged with new budget); roster rows show Veteran ? + XP and a dismiss button (50% refund); veteran flag syncs from XP threshold after battles.
-- Verified: `output/test-campaign-fixes.cjs` � buy/delete/veteran UI, win reward, HUD class, draw-pos cull logic all OK.
+- Verified: `output/test-campaign-fixes.cjs` � buy/delete/veteran UI, win reward, HUD class, draw-pos cull logic all OK.
 
 ## Campaign region battle maps + aggressive AI (2026-07-08)
 - **Region-zoomed battle maps**: launching a campaign battle now builds the map from the war-map cells around that node (`wodRogueBuildRegionBattleMap`) instead of a random similarly-shaped procgen map. City names come from the region's `towns` list (region name on the player's capital).
@@ -235,5 +235,11 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Campaign roadblocks + difficulty-scaled points (2026-07-08)
 - **Forced defenses**: counterattacks sometimes block further advances (`blockedAdvance`) until the player defends at least once; chance scales with difficulty (`blockChance`); capped at 5 per campaign (`forcedDefenses` / `WOD_ROGUE_MAX_FORCED_DEFENSES`).
 - **Defense rewards**: successful defenses grant requisition like victories (extra +140 base), scaled by `rewardMult`.
-- **Starting points by difficulty**: Easy 2400 / Normal 3000 / Hard 3800 / Brutal 4800; custom starting-requisition input removed.
+- **Starting points by difficulty**: Easy 3600 / Normal 4500 / Hard 5600 / Brutal 7000; custom starting-requisition input removed.
 - Verified: `output/test-campaign-blocks.cjs` ? start points, roadblock lock, defense playable, cap 5, defense reward > attack on hard.
+
+## Campaign farms + richer battle economy (2026-07-08)
+- **More starting resources**: campaign requisition raised (Easy 3600 → Brutal 7000); campaign battles open with **$12000** and **8000 MP** for structures (army still fixed).
+- **Farm building** ($1200): boosts manpower growth (+5 raw); build UI, icons, AI, capture clear, MP sync.
+- **Factory cash bump**: factory money bonus 10 → 15 raw (+50%).
+- Verified: `output/test-farm-econ.cjs` — farm build, factory income, start points, battle treasury.

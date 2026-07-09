@@ -8192,8 +8192,8 @@
 
                 <div class="esc-help-block">
                     <h4>Structures and income</h4>
-                    <p class="esc-help-prose">A <strong>factory</strong> is a major investment: it lifts both money and manpower income and is required to train <strong>armor</strong>. A <strong>harbor</strong> raises cash a bit, and it is needed where the urban footprint touches open water so you can build <strong>ships</strong> from that port.</p>
-                    <p class="esc-help-prose">Cities provide the larger economy: each town adds base cash and manpower growth, factories increase both, and harbors add extra cash. Manpower growth is separate from cash income and is spent on training infantry, marines, ships, and armor.</p>
+                    <p class="esc-help-prose">A <strong>factory</strong> is a major investment: it lifts both money and manpower income and is required to train <strong>armor</strong>. A <strong>farm</strong> boosts manpower growth. A <strong>harbor</strong> raises cash a bit, and it is needed where the urban footprint touches open water so you can build <strong>ships</strong> from that port.</p>
+                    <p class="esc-help-prose">Cities provide the larger economy: each town adds base cash and manpower growth, factories increase both, farms raise manpower further, and harbors add extra cash. Manpower growth is separate from cash income and is spent on training infantry, marines, ships, and armor.</p>
                     <p class="esc-help-prose"><strong>Trade convoys</strong> spawn between linked cities and pay a <strong>one-time</strong> bonus when they dock. If your budget stays underwater, <strong>unpaid upkeep</strong> will start chewing down army health until you recover — watch the treasury before you max out every regiment.</p>
                 </div>
 
@@ -8829,10 +8829,11 @@
                 <div class="wod-m-sheet wod-m-sheet--build">
                     <div class="wod-m-sheet-banner">
                         <span class="wod-m-sheet-title">Structures</span>
-                        <span class="wod-m-sheet-sub">Factories · harbors · forts · bridges · tap towns / place bridge on water.</span>
+                        <span class="wod-m-sheet-sub">Factories · farms · harbors · forts · bridges · tap towns / place bridge on water.</span>
                     </div>
                     <div class="bottom-bar" id="buildStructuresBarMobile">
                         <button class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city without a factory.">Build Factory ($2k)</button>
+                        <button class="build-btn" onclick="beginFarmBuild()" title="Costs $1200. Requires owned city without a farm. Boosts manpower growth.">Build Farm ($1.2k)</button>
                         <button class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City must border water without a harbor.">Build Harbor ($1k)</button>
                         <button class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned land (not city cores). Forts may be built near each other; defense bonuses do not stack.">Build Fort ($1.5k)</button>
                         <button class="build-btn" onclick="beginBridgeBuild()" title="Costs $2000. Place over water; mouse wheel or Q/E rotates before clicking.">Build Bridge ($2k)</button>
@@ -8860,6 +8861,7 @@
                     <div class="wod-pc-prod-pane-wrap">
                         <div class="wod-pc-prod-pane active" data-wod-pc-pane="structures" role="tabpanel">
                             <button type="button" class="build-btn" onclick="beginFactoryBuild()" title="Costs $2000. Requires owned city.">Build Factory ($2k)</button>
+                            <button type="button" class="build-btn" onclick="beginFarmBuild()" title="Costs $1200. Requires owned city. Boosts manpower growth.">Build Farm ($1.2k)</button>
                             <button type="button" class="build-btn" onclick="beginHarborBuild()" title="Costs $1000. City bordering water.">Build Harbor ($1k)</button>
                             <button type="button" class="build-btn" onclick="beginFortBuild()" title="Costs $1500. Place on owned terrain. Forts can be built close together; aura bonuses do not stack.">Build Fort ($1.5k)</button>
                             <button type="button" class="build-btn" onclick="beginBridgeBuild()" title="Costs $2000. Span a river; mouse wheel or Q/E rotates.">Build Bridge ($2k)</button>
@@ -9429,6 +9431,7 @@
         /** Match production menu / economy balance. */
         const WOD_PRICE_FACTORY = 2000;
         const WOD_PRICE_HARBOR = 1000;
+        const WOD_PRICE_FARM = 1200;
         const WOD_PRICE_FORT = 1500;
         const WOD_PRICE_BRIDGE = 2000;
         const WOD_BRIDGE_ROT_STEP = Math.PI / 12;
@@ -13516,7 +13519,7 @@
                 hexList: (gameData.hexList || []).map(wodStripHexForNet),
                 cities: (gameData.cities || []).map(c => ({
                     id: c.id, name: c.name, x: c.x, y: c.y, q: c.q, r: c.r, owner: c.owner,
-                    hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp, maxHp: c.maxHp,
+                    hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hasFarm: !!c.hasFarm, hp: c.hp, maxHp: c.maxHp,
                     urbanStyle: c.urbanStyle, incomeBonus: c.incomeBonus, manpowerBonus: c.manpowerBonus
                 })),
                 entities: (gameData.entities || []).map(wodStripEntityForNet),
@@ -13996,7 +13999,7 @@
                 for(let u of s.cities) {
                     let c = gameData.cities.find(cc => cc.q === u.q && cc.r === u.r);
                     if(c) {
-                        c.owner = u.owner; c.hasFactory = !!u.hasFactory; c.hasHarbor = !!u.hasHarbor;
+                        c.owner = u.owner; c.hasFactory = !!u.hasFactory; c.hasHarbor = !!u.hasHarbor; c.hasFarm = !!u.hasFarm;
                         if(u.hp != null) c.hp = u.hp;
                     }
                 }
@@ -14206,7 +14209,7 @@
                 sessionCitiesCapturedByOwner: Object.assign({}, gameData.sessionCitiesCapturedByOwner || {}),
                 entities: gameData.entities.filter(e => e.hp > 0).map(wodStripEntityForNet),
                 hexOwners: owners,
-                cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp })),
+                cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hasFarm: !!c.hasFarm, hp: c.hp })),
                 forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
                 bridges: (gameData.bridges || []).map(wodStripBridgeForNet).filter(Boolean),
                 encircledKeys,
@@ -15685,7 +15688,7 @@
                 hexList: src.hexList.map(wodStripHexForNet),
                 cities: (src.cities || []).map(c => ({
                     id: c.id, name: c.name, x: c.x, y: c.y, q: c.q, r: c.r, owner: c.owner,
-                    hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hp: c.hp, maxHp: c.maxHp
+                    hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hasFarm: !!c.hasFarm, hp: c.hp, maxHp: c.maxHp
                 })),
                 entities: (src.entities || []).map(wodStripEntityForNet),
                 mapRadius: src.mapRadius,
@@ -18675,6 +18678,7 @@
                     convoysCaptured: 0,
                     factoriesBuilt: 0,
                     harborsBuilt: 0,
+                    farmsBuilt: 0,
                     fortsBuilt: 0,
                     peakMoneyHeld: 0,
                     unitsBuiltLight: 0,
@@ -19589,6 +19593,7 @@
             city.owner = newOwner;
             city.hasFactory = false;
             city.hasHarbor = false;
+            city.hasFarm = false;
             let cityHex = gameData.hexes[`${city.q},${city.r}`];
             if(cityHex) setHexOwner(cityHex, newOwner);
             handleWodTownCaptureAndElimination(prevCityOwner, newOwner);
@@ -20828,6 +20833,7 @@
                 let label = city.name || 'Town';
                 let detail = `Base +${bd.base}/s`;
                 if(bd.factory > 0) detail += ` · Factory +${bd.factory}/s`;
+                if(bd.farm > 0) detail += ` · Farm +${bd.farm}/s`;
                 if(bd.bonus > 0) detail += ` · Bonus +${bd.bonus}/s`;
                 lines.push({ label, value: formatSigned(mp, '/s'), detail, expense: false });
             }
@@ -20899,7 +20905,7 @@
 
         function getCityIncome(city) {
             let total = 5;
-            if(city.hasFactory) total += 10;
+            if(city.hasFactory) total += 15;
             if(city.hasHarbor) total += 3;
             total += city.incomeBonus || 0;
             return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT * 1000) / 1000;
@@ -20908,6 +20914,7 @@
         function getCityManpowerIncome(city) {
             let total = 7;
             if(city.hasFactory) total += 2;
+            if(city.hasFarm) total += 5;
             total += city.manpowerBonus || 0;
             return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT * 1000) / 1000;
         }
@@ -20915,7 +20922,7 @@
         function getCityIncomeBreakdown(city) {
             let mult = WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT;
             let base = 5;
-            let factory = city.hasFactory ? 10 : 0;
+            let factory = city.hasFactory ? 15 : 0;
             let harbor = city.hasHarbor ? 3 : 0;
             let bonus = city.incomeBonus || 0;
             let round = (v) => Math.round(v * mult * 1000) / 1000;
@@ -20932,11 +20939,13 @@
             let mult = WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT;
             let base = 7;
             let factory = city.hasFactory ? 2 : 0;
+            let farm = city.hasFarm ? 5 : 0;
             let bonus = city.manpowerBonus || 0;
             let round = (v) => Math.round(v * mult * 1000) / 1000;
             return {
                 base: round(base),
                 factory: round(factory),
+                farm: round(farm),
                 bonus: round(bonus),
                 total: getCityManpowerIncome(city)
             };
@@ -28515,6 +28524,7 @@
                         owner: ow,
                         hasFactory: ti === 0,
                         hasHarbor: false,
+                        hasFarm: false,
                         hp: 1000,
                         maxHp: 1000,
                         urbanStyle: Math.floor(Math.random() * 4),
@@ -28683,7 +28693,7 @@
             }
 
             // Reset owners first
-            for(let c of gameData.cities) { c.owner = 0; c.hasFactory = false; c.hasHarbor = false; }
+            for(let c of gameData.cities) { c.owner = 0; c.hasFactory = false; c.hasHarbor = false; c.hasFarm = false; }
             for(let h of gameData.hexList) { setHexOwner(h, 0); }
 
             let cx = 0, cy = 0;
@@ -28748,7 +28758,7 @@
                             id: 'city_capital_' + owner,
                             name: generateCityName(),
                             x: coastalHex.x, y: coastalHex.y, q: coastalHex.q, r: coastalHex.r,
-                            owner, hasFactory: false, hasHarbor: false,
+                            owner, hasFactory: false, hasHarbor: false, hasFarm: false,
                             hp: 1000, maxHp: 1000,
                             urbanStyle: Math.floor(Math.random() * 4),
                             incomeBonus: 0,
@@ -28789,7 +28799,7 @@
                         id: 'city_start_' + owner,
                         name: generateCityName(),
                         x: fallbackHex.x, y: fallbackHex.y, q: fallbackHex.q, r: fallbackHex.r,
-                        owner, hasFactory: false, hasHarbor: false,
+                        owner, hasFactory: false, hasHarbor: false, hasFarm: false,
                         hp: 1000, maxHp: 1000,
                         urbanStyle: Math.floor(Math.random() * 4),
                         incomeBonus: 0,
@@ -29438,7 +29448,7 @@
                             id: 'city_' + i,
                             name: generateCityName(),
                             x: h.x, y: h.y, q: h.q, r: h.r,
-                            owner: 0, hasFactory: false, hasHarbor: false,
+                            owner: 0, hasFactory: false, hasHarbor: false, hasFarm: false,
                             hp: 1000, maxHp: 1000,
                             urbanStyle: Math.floor(Math.random() * 4),
                             incomeBonus: 0,
@@ -31327,6 +31337,14 @@
                     needHb.hasHarbor = true;
                     cash -= WOD_PRICE_HARBOR;
                     hbSpend++;
+                }
+                let farmSpend = 0;
+                while(cash >= WOD_PRICE_FARM + unitReserve && farmSpend < 1) {
+                    let needFarm = aiCities.find(ct => !ct.hasFarm);
+                    if(!needFarm) break;
+                    needFarm.hasFarm = true;
+                    cash -= WOD_PRICE_FARM;
+                    farmSpend++;
                 }
                 gameData.aiMoneyByOwner[ownerKey] = cash;
 
@@ -33623,18 +33641,59 @@
             ctx.restore();
         }
 
+        function drawPeriodFarmIcon(ctx, x, y, period, lite) {
+            let s = lite ? 0.82 : 1;
+            let pal = wodPeriodStructurePalette(period);
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.strokeStyle = pal.stroke;
+            ctx.lineWidth = Math.max(1, 1.1 * s);
+            ctx.lineJoin = 'round';
+            ctx.fillStyle = '#6b9b3a';
+            ctx.beginPath();
+            ctx.moveTo(-8 * s, 4 * s);
+            ctx.quadraticCurveTo(0, 8 * s, 8 * s, 4 * s);
+            ctx.lineTo(8 * s, 6 * s);
+            ctx.quadraticCurveTo(0, 10 * s, -8 * s, 6 * s);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = pal.wallHi || '#c9a66b';
+            ctx.fillRect(-3 * s, -6 * s, 6 * s, 8 * s);
+            ctx.strokeRect(-3 * s, -6 * s, 6 * s, 8 * s);
+            ctx.fillStyle = pal.roof || '#8b5a2b';
+            ctx.beginPath();
+            ctx.moveTo(-4.5 * s, -6 * s);
+            ctx.lineTo(0, -11 * s);
+            ctx.lineTo(4.5 * s, -6 * s);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#d4b45a';
+            for(let i = -2; i <= 2; i++) {
+                if(i === 0) continue;
+                ctx.fillRect(i * 2.6 * s - 0.7 * s, 1 * s, 1.4 * s, 3 * s);
+            }
+            ctx.restore();
+        }
+
         function drawWodCityStructureIcons(ctx, city, gfxLite, atLocalOrigin) {
             if(!city || city.owner === 0) return;
             let period = wodGetRenderPeriod();
             let x = atLocalOrigin ? 0 : city.x;
             let y = atLocalOrigin ? (gfxLite ? 10 : 12) : city.y + (gfxLite ? 10 : 12);
-            if(city.hasFactory && city.hasHarbor) {
-                drawPeriodFactoryIcon(ctx, x - 9, y, period, gfxLite);
-                drawPeriodHarborIcon(ctx, x + 9, y, period, gfxLite);
-            } else if(city.hasFactory) {
-                drawPeriodFactoryIcon(ctx, x, y, period, gfxLite);
-            } else if(city.hasHarbor) {
-                drawPeriodHarborIcon(ctx, x, y, period, gfxLite);
+            let icons = [];
+            if(city.hasFactory) icons.push('factory');
+            if(city.hasFarm) icons.push('farm');
+            if(city.hasHarbor) icons.push('harbor');
+            if(!icons.length) return;
+            let spacing = icons.length >= 3 ? 12 : 9;
+            let start = -((icons.length - 1) * spacing) / 2;
+            for(let i = 0; i < icons.length; i++) {
+                let ix = x + start + i * spacing;
+                if(icons[i] === 'factory') drawPeriodFactoryIcon(ctx, ix, y, period, gfxLite);
+                else if(icons[i] === 'farm') drawPeriodFarmIcon(ctx, ix, y, period, gfxLite);
+                else drawPeriodHarborIcon(ctx, ix, y, period, gfxLite);
             }
         }
 
@@ -33656,7 +33715,7 @@
                 ctx.fillStyle = city.owner === 0 ? '#bdc3c7' : factionColors[city.owner];
                 ctx.fillText(city.name || '', 0, -10);
                 ctx.shadowBlur = 0;
-                if(city.hasFactory || city.hasHarbor) drawWodCityStructureIcons(ctx, city, false, true);
+                if(city.hasFactory || city.hasHarbor || city.hasFarm) drawWodCityStructureIcons(ctx, city, false, true);
             } else if(city.owner !== 0) {
                 ctx.beginPath();
                 ctx.arc(0, -10, 8, 0, Math.PI * 2);
@@ -34134,7 +34193,7 @@
                     convoyLand: 'Land trade convoy', convoySea: 'Sea trade convoy',
                     trainLight: 'Train Light Infantry ($500, 1k MP)', trainMarine: 'Train Marines ($500, 1k MP)',
                     trainHeavy: 'Train Armor ($4k, 1k MP)', trainShip: 'Build Ship ($3.8k, 5k MP)',
-                    factory: 'Factory', harbor: 'Harbor', fort: 'Fort',
+                    factory: 'Factory', farm: 'Farm', harbor: 'Harbor', fort: 'Fort',
                     cityTown: 'Town', cityPort: 'Port City', cityIndustrial: 'Industrial City', cityPortIndustrial: 'Industrial Port City',
                     unitLight: (n) => wodOrdinal(n) + ' Infantry Div.',
                     unitMarine: (n) => wodOrdinal(n) + ' Marine Regt.',
@@ -34158,7 +34217,7 @@
                     convoyLand: 'Wagon train', convoySea: 'Merchant convoy',
                     trainLight: 'Form musket battalion ($500, 1k MP)', trainMarine: 'Embark naval infantry ($500, 1k MP)',
                     trainHeavy: 'Raise horse regiments ($4k, 1k MP)', trainShip: 'Commission ship of the line ($3.8k, 5k MP)',
-                    factory: 'Foundry', harbor: 'Naval yard', fort: 'Redoubt',
+                    factory: 'Foundry', farm: 'Granary', harbor: 'Naval yard', fort: 'Redoubt',
                     cityTown: 'Commune', cityPort: 'Port commune', cityIndustrial: 'Arsenal town', cityPortIndustrial: 'Grand arsenal port',
                     unitLight: (n) => n + 'e Bataillon de ligne',
                     unitMarine: (n) => n + 'e Infanterie de marine',
@@ -34182,7 +34241,7 @@
                     convoyLand: 'Supply caravan', convoySea: 'Grain convoy',
                     trainLight: 'Levy hoplites ($500, 1k MP)', trainMarine: 'Embark marines ($500, 1k MP)',
                     trainHeavy: 'Field chariots ($4k, 1k MP)', trainShip: 'Launch trireme ($3.8k, 5k MP)',
-                    factory: 'Workshop', harbor: 'Emporion', fort: 'Palisade',
+                    factory: 'Workshop', farm: 'Grain fields', harbor: 'Emporion', fort: 'Palisade',
                     cityTown: 'Polis', cityPort: 'Emporion', cityIndustrial: 'Workshop polis', cityPortIndustrial: 'Great emporion',
                     unitLight: (n) => wodOrdinal(n) + ' Hoplite Lochos',
                     unitMarine: (n) => wodOrdinal(n) + ' Epibatai',
@@ -34206,7 +34265,7 @@
                     convoyLand: 'Pack train', convoySea: 'Hanse convoy',
                     trainLight: 'Raise men-at-arms ($500, 1k MP)', trainMarine: 'Embark sea raiders ($500, 1k MP)',
                     trainHeavy: 'Muster knights ($4k, 1k MP)', trainShip: 'Build war galley ($3.8k, 5k MP)',
-                    factory: 'Smithy', harbor: 'Quay', fort: 'Keep',
+                    factory: 'Smithy', farm: 'Manor fields', harbor: 'Quay', fort: 'Keep',
                     cityTown: 'Bailiwick', cityPort: 'Port town', cityIndustrial: 'Castle town', cityPortIndustrial: 'Castle port',
                     unitLight: (n) => wodOrdinal(n) + ' Company of Foot',
                     unitMarine: (n) => wodOrdinal(n) + ' Sea Company',
@@ -34379,6 +34438,7 @@
             document.querySelectorAll('.build-btn').forEach(btn => {
                 let oc = btn.getAttribute('onclick') || '';
                 if(oc.indexOf('beginFactoryBuild') >= 0) btn.textContent = 'Build ' + f.factory + ' ($2k)';
+                else if(oc.indexOf('beginFarmBuild') >= 0) btn.textContent = 'Build ' + (f.farm || 'Farm') + ' ($1.2k)';
                 else if(oc.indexOf('beginHarborBuild') >= 0) btn.textContent = 'Build ' + f.harbor + ' ($1k)';
                 else if(oc.indexOf('beginFortBuild') >= 0) btn.textContent = 'Build ' + (f.fort || 'Fort') + ' ($1.5k)';
                 else if(oc.indexOf("buyUnit('light')") >= 0) btn.textContent = f.trainLight;
@@ -34470,7 +34530,7 @@
                 enemyTroopKills: 0, ownTroopLosses: 0, enemyMarineKills: 0, ownMarineLosses: 0,
                 enemyTankKills: 0, ownTankLosses: 0, enemyShipKills: 0, ownShipLosses: 0,
                 peakFieldManpower: 0, battlesWon: 0, campaignLosses: 0,
-                citiesCaptured: 0, convoysCaptured: 0, factoriesBuilt: 0, harborsBuilt: 0, fortsBuilt: 0, peakMoneyHeld: 0,
+                citiesCaptured: 0, convoysCaptured: 0, factoriesBuilt: 0, harborsBuilt: 0, farmsBuilt: 0, fortsBuilt: 0, peakMoneyHeld: 0,
                 unitsBuiltLight: 0, unitsBuiltHeavy: 0, unitsBuiltShip: 0, unitsBuiltMarine: 0, gamesStarted: 0,
                 missionsCompleted: 0, campaignsWon: 0, campaignBattlesWon: 0
             };
@@ -36214,10 +36274,10 @@
         const WOD_ROGUE_UNIT_COSTS = { light: 200, marine: 260, heavy: 480, ship: 420 };
         const WOD_ROGUE_UNIT_LABEL = { light: 'Infantry', marine: 'Marines', heavy: 'Armor', ship: 'Warship' };
         const WOD_ROGUE_DIFF_PRESETS = {
-            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 2400, blockChance: 0.28 },
-            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 3000, blockChance: 0.38 },
-            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 3800, blockChance: 0.48 },
-            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 4800, blockChance: 0.58 }
+            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 3600, blockChance: 0.28 },
+            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 4500, blockChance: 0.38 },
+            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 5600, blockChance: 0.48 },
+            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 7000, blockChance: 0.58 }
         };
         const WOD_ROGUE_MAX_FORCED_DEFENSES = 5;
         const WOD_ROGUE_LENGTH_PRESETS = {
@@ -36226,7 +36286,7 @@
             long: { label: 'Long — 18 regions', nodes: 18, W: 252, H: 152 },
             epic: { label: 'Epic — 24 regions', nodes: 24, W: 300, H: 180 }
         };
-        const WOD_ROGUE_DEFAULT_POINTS = 3000;
+        const WOD_ROGUE_DEFAULT_POINTS = 4500;
         const WOD_ROGUE_FLAVOR = [
             'Skirmishes flare along the front; no ground changes hands.',
             'Concord bombers hit our supply columns overnight.',
@@ -37456,6 +37516,7 @@
                     owner,
                     hasFactory: !!isCapital,
                     hasHarbor: false,
+                    hasFarm: false,
                     hp: 1000, maxHp: 1000,
                     urbanStyle: (seed + cities.length) % 4,
                     incomeBonus: 0,
@@ -37668,9 +37729,9 @@
                 unit.veteran = !!(r.veteran || (r.xp || 0) >= WOD_VETERAN_XP_THRESHOLD);
                 unit._campRosterId = r.id;
             }
-            // Fixed army: no recruiting, no starting treasury to spend on units.
-            gameData.money = 0;
-            gameData.manpower = 0;
+            // Fixed army: no recruiting mid-battle, but start with cash/MP for structures.
+            gameData.money = 12000;
+            gameData.manpower = 8000;
             wodSyncCampaignBattleHud();
             // Campaign AI should press the attack, not sit on hold lines.
             gameData._campaignAiAggressive = true;
@@ -38954,6 +39015,9 @@
                         cityEffects.push({ label: 'Factory', stats: '+' + incBd.factory + '/s', detail: 'Factory bonus to cash income.' });
                         cityEffects.push({ label: 'Factory MP', stats: '+' + mpBd.factory + '/s', detail: 'Factory bonus to manpower growth.' });
                     }
+                    if(sel.hasFarm) {
+                        cityEffects.push({ label: 'Farm', stats: '+' + mpBd.farm + '/s', detail: 'Farm bonus to manpower growth.' });
+                    }
                     if(sel.hasHarbor) {
                         cityEffects.push({ label: 'Harbor', stats: '+' + incBd.harbor + '/s', detail: 'Harbor bonus to cash income.' });
                     }
@@ -39484,7 +39548,7 @@
                         ctx.fillText(city.name, city.x, city.y - 10);
                         ctx.shadowBlur = 0;
 
-                        if(city.hasFactory || city.hasHarbor) drawWodCityStructureIcons(ctx, city, gfxLite);
+                        if(city.hasFactory || city.hasHarbor || city.hasFarm) drawWodCityStructureIcons(ctx, city, gfxLite);
                     } else if(!gfxLite) {
                         ctx.beginPath();
                         ctx.arc(city.x, city.y - 10, 8, 0, Math.PI*2);
@@ -42076,6 +42140,10 @@
                 if(city.hasFactory) return false;
                 return wodPlayerTreasury(owner) >= WOD_PRICE_FACTORY;
             }
+            if(mode === 'farm') {
+                if(city.hasFarm) return false;
+                return wodPlayerTreasury(owner) >= WOD_PRICE_FARM;
+            }
             if(mode === 'harbor') {
                 if(city.hasHarbor) return false;
                 if(wodPlayerTreasury(owner) < WOD_PRICE_HARBOR) return false;
@@ -42105,6 +42173,14 @@
                 city.hasFactory = true;
                 if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                     wodBumpLifetime('factoriesBuilt', 1);
+                    checkWodAchievements();
+                    scheduleSaveWodProgress();
+                }
+            } else if(mode === 'farm') {
+                wodDeductPlayerMoney(owner, WOD_PRICE_FARM);
+                city.hasFarm = true;
+                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+                    wodBumpLifetime('farmsBuilt', 1);
                     checkWodAchievements();
                     scheduleSaveWodProgress();
                 }
@@ -42198,6 +42274,9 @@
                 if(mode === 'factory') {
                     if(city.hasFactory) showNotification('This town already has a factory.');
                     else showNotification('Not enough money!');
+                } else if(mode === 'farm') {
+                    if(city.hasFarm) showNotification('This town already has a farm.');
+                    else showNotification('Not enough money!');
                 } else if(mode === 'harbor') {
                     if(city.hasHarbor) showNotification('This town already has a harbor.');
                     else if(wodPlayerTreasury(lo) < WOD_PRICE_HARBOR) showNotification('Not enough money!');
@@ -42231,6 +42310,10 @@
 
         function beginHarborBuild() {
             enterBuildPlacementMode('harbor');
+        }
+
+        function beginFarmBuild() {
+            enterBuildPlacementMode('farm');
         }
 
         function beginFortBuild() {
