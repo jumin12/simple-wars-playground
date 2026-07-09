@@ -309,3 +309,15 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Land formations near bridges stay on land (2026-07-09)
 - Same-shore / same-hex land orders no longer trigger bridge rescue (portal paths that looped onto the deck and back).
 - Bridge funnel detection and land-march resolve ignore radius false-positives from `wodBridgeHexAtPoint`; formation/shift slots that sit on water beside a shore snap to nearby land instead of the deck.
+
+## Store missions + D-Day Normandy (2026-07-09)
+- **Shop**: renamed Maps tab ? **Missions**; sells purchasable mission packs from `custom-maps/` (200g D-Day).
+- **Missions panel**: **Campaign** / **Store** tabs. Store lists owned shop missions; one-shots are spent on victory (`storeMissions.spent`), mini-campaign packs stay replayable.
+- **D-Day: Normandy** (`custom-maps/normandy-dday.json`): historical beaches (Utah?Sword), Cherbourg/Caen/Bayeux/etc., Allied/German OOB labels, Atlantic Wall forts, 7 scripted events/popups (Overlord briefing, H-Hour, Bloody Omaha, airborne, 21st Panzer, Mulberry, Cherbourg).
+- Generator: `node scripts/generate-store-missions.js` (also `npm run missions:store`).
+- Cloud progress syncs `storeMissions` completed/spent via `server/profiles.js`.
+
+### TODOs / next agent
+- Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
+- Optional: re-enable skirmish ?Shop Mission? setup button if non-mission map packs return.
+- Visual polish: Normandy map is large (~70 radius); consider a tighter Cotentin crop if load times matter on slow devices.

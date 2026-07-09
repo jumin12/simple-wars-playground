@@ -109,6 +109,7 @@ function defaultProfile(playerId) {
     },
     achievementGoldGranted: {},
     missions: { completed: {} },
+    storeMissions: { completed: {}, spent: {} },
     lifetime: defaultLifetime(),
     lifetimeByPeriod: {},
     multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
@@ -373,6 +374,10 @@ function hydrateProfile(playerId, row) {
   base.missions = {
     completed: sanitizeBoolMap(row.missions && row.missions.completed),
   };
+  base.storeMissions = {
+    completed: sanitizeBoolMap(row.storeMissions && row.storeMissions.completed),
+    spent: sanitizeBoolMap(row.storeMissions && row.storeMissions.spent),
+  };
   base.lifetime = sanitizeLifetime(row.lifetime);
   base.lifetimeByPeriod = mergeLifetimeByPeriod({}, row.lifetimeByPeriod || {});
   base.multiplayer = {
@@ -473,6 +478,17 @@ function syncProgress(playerId, payload) {
     profile.missions.completed = mergeBoolMap(
       profile.missions.completed,
       payload.missions.completed
+    );
+  }
+  if (payload.storeMissions && typeof payload.storeMissions === 'object') {
+    profile.storeMissions = profile.storeMissions || { completed: {}, spent: {} };
+    profile.storeMissions.completed = mergeBoolMap(
+      profile.storeMissions.completed,
+      payload.storeMissions.completed
+    );
+    profile.storeMissions.spent = mergeBoolMap(
+      profile.storeMissions.spent,
+      payload.storeMissions.spent
     );
   }
   if (payload.multiplayer && typeof payload.multiplayer === 'object') {

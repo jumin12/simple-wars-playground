@@ -5274,6 +5274,12 @@
             background: rgba(46, 204, 113, 0.16);
             color: #7ee2a8;
         }
+        .shop-map-card.shop-mission-spent {
+            opacity: 0.72;
+        }
+        .wod-mission-source-tabs {
+            justify-content: flex-start;
+        }
 
         #mapLibraryPanel.overlay {
             z-index: 40;
@@ -7679,7 +7685,11 @@
         <div id="missionsPanel" class="overlay hidden">
             <div class="panel panel-wide wod-map-lib-panel">
                 <h2 style="margin-top:0">Missions</h2>
-                <p class="wod-map-lib-sub">Ten linked battles across land and sea. Win each mission to unlock the next.</p>
+                <nav class="shop-tabs wod-mission-source-tabs" role="tablist" aria-label="Mission sources" style="margin-bottom:12px">
+                    <button type="button" class="shop-tab active" data-mission-tab="campaign" role="tab" aria-selected="true" id="wodMissionTabCampaign">Campaign</button>
+                    <button type="button" class="shop-tab" data-mission-tab="store" role="tab" aria-selected="false" id="wodMissionTabStore">Store</button>
+                </nav>
+                <p class="wod-map-lib-sub" id="wodMissionPanelSub">Ten linked battles across land and sea. Win each mission to unlock the next.</p>
                 <div class="wod-map-lib-layout">
                     <div class="wod-map-lib-list-column">
                         <div class="wod-map-lib-list" id="wodMissionList" aria-label="Mission list"></div>
@@ -7698,7 +7708,7 @@
                 </div>
                 <div id="wodMissionEmpty" class="shop-empty-state hidden">
                     <p><strong>No missions available</strong></p>
-                    <p>Missions could not be loaded. Return to the main menu and try again.</p>
+                    <p id="wodMissionEmptyHint">Missions could not be loaded. Return to the main menu and try again.</p>
                 </div>
                 <button type="button" class="menu-btn" onclick="showPanel('playMode')" style="margin-top:16px">Back</button>
             </div>
@@ -7772,7 +7782,7 @@
                 </div>
                 <div class="setup-row">
                     <button type="button" class="build-btn" id="setupBtnGenerateNew" onclick="previewMap()">Generate New</button>
-                    <button type="button" class="wod-editor-btn" id="setupBtnShopMaps" onclick="wodOpenSetupShopMapPicker()" disabled title="Unlock maps in the Shop first">Shop Map</button>
+                    <button type="button" class="wod-editor-btn" id="setupBtnShopMaps" onclick="wodOpenSetupShopMapPicker()" disabled title="Unlock missions in the Shop first" style="display:none">Shop Mission</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnSaveMap" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
                     <button type="button" class="wod-editor-btn" id="setupBtnLoadMap" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
                 </div>
@@ -8141,11 +8151,11 @@
 
         <div id="shopMapPickerPanel" class="overlay hidden">
             <div class="panel panel-wide wod-map-lib-panel">
-                <h2 style="margin-top:0">Shop maps</h2>
+                <h2 style="margin-top:0">Shop missions</h2>
                 <div class="shop-option-grid" id="shopMapPickerList"></div>
                 <div id="shopMapPickerEmpty" class="shop-empty-state hidden">
-                    <p><strong>No unlocked maps</strong></p>
-                    <p>Purchase maps in the Shop to use them here.</p>
+                    <p><strong>No unlocked missions</strong></p>
+                    <p>Purchase missions in the Shop to use them here.</p>
                 </div>
                 <button type="button" class="wod-editor-btn" onclick="wodShopMapPickerBack()" style="margin-top:16px">Back</button>
             </div>
@@ -8331,7 +8341,7 @@
                 <p>Gold: <strong id="shopGold">1000</strong></p>
                 <nav class="shop-tabs" role="tablist" aria-label="Shop categories">
                     <button type="button" class="shop-tab active" data-shop-tab="troops" role="tab" aria-selected="true">Troop skins</button>
-                    <button type="button" class="shop-tab" data-shop-tab="maps" role="tab" aria-selected="false">Maps</button>
+                    <button type="button" class="shop-tab" data-shop-tab="missions" role="tab" aria-selected="false">Missions</button>
                     <button type="button" class="shop-tab" data-shop-tab="mapSkins" role="tab" aria-selected="false">Map skins</button>
                     <button type="button" class="shop-tab" data-shop-tab="command" role="tab" aria-selected="false">Frontline &amp; command</button>
                 </nav>
@@ -8567,7 +8577,8 @@
                 </div>
                 </div>
 
-                <div id="shopTabMaps" class="shop-tab-pane" data-shop-pane="maps" role="tabpanel" hidden>
+                <div id="shopTabMaps" class="shop-tab-pane" data-shop-pane="missions" role="tabpanel" hidden>
+                    <p class="shop-tab-lead">Buy historical and special missions with gold. Owned missions appear under <strong>Missions → Store</strong>. One-shot missions can be played once; mini-campaign packs stay replayable.</p>
                     <div id="shopMapOptions"></div>
                 </div>
 
@@ -18869,6 +18880,7 @@
                 profile: { gold: 0, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
                 missions: { completed: {} },
+                storeMissions: { completed: {}, spent: {} },
                 achievementGoldGranted: {}
             };
         }
@@ -18928,6 +18940,10 @@
                 multiplayer: Object.assign({}, base.multiplayer, o.multiplayer || {}),
                 missions: {
                     completed: Object.assign({}, base.missions.completed, (o.missions && o.missions.completed) || {})
+                },
+                storeMissions: {
+                    completed: Object.assign({}, (base.storeMissions && base.storeMissions.completed) || {}, (o.storeMissions && o.storeMissions.completed) || {}),
+                    spent: Object.assign({}, (base.storeMissions && base.storeMissions.spent) || {}, (o.storeMissions && o.storeMissions.spent) || {})
                 },
                 achievementGoldGranted: Object.assign({}, base.achievementGoldGranted, o.achievementGoldGranted || {})
             };
@@ -19087,6 +19103,16 @@
                         (profile.missions && profile.missions.completed) || {}
                     )
                 },
+                storeMissions: {
+                    completed: wodMergeBoolMap(
+                        (local.storeMissions && local.storeMissions.completed) || {},
+                        (profile.storeMissions && profile.storeMissions.completed) || {}
+                    ),
+                    spent: wodMergeBoolMap(
+                        (local.storeMissions && local.storeMissions.spent) || {},
+                        (profile.storeMissions && profile.storeMissions.spent) || {}
+                    )
+                },
                 achievementGoldGranted: wodMergeBoolMap(
                     local.achievementGoldGranted,
                     profile.achievementGoldGranted
@@ -19129,6 +19155,7 @@
                 achievements: wodProgress.achievements,
                 achievementGoldGranted: wodProgress.achievementGoldGranted || {},
                 missions: wodProgress.missions || { completed: {} },
+                storeMissions: wodProgress.storeMissions || { completed: {}, spent: {} },
                 multiplayer: wodProgress.multiplayer || { gamesPlayed: 0, wins: 0, losses: 0 },
                 profile: {
                     gold: wodProgress.profile.gold | 0,
@@ -21054,6 +21081,24 @@
             let entry = gameData._selectedMissionEntry;
             if(!entry || !entry.id || !gameData.mission) return;
             if(!wodProgress) return;
+            if(entry.storeMission) {
+                if(!wodProgress.storeMissions) wodProgress.storeMissions = { completed: {}, spent: {} };
+                if(!wodProgress.storeMissions.completed) wodProgress.storeMissions.completed = {};
+                if(!wodProgress.storeMissions.spent) wodProgress.storeMissions.spent = {};
+                if(wodProgress.storeMissions.completed[entry.id]) return;
+                wodProgress.storeMissions.completed[entry.id] = true;
+                // One-shot store missions are consumed on victory (mini-campaigns stay replayable).
+                if(wodIsStoreMissionOneShot(entry)) {
+                    wodProgress.storeMissions.spent[entry.id] = true;
+                    showNotification('Store mission complete — one-shot cleared.');
+                } else {
+                    showNotification('Store mission complete!');
+                }
+                wodBumpLifetime('missionsCompleted', 1);
+                persistWodProgressNow();
+                checkWodAchievements();
+                return;
+            }
             if(!wodProgress.missions) wodProgress.missions = { completed: {} };
             if(!wodProgress.missions.completed) wodProgress.missions.completed = {};
             if(wodProgress.missions.completed[entry.id]) return;
@@ -21066,6 +21111,27 @@
 
         function wodIsMissionCompleted(missionId) {
             return !!(wodProgress && wodProgress.missions && wodProgress.missions.completed && wodProgress.missions.completed[missionId]);
+        }
+
+        function wodIsStoreMissionCompleted(missionId) {
+            return !!(wodProgress && wodProgress.storeMissions && wodProgress.storeMissions.completed && wodProgress.storeMissions.completed[missionId]);
+        }
+
+        function wodIsStoreMissionSpent(missionId) {
+            return !!(wodProgress && wodProgress.storeMissions && wodProgress.storeMissions.spent && wodProgress.storeMissions.spent[missionId]);
+        }
+
+        function wodIsStoreMissionOneShot(entry) {
+            if(!entry) return true;
+            let pack = entry.packType || entry.pack || 'oneshot';
+            return pack !== 'mini_campaign' && pack !== 'campaign' && pack !== 'replayable';
+        }
+
+        function wodStoreMissionPlayable(entry) {
+            if(!entry || !entry.id) return false;
+            if(!wodOwnsShopVisual(wodShopMapShopId(entry.id))) return false;
+            if(wodIsStoreMissionOneShot(entry) && wodIsStoreMissionSpent(entry.id)) return false;
+            return true;
         }
 
         /** Mission N is playable when it is the first mission or the previous one is completed. */
@@ -37290,6 +37356,8 @@
         let wodMissionCatalogLoaded = false;
         let wodMissionRenderToken = 0;
         let _wodSelectedMissionId = null;
+        let _wodMissionListTab = 'campaign'; // 'campaign' | 'store'
+        let wodMissionTabsBound = false;
 
         async function wodLoadMissionCatalog() {
             if(wodMissionCatalogLoaded) return wodMissionCatalog;
@@ -37297,13 +37365,50 @@
                 let res = await fetch(WOD_MISSIONS_DIR + 'manifest.json', { cache: 'no-cache' });
                 if(!res.ok) throw new Error('manifest missing');
                 let json = await res.json();
-                wodMissionCatalog = (json.missions || []).filter(m => m && m.id && m.file);
+                wodMissionCatalog = (json.missions || []).filter(m => m && m.id && m.file).map(m => Object.assign({}, m, { storeMission: false }));
             } catch(e) {
                 wodMissionCatalog = [];
                 console.warn('wodLoadMissionCatalog', e);
             }
             wodMissionCatalogLoaded = true;
             return wodMissionCatalog;
+        }
+
+        function wodGetActiveMissionCatalog() {
+            if(_wodMissionListTab === 'store') {
+                return (wodShopMapCatalog || []).filter(m => m && m.id && m.file).map(m => Object.assign({}, m, {
+                    storeMission: true,
+                    packType: m.packType || m.pack || 'oneshot'
+                }));
+            }
+            return wodMissionCatalog;
+        }
+
+        function wodFindMissionEntryById(id) {
+            if(!id) return null;
+            let camp = wodMissionCatalog.find(m => m.id === id);
+            if(camp) return Object.assign({}, camp, { storeMission: false });
+            let store = (wodShopMapCatalog || []).find(m => m.id === id);
+            if(store) return Object.assign({}, store, { storeMission: true, packType: store.packType || store.pack || 'oneshot' });
+            return null;
+        }
+
+        function wodInitMissionSourceTabs() {
+            if(wodMissionTabsBound) return;
+            wodMissionTabsBound = true;
+            document.querySelectorAll('#missionsPanel [data-mission-tab]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    let tab = btn.getAttribute('data-mission-tab') || 'campaign';
+                    if(tab === _wodMissionListTab) return;
+                    _wodMissionListTab = tab;
+                    document.querySelectorAll('#missionsPanel [data-mission-tab]').forEach(b => {
+                        let on = b.getAttribute('data-mission-tab') === tab;
+                        b.classList.toggle('active', on);
+                        b.setAttribute('aria-selected', on ? 'true' : 'false');
+                    });
+                    void wodRefreshMissionsPanel();
+                });
+            });
         }
 
         function wodMissionDataLooksValid(data) {
@@ -37354,8 +37459,9 @@
             if(!entry || !entry.id) return null;
             if(!opts.force && wodMissionDataCache[entry.id]) return wodMissionDataCache[entry.id];
             let file = entry.file || (entry.id + '.json');
+            let dir = entry.storeMission ? WOD_SHOP_MAPS_DIR : WOD_MISSIONS_DIR;
             try {
-                let res = await fetch(WOD_MISSIONS_DIR + file, { cache: 'no-cache' });
+                let res = await fetch(dir + file, { cache: 'no-cache' });
                 if(!res.ok) throw new Error('mission file missing (' + res.status + ')');
                 let data = await res.json();
                 if(!wodMissionDataLooksValid(data)) throw new Error('invalid mission export');
@@ -37416,6 +37522,11 @@
                 html += '<p class="wod-map-lib-meta-sub">Victory: ' + vic + ' · ' + evtN + ' battle event' + (evtN === 1 ? '' : 's');
                 if(trig) html += ' · ' + trig;
                 html += '</p>';
+                if(entry.storeMission) {
+                    let oneshot = wodIsStoreMissionOneShot(entry);
+                    html += '<p class="wod-map-lib-meta-sub">' + (oneshot ? 'One-shot store mission — cleared after a win.' : 'Mini-campaign pack — replayable.') + '</p>';
+                    if(wodIsStoreMissionSpent(entry.id)) html += '<p class="wod-map-lib-meta-sub" style="color:#e67e22">Already completed (one-shot spent).</p>';
+                }
                 if(meta) meta.innerHTML = html;
                 if(cv) {
                     try { wodPaintMapDataOnCanvas(cv, data); }
@@ -37429,9 +37540,17 @@
 
         async function wodRefreshMissionsPanel() {
             let token = ++wodMissionRenderToken;
+            wodInitMissionSourceTabs();
+            document.querySelectorAll('#missionsPanel [data-mission-tab]').forEach(b => {
+                let on = b.getAttribute('data-mission-tab') === _wodMissionListTab;
+                b.classList.toggle('active', on);
+                b.setAttribute('aria-selected', on ? 'true' : 'false');
+            });
             let list = document.getElementById('wodMissionList');
             let empty = document.getElementById('wodMissionEmpty');
+            let emptyHint = document.getElementById('wodMissionEmptyHint');
             let layout = document.querySelector('#missionsPanel .wod-map-lib-layout');
+            let sub = document.getElementById('wodMissionPanelSub');
             if(!list) return;
             list.innerHTML = '';
             _wodSelectedMissionId = null;
@@ -37439,41 +37558,84 @@
             if(startBtn) startBtn.disabled = true;
             wodSelectMissionEntry(null);
             await wodLoadMissionCatalog();
+            await wodLoadShopMapCatalog();
             if(token !== wodMissionRenderToken) return;
-            if(!wodMissionCatalog.length) {
+
+            let storeTab = _wodMissionListTab === 'store';
+            if(sub) {
+                sub.textContent = storeTab
+                    ? 'Missions unlocked from the Shop. One-shot missions disappear after a victory; mini-campaign packs stay available.'
+                    : 'Ten linked battles across land and sea. Win each mission to unlock the next.';
+            }
+
+            let catalog = wodGetActiveMissionCatalog();
+            if(storeTab) {
+                catalog = catalog.filter(e => wodOwnsShopVisual(wodShopMapShopId(e.id)));
+            }
+
+            if(!catalog.length) {
                 if(empty) empty.classList.remove('hidden');
+                if(emptyHint) {
+                    emptyHint.textContent = storeTab
+                        ? 'Buy missions in the Shop → Missions tab. Owned store missions will show up here.'
+                        : 'Missions could not be loaded. Return to the main menu and try again.';
+                }
                 if(layout) layout.style.display = 'none';
                 return;
             }
             if(empty) empty.classList.add('hidden');
             if(layout) layout.style.display = 'flex';
-            for(let entry of wodMissionCatalog) {
-                let idx = wodMissionCatalog.indexOf(entry);
-                let unlocked = wodIsMissionUnlocked(idx, wodMissionCatalog);
-                let done = wodIsMissionCompleted(entry.id);
+
+            for(let entry of catalog) {
                 let btn = document.createElement('button');
                 btn.type = 'button';
-                btn.className = 'wod-mission-row' + (unlocked ? '' : ' locked') + (done ? ' completed' : '');
                 btn.dataset.missionId = entry.id;
-                let badge = done ? '<span class="wod-mission-row-badge done">✓ Completed</span>'
-                    : (unlocked ? '' : '<span class="wod-mission-row-badge lock">🔒 Locked</span>');
-                btn.innerHTML =
-                    '<span class="wod-mission-row-title">' + (entry.name || entry.id) + badge + '</span>' +
-                    (unlocked && entry.description ? '<span class="wod-mission-row-desc">' + entry.description + '</span>'
-                        : (!unlocked ? '<span class="wod-mission-row-desc">Complete the previous mission to unlock.</span>' : ''));
-                if(unlocked) {
-                    btn.addEventListener('click', () => wodSelectMissionEntry(entry));
+                if(storeTab) {
+                    let spent = wodIsStoreMissionSpent(entry.id);
+                    let done = wodIsStoreMissionCompleted(entry.id);
+                    let playable = wodStoreMissionPlayable(entry);
+                    btn.className = 'wod-mission-row' + (playable ? '' : ' locked') + (done ? ' completed' : '');
+                    let badge = spent
+                        ? '<span class="wod-mission-row-badge done">✓ Spent</span>'
+                        : (done ? '<span class="wod-mission-row-badge done">✓ Completed</span>'
+                            : (wodIsStoreMissionOneShot(entry)
+                                ? '<span class="wod-mission-row-badge">One-shot</span>'
+                                : '<span class="wod-mission-row-badge">Pack</span>'));
+                    btn.innerHTML =
+                        '<span class="wod-mission-row-title">' + (entry.name || entry.id) + badge + '</span>' +
+                        (playable && entry.description
+                            ? '<span class="wod-mission-row-desc">' + entry.description + '</span>'
+                            : (!playable ? '<span class="wod-mission-row-desc">One-shot already completed.</span>' : ''));
+                    if(playable) btn.addEventListener('click', () => wodSelectMissionEntry(entry));
+                    else btn.addEventListener('click', () => showNotification('This one-shot store mission was already completed.'));
                 } else {
-                    btn.addEventListener('click', () => showNotification('Locked — complete the previous mission first.'));
+                    let idx = wodMissionCatalog.indexOf(entry);
+                    let unlocked = wodIsMissionUnlocked(idx, wodMissionCatalog);
+                    let done = wodIsMissionCompleted(entry.id);
+                    btn.className = 'wod-mission-row' + (unlocked ? '' : ' locked') + (done ? ' completed' : '');
+                    let badge = done ? '<span class="wod-mission-row-badge done">✓ Completed</span>'
+                        : (unlocked ? '' : '<span class="wod-mission-row-badge lock">🔒 Locked</span>');
+                    btn.innerHTML =
+                        '<span class="wod-mission-row-title">' + (entry.name || entry.id) + badge + '</span>' +
+                        (unlocked && entry.description ? '<span class="wod-mission-row-desc">' + entry.description + '</span>'
+                            : (!unlocked ? '<span class="wod-mission-row-desc">Complete the previous mission to unlock.</span>' : ''));
+                    if(unlocked) btn.addEventListener('click', () => wodSelectMissionEntry(entry));
+                    else btn.addEventListener('click', () => showNotification('Locked — complete the previous mission first.'));
                 }
                 list.appendChild(btn);
             }
-            // Auto-select the first uncompleted unlocked mission so the player can just hit Start.
+
             let auto = null;
-            for(let i = 0; i < wodMissionCatalog.length; i++) {
-                if(!wodIsMissionUnlocked(i, wodMissionCatalog)) break;
-                auto = wodMissionCatalog[i];
-                if(!wodIsMissionCompleted(auto.id)) break;
+            if(storeTab) {
+                for(let e of catalog) {
+                    if(wodStoreMissionPlayable(e)) { auto = e; break; }
+                }
+            } else {
+                for(let i = 0; i < wodMissionCatalog.length; i++) {
+                    if(!wodIsMissionUnlocked(i, wodMissionCatalog)) break;
+                    auto = wodMissionCatalog[i];
+                    if(!wodIsMissionCompleted(auto.id)) break;
+                }
             }
             if(auto) wodSelectMissionEntry(auto);
         }
@@ -37514,20 +37676,31 @@
             if(!btn || btn.dataset.wired === '1') return;
             btn.dataset.wired = '1';
             btn.addEventListener('click', () => {
-                let entry = wodMissionCatalog.find(m => m.id === _wodSelectedMissionId);
+                let entry = wodFindMissionEntryById(_wodSelectedMissionId);
                 if(!entry) {
                     showNotification('Select a mission first.');
                     return;
                 }
-                if(!wodIsMissionUnlocked(wodMissionCatalog.indexOf(entry), wodMissionCatalog)) {
-                    showNotification('Locked — complete the previous mission first.');
-                    return;
+                if(entry.storeMission) {
+                    if(!wodStoreMissionPlayable(entry)) {
+                        showNotification(wodIsStoreMissionSpent(entry.id)
+                            ? 'This one-shot store mission was already completed.'
+                            : 'Unlock this mission in the Shop first.');
+                        return;
+                    }
+                } else {
+                    let idx = wodMissionCatalog.findIndex(m => m.id === entry.id);
+                    if(!wodIsMissionUnlocked(idx, wodMissionCatalog)) {
+                        showNotification('Locked — complete the previous mission first.');
+                        return;
+                    }
                 }
                 btn.disabled = true;
                 btn.textContent = 'Loading…';
                 gameData._launchingMission = true;
                 let missionPeriod = document.getElementById('wodMissionGamePeriod');
                 if(missionPeriod && missionPeriod.value) wodApplyGamePeriod(missionPeriod.value, { saveProfile: true });
+                else if(entry.periodHint) wodApplyGamePeriod(entry.periodHint, { saveProfile: true });
                 showNotification('Loading mission map…');
                 void wodApplyMissionEntry(entry).then(ok => {
                     btn.textContent = 'Start mission';
@@ -39291,13 +39464,29 @@
             return 'shop_map_' + mapId;
         }
 
+        function wodNormalizeShopMissionEntry(raw) {
+            if(!raw || !raw.id || !raw.file) return null;
+            return Object.assign({}, raw, {
+                storeMission: true,
+                packType: raw.packType || raw.pack || 'oneshot',
+                kind: raw.kind || 'mission',
+                price: Math.max(0, raw.price | 0) || WOD_SHOP_MAP_DEFAULT_PRICE
+            });
+        }
+
         async function wodLoadShopMapCatalog() {
             if(wodShopMapCatalogLoaded) return wodShopMapCatalog;
             try {
                 let res = await fetch(WOD_SHOP_MAPS_DIR + 'manifest.json', { cache: 'no-cache' });
                 if(!res.ok) throw new Error('manifest missing');
                 let json = await res.json();
-                wodShopMapCatalog = (json.maps || []).filter(m => m && m.id && m.file);
+                let fromMissions = (json.missions || []).map(wodNormalizeShopMissionEntry).filter(Boolean);
+                let fromMaps = (json.maps || []).map(wodNormalizeShopMissionEntry).filter(Boolean);
+                // Prefer missions[] entries; merge unique map entries for legacy packs.
+                let byId = Object.create(null);
+                for(let m of fromMaps) byId[m.id] = m;
+                for(let m of fromMissions) byId[m.id] = m;
+                wodShopMapCatalog = Object.keys(byId).map(k => byId[k]);
             } catch(e) {
                 wodShopMapCatalog = [];
                 console.warn('wodLoadShopMapCatalog', e);
@@ -39309,6 +39498,14 @@
         async function wodFetchShopMapData(entry) {
             if(!entry || !entry.id) return null;
             if(wodShopMapDataCache[entry.id]) return wodShopMapDataCache[entry.id];
+            // Store missions may include full mission event blocks — reuse mission fetch when valid.
+            if(entry.kind === 'mission' || entry.storeMission) {
+                let missionData = await wodFetchMissionData(Object.assign({}, entry, { storeMission: true }));
+                if(missionData) {
+                    wodShopMapDataCache[entry.id] = missionData;
+                    return missionData;
+                }
+            }
             let file = entry.file || (entry.id + '.json');
             try {
                 let res = await fetch(WOD_SHOP_MAPS_DIR + file, { cache: 'no-cache' });
@@ -39330,9 +39527,10 @@
             if(wodCloudCanSync()) {
                 void wodCloudTryPurchase({ kind: 'map', itemId: shopId, price: Math.max(0, entry.price | 0) || WOD_SHOP_MAP_DEFAULT_PRICE }).then(ok => {
                     if(!ok) return;
-                    showNotification('Map unlocked!');
+                    showNotification('Mission unlocked! Open Missions → Store to play.');
                     updateSkinShop();
                     wodSyncSetupShopMapButton();
+                    if(typeof wodRefreshMissionsPanel === 'function') void wodRefreshMissionsPanel();
                 });
                 return false;
             }
@@ -39344,10 +39542,11 @@
             gameData.gold -= price;
             wodEnsureOwnedShopVisuals();
             gameData.ownedShopVisuals[shopId] = true;
-            showNotification('Map unlocked!');
+            showNotification('Mission unlocked! Open Missions → Store to play.');
             scheduleSaveWodProgress();
             updateSkinShop();
             wodSyncSetupShopMapButton();
+            if(typeof wodRefreshMissionsPanel === 'function') void wodRefreshMissionsPanel();
             return true;
         }
 
@@ -39362,14 +39561,14 @@
             await wodLoadShopMapCatalog();
             let owned = wodGetOwnedShopMapEntries();
             btn.disabled = owned.length === 0;
-            btn.title = owned.length ? 'Choose an unlocked shop map' : 'Unlock maps in the Shop first';
+            btn.title = owned.length ? 'Choose an unlocked shop mission' : 'Unlock missions in the Shop first';
         }
 
         async function wodOpenSetupShopMapPicker() {
             await wodLoadShopMapCatalog();
             let owned = wodGetOwnedShopMapEntries();
             if(!owned.length) {
-                showNotification('Unlock a map in the Shop first.');
+                showNotification('Unlock a mission in the Shop first.');
                 return;
             }
             wodRenderShopMapPicker(owned);
@@ -39385,16 +39584,24 @@
         async function wodApplyOwnedShopMapToSetup(entry) {
             if(!entry || !entry.id) return false;
             if(!wodOwnsShopVisual(wodShopMapShopId(entry.id))) {
-                showNotification('Unlock this map in the Shop first.');
+                showNotification('Unlock this mission in the Shop first.');
+                return false;
+            }
+            // Prefer launching store missions from the Missions panel.
+            if(entry.kind === 'mission' || entry.storeMission || (entry.packType && entry.file)) {
+                showNotification('Open Missions → Store to play purchased missions.');
+                wodShopMapPickerBack();
+                _wodMissionListTab = 'store';
+                showPanel('missions');
                 return false;
             }
             let data = await wodFetchShopMapData(entry);
             if(!data) {
-                showNotification('Could not load map file.');
+                showNotification('Could not load mission file.');
                 return false;
             }
             if(!wodApplyMapExportToSetup(data)) {
-                showNotification('Map data could not be applied.');
+                showNotification('Mission data could not be applied.');
                 return false;
             }
             gameData._equippedShopMapId = entry.id;
@@ -39450,14 +39657,24 @@
         async function wodEquipShopMap(entry) {
             if(!entry || !entry.id) return false;
             let shopId = wodShopMapShopId(entry.id);
-            if(!wodOwnsShopVisual(shopId) && !purchaseShopMap(entry)) return false;
+            if(!wodOwnsShopVisual(shopId)) {
+                if(!purchaseShopMap(entry)) return false;
+                // Cloud purchase is async — stop here; ack refreshes the shop.
+                if(wodCloudCanSync() && !wodOwnsShopVisual(shopId)) return false;
+            }
+            // Purchased store missions are played from Missions → Store, not skirmish setup.
+            if(entry.kind === 'mission' || entry.storeMission !== false) {
+                showNotification('Owned! Open Missions → Store to deploy.');
+                renderShopMapsTab();
+                return true;
+            }
             let data = await wodFetchShopMapData(entry);
             if(!data) {
-                showNotification('Could not load map file.');
+                showNotification('Could not load mission file.');
                 return false;
             }
             if(!wodApplyMapExportToSetup(data)) {
-                showNotification('Map data could not be applied.');
+                showNotification('Mission data could not be applied.');
                 return false;
             }
             gameData._equippedShopMapId = entry.id;
@@ -39465,7 +39682,7 @@
                 wodProgress.profile.equippedShopMapId = entry.id;
                 scheduleSaveWodProgress();
             }
-            showNotification('Map loaded for your next skirmish.');
+            showNotification('Mission loaded for your next skirmish.');
             renderShopMapsTab();
             return true;
         }
@@ -39478,22 +39695,27 @@
             if(token !== wodShopMapRenderToken) return;
             host.innerHTML = '';
             if(!wodShopMapCatalog.length) {
-                host.innerHTML = '<div class="shop-empty-state"><p><strong>Maps coming soon</strong></p></div>';
+                host.innerHTML = '<div class="shop-empty-state"><p><strong>Missions coming soon</strong></p></div>';
                 return;
             }
             for(let entry of wodShopMapCatalog) {
                 let shopId = wodShopMapShopId(entry.id);
                 let owned = wodOwnsShopVisual(shopId);
                 let price = Math.max(0, entry.price | 0) || WOD_SHOP_MAP_DEFAULT_PRICE;
-                let equipped = gameData._equippedShopMapId === entry.id;
+                let spent = wodIsStoreMissionSpent(entry.id);
+                let oneshot = wodIsStoreMissionOneShot(entry);
                 let card = document.createElement('button');
                 card.type = 'button';
-                card.className = 'shop-option-card shop-map-card' + (owned ? '' : ' shop-visual-locked') + (equipped ? ' active' : '');
+                card.className = 'shop-option-card shop-map-card' + (owned ? '' : ' shop-visual-locked') + (spent ? ' shop-mission-spent' : '');
                 card.title = entry.description || entry.name || entry.id;
-                let badge = equipped ? 'Equipped' : (owned ? 'Owned' : 'Locked');
+                let badge;
+                if(!owned) badge = 'Locked';
+                else if(spent && oneshot) badge = 'Completed';
+                else badge = 'Owned';
+                let packLabel = oneshot ? 'One-shot' : 'Mini-campaign';
                 let footer = owned
-                    ? '<span class="shop-option-badge">' + badge + '</span>'
-                    : '<span class="shop-visual-footer"><span class="shop-visual-state">Locked</span><span class="shop-visual-price">' + price + 'g</span></span>';
+                    ? '<span class="shop-option-badge">' + badge + ' · ' + packLabel + '</span>'
+                    : '<span class="shop-visual-footer"><span class="shop-visual-state">Locked · ' + packLabel + '</span><span class="shop-visual-price">' + price + 'g</span></span>';
                 card.innerHTML =
                     '<span class="shop-map-preview"><canvas width="280" height="96" aria-hidden="true"></canvas></span>' +
                     '<span class="shop-map-meta">' +
@@ -39501,7 +39723,19 @@
                     (entry.description ? '<span class="shop-option-desc">' + entry.description + '</span>' : '') +
                     footer +
                     '</span>';
-                card.addEventListener('click', () => { wodEquipShopMap(entry); });
+                card.addEventListener('click', () => {
+                    if(owned) {
+                        showNotification(spent && oneshot
+                            ? 'Already completed — one-shot missions cannot be replayed.'
+                            : 'Open Missions → Store to play this mission.');
+                        if(!spent || !oneshot) {
+                            _wodMissionListTab = 'store';
+                            showPanel('missions');
+                        }
+                        return;
+                    }
+                    wodEquipShopMap(entry);
+                });
                 host.appendChild(card);
                 wodFetchShopMapData(entry).then(data => {
                     if(token !== wodShopMapRenderToken || !data || !card.isConnected) return;
@@ -39679,7 +39913,7 @@
                 if(on) pane.removeAttribute('hidden');
                 else pane.setAttribute('hidden', '');
             });
-            if(tabId === 'maps') renderShopMapsTab();
+            if(tabId === 'missions' || tabId === 'maps') renderShopMapsTab();
         }
 
         function syncShopVisualOptionsUi() {
