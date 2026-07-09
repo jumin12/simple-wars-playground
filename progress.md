@@ -249,3 +249,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Defense battles**: win by surviving a difficulty-scaled hold (Easy 90s / Normal 120s / Hard 180s / Brutal 240s) **or** capturing all enemy cities; hold timer banner during the fight.
 - **Surrender**: "Delete save" replaced with **Surrender**; always confirms that the save will be deleted.
 - Verified: `output/test-defense-surrender.cjs`.
+
+## Campaign units killed + roster rename (2026-07-08)
+- **Units killed** added beside units lost on the campaign stats strip (enemy troop kills remain); battles accumulate `playerUnitsKilled` formation kills.
+- **Rename**: campaign roster has a rename button; in-battle renames sync back to the persistent roster.
+- Verified: `output/test-units-killed-rename.cjs`.
