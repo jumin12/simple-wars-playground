@@ -5170,6 +5170,7 @@
             gap: 6px;
             flex-shrink: 0;
         }
+        .wod-camp-unit .wod-camp-rename,
         .wod-camp-unit .wod-camp-del {
             flex: 0 0 auto;
             margin: 0;
@@ -5177,10 +5178,20 @@
             font-size: 0.68rem;
             line-height: 1.2;
             border-radius: 4px;
+            cursor: pointer;
+        }
+        .wod-camp-unit .wod-camp-rename {
+            border: 1px solid rgba(127, 155, 179, 0.55);
+            background: rgba(127, 155, 179, 0.12);
+            color: #c5d6e6;
+        }
+        .wod-camp-unit .wod-camp-rename:hover {
+            background: rgba(127, 155, 179, 0.28);
+        }
+        .wod-camp-unit .wod-camp-del {
             border: 1px solid rgba(231, 76, 60, 0.45);
             background: rgba(231, 76, 60, 0.12);
             color: #ff9d8f;
-            cursor: pointer;
         }
         .wod-camp-unit .wod-camp-del:hover {
             background: rgba(231, 76, 60, 0.28);
@@ -20425,10 +20436,15 @@
             let campUnitsLostThisBattle = 0;
             if(campMeta) {
                 campUnitsLostThisBattle = campMeta.unitsLost | 0;
+                let killed = campMeta.unitsKilled | 0;
                 if(subEl) {
-                    subEl.textContent = (subEl.textContent ? subEl.textContent + ' · ' : '') +
-                        campUnitsLostThisBattle + ' unit' + (campUnitsLostThisBattle === 1 ? '' : 's') + ' lost' +
-                        (campMeta.unitsLostTotal != null ? ' (' + campMeta.unitsLostTotal + ' campaign total)' : '');
+                    let bits = [];
+                    bits.push(killed + ' unit' + (killed === 1 ? '' : 's') + ' killed');
+                    bits.push(campUnitsLostThisBattle + ' unit' + (campUnitsLostThisBattle === 1 ? '' : 's') + ' lost');
+                    if(campMeta.unitsKilledTotal != null || campMeta.unitsLostTotal != null) {
+                        bits.push('campaign ' + (campMeta.unitsKilledTotal | 0) + 'K/' + (campMeta.unitsLostTotal | 0) + 'L');
+                    }
+                    subEl.textContent = (subEl.textContent ? subEl.textContent + ' · ' : '') + bits.join(' · ');
                 }
             } else if(campRun) {
                 let before = campRun.rosterAtStart | 0;
@@ -20436,8 +20452,10 @@
                 for(let u of gameData.entities || []) if(u && u.owner === lo && u.hp > 0 && u._campRosterId) aliveNow++;
                 if(!before) before = aliveNow;
                 campUnitsLostThisBattle = Math.max(0, before - aliveNow);
+                let killed = gameData.playerUnitsKilled | 0;
                 if(subEl) {
                     subEl.textContent = (subEl.textContent ? subEl.textContent + ' · ' : '') +
+                        killed + ' unit' + (killed === 1 ? '' : 's') + ' killed · ' +
                         campUnitsLostThisBattle + ' unit' + (campUnitsLostThisBattle === 1 ? '' : 's') + ' lost';
                 }
             }
@@ -21438,6 +21456,13 @@
             }
             if(unit.type === 'ship' && prevHpAlive && unit.hp <= 0) {
                 addShipCasualties(unit.owner, 1, source);
+            }
+            if(prevHpAlive && unit.hp <= 0 && unit.type !== 'convoy') {
+                let killer = (source && typeof source === 'object' && source.owner != null)
+                    ? source.owner
+                    : (typeof source === 'number' ? source : 0);
+                if(killer === 1 && unit.owner !== 1)
+                    gameData.playerUnitsKilled = (gameData.playerUnitsKilled || 0) + 1;
             }
             let repCost = replacementMoneyFromLosses(unit, casualties, tankLosses);
             if(repCost > 0) addCasualtyReplacementCost(unit.owner, repCost);
@@ -28640,6 +28665,7 @@
             gameData.casualties = 0;
             gameData.enemyCasualties = 0;
             gameData.playerKills = 0;
+            gameData.playerUnitsKilled = 0;
             gameData.tankCasualties = 0;
             gameData.playerTankKills = 0;
             gameData.shipCasualties = 0;
@@ -36824,7 +36850,7 @@
                 blockedAdvance: false,
                 forcedDefenses: 0,
                 log: ['The Federation Remnant lands. The war for the Ashen Front begins. Starting requisition: ' + startPts + '.'],
-                stats: { battles: 0, wins: 0, defeats: 0, unitsLost: 0, unitsBought: 0, kills: 0, losses: 0 },
+                stats: { battles: 0, wins: 0, defeats: 0, unitsLost: 0, unitsKilled: 0, unitsBought: 0, kills: 0, losses: 0 },
                 over: false,
                 won: false
             };
@@ -36913,6 +36939,32 @@
         function wodRogueIsRosterVeteran(u) {
             return !!(u && (u.veteran || (u.xp || 0) >= WOD_VETERAN_XP_THRESHOLD));
         }
+
+        /** Rename a roster unit from the campaign army panel. */
+        function wodRogueRosterRename(unitId) {
+            let c = wodRogueLoad();
+            if(!c || c.over) return;
+            let unit = c.roster.find(u => u && u.id === unitId);
+            if(!unit) return;
+            if(typeof window.wodShowNameInputDialog !== 'function') return;
+            window.wodShowNameInputDialog({
+                title: 'Rename unit',
+                hint: 'Name shown on the war map roster and in battles.',
+                label: 'Display name',
+                defaultValue: unit.name || 'Unit',
+                confirmLabel: 'Apply',
+                maxLength: 32,
+                requireNonEmpty: 'Name cannot be empty.'
+            }).then(nextName => {
+                if(nextName == null) return;
+                nextName = String(nextName).trim();
+                if(nextName.length === 0) { showNotification('Name cannot be empty.'); return; }
+                unit.name = nextName.slice(0, 32);
+                wodRogueSave();
+                wodRefreshCampaignPanel();
+            });
+        }
+        window.wodRogueRosterRename = wodRogueRosterRename;
 
         /** Dismiss a roster unit between battles; refunds half its recruit cost (rounded). */
         function wodRogueRosterDelete(unitId) {
@@ -37282,6 +37334,7 @@
                     '<span><strong>' + (s.battles || 0) + '</strong> battles (' + (s.wins || 0) + 'W-' + (s.defeats || 0) + 'L)</span>' +
                     '<span><strong>' + Math.round(s.kills || 0).toLocaleString() + '</strong> enemy troops killed</span>' +
                     '<span><strong>' + Math.round(s.losses || 0).toLocaleString() + '</strong> troops lost</span>' +
+                    '<span><strong>' + (s.unitsKilled || 0) + '</strong> units killed</span>' +
                     '<span><strong>' + (s.unitsLost || 0) + '</strong> units lost</span>' +
                     '<span><strong>' + (s.unitsBought || 0) + '</strong> units recruited</span>';
             }
@@ -37369,10 +37422,19 @@
                         '</div>' +
                         '<div class="wod-camp-unit-right">' +
                             '<span class="hpbar"><i class="' + (hpFrac < 0.45 ? 'low' : '') + '" style="width:' + Math.round(hpFrac * 100) + '%"></i></span>' +
+                            (c.over ? '' : '<button type="button" class="wod-camp-rename" data-camp-rename="' + u.id + '" title="Rename unit">✎</button>') +
                             (c.over ? '' : '<button type="button" class="wod-camp-del" data-camp-del="' + u.id + '" title="Dismiss unit (50% refund)">✕</button>') +
                         '</div>';
                     roster.appendChild(row);
                 }
+                roster.querySelectorAll('[data-camp-rename]').forEach(btn => {
+                    btn.addEventListener('click', (ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        let id = btn.getAttribute('data-camp-rename');
+                        if(id) wodRogueRosterRename(id);
+                    });
+                });
                 roster.querySelectorAll('[data-camp-del]').forEach(btn => {
                     btn.addEventListener('click', (ev) => {
                         ev.preventDefault();
@@ -37818,6 +37880,7 @@
             // Fixed army: no recruiting mid-battle, but start with cash/MP for structures.
             gameData.money = 12000;
             gameData.manpower = 8000;
+            gameData.playerUnitsKilled = 0;
             if(run) run.rosterAtStart = c.roster.length;
             wodSyncCampaignBattleHud();
             if(run && run.defense) wodUpdateCampaignDefenseHoldBanner();
@@ -37891,18 +37954,22 @@
             let lost = before - kept.length;
             c.roster = kept;
             // Campaign stats.
-            if(!c.stats) c.stats = { battles: 0, wins: 0, defeats: 0, unitsLost: 0, unitsBought: 0, kills: 0, losses: 0 };
+            if(!c.stats) c.stats = { battles: 0, wins: 0, defeats: 0, unitsLost: 0, unitsKilled: 0, unitsBought: 0, kills: 0, losses: 0 };
+            if(c.stats.unitsKilled == null) c.stats.unitsKilled = 0;
             c.stats.battles++;
             if(won) c.stats.wins++;
             else c.stats.defeats++;
             c.stats.unitsLost += lost;
+            c.stats.unitsKilled += (gameData.playerUnitsKilled || 0);
             c.stats.kills += (gameData.playerKills || 0);
             c.stats.losses += (gameData.casualties || 0);
             gameData._lastCampaignBattleMeta = {
                 defense: !!run.defense,
                 holdSec: run.holdSec || 0,
                 unitsLost: lost,
-                unitsLostTotal: c.stats.unitsLost
+                unitsLostTotal: c.stats.unitsLost,
+                unitsKilled: gameData.playerUnitsKilled || 0,
+                unitsKilledTotal: c.stats.unitsKilled
             };
             // Outcome.
             let nodeState = c.nodesState[run.nodeId];
@@ -41486,6 +41553,16 @@
                 nextName = String(nextName).trim();
                 if(nextName.length === 0) { showNotification('Name cannot be empty.'); return; }
                 sel.name = nextName.slice(0, 32);
+                if(sel._campRosterId) {
+                    let camp = typeof wodRogueLoad === 'function' ? wodRogueLoad() : null;
+                    if(camp && Array.isArray(camp.roster)) {
+                        let rosterUnit = camp.roster.find(r => r && r.id === sel._campRosterId);
+                        if(rosterUnit) {
+                            rosterUnit.name = sel.name;
+                            if(typeof wodRogueSave === 'function') wodRogueSave();
+                        }
+                    }
+                }
                 _infoCardUiThrottle.s = null;
                 syncInfoCardPanel();
             });
