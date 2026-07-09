@@ -10545,8 +10545,19 @@
             if(n >= 120) return 1;
             return 0;
         }
+        let wodSmoothedFrameMs = 16.7;
+        let wodGfxLiteHoldUntil = 0;
+        let wodGfxSimplifyHoldUntil = 0;
         function wodRecentFrameMs() {
+            // Prefer the EMA so LOD decisions don't thrash on single-frame spikes.
+            if(typeof wodSmoothedFrameMs === 'number' && wodSmoothedFrameMs > 0) return wodSmoothedFrameMs;
             return (typeof wodDevFrameMs === 'number' && wodDevFrameMs > 0) ? wodDevFrameMs : 16.7;
+        }
+        function wodNoteSmoothedFrameMs(frameMs) {
+            if(!(frameMs > 0) || frameMs >= 100) return;
+            // Fast rise / slow fall keeps lite mode sticky once entered, avoiding visual flash.
+            let a = frameMs > wodSmoothedFrameMs ? 0.35 : 0.12;
+            wodSmoothedFrameMs += (frameMs - wodSmoothedFrameMs) * a;
         }
         function wodBeginSimPfBudget(entCount) {
             wodPfSpentMs = 0;
@@ -29322,6 +29333,9 @@
             gameData._wodPolBakeAgain = false;
             wodGfxLiteLatch = false;
             wodGfxSimplifyLatch = false;
+            wodGfxLiteHoldUntil = 0;
+            wodGfxSimplifyHoldUntil = 0;
+            wodSmoothedFrameMs = 16.7;
             gameData._fogVisible = null;
             gameData._fogExplored = new Set();
             gameData._fogVisionTimer = 0;
@@ -41220,13 +41234,12 @@
             let camT = gameData.camera.y / gameData.camera.zoom;
             let camB = camT + viewH / gameData.camera.zoom;
 
+            // LOD must be sticky across frames — flipping gfxLite every frame resizes
+            // forts/city icons/unit bars and looks like constant flashing.
             let gfxDecorSkip = wodShouldSimplifyDraw();
             let gfxLite = wodShouldGfxLite();
-            let fxN = gameData._combatFx ? gameData._combatFx.length : 0;
-            if(fxN > 36) gfxLite = true;
             let armyDrawTier = wodArmyScaleTier(gameData.entities.length);
             if(armyDrawTier >= 3) { gfxLite = true; gfxDecorSkip = true; }
-            else if(armyDrawTier >= 2 && wodRecentFrameMs() > 20) { gfxLite = true; }
             let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
             // Always cull to the camera frustum: without this, desktop "small" battles still iterated/drew every entity every frame — very costly when zoomed in.
             let wodCull = true;
@@ -41637,17 +41650,16 @@
                     }
 
                     if(unit.type !== 'convoy') {
-                        let cvThRow = gfxLite ? 0.04 : 0.06,
-                            combatBurstOn = unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
-                            (unit.activeCombatVisual || 0) > cvThRow;
+                        let combatBurstOn = unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
+                            (unit.activeCombatVisual || 0) > 0.08;
                         // Huge armies: skip overhead icons except selected / fighting / broken.
-                        let drawOverhead = !gfxLite || unit.selected || combatBurstOn || unit.moraleBroken ||
-                            armyDrawTier < 2;
+                        // Gate on army tier only (not momentary gfxLite) so icons don't pop every frame.
+                        let drawOverhead = armyDrawTier < 2 || unit.selected || combatBurstOn || unit.moraleBroken;
                         if(drawOverhead) drawWodUnitOverheadRow(ctx, unit, ur, gfxLite, combatBurstOn);
                     }
 
                     // Resource bars: always for selected; otherwise skip when zoomed out in huge battles.
-                    let drawBars = unit.selected || !gfxLite || camZ > 0.55 || armyDrawTier < 2;
+                    let drawBars = unit.selected || armyDrawTier < 2 || camZ > 0.55;
                     if(drawBars) drawCombatUnitResourceBars(ctx, unit, ur, gfxLite || armyDrawTier >= 3, camZ);
                     
                     ctx.restore();
@@ -41863,19 +41875,35 @@
         let wodGfxLiteLatch = false;
         let wodGfxSimplifyLatch = false;
         function wodShouldSimplifyDraw() {
+            // Touch-cam uses temporary simplify without latching (gesture ends → restore).
             if(touchCamGesture) return true;
             let n = gameData && gameData.entities ? gameData.entities.length : 0;
             let fm = wodRecentFrameMs();
-            if(!wodGfxSimplifyLatch && (n > 140 || fm > 26)) wodGfxSimplifyLatch = true;
-            else if(wodGfxSimplifyLatch && n < 110 && fm < 20) wodGfxSimplifyLatch = false;
+            let now = performance.now();
+            if(!wodGfxSimplifyLatch) {
+                if(n > 140 || fm > 28) {
+                    wodGfxSimplifyLatch = true;
+                    wodGfxSimplifyHoldUntil = now + 900;
+                }
+            } else if(now >= wodGfxSimplifyHoldUntil && n < 100 && fm < 18) {
+                wodGfxSimplifyLatch = false;
+            }
             return wodGfxSimplifyLatch;
         }
         function wodShouldGfxLite() {
             if(touchCamGesture) return true;
             let n = gameData && gameData.entities ? gameData.entities.length : 0;
             let fm = wodRecentFrameMs();
-            if(!wodGfxLiteLatch && (n > 100 || fm > 22)) wodGfxLiteLatch = true;
-            else if(wodGfxLiteLatch && n < 78 && fm < 18) wodGfxLiteLatch = false;
+            let now = performance.now();
+            if(!wodGfxLiteLatch) {
+                // Enter lite only on sustained load (smoothed ms / large army), never on one spike.
+                if(n > 120 || fm > 26) {
+                    wodGfxLiteLatch = true;
+                    wodGfxLiteHoldUntil = now + 1200;
+                }
+            } else if(now >= wodGfxLiteHoldUntil && n < 70 && fm < 17) {
+                wodGfxLiteLatch = false;
+            }
             return wodGfxLiteLatch;
         }
 
@@ -44494,6 +44522,7 @@
             let frameMs = dt > 0 ? dt * 1000 : (wodDevLastFramePerf ? (now - wodDevLastFramePerf) : 16.7);
             wodDevLastFramePerf = now;
             wodDevFrameMs = frameMs;
+            wodNoteSmoothedFrameMs(frameMs);
             let inst = frameMs > 0.1 ? (1000 / frameMs) : 0;
             // Ignore bogus samples from the slow UI poll (menu / paused).
             if(frameMs >= 100) {

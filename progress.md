@@ -365,10 +365,14 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Draw LOD: skip most order arrows / overhead icons / bars when armies are huge; single-pass unit draw order.
 - Stress test: `node scripts/test-huge-army-perf.js` (~900 units, p50 under ~55ms).
 
+## Draw LOD flash fix (2026-07-09)
+- Root cause: per-frame `gfxLite` / simplify toggles (raw `wodDevFrameMs` spikes + combat-FX / army-tier overrides) resized city icons, forts, unit bars, and overhead glyphs every frame ? constant flashing.
+- Fix: EMA-smoothed frame ms, sticky LOD latches with hold timers, remove per-frame FX/army overrides that flipped lite mid-stream, gate overhead/bars on army tier (not momentary lite).
+- Regression: `node scripts/test-draw-lod-stable.js`.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
 - Visual polish: Normandy map is large (~72 radius / ~16k hexes); consider a tighter Cotentin crop if load times matter on slow devices.
 - Optional: sample attract-mode FPS when menu battle is running under `menuAttractMode`.
 - Optional: paint beach-sector labels (Utah/Omaha/Gold/Juno/Sword) as map markers if the engine gains label entities.
-- Push huge-army perf to live when user asks (not auto-pushed).
