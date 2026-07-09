@@ -24332,55 +24332,112 @@
             let joinPt = leadCorridor[approachIdx] || leadCorridor[joinIdx];
             if(!joinPt) return false;
 
+            // Far-shore destination must stay on land past the exit — never a mid-deck
+            // formation offset (that made flank units stop halfway across).
+            let farPt = exactLast ? { x: exactLast.x, y: exactLast.y } : null;
+            let farOnDeck = !!(farPt && (
+                wodPointOnBridgeForUnit(unit, farPt.x, farPt.y, 1.2) ||
+                wodBridgeHexAtPoint(unit, farPt.x, farPt.y) ||
+                (getNearestHexToPoint(farPt.x, farPt.y) && isBridgeHex(getNearestHexToPoint(farPt.x, farPt.y)))
+            ));
+            if(!farPt || farOnDeck) {
+                // Prefer the last lead-corridor point that is clearly off the deck.
+                for(let k = leadCorridor.length - 1; k >= 0; k--) {
+                    let p = leadCorridor[k];
+                    if(!p) continue;
+                    let onD = wodPointOnBridgeForUnit(unit, p.x, p.y, 1.15) ||
+                        (getNearestHexToPoint(p.x, p.y) && isBridgeHex(getNearestHexToPoint(p.x, p.y)));
+                    if(!onD) {
+                        farPt = { x: p.x, y: p.y };
+                        farOnDeck = false;
+                        break;
+                    }
+                }
+                if(!farPt || farOnDeck) {
+                    let last = leadCorridor[leadCorridor.length - 1];
+                    farPt = last ? { x: last.x, y: last.y } : farPt;
+                }
+            }
+
+            let onDeckNow = !!wodUnitOnBridgeDeck(unit) ||
+                wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
+                !!wodBridgeHexAtPoint(unit, unit.x, unit.y);
+
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let joinHex = getNearestWalkableHexForUnit(unit, joinPt.x, joinPt.y) ||
                 getNearestHexToPoint(joinPt.x, joinPt.y);
             if(!startHex || !joinHex) return false;
 
-            let approachHex = findPathAroundTerrain(unit, joinHex, startHex, false, 'auto', true);
-            if(approachHex.length <= 1 && !wodOrderIntoWater(unit, joinHex)) {
-                let alt = wodTryPortalBridgeMarchPath(unit, startHex, joinHex);
-                if(wodHexPathLength(alt) > 1) approachHex = alt;
-            }
-            // Already near the join — skip approach and ride the lead lane.
+            let approachHex = [];
             let nearJoin = false;
-            if(approachHex.length <= 1) {
-                let dx = unit.x - joinPt.x,
-                    dy = unit.y - joinPt.y;
-                let hr = gameData.hexRadius || 20;
-                if(dx * dx + dy * dy <= Math.pow(hr * 1.35 * 2.2, 2) &&
-                    wodSegmentClearsTerrainForUnit(unit, unit.x, unit.y, joinPt.x, joinPt.y))
-                    nearJoin = true;
-                else return false;
+            if(onDeckNow) {
+                // Already on the deck — ride the remaining lead lane; don't re-path to the join.
+                nearJoin = true;
+                // Join at the nearest lead-corridor index ahead of the unit.
+                let bestK = approachIdx,
+                    bestD = Infinity;
+                for(let k = approachIdx; k < leadCorridor.length; k++) {
+                    let p = leadCorridor[k];
+                    if(!p) continue;
+                    let dx = p.x - unit.x,
+                        dy = p.y - unit.y;
+                    let d = dx * dx + dy * dy;
+                    if(d < bestD) {
+                        bestD = d;
+                        bestK = k;
+                    }
+                }
+                approachIdx = bestK;
+                joinPt = leadCorridor[approachIdx] || joinPt;
+            } else {
+                approachHex = findPathAroundTerrain(unit, joinHex, startHex, false, 'auto', true);
+                if(approachHex.length <= 1 && !wodOrderIntoWater(unit, joinHex)) {
+                    let alt = wodTryPortalBridgeMarchPath(unit, startHex, joinHex);
+                    if(wodHexPathLength(alt) > 1) approachHex = alt;
+                }
+                if(approachHex.length <= 1) {
+                    let dx = unit.x - joinPt.x,
+                        dy = unit.y - joinPt.y;
+                    let hr = gameData.hexRadius || 20;
+                    if(dx * dx + dy * dy <= Math.pow(hr * 1.35 * 2.2, 2) &&
+                        wodSegmentClearsTerrainForUnit(unit, unit.x, unit.y, joinPt.x, joinPt.y))
+                        nearJoin = true;
+                    else return false;
+                }
             }
 
             let corridor = [{ x: unit.x, y: unit.y }];
-            if(!nearJoin) {
+            if(!nearJoin && !onDeckNow) {
                 let approachWorld = wodHexPathToWorldWaypoints(unit, approachHex, joinPt);
                 for(let wi = 0; wi < approachWorld.length; wi++)
                     corridor.push({ x: approachWorld[wi].x, y: approachWorld[wi].y });
-            } else {
+            } else if(!onDeckNow) {
                 corridor.push({ x: joinPt.x, y: joinPt.y });
             }
             // Ride the lead lane from the join through deck + exit (offsets collapsed).
-            for(let k = approachIdx + 1; k < leadCorridor.length; k++) {
-                let s = funnel ? (funnel[k] == null ? 1 : funnel[k]) : 1;
+            for(let k = approachIdx + (onDeckNow ? 0 : 1); k < leadCorridor.length; k++) {
                 let p = leadCorridor[k];
                 if(!p) continue;
-                if(s < 0.35) corridor.push({ x: p.x, y: p.y });
-                else {
-                    // After exit, allow a little formation spread toward exactLast later.
-                    corridor.push({ x: p.x, y: p.y });
-                }
+                corridor.push({ x: p.x, y: p.y });
+            }
+            // Always finish on the far-shore point so units never treat mid-deck as arrival.
+            if(farPt) {
+                let last = corridor[corridor.length - 1];
+                if(!last || Math.abs(last.x - farPt.x) > 1 || Math.abs(last.y - farPt.y) > 1)
+                    corridor.push({ x: farPt.x, y: farPt.y });
             }
             corridor = dedupeNearOrderPathPoints(corridor);
             if(corridor.length < 2) return false;
             if(wodCorridorHasBlockedChord(unit, corridor)) return false;
-            wodApplyCorridorExactEnd(corridor, exactLast, unit);
+            // Only snap exact-end when the destination is off the deck — otherwise
+            // formation offsets truncate the corridor mid-bridge.
+            if(farPt && !farOnDeck)
+                wodApplyCorridorExactEnd(corridor, farPt, unit);
 
             invalidateUnitOrderArrowCache(unit);
             unit.blockedTimer = 0;
             unit.stuckTimer = 0;
+            unit._wodFriendBlockT = 0;
             unit._wodLegRepathQueued = false;
             unit._wodGreedyStepsLeft = 0;
             unit._wodPathGiveUpUntil = 0;
@@ -24390,7 +24447,7 @@
             unit._wodRouteUsesBridge = true;
             unit._wodAmpPathKey = null;
             unit._wodAmpPath = null;
-            unit.orderTarget = { x: exactLast.x, y: exactLast.y, intoWater: !!intoWater };
+            unit.orderTarget = { x: farPt.x, y: farPt.y, intoWater: !!intoWater };
             unit.fullMarchWaypoints = marchPts.map(p => ({ x: p.x, y: p.y }));
             unit.marchWpCursor = 0;
             unit.path = corridor.slice(1).map(p => ({ x: p.x, y: p.y, pathPrepared: true }));
@@ -24522,6 +24579,33 @@
                         let leadClick = leadPts[leadPts.length - 1];
                         let leadWater = !!lead._wodOrderIntoWater;
                         let leadBridge = !!lead._wodRouteUsesBridge || !!wodLeadCorridorBridgeFunnelScales(leadCorridor);
+                        // Shared far-shore destination for all bridge followers — per-unit
+                        // formation offsets often land mid-deck and stop the crossing early.
+                        let leadFarExact = lead.orderTarget
+                            ? { x: lead.orderTarget.x, y: lead.orderTarget.y }
+                            : { x: leadClick.x, y: leadClick.y };
+                        if(leadBridge) {
+                            let leadFarSnap = wodSnapLandArmyOrderPoint(lead, leadFarExact.x, leadFarExact.y);
+                            if(leadFarSnap && !(
+                                wodPointOnBridgeForUnit(lead, leadFarSnap.x, leadFarSnap.y, 1.15) ||
+                                (getNearestHexToPoint(leadFarSnap.x, leadFarSnap.y) &&
+                                    isBridgeHex(getNearestHexToPoint(leadFarSnap.x, leadFarSnap.y)))
+                            )) {
+                                leadFarExact = { x: leadFarSnap.x, y: leadFarSnap.y };
+                            } else {
+                                // Prefer last off-deck lead corridor point.
+                                for(let k = leadCorridor.length - 1; k >= 0; k--) {
+                                    let p = leadCorridor[k];
+                                    if(!p) continue;
+                                    let onD = wodPointOnBridgeForUnit(lead, p.x, p.y, 1.15) ||
+                                        (getNearestHexToPoint(p.x, p.y) && isBridgeHex(getNearestHexToPoint(p.x, p.y)));
+                                    if(!onD) {
+                                        leadFarExact = { x: p.x, y: p.y };
+                                        break;
+                                    }
+                                }
+                            }
+                        }
                         let tile = (gameData.hexRadius || 20) * 1.35;
                         // Generous caps: the cloned lane is only a first-frame hint — any unit
                         // whose lane clips bad terrain re-paths itself within ~0.25s via the
@@ -24561,8 +24645,9 @@
                                     let water = reach ? !!reach.intoWater : leadWater;
                                     if(leadBridge) {
                                         // Pathfind to bridge join + ride lead deck — never offset-clone across water.
+                                        // Always use the shared far-shore destination.
                                         if(bridgeSyncLeft > 0) {
-                                            cloned = wodAssignGroupBridgeCorridor(u, leadCorridor, exact, water, pts, {
+                                            cloned = wodAssignGroupBridgeCorridor(u, leadCorridor, leadFarExact, water, pts, {
                                                 routeUsesBridge: true
                                             });
                                             if(cloned) bridgeSyncLeft--;
@@ -24579,7 +24664,7 @@
                                     // Queue with a marker so the pump prefers bridge-join assignment.
                                     wodQueuePlayerMoveOrder(u, pts, {
                                         groupBridgeCorridor: leadCorridor,
-                                        groupBridgeExact: pts[pts.length - 1]
+                                        groupBridgeExact: leadFarExact
                                     });
                                 } else {
                                     wodQueuePlayerMoveOrder(u, pts);
@@ -27049,7 +27134,19 @@
                 let hr = gameData.hexRadius || 20;
                 let ogx = unit.orderTarget.x - unit.x,
                     ogy = unit.orderTarget.y - unit.y;
-                if(ogx * ogx + ogy * ogy > hr * hr * 2.25) {
+                let d2 = ogx * ogx + ogy * ogy;
+                // Still on the bridge with a far-shore order — keep marching; never arrive mid-deck.
+                let onDeck = unit._wodRouteUsesBridge && (
+                    wodUnitOnBridgeDeck(unit) ||
+                    wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
+                    !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
+                );
+                if(onDeck && d2 > hr * hr * 0.25) {
+                    unit.path = null;
+                    unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: false };
+                    return true;
+                }
+                if(d2 > hr * hr * 2.25) {
                     unit.path = null;
                     unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: false };
                     return true;
@@ -27141,6 +27238,24 @@
                             unit._wodBlockedRepathUntil = nowMs + 420;
                         }
                         if(wodUnitPrefersLandOnlyPath(unit) || unit.type === 'marine') {
+                            // On a bridge crossing, prefer advancing the existing deck path
+                            // over a greedy land hop that can walk off the deck sideways.
+                            if(unit._wodRouteUsesBridge && (wodUnitOnBridgeDeck(unit) ||
+                                wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15))) {
+                                if(unit.path && unit.path.length > 0 && wodTakeNextPathTarget(unit)) {
+                                    unit.blockedTimer = 0;
+                                    return;
+                                }
+                                if(unit.orderTarget) {
+                                    unit.target = {
+                                        x: unit.orderTarget.x,
+                                        y: unit.orderTarget.y,
+                                        pathPrepared: false
+                                    };
+                                    unit.blockedTimer = 0;
+                                    return;
+                                }
+                            }
                             let goalHex = getNearestHexToPoint(unit.orderTarget.x, unit.orderTarget.y);
                             let hop = goalHex ? findGreedyLandStep(unit, goalHex) : null;
                             if(hop) {
@@ -27195,16 +27310,27 @@
                         unit._wodFriendBlockT = (unit._wodFriendBlockT || 0) + dt;
                         if(unit._wodFriendBlockT > 1.35) {
                             unit._wodFriendBlockT = 0;
-                            let hrA = gameData.hexRadius || 20;
-                            let adx = unit.orderTarget.x - unit.x, ady = unit.orderTarget.y - unit.y;
-                            let arriveR = hrA * 1.35 * 5.5;
-                            if(adx * adx + ady * ady < arriveR * arriveR) {
-                                unit.target = null;
-                                unit.path = null;
-                                unit.orderTarget = null;
-                                unit.fullMarchWaypoints = null;
-                                unit.marchWpCursor = 0;
-                                invalidateUnitOrderArrowCache(unit);
+                            // Never "arrive in place" while still on a bridge deck — rear units
+                            // in a column would freeze mid-crossing when blocked by friendlies.
+                            let onDeck = unit._wodRouteUsesBridge && (
+                                wodUnitOnBridgeDeck(unit) ||
+                                wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
+                                !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
+                            );
+                            let landAhead = wodUnitHasLandWaypointAhead(unit);
+                            if(!onDeck && !landAhead) {
+                                let hrA = gameData.hexRadius || 20;
+                                let adx = unit.orderTarget.x - unit.x, ady = unit.orderTarget.y - unit.y;
+                                let arriveR = hrA * 1.35 * 5.5;
+                                if(adx * adx + ady * ady < arriveR * arriveR) {
+                                    unit.target = null;
+                                    unit.path = null;
+                                    unit.orderTarget = null;
+                                    unit.fullMarchWaypoints = null;
+                                    unit.marchWpCursor = 0;
+                                    unit._wodRouteUsesBridge = false;
+                                    invalidateUnitOrderArrowCache(unit);
+                                }
                             }
                         }
                     }

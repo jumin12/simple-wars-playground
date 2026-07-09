@@ -292,3 +292,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Group bridge pathing: pathfind to join, then ride lead deck (2026-07-09)
 - Offset corridor clones for 3+ unit groups sent flank units straight through open water toward the first deck waypoint (`pathPrepared` chords, no follower pathfind).
 - Bridge group orders now use `wodAssignGroupBridgeCorridor`: each follower pathfinds to the lead's bridge join, then follows the lead deck/exit lane; plain offset clones refuse bridge routes and blocked chords; queued followers reuse the same join assignment.
+
+## Stop mid-bridge freezes on group crossings (2026-07-09)
+- Flank formation offsets were becoming `orderTarget` mid-deck, truncating corridors via exact-end snap; rear units also cleared orders when friend-blocked on the deck.
+- Bridge followers now share the lead's far-shore destination, refuse mid-deck exact-end snaps, keep marching while on deck, and skip friend-block early-arrival / greedy off-deck hops during bridge transit.
