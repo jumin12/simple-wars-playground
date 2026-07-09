@@ -324,7 +324,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 
 ## Normandy D-Day accuracy pass (2026-07-09)
 - Regenerated `custom-maps/normandy-dday.json` with Cotentin peninsula (Cherbourg tip north), Baie du Grand Vey gap, Utah on east Cotentin, Pointe du Hoc cliffs, Omaha bluffs, Gold/Juno/Sword sand belt, Carentan marsh, Vire/Orne rivers.
-- Towns: Portsmouth, Southampton, Plymouth, Cherbourg, Valognes, Sainte-M?re-?glise, Carentan, Isigny-sur-Mer, Saint-L?, Bayeux, Caen, Ouistreham, Falaise.
+- Towns: Portsmouth, Southampton, Plymouth, Cherbourg, Valognes, Sainte-M�re-�glise, Carentan, Isigny-sur-Mer, Saint-L�, Bayeux, Caen, Ouistreham, Falaise.
 - OOB labels: 4th/1st/29th/50th/3rd Cdn/3rd Inf, 82nd/101st/6th Airborne, Rangers, DD tanks, Force U/O/G/J/S + Warspite/Texas/Belfast/etc.; German 709th/91st/243rd/352nd/716th, 21st Panzer, Cherbourg Festung, LXXXIV Corps.
 - Ownership fix so England seeds no longer claim the Cotentin; beach sand left contested for assault landings.
 - 13 cities, 18 forts, 89 units, 7 events. Rebuild: `node scripts/generate-store-missions.js`.
@@ -359,16 +359,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Rivers re-stamped after Channel seal: Vire, Douve, Orne (to Ouistreham), Seulles.
 - Rebuild: `node scripts/generate-store-missions.js`.
 
-## Huge-army performance scaling (2026-07-09)
-- Adaptive army tiers (120 / 200 / 320 / 500+ units): tighter PF budgets, worker-only separation at high tiers, staggered combat scans + territory claims + terrain/heal passes, fewer sim substeps, frame-time-aware gfx lite.
-- Extra hot-path cuts: combat slowdown uses cached foe (no second neighbor scan at tier 2+), fort-aura slowdown cached, neighbor claim occupancy skipped at tier 3+.
-- Draw LOD: skip most order arrows / overhead icons / bars when armies are huge; single-pass unit draw order.
-- Stress test: `node scripts/test-huge-army-perf.js` (~900 units, p50 under ~55ms).
-
-## Draw LOD flash fix (2026-07-09)
-- Root cause: per-frame `gfxLite` / simplify toggles (raw `wodDevFrameMs` spikes + combat-FX / army-tier overrides) resized city icons, forts, unit bars, and overhead glyphs every frame ? constant flashing.
-- Fix: EMA-smoothed frame ms, sticky LOD latches with hold timers, remove per-frame FX/army overrides that flipped lite mid-stream, gate overhead/bars on army tier (not momentary lite).
-- Regression: `node scripts/test-draw-lod-stable.js`.
+## Large-army performance pass (2026-07-09)
+- Merged combat proximity + movement slowdown into one spatial query per unit/tick.
+- Pooled hex-ring scratch buffers; staggered idle territory claims; swap-and-pop deaths.
+- Rebuild spatial grid after movement for accurate separation; cache AI frontline hex lists.
+- Spatialize threat/foreign-unit distance queries; single-pass unit draw ordering.
+- Gameplay unchanged ? same combat/movement/claims, cheaper calculations.
 
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.

@@ -10537,48 +10537,14 @@
                 });
             }
         }
-        function wodArmyScaleTier(n) {
-            n = n | 0;
-            if(n >= 500) return 4;
-            if(n >= 320) return 3;
-            if(n >= 200) return 2;
-            if(n >= 120) return 1;
-            return 0;
-        }
-        let wodSmoothedFrameMs = 16.7;
-        let wodGfxLiteHoldUntil = 0;
-        let wodGfxSimplifyHoldUntil = 0;
-        function wodRecentFrameMs() {
-            // Prefer the EMA so LOD decisions don't thrash on single-frame spikes.
-            if(typeof wodSmoothedFrameMs === 'number' && wodSmoothedFrameMs > 0) return wodSmoothedFrameMs;
-            return (typeof wodDevFrameMs === 'number' && wodDevFrameMs > 0) ? wodDevFrameMs : 16.7;
-        }
-        function wodNoteSmoothedFrameMs(frameMs) {
-            if(!(frameMs > 0) || frameMs >= 100) return;
-            // Fast rise / slow fall keeps lite mode sticky once entered, avoiding visual flash.
-            let a = frameMs > wodSmoothedFrameMs ? 0.35 : 0.12;
-            wodSmoothedFrameMs += (frameMs - wodSmoothedFrameMs) * a;
-        }
         function wodBeginSimPfBudget(entCount) {
             wodPfSpentMs = 0;
             let n = entCount | 0;
-            let tier = wodArmyScaleTier(n);
-            // Keep a small pathfinding budget even with huge armies so marches don't freeze,
-            // but scale down hard so PF can't monopolize the frame.
-            if(tier >= 4) wodPfBudgetMs = 1.35;
-            else if(tier >= 3) wodPfBudgetMs = 1.7;
-            else if(tier >= 2) wodPfBudgetMs = 2.2;
-            else if(tier >= 1) wodPfBudgetMs = 3.0;
-            else if(n > 70) wodPfBudgetMs = 3.8;
-            else wodPfBudgetMs = 4.8;
+            wodPfBudgetMs = n > 200 ? 2.2 : (n > 120 ? 3.0 : (n > 70 ? 3.8 : 4.8));
             if(wodUsesVisualViewportLayout()) wodPfBudgetMs *= 0.75;
             if((gameData._wodPlayerMovingN || 0) > 0) wodPfBudgetMs *= 2.2;
             let spd = gameData && gameData.speed > 0 ? gameData.speed : 1;
             wodPfBudgetMs *= Math.min(3, spd);
-            // If the last frame was already slow, cut PF further so draw recovers.
-            let fm = wodRecentFrameMs();
-            if(fm > 28) wodPfBudgetMs *= 0.55;
-            else if(fm > 22) wodPfBudgetMs *= 0.75;
         }
         function wodCanSpendPf() {
             return wodPfSpentMs < wodPfBudgetMs;
@@ -10597,13 +10563,9 @@
             if(wodSepBusy) return;
             let kicked = wodKickSepWorker(sepPad, cellSize);
             if(kicked) return;
-            // Huge armies: never fall back to main-thread O(n·neighbors) sync separation.
-            let tier = wodArmyScaleTier(gameData.entities.length);
-            if(tier >= 3) return;
             if((gameData._wodSimTick & 1) === 0) {
                 let mn = gameData._wodMovingN || 0;
-                let syncEvery = tier >= 2 ? 8 : 4;
-                if(mn < 12 || (gameData._wodSimTick % syncEvery) === 0)
+                if(mn < 12 || (gameData._wodSimTick % 4) === 0)
                     wodRunUnitSeparationSync(sepPad, cellSize);
             }
         }
@@ -20699,9 +20661,6 @@
             // chunked with per-frame time budgets now, so only defer under an extreme player
             // march load where every spare millisecond matters.
             let pn = gameData._wodPlayerMovingN || 0;
-            let tier = wodArmyScaleTier(gameData.entities.length);
-            if(tier >= 4) return pn >= 36;
-            if(tier >= 3) return pn >= 48;
             return pn >= 60;
         }
 
@@ -26648,7 +26607,7 @@
 
         function wodGetOwnerSpawnAnchorHexes(owner) {
             let probe = { type: 'light', owner };
-            let fronts = getOwnerFrontlineHexes(owner).filter(h => h.type !== 'mountain' && canUnitEnterHex(probe, h));
+            let fronts = wodCachedFrontlineHexes(owner).filter(h => h.type !== 'mountain' && canUnitEnterHex(probe, h));
             if(fronts.length > 0) return fronts;
             if(gameData.mapShape !== 'archipelago') return fronts;
             let enemy = [];
@@ -26722,6 +26681,18 @@
 
         function nearestForeignCombatUnitDistSq(x, y, owner) {
             let best = Infinity;
+            let grid = gameData.unitSpatialGrid;
+            let probeR = (gameData.hexRadius || 20) * 32;
+            if(grid && grid.cells) {
+                forEachNearbyUnit(grid, x, y, probeR, (u) => {
+                    if(u.hp <= 0 || u.type === 'convoy' || u.owner === owner) return;
+                    let dx = u.x - x;
+                    let dy = u.y - y;
+                    let d = dx * dx + dy * dy;
+                    if(d < best) best = d;
+                });
+                if(best !== Infinity) return best;
+            }
             for(let u of gameData.entities) {
                 if(u.hp <= 0 || u.type === 'convoy' || u.owner === owner) continue;
                 let dx = u.x - x;
@@ -27603,29 +27574,40 @@
         }
 
         /** While exchanging fire at weapon range, move at one-third speed (orders are no longer halted). */
-        function getCombatMovementSlowdownFactor(unit, grid) {
-            if(!unit || unit.type === 'convoy' || unit.moraleBroken) return 1;
-            let minDist2 = unit.range * unit.range;
+        function wodRefreshUnitCombatProximity(unit, grid) {
+            unit._combatEnemy = null;
+            unit._combatEngaged = false;
+            unit._combatProxTick = gameData._wodSimTick | 0;
+            if(!unit || unit.type === 'convoy' || !grid || unit.moraleBroken) return;
+            let range = unit.range || 0;
+            if(range <= 0) return;
+            let minDist2 = range * range;
             let fighting = (unit.damage || 0) > 0;
-            // Prefer the combat-scan cache so marching units don't re-scan neighbors every step.
-            let foe = unit._combatFoe;
-            if(foe && foe.hp > 0 && foe.owner !== unit.owner && foe.type !== 'convoy') {
-                let fdx = unit.x - foe.x, fdy = unit.y - foe.y;
-                if(fdx * fdx + fdy * fdy <= minDist2 && (fighting || (foe.damage || 0) > 0))
-                    return 1 / 3;
-            }
-            if(!grid) return 1;
-            // Huge armies: trust the cached foe (or lack of one) instead of another O(neighbors) pass.
-            if(wodArmyScaleTier(gameData.entities.length) >= 2) return 1;
+            let enemy = null;
             let engaged = false;
-            forEachNearbyUnit(grid, unit.x, unit.y, unit.range, (other) => {
-                if(engaged || other === unit || other.owner === unit.owner || other.type === 'convoy' || other.hp <= 0) return;
+            forEachNearbyUnit(grid, unit.x, unit.y, range, (other) => {
+                if(other === unit || other.owner === unit.owner || other.type === 'convoy' || other.hp <= 0) return;
                 let dx = unit.x - other.x;
                 let dy = unit.y - other.y;
-                if(dx * dx + dy * dy > minDist2) return;
-                if(fighting || (other.damage || 0) > 0) engaged = true;
+                let dist2 = dx * dx + dy * dy;
+                if(dist2 > minDist2 && !engaged) return;
+                if(dist2 < minDist2) {
+                    minDist2 = dist2;
+                    enemy = other;
+                }
+                if(!engaged && (fighting || (other.damage || 0) > 0) && dist2 <= range * range) engaged = true;
             });
-            return engaged ? (1 / 3) : 1;
+            unit._combatEnemy = enemy;
+            unit._combatEngaged = engaged;
+        }
+
+        function getCombatMovementSlowdownFactor(unit, grid) {
+            if(!unit || unit.type === 'convoy' || unit.moraleBroken) return 1;
+            if((unit._combatProxTick | 0) === (gameData._wodSimTick | 0))
+                return unit._combatEngaged ? (1 / 3) : 1;
+            if(!grid) return 1;
+            wodRefreshUnitCombatProximity(unit, grid);
+            return unit._combatEngaged ? (1 / 3) : 1;
         }
 
         function wodUnitArrivedAtTarget(unit) {
@@ -27973,8 +27955,6 @@
         function wodHexNearActiveEnemyCombat(hex, friendlyOwner) {
             if(!hex) return false;
             if(wodHexOccupiedByEnemyCombat(hex, friendlyOwner)) return true;
-            // Neighbor occupancy scans are expensive under huge armies; standing-hex check is enough.
-            if(wodArmyScaleTier(gameData.entities.length) >= 3) return false;
             for(let nb of getNeighborHexes(hex)) {
                 if(nb && wodHexOccupiedByEnemyCombat(nb, friendlyOwner)) return true;
             }
@@ -28160,33 +28140,45 @@
             return res;
         }
 
-        /** Hex-ring tiles in all 8 neighbor directions (correct axial topology, not square dq/dr). */
+        /** Hex-ring tiles in all 8 neighbor directions (correct axial topology, not square dq/dr).
+         *  Result is a scratch buffer valid until the next call — copy if you need to retain it. */
+        let _wodHexRingSeen = new Set();
+        let _wodHexRingRes = [];
+        let _wodHexRingFrontier = [];
+        let _wodHexRingNext = [];
         function getHexesInHexRadius(cq, cr, R) {
-            if(R <= 0) return [{q: cq, r: cr}];
-            let seen = new Set();
-            let res = [];
-            let frontier = [{q: cq, r: cr}];
-            seen.add(`${cq},${cr}`);
-            res.push({q: cq, r: cr});
+            if(R <= 0) {
+                _wodHexRingRes.length = 0;
+                _wodHexRingRes.push({q: cq, r: cr});
+                return _wodHexRingRes;
+            }
+            _wodHexRingSeen.clear();
+            _wodHexRingRes.length = 0;
+            _wodHexRingFrontier.length = 0;
+            _wodHexRingSeen.add(`${cq},${cr}`);
+            _wodHexRingRes.push({q: cq, r: cr});
+            _wodHexRingFrontier.push({q: cq, r: cr});
             for(let ring = 0; ring < R; ring++) {
-                let next = [];
-                for(let hi = 0; hi < frontier.length; hi++) {
-                    let h = frontier[hi];
+                _wodHexRingNext.length = 0;
+                for(let hi = 0; hi < _wodHexRingFrontier.length; hi++) {
+                    let h = _wodHexRingFrontier[hi];
                     for(let di = 0; di < hexDirections.length; di++) {
                         let dir = hexDirections[di];
                         let nq = h.q + dir.q;
                         let nr = h.r + dir.r;
                         let k = `${nq},${nr}`;
-                        if(seen.has(k)) continue;
-                        seen.add(k);
+                        if(_wodHexRingSeen.has(k)) continue;
+                        _wodHexRingSeen.add(k);
                         let pt = {q: nq, r: nr};
-                        res.push(pt);
-                        next.push(pt);
+                        _wodHexRingRes.push(pt);
+                        _wodHexRingNext.push(pt);
                     }
                 }
-                frontier = next;
+                let swap = _wodHexRingFrontier;
+                _wodHexRingFrontier = _wodHexRingNext;
+                _wodHexRingNext = swap;
             }
-            return res;
+            return _wodHexRingRes;
         }
 
         function hexRound(q, r) {
@@ -29333,9 +29325,6 @@
             gameData._wodPolBakeAgain = false;
             wodGfxLiteLatch = false;
             wodGfxSimplifyLatch = false;
-            wodGfxLiteHoldUntil = 0;
-            wodGfxSimplifyHoldUntil = 0;
-            wodSmoothedFrameMs = 16.7;
             gameData._fogVisible = null;
             gameData._fogExplored = new Set();
             gameData._fogVisionTimer = 0;
@@ -31823,6 +31812,15 @@
         function countPlayerThreatNear(wx, wy, radius) {
             let r2 = radius * radius;
             let n = 0;
+            let grid = gameData.unitSpatialGrid;
+            if(grid && grid.cells) {
+                forEachNearbyUnit(grid, wx, wy, radius, (u) => {
+                    if(u.owner !== 1 || u.hp <= 0 || u.type === 'convoy') return;
+                    let dx = u.x - wx, dy = u.y - wy;
+                    if(dx * dx + dy * dy <= r2) n++;
+                });
+                return n;
+            }
             for(let u of gameData.entities) {
                 if(u.owner !== 1 || u.hp <= 0 || u.type === 'convoy') continue;
                 let dx = u.x - wx, dy = u.y - wy;
@@ -31852,7 +31850,7 @@
                 let centroid = findFrontlineCentroid(owner);
                 let best = null;
                 let bestScore = -Infinity;
-                let frontHexes = getOwnerFrontlineHexes(owner);
+                let frontHexes = wodCachedFrontlineHexes(owner);
                 if(frontHexes.length > 52) {
                     let step = frontHexes.length / 52;
                     let sampled = [];
@@ -32211,7 +32209,9 @@
         function buildAiFrontlineSectors(owner, want) {
             let fake = {type: 'light', owner};
             let candidates = [];
-            for(let hex of getOwnerFrontlineHexes(owner)) {
+            let frontHexes = wodCachedFrontlineHexes(owner);
+            for(let fi = 0, fl = frontHexes.length; fi < fl; fi++) {
+                let hex = frontHexes[fi];
                 if(!canUnitEnterHex(fake, hex)) continue;
                 let attackHex = null;
                 let bestWeak = Infinity;
@@ -32502,7 +32502,7 @@
                 seen.add(k);
                 out.push(h);
             }
-            for(let h of getOwnerFrontlineHexes(ownerId)) {
+            for(let h of wodCachedFrontlineHexes(ownerId)) {
                 addHex(h);
                 for(let n of getNeighborHexes(h)) addHex(n);
             }
@@ -32564,7 +32564,7 @@
             }
 
             if(!isFrontlineHex(hex, ownerId) && score < 55) {
-                let frontDist = nearestHexDistanceSq(hex.x, hex.y, getOwnerFrontlineHexes(ownerId));
+                let frontDist = nearestHexDistanceSq(hex.x, hex.y, wodCachedFrontlineHexes(ownerId));
                 if(frontDist > Math.pow(tilePx * 14, 2)) score -= 40;
             }
 
@@ -32682,7 +32682,7 @@
                 farSeen.add(k);
                 farCoast.push(h);
             }
-            for(let h of getOwnerFrontlineHexes(ownerId)) {
+            for(let h of wodCachedFrontlineHexes(ownerId)) {
                 addOwnCoast(h);
                 for(let n of getNeighborHexes(h)) {
                     addOwnCoast(n);
@@ -33242,12 +33242,9 @@
             gameData._wodPrevPlayerMovingN = playerMovingN;
             gameData._combatShotBudget = WOD_COMBAT_SHOTS_PER_FRAME;
             let entN = gameData.entities.length;
-            let armyTier = wodArmyScaleTier(entN);
             if(touchCamGesture) gameData._combatShotBudget = 0;
-            else if(armyTier >= 4) gameData._combatShotBudget = 4;
-            else if(armyTier >= 3) gameData._combatShotBudget = 7;
-            else if(armyTier >= 2) gameData._combatShotBudget = 10;
-            else if(armyTier >= 1) gameData._combatShotBudget = 14;
+            else if(entN > 220) gameData._combatShotBudget = 10;
+            else if(entN > 140) gameData._combatShotBudget = 14;
             wodUpdateCombatFx(dt);
             if(wodPlayerOrderQueue.length && !wodPlayerOrderPumpScheduled) wodSchedulePlayerOrderPump();
             if(gameState === 'PLAYING') wodRefreshFogVision(dt);
@@ -33402,18 +33399,15 @@
 
             // Unit Collision (Separation) — grid built first; separation runs after movement below.
             gameData._wodSimTick = (gameData._wodSimTick | 0) + 1;
-            let wodHeavyEnts = armyTier >= 1;
+            let wodHeavyEnts = gameData.entities.length > 160;
             let wodMob = wodUsesVisualViewportLayout();
-            // At huge scale, skip sync sep more often and rely on the worker.
-            let wodSkipSep = (wodMob && wodHeavyEnts && (gameData._wodSimTick % 2 === 0)) ||
-                (armyTier >= 3 && (gameData._wodSimTick % 3 !== 0)) ||
-                (armyTier >= 4 && (gameData._wodSimTick % 2 !== 0));
-            let sepPad = armyTier >= 3 ? 24 : (wodMob && wodHeavyEnts ? 32 : 42);
-            let gridCell = armyTier >= 3 ? (wodMob ? 150 : 128) : (wodMob ? 120 : 96);
-            let terrainCheckStride = armyTier >= 4 ? 9 : (armyTier >= 3 ? 7 : (wodHeavyEnts ? 5 : 3));
+            let wodSkipSep = wodMob && wodHeavyEnts && (gameData._wodSimTick % 2 === 0);
+            let sepPad = wodMob && wodHeavyEnts ? 32 : 42;
+            let gridCell = wodMob ? 120 : 96;
             for(let ui = 0; ui < gameData.entities.length; ui++) {
                 let u = gameData.entities[ui];
                 if(!u || u.hp <= 0 || u.type === 'ship' || u.target) continue;
+                let terrainCheckStride = wodHeavyEnts ? 5 : 3;
                 if(((ui + gameData._wodSimTick) % terrainCheckStride) !== 0) continue;
                 let hh = getNearestHexToPoint(u.x, u.y);
                 if(!hh || !canUnitEnterHex(u, hh)) ensureUnitPixelOnWalkableHex(u, 28);
@@ -33472,7 +33466,13 @@
                     unit.target = null;
                     unit.path = null;
                     unit.orderTarget = null;
-                    gameData.entities.splice(i, 1);
+                    // Swap-and-pop: O(1) vs splice O(n) during mass casualties.
+                    let last = gameData.entities.length - 1;
+                    if(i !== last) {
+                        gameData.entities[i] = gameData.entities[last];
+                        if(gameData.entities[i]) gameData.entities[i]._gridIndex = i;
+                    }
+                    gameData.entities.pop();
                     continue;
                 }
                 
@@ -33540,30 +33540,14 @@
                     }
                 }
                 
-                // Combat
-                let enemy = null;
-                // Stagger combat target scans under huge armies (damage still continuous via cached foe).
-                let combatScanStride = armyTier >= 4 ? 4 : (armyTier >= 3 ? 3 : (armyTier >= 2 ? 2 : 1));
-                let doCombatScan = combatScanStride <= 1 || ((i + gameData._wodSimTick) % combatScanStride) === 0;
-                if(doCombatScan) {
-                    let minDist2 = unit.range * unit.range;
-                    forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, unit.range, (other) => {
-                        if(other === unit || other.owner === unit.owner || other.type === 'convoy' || other.hp <= 0) return;
-                        let dx = unit.x - other.x;
-                        let dy = unit.y - other.y;
-                        let dist2 = dx * dx + dy * dy;
-                        if(dist2 < minDist2) { minDist2 = dist2; enemy = other; }
-                    });
-                    unit._combatFoe = enemy;
-                } else {
-                    enemy = unit._combatFoe && unit._combatFoe.hp > 0 ? unit._combatFoe : null;
-                    if(enemy && enemy.owner === unit.owner) enemy = null;
-                }
+                // Combat — reuse proximity scan from movement slowdown when available.
+                if((unit._combatProxTick | 0) !== (gameData._wodSimTick | 0))
+                    wodRefreshUnitCombatProximity(unit, gameData.unitSpatialGrid);
+                let enemy = unit._combatEnemy || null;
                 
                 if(enemy && unit.damage > 0 && !unit.retreating && !unit.moraleBroken) {
                     let atkMod = 1, defMod = 1;
-                    let hexModStride = armyTier >= 3 ? 7 : 3;
-                    if((gameData._wodSimTick & hexModStride) === 0) {
+                    if((gameData._wodSimTick & 3) === 0) {
                         let attackerHex = getNearestHexToPoint(unit.x, unit.y);
                         let defenderHex = getNearestHexToPoint(enemy.x, enemy.y);
                         unit._combatHex = attackerHex;
@@ -33613,45 +33597,43 @@
                     unit.aiFormationSerial = -1;
                 }
 
-                // Stagger terrain / encircle / heal bookkeeping when armies are huge.
-                let fxStride = armyTier >= 4 ? 3 : (armyTier >= 3 ? 2 : 1);
-                let doFxPass = fxStride <= 1 || ((i + gameData._wodSimTick) % fxStride) === 0;
-                if(doFxPass) {
-                    applyTerrainUnitEffects(unit, dt * fxStride);
+                applyTerrainUnitEffects(unit, dt);
 
-                    let currentHex = getNearestHexToPoint(unit.x, unit.y);
-                    let encState = wodGetHexEncirclementState(currentHex);
-                    if(encState) {
-                        let encRate = 0.035;
-                        if(encState.relief) encRate *= 0.5;
-                        applyDamage(unit, unit.maxHp * encRate * dt * fxStride, 0);
-                        unit.encircledFlash = 0.35;
-                    } else if(unit.encircledFlash) {
-                        unit.encircledFlash = Math.max(0, unit.encircledFlash - dt * fxStride);
-                    }
-
-                    if(wodMpIsHumanOwner(unit.owner) && playerBrokeByOwner[unit.owner] && unit.type !== 'convoy') {
-                        applyDamage(unit, unit.maxHp * 0.025 * dt * fxStride, 0);
-                        unit.unpaidFlash = 0.35;
-                    } else if(unit.unpaidFlash) {
-                        unit.unpaidFlash = Math.max(0, unit.unpaidFlash - dt * fxStride);
-                    }
-
-                    updateUnitHealing(unit, dt * fxStride);
+                let currentHex = getNearestHexToPoint(unit.x, unit.y);
+                let encState = wodGetHexEncirclementState(currentHex);
+                if(encState) {
+                    let encRate = 0.035;
+                    if(encState.relief) encRate *= 0.5;
+                    applyDamage(unit, unit.maxHp * encRate * dt, 0);
+                    unit.encircledFlash = 0.35;
+                } else if(unit.encircledFlash) {
+                    unit.encircledFlash = Math.max(0, unit.encircledFlash - dt);
                 }
-                let claimStride = armyTier >= 4 ? 4 : (armyTier >= 3 ? 3 : (armyTier >= 2 ? 2 : 1));
-                let doClaim = claimStride <= 1 || ((i + gameData._wodSimTick) % claimStride) === 0;
-                if(doClaim) {
-                    if(!unit.target) claimTerritoryAroundUnit(unit);
-                    else if((unit.activeCombatVisual || 0) > 0.25 && (gameData._wodSimTick & 3) === 0) {
-                        // Attackers wedged in a firefight never cross a tile boundary, so the
-                        // hex-crossing claim path never fires — the frontline looked frozen even
-                        // though the push was working. Claim around fighting units too.
+
+                if(wodMpIsHumanOwner(unit.owner) && playerBrokeByOwner[unit.owner] && unit.type !== 'convoy') {
+                    applyDamage(unit, unit.maxHp * 0.025 * dt, 0);
+                    unit.unpaidFlash = 0.35;
+                } else if(unit.unpaidFlash) {
+                    unit.unpaidFlash = Math.max(0, unit.unpaidFlash - dt);
+                }
+
+                updateUnitHealing(unit, dt);
+                // Stagger idle claims; fighting units still claim every 4th tick.
+                let claimTick = gameData._wodSimTick | 0;
+                let claimStride = gameData.entities.length > 220 ? 5 : (gameData.entities.length > 120 ? 4 : 3);
+                if(!unit.target) {
+                    if(((unit._gridIndex || i) + claimTick) % claimStride === 0)
                         claimTerritoryAroundUnit(unit);
-                    }
+                } else if((unit.activeCombatVisual || 0) > 0.25 && (claimTick & 3) === 0) {
+                    // Attackers wedged in a firefight never cross a tile boundary, so the
+                    // hex-crossing claim path never fires — the frontline looked frozen even
+                    // though the push was working. Claim around fighting units too.
+                    claimTerritoryAroundUnit(unit);
                 }
             }
 
+            // Rebuild grid after movement so separation / late queries see current positions.
+            gameData.unitSpatialGrid = buildUnitSpatialGrid(gridCell);
             wodRunUnitSeparation(wodSkipSep, sepPad, gridCell);
 
             wodApplyTerritoryClaimBatch();
@@ -40975,7 +40957,8 @@
         function wodFogRevealHexesAround(cq, cr, R, visible, explored) {
             if(R <= 0) return;
             let pts = getHexesInHexRadius(cq, cr, R);
-            for(let i = 0; i < pts.length; i++) {
+            // Snapshot length — getHexesInHexRadius reuses a scratch buffer.
+            for(let i = 0, n = pts.length; i < n; i++) {
                 let h = gameData.hexes[`${pts[i].q},${pts[i].r}`];
                 if(!h) continue;
                 let k = getHexKey(h);
@@ -41234,12 +41217,10 @@
             let camT = gameData.camera.y / gameData.camera.zoom;
             let camB = camT + viewH / gameData.camera.zoom;
 
-            // LOD must be sticky across frames — flipping gfxLite every frame resizes
-            // forts/city icons/unit bars and looks like constant flashing.
             let gfxDecorSkip = wodShouldSimplifyDraw();
             let gfxLite = wodShouldGfxLite();
-            let armyDrawTier = wodArmyScaleTier(gameData.entities.length);
-            if(armyDrawTier >= 3) { gfxLite = true; gfxDecorSkip = true; }
+            let fxN = gameData._combatFx ? gameData._combatFx.length : 0;
+            if(fxN > 36) gfxLite = true;
             let camZ = gameData.camera.zoom > 0 && isFinite(gameData.camera.zoom) ? gameData.camera.zoom : 1;
             // Always cull to the camera frustum: without this, desktop "small" battles still iterated/drew every entity every frame — very costly when zoomed in.
             let wodCull = true;
@@ -41447,24 +41428,19 @@
                 }
                 let uo = wodUnitsDrawOrderScratch;
                 uo.length = 0;
-                // Single pass: convoys first, then combat units (preserves draw order without 2× scans).
                 let combatScratch = gameData._wodCombatDrawScratch;
                 if(!combatScratch) combatScratch = gameData._wodCombatDrawScratch = [];
                 combatScratch.length = 0;
                 for(let i = 0, el = gameData.entities.length; i < el; i++) {
                     let u = gameData.entities[i];
-                    if(!u || u.hp <= 0) continue;
+                    if(u.hp <= 0) continue;
                     if(u.type === 'convoy') uo.push(u);
                     else combatScratch.push(u);
                 }
                 for(let i = 0, cl = combatScratch.length; i < cl; i++) uo.push(combatScratch[i]);
-                combatScratch.length = 0;
-                // Huge armies: skip drawing most order arrows (selected still draw).
-                let skipMostOrderArrows = armyDrawTier >= 3 || (armyDrawTier >= 2 && gfxDecorSkip);
                 for(let ui = 0, ul = uo.length; ui < ul; ui++) {
                     let unit = uo[ui];
                     if(!wodFogCanSeeUnit(unit)) continue;
-                    if(skipMostOrderArrows && !unit.selected && unit.type !== 'convoy') continue;
                     if(shouldDrawPlayerUnitOrderPath(unit) || shouldDrawConvoyMovementPath(unit)) {
                         // Cull against both auth and smooth-draw positions so MP snap
                         // lag cannot hide a unit the moment it is deselected.
@@ -41650,17 +41626,13 @@
                     }
 
                     if(unit.type !== 'convoy') {
-                        let combatBurstOn = unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
-                            (unit.activeCombatVisual || 0) > 0.08;
-                        // Huge armies: skip overhead icons except selected / fighting / broken.
-                        // Gate on army tier only (not momentary gfxLite) so icons don't pop every frame.
-                        let drawOverhead = armyDrawTier < 2 || unit.selected || combatBurstOn || unit.moraleBroken;
-                        if(drawOverhead) drawWodUnitOverheadRow(ctx, unit, ur, gfxLite, combatBurstOn);
+                        let cvThRow = gfxLite ? 0.04 : 0.06,
+                            combatBurstOn = unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
+                            (unit.activeCombatVisual || 0) > cvThRow;
+                        drawWodUnitOverheadRow(ctx, unit, ur, gfxLite, combatBurstOn);
                     }
 
-                    // Resource bars: always for selected; otherwise skip when zoomed out in huge battles.
-                    let drawBars = unit.selected || armyDrawTier < 2 || camZ > 0.55;
-                    if(drawBars) drawCombatUnitResourceBars(ctx, unit, ur, gfxLite || armyDrawTier >= 3, camZ);
+                    drawCombatUnitResourceBars(ctx, unit, ur, gfxLite, camZ);
                     
                     ctx.restore();
                 }
@@ -41813,10 +41785,7 @@
                     (wodUsesVisualViewportLayout() && UI.inGameUI && UI.inGameUI.getAttribute('data-mtab'));
                 if(!uiPaused) {
                     let simDt = dt * gameData.speed;
-                    let armyTier = wodArmyScaleTier(gameData.entities.length);
                     let baseChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
-                    if(armyTier >= 4) baseChunk = wodUsesVisualViewportLayout() ? 0.055 : 0.07;
-                    else if(armyTier >= 3) baseChunk = wodUsesVisualViewportLayout() ? 0.048 : 0.06;
                     let maxSingleStep = baseChunk * 1.15;
                     gameData._frameSimDt = 0;
                     if(simDt <= maxSingleStep) {
@@ -41826,7 +41795,7 @@
                     } else {
                         let simChunk = baseChunk * Math.max(1, gameData.speed || 1);
                         let simRemain = simDt;
-                        let marchCap = (gameData._wodPlayerMovingN || 0) > 0 ? 2 : (armyTier >= 3 ? 6 : 12);
+                        let marchCap = (gameData._wodPlayerMovingN || 0) > 0 ? 2 : 12;
                         let steps = 0;
                         while(simRemain > 0.0001 && steps++ < marchCap) {
                             let step = Math.min(simRemain, simChunk);
@@ -41875,35 +41844,17 @@
         let wodGfxLiteLatch = false;
         let wodGfxSimplifyLatch = false;
         function wodShouldSimplifyDraw() {
-            // Touch-cam uses temporary simplify without latching (gesture ends → restore).
             if(touchCamGesture) return true;
             let n = gameData && gameData.entities ? gameData.entities.length : 0;
-            let fm = wodRecentFrameMs();
-            let now = performance.now();
-            if(!wodGfxSimplifyLatch) {
-                if(n > 140 || fm > 28) {
-                    wodGfxSimplifyLatch = true;
-                    wodGfxSimplifyHoldUntil = now + 900;
-                }
-            } else if(now >= wodGfxSimplifyHoldUntil && n < 100 && fm < 18) {
-                wodGfxSimplifyLatch = false;
-            }
+            if(!wodGfxSimplifyLatch && n > 140) wodGfxSimplifyLatch = true;
+            else if(wodGfxSimplifyLatch && n < 110) wodGfxSimplifyLatch = false;
             return wodGfxSimplifyLatch;
         }
         function wodShouldGfxLite() {
             if(touchCamGesture) return true;
             let n = gameData && gameData.entities ? gameData.entities.length : 0;
-            let fm = wodRecentFrameMs();
-            let now = performance.now();
-            if(!wodGfxLiteLatch) {
-                // Enter lite only on sustained load (smoothed ms / large army), never on one spike.
-                if(n > 120 || fm > 26) {
-                    wodGfxLiteLatch = true;
-                    wodGfxLiteHoldUntil = now + 1200;
-                }
-            } else if(now >= wodGfxLiteHoldUntil && n < 70 && fm < 17) {
-                wodGfxLiteLatch = false;
-            }
+            if(!wodGfxLiteLatch && n > 100) wodGfxLiteLatch = true;
+            else if(wodGfxLiteLatch && n < 78) wodGfxLiteLatch = false;
             return wodGfxLiteLatch;
         }
 
@@ -43492,15 +43443,8 @@
             if(ox <= 0) return 1;
             let list = gameData.forts;
             if(!list || !list.length) return 1;
-            // Cache fort-aura slowdown for a few ticks under huge armies.
-            let tier = wodArmyScaleTier(gameData.entities.length);
-            let tick = gameData._wodSimTick | 0;
-            if(tier >= 2 && mover._fortSlowTick === tick) return mover._fortSlowMul != null ? mover._fortSlowMul : 1;
-            if(tier >= 3 && mover._fortSlowTick != null && (tick - mover._fortSlowTick) < 3 && mover._fortSlowMul != null)
-                return mover._fortSlowMul;
             let radius = wodFortCombatAuraRadiusPx(),
                 r2 = radius * radius;
-            let mul = 1;
             for(let i = list.length - 1; i >= 0; i--) {
                 let ft = list[i];
                 if(!ft) continue;
@@ -43508,11 +43452,9 @@
                 if(fo <= 0 || fo === ox) continue;
                 let dx = mover.x - ft.x,
                     dy = mover.y - ft.y;
-                if(dx * dx + dy * dy <= r2) { mul = 0.8; break; }
+                if(dx * dx + dy * dy <= r2) return 0.8;
             }
-            mover._fortSlowTick = tick;
-            mover._fortSlowMul = mul;
-            return mul;
+            return 1;
         }
 
         /** Compact heater shield silhouette (fort defense badge). */
@@ -44522,7 +44464,6 @@
             let frameMs = dt > 0 ? dt * 1000 : (wodDevLastFramePerf ? (now - wodDevLastFramePerf) : 16.7);
             wodDevLastFramePerf = now;
             wodDevFrameMs = frameMs;
-            wodNoteSmoothedFrameMs(frameMs);
             let inst = frameMs > 0.1 ? (1000 / frameMs) : 0;
             // Ignore bogus samples from the slow UI poll (menu / paused).
             if(frameMs >= 100) {
