@@ -121,6 +121,96 @@
             background: rgba(0, 0, 0, 0.72);
             pointer-events: none;
         }
+        #wodDevMenu {
+            position: fixed;
+            top: 56px;
+            right: 16px;
+            z-index: 100010;
+            width: min(360px, calc(100vw - 24px));
+            max-height: min(78vh, 640px);
+            overflow: auto;
+            background: rgba(10, 16, 24, 0.94);
+            border: 1px solid rgba(212, 175, 55, 0.45);
+            border-radius: 10px;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+            color: #ecf0f1;
+            font: 12px/1.4 Consolas, "Courier New", monospace;
+            padding: 12px 14px 14px;
+            pointer-events: auto;
+        }
+        #wodDevMenu.hidden { display: none !important; }
+        #wodDevMenu h3 {
+            margin: 0 0 8px;
+            font: 700 14px/1.2 system-ui, sans-serif;
+            color: #f1c40f;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+        #wodDevMenu .wod-dev-sub {
+            margin: 0 0 10px;
+            color: #9db3c7;
+            font: 11px/1.35 system-ui, sans-serif;
+        }
+        #wodDevMenu .wod-dev-section {
+            margin-top: 12px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        #wodDevMenu .wod-dev-section h4 {
+            margin: 0 0 6px;
+            font: 600 11px/1.2 system-ui, sans-serif;
+            color: #7fdbff;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        #wodDevFps {
+            font-size: 18px;
+            font-weight: 700;
+            color: #2ecc71;
+        }
+        #wodDevFps.wod-dev-fps-warn { color: #f1c40f; }
+        #wodDevFps.wod-dev-fps-bad { color: #e74c3c; }
+        #wodDevStats, #wodDevActivity {
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: #c8d6e5;
+        }
+        #wodDevActivity {
+            max-height: 140px;
+            overflow: auto;
+            background: rgba(0, 0, 0, 0.28);
+            border-radius: 6px;
+            padding: 6px 8px;
+        }
+        .wod-dev-cheats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .wod-dev-cheats button {
+            appearance: none;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            background: rgba(255, 255, 255, 0.06);
+            color: #ecf0f1;
+            border-radius: 6px;
+            padding: 5px 8px;
+            font: 600 11px/1.2 system-ui, sans-serif;
+            cursor: pointer;
+        }
+        .wod-dev-cheats button:hover {
+            border-color: rgba(241, 196, 15, 0.65);
+            background: rgba(241, 196, 15, 0.12);
+        }
+        .wod-dev-close {
+            float: right;
+            margin: -2px 0 0;
+            border: none;
+            background: transparent;
+            color: #9db3c7;
+            font: 700 14px/1 system-ui, sans-serif;
+            cursor: pointer;
+        }
+        .wod-dev-close:hover { color: #ecf0f1; }
         #wodMpSyncOverlay .wod-load-caption {
             font-size: 15px;
             text-align: center;
@@ -8183,6 +8273,36 @@
                 <p class="wod-mission-popup-body" id="wodMissionPopupBody"></p>
                 <div class="wod-mission-popup-actions">
                     <button type="button" class="wod-mission-popup-btn" id="wodMissionPopupOk">Continue</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="wodDevMenu" class="hidden" role="dialog" aria-modal="false" aria-label="Developer menu">
+            <button type="button" class="wod-dev-close" id="wodDevCloseBtn" title="Close (``` again)">×</button>
+            <h3>Dev menu</h3>
+            <p class="wod-dev-sub">Toggle anytime with <kbd>`</kbd><kbd>`</kbd><kbd>`</kbd> (backtick ×3).</p>
+            <div><span id="wodDevFps">— FPS</span> <span id="wodDevFrameMs" style="color:#9db3c7"></span></div>
+            <div class="wod-dev-section">
+                <h4>Live state</h4>
+                <div id="wodDevStats">Loading…</div>
+            </div>
+            <div class="wod-dev-section">
+                <h4>Functions / activity</h4>
+                <div id="wodDevActivity">—</div>
+            </div>
+            <div class="wod-dev-section">
+                <h4>Cheats</h4>
+                <div class="wod-dev-cheats" id="wodDevCheats">
+                    <button type="button" data-cheat="gold100">+100 gold</button>
+                    <button type="button" data-cheat="gold1000">+1000 gold</button>
+                    <button type="button" data-cheat="money10k">+10k money</button>
+                    <button type="button" data-cheat="mp5k">+5k manpower</button>
+                    <button type="button" data-cheat="heal">Heal selected</button>
+                    <button type="button" data-cheat="spawnLight">Spawn infantry</button>
+                    <button type="button" data-cheat="spawnHeavy">Spawn armor</button>
+                    <button type="button" data-cheat="win">Force victory</button>
+                    <button type="button" data-cheat="pause">Toggle pause</button>
+                    <button type="button" data-cheat="unlockStore">Unlock store missions</button>
                 </div>
             </div>
         </div>
@@ -41523,6 +41643,7 @@
             let dt = (time - lastTime) / 1000;
             if (dt > 0.1) dt = 0.1; // Cap dt to prevent massive jumps/freezes after alerts or lag
             lastTime = time;
+            wodDevNoteFrame(time, dt);
             let mpWaiting = gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay();
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
                 let simDt = dt * (gameData.speed || 0);
@@ -41552,12 +41673,14 @@
                     gameData._wodMovingN = mn;
                     gameData._wodPlayerMovingN = pn;
                 }
+                wodDevMark('draw');
                 draw();
                 animationFrameId = requestAnimationFrame(gameLoop);
                 return;
             }
             if(mpWaiting) {
                 if(UI.escMenu.classList.contains('hidden') && gameData.speed > 0) updateCamera(dt * gameData.speed);
+                wodDevMark('draw');
                 draw();
                 animationFrameId = requestAnimationFrame(gameLoop);
                 return;
@@ -41580,6 +41703,7 @@
                     let maxSingleStep = baseChunk * 1.15;
                     gameData._frameSimDt = 0;
                     if(simDt <= maxSingleStep) {
+                        wodDevMark('update');
                         update(simDt);
                         gameData._frameSimDt = simDt;
                     } else {
@@ -41589,6 +41713,7 @@
                         let steps = 0;
                         while(simRemain > 0.0001 && steps++ < marchCap) {
                             let step = Math.min(simRemain, simChunk);
+                            wodDevMark('update');
                             update(step);
                             gameData._frameSimDt += step;
                             simRemain -= step;
@@ -41600,6 +41725,7 @@
             } else {
                 gameData._frameSimDt = 0;
             }
+            wodDevMark('draw');
             draw();
             animationFrameId = requestAnimationFrame(gameLoop);
         }
@@ -42772,6 +42898,18 @@
 
         let keys = {};
         window.addEventListener('keydown', e => {
+            // Triple-backtick (```) anytime opens/closes the in-game dev menu.
+            if(e.code === 'Backquote' || e.key === '`' || e.key === '~') {
+                let tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+                let typing = tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable);
+                if(!typing && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                    if(wodDevNoteBacktick()) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        return;
+                    }
+                }
+            }
             if(gameState === 'PLAYING' && gameData.buildMode === 'bridge' && gameData.bridgePlacement) {
                 let p = gameData.bridgePlacement;
                 if(e.key === 'r' || e.key === 'R' || e.key === 'e' || e.key === 'E') {
@@ -42786,6 +42924,11 @@
                 }
             }
             if(e.key === 'Escape') {
+                if(wodDevMenuOpen()) {
+                    e.preventDefault();
+                    wodSetDevMenuOpen(false);
+                    return;
+                }
                 if(gameState === 'PLAYING' && gameData.buildMode) {
                     e.preventDefault();
                     exitBuildPlacementMode();
@@ -44168,7 +44311,10 @@
                 territory,
                 landCells: Object.values(territory).reduce((sum, count) => sum + count, 0),
                 cities: gameData.cities.map(c => ({id: c.id, owner: c.owner})),
-                units: gameData.entities.map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp}))
+                units: gameData.entities.map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp})),
+                gold: gameData.gold | 0,
+                fps: Math.round(wodDevFps || 0),
+                devMenu: wodDevMenuOpen()
             });
         };
 
@@ -44188,13 +44334,293 @@
                 terrainLastBakeMs: wodTerrainLastBakeCostMs,
                 campaignEnded: !!gameData._campaignEnded,
                 playerCities: gameData.cities.filter(c => c.owner === 1).length,
-                totalCities: gameData.cities.length
+                totalCities: gameData.cities.length,
+                fps: Math.round(wodDevFps || 0),
+                frameMs: Math.round((wodDevFrameMs || 0) * 10) / 10,
+                gold: gameData.gold | 0,
+                activity: wodDevActivitySnapshot()
             };
         };
 
+        /* ========== In-game dev menu (``` triple backtick) ========== */
+        let wodDevFps = 0;
+        let wodDevFrameMs = 0;
+        let wodDevFpsSamples = [];
+        let wodDevLastFramePerf = 0;
+        let wodDevBacktickTimes = [];
+        let wodDevUiTimer = null;
+        let wodDevActivity = Object.create(null);
+        let wodDevActivityOrder = [];
+        let wodDevWired = false;
+
+        function wodDevMark(name) {
+            if(!name) return;
+            let now = performance.now();
+            let slot = wodDevActivity[name];
+            if(!slot) {
+                slot = { count: 0, last: 0 };
+                wodDevActivity[name] = slot;
+                wodDevActivityOrder.push(name);
+                if(wodDevActivityOrder.length > 24) {
+                    let drop = wodDevActivityOrder.shift();
+                    delete wodDevActivity[drop];
+                }
+            }
+            slot.count++;
+            slot.last = now;
+        }
+
+        function wodDevNoteFrame(time, dt) {
+            let now = (typeof time === 'number' && time > 0) ? time : performance.now();
+            let frameMs = dt > 0 ? dt * 1000 : (wodDevLastFramePerf ? (now - wodDevLastFramePerf) : 16.7);
+            wodDevLastFramePerf = now;
+            wodDevFrameMs = frameMs;
+            let inst = frameMs > 0.1 ? (1000 / frameMs) : 0;
+            // Ignore bogus samples from the slow UI poll (menu / paused).
+            if(frameMs >= 100) {
+                wodDevMark('gameLoop');
+                return;
+            }
+            wodDevFpsSamples.push(inst);
+            if(wodDevFpsSamples.length > 30) wodDevFpsSamples.shift();
+            let sum = 0;
+            for(let i = 0; i < wodDevFpsSamples.length; i++) sum += wodDevFpsSamples[i];
+            wodDevFps = sum / Math.max(1, wodDevFpsSamples.length);
+            wodDevMark('gameLoop');
+        }
+
+        function wodDevActivitySnapshot() {
+            let now = performance.now();
+            let rows = [];
+            for(let i = 0; i < wodDevActivityOrder.length; i++) {
+                let name = wodDevActivityOrder[i];
+                let slot = wodDevActivity[name];
+                if(!slot) continue;
+                let age = now - (slot.last || 0);
+                if(age > 4000 && name !== 'gameLoop') continue;
+                rows.push({ name, count: slot.count | 0, ageMs: Math.round(age) });
+            }
+            rows.sort((a, b) => a.ageMs - b.ageMs);
+            return rows.slice(0, 14);
+        }
+
+        function wodDevMenuOpen() {
+            let el = document.getElementById('wodDevMenu');
+            return !!(el && !el.classList.contains('hidden'));
+        }
+
+        function wodSetDevMenuOpen(open) {
+            let el = document.getElementById('wodDevMenu');
+            if(!el) return;
+            if(open) {
+                el.classList.remove('hidden');
+                wodRefreshDevMenu();
+                if(!wodDevUiTimer) {
+                    wodDevUiTimer = setInterval(() => {
+                        if(!wodDevMenuOpen()) return;
+                        // Sample FPS even on the main menu (gameLoop only runs while PLAYING).
+                        if(gameState !== 'PLAYING') wodDevNoteFrame(performance.now(), 0.25);
+                        wodRefreshDevMenu();
+                    }, 250);
+                }
+            } else {
+                el.classList.add('hidden');
+                if(wodDevUiTimer) {
+                    clearInterval(wodDevUiTimer);
+                    wodDevUiTimer = null;
+                }
+            }
+        }
+
+        function wodToggleDevMenu() {
+            wodSetDevMenuOpen(!wodDevMenuOpen());
+        }
+
+        /** Returns true when the triple-tap fired (caller should preventDefault). */
+        function wodDevNoteBacktick() {
+            let now = performance.now();
+            wodDevBacktickTimes.push(now);
+            while(wodDevBacktickTimes.length && now - wodDevBacktickTimes[0] > 900) wodDevBacktickTimes.shift();
+            if(wodDevBacktickTimes.length >= 3) {
+                wodDevBacktickTimes = [];
+                wodToggleDevMenu();
+                return true;
+            }
+            return false;
+        }
+
+        function wodDevSpawnNearCamera(type) {
+            if(gameState !== 'PLAYING' || gameData.menuAttractMode) {
+                showNotification('Start a match to spawn units.');
+                return;
+            }
+            let owner = typeof wodLocalPlayerOwner === 'function' ? wodLocalPlayerOwner() : 1;
+            let cx = (gameData.camera && gameData.camera.x) || 0;
+            let cy = (gameData.camera && gameData.camera.y) || 0;
+            if(typeof createUnitAt === 'function') {
+                let u = createUnitAt(type || 'light', cx, cy, owner);
+                if(u) {
+                    showNotification('Spawned ' + (type || 'light') + '.');
+                    wodDevMark('cheat:spawn');
+                    return;
+                }
+            }
+            showNotification('Could not spawn unit here.');
+        }
+
+        function wodDevRunCheat(id) {
+            switch(id) {
+                case 'gold100':
+                    wodGrantGold(100, 'Dev: +100 gold');
+                    wodDevMark('cheat:gold');
+                    break;
+                case 'gold1000':
+                    wodGrantGold(1000, 'Dev: +1000 gold');
+                    wodDevMark('cheat:gold');
+                    break;
+                case 'money10k':
+                    if(gameState === 'PLAYING') {
+                        gameData.money = (gameData.money || 0) + 10000;
+                        showNotification('Dev: +10,000 money');
+                        wodDevMark('cheat:money');
+                    } else showNotification('Start a match for battle money.');
+                    break;
+                case 'mp5k':
+                    if(gameState === 'PLAYING') {
+                        gameData.manpower = (gameData.manpower || 0) + 5000;
+                        showNotification('Dev: +5,000 manpower');
+                        wodDevMark('cheat:manpower');
+                    } else showNotification('Start a match for manpower.');
+                    break;
+                case 'heal': {
+                    let n = 0;
+                    for(let e of (gameData.entities || [])) {
+                        if(!e || !e.selected || e.hp <= 0) continue;
+                        e.hp = e.maxHp || e.hp;
+                        if(e.manpower != null && e.maxManpower != null) e.manpower = e.maxManpower;
+                        if(e.tanks != null && e.maxTanks != null) e.tanks = e.maxTanks;
+                        n++;
+                    }
+                    showNotification(n ? ('Dev: healed ' + n + ' selected') : 'Select units first.');
+                    wodDevMark('cheat:heal');
+                    break;
+                }
+                case 'spawnLight':
+                    wodDevSpawnNearCamera('light');
+                    break;
+                case 'spawnHeavy':
+                    wodDevSpawnNearCamera('heavy');
+                    break;
+                case 'win':
+                    if(gameState === 'PLAYING' && !gameData.menuAttractMode && typeof triggerCampaignVictory === 'function') {
+                        triggerCampaignVictory('Dev victory', true);
+                        wodDevMark('cheat:win');
+                    } else showNotification('No active match to win.');
+                    break;
+                case 'pause':
+                    if(gameState === 'PLAYING' && typeof setGameSpeed === 'function') {
+                        setGameSpeed((gameData.speed || 0) > 0 ? 0 : 1, true);
+                        showNotification((gameData.speed || 0) > 0 ? 'Dev: resumed' : 'Dev: paused');
+                        wodDevMark('cheat:pause');
+                    } else showNotification('No active match.');
+                    break;
+                case 'unlockStore':
+                    void (async () => {
+                        await wodLoadShopMapCatalog();
+                        wodEnsureOwnedShopVisuals();
+                        let n = 0;
+                        for(let entry of (wodShopMapCatalog || [])) {
+                            let sid = wodShopMapShopId(entry.id);
+                            if(!wodOwnsShopVisual(sid)) {
+                                gameData.ownedShopVisuals[sid] = true;
+                                n++;
+                            }
+                        }
+                        flushGameProfileToWod();
+                        scheduleSaveWodProgress();
+                        if(typeof updateSkinShop === 'function') updateSkinShop();
+                        showNotification(n ? ('Dev: unlocked ' + n + ' store mission(s)') : 'Store missions already owned.');
+                        wodDevMark('cheat:unlockStore');
+                        wodRefreshDevMenu();
+                    })();
+                    break;
+                default:
+                    showNotification('Unknown cheat.');
+            }
+            wodRefreshDevMenu();
+        }
+
+        function wodRefreshDevMenu() {
+            let fpsEl = document.getElementById('wodDevFps');
+            let msEl = document.getElementById('wodDevFrameMs');
+            let statsEl = document.getElementById('wodDevStats');
+            let actEl = document.getElementById('wodDevActivity');
+            if(!fpsEl || !statsEl) return;
+            let fps = Math.round(wodDevFps || 0);
+            let fpsLive = (performance.now() - (wodDevLastFramePerf || 0)) < 1500 && fps > 0;
+            fpsEl.textContent = fpsLive ? (fps + ' FPS') : '— FPS';
+            fpsEl.classList.toggle('wod-dev-fps-warn', fpsLive && fps < 45);
+            fpsEl.classList.toggle('wod-dev-fps-bad', fpsLive && fps < 25);
+            if(msEl) msEl.textContent = fpsLive ? ((Math.round((wodDevFrameMs || 0) * 10) / 10) + ' ms/frame') : '(open in a match for live FPS)';
+
+            let lo = typeof wodLocalPlayerOwner === 'function' ? wodLocalPlayerOwner() : 1;
+            let sel = 0;
+            for(let e of (gameData.entities || [])) if(e && e.selected) sel++;
+            let lines = [
+                'state: ' + gameState + (gameData.menuAttractMode ? ' (attract)' : ''),
+                'speed: ' + (gameData.speed == null ? '—' : gameData.speed) + 'x',
+                'gold: ' + (gameData.gold | 0),
+                'money: ' + Math.floor(gameData.money || 0) + '  manpower: ' + Math.floor(gameData.manpower || 0),
+                'units: ' + (gameData.entities ? gameData.entities.length : 0) + '  cities: ' + (gameData.cities ? gameData.cities.length : 0),
+                'hexes: ' + (gameData.hexList ? gameData.hexList.length : 0) + '  moving: ' + (gameData._wodMovingN | 0),
+                'simTick: ' + (gameData._wodSimTick | 0) + '  owner: ' + lo + '  selected: ' + sel,
+                'terrainBake: ' + (Math.round((wodTerrainLastBakeCostMs || 0) * 10) / 10) + ' ms',
+                'mission: ' + ((gameData.mission && gameData.mission.title) || '—')
+            ];
+            if(gameData.mp && gameData.mp.enabled) {
+                lines.push('mp: ' + (gameData.mp.isHost ? 'host' : 'client') + (typeof wodMpMatchCanPlay === 'function' && wodMpMatchCanPlay() ? ' playing' : ' waiting'));
+            }
+            statsEl.textContent = lines.join('\n');
+
+            if(actEl) {
+                let rows = wodDevActivitySnapshot();
+                if(!rows.length) actEl.textContent = 'No recent activity yet — open during play.';
+                else {
+                    actEl.textContent = rows.map(r => {
+                        let tag = r.ageMs < 80 ? '●' : (r.ageMs < 500 ? '○' : '·');
+                        return tag + ' ' + r.name + '  ×' + r.count + '  ' + r.ageMs + 'ms ago';
+                    }).join('\n');
+                }
+            }
+        }
+
+        function wodWireDevMenuOnce() {
+            if(wodDevWired) return;
+            wodDevWired = true;
+            let close = document.getElementById('wodDevCloseBtn');
+            if(close) close.addEventListener('click', () => wodSetDevMenuOpen(false));
+            let host = document.getElementById('wodDevCheats');
+            if(host) {
+                host.addEventListener('click', (ev) => {
+                    let btn = ev.target && ev.target.closest ? ev.target.closest('[data-cheat]') : null;
+                    if(!btn) return;
+                    wodDevRunCheat(btn.getAttribute('data-cheat'));
+                });
+            }
+            window.wodToggleDevMenu = wodToggleDevMenu;
+            window.wodSetDevMenuOpen = wodSetDevMenuOpen;
+        }
+
+        wodWireDevMenuOnce();
+
         window.advanceTime = function(ms) {
             const steps = Math.max(1, Math.round(ms / (1000 / 60)));
-            for (let i = 0; i < steps; i++) update(1/60);
+            for (let i = 0; i < steps; i++) {
+                wodDevNoteFrame(performance.now(), 1 / 60);
+                wodDevMark('update');
+                update(1/60);
+            }
+            wodDevMark('draw');
             draw();
         };
 

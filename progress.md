@@ -317,7 +317,21 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Generator: `node scripts/generate-store-missions.js` (also `npm run missions:store`).
 - Cloud progress syncs `storeMissions` completed/spent via `server/profiles.js`.
 
+## In-game dev menu (2026-07-09)
+- Press **backtick three times** within ~900ms anytime to toggle `#wodDevMenu`.
+- Shows live FPS (during PLAYING), frame ms, state/gold/units/hexes/simTick, recent function activity (`gameLoop` / `update` / `draw` / cheats), and cheat buttons (+gold, money, manpower, heal, spawn, force win, pause, unlock store missions).
+- Esc closes the panel. Test: `node scripts/test-dev-menu.js`.
+
+## Normandy D-Day accuracy pass (2026-07-09)
+- Regenerated `custom-maps/normandy-dday.json` with Cotentin peninsula (Cherbourg tip north), Baie du Grand Vey gap, Utah on east Cotentin, Pointe du Hoc cliffs, Omaha bluffs, Gold/Juno/Sword sand belt, Carentan marsh, Vire/Orne rivers.
+- Towns: Portsmouth, Southampton, Plymouth, Cherbourg, Valognes, Sainte-Mère-Église, Carentan, Isigny-sur-Mer, Saint-Lô, Bayeux, Caen, Ouistreham, Falaise.
+- OOB labels: 4th/1st/29th/50th/3rd Cdn/3rd Inf, 82nd/101st/6th Airborne, Rangers, DD tanks, Force U/O/G/J/S + Warspite/Texas/Belfast/etc.; German 709th/91st/243rd/352nd/716th, 21st Panzer, Cherbourg Festung, LXXXIV Corps.
+- Ownership fix so England seeds no longer claim the Cotentin; beach sand left contested for assault landings.
+- 13 cities, 18 forts, 89 units, 7 events. Rebuild: `node scripts/generate-store-missions.js`.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
-- Optional: re-enable skirmish ?Shop Mission? setup button if non-mission map packs return.
-- Visual polish: Normandy map is large (~70 radius); consider a tighter Cotentin crop if load times matter on slow devices.
+- Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
+- Visual polish: Normandy map is large (~72 radius / ~16k hexes); consider a tighter Cotentin crop if load times matter on slow devices.
+- Optional: sample attract-mode FPS when menu battle is running under `menuAttractMode`.
+- Optional: paint beach-sector labels (Utah/Omaha/Gold/Juno/Sword) as map markers if the engine gains label entities.
