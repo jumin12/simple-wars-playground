@@ -12417,7 +12417,24 @@
             let out = [];
             let useBridges = wodUnitUsesLandBridges(unit);
             let waterOnly = unit && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute));
-            for(let i = 1; i < hexPath.length; i++) {
+            // Paths that START on a bridge used to skip the first deck hex (loop begins at i=1),
+            // collapsing shore→far-shore corridors into a single land point / water chord.
+            let i0 = 1;
+            if(useBridges && isBridgeHex(hexPath[0])) {
+                let br0 = bridgeAtHex(hexPath[0]);
+                let run0 = [hexPath[0]];
+                let j0 = 1;
+                while(j0 < hexPath.length && isBridgeHex(hexPath[j0]) && bridgeAtHex(hexPath[j0]) === br0) {
+                    run0.push(hexPath[j0]);
+                    j0++;
+                }
+                let next0 = j0 < hexPath.length ? hexPath[j0] : null;
+                let corridor0 = wodBridgeDeckCorridorWaypoints(br0, null, run0, next0);
+                for(let ci = 0; ci < corridor0.length; ci++) wodPushWaypointDedup(out, corridor0[ci]);
+                if(!corridor0.length) wodPushWaypointDedup(out, { x: hexPath[0].x, y: hexPath[0].y });
+                i0 = j0;
+            }
+            for(let i = i0; i < hexPath.length; i++) {
                 let h = hexPath[i];
                 if(useBridges && isBridgeHex(h)) {
                     let br = bridgeAtHex(h);
@@ -22159,8 +22176,13 @@
             if(unit && unit.type === 'convoy' && unit.convoySeaRoute) ring = Math.max(ring, 12);
             else if(unit && unit.type === 'convoy') ring = Math.max(ring, 14);
             else if(unit && unit.type === 'ship') ring = Math.max(ring, 10);
-            let onBridge = wodBridgeHexAtPoint(unit, x, y);
-            if(onBridge) return onBridge;
+            // Only treat as on-deck when the point is actually on the bridge rect —
+            // wodBridgeHexAtPoint's radius scan used to snap nearby shore units onto the
+            // deck, so AI corridor builds started mid-bridge and skipped the approach.
+            if(wodPointOnBridgeForUnit(unit, x, y, 1.05)) {
+                let onBridge = wodBridgeHexAtPoint(unit, x, y);
+                if(onBridge) return onBridge;
+            }
             let allowWater = wodOrderIntoWater(unit, null);
             let primary = getNearestHexToPoint(x, y);
             if(primary && wodPathTileWalkable(unit, primary, allowWater)) return primary;
@@ -22171,6 +22193,9 @@
                 for(let dr = -ring; dr <= ring; dr++) {
                     let h = gameData.hexes[`${center.q + dq},${center.r + dr}`];
                     if(!wodPathTileWalkable(unit, h, allowWater)) continue;
+                    // Prefer pure land over nearby bridge tiles when standing on land.
+                    if(primary && !isWaterHex(primary) && !isBridgeHex(primary) && isBridgeHex(h))
+                        continue;
                     let dx = h.x - x;
                     let dy = h.y - y;
                     let d = dx * dx + dy * dy;
@@ -23501,10 +23526,11 @@
             // Deadline: each `consider` composes multiple land A*/BFS legs. With several AI-built
             // bridges on the map this stacked into multi-hundred-ms (worst 1.8s) frame stalls.
             let bridgeT0 = performance.now();
-            // Human bridge marches need more time — 8ms often timed out before composing a
-            // deck crossing, leaving units stuck at the shore with greedy water hops.
+            // Bridge compose stacks several land A*/BFS legs. Humans get 22ms; AI used to
+            // get only 8ms and timed out into shore greedy/water hops. Give AI enough time
+            // to finish a deck crossing without matching the full human order budget.
             let human = wodMpIsHumanOwner(unit.owner);
-            const BRIDGE_SEARCH_MS = human ? 22 : 8;
+            const BRIDGE_SEARCH_MS = human ? 22 : 16;
             let best = [],
                 bestLen = Infinity;
             function overDeadline() {
@@ -23845,10 +23871,17 @@
                 wodEnsureBridgePathIndex();
             let pathAllowWater = pathMode === 'water' || wodOrderIntoWater(unit, targetHex) ||
                 wodOrderIntoWater(unit, startHex) || !!unit._wodOrderIntoWater;
-            if(isBridgeHex(startHex) || wodBridgeHexAtPoint(unit, startHex.x, startHex.y))
-                startHex = isBridgeHex(startHex) ? startHex : wodBridgeHexAtPoint(unit, startHex.x, startHex.y) || startHex;
-            if(isBridgeHex(targetHex) || wodBridgeHexAtPoint(unit, targetHex.x, targetHex.y))
-                targetHex = isBridgeHex(targetHex) ? targetHex : wodBridgeHexAtPoint(unit, targetHex.x, targetHex.y) || targetHex;
+            // Only remap onto the deck when the hex/point is actually on the bridge —
+            // wodBridgeHexAtPoint's radius scan used to yank nearby shore hexes onto the
+            // deck, turning shore→shore marches into deck→deck stubs that never exit.
+            if(!isBridgeHex(startHex) && wodPointOnBridgeForUnit(unit, startHex.x, startHex.y, 1.05)) {
+                let bh = wodBridgeHexAtPoint(unit, startHex.x, startHex.y);
+                if(bh) startHex = bh;
+            }
+            if(!isBridgeHex(targetHex) && wodPointOnBridgeForUnit(unit, targetHex.x, targetHex.y, 1.05)) {
+                let bh = wodBridgeHexAtPoint(unit, targetHex.x, targetHex.y);
+                if(bh) targetHex = bh;
+            }
             if(!wodPathTileWalkable(unit, startHex, pathAllowWater) || !wodPathTileWalkable(unit, targetHex, pathAllowWater)) return [];
             if(wodHexKeysEqual(startHex, targetHex)) return [startHex];
             let pfKey = null;
@@ -25007,11 +25040,21 @@
                 corridor.push({ x: exactEnd.x, y: exactEnd.y });
         }
 
-        /** Build one terrain-aware corridor for a player march and queue it in unit.path. */
+        /** True when this unit should get the dense land corridor (exact-end + kink strip).
+         * Players always; AI land armies when bridges exist so river crossings compose. */
+        function wodUnitGetsLandCorridorPath(unit) {
+            if(!unit) return false;
+            if(wodMpIsHumanOwner(unit.owner)) return true;
+            if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) return false;
+            return !!(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length);
+        }
+
+        /** Build one terrain-aware corridor for a land march and queue it in unit.path. */
         function wodTryAssignPlayerCorridorPath(unit, marchPts, exactLast, fromAdvance) {
-            if(!unit || !marchPts || !marchPts.length || !wodMpIsHumanOwner(unit.owner)) return false;
+            if(!unit || !marchPts || !marchPts.length || !wodUnitGetsLandCorridorPath(unit)) return false;
             wodPfSpentMs = 0;
-            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, fromAdvance ? 18 : 28);
+            let human = wodMpIsHumanOwner(unit.owner);
+            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, fromAdvance ? (human ? 18 : 14) : (human ? 28 : 20));
             let startPt = { x: unit.x, y: unit.y };
             let fullHex = buildConcatenatedHexPath(unit, marchPts, startPt, true, { forOrder: true });
             if(fullHex.length <= 1) return false;
@@ -25128,7 +25171,7 @@
                 }
             }
 
-            if(wodMpIsHumanOwner(unit.owner)) {
+            if(wodUnitGetsLandCorridorPath(unit)) {
                 let corridorPts = fromAdvance ? marchPts.slice(cursor) : marchPts;
                 if(wodTryAssignPlayerCorridorPath(unit, corridorPts, exactLast, fromAdvance))
                     return true;
@@ -25138,7 +25181,9 @@
             }
 
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
-            let path = findPathAroundTerrain(unit, reachNext.hex, startHex, false, 'auto', wodMpIsHumanOwner(unit.owner));
+            let allowOver = wodMpIsHumanOwner(unit.owner) ||
+                !!(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length);
+            let path = findPathAroundTerrain(unit, reachNext.hex, startHex, false, 'auto', allowOver);
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex) {
                 let ampPath = findAmphibiousMarchPath(unit, startHex, reachNext.hex);
                 if(wodHexPathLength(ampPath) > 1) path = ampPath;
@@ -25409,9 +25454,19 @@
                 desired = reachable ? {x: reachable.exactX, y: reachable.exactY, ...(desired.isCity ? {isCity: true} : {})} : desired;
                 unit.orderTarget = reachable ? {x: reachable.exactX, y: reachable.exactY, ...(unit.orderTarget && unit.orderTarget.isCity ? {isCity: true} : {})} : unit.orderTarget;
             }
-            let path = findPathAroundTerrain(unit, targetHex, startHex, false, 'auto', wodMpIsHumanOwner(unit.owner));
+            let path = findPathAroundTerrain(unit, targetHex, startHex, false, 'auto',
+                wodMpIsHumanOwner(unit.owner) ||
+                !!(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length));
+            // AI (and any land army): rescue bridge crossings when land A* timed out —
+            // without this, preparePathTarget falls into greedy shore hops / water.
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex && startHex &&
+                !wodOrderIntoWater(unit, targetHex)) {
+                let bridgeAlt = wodTryPortalBridgeMarchPath(unit, startHex, targetHex);
+                if(wodHexPathLength(bridgeAlt) > 1) path = bridgeAlt;
+            }
             if(path.length > 1) {
                 unit._wodPathGiveUpUntil = 0;
+                if(wodPathCrossesBridge(path)) unit._wodRouteUsesBridge = true;
                 let endNode = {x: desired.x, y: desired.y};
                 if(desired.isCity) endNode.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endNode);
@@ -27041,7 +27096,9 @@
                 if(convoyCity) finalTarget.isCity = true;
                 unit.orderTarget = finalTarget;
             }
-            let path = findPathAroundTerrain(unit, targetHex, startHex, false, 'auto', wodMpIsHumanOwner(unit.owner));
+            let path = findPathAroundTerrain(unit, targetHex, startHex, false, 'auto',
+                wodMpIsHumanOwner(unit.owner) ||
+                !!(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length));
             if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex && startHex) {
                 let ampPath = findAmphibiousMarchPath(unit, startHex, targetHex);
                 if(wodHexPathLength(ampPath) > 1) path = ampPath;
@@ -27454,6 +27511,24 @@
                     return;
                 }
                 unit.blockedTimer = (unit.blockedTimer || 0) + dt;
+                // On a bridge crossing, prefer advancing the existing deck path over a
+                // sideways detour that walks AI units off the deck into open water.
+                if(unit._wodRouteUsesBridge && (wodUnitOnBridgeDeck(unit) ||
+                    wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15))) {
+                    if(unit.path && unit.path.length > 0 && wodTakeNextPathTarget(unit)) {
+                        unit.blockedTimer = 0;
+                        return;
+                    }
+                    if(unit.orderTarget) {
+                        unit.target = {
+                            x: unit.orderTarget.x,
+                            y: unit.orderTarget.y,
+                            pathPrepared: false
+                        };
+                        unit.blockedTimer = 0;
+                        return;
+                    }
+                }
                 let replanT = unit.type === 'convoy' ? 0.12 : (unit.type === 'ship' ? 0.18 : 0.25);
                 let curHx = getNearestHexToPoint(unit.x, unit.y);
                 if(curHx && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute) &&
@@ -27525,12 +27600,20 @@
                     unit._wodAiFriendBlockT = (unit._wodAiFriendBlockT || 0) + dt;
                     let ftA = unit.orderTarget || (unit.target && unit.target.finalTarget) || unit.target;
                     if(unit._wodAiFriendBlockT > 1.2 && ftA) {
-                        let hrA = gameData.hexRadius || 20;
-                        let adx = ftA.x - unit.x, ady = ftA.y - unit.y;
-                        let arriveR = hrA * 1.35 * 5;
-                        if(adx * adx + ady * ady < arriveR * arriveR) {
-                            wodUnitArrivedAtTarget(unit);
-                            return;
+                        // Never arrive mid-deck — same guard as player friend-block.
+                        let onDeck = unit._wodRouteUsesBridge && (
+                            wodUnitOnBridgeDeck(unit) ||
+                            wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
+                            !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
+                        );
+                        if(!onDeck) {
+                            let hrA = gameData.hexRadius || 20;
+                            let adx = ftA.x - unit.x, ady = ftA.y - unit.y;
+                            let arriveR = hrA * 1.35 * 5;
+                            if(adx * adx + ady * ady < arriveR * arriveR) {
+                                wodUnitArrivedAtTarget(unit);
+                                return;
+                            }
                         }
                     }
                 }
@@ -31997,6 +32080,11 @@
             let idleN = 0;
             for(let iu = ch.idx; iu < ch.readyUnits.length; iu++) if(!ch.readyUnits[iu].target) idleN++;
             let maxUnits = (wodUsesVisualViewportLayout() ? 3 : 5) + Math.min(6, idleN >> 2);
+            // Fresh PF budget each formation pulse so bridge compose isn't starved by
+            // earlier AI pathfinds in the same frame.
+            wodPfSpentMs = 0;
+            if(gameData.bridges && gameData.bridges.length)
+                wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, 18);
             let assigned = 0;
             while(ch.idx < ch.readyUnits.length && assigned < maxUnits) {
                 if(performance.now() - t0 >= budgetMs) break;
@@ -41558,9 +41646,33 @@
                 unit.holding = !!holdingOpt;
                 return true;
             }
-            let reach = findReachableOrderHex(unit, x, y);
+            let tx = x, ty = y;
+            // Sector jitter / formation slots near rivers must not become intoWater orders
+            // when a bridge can carry the march — snap land armies onto land or deck.
+            if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
+                let nh = getNearestHexToPoint(x, y);
+                if(nh && (wodIsOpenWaterHex(nh) || isBridgeHex(nh))) {
+                    let snap = wodSnapLandArmyOrderPoint(unit, x, y);
+                    if(snap) {
+                        tx = snap.x;
+                        ty = snap.y;
+                    }
+                }
+            }
+            let reach = findReachableOrderHex(unit, tx, ty);
+            if(reach && reach.intoWater && wodUnitPrefersLandOnlyPath(unit) &&
+                !wodOrderIntoWater(unit, reach.hex)) {
+                let snap = wodSnapLandArmyOrderPoint(unit, tx, ty);
+                if(snap && !(snap.hex && wodIsOpenWaterHex(snap.hex)))
+                    reach = { hex: snap.hex || reach.hex, exactX: snap.x, exactY: snap.y, intoWater: false };
+                else {
+                    let resolved = wodResolveLandMarchHex(unit, tx, ty);
+                    if(resolved && !resolved.intoWater)
+                        reach = { hex: resolved.hex, exactX: resolved.exactX, exactY: resolved.exactY, intoWater: false };
+                }
+            }
             if(!reach && wodUnitPrefersLandOnlyPath(unit)) {
-                let resolved = wodResolveLandMarchHex(unit, x, y);
+                let resolved = wodResolveLandMarchHex(unit, tx, ty);
                 if(resolved && !resolved.intoWater)
                     reach = { hex: resolved.hex, exactX: resolved.exactX, exactY: resolved.exactY, intoWater: false };
             }
