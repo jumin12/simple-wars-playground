@@ -14882,6 +14882,7 @@
             if(hostForm) hostForm.classList.toggle('visible', tabId === 'host');
             if(tabId === 'friends') {
                 wodCloudFetchProfile();
+                scheduleCloudSyncProgress();
                 wodMpRenderFriendsList();
                 wodMpQueryFriendPresence();
             }
@@ -16757,14 +16758,14 @@
                 wodMpRenderLeaderboard(d.rows, d.sort || window._wodMpLbSort || 'wins', scope);
             });
             addEventListener('wod-mp-Registered', (ev) => {
-                if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
+                if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile, { pushCloud: true });
                 wodMpConfirmRegisteredDisplayName();
             });
             addEventListener('wod-mp-Profile', (ev) => {
                 if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
             });
             addEventListener('wod-mp-ShopPurchaseOk', (ev) => {
-                if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
+                if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile, { shopPurchase: true });
             });
             addEventListener('wod-mp-RegisterFailed', (ev) => {
                 if(ev.detail) wodMpHandleDisplayNameRejected(ev.detail);
@@ -16806,7 +16807,8 @@
             wodEnsurePlayerId();
             return wodMpEnsureConnected().then(() => {
                 wodMpRegisterWithServer();
-                wodCloudFetchProfile();
+                // Push local progress first so a stale/empty cloud profile cannot wipe saves.
+                scheduleCloudSyncProgress();
                 void wodMpTryJoinLobbyFromUrl();
             }).catch(() => {});
         }
@@ -16825,7 +16827,7 @@
                 .then(() => {
                     if(st) st.textContent = 'Connected — browse lobbies or host a match.';
                     wodMpRegisterWithServer();
-                    wodCloudFetchProfile();
+                    scheduleCloudSyncProgress();
                     wodMpQueryFriendPresence();
                     wodMpRefreshMpPanelState();
                     wodMpRenderLobbyList(WodMultiplayer.api.lobbies || []);
@@ -18708,6 +18710,46 @@
             };
         }
 
+        function wodMergeBoolMap(a, b) {
+            let out = Object.assign({}, a || {});
+            if(b && typeof b === 'object') {
+                for(let k of Object.keys(b)) if(b[k]) out[k] = true;
+            }
+            return out;
+        }
+        function wodMergeLifetimeMax(a, b) {
+            let out = Object.assign({}, a || {});
+            if(!b || typeof b !== 'object') return out;
+            for(let k of Object.keys(b)) {
+                let av = Number(out[k]) || 0;
+                let bv = Number(b[k]) || 0;
+                out[k] = Math.max(av, bv);
+            }
+            // Keep keys that only exist on a.
+            return out;
+        }
+        function wodMergeLifetimeByPeriodMax(a, b) {
+            let out = Object.assign({}, a || {});
+            if(!b || typeof b !== 'object') return out;
+            for(let pid of Object.keys(b)) {
+                out[pid] = wodMergeLifetimeMax(out[pid] || {}, b[pid] || {});
+            }
+            return out;
+        }
+        function wodMergeAchievementsMax(a, b) {
+            let out = Object.assign({}, a || {});
+            if(!b || typeof b !== 'object') return out;
+            for(let k of Object.keys(b)) if(b[k]) out[k] = true;
+            return out;
+        }
+        function wodMergeMpStatsMax(a, b) {
+            let out = Object.assign({ gamesPlayed: 0, wins: 0, losses: 0 }, a || {});
+            if(!b || typeof b !== 'object') return out;
+            out.gamesPlayed = Math.max(out.gamesPlayed | 0, b.gamesPlayed | 0);
+            out.wins = Math.max(out.wins | 0, b.wins | 0);
+            out.losses = Math.max(out.losses | 0, b.losses | 0);
+            return out;
+        }
         function wodMergeProgressObject(o) {
             let base = defaultWodProgress();
             if(!o || typeof o !== 'object') return base;
@@ -18846,25 +18888,56 @@
         function wodCloudCanSync() {
             return typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen && WodMultiplayer.syncProgress;
         }
-        function wodApplyServerProfile(profile) {
+        function wodApplyServerProfile(profile, opts) {
             if(!profile || typeof profile !== 'object') return;
-            let keepPlayerId = (wodProgress && wodProgress.profile && wodProgress.profile.playerId) || '';
-            let localFriends = (wodProgress && wodProgress.profile) ? {
-                friends: wodProgress.profile.friends,
-                friendRequestsOut: wodProgress.profile.friendRequestsOut,
-                friendRequestsIn: wodProgress.profile.friendRequestsIn
+            opts = opts || {};
+            // Snapshot local progress first — cloud responses must never wipe client-only
+            // fields (achievement gold grants, missions) or regress lifetime/gold/skins.
+            flushGameProfileToWod();
+            let local = wodProgress || defaultWodProgress();
+            let keepPlayerId = (local.profile && local.profile.playerId) || '';
+            let localFriends = local.profile ? {
+                friends: local.profile.friends,
+                friendRequestsOut: local.profile.friendRequestsOut,
+                friendRequestsIn: local.profile.friendRequestsIn
             } : null;
-            let localDisplayName = (wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName) || '';
+            let localDisplayName = (local.profile && local.profile.mpDisplayName) || '';
             let mpEl = document.getElementById('mpDisplayName');
             let editingName = !!(mpEl && (mpEl === document.activeElement || mpEl._wodMpEditing));
             if(editingName && mpEl && mpEl.value.trim())
                 localDisplayName = mpEl.value.trim().slice(0, 24);
+            let sp = profile.profile || {};
+            let mergedGold = Math.max(local.profile.gold | 0, sp.gold | 0);
+            // Shop purchase responses are authoritative for gold after a spend.
+            if(opts.shopPurchase && sp.gold != null) mergedGold = sp.gold | 0;
+            let mergedOwned = wodMergeBoolMap(local.profile.ownedUnitSkins, sp.ownedUnitSkins);
+            mergedOwned.nato = true;
+            let mergedVisuals = wodMergeBoolMap(local.profile.ownedShopVisuals, sp.ownedShopVisuals);
             wodProgress = wodMergeProgressObject({
-                achievements: profile.achievements,
-                lifetime: profile.lifetime,
-                lifetimeByPeriod: profile.lifetimeByPeriod,
-                multiplayer: profile.multiplayer,
-                profile: Object.assign({}, profile.profile || {}, { playerId: keepPlayerId || (profile.profile && profile.profile.playerId) || '' })
+                achievements: wodMergeAchievementsMax(local.achievements, profile.achievements),
+                lifetime: wodMergeLifetimeMax(local.lifetime, profile.lifetime),
+                lifetimeByPeriod: wodMergeLifetimeByPeriodMax(local.lifetimeByPeriod, profile.lifetimeByPeriod),
+                multiplayer: wodMergeMpStatsMax(local.multiplayer, profile.multiplayer),
+                missions: {
+                    completed: wodMergeBoolMap(
+                        (local.missions && local.missions.completed) || {},
+                        (profile.missions && profile.missions.completed) || {}
+                    )
+                },
+                achievementGoldGranted: wodMergeBoolMap(
+                    local.achievementGoldGranted,
+                    profile.achievementGoldGranted
+                ),
+                profile: Object.assign({}, local.profile, sp, {
+                    playerId: keepPlayerId || sp.playerId || '',
+                    gold: mergedGold,
+                    ownedUnitSkins: mergedOwned,
+                    ownedShopVisuals: mergedVisuals,
+                    unitSkin: sp.unitSkin || local.profile.unitSkin,
+                    aiUnitSkin: sp.aiUnitSkin || local.profile.aiUnitSkin,
+                    equippedShopMapId: (sp.equippedShopMapId != null ? sp.equippedShopMapId : local.profile.equippedShopMapId) || null,
+                    mpDisplayName: localDisplayName || sp.mpDisplayName || local.profile.mpDisplayName || ''
+                })
             });
             if(editingName && localDisplayName && wodProgress.profile)
                 wodProgress.profile.mpDisplayName = localDisplayName;
@@ -18875,21 +18948,31 @@
             }
             applyWodProfileToGame();
             syncGoldenChipUnlockFromAchievements();
+            // Reconcile achievement gold without re-notifying already-paid badges.
+            if(typeof checkWodAchievements === 'function') checkWodAchievements();
             if(typeof renderAchievementsUi === 'function') renderAchievementsUi();
             if(typeof updateSkinShop === 'function') updateSkinShop();
             if(typeof wodMpRefreshLocalMpStatsReadout === 'function') wodMpRefreshLocalMpStatsReadout();
             if(typeof wodMpRenderFriendsList === 'function') wodMpRenderFriendsList();
             persistWodProgressNow();
-            scheduleCloudSyncProgress();
+            // Do not echo sync_progress from profile acks — that loops forever.
+            if(opts.pushCloud) scheduleCloudSyncProgress();
         }
         function wodBuildCloudSyncPayload() {
             flushGameProfileToWod();
             return {
                 lifetime: wodProgress.lifetime,
                 lifetimeByPeriod: wodProgress.lifetimeByPeriod,
+                achievements: wodProgress.achievements,
+                achievementGoldGranted: wodProgress.achievementGoldGranted || {},
+                missions: wodProgress.missions || { completed: {} },
+                multiplayer: wodProgress.multiplayer || { gamesPlayed: 0, wins: 0, losses: 0 },
                 profile: {
+                    gold: wodProgress.profile.gold | 0,
                     unitSkin: wodProgress.profile.unitSkin,
                     aiUnitSkin: wodProgress.profile.aiUnitSkin,
+                    ownedUnitSkins: wodProgress.profile.ownedUnitSkins,
+                    ownedShopVisuals: wodProgress.profile.ownedShopVisuals,
                     equippedShopMapId: wodProgress.profile.equippedShopMapId,
                     mpDisplayName: wodProgress.profile.mpDisplayName || '',
                     friends: wodProgress.profile.friends,
@@ -18928,7 +19011,7 @@
                     resolve(ok);
                 }
                 function onOk(ev) {
-                    if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile);
+                    if(ev.detail && ev.detail.profile) wodApplyServerProfile(ev.detail.profile, { shopPurchase: true });
                     finish(true);
                 }
                 function onFail(ev) {
@@ -19022,8 +19105,28 @@
             }
         }
 
+        /** Returning players whose grant map was wiped by old cloud sync should not
+         *  re-earn gold for badges they already met — mark them paid without payout. */
+        function wodReconcileAchievementGoldGrants() {
+            if(!wodProgress) return;
+            if(!wodProgress.achievementGoldGranted) wodProgress.achievementGoldGranted = {};
+            let paid = wodProgress.achievementGoldGranted;
+            if(Object.keys(paid).length > 0) return;
+            let L = wodProgress.lifetime || {};
+            let A = wodProgress.achievements || {};
+            let hasHistory = (L.gamesStarted | 0) > 0 || (L.battlesWon | 0) > 0 ||
+                (L.missionsCompleted | 0) > 0 || (L.campaignBattlesWon | 0) > 0 ||
+                ((wodProgress.profile && wodProgress.profile.gold) | 0) > 0 ||
+                (gameData.gold | 0) > 0;
+            if(!hasHistory) return;
+            for(let r of wodAchievementBadgeDefs(L, A)) {
+                if((r.prog || 0) >= r.need) paid[r.id] = true;
+            }
+        }
+
         function checkWodAchievements() {
             if(!wodProgress) return;
+            wodReconcileAchievementGoldGrants();
             let L = wodProgress.lifetime, A = wodProgress.achievements;
             if(!A.goldenChipMaster && allWodAchievementsMet(L, A)) {
                 A.goldenChipMaster = true;

@@ -254,3 +254,10 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - **Units killed** added beside units lost on the campaign stats strip (enemy troop kills remain); battles accumulate `playerUnitsKilled` formation kills.
 - **Rename**: campaign roster has a rename button; in-battle renames sync back to the persistent roster.
 - Verified: `output/test-units-killed-rename.cjs`.
+
+## Fix achievement/gold cloud wipe (2026-07-08)
+- **Root cause**: cloud profile apply replaced local progress and dropped `achievementGoldGranted` / missions / gold, so badges vanished and gold notifications re-fired every session.
+- **Client**: `wodApplyServerProfile` now merges lifetime/MP/gold/skins/achievements/missions/grants monotonically; boot pushes local progress before trusting cloud; shop spends still apply authoritative gold.
+- **Server**: `syncProgress` stores and merges gold, achievements, achievement gold grants, missions, owned skins, and MP stats without regressing.
+- Returning players with a wiped grant map are reconciled (mark already-met badges paid, no re-grant spam).
+- Verified: `output/test-progress-persist.cjs`, `output/test-server-progress-persist.cjs`.

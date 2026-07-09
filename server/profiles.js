@@ -40,7 +40,7 @@ const LIFETIME_KEYS = [
   'enemyTroopKills', 'ownTroopLosses', 'enemyMarineKills', 'ownMarineLosses',
   'enemyTankKills', 'ownTankLosses', 'enemyShipKills', 'ownShipLosses',
   'peakFieldManpower', 'battlesWon', 'campaignLosses', 'citiesCaptured', 'convoysCaptured',
-  'factoriesBuilt', 'harborsBuilt', 'fortsBuilt', 'peakMoneyHeld',
+  'factoriesBuilt', 'harborsBuilt', 'farmsBuilt', 'fortsBuilt', 'peakMoneyHeld',
   'unitsBuiltLight', 'unitsBuiltHeavy', 'unitsBuiltShip', 'unitsBuiltMarine', 'gamesStarted',
   'missionsCompleted', 'campaignsWon', 'campaignBattlesWon',
 ];
@@ -49,7 +49,7 @@ const LIFETIME_MAX_JUMP = {
   enemyTroopKills: 800, enemyMarineKills: 400, enemyTankKills: 200, enemyShipKills: 80,
   ownTroopLosses: 800, ownMarineLosses: 400, ownTankLosses: 200, ownShipLosses: 80,
   battlesWon: 5, campaignLosses: 5, citiesCaptured: 40, convoysCaptured: 40,
-  factoriesBuilt: 20, harborsBuilt: 20, fortsBuilt: 20,
+  factoriesBuilt: 20, harborsBuilt: 20, farmsBuilt: 20, fortsBuilt: 20,
   peakFieldManpower: 100000, peakMoneyHeld: 500000,
   unitsBuiltLight: 200, unitsBuiltHeavy: 80, unitsBuiltShip: 40, unitsBuiltMarine: 80,
   gamesStarted: 5,
@@ -107,6 +107,8 @@ function defaultProfile(playerId) {
       periodAncient: false,
       periodMedieval: false,
     },
+    achievementGoldGranted: {},
+    missions: { completed: {} },
     lifetime: defaultLifetime(),
     lifetimeByPeriod: {},
     multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
@@ -323,6 +325,33 @@ function loadProfilesFromDisk() {
   }
 }
 
+function sanitizeBoolMap(obj) {
+  const out = {};
+  if (!obj || typeof obj !== 'object') return out;
+  for (const [k, v] of Object.entries(obj)) {
+    const key = String(k).slice(0, 64);
+    if (key && v) out[key] = true;
+  }
+  return out;
+}
+
+function mergeBoolMap(a, b) {
+  return Object.assign({}, sanitizeBoolMap(a), sanitizeBoolMap(b));
+}
+
+function mergeMpStatsMax(a, b) {
+  const out = {
+    gamesPlayed: clampInt(a && a.gamesPlayed, 0, 999999),
+    wins: clampInt(a && a.wins, 0, 999999),
+    losses: clampInt(a && a.losses, 0, 999999),
+  };
+  if (!b || typeof b !== 'object') return out;
+  out.gamesPlayed = Math.max(out.gamesPlayed, clampInt(b.gamesPlayed, 0, 999999));
+  out.wins = Math.max(out.wins, clampInt(b.wins, 0, 999999));
+  out.losses = Math.max(out.losses, clampInt(b.losses, 0, 999999));
+  return out;
+}
+
 function hydrateProfile(playerId, row) {
   const base = defaultProfile(playerId);
   if (!row || typeof row !== 'object') return base;
@@ -340,6 +369,10 @@ function hydrateProfile(playerId, row) {
   base.profile.friendRequestsOut = sanitizeFriendRequests(p.friendRequestsOut);
   base.profile.friendRequestsIn = sanitizeFriendRequests(p.friendRequestsIn);
   base.achievements = Object.assign(base.achievements, row.achievements || {});
+  base.achievementGoldGranted = sanitizeBoolMap(row.achievementGoldGranted);
+  base.missions = {
+    completed: sanitizeBoolMap(row.missions && row.missions.completed),
+  };
   base.lifetime = sanitizeLifetime(row.lifetime);
   base.lifetimeByPeriod = mergeLifetimeByPeriod({}, row.lifetimeByPeriod || {});
   base.multiplayer = {
@@ -427,9 +460,37 @@ function syncProgress(playerId, payload) {
   if (payload.lifetimeByPeriod && typeof payload.lifetimeByPeriod === 'object') {
     profile.lifetimeByPeriod = mergeLifetimeByPeriod(profile.lifetimeByPeriod, payload.lifetimeByPeriod);
   }
+  if (payload.achievements && typeof payload.achievements === 'object') {
+    for (const [k, v] of Object.entries(payload.achievements)) {
+      if (v) profile.achievements[k] = true;
+    }
+  }
+  if (payload.achievementGoldGranted && typeof payload.achievementGoldGranted === 'object') {
+    profile.achievementGoldGranted = mergeBoolMap(profile.achievementGoldGranted, payload.achievementGoldGranted);
+  }
+  if (payload.missions && typeof payload.missions === 'object') {
+    profile.missions = profile.missions || { completed: {} };
+    profile.missions.completed = mergeBoolMap(
+      profile.missions.completed,
+      payload.missions.completed
+    );
+  }
+  if (payload.multiplayer && typeof payload.multiplayer === 'object') {
+    profile.multiplayer = mergeMpStatsMax(profile.multiplayer, payload.multiplayer);
+  }
 
   if (payload.profile && typeof payload.profile === 'object') {
     const cp = payload.profile;
+    if (cp.gold != null) {
+      // Gold only rises via client sync (victories/achievements). Shop spends go through shopPurchase.
+      cur.gold = Math.max(cur.gold | 0, clampInt(cp.gold, 0, 999999999));
+    }
+    if (cp.ownedUnitSkins && typeof cp.ownedUnitSkins === 'object') {
+      cur.ownedUnitSkins = sanitizeOwnedMap(Object.assign({}, cur.ownedUnitSkins, cp.ownedUnitSkins));
+    }
+    if (cp.ownedShopVisuals && typeof cp.ownedShopVisuals === 'object') {
+      cur.ownedShopVisuals = sanitizeOwnedMap(Object.assign({}, cur.ownedShopVisuals, cp.ownedShopVisuals));
+    }
     if (cp.unitSkin != null) cur.unitSkin = validateEquippedSkin(profile, cp.unitSkin);
     if (cp.aiUnitSkin != null) cur.aiUnitSkin = validateEquippedSkin(profile, cp.aiUnitSkin);
     if (cp.equippedShopMapId != null) {
