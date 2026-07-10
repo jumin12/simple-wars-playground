@@ -495,3 +495,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Locked `#hudObjectiveDesktop` to a mobile-style row (icon left of copy) with stronger CSS so it cannot stack.
 - Map Key / Layers / player chart offset from measured `.wod-hud-top` height (`wodSyncPcTopUiClearance`).
 - Pushed to `main`.
+
+## Unit card terrain page + retreat order (2026-07-10)
+- Terrain KPI is a button that opens a full terrain-effects sheet (same matrix as help) with an Orders back button on PC and mobile.
+- Order row fits five controls: Move, Waypoint, Formation, Stats, Retreat.
+- Retreat sends selected owned units ≥5 cells away; while retreating they keep 75% combat march speed and do not return fire.
+- Pushed to `main`.
