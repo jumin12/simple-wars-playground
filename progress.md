@@ -445,3 +445,10 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Counter chunk complete: modern NATO markers now use a raised faction-color base, pale face, black NATO symbol, lower readiness plate, deeper shadow, and larger glowing corner brackets; modern unit names use full “Division” / “Regiment” labels. The selected-unit emblem mirrors the circular gold-ring counter treatment.
 - Mobile HUD chunk complete: two resource cards with live rates, crosshair objective card, compact speed/menu actions, a full-width command sheet, hidden redundant deselect row in compact mode, gold SVG dock icons, and outlined default Map tab. The separate dock handle is hidden in portrait so the sheet sits directly above the dock like the reference.
 - Verification: 430x932 and 390x844 portrait captures have no document overflow or console errors. At 430, top rail is 64px, command sheet is 406x163, and dock is 62px; the full unit name fits without truncation. Move → Waypoint → Formation modes, More expand/collapse, and sheet peek/reopen all passed. Required client emitted gameplay screenshots + `render_game_to_text` state with no error JSON.
+
+## Order button / depression / cities-default / scroll fix (2026-07-10)
+- Move/Waypoint/Formation share the same navy default; only the armed mode turns green.
+- Added soft valley depression shading and stronger dark relief contours for ground recesses.
+- Cities layer defaults off (city names stay on).
+- Fixed touch scrolling on info-card pages, campaign side panel, and build/units sheet lists.
+- Pushed to `main` (`b2c5224`).
