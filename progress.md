@@ -465,8 +465,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Terrain palette, soft AO basins, ridge highlights, denser canopy trees, warmer rock peaks, and soft blue coast fringe tuned toward the reference map.
 - Pushed to `main`.
 
-## PC HUD / right cards / slope topography (2026-07-10)
-- Shifted Infantry/Idle text right on unit cards; PC cards back on the right, larger, hugging the bottom production bar.
-- PC top/bottom chrome uses mobile-style bordered resource cards, objective panel, and dock-like production tabs.
-- Replaced blotchy per-hex dark spots with slope shading only along real elevation drops (mountain→valley).
+## PC HUD parity / right card / continuous topography (2026-07-10)
+- Shifted unit type + Idle status text right on the sheet.
+- PC unit/city cards restored to the right, larger, hugging the bottom production UI.
+- PC top bar and bottom production tabs restyled toward the mobile charcoal/gold resource-card + dock look.
+- Removed per-hex dark blob relief; replaced with continuous crumpled heightmap hillshade topography.
 - Pushed to `main`.
