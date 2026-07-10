@@ -8314,7 +8314,7 @@
         <div id="wodDeployBanner" class="hidden" role="status" aria-live="polite">
             <div class="wod-deploy-banner-text">
                 <strong>Deployment</strong>
-                <span>Select units and right-click friendly territory to place them, then begin the battle.</span>
+                <span>Right-click to place, or right-drag a line / stroke a path to draw formations in your territory — then Begin battle.</span>
             </div>
             <button type="button" class="wod-deploy-begin-btn" id="wodDeployBeginBtn">Begin battle</button>
         </div>
@@ -10100,7 +10100,11 @@
                 showNotification('Finish deployment with Begin battle first.');
                 speed = 0;
             }
+            let prev = gameData.speed;
             gameData.speed = speed;
+            // Resuming from pause/popup: reset the frame clock so catch-up doesn't jump units.
+            if(prev === 0 && speed > 0 && typeof lastTime !== 'undefined')
+                lastTime = performance.now();
             for(let btn of document.querySelectorAll('.speed-btn')) btn.classList.remove('active');
             let activeId = speed === 0 ? 'speedPause' : (speed === 3 ? 'speed3' : (speed === 2 ? 'speed2' : 'speed1'));
             let activeBtn = document.getElementById(activeId);
@@ -10600,9 +10604,14 @@
         function wodBeginSimPfBudget(entCount) {
             wodPfSpentMs = 0;
             let n = entCount | 0;
-            wodPfBudgetMs = n > 200 ? 2.2 : (n > 120 ? 3.0 : (n > 70 ? 3.8 : 4.8));
-            if(wodUsesVisualViewportLayout()) wodPfBudgetMs *= 0.75;
-            if((gameData._wodPlayerMovingN || 0) > 0) wodPfBudgetMs *= 2.2;
+            let mapCells = (gameData && gameData.hexList) ? gameData.hexList.length : 0;
+            // Larger maps need a bit more PF headroom so columns don't fall back to
+            // greedy/straight hops that look like weird zig-zag movement.
+            wodPfBudgetMs = n > 200 ? 2.8 : (n > 120 ? 3.4 : (n > 70 ? 4.2 : 5.2));
+            if(mapCells > 12000) wodPfBudgetMs *= 1.25;
+            else if(mapCells > 7000) wodPfBudgetMs *= 1.12;
+            if(wodUsesVisualViewportLayout()) wodPfBudgetMs *= 0.78;
+            if((gameData._wodPlayerMovingN || 0) > 0) wodPfBudgetMs *= 2.4;
             let spd = gameData && gameData.speed > 0 ? gameData.speed : 1;
             wodPfBudgetMs *= Math.min(3, spd);
         }
@@ -20729,11 +20738,6 @@
         }
 
         function wodUnitSmoothDrawXY(unit, simDt) {
-            if(unit.target) {
-                unit._drawX = unit.x;
-                unit._drawY = unit.y;
-                return { x: unit.x, y: unit.y };
-            }
             if(unit._drawX == null || unit._drawY == null) {
                 unit._drawX = unit.x;
                 unit._drawY = unit.y;
@@ -20742,18 +20746,22 @@
             let dx = unit.x - unit._drawX;
             let dy = unit.y - unit._drawY;
             let distSq = dx * dx + dy * dy;
-            if(distSq > 360 * 360) {
+            // Hard snap only on teleports / huge desyncs (orders, deploy, MP snaps).
+            if(distSq > 220 * 220) {
                 unit._drawX = unit.x;
                 unit._drawY = unit.y;
                 return { x: unit.x, y: unit.y };
             }
-            if(distSq < 0.09) {
+            if(distSq < 0.04) {
                 unit._drawX = unit.x;
                 unit._drawY = unit.y;
                 return { x: unit.x, y: unit.y };
             }
+            // Always ease toward auth position — including while marching — so waypoint
+            // snaps and multi-step catch-up never look like jerky teleports.
             let dt = simDt > 0 ? simDt : (1 / 60);
-            let k = 1 - Math.exp(-20 * dt);
+            let rate = unit.target ? 28 : 20;
+            let k = 1 - Math.exp(-rate * dt);
             unit._drawX += dx * k;
             unit._drawY += dy * k;
             return { x: unit._drawX, y: unit._drawY };
@@ -24366,7 +24374,9 @@
                 // relax window covers nested calls (e.g. via wodPickLandArmyMarchPath) that
                 // don't carry the allowOverBudget flag themselves.
                 let astRelaxed = unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
-                let astCeilMs = (allowOverBudget || astRelaxed) ? 14 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 6 : 24);
+                // Slightly higher ceilings so long marches on large maps keep real corridors
+                // instead of truncating into straight-line / greedy hops mid-route.
+                let astCeilMs = (allowOverBudget || astRelaxed) ? 16 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 8 : 24);
                 let visitTick = 0;
                 while(open.length > 0 && maxVisits-- > 0) {
                     if((++visitTick & 255) === 0 && performance.now() - astT0 > astCeilMs) break;
@@ -25606,8 +25616,7 @@
 
         function issueStrokeMoveOrder(worldPtsRaw) {
             if(wodCampaignDeployActive()) {
-                let end = worldPtsRaw && worldPtsRaw.length ? worldPtsRaw[worldPtsRaw.length - 1] : null;
-                if(end) wodCampaignDeployUnitsAt(end);
+                wodCampaignDeployUnitsAlongStroke(worldPtsRaw);
                 return;
             }
             if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
@@ -27746,8 +27755,11 @@
             let fortZoneSlow = wodFortEnemyMovementSlowdownMultiplier(unit);
             let stepSpeed = unit.speed * getUnitSpeedMultiplier(unit) * WOD_MOVE_SPEED_FACTOR * combatSlow * fortZoneSlow;
             let stepLeft = stepSpeed * dt;
+            // Cap waypoint snaps per tick so catch-up / large dt never teleports through a
+            // whole corridor in one frame (draw smoothing alone can't hide that).
+            let maxWpSnaps = playerMarch ? 2 : (gameData.entities.length > 220 ? 4 : 6);
             let guard = 0;
-            while(unit.target && stepLeft > 0.0001 && guard++ < 12) {
+            while(unit.target && stepLeft > 0.0001 && guard++ < maxWpSnaps) {
                 let dx = unit.target.x - unit.x;
                 let dy = unit.target.y - unit.y;
                 let dist = Math.sqrt(dx * dx + dy * dy);
@@ -35028,7 +35040,7 @@
                     // froze the border/territory paint for the whole march, which made captured
                     // ground look like it wasn't being claimed at all.
                     let budget = playerMarching
-                        ? (wodUsesVisualViewportLayout() ? 1.4 : 2.4)
+                        ? (wodUsesVisualViewportLayout() ? 1.0 : 1.6)
                         : (wodUsesVisualViewportLayout() ? (camBusy ? 1.2 : 2.4) : 2.6);
                     wodStepTerrainPoliticalBake(budget);
                     if(!terrainNeedsUpdate)
@@ -39542,7 +39554,7 @@
                   wodFormatHoldClock(holdSec) + ' or capture every enemy city to throw them back.'
                 : node.brief) +
                 '\n\nYour army is all you have: ' + c.roster.length + ' units. There are no reinforcements — every loss is permanent.' +
-                '\n\nDeployment: place your troops anywhere in your territory before the battle begins.';
+                '\n\nDeployment: place your troops in your territory — right-click, drag a formation line, or stroke a path — then Begin battle.';
             setGameSpeed(0, true);
             wodShowMissionPopupDialog({ kicker, title, body, style: run.defense ? 'alert' : 'briefing' }, () => {
                 wodEnterCampaignDeployPhase();
@@ -39577,12 +39589,49 @@
             return typeof isClaimableLand === 'function' ? isClaimableLand(hex) : true;
         }
 
+        function wodCampaignDeployFindHex(unit, tx, ty) {
+            let hex = getNearestHexToPoint(tx, ty);
+            if(wodCampaignDeployHexOk(unit, hex)) return hex;
+            let coord = pixelToHex(tx, ty);
+            let best = null, bd = Infinity;
+            for(let pt of getHexesInRadius(coord.q, coord.r, 5)) {
+                let h = gameData.hexes[`${pt.q},${pt.r}`];
+                if(!wodCampaignDeployHexOk(unit, h)) continue;
+                let dx = h.x - tx, dy = h.y - ty;
+                let d = dx * dx + dy * dy;
+                if(d < bd) { bd = d; best = h; }
+            }
+            return best;
+        }
+
+        function wodCampaignDeploySnapUnit(unit, tx, ty) {
+            let hex = wodCampaignDeployFindHex(unit, tx, ty);
+            if(!hex) return false;
+            wodClearUnitOrdersInstant(unit);
+            unit.x = hex.x;
+            unit.y = hex.y;
+            unit._drawX = hex.x;
+            unit._drawY = hex.y;
+            return true;
+        }
+
+        function wodCampaignDeployGetUnits() {
+            let units = typeof getMovableSelectedUnits === 'function' ? getMovableSelectedUnits() : [];
+            return (units || []).filter(u => u && u.owner === 1 && u.hp > 0 && u.type !== 'convoy');
+        }
+
+        function wodCampaignDeployNotify(units, placed, blocked) {
+            if(placed === 0) showNotification('Place units only in your territory' + (units.some(u => u.type === 'ship') ? ' (ships need owned water)' : '') + '.');
+            else if(blocked > 0) showNotification('Deployed ' + placed + ' · ' + blocked + ' could not fit in friendly ground');
+            else showNotification(placed === 1 ? 'Unit deployed' : placed + ' units deployed');
+        }
+
+        /** Instant-place selected units on a square grid around a click (single right-click). */
         function wodCampaignDeployUnitsAt(worldPos) {
             if(!wodCampaignDeployActive()) return false;
-            let units = typeof getMovableSelectedUnits === 'function' ? getMovableSelectedUnits() : [];
-            units = (units || []).filter(u => u && u.owner === 1 && u.hp > 0 && u.type !== 'convoy');
+            let units = wodCampaignDeployGetUnits();
             if(!units.length) {
-                showNotification('Select your units, then right-click friendly territory to place them.');
+                showNotification('Select your units, then right-click or drag a formation in friendly territory.');
                 return true;
             }
             let spacing = Math.max(22, (gameData.hexRadius || 20) * 1.25);
@@ -39591,35 +39640,84 @@
             let midRow = (Math.ceil(units.length / cols) - 1) / 2;
             let placed = 0, blocked = 0;
             for(let i = 0; i < units.length; i++) {
-                let unit = units[i];
                 let r = Math.floor(i / cols), c = i % cols;
                 let tx = worldPos.x + (c - midCol) * spacing;
                 let ty = worldPos.y + (r - midRow) * spacing;
-                let hex = getNearestHexToPoint(tx, ty);
-                if(!wodCampaignDeployHexOk(unit, hex)) {
-                    // Fall back to nearest valid friendly hex around the click.
-                    let coord = pixelToHex(tx, ty);
-                    let best = null, bd = Infinity;
-                    for(let pt of getHexesInRadius(coord.q, coord.r, 4)) {
-                        let h = gameData.hexes[`${pt.q},${pt.r}`];
-                        if(!wodCampaignDeployHexOk(unit, h)) continue;
-                        let dx = h.x - tx, dy = h.y - ty;
-                        let d = dx * dx + dy * dy;
-                        if(d < bd) { bd = d; best = h; }
-                    }
-                    hex = best;
-                }
-                if(!hex) { blocked++; continue; }
-                wodClearUnitOrdersInstant(unit);
-                unit.x = hex.x;
-                unit.y = hex.y;
-                if(unit.drawX != null) unit.drawX = hex.x;
-                if(unit.drawY != null) unit.drawY = hex.y;
-                placed++;
+                if(wodCampaignDeploySnapUnit(units[i], tx, ty)) placed++;
+                else blocked++;
             }
-            if(placed === 0) showNotification('Place units only in your territory' + (units.some(u => u.type === 'ship') ? ' (ships need owned water)' : '') + '.');
-            else if(blocked > 0) showNotification('Deployed ' + placed + ' · ' + blocked + ' could not fit in friendly ground');
-            else showNotification(placed === 1 ? 'Unit deployed' : placed + ' units deployed');
+            wodCampaignDeployNotify(units, placed, blocked);
+            return true;
+        }
+
+        /** Instant-place selected units evenly along a drawn formation line. */
+        function wodCampaignDeployUnitsAlongLine(start, end) {
+            if(!wodCampaignDeployActive()) return false;
+            if(!start || !end) return wodCampaignDeployUnitsAt(end || start || { x: 0, y: 0 });
+            let units = wodCampaignDeployGetUnits();
+            if(!units.length) {
+                showNotification('Select your units, then drag a formation line in friendly territory.');
+                return true;
+            }
+            let dx = end.x - start.x, dy = end.y - start.y;
+            let len = Math.sqrt(dx * dx + dy * dy);
+            if(len < 28) return wodCampaignDeployUnitsAt(end);
+            // Sort along the line so relative order matches the preview slots.
+            units = units.slice().sort((a, b) => {
+                let ax = ((a.x - start.x) * dx + (a.y - start.y) * dy) / len;
+                let bx = ((b.x - start.x) * dx + (b.y - start.y) * dy) / len;
+                return ax - bx;
+            });
+            let placed = 0, blocked = 0;
+            for(let i = 0; i < units.length; i++) {
+                let t = units.length === 1 ? 0.5 : i / (units.length - 1);
+                let tx = start.x + dx * t;
+                let ty = start.y + dy * t;
+                if(wodCampaignDeploySnapUnit(units[i], tx, ty)) placed++;
+                else blocked++;
+            }
+            wodCampaignDeployNotify(units, placed, blocked);
+            return true;
+        }
+
+        /** Instant-place selected units along a freehand stroke / path. */
+        function wodCampaignDeployUnitsAlongStroke(worldPtsRaw) {
+            if(!wodCampaignDeployActive()) return false;
+            let pts = worldPtsRaw;
+            if(typeof simplifyPathStrokeForOrders === 'function' && pts && pts.length >= 2)
+                pts = simplifyPathStrokeForOrders(pts);
+            if(!pts || pts.length < 2) {
+                let end = worldPtsRaw && worldPtsRaw.length ? worldPtsRaw[worldPtsRaw.length - 1] : null;
+                return end ? wodCampaignDeployUnitsAt(end) : false;
+            }
+            let units = wodCampaignDeployGetUnits();
+            if(!units.length) {
+                showNotification('Select your units, then stroke a formation path in friendly territory.');
+                return true;
+            }
+            // Arc-length sample so units spread evenly along the drawn path.
+            let segLens = [0], total = 0;
+            for(let i = 1; i < pts.length; i++) {
+                let sx = pts[i].x - pts[i - 1].x, sy = pts[i].y - pts[i - 1].y;
+                total += Math.sqrt(sx * sx + sy * sy);
+                segLens.push(total);
+            }
+            if(total < 28) return wodCampaignDeployUnitsAt(pts[pts.length - 1]);
+            let placed = 0, blocked = 0;
+            for(let i = 0; i < units.length; i++) {
+                let t = units.length === 1 ? 0.5 : i / (units.length - 1);
+                let want = t * total;
+                let si = 1;
+                while(si < segLens.length - 1 && segLens[si] < want) si++;
+                let a = pts[si - 1], b = pts[si];
+                let seg = segLens[si] - segLens[si - 1];
+                let u = seg > 0.0001 ? (want - segLens[si - 1]) / seg : 0;
+                let tx = a.x + (b.x - a.x) * u;
+                let ty = a.y + (b.y - a.y) * u;
+                if(wodCampaignDeploySnapUnit(units[i], tx, ty)) placed++;
+                else blocked++;
+            }
+            wodCampaignDeployNotify(units, placed, blocked);
             return true;
         }
 
@@ -39638,7 +39736,7 @@
                 btn._wodDeployWired = true;
                 btn.addEventListener('click', () => wodFinishCampaignDeployPhase());
             }
-            showNotification('Deployment — place troops in your territory, then Begin battle.');
+            showNotification('Deployment — right-click, drag a line, or stroke a path to form up, then Begin battle.');
         }
 
         function wodFinishCampaignDeployPhase() {
@@ -41925,7 +42023,11 @@
                 return;
             }
             let dt = (time - lastTime) / 1000;
-            if (dt > 0.1) dt = 0.1; // Cap dt to prevent massive jumps/freezes after alerts or lag
+            // Tighter cap while armies are marching so popup/lag spikes never dump a
+            // huge catch-up burst into unit positions.
+            let dtCap = (gameData._wodPlayerMovingN || 0) > 0 || (gameData._wodMovingN || 0) > 40
+                ? 0.05 : 0.08;
+            if (dt > dtCap) dt = dtCap;
             lastTime = time;
             wodDevNoteFrame(time, dt);
             let mpWaiting = gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay();
@@ -41983,17 +42085,19 @@
                     (wodUsesVisualViewportLayout() && UI.inGameUI && UI.inGameUI.getAttribute('data-mtab'));
                 if(!uiPaused) {
                     let simDt = dt * gameData.speed;
-                    let baseChunk = wodUsesVisualViewportLayout() ? 0.04 : 0.052;
-                    let maxSingleStep = baseChunk * 1.15;
+                    // Fixed-ish substeps keep movement continuous across map sizes / troop counts.
+                    let baseChunk = wodUsesVisualViewportLayout() ? 0.033 : 0.036;
+                    let maxSingleStep = baseChunk * 1.35;
                     gameData._frameSimDt = 0;
                     if(simDt <= maxSingleStep) {
                         wodDevMark('update');
                         update(simDt);
                         gameData._frameSimDt = simDt;
                     } else {
-                        let simChunk = baseChunk * Math.max(1, gameData.speed || 1);
+                        let simChunk = baseChunk * Math.max(1, Math.min(2, gameData.speed || 1));
                         let simRemain = simDt;
-                        let marchCap = (gameData._wodPlayerMovingN || 0) > 0 ? 2 : 12;
+                        // Prefer more small steps over a few large ones — smoother marches.
+                        let marchCap = (gameData._wodPlayerMovingN || 0) > 0 ? 3 : 8;
                         let steps = 0;
                         while(simRemain > 0.0001 && steps++ < marchCap) {
                             let step = Math.min(simRemain, simChunk);
@@ -42005,6 +42109,8 @@
                     }
                 } else {
                     gameData._frameSimDt = 0;
+                    // UI overlays pause sim — don't accumulate a catch-up debt.
+                    lastTime = time;
                 }
             } else {
                 gameData._frameSimDt = 0;
@@ -42444,8 +42550,8 @@
         function applyShiftWaypointMarch() {
             if(wodCampaignDeployActive()) {
                 let wps = gameData.playerShiftWaypoints;
-                let end = wps && wps.length ? wps[wps.length - 1] : null;
-                if(end) wodCampaignDeployUnitsAt(end);
+                if(wps && wps.length >= 2) wodCampaignDeployUnitsAlongStroke(wps);
+                else if(wps && wps.length) wodCampaignDeployUnitsAt(wps[wps.length - 1]);
                 gameData.playerShiftWaypoints = [];
                 return;
             }
@@ -42579,7 +42685,7 @@
 
         function issueLineFormationOrder(start, end) {
             if(wodCampaignDeployActive()) {
-                wodCampaignDeployUnitsAt(end || start);
+                wodCampaignDeployUnitsAlongLine(start, end || start);
                 return;
             }
             if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
@@ -43482,11 +43588,11 @@
             if(popup.title || popup.body) {
                 wodShowMissionPopupDialog(popup, () => {
                     rt.popupOpen = false;
-                    gameData.speed = rt.resumeSpeed || 1;
+                    setGameSpeed(rt.resumeSpeed || 1, true);
                 });
             } else {
                 rt.popupOpen = false;
-                gameData.speed = rt.resumeSpeed || 1;
+                setGameSpeed(rt.resumeSpeed || 1, true);
             }
         }
         function wodUpdateMissionEvents(dt) {

@@ -373,6 +373,11 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Pre-battle **deployment phase**: after briefing, game stays paused; player places roster units anywhere in friendly territory (right-click / formation / stroke), then **Begin battle**.
 - Campaign HUD shows `+/turn` income from held regions; `render_game_to_text` includes deploy/hold campaign fields.
 
+## Deploy formations + butter-smooth movement (2026-07-09)
+- Deployment now places along **drawn formation lines** and **stroke paths** (not just a grid at the click endpoint).
+- Marching units use draw interpolation again (`wodUnitSmoothDrawXY` no longer hard-snaps while `target` is set).
+- Movement hitch fixes: tighter dt caps while marching, smaller sim substeps, fewer waypoint snaps per tick, reset frame clock on unpause/popup resume, more PF budget on large maps, lighter terrain bake during marches.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
