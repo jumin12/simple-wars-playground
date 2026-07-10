@@ -477,3 +477,11 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Topography uses neighbor-blended elev + blur so depressions read round; cities/hills/mountains get realistic shade.
 - PC top/bottom chrome uses mobile-style $ / MP marks and Buildings/Units SVG icons; unit card sits bottom-right flush on the dock with no gap and no overlapping detail rows.
 - Pushed to `main`.
+
+## PC objective / economy / dock / select-close menus (2026-07-10)
+- PC objective uses the same crosshair icon as mobile, placed left of the objective text.
+- Money/manpower compact cards are larger and more spaced again.
+- Removed the far-right production-tray hide arrow; click the active Buildings/Units tab to collapse.
+- Selecting a unit closes open menus (PC production tray, mobile dock sheets, Stats, Esc menu).
+- PC unit card widened to match mobile (~560px).
+- Pushed to `main`.
