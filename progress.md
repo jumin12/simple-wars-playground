@@ -472,9 +472,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Removed per-hex dark blob relief; replaced with continuous crumpled heightmap hillshade topography.
 - Pushed to `main`.
 
-## Multi-select Stats / rounder topo / PC mobile chrome (2026-07-10)
-- Hide Stats order button when multiple units are selected.
-- Soft-blend + blur topography so depressions read as rounded bowls instead of square blotches.
-- PC now uses the mobile top status rail and bottom dock (PC-sized); Buildings/Units open the production tray.
-- PC unit card matches mobile sheet styling, bottom-right, flush above the dock with no gap.
+## Multi-select Stats hide / rounder topo / PC dock parity (2026-07-10)
+- Stats order button hidden when multiple units are selected (3-button order row).
+- Topography elevation blurred so depressions read rounded instead of square hex blocks.
+- PC bottom dock is Stats/Map/Buildings/Units like mobile; top HUD uses paired resource cards + gold chrome.
+- PC unit card sits bottom-right flush above the dock (no gap, no overlap).
 - Pushed to `main`.
