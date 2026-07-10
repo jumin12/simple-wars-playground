@@ -490,3 +490,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Map key and Layers sit below the PC top bar via `--wod-pc-top-ui-h`.
 - Fixed a later PC CSS override that stacked the objective icon above the text; icon stays left of the copy like mobile.
 - Pushed to `main`.
+
+## PC objective left + live top-bar clearance (2026-07-10)
+- Locked `#hudObjectiveDesktop` to a mobile-style row (icon left of copy) with stronger CSS so it cannot stack.
+- Map Key / Layers / player chart offset from measured `.wod-hud-top` height (`wodSyncPcTopUiClearance`).
+- Pushed to `main`.

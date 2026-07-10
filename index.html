@@ -754,6 +754,10 @@
         }
 
         .wod-hud-objective {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
             flex: 1 1 auto;
             min-width: 0;
             max-width: min(380px, 36vw);
@@ -762,6 +766,17 @@
             border-radius: 10px;
             background: rgba(8, 14, 24, 0.55);
             border: 1px solid rgba(212, 175, 39, 0.35);
+            box-sizing: border-box;
+        }
+        .wod-hud-objective > .wod-m-objective-icon {
+            flex: 0 0 auto;
+            order: 0;
+            align-self: center;
+        }
+        .wod-hud-objective > .wod-m-objective-copy {
+            flex: 1 1 auto;
+            min-width: 0;
+            order: 1;
         }
         .wod-hud-objective-label {
             display: block;
@@ -1279,20 +1294,20 @@
                 display: none !important;
             }
             #inGameUI {
-                --wod-pc-top-ui-h: 86px;
+                --wod-pc-top-ui-h: 96px;
             }
             #inGameUI #terrainKey {
-                top: calc(var(--wod-pc-top-ui-h) + 12px);
+                top: calc(var(--wod-pc-top-ui-h) + 14px);
                 left: 16px;
                 z-index: 12;
             }
             #inGameUI .layer-toggles {
-                top: calc(var(--wod-pc-top-ui-h) + 12px);
+                top: calc(var(--wod-pc-top-ui-h) + 14px);
                 right: 16px;
                 z-index: 12;
             }
             #inGameUI .player-summary {
-                top: calc(var(--wod-pc-top-ui-h) + 220px);
+                top: calc(var(--wod-pc-top-ui-h) + 230px);
             }
             .wod-pc-prod-slide {
                 background: rgba(8, 16, 26, 0.96);
@@ -1399,7 +1414,8 @@
                 line-height: 1;
                 font-variant-numeric: tabular-nums;
             }
-            #inGameUI .wod-hud-objective {
+            #inGameUI .wod-hud-objective,
+            #inGameUI #hudObjectiveDesktop {
                 max-width: min(460px, 42vw);
                 margin-right: 0;
                 margin-left: 4px;
@@ -1409,6 +1425,7 @@
                 border: 1px solid rgba(217, 169, 76, 0.4);
                 display: flex !important;
                 flex-direction: row !important;
+                flex-wrap: nowrap !important;
                 align-items: center !important;
                 gap: 10px;
                 box-sizing: border-box;
@@ -7666,12 +7683,27 @@
                 width: auto !important;
                 margin-top: 0 !important;
             }
-            #inGameUI .wod-hud-objective {
+            #inGameUI .wod-hud-objective,
+            #inGameUI #hudObjectiveDesktop {
                 display: flex !important;
                 flex-direction: row !important;
+                flex-wrap: nowrap !important;
                 align-items: center !important;
                 max-width: min(460px, 42vw);
                 gap: 10px;
+            }
+            #inGameUI #hudObjectiveDesktop > .wod-m-objective-icon {
+                display: block !important;
+                flex: 0 0 30px !important;
+                order: 0 !important;
+                align-self: center !important;
+            }
+            #inGameUI #hudObjectiveDesktop > .wod-m-objective-copy {
+                display: flex !important;
+                flex-direction: column !important;
+                flex: 1 1 auto !important;
+                min-width: 0 !important;
+                order: 1 !important;
             }
             #inGameUI #hudObjectiveMobileBlock { display: none !important; }
             #inGameUI #terrainKey,
@@ -7680,11 +7712,11 @@
                 display: revert !important;
             }
             #inGameUI #terrainKey {
-                top: calc(var(--wod-pc-top-ui-h, 78px) + 12px);
+                top: calc(var(--wod-pc-top-ui-h, 96px) + 14px);
                 left: 16px;
             }
             #inGameUI .layer-toggles {
-                top: calc(var(--wod-pc-top-ui-h, 78px) + 12px);
+                top: calc(var(--wod-pc-top-ui-h, 96px) + 14px);
                 right: 16px;
             }
             #inGameUI .bottom-bar {
@@ -10998,6 +11030,17 @@
             });
         }
 
+        function wodSyncPcTopUiClearance() {
+            let ui = document.getElementById('inGameUI');
+            let top = ui && ui.querySelector('.wod-hud-top');
+            if(!ui || !top) return;
+            if(typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 900px)').matches) return;
+            let h = Math.ceil(top.getBoundingClientRect().height || 0);
+            if(h < 48) h = 96;
+            ui.style.setProperty('--wod-pc-top-ui-h', h + 'px');
+        }
+        window.wodSyncPcTopUiClearance = wodSyncPcTopUiClearance;
+
         function initTerrainKeyToggle() {
             let panel = document.getElementById('terrainKey');
             let btn = document.getElementById('terrainKeyToggle');
@@ -11236,6 +11279,20 @@
         wodInitStatsMobileTabs();
         initWodPcProductionDock();
         initWodHudDeselectOnClick();
+        wodSyncPcTopUiClearance();
+        window.addEventListener('resize', () => {
+            if(typeof wodSyncPcTopUiClearance === 'function') wodSyncPcTopUiClearance();
+        });
+        if(typeof ResizeObserver === 'function') {
+            let topBar = document.querySelector('#inGameUI .wod-hud-top');
+            if(topBar) {
+                try {
+                    new ResizeObserver(() => {
+                        if(typeof wodSyncPcTopUiClearance === 'function') wodSyncPcTopUiClearance();
+                    }).observe(topBar);
+                } catch(_) {}
+            }
+        }
 
         let gameState = 'MENU'; 
         let menuDemoSeeded = false;
@@ -11385,6 +11442,7 @@
             setUiText('hudObjectiveRuleDesktop', pack.rule);
             setUiText('hudObjectiveModeMobile', pack.mode);
             setUiText('hudObjectiveRuleMobile', pack.rule);
+            if(typeof wodSyncPcTopUiClearance === 'function') wodSyncPcTopUiClearance();
         }
 
         function syncSetupVictoryDetail() {
