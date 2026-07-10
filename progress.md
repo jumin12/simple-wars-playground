@@ -366,9 +366,17 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Spatialize threat/foreign-unit distance queries; single-pass unit draw ordering.
 - Gameplay unchanged ? same combat/movement/claims, cheaper calculations.
 
+## Campaign economy / defense / deployment pass (2026-07-09)
+- Turn income: **+50 requisition per controlled territory** (replaces flat +60 and industry +80).
+- Defense hold timer: **5:00** on all difficulties (`defenseHoldSec: 300`).
+- Defense streak cap: never more than **2 defenses in a row** (`consecutiveDefenses`); an attack battle resets the streak.
+- Pre-battle **deployment phase**: after briefing, game stays paused; player places roster units anywhere in friendly territory (right-click / formation / stroke), then **Begin battle**.
+- Campaign HUD shows `+/turn` income from held regions; `render_game_to_text` includes deploy/hold campaign fields.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
 - Visual polish: Normandy map is large (~72 radius / ~16k hexes); consider a tighter Cotentin crop if load times matter on slow devices.
 - Optional: sample attract-mode FPS when menu battle is running under `menuAttractMode`.
 - Optional: paint beach-sector labels (Utah/Omaha/Gold/Juno/Sword) as map markers if the engine gains label entities.
+- Optional: Playwright smoke for campaign deploy banner + Begin battle resume.

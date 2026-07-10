@@ -5332,6 +5332,52 @@
             border-color: rgba(231, 76, 60, 0.75);
             color: #ff9d8f;
         }
+        #wodDeployBanner {
+            position: fixed;
+            top: 64px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 65;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            max-width: min(720px, calc(100vw - 24px));
+            padding: 12px 16px 12px 18px;
+            border-radius: 12px;
+            background: rgba(18, 28, 42, 0.94);
+            border: 1px solid rgba(100, 170, 255, 0.55);
+            color: #d7e8ff;
+            box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+            pointer-events: auto;
+        }
+        #wodDeployBanner.hidden { display: none; }
+        .wod-deploy-banner-text {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            min-width: 0;
+            font-size: 0.92rem;
+            line-height: 1.35;
+        }
+        .wod-deploy-banner-text strong {
+            color: #9ec8ff;
+            font-size: 1.02rem;
+            letter-spacing: 0.02em;
+        }
+        .wod-deploy-banner-text span { opacity: 0.92; }
+        .wod-deploy-begin-btn {
+            flex: 0 0 auto;
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid rgba(120, 200, 120, 0.65);
+            background: rgba(46, 140, 70, 0.85);
+            color: #f2fff4;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .wod-deploy-begin-btn:hover { filter: brightness(1.08); }
         @keyframes wodEndCdPulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.72; }
@@ -8265,6 +8311,13 @@
         </div>
 
         <div id="wodEndCountdownBanner" class="hidden" role="status" aria-live="polite"></div>
+        <div id="wodDeployBanner" class="hidden" role="status" aria-live="polite">
+            <div class="wod-deploy-banner-text">
+                <strong>Deployment</strong>
+                <span>Select units and right-click friendly territory to place them, then begin the battle.</span>
+            </div>
+            <button type="button" class="wod-deploy-begin-btn" id="wodDeployBeginBtn">Begin battle</button>
+        </div>
 
         <div id="wodMissionPopupOverlay" class="overlay hidden wod-load-overlay" role="dialog" aria-modal="true" aria-labelledby="wodMissionPopupTitle">
             <div id="wodMissionPopupPanel" class="wod-mission-popup-panel wod-mission-style-briefing">
@@ -10042,6 +10095,11 @@
             if(speed > 3) speed = 3;
             if(gameData && gameData.mp && gameData.mp.enabled && !allowNonRealtime && speed !== 1)
                 speed = 1;
+            // Deployment stays paused until the player confirms Begin battle.
+            if(wodCampaignDeployActive() && speed > 0 && !allowNonRealtime) {
+                showNotification('Finish deployment with Begin battle first.');
+                speed = 0;
+            }
             gameData.speed = speed;
             for(let btn of document.querySelectorAll('.speed-btn')) btn.classList.remove('active');
             let activeId = speed === 0 ? 'speedPause' : (speed === 3 ? 'speed3' : (speed === 2 ? 'speed2' : 'speed1'));
@@ -10108,6 +10166,8 @@
         function returnToMenu() {
             hideCampaignSummaryOverlay();
             wodHideMissionPopup();
+            let deployBanner = document.getElementById('wodDeployBanner');
+            if(deployBanner) deployBanner.classList.add('hidden');
             // Quitting a campaign battle mid-fight counts as a failed assault: the roster
             // syncs to the units' current state and the node is not captured.
             if(gameData._campaignRun && !gameData._campaignRun.synced && gameState === 'PLAYING')
@@ -20966,7 +21026,7 @@
             let victoryLabel = modeKey === 'annihilation' ? 'Annihilation'
                 : (modeKey === 'defense' ? 'Defense' : 'Domination');
             let victoryRule = modeKey === 'defense'
-                ? ('Hold for ' + wodFormatHoldClock(campRun.holdSec || 120) + ' or capture all enemy cities.')
+                ? ('Hold for ' + wodFormatHoldClock(campRun.holdSec || 300) + ' or capture all enemy cities.')
                 : (WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || '');
 
             let lo = wodLocalPlayerOwner();
@@ -21326,7 +21386,7 @@
             // Prefer end-condition countdowns when they are active.
             let cds = gameData._endCountdowns;
             if(cds) for(let k in cds) { if(cds[k]) return; }
-            let need = run.holdSec || 120;
+            let need = run.holdSec || 300;
             let left = Math.max(0, need - (run.holdElapsed || 0));
             el.textContent = 'Hold the line — ' + wodFormatHoldClock(left) + ' remaining (or take all enemy cities)';
             el.classList.remove('wod-endcd-danger');
@@ -21342,6 +21402,7 @@
         /** Ends solo vs AI matches: domination (default) or annihilation; also handles defeat when the player has no cities. In multiplayer, only the host evaluates end conditions and broadcasts outcomes. */
         function checkCampaignEndConditions(dt) {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
+            if(wodCampaignDeployActive()) return;
             if(window._wodBootBusy || window._wodMenuBootstrapBusy || gameData._mapGenInProgress) return;
             if(gameData.mp && gameData.mp.enabled) {
                 if(gameData.mp.isHost) wodMpCheckEndConditionsHost(dt);
@@ -25544,6 +25605,11 @@
         }
 
         function issueStrokeMoveOrder(worldPtsRaw) {
+            if(wodCampaignDeployActive()) {
+                let end = worldPtsRaw && worldPtsRaw.length ? worldPtsRaw[worldPtsRaw.length - 1] : null;
+                if(end) wodCampaignDeployUnitsAt(end);
+                return;
+            }
             if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
             let units = getMovableSelectedUnits();
             if(units.length === 0 || !worldPtsRaw || worldPtsRaw.length < 2) return;
@@ -33172,6 +33238,10 @@
         }
 
         function updateAiStrategy(dt) {
+            if(wodCampaignDeployActive()) {
+                gameData._aiStratWork = null;
+                return;
+            }
             if(gameData._aiStratWork) {
                 if(wodDeferHeavySimDuringMarch() && (gameData._wodSimTick & 1)) return;
                 wodDrainAiStratFormationAndUnits();
@@ -37934,15 +38004,17 @@
         const WOD_ROGUE_UNIT_COSTS = { light: 200, marine: 260, heavy: 480, ship: 420 };
         const WOD_ROGUE_UNIT_LABEL = { light: 'Infantry', marine: 'Marines', heavy: 'Armor', ship: 'Warship' };
         const WOD_ROGUE_DIFF_PRESETS = {
-            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 3600, blockChance: 0.28, defenseHoldSec: 90 },
-            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 4500, blockChance: 0.38, defenseHoldSec: 120 },
-            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 5600, blockChance: 0.48, defenseHoldSec: 180 },
-            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 7000, blockChance: 0.58, defenseHoldSec: 240 }
+            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 3600, blockChance: 0.28, defenseHoldSec: 300 },
+            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 4500, blockChance: 0.38, defenseHoldSec: 300 },
+            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 5600, blockChance: 0.48, defenseHoldSec: 300 },
+            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 7000, blockChance: 0.58, defenseHoldSec: 300 }
         };
         const WOD_ROGUE_MAX_FORCED_DEFENSES = 5;
+        const WOD_ROGUE_MAX_CONSECUTIVE_DEFENSES = 2;
+        const WOD_ROGUE_REQ_PER_TERRITORY = 50;
         function wodRogueDefenseHoldSeconds(difficulty) {
             let D = WOD_ROGUE_DIFF_PRESETS[difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
-            return Math.max(60, D.defenseHoldSec | 0 || 120);
+            return Math.max(60, D.defenseHoldSec | 0 || 300);
         }
         function wodFormatHoldClock(sec) {
             sec = Math.max(0, Math.ceil(sec || 0));
@@ -38281,7 +38353,7 @@
             for(let n of nodes) {
                 if(n.hq) n.brief = 'Our last foothold on this coast. From ' + n.name + ' the Federation Remnant strikes back — if it falls, the war is over.';
                 else if(n.capital) n.brief = 'The Iron Concord\u2019s capital, ' + n.name + '. ' + (n.ai > 1 ? 'Two field armies stand between you and the palace. ' : '') + 'End this war.';
-                else n.brief = wodRogueMakeBrief(rng, n) + (n.industry ? ' Holding its foundries yields extra requisition every turn.' : '');
+                else n.brief = wodRogueMakeBrief(rng, n) + (n.industry ? ' Its foundries mark a vital industrial region.' : '');
             }
             // Edges: 2-3 nearest neighbors + union-find connectivity repair.
             let edges = [];
@@ -38419,6 +38491,7 @@
                 alerts: {},
                 blockedAdvance: false,
                 forcedDefenses: 0,
+                consecutiveDefenses: 0,
                 log: ['The Federation Remnant lands. The war for the Ashen Front begins. Starting requisition: ' + startPts + '.'],
                 stats: { battles: 0, wins: 0, defeats: 0, unitsLost: 0, unitsKilled: 0, unitsBought: 0, kills: 0, losses: 0 },
                 over: false,
@@ -38892,9 +38965,11 @@
             let status = document.getElementById('wodCampStatus');
             if(status) {
                 let held = Object.values(c.nodesState).filter(n => n.owner === 'player').length;
+                let turnIncome = held * WOD_ROGUE_REQ_PER_TERRITORY;
                 status.innerHTML =
                     '<span>' + c.points + ' requisition</span>' +
-                    '<span class="wod-camp-turn">War turn ' + c.turn + ' · ' + held + '/' + wodRogueNodes().length + ' regions · ' +
+                    '<span class="wod-camp-turn">War turn ' + c.turn + ' · ' + held + '/' + wodRogueNodes().length + ' regions · +' +
+                    turnIncome + '/turn · ' +
                     WOD_ROGUE_DIFF_PRESETS[c.settings.difficulty].label + '</span>';
             }
             let statsEl = document.getElementById('wodCampStats');
@@ -38951,7 +39026,7 @@
                         tag +
                         '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield</p>' +
                         '<p>' + node.brief + '</p>' +
-                        (node.industry ? '<p style="color:#d4af37">Holding these foundries: +80 requisition every turn.</p>' : '') +
+                        (node.industry ? '<p style="color:#d4af37">Industrial region — still worth +' + WOD_ROGUE_REQ_PER_TERRITORY + ' requisition each turn while held.</p>' : '') +
                         blockNote +
                         intel;
                 }
@@ -39454,10 +39529,10 @@
             if(run) run.rosterAtStart = c.roster.length;
             wodSyncCampaignBattleHud();
             if(run && run.defense) wodUpdateCampaignDefenseHoldBanner();
-            // Campaign AI should press the attack, not sit on hold lines.
+            // Campaign AI should press the attack, not sit on hold lines — after deployment.
             gameData._campaignAiAggressive = true;
             gameData.aiStrategyTimer = 99;
-            // Story briefing.
+            // Story briefing, then interactive deployment in friendly territory.
             let kicker = run.defense ? 'Counterattack at ' + node.name : 'War turn ' + c.turn;
             let title = run.defense ? 'Hold ' + node.name : node.name;
             let holdSec = run.holdSec || (run.defense ? wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty) : 0);
@@ -39466,9 +39541,122 @@
                 ? 'The Iron Concord is counterattacking ' + node.name + '. Hold for ' +
                   wodFormatHoldClock(holdSec) + ' or capture every enemy city to throw them back.'
                 : node.brief) +
-                '\n\nYour army is all you have: ' + c.roster.length + ' units. There are no reinforcements — every loss is permanent.';
+                '\n\nYour army is all you have: ' + c.roster.length + ' units. There are no reinforcements — every loss is permanent.' +
+                '\n\nDeployment: place your troops anywhere in your territory before the battle begins.';
             setGameSpeed(0, true);
-            wodShowMissionPopupDialog({ kicker, title, body, style: run.defense ? 'alert' : 'briefing' }, () => setGameSpeed(1, true));
+            wodShowMissionPopupDialog({ kicker, title, body, style: run.defense ? 'alert' : 'briefing' }, () => {
+                wodEnterCampaignDeployPhase();
+            });
+        }
+
+        function wodCampaignDeployActive() {
+            return !!(gameData && gameData._campaignRun && gameData._campaignRun.deploying);
+        }
+
+        function wodClearUnitOrdersInstant(unit) {
+            if(!unit) return;
+            unit.target = null;
+            unit.path = null;
+            unit.orderTarget = null;
+            unit.fullMarchWaypoints = null;
+            unit.marchWpCursor = 0;
+            unit.combatEngaged = false;
+            unit.retreating = false;
+            unit.combatLockTimer = 0;
+        }
+
+        function wodCampaignDeployHexOk(unit, hex) {
+            if(!unit || !hex || hex.owner !== 1) return false;
+            if(unit.type === 'ship') return wodIsOpenWaterHex(hex);
+            if(unit.type === 'marine') {
+                if(hex.type === 'mountain') return false;
+                return isWaterHex(hex) || (typeof isClaimableLand === 'function' ? isClaimableLand(hex) : !isWaterHex(hex));
+            }
+            if(hex.type === 'mountain') return false;
+            if(isWaterHex(hex) && !isBridgeHex(hex)) return false;
+            return typeof isClaimableLand === 'function' ? isClaimableLand(hex) : true;
+        }
+
+        function wodCampaignDeployUnitsAt(worldPos) {
+            if(!wodCampaignDeployActive()) return false;
+            let units = typeof getMovableSelectedUnits === 'function' ? getMovableSelectedUnits() : [];
+            units = (units || []).filter(u => u && u.owner === 1 && u.hp > 0 && u.type !== 'convoy');
+            if(!units.length) {
+                showNotification('Select your units, then right-click friendly territory to place them.');
+                return true;
+            }
+            let spacing = Math.max(22, (gameData.hexRadius || 20) * 1.25);
+            let cols = Math.ceil(Math.sqrt(units.length));
+            let midCol = (cols - 1) / 2;
+            let midRow = (Math.ceil(units.length / cols) - 1) / 2;
+            let placed = 0, blocked = 0;
+            for(let i = 0; i < units.length; i++) {
+                let unit = units[i];
+                let r = Math.floor(i / cols), c = i % cols;
+                let tx = worldPos.x + (c - midCol) * spacing;
+                let ty = worldPos.y + (r - midRow) * spacing;
+                let hex = getNearestHexToPoint(tx, ty);
+                if(!wodCampaignDeployHexOk(unit, hex)) {
+                    // Fall back to nearest valid friendly hex around the click.
+                    let coord = pixelToHex(tx, ty);
+                    let best = null, bd = Infinity;
+                    for(let pt of getHexesInRadius(coord.q, coord.r, 4)) {
+                        let h = gameData.hexes[`${pt.q},${pt.r}`];
+                        if(!wodCampaignDeployHexOk(unit, h)) continue;
+                        let dx = h.x - tx, dy = h.y - ty;
+                        let d = dx * dx + dy * dy;
+                        if(d < bd) { bd = d; best = h; }
+                    }
+                    hex = best;
+                }
+                if(!hex) { blocked++; continue; }
+                wodClearUnitOrdersInstant(unit);
+                unit.x = hex.x;
+                unit.y = hex.y;
+                if(unit.drawX != null) unit.drawX = hex.x;
+                if(unit.drawY != null) unit.drawY = hex.y;
+                placed++;
+            }
+            if(placed === 0) showNotification('Place units only in your territory' + (units.some(u => u.type === 'ship') ? ' (ships need owned water)' : '') + '.');
+            else if(blocked > 0) showNotification('Deployed ' + placed + ' · ' + blocked + ' could not fit in friendly ground');
+            else showNotification(placed === 1 ? 'Unit deployed' : placed + ' units deployed');
+            return true;
+        }
+
+        function wodEnterCampaignDeployPhase() {
+            let run = gameData._campaignRun;
+            if(!run) return;
+            run.deploying = true;
+            run.holdElapsed = 0;
+            setGameSpeed(0, true);
+            // Freeze AI / economy while the player arranges the army.
+            gameData._campaignAiAggressive = false;
+            let banner = document.getElementById('wodDeployBanner');
+            if(banner) banner.classList.remove('hidden');
+            let btn = document.getElementById('wodDeployBeginBtn');
+            if(btn && !btn._wodDeployWired) {
+                btn._wodDeployWired = true;
+                btn.addEventListener('click', () => wodFinishCampaignDeployPhase());
+            }
+            showNotification('Deployment — place troops in your territory, then Begin battle.');
+        }
+
+        function wodFinishCampaignDeployPhase() {
+            let run = gameData._campaignRun;
+            if(!run || !run.deploying) return;
+            run.deploying = false;
+            run.holdElapsed = 0;
+            let banner = document.getElementById('wodDeployBanner');
+            if(banner) banner.classList.add('hidden');
+            // Clear any leftover march orders from placement clicks.
+            for(let u of gameData.entities || []) {
+                if(u && u.owner === 1) wodClearUnitOrdersInstant(u);
+            }
+            gameData._campaignAiAggressive = true;
+            gameData.aiStrategyTimer = 99;
+            setGameSpeed(1, true);
+            if(run.defense) wodUpdateCampaignDefenseHoldBanner();
+            showNotification('Battle begun!');
         }
 
         function wodRogueFindDeployWaterHex(x, y, idx) {
@@ -39543,6 +39731,9 @@
             };
             // Outcome.
             let nodeState = c.nodesState[run.nodeId];
+            if(c.consecutiveDefenses == null) c.consecutiveDefenses = 0;
+            if(run.defense) c.consecutiveDefenses = (c.consecutiveDefenses | 0) + 1;
+            else c.consecutiveDefenses = 0;
             if(won) {
                 wodBumpLifetime('campaignBattlesWon', 1);
                 checkWodAchievements();
@@ -39595,6 +39786,8 @@
             gameData._campaignRegionMap = null;
             gameData._campaignAiAggressive = false;
             gameData._wodReturnToCampaign = true;
+            let deployBanner = document.getElementById('wodDeployBanner');
+            if(deployBanner) deployBanner.classList.add('hidden');
             wodSyncCampaignBattleHud();
         }
 
@@ -39604,6 +39797,7 @@
             c.turn++;
             if(c.forcedDefenses == null) c.forcedDefenses = 0;
             if(c.blockedAdvance == null) c.blockedAdvance = false;
+            if(c.consecutiveDefenses == null) c.consecutiveDefenses = 0;
             let D = WOD_ROGUE_DIFF_PRESETS[c.settings.difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
             let rng = wodRogueRng((c.seed ^ wodRogueMul32(c.turn, 0xc2b2ae35)) >>> 0);
             // Unanswered alerts fall.
@@ -39619,17 +39813,21 @@
                 }
             }
             if(!wodRogueHasActiveAlerts(c)) c.blockedAdvance = false;
-            // Turn income (+industry bonuses).
-            let income = 60;
-            for(let n of wodRogueNodes()) {
-                if(n.industry && c.nodesState[n.id] && c.nodesState[n.id].owner === 'player') income += 80;
-            }
-            c.points += income;
-            // New counterattack: a player border region (HQ exempt until the endgame).
-            // Sometimes this seals the roads (forced defense) — at most 5 times per campaign.
+            // Turn income: +50 requisition per controlled territory.
             let held = Object.values(c.nodesState).filter(n => n.owner === 'player').length;
+            let income = held * WOD_ROGUE_REQ_PER_TERRITORY;
+            c.points += income;
+            if(held > 0) wodRogueLogPush('+' + income + ' requisition from ' + held + ' held region' + (held === 1 ? '' : 's') + '.');
+            // New counterattack: a player border region (HQ exempt until the endgame).
+            // Never more than 2 defense battles in a row; sometimes seals the roads (forced defense).
             let total = wodRogueNodes().length;
-            if(c.turn > 2 && rng() < D.counterChance && !wodRogueHasActiveAlerts(c)) {
+            let canSpawnDefense = (c.consecutiveDefenses | 0) < WOD_ROGUE_MAX_CONSECUTIVE_DEFENSES;
+            if(!canSpawnDefense && wodRogueHasActiveAlerts(c)) {
+                c.alerts = {};
+                c.blockedAdvance = false;
+                wodRogueLogPush('High command grants a breathing space — no further counterattacks until you press the attack.');
+            }
+            if(canSpawnDefense && c.turn > 2 && rng() < D.counterChance && !wodRogueHasActiveAlerts(c)) {
                 let targets = wodRogueNodes().filter(n =>
                     c.nodesState[n.id].owner === 'player' &&
                     !c.alerts[n.id] &&
@@ -42244,6 +42442,13 @@
         }
 
         function applyShiftWaypointMarch() {
+            if(wodCampaignDeployActive()) {
+                let wps = gameData.playerShiftWaypoints;
+                let end = wps && wps.length ? wps[wps.length - 1] : null;
+                if(end) wodCampaignDeployUnitsAt(end);
+                gameData.playerShiftWaypoints = [];
+                return;
+            }
             if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
             let units = getMovableSelectedUnits();
             if(units.length === 0) return;
@@ -42329,6 +42534,10 @@
         }
 
         function issueMoveOrder(worldPos) {
+            if(wodCampaignDeployActive()) {
+                wodCampaignDeployUnitsAt(worldPos);
+                return;
+            }
             if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
             let units = getMovableSelectedUnits();
             if(units.length === 0) return;
@@ -42369,6 +42578,10 @@
         }
 
         function issueLineFormationOrder(start, end) {
+            if(wodCampaignDeployActive()) {
+                wodCampaignDeployUnitsAt(end || start);
+                return;
+            }
             if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
             let units = getMovableSelectedUnits();
             if(units.length === 0) return;
@@ -44403,7 +44616,14 @@
                 units: gameData.entities.map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp})),
                 gold: gameData.gold | 0,
                 fps: Math.round(wodDevFps || 0),
-                devMenu: wodDevMenuOpen()
+                devMenu: wodDevMenuOpen(),
+                campaign: gameData._campaignRun ? {
+                    nodeId: gameData._campaignRun.nodeId,
+                    defense: !!gameData._campaignRun.defense,
+                    deploying: !!gameData._campaignRun.deploying,
+                    holdSec: gameData._campaignRun.holdSec || 0,
+                    holdElapsed: Math.round(gameData._campaignRun.holdElapsed || 0)
+                } : null
             });
         };
 
