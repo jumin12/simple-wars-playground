@@ -453,8 +453,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Fixed touch scrolling on info-card pages, campaign side panel, and build/units sheet lists.
 - Pushed to `main` (`b2c5224`).
 
-## PC UI parity / hillshade depressions / scroll-preserve (2026-07-10)
-- Desktop unit sheet now shows the same Move/Waypoint/Formation/Stats order buttons and KPI chrome as mobile; armed mode stays green.
-- PC production tabs/buttons use the same navy + gold selected feel.
-- Terrain depressions use colonial-cartographer-style NW hillshade + basin darkening instead of random blobs.
-- Info-card effect lists no longer jump to top on refresh (preserve scroll / skip identical HTML rewrites).
+## PC UI parity / soft hillshade / scroll-jump fix (2026-07-10)
+- PC unit cards now use the same navy order buttons, KPI chips, and gold-bordered sheet feel as mobile; production tray buttons/tabs match that language.
+- Replaced stroke scribble relief with colonial-cartographer-style soft hillshade + basin darkening; land contour lines removed (water ripples kept).
+- Info-card effect/page scroll and campaign side/roster scroll no longer jump to top on UI refresh.
+- Pushed to `main`.
