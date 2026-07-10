@@ -409,6 +409,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Terrain polish: richer forest crowns, mountain/hill rock peaks, shore foam accents, higher-contrast terrain palette.
 - Mobile dock active tabs use stronger gold chrome.
 
+## NATO counters + terrain/UI match pass (2026-07-10)
+- NATO map counters are solid faction-colored chips with black symbology and corner-bracket selection (not dashed rings).
+- Removed dotted ocean shore strokes; shallow water is a soft continuous rim only. Diplomacy borders skip water hexes.
+- Terrain: mottled surface detail, denser round tree clusters, browner mountain peaks, updated palette.
+- Mobile unit sheet head is identity + KPI row; bottom dock active tab is solid gold with dark icon/label.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
