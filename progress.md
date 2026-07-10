@@ -506,3 +506,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Ordered retreat only targets owned land deeper from hostile territory and never marches toward the enemy front.
 - Coastline gains a dark cliff bevel plus bright foam shelf; forests use denser 3D canopy blobs with stronger ground shadows and darker undergrowth.
 - Pushed to `main`.
+
+## Retreat owned-land BFS + sharper coast/trees (2026-07-10)
+- Retreat destinations are found by BFS through owned land only, always deeper/away from hostile territory (no enemy-facing fallback).
+- Coast topo banding removed at the waterline; cyan shallow shelf + thin cliff/foam match the reference; denser popcorn tree canopies.
+- Pushed to `main`.
