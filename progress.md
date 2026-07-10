@@ -472,9 +472,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Removed per-hex dark blob relief; replaced with continuous crumpled heightmap hillshade topography.
 - Pushed to `main`.
 
-## Multi-select Stats hide / rounder topo / PC dock parity (2026-07-10)
-- Stats order button hidden when multiple units are selected (3-button order row).
-- Topography elevation blurred so depressions read rounded instead of square hex blocks.
-- PC bottom dock is Stats/Map/Buildings/Units like mobile; top HUD uses paired resource cards + gold chrome.
-- PC unit card sits bottom-right flush above the dock (no gap, no overlap).
+## Multi-select Stats hide / rounder topo / PC card flush (2026-07-10)
+- Stats order button hidden when multiple units are selected.
+- Topography uses neighbor-blended elev + blur so depressions read round; cities/hills/mountains get realistic shade.
+- PC top/bottom chrome uses mobile-style $ / MP marks and Buildings/Units SVG icons; unit card sits bottom-right flush on the dock with no gap and no overlapping detail rows.
 - Pushed to `main`.
