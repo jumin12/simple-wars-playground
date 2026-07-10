@@ -389,6 +389,10 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Campaign footer: **Back** bottom-left, **Surrender** bottom-right.
 - Missions / Play vs AI / Skirmish Start+Back actions centered for mobile (`.wod-panel-footer`, `.wod-setup-actions`, `.wod-map-lib-actions`).
 
+## Mobile button overflow fix (2026-07-09)
+- Global mobile `.menu-btn { width: 88vw }` was left-shifting Play vs AI buttons and clipping campaign Back/Surrender.
+- Play vs AI buttons now fill a centered column (`max-width: 280px`); campaign footer buttons are equal flex halves with `width: 100%` and no viewport-width overflow.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
