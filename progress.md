@@ -384,6 +384,11 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Campaign panel stacks on mobile; Play vs AI / setup Back buttons centered via `.wod-panel-footer` / `.wod-setup-actions`.
 - Campaign **Research** tree (requisition): War Chest (+battle money), Manpower Reserves (+battle MP), Supply Lines (+req/region). 3 levels each, costly but lasting.
 
+## Campaign research popup + mobile centering (2026-07-09)
+- Research moved into a designed popup (`#wodCampResearchDlg`); side-panel **Research** button replaces Surrender in the actions row.
+- Campaign footer: **Back** bottom-left, **Surrender** bottom-right.
+- Missions / Play vs AI / Skirmish Start+Back actions centered for mobile (`.wod-panel-footer`, `.wod-setup-actions`, `.wod-map-lib-actions`).
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
