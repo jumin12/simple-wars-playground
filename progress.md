@@ -501,3 +501,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Order row fits five controls: Move, Waypoint, Formation, Stats, Retreat.
 - Retreat sends selected owned units ≥5 cells away; while retreating they keep 75% combat march speed and do not return fire.
 - Pushed to `main`.
+
+## Retreat depth + reference coast/trees (2026-07-10)
+- Ordered retreat only targets owned land deeper from hostile territory and never marches toward the enemy front.
+- Coastline gains a dark cliff bevel plus bright foam shelf; forests use denser 3D canopy blobs with stronger ground shadows and darker undergrowth.
+- Pushed to `main`.

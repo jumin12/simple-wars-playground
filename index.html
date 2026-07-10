@@ -20502,11 +20502,11 @@
         ];
 
         function getTerrainColor(type) {
-            if(type === 'deep_water') return '#145a9a';
-            if(type === 'water') return '#1a6bb0';
+            if(type === 'deep_water') return '#0f4f8c';
+            if(type === 'water') return '#1563a8';
             if(type === 'sand') return '#c9923a';
             if(type === 'grass') return '#4ea053';
-            if(type === 'forest') return '#2f7340';
+            if(type === 'forest') return '#246338';
             if(type === 'swamp') return '#457a55';
             if(type === 'hill') return '#8b6d4e';
             if(type === 'snow') return '#8a9590';
@@ -29027,62 +29027,110 @@
             return Math.max(Math.abs((a.q | 0) - (b.q | 0)), Math.abs((a.r | 0) - (b.r | 0)));
         }
 
+        function wodNearestHostileLandHex(fromHex, owner, maxR) {
+            if(!fromHex) return null;
+            maxR = maxR == null ? 28 : maxR;
+            let best = null;
+            let bestD = Infinity;
+            let list = gameData.hexList || [];
+            for(let i = 0, n = list.length; i < n; i++) {
+                let hex = list[i];
+                if(!hex || !isClaimableLand(hex)) continue;
+                if(!(hex.owner > 0) || hex.owner === owner) continue;
+                let d = wodHexCellDist(fromHex, hex);
+                if(d > maxR || d >= bestD) continue;
+                bestD = d;
+                best = hex;
+            }
+            return best;
+        }
+
         function findOrderedRetreatPoint(unit, minCells) {
             minCells = Math.max(1, minCells | 0);
             let start = getNearestHexToPoint(unit.x, unit.y);
             if(!start) return findRetreatPoint(unit);
-            let enemyPullX = 0, enemyPullY = 0, enemyN = 0;
-            let pullR = (gameData.hexRadius || 20) * 10;
-            if(gameData.unitSpatialGrid) {
-                forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, pullR, (other) => {
-                    if(!other || other === unit || other.owner === unit.owner || other.type === 'convoy' || other.hp <= 0) return;
-                    enemyPullX += other.x;
-                    enemyPullY += other.y;
-                    enemyN++;
-                });
-            }
+            let owner = unit.owner;
+            let hostile = wodNearestHostileLandHex(start, owner, 40);
+            let startDepth = hostile ? wodHexCellDist(start, hostile) : 12;
             let awayX = 0, awayY = 0;
-            if(enemyN > 0) {
-                awayX = unit.x - enemyPullX / enemyN;
-                awayY = unit.y - enemyPullY / enemyN;
+            if(hostile) {
+                awayX = start.x - hostile.x;
+                awayY = start.y - hostile.y;
+            } else {
+                let enemyPullX = 0, enemyPullY = 0, enemyN = 0;
+                let pullR = (gameData.hexRadius || 20) * 12;
+                if(gameData.unitSpatialGrid) {
+                    forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, pullR, (other) => {
+                        if(!other || other === unit || other.owner === owner || other.type === 'convoy' || other.hp <= 0) return;
+                        enemyPullX += other.x;
+                        enemyPullY += other.y;
+                        enemyN++;
+                    });
+                }
+                if(enemyN > 0) {
+                    awayX = unit.x - enemyPullX / enemyN;
+                    awayY = unit.y - enemyPullY / enemyN;
+                }
             }
+            let awayLen = Math.hypot(awayX, awayY);
+            if(awayLen < 0.001) {
+                // Last resort: pull toward map centroid of owned land.
+                let ox = 0, oy = 0, on = 0;
+                for(let hex of gameData.hexList || []) {
+                    if(!hex || hex.owner !== owner || !isClaimableLand(hex)) continue;
+                    ox += hex.x; oy += hex.y; on++;
+                }
+                if(on > 0) {
+                    awayX = ox / on - unit.x;
+                    awayY = oy / on - unit.y;
+                    awayLen = Math.hypot(awayX, awayY);
+                }
+            }
+            if(awayLen < 0.001) return findRetreatPoint(unit);
+            awayX /= awayLen;
+            awayY /= awayLen;
+
             let best = null;
-            let bestScore = Infinity;
-            let fallback = null;
-            let fallbackScore = Infinity;
-            let list = gameData.hexList || [];
-            for(let i = 0, n = list.length; i < n; i++) {
-                let hex = list[i];
-                if(!hex || !canUnitEnterHex(unit, hex)) continue;
+            let bestScore = -Infinity;
+            let soft = null;
+            let softScore = -Infinity;
+            let searchR = Math.max(14, minCells + 10);
+            let ring = getHexesInHexRadius(start.q, start.r, searchR);
+            for(let i = 0; i < ring.length; i++) {
+                let pt = ring[i];
+                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                // Only retreat deeper into owned land — never into enemy/neutral ground.
+                if(!hex || hex.owner !== owner || !canUnitEnterHex(unit, hex)) continue;
                 let cellDist = wodHexCellDist(start, hex);
                 if(cellDist < minCells) continue;
+                let depth = hostile ? wodHexCellDist(hex, hostile) : (startDepth + cellDist);
+                // Must not get closer to enemy territory.
+                if(depth < startDepth) continue;
                 let dx = hex.x - unit.x;
                 let dy = hex.y - unit.y;
-                let dist = dx * dx + dy * dy;
-                let score = dist + (cellDist - minCells) * (cellDist - minCells) * 40;
-                if(enemyN > 0) {
-                    let along = dx * awayX + dy * awayY;
-                    score -= along * 0.015;
-                }
-                if(hex.owner === unit.owner) score -= 120000;
-                else if(hex.owner && hex.owner !== unit.owner) score += 220000;
-                if(isFrontlineHex(hex, unit.owner)) score += 90000;
-                let enemyNearby = countNearbyUnits(unit.owner, hex.x, hex.y, 160, true);
-                score += enemyNearby * 70000;
+                let along = dx * awayX + dy * awayY;
+                // Never march toward the enemy front / hostile mass.
+                if(along < (gameData.hexRadius || 20) * 0.45) continue;
+                let front = isFrontlineHex(hex, owner);
+                let enemyNearby = countNearbyUnits(owner, hex.x, hex.y, 140, true);
+                let score = depth * 100000 + along * 22 + (depth - startDepth) * 50000
+                    - Math.abs(cellDist - Math.max(minCells, 6)) * 700
+                    - enemyNearby * 90000
+                    - (front ? 160000 : 0);
                 if(unit.type !== 'heavy') {
-                    if(hex.type === 'forest' || hex.type === 'hill') score -= 25000;
-                    else if(hex.type === 'urban') score -= 18000;
-                }
-                if(score < bestScore) {
+                    if(hex.type === 'forest' || hex.type === 'hill') score += 16000;
+                    else if(hex.type === 'urban') score += 10000;
+                } else if(hex.type === 'urban') score += 7000;
+                if(!front && enemyNearby === 0 && score > bestScore) {
                     bestScore = score;
                     best = hex;
                 }
-                if(hex.owner === unit.owner && score < fallbackScore) {
-                    fallbackScore = score;
-                    fallback = hex;
+                if(score > softScore) {
+                    softScore = score;
+                    soft = hex;
                 }
             }
-            let pick = best || fallback;
+            let pick = best || soft;
             if(pick) return { x: pick.x, y: pick.y };
             return findRetreatPoint(unit);
         }
@@ -36304,11 +36352,15 @@
             ctx.restore();
         }
 
-        /** Soft light-blue coastal fringe (no white shore rings). */
+        /** Reference-style coast: dark land cliff bevel + bright foam shelf on the water. */
         function drawTerrainCoastFringe(ctx, offsetX, offsetY) {
             if(!gameData.layers || gameData.terrainViewMode === 'schematic') return;
             let spacing = gameData.hexRadius * 1.35;
-            let r = spacing * 0.48;
+            let cliffR = spacing * 0.58;
+            let foamR = spacing * 0.42;
+            let shelfR = spacing * 0.72;
+
+            // Pass 1: soft cyan water shelf just offshore.
             for(let hex of gameData.hexList) {
                 if(!isWaterHex(hex)) continue;
                 let nearLand = false;
@@ -36318,13 +36370,66 @@
                 }
                 if(!nearLand) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
-                let g = ctx.createRadialGradient(px, py, 0, px, py, r);
-                g.addColorStop(0, 'rgba(130, 195, 235, 0.14)');
-                g.addColorStop(0.6, 'rgba(80, 155, 215, 0.06)');
-                g.addColorStop(1, 'rgba(80, 155, 215, 0)');
+                let g = ctx.createRadialGradient(px, py, 0, px, py, shelfR);
+                g.addColorStop(0, 'rgba(120, 200, 235, 0.22)');
+                g.addColorStop(0.45, 'rgba(70, 160, 220, 0.1)');
+                g.addColorStop(1, 'rgba(40, 120, 190, 0)');
                 ctx.fillStyle = g;
                 ctx.beginPath();
-                ctx.arc(px, py, r, 0, Math.PI * 2);
+                ctx.arc(px, py, shelfR, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Pass 2: dark cliff / drop-shadow under the land edge (elevated shore).
+            for(let hex of gameData.hexList) {
+                if(isWaterHex(hex) || hex.type === 'bridge') continue;
+                let waterN = 0;
+                let wx = 0, wy = 0;
+                for(let dir of hexDirections) {
+                    let n = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    if(n && isWaterHex(n)) {
+                        waterN++;
+                        wx += n.x - hex.x;
+                        wy += n.y - hex.y;
+                    }
+                }
+                if(!waterN) continue;
+                let px = hex.x + offsetX + wx / waterN * 0.18;
+                let py = hex.y + offsetY + wy / waterN * 0.18;
+                let g = ctx.createRadialGradient(px, py, 0, px, py, cliffR);
+                g.addColorStop(0, 'rgba(8, 18, 28, 0.42)');
+                g.addColorStop(0.55, 'rgba(10, 24, 36, 0.18)');
+                g.addColorStop(1, 'rgba(10, 24, 36, 0)');
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(px, py, cliffR, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Pass 3: bright foam / surf line hugging the shore.
+            for(let hex of gameData.hexList) {
+                if(isWaterHex(hex) || hex.type === 'bridge') continue;
+                let waterN = 0;
+                let wx = 0, wy = 0;
+                for(let dir of hexDirections) {
+                    let n = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    if(n && isWaterHex(n)) {
+                        waterN++;
+                        wx += n.x - hex.x;
+                        wy += n.y - hex.y;
+                    }
+                }
+                if(!waterN) continue;
+                let px = hex.x + offsetX + wx / waterN * 0.34;
+                let py = hex.y + offsetY + wy / waterN * 0.34;
+                let g = ctx.createRadialGradient(px, py, 0, px, py, foamR);
+                g.addColorStop(0, 'rgba(235, 250, 255, 0.55)');
+                g.addColorStop(0.35, 'rgba(170, 230, 245, 0.28)');
+                g.addColorStop(0.7, 'rgba(110, 195, 230, 0.1)');
+                g.addColorStop(1, 'rgba(110, 195, 230, 0)');
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(px, py, foamR, 0, Math.PI * 2);
                 ctx.fill();
             }
         }
@@ -36338,32 +36443,56 @@
                 return x - Math.floor(x);
             }
 
+            // Soft undergrowth shade so forest floors read darker than open grass.
             for(let hex of gameData.hexList) {
                 if(hex.type !== 'forest') continue;
-                if(det01(hex.q, hex.r, 9.4) < 0.08) continue;
                 let bx = hex.x + offsetX, by = hex.y + offsetY;
-                let nTrees = 4 + Math.floor(det01(hex.q, hex.r, 2.31) * 4);
+                let g = ctx.createRadialGradient(bx, by, 0, bx, by, spacing * 0.62);
+                g.addColorStop(0, 'rgba(12, 32, 16, 0.28)');
+                g.addColorStop(0.7, 'rgba(18, 48, 24, 0.12)');
+                g.addColorStop(1, 'rgba(18, 48, 24, 0)');
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(bx, by, spacing * 0.62, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            for(let hex of gameData.hexList) {
+                if(hex.type !== 'forest') continue;
+                if(det01(hex.q, hex.r, 9.4) < 0.05) continue;
+                let bx = hex.x + offsetX, by = hex.y + offsetY;
+                let nTrees = 5 + Math.floor(det01(hex.q, hex.r, 2.31) * 5);
                 for(let ti = 0; ti < nTrees; ti++) {
                     let u1 = det01(hex.q + ti * 3, hex.r - ti, 0.71);
                     let u2 = det01(hex.q - ti * 5, hex.r + ti * 7, 1.93);
-                    let tx = bx + (u1 - 0.5) * spacing * 0.82;
-                    let ty = by + (u2 - 0.5) * spacing * 0.76;
-                    let crownR = spacing * (0.16 + (u1 + u2) * 0.04);
-                    ctx.fillStyle = 'rgba(8, 18, 10, 0.28)';
+                    let u3 = det01(hex.q + ti, hex.r + ti * 2, 4.2);
+                    let tx = bx + (u1 - 0.5) * spacing * 0.88;
+                    let ty = by + (u2 - 0.5) * spacing * 0.8;
+                    let crownR = spacing * (0.15 + (u1 + u2) * 0.045);
+                    // Soft ground shadow (offset down-right like the reference).
+                    ctx.fillStyle = 'rgba(6, 14, 8, 0.34)';
                     ctx.beginPath();
-                    ctx.ellipse(tx + crownR * 0.1, ty + crownR * 0.28, crownR * 0.95, crownR * 0.4, 0, 0, Math.PI * 2);
+                    ctx.ellipse(tx + crownR * 0.22, ty + crownR * 0.42, crownR * 1.05, crownR * 0.42, -0.25, 0, Math.PI * 2);
                     ctx.fill();
-                    ctx.fillStyle = '#1a3d24';
+                    // Dark canopy base blob.
+                    ctx.fillStyle = '#14351f';
                     ctx.beginPath();
-                    ctx.arc(tx + crownR * 0.1, ty, crownR * 0.92, 0, Math.PI * 2);
+                    ctx.arc(tx + crownR * 0.08, ty + crownR * 0.06, crownR * 0.98, 0, Math.PI * 2);
                     ctx.fill();
+                    // Mid canopy volume.
+                    ctx.fillStyle = '#1f5a2e';
+                    ctx.beginPath();
+                    ctx.arc(tx - crownR * 0.08, ty - crownR * 0.12, crownR * 0.78, 0, Math.PI * 2);
+                    ctx.fill();
+                    // Secondary lobe for bushy 3D look.
                     ctx.fillStyle = '#246b38';
                     ctx.beginPath();
-                    ctx.arc(tx - crownR * 0.12, ty - crownR * 0.18, crownR * 0.72, 0, Math.PI * 2);
+                    ctx.arc(tx + crownR * 0.28, ty - crownR * 0.08, crownR * 0.55, 0, Math.PI * 2);
                     ctx.fill();
-                    ctx.fillStyle = 'rgba(90, 150, 78, 0.5)';
+                    // Specular highlight on the lit side.
+                    ctx.fillStyle = 'rgba(110, 175, 95, ' + (0.42 + u3 * 0.18) + ')';
                     ctx.beginPath();
-                    ctx.arc(tx - crownR * 0.22, ty - crownR * 0.38, crownR * 0.32, 0, Math.PI * 2);
+                    ctx.arc(tx - crownR * 0.28, ty - crownR * 0.4, crownR * 0.3, 0, Math.PI * 2);
                     ctx.fill();
                 }
             }
@@ -36442,8 +36571,8 @@
                 let bx = hex.x + offsetX, by = hex.y + offsetY;
                 let len = spacing * (0.5 + u2 * 0.36);
                 let yJ = (u2 - 0.5) * spacing * 0.6;
-                ctx.strokeStyle = 'rgba(183, 213, 235, 0.18)';
-                ctx.lineWidth = Math.max(0.65, spacing * 0.04);
+                ctx.strokeStyle = 'rgba(200, 230, 245, 0.22)';
+                ctx.lineWidth = Math.max(0.7, spacing * 0.045);
                 ctx.lineCap = 'round';
                 ctx.beginPath();
                 ctx.moveTo(bx - len * 0.5, by + yJ);
