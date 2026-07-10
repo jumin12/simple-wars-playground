@@ -452,3 +452,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Cities layer defaults off (city names stay on).
 - Fixed touch scrolling on info-card pages, campaign side panel, and build/units sheet lists.
 - Pushed to `main` (`b2c5224`).
+
+## PC UI parity / hillshade depressions / scroll-preserve (2026-07-10)
+- Desktop unit sheet now shows the same Move/Waypoint/Formation/Stats order buttons and KPI chrome as mobile; armed mode stays green.
+- PC production tabs/buttons use the same navy + gold selected feel.
+- Terrain depressions use colonial-cartographer-style NW hillshade + basin darkening instead of random blobs.
+- Info-card effect lists no longer jump to top on refresh (preserve scroll / skip identical HTML rewrites).
