@@ -511,3 +511,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Retreat destinations are found by BFS through owned land only, always deeper/away from hostile territory (no enemy-facing fallback).
 - Coast topo banding removed at the waterline; cyan shallow shelf + thin cliff/foam match the reference; denser popcorn tree canopies.
 - Pushed to `main`.
+
+## Retreat always deeper into owned land (2026-07-10)
+- Ordered retreat must pick owned hexes strictly farther from enemy territory than the start, moving away from the front (never toward the enemy).
+- Soft fallbacks also reject frontline tiles; final safety checks drop any pick that is not deeper/away.
+- Pushed to `main`.

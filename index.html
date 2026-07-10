@@ -29057,7 +29057,9 @@
                 start = nearestOwn;
             }
             let hostile = wodNearestHostileLandHex(start, owner, 48);
-            let startDepth = hostile ? wodHexCellDist(start, hostile) : 16;
+            let startDepth = hostile ? wodHexCellDist(start, hostile) : 0;
+
+            // Away vector: from nearest enemy land (preferred), else enemy units, else owned centroid.
             let awayX = 0, awayY = 0;
             if(hostile) {
                 awayX = start.x - hostile.x;
@@ -29095,7 +29097,7 @@
             awayX /= awayLen;
             awayY /= awayLen;
 
-            // BFS only through owned enterable land so retreat never routes into enemy territory.
+            // BFS only through owned enterable land so retreat never enters enemy / neutral ground.
             let best = null;
             let bestScore = -Infinity;
             let soft = null;
@@ -29103,28 +29105,30 @@
             let seen = new Set();
             let queue = [{ hex: start, steps: 0 }];
             seen.add(`${start.q},${start.r}`);
-            let maxSteps = Math.max(22, minCells + 16);
+            let maxSteps = Math.max(26, minCells + 18);
             let hr = gameData.hexRadius || 20;
+            let minAlong = hr * 0.85;
             while(queue.length) {
                 let cur = queue.shift();
                 let hex = cur.hex;
                 let steps = cur.steps;
                 if(steps >= minCells) {
                     let depth = hostile ? wodHexCellDist(hex, hostile) : (startDepth + steps);
-                    // Never pick a hex closer to enemy territory than where we started.
-                    if(depth >= startDepth) {
+                    // Must be strictly deeper into friendly land than the start (never closer to enemy territory).
+                    let deeperOk = hostile ? (depth > startDepth) : true;
+                    if(deeperOk) {
                         let dx = hex.x - unit.x;
                         let dy = hex.y - unit.y;
                         let along = dx * awayX + dy * awayY;
-                        // Must move away from the enemy front, not sideways into it.
-                        if(along >= hr * 0.55) {
+                        // Must move away from the enemy front — never toward or across it.
+                        if(along >= minAlong) {
                             let front = isFrontlineHex(hex, owner);
                             let enemyNearby = countNearbyUnits(owner, hex.x, hex.y, 140, true);
-                            let score = depth * 120000 + along * 28 + (depth - startDepth) * 70000
-                                + steps * 800
-                                - Math.abs(steps - Math.max(minCells, 6)) * 500
-                                - enemyNearby * 110000
-                                - (front ? 220000 : 0);
+                            let score = depth * 140000 + along * 36 + (depth - startDepth) * 90000
+                                + steps * 900
+                                - Math.abs(steps - Math.max(minCells, 6)) * 450
+                                - enemyNearby * 130000
+                                - (front ? 260000 : 0);
                             if(unit.type !== 'heavy') {
                                 if(hex.type === 'forest' || hex.type === 'hill') score += 18000;
                                 else if(hex.type === 'urban') score += 12000;
@@ -29133,7 +29137,7 @@
                                 bestScore = score;
                                 best = hex;
                             }
-                            if(score > softScore) {
+                            if(!front && score > softScore) {
                                 softScore = score;
                                 soft = hex;
                             }
@@ -29144,6 +29148,7 @@
                 for(let di = 0; di < hexDirections.length; di++) {
                     let dir = hexDirections[di];
                     let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    // Owned land only — never step onto enemy or neutral tiles.
                     if(!nHex || nHex.owner !== owner || !canUnitEnterHex(unit, nHex)) continue;
                     let key = `${nHex.q},${nHex.r}`;
                     if(seen.has(key)) continue;
@@ -29152,7 +29157,12 @@
                 }
             }
             let pick = best || soft;
-            return pick ? { x: pick.x, y: pick.y } : null;
+            if(!pick) return null;
+            // Final safety: never accept a destination closer to enemy land than the start.
+            if(hostile && wodHexCellDist(pick, hostile) <= startDepth) return null;
+            let pdx = pick.x - unit.x, pdy = pick.y - unit.y;
+            if(pdx * awayX + pdy * awayY < minAlong * 0.5) return null;
+            return { x: pick.x, y: pick.y };
         }
 
         function wodIssueRetreatOrder() {
