@@ -486,7 +486,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - PC unit card widened to match mobile (~560px).
 - Pushed to `main`.
 
-## PC HUD clearance / objective row / realistic coasts (2026-07-10)
-- Map key and Layers sit below the top HUD on PC (top ~118px).
-- Fixed PC objective stacking: icon stays left of the text (row layout), matching mobile.
-- Removed the light/white shore halo; coasts use a dark underwater shelf + cliff shade, smoother coastal stamps, and topo highlights no longer AA into a white fringe.
+## PC map key under HUD / objective row fix (2026-07-10)
+- Map key and Layers sit below the PC top bar via `--wod-pc-top-ui-h`.
+- Fixed a later PC CSS override that stacked the objective icon above the text; icon stays left of the copy like mobile.
+- Pushed to `main`.
