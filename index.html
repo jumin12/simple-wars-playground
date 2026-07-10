@@ -1199,25 +1199,63 @@
             gap: 10px;
             margin-top: 16px;
         }
+        #wodConfirmDlg.mp-host-dlg {
+            padding: max(16px, env(safe-area-inset-top, 0px))
+                max(16px, env(safe-area-inset-right, 0px))
+                max(16px, env(safe-area-inset-bottom, 0px))
+                max(16px, env(safe-area-inset-left, 0px));
+            align-items: center;
+            justify-content: center;
+        }
         #wodConfirmDlg.mp-host-dlg .panel {
             text-align: center;
-            max-width: 440px;
+            max-width: min(420px, 92vw);
+            width: 100%;
+            margin: 0 auto;
+            padding: 26px 24px 22px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
         }
         #wodConfirmDlg.mp-host-dlg .panel h3 {
             color: #ecf0f1;
-            margin-bottom: 8px;
+            margin: 0 0 10px;
+            width: 100%;
+            text-align: center;
         }
         #wodConfirmDlg.wod-confirm-danger .panel h3 {
             color: #ff9d8f;
         }
         #wodConfirmDlgBody {
-            margin: 0 0 4px;
+            margin: 0 0 18px;
             color: #bdc3c7;
-            font-size: 0.92rem;
-            line-height: 1.45;
+            font-size: 0.94rem;
+            line-height: 1.5;
+            width: 100%;
+            text-align: center;
         }
         #wodConfirmDlg.mp-host-dlg .mp-host-dlg-actions {
+            display: flex;
+            flex-direction: row;
+            flex-wrap: nowrap;
             justify-content: center;
+            align-items: stretch;
+            gap: 12px;
+            width: 100%;
+            margin-top: 0;
+        }
+        #wodConfirmDlg.mp-host-dlg .mp-host-dlg-actions .wod-editor-btn,
+        #wodConfirmDlg.mp-host-dlg .mp-host-dlg-actions .menu-btn {
+            flex: 1 1 0;
+            min-width: 0;
+            width: auto !important;
+            max-width: none;
+            margin: 0 !important;
+            box-sizing: border-box;
+            padding: 12px 14px;
+            font-size: 0.95rem;
+            white-space: nowrap;
         }
         #wodConfirmDlgOk.wod-confirm-ok-danger {
             background: linear-gradient(135deg, #922b21, #e74c3c) !important;
@@ -5303,6 +5341,8 @@
             background: #10202e;
             cursor: pointer;
             display: block;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
         }
         .wod-camp-log {
             margin-top: 8px;
@@ -6204,6 +6244,14 @@
                 padding: 14px 18px;
                 font-size: 16px;
                 margin: 6px;
+            }
+
+            #wodConfirmDlg.mp-host-dlg .mp-host-dlg-actions .wod-editor-btn,
+            #wodConfirmDlg.mp-host-dlg .mp-host-dlg-actions .menu-btn {
+                width: auto !important;
+                max-width: none;
+                flex: 1 1 0;
+                margin: 0 !important;
             }
 
             .setup-row {
@@ -39072,6 +39120,7 @@
             try { localStorage.removeItem(WOD_ROGUE_LS_KEY); } catch(e) {}
             wodRogue = null;
             _wodRogueWorldCache = null;
+            wodRogueInvalidateMapCache();
             _wodRogueSelectedNode = null;
             _wodRogueDraft = wodRogueFreshDraft();
         }
@@ -39111,6 +39160,7 @@
                 won: false
             };
             _wodRogueWorldCache = null;
+            wodRogueInvalidateMapCache();
             _wodRogueSelectedNode = null;
             wodRogueSave();
         }
@@ -39285,14 +39335,36 @@
             return { x: node.x * cw, y: node.y * ch };
         }
 
-        function wodRoguePaintMap() {
-            let cv = document.getElementById('wodCampMapCanvas');
-            if(!cv || !cv.getContext) return;
-            let ctx2 = cv.getContext('2d');
-            let c = wodRogueLoad();
-            let { W, H, cells, nodes } = wodRogueEnsureWorldCells();
-            let edges = c ? c.world.edges : (_wodRogueDraftWorld ? _wodRogueDraftWorld.edges : []);
-            let cw = cv.width, ch = cv.height;
+        let _wodRogueMapBaseCache = null;
+        let _wodRogueMapBaseKey = '';
+
+        function wodRogueMapCacheKey(c, cw, ch, W, H, nodes, edges) {
+            let own = '';
+            let alerts = '';
+            if(c && c.nodesState) {
+                for(let n of nodes) {
+                    let st = c.nodesState[n.id];
+                    own += n.id + (st && st.owner === 'player' ? 'p' : 'e');
+                    if(c.alerts && c.alerts[n.id] != null) alerts += n.id + ',';
+                }
+            }
+            return [
+                cw, ch, W, H,
+                c ? (c.seed | 0) : 'd',
+                c ? (c.turn | 0) : 0,
+                !!(c && wodRogueAdvanceBlocked(c)),
+                own,
+                alerts,
+                edges.length
+            ].join('|');
+        }
+
+        function wodRogueInvalidateMapCache() {
+            _wodRogueMapBaseCache = null;
+            _wodRogueMapBaseKey = '';
+        }
+
+        function wodRoguePaintMapBase(ctx2, c, W, H, cells, nodes, edges, cw, ch) {
             let px = cw / W, py = ch / H;
             for(let gy = 0; gy < H; gy++) {
                 for(let gx = 0; gx < W; gx++) {
@@ -39300,7 +39372,6 @@
                     ctx2.fillRect(gx * px, gy * py, px + 1, py + 1);
                 }
             }
-            // Territory tint: nearest-node ownership over land.
             let pts = nodes.map(n => ({ n, p: wodRogueNodeCanvasPos(n, cw, ch) }));
             for(let gy = 0; gy < H; gy++) {
                 for(let gx = 0; gx < W; gx++) {
@@ -39317,7 +39388,6 @@
                     ctx2.fillRect(gx * px, gy * py, px + 1, py + 1);
                 }
             }
-            // Edges.
             ctx2.lineWidth = 2;
             let advanceBlocked = !!(c && wodRogueAdvanceBlocked(c));
             for(let [a, b] of edges) {
@@ -39327,7 +39397,6 @@
                 let oa = c ? c.nodesState[a].owner : (na.hq ? 'player' : 'enemy');
                 let ob = c ? c.nodesState[b].owner : (nb.hq ? 'player' : 'enemy');
                 let isFront = oa !== ob;
-                // Roadblock: front connections look sealed until the defense is fought.
                 if(advanceBlocked && isFront) {
                     ctx2.strokeStyle = 'rgba(231,76,60,0.85)';
                     ctx2.setLineDash([4, 5]);
@@ -39344,7 +39413,9 @@
             }
             ctx2.setLineDash([]);
             ctx2.lineWidth = 2;
-            // Nodes.
+        }
+
+        function wodRoguePaintMapNodes(ctx2, c, nodes, cw, ch) {
             let selId = _wodRogueSelectedNode;
             for(let n of nodes) {
                 let p = wodRogueNodeCanvasPos(n, cw, ch);
@@ -39382,6 +39453,32 @@
             }
         }
 
+        function wodRoguePaintMap(opts) {
+            opts = opts || {};
+            let cv = document.getElementById('wodCampMapCanvas');
+            if(!cv || !cv.getContext) return;
+            let ctx2 = cv.getContext('2d');
+            let c = wodRogueLoad();
+            let { W, H, cells, nodes } = wodRogueEnsureWorldCells();
+            let edges = c ? c.world.edges : (_wodRogueDraftWorld ? _wodRogueDraftWorld.edges : []);
+            let cw = cv.width, ch = cv.height;
+            let key = wodRogueMapCacheKey(c, cw, ch, W, H, nodes, edges);
+            let needBase = opts.force || !_wodRogueMapBaseCache || _wodRogueMapBaseKey !== key
+                || _wodRogueMapBaseCache.width !== cw || _wodRogueMapBaseCache.height !== ch;
+            if(needBase) {
+                let off = document.createElement('canvas');
+                off.width = cw;
+                off.height = ch;
+                wodRoguePaintMapBase(off.getContext('2d'), c, W, H, cells, nodes, edges, cw, ch);
+                _wodRogueMapBaseCache = off;
+                _wodRogueMapBaseKey = key;
+            }
+            // Blit cached terrain/tint/edges, then redraw only the lightweight node markers.
+            // Avoids a full cell-by-cell rebuild (and mobile flash) on every selection click.
+            ctx2.drawImage(_wodRogueMapBaseCache, 0, 0);
+            wodRoguePaintMapNodes(ctx2, c, nodes, cw, ch);
+        }
+
         /* --------------------------- panel UI --------------------------- */
         let _wodRogueSelectedNode = null;
         let _wodRoguePanelWired = false;
@@ -39411,10 +39508,12 @@
                 let mx = (ev.clientX - rect.left) * (cv.width / rect.width);
                 let my = (ev.clientY - rect.top) * (cv.height / rect.height);
                 let n = wodRogueSelectableNodeAtCanvas(mx, my);
-                if(n) {
-                    _wodRogueSelectedNode = n.id;
-                    wodRefreshCampaignPanel();
-                }
+                if(!n || n.id === _wodRogueSelectedNode) return;
+                _wodRogueSelectedNode = n.id;
+                // Selection-only: blit cached map + update side info. Avoids mobile flash
+                // from rebuilding the whole campaign panel / terrain every tap.
+                wodRoguePaintMap();
+                wodRefreshCampaignNodeInfoOnly();
             });
             let launch = document.getElementById('wodCampLaunchBtn');
             if(launch) launch.addEventListener('click', () => {
@@ -39494,6 +39593,7 @@
                 let d = wodRogueDraft();
                 d.seed = ((d.seed ^ (Math.random() * 0xffffffff)) >>> 0) || 0xabcd1234;
                 _wodRogueWorldCache = null;
+                wodRogueInvalidateMapCache();
                 wodRefreshCampaignPanel();
             });
             for(let id of ['wodCampSetDiff', 'wodCampSetLen']) {
@@ -39506,6 +39606,7 @@
                     if(lenEl) d.length = lenEl.value;
                     d.startPoints = wodRogueStartPointsForDifficulty(d.difficulty);
                     _wodRogueWorldCache = null;
+                    wodRogueInvalidateMapCache();
                     wodRefreshCampaignPanel();
                 });
             }
@@ -39554,6 +39655,68 @@
         }
         function wodRogueShapeLabel(shape) {
             return { island: 'Island', archipelago: 'Archipelago', mountain: 'Mountains', forest: 'Forest', desert: 'Desert', rectangle: 'Open country' }[shape] || shape;
+        }
+
+        /** Update only the selected-node card + launch button (used after map taps). */
+        function wodRefreshCampaignNodeInfoOnly() {
+            let c = wodRogueLoad();
+            let info = document.getElementById('wodCampNodeInfo');
+            let launch = document.getElementById('wodCampLaunchBtn');
+            if(!c) {
+                if(info) info.innerHTML = '';
+                if(launch) { launch.disabled = true; launch.textContent = 'Launch battle'; }
+                return;
+            }
+            let node = _wodRogueSelectedNode != null ? wodRogueNodeTemplate(_wodRogueSelectedNode) : null;
+            if(info) {
+                if(c.over) {
+                    info.innerHTML = c.won
+                        ? '<h3>The war is won</h3><p>' + (wodRogueCapitalNode() || {}).name + ' has fallen after ' + c.turn + ' turns. The Ashen Front is quiet at last.</p>'
+                        : '<h3>The war is lost</h3><p>The Federation Remnant can no longer field an army. History will remember that you tried.</p>';
+                } else if(!node) {
+                    info.innerHTML = wodRogueAdvanceBlocked(c)
+                        ? '<p>The Concord has sealed the roads. Select the ⚠ region and defend it before you can advance.</p>'
+                        : '<p>Select a region on the map. Highlighted regions can be attacked or must be defended.</p>';
+                } else {
+                    let st = c.nodesState[node.id];
+                    let alert = !!c.alerts[node.id];
+                    let blocked = wodRogueAdvanceBlocked(c);
+                    let tag = alert ? '<span class="wod-camp-node-tag alert">UNDER ATTACK — defend it</span>'
+                        : st.owner === 'player' ? '<span class="wod-camp-node-tag friendly">Held by the Remnant</span>'
+                        : '<span class="wod-camp-node-tag hostile">Iron Concord — ' + '★'.repeat(node.diff + 1) + '</span>';
+                    let intel = st.owner === 'enemy' || alert ? '<p class="wod-camp-intel"><strong>Intel:</strong> ' + wodRogueNodeIntel(node) +
+                        (node.ai > 1 ? ' · two commands' : '') + '</p>' : '';
+                    let blockNote = '';
+                    if(blocked && st.owner === 'enemy')
+                        blockNote = '<p style="color:#ff9d8f">Advance blocked — clear the Concord counterattack first.</p>';
+                    else if(blocked && alert)
+                        blockNote = '<p style="color:#ffd968">This defense must be fought before the front can move again. Hold ' +
+                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
+                            ' or take all enemy cities.</p>';
+                    else if(alert)
+                        blockNote = '<p style="color:#ffd968">Defense: hold ' +
+                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
+                            ' or capture every enemy city.</p>';
+                    info.innerHTML = '<h3>' + node.name + (node.industry ? ' 🏭' : node.capital ? ' ★' : node.hq ? ' ⚑' : '') + '</h3>' +
+                        tag +
+                        '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield</p>' +
+                        '<p>' + node.brief + '</p>' +
+                        (node.industry ? '<p style="color:#d4af37">Industrial region — still worth +' + WOD_ROGUE_REQ_PER_TERRITORY + ' requisition each turn while held.</p>' : '') +
+                        blockNote +
+                        intel;
+                }
+            }
+            if(launch) {
+                let playable = node && wodRogueNodePlayable(node.id) && c.roster.length > 0;
+                launch.disabled = !playable;
+                if(!node) launch.textContent = 'Launch battle';
+                else if(c.roster.length === 0) launch.textContent = 'No army — recruit units below';
+                else if(c.alerts[node.id]) launch.textContent = 'Defend ' + node.name;
+                else if(wodRogueAdvanceBlocked(c) && c.nodesState[node.id].owner === 'enemy')
+                    launch.textContent = 'Roads blocked — defend first';
+                else if(c.nodesState[node.id].owner === 'enemy') launch.textContent = 'Attack ' + node.name;
+                else launch.textContent = 'Launch battle';
+            }
         }
 
         function wodRefreshCampaignPanel() {
@@ -39635,58 +39798,7 @@
                 else sub.textContent = 'One army, one war — every casualty is permanent.';
             }
             // Node info + intel.
-            let info = document.getElementById('wodCampNodeInfo');
-            let launch = document.getElementById('wodCampLaunchBtn');
-            let node = _wodRogueSelectedNode != null ? wodRogueNodeTemplate(_wodRogueSelectedNode) : null;
-            if(info) {
-                if(c.over) {
-                    info.innerHTML = c.won
-                        ? '<h3>The war is won</h3><p>' + (wodRogueCapitalNode() || {}).name + ' has fallen after ' + c.turn + ' turns. The Ashen Front is quiet at last.</p>'
-                        : '<h3>The war is lost</h3><p>The Federation Remnant can no longer field an army. History will remember that you tried.</p>';
-                } else if(!node) {
-                    info.innerHTML = wodRogueAdvanceBlocked(c)
-                        ? '<p>The Concord has sealed the roads. Select the ⚠ region and defend it before you can advance.</p>'
-                        : '<p>Select a region on the map. Highlighted regions can be attacked or must be defended.</p>';
-                } else {
-                    let st = c.nodesState[node.id];
-                    let alert = !!c.alerts[node.id];
-                    let blocked = wodRogueAdvanceBlocked(c);
-                    let tag = alert ? '<span class="wod-camp-node-tag alert">UNDER ATTACK — defend it</span>'
-                        : st.owner === 'player' ? '<span class="wod-camp-node-tag friendly">Held by the Remnant</span>'
-                        : '<span class="wod-camp-node-tag hostile">Iron Concord — ' + '★'.repeat(node.diff + 1) + '</span>';
-                    let intel = st.owner === 'enemy' || alert ? '<p class="wod-camp-intel"><strong>Intel:</strong> ' + wodRogueNodeIntel(node) +
-                        (node.ai > 1 ? ' · two commands' : '') + '</p>' : '';
-                    let blockNote = '';
-                    if(blocked && st.owner === 'enemy')
-                        blockNote = '<p style="color:#ff9d8f">Advance blocked — clear the Concord counterattack first.</p>';
-                    else if(blocked && alert)
-                        blockNote = '<p style="color:#ffd968">This defense must be fought before the front can move again. Hold ' +
-                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
-                            ' or take all enemy cities.</p>';
-                    else if(alert)
-                        blockNote = '<p style="color:#ffd968">Defense: hold ' +
-                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
-                            ' or capture every enemy city.</p>';
-                    info.innerHTML = '<h3>' + node.name + (node.industry ? ' 🏭' : node.capital ? ' ★' : node.hq ? ' ⚑' : '') + '</h3>' +
-                        tag +
-                        '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield</p>' +
-                        '<p>' + node.brief + '</p>' +
-                        (node.industry ? '<p style="color:#d4af37">Industrial region — still worth +' + WOD_ROGUE_REQ_PER_TERRITORY + ' requisition each turn while held.</p>' : '') +
-                        blockNote +
-                        intel;
-                }
-            }
-            if(launch) {
-                let playable = node && wodRogueNodePlayable(node.id) && c.roster.length > 0;
-                launch.disabled = !playable;
-                if(!node) launch.textContent = 'Launch battle';
-                else if(c.roster.length === 0) launch.textContent = 'No army — recruit units below';
-                else if(c.alerts[node.id]) launch.textContent = 'Defend ' + node.name;
-                else if(wodRogueAdvanceBlocked(c) && c.nodesState[node.id].owner === 'enemy')
-                    launch.textContent = 'Roads blocked — defend first';
-                else if(c.nodesState[node.id].owner === 'enemy') launch.textContent = 'Attack ' + node.name;
-                else launch.textContent = 'Launch battle';
-            }
+            wodRefreshCampaignNodeInfoOnly();
             // Roster.
             let roster = document.getElementById('wodCampRoster');
             let count = document.getElementById('wodCampArmyCount');

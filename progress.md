@@ -393,6 +393,11 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Global mobile `.menu-btn { width: 88vw }` was left-shifting Play vs AI buttons and clipping campaign Back/Surrender.
 - Play vs AI buttons now fill a centered column (`max-width: 280px`); campaign footer buttons are equal flex halves with `width: 100%` and no viewport-width overflow.
 
+## Campaign map flash + surrender dialog polish (2026-07-09)
+- Campaign war map caches terrain/tint/edges offscreen; taps only blit the cache and redraw node markers (no full cell rebuild / mobile flash).
+- Map clicks update selection + node info without rebuilding the whole campaign panel.
+- Surrender confirm dialog is centered with equal-width Cancel/Confirm actions on PC and mobile.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
