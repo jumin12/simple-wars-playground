@@ -398,6 +398,10 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Map clicks update selection + node info without rebuilding the whole campaign panel.
 - Surrender confirm dialog is centered with equal-width Cancel/Confirm actions on PC and mobile.
 
+## Mobile Play vs AI / campaign Back centering (2026-07-09)
+- `#playModePanel` uses `justify-content: center` on mobile so the menu sits mid-screen instead of the top.
+- Campaign footer stacks and centers Back (and Surrender) as full-width centered buttons on mobile.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
