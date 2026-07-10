@@ -464,3 +464,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - PC unit/city cards sit bottom-center above the production tray with the mobile charcoal+gold sheet aesthetic (no overlap with layers/tray).
 - Terrain palette, soft AO basins, ridge highlights, denser canopy trees, warmer rock peaks, and soft blue coast fringe tuned toward the reference map.
 - Pushed to `main`.
+
+## PC HUD / right cards / slope topography (2026-07-10)
+- Shifted Infantry/Idle text right on unit cards; PC cards back on the right, larger, hugging the bottom production bar.
+- PC top/bottom chrome uses mobile-style bordered resource cards, objective panel, and dock-like production tabs.
+- Replaced blotchy per-hex dark spots with slope shading only along real elevation drops (mountain→valley).
+- Pushed to `main`.
