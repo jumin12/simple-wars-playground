@@ -378,6 +378,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Marching units use draw interpolation again (`wodUnitSmoothDrawXY` no longer hard-snaps while `target` is set).
 - Movement hitch fixes: tighter dt caps while marching, smaller sim substeps, fewer waypoint snaps per tick, reset frame clock on unpause/popup resume, more PF budget on large maps, lighter terrain bake during marches.
 
+## Campaign UI / research / defeat timer (2026-07-09)
+- Defeat countdown is **15 seconds** (victory stays 30s).
+- New-campaign setup panel redesigned (kicker, budget chip, stacked fields, clearer actions).
+- Campaign surrender uses a styled confirm dialog (no native `confirm`); in-match surrender panel restyled.
+- Campaign **Research** shop: War Chest, Recruiting Drive, Logistics Bureau, Strategic Reserves — costly requisition upgrades that boost battle start money/manpower and/or per-territory income.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
