@@ -36080,10 +36080,8 @@
                     for(let type of paintOrder) {
                         drawTerrainBlobLayer(terrainBaseCtx, type, -terrainBounds.minX, -terrainBounds.minY);
                     }
-                    drawTerrainTopography(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                     drawForestTreeDecorations(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                     drawMountainRockDecorations(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
-                    drawTerrainCoastFringe(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                     drawTerrainWaterRipples(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                     drawUrbanTerrainDetails(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                 }
@@ -36307,125 +36305,14 @@
             return a;
         }
 
-        /** Continuous rounded topography hillshade for land, hills, mountains, and cities. */
+        /** Continuous rounded topography hillshade — disabled (read as black/white circles). */
         function drawTerrainTopography(ctx, offsetX, offsetY) {
-            if(!gameData.layers || gameData.terrainViewMode === 'schematic') return;
-            let w = ctx.canvas.width | 0, h = ctx.canvas.height | 0;
-            if(w < 8 || h < 8) return;
-            let hr = gameData.hexRadius || 20;
-            let step = Math.max(3, Math.min(5, Math.round(hr * 0.24)));
-            let sw = Math.ceil(w / step), sh = Math.ceil(h / step);
-            let elevRaw = new Float32Array(sw * sh);
-            let land = new Uint8Array(sw * sh);
-            for(let sy = 0; sy < sh; sy++) {
-                let wy = sy * step - offsetY;
-                for(let sx = 0; sx < sw; sx++) {
-                    let wx = sx * step - offsetX;
-                    let hex = getNearestHexToPoint(wx, wy);
-                    let i = sy * sw + sx;
-                    if(!hex || isWaterHex(hex) || hex.type === 'bridge') {
-                        elevRaw[i] = hex && isWaterHex(hex) ? 0.04 : 0.16;
-                        land[i] = 0;
-                        continue;
-                    }
-                    elevRaw[i] = wodSampleTopoElev(wx, wy);
-                    land[i] = 1;
-                }
-            }
-            let elev = wodBlurFloatGrid(elevRaw, sw, sh, 2);
-            if(!gameData._topoShadeCanvas) gameData._topoShadeCanvas = document.createElement('canvas');
-            let oc = gameData._topoShadeCanvas;
-            if(oc.width !== sw || oc.height !== sh) {
-                oc.width = sw;
-                oc.height = sh;
-            }
-            let octx = oc.getContext('2d', { willReadFrequently: true });
-            let img = octx.createImageData(sw, sh);
-            let data = img.data;
-            let Lx = -0.5, Ly = -0.66, Lz = 0.56;
-            let vert = 2.85;
-            for(let sy = 0; sy < sh; sy++) {
-                for(let sx = 0; sx < sw; sx++) {
-                    let i = sy * sw + sx;
-                    let p = i * 4;
-                    if(!land[i]) {
-                        data[p] = data[p + 1] = data[p + 2] = 0;
-                        data[p + 3] = 0;
-                        continue;
-                    }
-                    // Kill weird cliff banding at the waterline — coasts use a dedicated fringe.
-                    let coastNear = 0;
-                    for(let oy = -1; oy <= 1; oy++) {
-                        for(let ox = -1; ox <= 1; ox++) {
-                            if(!ox && !oy) continue;
-                            let nx = sx + ox, ny = sy + oy;
-                            if(nx < 0 || ny < 0 || nx >= sw || ny >= sh) continue;
-                            if(!land[ny * sw + nx]) coastNear++;
-                        }
-                    }
-                    if(coastNear >= 1) {
-                        data[p] = data[p + 1] = data[p + 2] = 0;
-                        data[p + 3] = 0;
-                        continue;
-                    }
-                    let eL = elev[sy * sw + Math.max(0, sx - 1)];
-                    let eR = elev[sy * sw + Math.min(sw - 1, sx + 1)];
-                    let eU = elev[Math.max(0, sy - 1) * sw + sx];
-                    let eD = elev[Math.min(sh - 1, sy + 1) * sw + sx];
-                    let dx = (eR - eL) * vert;
-                    let dy = (eD - eU) * vert;
-                    let nx = -dx, ny = -dy, nz = 1;
-                    let inv = 1 / Math.hypot(nx, ny, nz);
-                    let shade = 0.5 + 0.78 * Math.max(0, (nx * inv) * Lx + (ny * inv) * Ly + (nz * inv) * Lz);
-                    shade = Math.max(0.34, Math.min(1.24, shade));
-                    let avg = (elev[i] + eL + eR + eU + eD) * 0.2;
-                    let basin = Math.max(0, avg - elev[i]);
-                    // Soft bowl falloff (sqrt) keeps depressions round
-                    shade -= Math.sqrt(basin) * 0.62;
-                    if(shade < 1) {
-                        let a = Math.min(150, Math.round((1 - shade) * 175));
-                        data[p] = 14;
-                        data[p + 1] = 20;
-                        data[p + 2] = 14;
-                        data[p + 3] = a;
-                    } else {
-                        let a = Math.min(62, Math.round((shade - 1) * 125));
-                        data[p] = 228;
-                        data[p + 1] = 216;
-                        data[p + 2] = 172;
-                        data[p + 3] = a;
-                    }
-                }
-            }
-            octx.putImageData(img, 0, 0);
-            ctx.save();
-            ctx.imageSmoothingEnabled = true;
-            ctx.imageSmoothingQuality = 'high';
-            ctx.globalAlpha = 1;
-            ctx.drawImage(oc, 0, 0, sw, sh, 0, 0, w, h);
-            ctx.restore();
+            return;
         }
 
-        /** Soft shallow-water tint only — no dark cliff bevel or bright foam rings. */
+        /** Soft shallow-water tint — disabled with topography/coast circle cleanup. */
         function drawTerrainCoastFringe(ctx, offsetX, offsetY) {
-            if(!gameData.layers || gameData.terrainViewMode === 'schematic') return;
-            let spacing = gameData.hexRadius * 1.35;
-            let shelfR = spacing * 0.5;
-
-            for(let hex of gameData.hexList) {
-                if(!isWaterHex(hex)) continue;
-                let nearLand = false;
-                for(let dir of hexDirections) {
-                    let n = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(n && !isWaterHex(n) && n.type !== 'bridge') { nearLand = true; break; }
-                }
-                if(!nearLand) continue;
-                let px = hex.x + offsetX, py = hex.y + offsetY;
-                ctx.fillStyle = 'rgba(72, 158, 198, 0.18)';
-                ctx.beginPath();
-                ctx.arc(px, py, shelfR, 0, Math.PI * 2);
-                ctx.fill();
-            }
+            return;
         }
 
         function drawForestTreeDecorations(ctx, offsetX, offsetY) {

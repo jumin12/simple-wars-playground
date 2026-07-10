@@ -521,3 +521,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Ordered retreat only pulls back ~2–4 cells slightly off the front (capped depth gain), not a deep rear dash.
 - Removed dark cliff bevel and bright foam rings from the coast fringe; topo shade no longer paints the waterline.
 - Pushed to `main`.
+
+## Remove map black/white circle overlay (2026-07-10)
+- Disabled topography hillshade and coast fringe passes that painted dark/light circular blobs across the map.
+- Pushed to `main`.
