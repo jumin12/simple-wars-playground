@@ -427,3 +427,12 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Optional: sample attract-mode FPS when menu battle is running under `menuAttractMode`.
 - Optional: paint beach-sector labels (Utah/Omaha/Gold/Juno/Sword) as map markers if the engine gains label entities.
 - Optional: Playwright smoke for campaign deploy banner + Begin battle resume.
+
+## Reference terrain / NATO counters / mobile HUD pass (2026-07-10)
+- Current request: match the supplied mobile strategy-map reference as closely as possible, specifically terrain rendering, map unit counters, and mobile UI.
+- Baseline at 430x932 confirmed the current game is functional with no console errors, but still reads flatter and more saturated than the reference; the portrait objective consumes a second HUD row, the selected-unit sheet is too narrow, and NATO counters are fully faction-colored instead of white-faced counters on colored bases.
+- In progress: muted relief-map palette and texture pass, white-faced dimensional NATO counters, and a one-row reference-style mobile HUD / full-width command sheet.
+- Terrain chunk complete: reference-muted blue/green/ochre/stone palette, curved relief strokes, water wave grain, larger shaded tree crowns, and less repetitive faceted mountain ridges. Required web-game client smoke rendered gameplay with state output and no console-error artifact.
+- Counter chunk complete: modern NATO markers now use a raised faction-color base, pale face, black NATO symbol, lower readiness plate, deeper shadow, and larger glowing corner brackets; modern unit names use full “Division” / “Regiment” labels. The selected-unit emblem mirrors the circular gold-ring counter treatment.
+- Mobile HUD chunk complete: two resource cards with live rates, crosshair objective card, compact speed/menu actions, a full-width command sheet, hidden redundant deselect row in compact mode, gold SVG dock icons, and outlined default Map tab. The separate dock handle is hidden in portrait so the sheet sits directly above the dock like the reference.
+- Verification: 430x932 and 390x844 portrait captures have no document overflow or console errors. At 430, top rail is 64px, command sheet is 406x163, and dock is 62px; the full unit name fits without truncation. Move → Waypoint → Formation modes, More expand/collapse, and sheet peek/reopen all passed. Required client emitted gameplay screenshots + `render_game_to_text` state with no error JSON.
