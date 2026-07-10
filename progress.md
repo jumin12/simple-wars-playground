@@ -415,6 +415,11 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Terrain: mottled surface detail, denser round tree clusters, browner mountain peaks, updated palette.
 - Mobile unit sheet head is identity + KPI row; bottom dock active tab is solid gold with dark icon/label.
 
+## Coast cleanup + reference match (2026-07-10)
+- Removed shallow-water rim circles entirely (the pale rings at land/ocean edges).
+- Matched ocean fill to water color; sealed coastal land discs; skipped water on territory overlay.
+- NATO chips use thin white rim + black symbols; mobile sheet/dock layout tightened toward the reference.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
