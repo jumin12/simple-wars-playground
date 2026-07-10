@@ -471,3 +471,10 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - PC top bar and bottom production tabs restyled toward the mobile charcoal/gold resource-card + dock look.
 - Removed per-hex dark blob relief; replaced with continuous crumpled heightmap hillshade topography.
 - Pushed to `main`.
+
+## Multi-select Stats / rounder topo / PC mobile chrome (2026-07-10)
+- Hide Stats order button when multiple units are selected.
+- Soft-blend + blur topography so depressions read as rounded bowls instead of square blotches.
+- PC now uses the mobile top status rail and bottom dock (PC-sized); Buildings/Units open the production tray.
+- PC unit card matches mobile sheet styling, bottom-right, flush above the dock with no gap.
+- Pushed to `main`.
