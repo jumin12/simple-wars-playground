@@ -402,6 +402,13 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - `#playModePanel` uses `justify-content: center` on mobile so the menu sits mid-screen instead of the top.
 - Campaign footer stacks and centers Back (and Surrender) as full-width centered buttons on mobile.
 
+## Sharper UI + mobile unit sheet (2026-07-10)
+- Game-wide dark charcoal / thin gold theme: CSS vars, sharper menu/build/speed buttons, panels, resource chips.
+- Mobile unit selection redesigned to match reference: circular gold-ring emblem, status dot, personnel/condition/terrain KPI boxes, Move/Waypoint/Formation/More order row, circular expand toggle.
+- More toggles effects/service details on mobile; desktop keeps full detail visible.
+- Terrain polish: richer forest crowns, mountain/hill rock peaks, shore foam accents, higher-contrast terrain palette.
+- Mobile dock active tabs use stronger gold chrome.
+
 ### TODOs / next agent
 - Optional: more store packs (Market Garden, Bulge) using the same generator pattern.
 - Optional: re-enable skirmish Shop Mission setup button if non-mission map packs return.
