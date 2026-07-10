@@ -516,3 +516,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Ordered retreat must pick owned hexes strictly farther from enemy territory than the start, moving away from the front (never toward the enemy).
 - Soft fallbacks also reject frontline tiles; final safety checks drop any pick that is not deeper/away.
 - Pushed to `main`.
+
+## Short retreat + clean coastline (2026-07-10)
+- Ordered retreat only pulls back ~2–4 cells slightly off the front (capped depth gain), not a deep rear dash.
+- Removed dark cliff bevel and bright foam rings from the coast fringe; topo shade no longer paints the waterline.
+- Pushed to `main`.

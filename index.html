@@ -29046,7 +29046,10 @@
         }
 
         function findOrderedRetreatPoint(unit, minCells) {
-            minCells = Math.max(1, minCells | 0);
+            // Slight pullback only — a few cells off the front, not a deep rear march.
+            minCells = Math.max(1, Math.min(3, minCells | 0));
+            let maxCells = Math.max(minCells, 4);
+            let maxDepthGain = 2;
             let start = getNearestHexToPoint(unit.x, unit.y);
             if(!start) return null;
             let owner = unit.owner;
@@ -29105,34 +29108,36 @@
             let seen = new Set();
             let queue = [{ hex: start, steps: 0 }];
             seen.add(`${start.q},${start.r}`);
-            let maxSteps = Math.max(26, minCells + 18);
+            let maxSteps = maxCells + 2;
             let hr = gameData.hexRadius || 20;
-            let minAlong = hr * 0.85;
+            let minAlong = hr * 0.55;
             while(queue.length) {
                 let cur = queue.shift();
                 let hex = cur.hex;
                 let steps = cur.steps;
-                if(steps >= minCells) {
+                if(steps >= minCells && steps <= maxCells) {
                     let depth = hostile ? wodHexCellDist(hex, hostile) : (startDepth + steps);
-                    // Must be strictly deeper into friendly land than the start (never closer to enemy territory).
-                    let deeperOk = hostile ? (depth > startDepth) : true;
+                    let depthGain = depth - startDepth;
+                    // Slightly deeper into friendly land — never closer to enemy, never a long rear dash.
+                    let deeperOk = hostile ? (depthGain >= 1 && depthGain <= maxDepthGain) : true;
                     if(deeperOk) {
                         let dx = hex.x - unit.x;
                         let dy = hex.y - unit.y;
                         let along = dx * awayX + dy * awayY;
-                        // Must move away from the enemy front — never toward or across it.
+                        // Must move away from the enemy front — never toward it.
                         if(along >= minAlong) {
                             let front = isFrontlineHex(hex, owner);
                             let enemyNearby = countNearbyUnits(owner, hex.x, hex.y, 140, true);
-                            let score = depth * 140000 + along * 36 + (depth - startDepth) * 90000
-                                + steps * 900
-                                - Math.abs(steps - Math.max(minCells, 6)) * 450
-                                - enemyNearby * 130000
-                                - (front ? 260000 : 0);
+                            // Prefer the nearest valid pullback (short steps, small depth gain).
+                            let score = along * 40
+                                - steps * 120000
+                                - Math.abs(depthGain - 1) * 80000
+                                - enemyNearby * 100000
+                                - (front ? 200000 : 0);
                             if(unit.type !== 'heavy') {
-                                if(hex.type === 'forest' || hex.type === 'hill') score += 18000;
-                                else if(hex.type === 'urban') score += 12000;
-                            } else if(hex.type === 'urban') score += 8000;
+                                if(hex.type === 'forest' || hex.type === 'hill') score += 12000;
+                                else if(hex.type === 'urban') score += 8000;
+                            } else if(hex.type === 'urban') score += 5000;
                             if(!front && enemyNearby === 0 && score > bestScore) {
                                 bestScore = score;
                                 best = hex;
@@ -29159,9 +29164,13 @@
             let pick = best || soft;
             if(!pick) return null;
             // Final safety: never accept a destination closer to enemy land than the start.
-            if(hostile && wodHexCellDist(pick, hostile) <= startDepth) return null;
+            if(hostile) {
+                let d = wodHexCellDist(pick, hostile);
+                if(d <= startDepth || d > startDepth + maxDepthGain) return null;
+            }
             let pdx = pick.x - unit.x, pdy = pick.y - unit.y;
-            if(pdx * awayX + pdy * awayY < minAlong * 0.5) return null;
+            if(pdx * awayX + pdy * awayY < minAlong * 0.45) return null;
+            if(wodHexCellDist(start, pick) > maxCells) return null;
             return { x: pick.x, y: pick.y };
         }
 
@@ -29175,7 +29184,7 @@
                 if(!unit || unit.id || unit.type === 'convoy' || unit.hp <= 0) continue;
                 if(unit.owner !== lo) continue;
                 if(unit.moraleBroken) continue;
-                let pt = findOrderedRetreatPoint(unit, 5);
+                let pt = findOrderedRetreatPoint(unit, 2);
                 if(!pt) continue;
                 if(assignUnitMoveAlongWaypoints(unit, [pt], { forceRetreat: true })) {
                     unit.retreating = true;
@@ -36354,7 +36363,7 @@
                             if(!land[ny * sw + nx]) coastNear++;
                         }
                     }
-                    if(coastNear >= 2) {
+                    if(coastNear >= 1) {
                         data[p] = data[p + 1] = data[p + 2] = 0;
                         data[p + 3] = 0;
                         continue;
@@ -36373,7 +36382,6 @@
                     let basin = Math.max(0, avg - elev[i]);
                     // Soft bowl falloff (sqrt) keeps depressions round
                     shade -= Math.sqrt(basin) * 0.62;
-                    if(coastNear) shade = 1 + (shade - 1) * 0.35;
                     if(shade < 1) {
                         let a = Math.min(150, Math.round((1 - shade) * 175));
                         data[p] = 14;
@@ -36398,15 +36406,12 @@
             ctx.restore();
         }
 
-        /** Reference coast: crisp land shelf, cyan shallow fringe, no muddy shore gradients. */
+        /** Soft shallow-water tint only — no dark cliff bevel or bright foam rings. */
         function drawTerrainCoastFringe(ctx, offsetX, offsetY) {
             if(!gameData.layers || gameData.terrainViewMode === 'schematic') return;
             let spacing = gameData.hexRadius * 1.35;
-            let shelfR = spacing * 0.58;
-            let cliffR = spacing * 0.36;
-            let foamR = spacing * 0.28;
+            let shelfR = spacing * 0.5;
 
-            // Pass 1: shallow cyan shelf on water tiles that touch land (real water, not land tint).
             for(let hex of gameData.hexList) {
                 if(!isWaterHex(hex)) continue;
                 let nearLand = false;
@@ -36416,57 +36421,9 @@
                 }
                 if(!nearLand) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
-                ctx.fillStyle = 'rgba(96, 188, 228, 0.34)';
-                ctx.beginPath();
-                ctx.arc(px, py, shelfR * 0.72, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.fillStyle = 'rgba(58, 150, 210, 0.16)';
+                ctx.fillStyle = 'rgba(72, 158, 198, 0.18)';
                 ctx.beginPath();
                 ctx.arc(px, py, shelfR, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            // Pass 2: thin dark cliff bevel under the land edge (elevated plateau look).
-            for(let hex of gameData.hexList) {
-                if(isWaterHex(hex) || hex.type === 'bridge') continue;
-                let waterN = 0;
-                let wx = 0, wy = 0;
-                for(let dir of hexDirections) {
-                    let n = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(n && isWaterHex(n)) {
-                        waterN++;
-                        wx += n.x - hex.x;
-                        wy += n.y - hex.y;
-                    }
-                }
-                if(!waterN) continue;
-                let px = hex.x + offsetX + wx / waterN * 0.22;
-                let py = hex.y + offsetY + wy / waterN * 0.22;
-                ctx.fillStyle = 'rgba(6, 14, 22, 0.38)';
-                ctx.beginPath();
-                ctx.arc(px, py, cliffR, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
-            // Pass 3: thin bright cyan foam line hugging the shore (not white rings).
-            for(let hex of gameData.hexList) {
-                if(isWaterHex(hex) || hex.type === 'bridge') continue;
-                let waterN = 0;
-                let wx = 0, wy = 0;
-                for(let dir of hexDirections) {
-                    let n = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(n && isWaterHex(n)) {
-                        waterN++;
-                        wx += n.x - hex.x;
-                        wy += n.y - hex.y;
-                    }
-                }
-                if(!waterN) continue;
-                let px = hex.x + offsetX + wx / waterN * 0.4;
-                let py = hex.y + offsetY + wy / waterN * 0.4;
-                ctx.fillStyle = 'rgba(180, 230, 245, 0.42)';
-                ctx.beginPath();
-                ctx.arc(px, py, foamR, 0, Math.PI * 2);
                 ctx.fill();
             }
         }
