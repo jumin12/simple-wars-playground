@@ -458,3 +458,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Replaced stroke scribble relief with colonial-cartographer-style soft hillshade + basin darkening; land contour lines removed (water ripples kept).
 - Info-card effect/page scroll and campaign side/roster scroll no longer jump to top on UI refresh.
 - Pushed to `main`.
+
+## Mobile minimize removal / PC card layout / reference terrain (2026-07-10)
+- Removed the mobile unit-sheet minimize/peek control; KPI chips expand into that space on the right.
+- PC unit/city cards sit bottom-center above the production tray with the mobile charcoal+gold sheet aesthetic (no overlap with layers/tray).
+- Terrain palette, soft AO basins, ridge highlights, denser canopy trees, warmer rock peaks, and soft blue coast fringe tuned toward the reference map.
+- Pushed to `main`.
