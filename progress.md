@@ -525,3 +525,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Remove map black/white circle overlay (2026-07-10)
 - Disabled topography hillshade and coast fringe passes that painted dark/light circular blobs across the map.
 - Pushed to `main`.
+
+## Realistic continuous topography (2026-07-10)
+- Re-enabled topography as domain-warped noise ridges/valleys (not hex-centered circles), with soft multiply shadow-only hillshade.
+- Coast fringe stays a light shallow tint without dark/white rings.
+- Pushed to `main`.
