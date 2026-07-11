@@ -534,3 +534,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Tree shadow cleanup (2026-07-10)
 - Removed circular forest undergrowth discs; tree ground shadows are soft elongated contact ellipses aligned with map light.
 - Pushed to `main`.
+
+## Remove coastline circles (2026-07-10)
+- Disabled the shallow-water coast fringe that painted circular arcs along the shoreline.
+- Pushed to `main`.
