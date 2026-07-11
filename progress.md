@@ -530,3 +530,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Re-enabled topography as domain-warped noise ridges/valleys (not hex-centered circles), with soft multiply shadow-only hillshade.
 - Coast fringe stays a light shallow tint without dark/white rings.
 - Pushed to `main`.
+
+## Tree shadow cleanup (2026-07-10)
+- Removed circular forest undergrowth discs; tree ground shadows are soft elongated contact ellipses aligned with map light.
+- Pushed to `main`.

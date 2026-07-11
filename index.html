@@ -36445,15 +36445,10 @@
                 return x - Math.floor(x);
             }
 
-            // Soft undergrowth so canopy pops like the reference miniature trees.
-            for(let hex of gameData.hexList) {
-                if(hex.type !== 'forest') continue;
-                let bx = hex.x + offsetX, by = hex.y + offsetY;
-                ctx.fillStyle = 'rgba(10, 28, 14, 0.22)';
-                ctx.beginPath();
-                ctx.arc(bx, by, spacing * 0.58, 0, Math.PI * 2);
-                ctx.fill();
-            }
+            // Match topography light (NW) — soft contact shadows fall SE, not round discs.
+            let shadowAng = 0.55;
+            let shadowDx = Math.cos(shadowAng);
+            let shadowDy = Math.sin(shadowAng);
 
             for(let hex of gameData.hexList) {
                 if(hex.type !== 'forest') continue;
@@ -36467,10 +36462,25 @@
                     let tx = bx + (u1 - 0.5) * spacing * 0.9;
                     let ty = by + (u2 - 0.5) * spacing * 0.82;
                     let crownR = spacing * (0.13 + (u1 + u2) * 0.04);
-                    // Soft ground shadow (offset down-right).
-                    ctx.fillStyle = 'rgba(5, 12, 7, 0.32)';
+                    let stretch = 1.35 + u3 * 0.45;
+                    let sx = tx + shadowDx * crownR * 0.55;
+                    let sy = ty + shadowDy * crownR * 0.55;
+                    // Soft elongated ground shadow (two passes) — no circular blob.
+                    ctx.fillStyle = 'rgba(8, 16, 10, 0.16)';
                     ctx.beginPath();
-                    ctx.ellipse(tx + crownR * 0.2, ty + crownR * 0.45, crownR * 1.0, crownR * 0.38, -0.28, 0, Math.PI * 2);
+                    ctx.ellipse(sx, sy, crownR * stretch * 1.05, crownR * 0.32, shadowAng, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = 'rgba(6, 14, 8, 0.2)';
+                    ctx.beginPath();
+                    ctx.ellipse(
+                        sx - shadowDx * crownR * 0.12,
+                        sy - shadowDy * crownR * 0.12,
+                        crownR * stretch * 0.72,
+                        crownR * 0.22,
+                        shadowAng,
+                        0,
+                        Math.PI * 2
+                    );
                     ctx.fill();
                     // Dark canopy base.
                     ctx.fillStyle = '#12301c';
