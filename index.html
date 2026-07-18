@@ -354,6 +354,13 @@
         #campaignSummaryOverlay {
             z-index: 42;
             background: radial-gradient(circle at 50% 20%, rgba(26, 48, 64, 0.96), rgba(5, 10, 16, 0.96));
+            justify-content: flex-start;
+            align-items: center;
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 18px 12px 28px;
+            box-sizing: border-box;
         }
         .campaign-summary-overlay-wrap {
             pointer-events: auto;
@@ -361,12 +368,32 @@
         .campaign-summary-panel {
             max-width: 640px;
             width: 92vw;
+            max-height: min(92vh, 960px);
+            margin: auto 0;
             padding: 24px 26px 28px;
             border-radius: 16px;
             border: 2px solid rgba(212, 175, 39, 0.55);
             background: linear-gradient(165deg, rgba(18, 28, 40, 0.98), rgba(10, 17, 26, 0.99));
             box-shadow: 0 18px 48px rgba(0,0,0,0.5);
             text-align: left;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+        }
+        .campaign-summary-panel > h2,
+        .campaign-summary-panel > .campaign-summary-sub,
+        .campaign-summary-panel > .campaign-summary-actions {
+            flex: 0 0 auto;
+        }
+        .campaign-summary-panel > .cs-stats-root {
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: visible;
         }
         .campaign-summary-panel h2 {
             margin: 0 0 6px;
@@ -42098,6 +42125,143 @@
             startGame('ai');
         }
 
+        /** Campaign AI start placement: keep Concord armies on their frontages and around
+         *  cities they already hold (not deep backline skirmish spawn). */
+        function wodCampaignSpawnAiStartingUnits(owners, gar, spawnRng) {
+            gameData.entities = [];
+            gameData._enemyDistField = null;
+            if(!owners || !owners.length) return;
+            let rng = typeof spawnRng === 'function' ? spawnRng : Math.random;
+            let hr = Math.max(gameData.hexRadius || 20, 12);
+            let minSepSq = Math.pow(hr * 2.15, 2);
+            let used = [];
+            function tooClose(x, y) {
+                for(let p of used) {
+                    let dx = p.x - x, dy = p.y - y;
+                    if(dx * dx + dy * dy < minSepSq) return true;
+                }
+                return false;
+            }
+            function pushUsed(x, y) { used.push({ x, y }); }
+            function cityAnchorsFor(owner) {
+                let out = [];
+                for(let cc of gameData.cities || []) {
+                    if(!cc || cc.owner !== owner) continue;
+                    out.push(cc);
+                }
+                return out;
+            }
+            function frontAnchorsFor(owner) {
+                let fronts = typeof wodGetOwnerSpawnAnchorHexes === 'function'
+                    ? wodGetOwnerSpawnAnchorHexes(owner)
+                    : [];
+                if(fronts && fronts.length) return fronts;
+                // Fallback: owned land nearest any foreign land.
+                let scored = [];
+                for(let h of gameData.hexList) {
+                    if(!h || h.owner !== owner || h.type === 'mountain') continue;
+                    if(typeof isClaimableLand === 'function' && !isClaimableLand(h)) continue;
+                    if(isWaterHex(h)) continue;
+                    let d = typeof wodMinDistSqToEnemyTerritory === 'function'
+                        ? wodMinDistSqToEnemyTerritory(h.x, h.y, owner)
+                        : Infinity;
+                    scored.push({ h, d });
+                }
+                scored.sort((a, b) => a.d - b.d);
+                return scored.slice(0, Math.min(48, scored.length)).map(s => s.h);
+            }
+            function pickLandNearAnchors(owner, type, anchors, radiusMax) {
+                let probe = { type: type === 'heavy' ? 'heavy' : 'light', owner };
+                if(!anchors || !anchors.length) return null;
+                let rMax = Math.max(1, radiusMax | 0);
+                for(let attempt = 0; attempt < 90; attempt++) {
+                    let a = anchors[(rng() * anchors.length) | 0];
+                    if(!a) continue;
+                    let aq = a.q, ar = a.r;
+                    if(aq == null || ar == null) {
+                        let c = pixelToHex(a.x, a.y);
+                        aq = c.q; ar = c.r;
+                    }
+                    let rad = 1 + ((rng() * rMax) | 0);
+                    let pts = getHexesInRadius(aq, ar, rad);
+                    for(let n = 0; n < pts.length; n++) {
+                        let pt = pts[((rng() * pts.length) | 0)];
+                        let h = gameData.hexes[`${pt.q},${pt.r}`];
+                        if(!h || h.owner !== owner) continue;
+                        if(typeof isArmyStartSpawnHex === 'function') {
+                            if(!isArmyStartSpawnHex(probe, h)) continue;
+                        } else if(h.type === 'mountain' || isWaterHex(h)) continue;
+                        if(tooClose(h.x, h.y)) continue;
+                        return h;
+                    }
+                }
+                // Last resort: any owned claimable land for this owner.
+                for(let h of gameData.hexList) {
+                    if(!h || h.owner !== owner) continue;
+                    if(typeof isArmyStartSpawnHex === 'function' && !isArmyStartSpawnHex(probe, h)) continue;
+                    if(tooClose(h.x, h.y)) continue;
+                    return h;
+                }
+                return null;
+            }
+            function placeOne(owner, type, preferFront) {
+                if(type === 'ship') {
+                    let cities = cityAnchorsFor(owner);
+                    let fronts = frontAnchorsFor(owner);
+                    let pool = cities.length ? cities : fronts;
+                    if(!pool.length) return null;
+                    for(let attempt = 0; attempt < 40; attempt++) {
+                        let a = pool[(rng() * pool.length) | 0];
+                        let w = wodRogueFindDeployWaterHex(a.x, a.y, attempt);
+                        if(!w || tooClose(w.x, w.y)) continue;
+                        // Prefer water that still belongs to this AI when ownership exists.
+                        if(w.owner && w.owner !== owner && attempt < 28) continue;
+                        let u = createUnitAt('ship', w.x, w.y, owner, { startSpawn: true });
+                        if(u) pushUsed(u.x, u.y);
+                        return u;
+                    }
+                    return null;
+                }
+                let fronts = frontAnchorsFor(owner);
+                let cities = cityAnchorsFor(owner);
+                let anchors = preferFront
+                    ? (fronts.length ? fronts : cities)
+                    : (cities.length ? cities : fronts);
+                let hex = pickLandNearAnchors(owner, type, anchors, preferFront ? 3 : 4);
+                if(!hex && anchors !== fronts) hex = pickLandNearAnchors(owner, type, fronts, 3);
+                if(!hex && anchors !== cities) hex = pickLandNearAnchors(owner, type, cities, 4);
+                if(!hex) return null;
+                let u = createUnitAt(type, hex.x, hex.y, owner, { startSpawn: true });
+                if(u) pushUsed(u.x, u.y);
+                return u;
+            }
+
+            let unitsPerOwner = Math.max(12, Math.min(28, Math.floor((gameData.mapRadius || 40) / 3.5)));
+            for(let owner of owners) {
+                for(let i = 0; i < unitsPerOwner; i++) {
+                    // Mostly on the frontage; every 5th unit garrisons a city.
+                    let preferFront = (i % 5) !== 4;
+                    placeOne(owner, 'light', preferFront);
+                }
+                for(let h = 0; h < 2; h++) placeOne(owner, 'heavy', h === 0);
+            }
+
+            let need = gar || { light: 0, heavy: 0, ship: 0 };
+            let have = { light: 0, heavy: 0, ship: 0 };
+            for(let u of gameData.entities) {
+                if(u && u.hp > 0 && u.owner > 1 && have[u.type] != null) have[u.type]++;
+            }
+            for(let t of ['light', 'heavy', 'ship']) {
+                let needTotal = Math.max(0, (need[t] || 0) - have[t]);
+                for(let k = 0; k < needTotal; k++) {
+                    let o = owners[k % owners.length];
+                    // Garrison leftovers: mostly cities, with a frontline mix for land.
+                    let preferFront = t !== 'ship' && (k % 3) === 0;
+                    placeOne(o, t, preferFront);
+                }
+            }
+        }
+
         /** Called from startGame after initGame when a campaign battle is active:
          * replace the default player army with the persistent roster, freeze recruiting,
          * field the node's garrison, and show the story briefing. */
@@ -42110,7 +42274,7 @@
             if(!node) return;
             c.nodesState[run.nodeId].battles = (c.nodesState[run.nodeId].battles || 0) + 1;
             wodRogueSave();
-            // Field AI armies first (spawnInitialFrontlineUnits clears entities).
+            // Field AI armies first around their frontlines + controlled cities.
             gameData.entities = [];
             gameData.selection = [];
             let owners = [];
@@ -42121,27 +42285,13 @@
                 gameData.aiMoneyByOwner[o] = Math.round((5200 + diff * 3400) * D.mult);
                 gameData.aiManpowerByOwner[o] = Math.round((4600 + diff * 2400) * D.mult);
             }
-            if(owners.length && typeof spawnInitialFrontlineUnits === 'function') {
-                try { spawnInitialFrontlineUnits(owners); } catch(_) {}
-            }
             let gar = node.gar || { light: 0, heavy: 0, ship: 0 };
-            let have = { light: 0, heavy: 0, ship: 0 };
-            for(let u of gameData.entities) {
-                if(u && u.hp > 0 && u.owner > 1 && have[u.type] != null) have[u.type]++;
-            }
             let spawnRng = wodRogueRng((c.seed ^ wodRogueMul32(run.nodeId + 31, 0x27d4eb2f)) >>> 0);
-            for(let t of ['light', 'heavy', 'ship']) {
-                let needTotal = Math.max(0, (gar[t] || 0) - have[t]);
-                for(let k = 0; k < needTotal; k++) {
-                    let o = owners[k % owners.length];
-                    let cityPool = gameData.cities.filter(cc => cc.owner === o);
-                    if(!cityPool.length) continue;
-                    let city = cityPool[(spawnRng() * cityPool.length) | 0];
-                    if(t === 'ship') {
-                        let w = wodRogueFindDeployWaterHex(city.x, city.y, k);
-                        if(w) createUnitAt('ship', w.x, w.y, o, { startSpawn: true });
-                    } else {
-                        createUnitAt(t, city.x + (spawnRng() - 0.5) * 140, city.y + (spawnRng() - 0.5) * 140, o, { startSpawn: true });
+            if(owners.length) {
+                try { wodCampaignSpawnAiStartingUnits(owners, gar, spawnRng); }
+                catch(_) {
+                    if(typeof spawnInitialFrontlineUnits === 'function') {
+                        try { spawnInitialFrontlineUnits(owners); } catch(__) {}
                     }
                 }
             }

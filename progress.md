@@ -538,3 +538,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Remove coastline circles (2026-07-10)
 - Disabled the shallow-water coast fringe that painted circular arcs along the shoreline.
 - Pushed to `main`.
+
+## Victory scroll + campaign AI start posts (2026-07-18)
+- Victory / end-of-battle summary panel now fits short PC viewports (`max-height` + overlay/panel scroll) so the bottom actions stay reachable.
+- Campaign AI opening armies spawn around their frontlines and controlled cities instead of deep skirmish backline placement.
+- Pushed to `main`.
