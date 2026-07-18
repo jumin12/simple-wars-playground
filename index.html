@@ -41931,45 +41931,123 @@
             function isLandHex(h) {
                 return h && h.type !== 'water' && h.type !== 'mountain';
             }
+            /** Pick cities deep in a side's rear (away from the mid-map front), spread N–S. */
             function pickLandSites(side, count, avoid) {
-                let pool = [];
-                for(let h of hexList) {
-                    if(!isLandHex(h)) continue;
-                    let onSide = side === 'west' ? h.q < -mapR * 0.12 : h.q > mapR * 0.12;
-                    if(!onSide) continue;
-                    // Prefer interior land away from the map rim.
-                    let edge = Math.max(Math.abs(h.q) / mapR, Math.abs(h.r) / Math.max(rows, 1));
-                    if(edge > 0.88) continue;
-                    pool.push(h);
+                let rowSpan = Math.max(rows, 1);
+                let idealDepth = mapR * 0.58;
+                let rimQ = mapR * 0.93;
+                let rimR = rowSpan * 0.90;
+                function sideDepth(h) {
+                    return side === 'west' ? -h.q : h.q;
                 }
-                pool.sort((a, b) => {
-                    let ae = Math.abs(a.q) + Math.abs(a.r) * 0.35;
-                    let be = Math.abs(b.q) + Math.abs(b.r) * 0.35;
-                    return ae - be;
-                });
-                let out = [];
-                let minDist = Math.max(hr * 14, mapR * hr * 0.22);
-                for(let h of pool) {
-                    if(out.length >= count) break;
-                    let tooClose = out.some(c => {
-                        let dx = c.x - h.x, dy = c.y - h.y;
-                        return Math.sqrt(dx * dx + dy * dy) < minDist;
-                    }) || (avoid || []).some(c => {
-                        let dx = c.x - h.x, dy = c.y - h.y;
-                        return Math.sqrt(dx * dx + dy * dy) < minDist * 0.85;
-                    });
-                    if(tooClose) continue;
-                    out.push(h);
+                function siteScore(h) {
+                    let depth = sideDepth(h);
+                    // Reward depth into the rear; soft preference for ~mid-rear band.
+                    let score = depth * 3.4 - Math.abs(depth - idealDepth) * 0.55;
+                    // Keep clear of the central front strip.
+                    let frontClear = mapR * 0.26;
+                    if(depth < frontClear) score -= (frontClear - depth) * 6.5;
+                    // Soft rim penalty so towns are not jammed on the map edge.
+                    if(Math.abs(h.q) > rimQ) score -= (Math.abs(h.q) - rimQ) * 4;
+                    if(Math.abs(h.r) > rimR) score -= (Math.abs(h.r) - rimR) * 5;
+                    // Prefer solid land with a little local footprint room.
+                    let neighbors = 0;
+                    for(let dq = -1; dq <= 1; dq++) {
+                        for(let dr = -1; dr <= 1; dr++) {
+                            if(!dq && !dr) continue;
+                            let n = hexes[`${h.q + dq},${h.r + dr}`];
+                            if(n && isLandHex(n)) neighbors++;
+                        }
+                    }
+                    score += neighbors * 0.35;
+                    return score;
                 }
-                // Fallback: any land on that side.
-                if(out.length < count) {
+                function tooCloseTo(h, list, minDist) {
+                    for(let c of list) {
+                        let dx = c.x - h.x, dy = c.y - h.y;
+                        if(Math.sqrt(dx * dx + dy * dy) < minDist) return true;
+                    }
+                    return false;
+                }
+                let minDistBase = Math.max(hr * 20, mapR * hr * 0.36);
+                let depthFracs = [0.48, 0.38, 0.28, 0.18, 0.10];
+                let bestPartial = [];
+
+                for(let di = 0; di < depthFracs.length; di++) {
+                    let minDepth = mapR * depthFracs[di];
+                    let pool = [];
+                    for(let h of hexList) {
+                        if(!isLandHex(h)) continue;
+                        if(sideDepth(h) < minDepth) continue;
+                        if(Math.abs(h.r) > rowSpan * 0.94) continue;
+                        if(Math.abs(h.q) > mapR * 0.96) continue;
+                        pool.push(h);
+                    }
+                    if(pool.length < Math.max(1, count)) continue;
+
+                    let rMin = Infinity, rMax = -Infinity;
                     for(let h of pool) {
-                        if(out.length >= count) break;
-                        if(out.indexOf(h) >= 0) continue;
-                        out.push(h);
+                        if(h.r < rMin) rMin = h.r;
+                        if(h.r > rMax) rMax = h.r;
+                    }
+                    let rRange = Math.max(1, rMax - rMin);
+
+                    for(let sepPass = 0; sepPass < 5; sepPass++) {
+                        let minDist = minDistBase * (1 - sepPass * 0.11);
+                        let avoidDist = minDist * 0.9;
+                        let out = [];
+                        let bandPad = rRange * (0.12 + sepPass * 0.04);
+
+                        for(let bi = 0; bi < count; bi++) {
+                            let t0 = bi / Math.max(1, count);
+                            let t1 = (bi + 1) / Math.max(1, count);
+                            let bandLo = rMin + rRange * t0 - bandPad;
+                            let bandHi = rMin + rRange * t1 + bandPad;
+                            // Stagger depth slightly so cities aren't on one longitude.
+                            let depthBias = idealDepth * (0.88 + (bi % 3) * 0.08);
+                            let band = pool.filter(h => h.r >= bandLo && h.r <= bandHi);
+                            if(band.length < 3) band = pool;
+                            band.sort((a, b) => {
+                                let sa = siteScore(a) - Math.abs(sideDepth(a) - depthBias) * 0.4;
+                                let sb = siteScore(b) - Math.abs(sideDepth(b) - depthBias) * 0.4;
+                                return sb - sa;
+                            });
+                            let picked = null;
+                            for(let h of band) {
+                                if(tooCloseTo(h, out, minDist)) continue;
+                                if(avoid && avoid.length && tooCloseTo(h, avoid, avoidDist)) continue;
+                                picked = h;
+                                break;
+                            }
+                            if(picked) out.push(picked);
+                        }
+
+                        if(out.length < count) {
+                            let rest = pool.slice().sort((a, b) => siteScore(b) - siteScore(a));
+                            for(let h of rest) {
+                                if(out.length >= count) break;
+                                if(out.indexOf(h) >= 0) continue;
+                                if(tooCloseTo(h, out, minDist * 0.72)) continue;
+                                if(avoid && avoid.length && tooCloseTo(h, avoid, avoidDist * 0.72)) continue;
+                                out.push(h);
+                            }
+                        }
+
+                        if(out.length > bestPartial.length) bestPartial = out.slice();
+                        if(out.length >= count) return out.slice(0, count);
                     }
                 }
-                return out;
+
+                if(bestPartial.length) return bestPartial.slice(0, count);
+                // Last resort: deepest land on that side, ignore spacing.
+                let fallback = [];
+                for(let h of hexList) {
+                    if(!isLandHex(h)) continue;
+                    if(sideDepth(h) <= 0) continue;
+                    fallback.push(h);
+                }
+                fallback.sort((a, b) => siteScore(b) - siteScore(a));
+                return fallback.slice(0, count);
             }
 
             let townNames = wodRogueEnsureNodeTowns(node, c).slice();
@@ -41980,8 +42058,20 @@
             }
             if(c) wodRogueSave();
             let citiesPerSide = Math.max(2, Math.min(4, Math.ceil(townNames.length / 2)));
+            let enemySide = playerSide === 'west' ? 'east' : 'west';
             let playerSites = pickLandSites(playerSide, citiesPerSide, []);
-            let enemySites = pickLandSites(playerSide === 'west' ? 'east' : 'west', citiesPerSide, playerSites);
+            let enemySites = pickLandSites(enemySide, citiesPerSide, playerSites);
+            // Capitals/factories first: deepest sites in each rear.
+            function orderDeepestFirst(sites, side) {
+                return (sites || []).slice().sort((a, b) => {
+                    let da = side === 'west' ? -a.q : a.q;
+                    let db = side === 'west' ? -b.q : b.q;
+                    if(db !== da) return db - da;
+                    return (a.r - b.r);
+                });
+            }
+            playerSites = orderDeepestFirst(playerSites, playerSide);
+            enemySites = orderDeepestFirst(enemySites, enemySide);
             // Ensure at least one city each.
             if(!playerSites.length) {
                 let any = hexList.find(isLandHex);
@@ -42028,8 +42118,8 @@
                         th.owner = owner;
                     }
                 }
-                // Claim a blob of surrounding land for starting territory.
-                let claimR = Math.max(5, Math.floor(mapR * 0.18));
+                // Claim a hinterland blob so deep cities still own a solid rear.
+                let claimR = Math.max(6, Math.floor(mapR * 0.24));
                 for(let dq = -claimR; dq <= claimR; dq++) {
                     for(let dr = -claimR; dr <= claimR; dr++) {
                         if(dq * dq + dr * dr > claimR * claimR) continue;

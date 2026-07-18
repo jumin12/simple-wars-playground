@@ -543,3 +543,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Victory / end-of-battle summary panel now fits short PC viewports (`max-height` + overlay/panel scroll) so the bottom actions stay reachable.
 - Campaign AI opening armies spawn around their frontlines and controlled cities instead of deep skirmish backline placement.
 - Pushed to `main`.
+
+## Campaign city placement depth/spread (2026-07-18)
+- Region battle maps place towns deeper in each side's rear (clear of the mid-map front), with stronger N–S spacing and larger hinterland claims; capitals prefer the deepest site.
+- Pushed to `main`.
