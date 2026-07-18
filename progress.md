@@ -547,3 +547,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Campaign city placement depth/spread (2026-07-18)
 - Region battle maps place towns deeper in each side's rear (clear of the mid-map front), with stronger N–S spacing and larger hinterland claims; capitals prefer the deepest site.
 - Pushed to `main`.
+
+## Upright forest trees + campaign town depth tweak (2026-07-18)
+- Forest decorations use upright trunk/canopy forms with soft round contact shadows (no long sideways ellipses).
+- Campaign towns target a mid-rear band (not map-edge deep) while staying behind the front.
+- Pushed to `main`.

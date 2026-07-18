@@ -36454,10 +36454,10 @@
                 return x - Math.floor(x);
             }
 
-            // Match topography light (NW) — soft contact shadows fall SE, not round discs.
-            let shadowAng = 0.55;
-            let shadowDx = Math.cos(shadowAng);
-            let shadowDy = Math.sin(shadowAng);
+            // Soft ground contact under upright crowns (NW light → slight SE offset).
+            // Keep shadows nearly round — long rotated ellipses read as sideways trees.
+            let shadowDx = 0.42;
+            let shadowDy = 0.28;
 
             for(let hex of gameData.hexList) {
                 if(hex.type !== 'forest') continue;
@@ -36471,45 +36471,39 @@
                     let tx = bx + (u1 - 0.5) * spacing * 0.9;
                     let ty = by + (u2 - 0.5) * spacing * 0.82;
                     let crownR = spacing * (0.13 + (u1 + u2) * 0.04);
-                    let stretch = 1.35 + u3 * 0.45;
-                    let sx = tx + shadowDx * crownR * 0.55;
-                    let sy = ty + shadowDy * crownR * 0.55;
-                    // Soft elongated ground shadow (two passes) — no circular blob.
-                    ctx.fillStyle = 'rgba(8, 16, 10, 0.16)';
+                    let sx = tx + shadowDx * crownR * 0.85;
+                    let sy = ty + shadowDy * crownR * 0.85 + crownR * 0.22;
+                    // Soft, mostly round contact shadow under the canopy.
+                    ctx.fillStyle = 'rgba(8, 16, 10, 0.18)';
                     ctx.beginPath();
-                    ctx.ellipse(sx, sy, crownR * stretch * 1.05, crownR * 0.32, shadowAng, 0, Math.PI * 2);
+                    ctx.ellipse(sx, sy, crownR * 0.92, crownR * 0.58, 0.18, 0, Math.PI * 2);
                     ctx.fill();
-                    ctx.fillStyle = 'rgba(6, 14, 8, 0.2)';
+                    ctx.fillStyle = 'rgba(6, 14, 8, 0.16)';
                     ctx.beginPath();
-                    ctx.ellipse(
-                        sx - shadowDx * crownR * 0.12,
-                        sy - shadowDy * crownR * 0.12,
-                        crownR * stretch * 0.72,
-                        crownR * 0.22,
-                        shadowAng,
-                        0,
-                        Math.PI * 2
-                    );
+                    ctx.ellipse(sx + crownR * 0.06, sy + crownR * 0.04, crownR * 0.62, crownR * 0.4, 0.12, 0, Math.PI * 2);
                     ctx.fill();
-                    // Dark canopy base.
+                    // Short trunk so the form reads upright, not a flat sideways blob.
+                    ctx.fillStyle = '#3a2a18';
+                    ctx.fillRect(tx - crownR * 0.1, ty + crownR * 0.15, crownR * 0.2, crownR * 0.55);
+                    // Dark canopy base (slightly taller than wide).
                     ctx.fillStyle = '#12301c';
                     ctx.beginPath();
-                    ctx.arc(tx + crownR * 0.06, ty + crownR * 0.08, crownR * 0.96, 0, Math.PI * 2);
+                    ctx.ellipse(tx + crownR * 0.02, ty - crownR * 0.08, crownR * 0.78, crownR * 0.98, 0, 0, Math.PI * 2);
                     ctx.fill();
                     // Mid canopy volume.
                     ctx.fillStyle = '#1d5a2c';
                     ctx.beginPath();
-                    ctx.arc(tx - crownR * 0.1, ty - crownR * 0.14, crownR * 0.76, 0, Math.PI * 2);
+                    ctx.ellipse(tx - crownR * 0.08, ty - crownR * 0.28, crownR * 0.62, crownR * 0.78, 0, 0, Math.PI * 2);
                     ctx.fill();
                     // Lit lobe (popcorn highlight).
                     ctx.fillStyle = '#2f7a3f';
                     ctx.beginPath();
-                    ctx.arc(tx + crownR * 0.26, ty - crownR * 0.1, crownR * 0.52, 0, Math.PI * 2);
+                    ctx.ellipse(tx + crownR * 0.18, ty - crownR * 0.22, crownR * 0.42, crownR * 0.52, 0, 0, Math.PI * 2);
                     ctx.fill();
                     // Specular highlight top-left.
                     ctx.fillStyle = 'rgba(130, 195, 110, ' + (0.48 + u3 * 0.2) + ')';
                     ctx.beginPath();
-                    ctx.arc(tx - crownR * 0.3, ty - crownR * 0.42, crownR * 0.28, 0, Math.PI * 2);
+                    ctx.ellipse(tx - crownR * 0.22, ty - crownR * 0.52, crownR * 0.22, crownR * 0.28, 0, 0, Math.PI * 2);
                     ctx.fill();
                 }
             }
@@ -41931,24 +41925,27 @@
             function isLandHex(h) {
                 return h && h.type !== 'water' && h.type !== 'mountain';
             }
-            /** Pick cities deep in a side's rear (away from the mid-map front), spread N–S. */
+            /** Pick cities in each side's rear (behind the front), spread N–S — not map-edge deep. */
             function pickLandSites(side, count, avoid) {
                 let rowSpan = Math.max(rows, 1);
-                let idealDepth = mapR * 0.58;
-                let rimQ = mapR * 0.93;
-                let rimR = rowSpan * 0.90;
+                // Mid-rear band: behind the front, but not jammed against the outer rim.
+                let idealDepth = mapR * 0.38;
+                let maxDepth = mapR * 0.55;
+                let rimQ = mapR * 0.88;
+                let rimR = rowSpan * 0.88;
                 function sideDepth(h) {
                     return side === 'west' ? -h.q : h.q;
                 }
                 function siteScore(h) {
                     let depth = sideDepth(h);
-                    // Reward depth into the rear; soft preference for ~mid-rear band.
-                    let score = depth * 3.4 - Math.abs(depth - idealDepth) * 0.55;
+                    // Prefer a mid-rear band — not the front, not the far back wall.
+                    let score = depth * 1.6 - Math.abs(depth - idealDepth) * 2.4;
+                    if(depth > maxDepth) score -= (depth - maxDepth) * 5.5;
                     // Keep clear of the central front strip.
-                    let frontClear = mapR * 0.26;
-                    if(depth < frontClear) score -= (frontClear - depth) * 6.5;
+                    let frontClear = mapR * 0.18;
+                    if(depth < frontClear) score -= (frontClear - depth) * 5.5;
                     // Soft rim penalty so towns are not jammed on the map edge.
-                    if(Math.abs(h.q) > rimQ) score -= (Math.abs(h.q) - rimQ) * 4;
+                    if(Math.abs(h.q) > rimQ) score -= (Math.abs(h.q) - rimQ) * 6;
                     if(Math.abs(h.r) > rimR) score -= (Math.abs(h.r) - rimR) * 5;
                     // Prefer solid land with a little local footprint room.
                     let neighbors = 0;
@@ -41969,8 +41966,8 @@
                     }
                     return false;
                 }
-                let minDistBase = Math.max(hr * 20, mapR * hr * 0.36);
-                let depthFracs = [0.48, 0.38, 0.28, 0.18, 0.10];
+                let minDistBase = Math.max(hr * 18, mapR * hr * 0.3);
+                let depthFracs = [0.28, 0.22, 0.16, 0.10, 0.06];
                 let bestPartial = [];
 
                 for(let di = 0; di < depthFracs.length; di++) {
@@ -41979,8 +41976,10 @@
                     for(let h of hexList) {
                         if(!isLandHex(h)) continue;
                         if(sideDepth(h) < minDepth) continue;
-                        if(Math.abs(h.r) > rowSpan * 0.94) continue;
-                        if(Math.abs(h.q) > mapR * 0.96) continue;
+                        // Cap how far back towns can sit.
+                        if(sideDepth(h) > mapR * 0.62) continue;
+                        if(Math.abs(h.r) > rowSpan * 0.92) continue;
+                        if(Math.abs(h.q) > mapR * 0.92) continue;
                         pool.push(h);
                     }
                     if(pool.length < Math.max(1, count)) continue;
@@ -42118,8 +42117,8 @@
                         th.owner = owner;
                     }
                 }
-                // Claim a hinterland blob so deep cities still own a solid rear.
-                let claimR = Math.max(6, Math.floor(mapR * 0.24));
+                // Claim a hinterland blob around each town.
+                let claimR = Math.max(5, Math.floor(mapR * 0.2));
                 for(let dq = -claimR; dq <= claimR; dq++) {
                     for(let dr = -claimR; dr <= claimR; dr++) {
                         if(dq * dq + dr * dr > claimR * claimR) continue;
