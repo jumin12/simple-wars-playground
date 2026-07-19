@@ -32,6 +32,7 @@
             padding: 0;
             width: 100%;
             height: 100%;
+            max-height: 100%;
             background-color: #111;
             color: #fff;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -43,14 +44,32 @@
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
+        /* Prefer dynamic viewport so browser chrome (non-fullscreen) does not clip UI. */
+        @supports (height: 100dvh) {
+            html, body {
+                height: 100dvh;
+                max-height: 100dvh;
+            }
+        }
+        @supports (height: 100svh) {
+            html, body {
+                min-height: 100svh;
+            }
+        }
 
         #gameWrapper {
             width: 100vw;
+            width: 100dvw;
             height: 100vh;
+            height: 100dvh;
+            max-width: 100vw;
+            max-height: 100vh;
+            max-height: 100dvh;
             border: none;
             position: relative;
             overflow: hidden;
             background-color: #154360; /* Deep water fallback */
+            box-sizing: border-box;
         }
 
         #gameCanvas {
@@ -80,9 +99,15 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
+            justify-content: safe center;
             background-color: rgba(0, 0, 0, 0.85);
             z-index: 10;
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            padding: 10px 8px;
+            box-sizing: border-box;
         }
 
         #mainMenu.overlay {
@@ -1098,13 +1123,22 @@
             }
             .wod-pc-prod-slide {
                 pointer-events: auto;
-                max-height: min(288px, 34vh);
+                max-height: min(288px, 34vh, 34dvh);
                 overflow: hidden;
                 transition: max-height 0.3s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
                 border-top: 2px solid rgba(212, 175, 55, 0.95);
                 background: rgba(15, 25, 35, 0.94);
                 backdrop-filter: blur(10px);
                 box-sizing: border-box;
+            }
+            @media (max-height: 700px) {
+                .wod-pc-prod-slide {
+                    max-height: min(220px, 30dvh);
+                }
+                .wod-pc-prod-tab {
+                    padding: 8px 10px;
+                    font-size: 12px;
+                }
             }
             .wod-pc-prod-root.wod-pc-collapsed .wod-pc-prod-slide {
                 max-height: 0;
@@ -2697,6 +2731,12 @@
             text-align: center;
             max-width: 600px;
             width: 80%;
+            max-height: min(92vh, 92dvh, 960px);
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            box-sizing: border-box;
             box-shadow: var(--wod-shadow-panel);
         }
 
@@ -6075,6 +6115,53 @@
         }
         .wod-camp-panel {
             max-width: 1120px;
+            width: min(1120px, 96vw);
+            max-height: min(92vh, 92dvh, 960px);
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            overscroll-behavior: contain;
+            box-sizing: border-box;
+            padding: 28px 28px 22px;
+        }
+        @media (min-width: 901px) and (max-height: 820px) {
+            .wod-camp-panel {
+                padding: 18px 20px 14px;
+                max-height: min(94vh, 94dvh);
+            }
+            .wod-camp-layout {
+                min-height: 0;
+            }
+            .wod-camp-side {
+                max-height: min(70vh, 70dvh);
+                overflow-y: auto;
+                -webkit-overflow-scrolling: touch;
+                overscroll-behavior: contain;
+            }
+            #wodCampMapCanvas {
+                max-height: min(48vh, 420px);
+                object-fit: contain;
+            }
+            .wod-camp-roster {
+                max-height: min(160px, 22vh);
+            }
+        }
+        @media (min-width: 901px) and (max-height: 640px) {
+            .wod-camp-panel {
+                padding: 12px 14px 10px;
+            }
+            .wod-camp-header {
+                margin-bottom: 6px;
+            }
+            #wodCampMapCanvas {
+                max-height: min(38vh, 280px);
+            }
+            .wod-camp-side {
+                max-height: min(78vh, 78dvh);
+            }
+            .panel {
+                padding: 22px 24px;
+            }
         }
         .wod-camp-header {
             display: flex;
@@ -6473,7 +6560,7 @@
 
         #wodEndCountdownBanner {
             position: fixed;
-            top: 64px;
+            top: max(52px, env(safe-area-inset-top, 0px) + 48px);
             left: 50%;
             transform: translateX(-50%);
             z-index: 60;
@@ -6483,11 +6570,15 @@
             border: 1px solid rgba(46, 204, 113, 0.7);
             color: #7ee2a8;
             font-weight: 700;
-            font-size: 1.02rem;
+            font-size: clamp(0.82rem, 1.6vw, 1.02rem);
             letter-spacing: 0.02em;
             pointer-events: none;
             text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
             animation: wodEndCdPulse 1.1s ease-in-out infinite;
+            max-width: min(720px, calc(100vw - 16px));
+            box-sizing: border-box;
+            text-align: center;
+            white-space: normal;
         }
         #wodEndCountdownBanner.wod-endcd-danger {
             background: rgba(44, 18, 18, 0.92);
@@ -6496,14 +6587,16 @@
         }
         #wodDeployBanner {
             position: fixed;
-            top: 64px;
+            top: max(52px, env(safe-area-inset-top, 0px) + 48px);
             left: 50%;
             transform: translateX(-50%);
             z-index: 65;
             display: flex;
             align-items: center;
-            gap: 16px;
-            max-width: min(720px, calc(100vw - 24px));
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 12px 16px;
+            max-width: min(720px, calc(100vw - 16px));
             padding: 12px 16px 12px 18px;
             border-radius: 12px;
             background: rgba(18, 28, 42, 0.94);
@@ -6511,6 +6604,20 @@
             color: #d7e8ff;
             box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
             pointer-events: auto;
+            box-sizing: border-box;
+        }
+        @media (max-height: 700px) {
+            #wodEndCountdownBanner,
+            #wodDeployBanner {
+                top: max(44px, env(safe-area-inset-top, 0px) + 40px);
+            }
+            .wod-hud-top {
+                padding: 8px 14px;
+            }
+            .info-card {
+                bottom: max(72px, 10vh);
+                max-height: min(42vh, 360px);
+            }
         }
         #wodDeployBanner.hidden { display: none; }
         .wod-deploy-banner-text {
@@ -22925,8 +23032,10 @@
             let victoryLabel = modeKey === 'annihilation' ? 'Annihilation'
                 : (modeKey === 'defense' ? 'Defense' : 'Domination');
             let victoryRule = modeKey === 'defense'
-                ? ('Hold for ' + wodFormatHoldClock(campRun.holdSec || 300) + ' or capture all enemy cities.')
-                : (WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || '');
+                ? ('Hold for ' + wodFormatHoldClock(campRun.holdSec || WOD_ROGUE_BATTLE_HOLD_SEC) + ' or capture all enemy cities.')
+                : ((campRun && campRun.holdSec)
+                    ? ('Capture all enemy cities within ' + wodFormatHoldClock(campRun.holdSec) + '.')
+                    : (WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || ''));
 
             let lo = wodLocalPlayerOwner();
             let plyCities, enCities, enArmies, plyArmies, plyIncomeAcc, aiIncomeAcc;
@@ -23275,8 +23384,8 @@
             let active = null;
             if(cds) for(let k in cds) { if(!active || cds[k].left < active.left) active = cds[k]; }
             if(!active || gameData._campaignEnded || gameState !== 'PLAYING' || gameData.menuAttractMode) {
-                // Fall through to defense hold banner when no end-countdown is active.
-                if(gameData._campaignRun && gameData._campaignRun.defense && !gameData._campaignEnded && gameState === 'PLAYING' && !gameData.menuAttractMode) {
+                // Fall through to campaign battle timer when no end-countdown is active.
+                if(gameData._campaignRun && gameData._campaignRun.holdSec > 0 && !gameData._campaignEnded && gameState === 'PLAYING' && !gameData.menuAttractMode) {
                     wodUpdateCampaignDefenseHoldBanner();
                     return;
                 }
@@ -23292,7 +23401,7 @@
         function wodUpdateCampaignDefenseHoldBanner() {
             let el = document.getElementById('wodEndCountdownBanner');
             let run = gameData._campaignRun;
-            if(!el || !run || !run.defense || gameData._campaignEnded || gameState !== 'PLAYING' || gameData.menuAttractMode) return;
+            if(!el || !run || !(run.holdSec > 0) || gameData._campaignEnded || gameState !== 'PLAYING' || gameData.menuAttractMode) return;
             if(wodEscMenuOpen() || wodMissionPopupOpen()) {
                 el.classList.add('hidden');
                 return;
@@ -23300,10 +23409,12 @@
             // Prefer end-condition countdowns when they are active.
             let cds = gameData._endCountdowns;
             if(cds) for(let k in cds) { if(cds[k]) return; }
-            let need = run.holdSec || 300;
+            let need = run.holdSec || WOD_ROGUE_BATTLE_HOLD_SEC;
             let left = Math.max(0, need - (run.holdElapsed || 0));
-            el.textContent = 'Hold the line — ' + wodFormatHoldClock(left) + ' remaining (or take all enemy cities)';
-            el.classList.remove('wod-endcd-danger');
+            el.textContent = run.defense
+                ? ('Hold the line — ' + wodFormatHoldClock(left) + ' remaining (or take all enemy cities)')
+                : ('Assault — ' + wodFormatHoldClock(left) + ' remaining (capture all enemy cities)');
+            el.classList.toggle('wod-endcd-danger', !run.defense && left <= 60);
             el.classList.remove('hidden');
         }
 
@@ -23341,26 +23452,33 @@
                     return;
                 }
                 if(gameData._endCountdowns && gameData._endCountdowns.campArmyLost) return;
-                // Defense: survive the hold timer OR capture all enemy cities.
+                // Attack + defense share a battle clock: capture all cities early, or
+                // defense wins by holding / attack loses if time expires.
                 let run = gameData._campaignRun;
-                if(run.defense) {
-                    let camp = wodRogueLoad();
-                    let need = run.holdSec || wodRogueDefenseHoldSeconds(camp && camp.settings && camp.settings.difficulty);
-                    run.holdSec = need;
-                    run.holdElapsed = (run.holdElapsed || 0) + simDt;
-                    wodUpdateCampaignDefenseHoldBanner();
-                    if(wodTickEndCountdown('domination', !anyEnemyOwnedCityRemains(), simDt, 'All enemy cities captured! Victory in')) {
-                        triggerCampaignVictory('Victory — counterattack broken: all enemy cities captured.', false);
-                        return;
-                    }
-                    // Survive the hold even while a city-capture countdown is running.
-                    if(run.holdElapsed >= need && playerControlsAnyCity() && countPlayerCombatUnitsExcludingConvoys() > 0) {
+                let camp = wodRogueLoad();
+                let need = run.holdSec || wodRogueBattleHoldSeconds(camp && camp.settings && camp.settings.difficulty);
+                run.holdSec = need;
+                run.holdElapsed = (run.holdElapsed || 0) + simDt;
+                wodUpdateCampaignDefenseHoldBanner();
+                if(wodTickEndCountdown('domination', !anyEnemyOwnedCityRemains(), simDt, 'All enemy cities captured! Victory in')) {
+                    triggerCampaignVictory(run.defense
+                        ? 'Victory — counterattack broken: all enemy cities captured.'
+                        : 'Victory — all enemy cities captured.', false);
+                    return;
+                }
+                if(run.holdElapsed >= need) {
+                    if(run.defense && playerControlsAnyCity() && countPlayerCombatUnitsExcludingConvoys() > 0) {
                         triggerCampaignVictory('Victory — held the line for ' + wodFormatHoldClock(need) + '.', false);
                         return;
                     }
-                    if(gameData._endCountdowns && gameData._endCountdowns.domination) return;
-                    return;
+                    // Assault timeout only if cities remain and a capture countdown is not already running.
+                    if(!run.defense && anyEnemyOwnedCityRemains() && !(gameData._endCountdowns && gameData._endCountdowns.domination)) {
+                        triggerCampaignDefeat('Defeat — assault timed out after ' + wodFormatHoldClock(need) + '.');
+                        return;
+                    }
                 }
+                if(gameData._endCountdowns && gameData._endCountdowns.domination) return;
+                return;
             }
             let mode = gameData.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
             if(mode === 'domination') {
@@ -40554,11 +40672,13 @@
         const WOD_ROGUE_UNIT_COSTS = { light: 200, marine: 260, heavy: 480, ship: 420 };
         const WOD_ROGUE_UNIT_LABEL = { light: 'Infantry', marine: 'Marines', heavy: 'Armor', ship: 'Warship' };
         const WOD_ROGUE_DIFF_PRESETS = {
-            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 3600, blockChance: 0.28, defenseHoldSec: 300 },
-            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 4500, blockChance: 0.38, defenseHoldSec: 300 },
-            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 5600, blockChance: 0.48, defenseHoldSec: 300 },
-            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 7000, blockChance: 0.58, defenseHoldSec: 300 }
+            easy: { label: 'Easy', mult: 0.7, counterChance: 0.35, rewardMult: 0.95, startPoints: 3600, blockChance: 0.28, defenseHoldSec: 600 },
+            normal: { label: 'Normal', mult: 1.0, counterChance: 0.55, rewardMult: 1.0, startPoints: 4500, blockChance: 0.38, defenseHoldSec: 600 },
+            hard: { label: 'Hard', mult: 1.35, counterChance: 0.7, rewardMult: 1.12, startPoints: 5600, blockChance: 0.48, defenseHoldSec: 600 },
+            brutal: { label: 'Brutal', mult: 1.75, counterChance: 0.85, rewardMult: 1.28, startPoints: 7000, blockChance: 0.58, defenseHoldSec: 600 }
         };
+        /** Shared assault / defense battle clock (10 minutes). */
+        const WOD_ROGUE_BATTLE_HOLD_SEC = 600;
         const WOD_ROGUE_MAX_FORCED_DEFENSES = 5;
         const WOD_ROGUE_MAX_CONSECUTIVE_DEFENSES = 2;
         const WOD_ROGUE_REQ_PER_TERRITORY = 50;
@@ -40710,9 +40830,12 @@
                 list.appendChild(row);
             }
         }
-        function wodRogueDefenseHoldSeconds(difficulty) {
+        function wodRogueBattleHoldSeconds(difficulty) {
             let D = WOD_ROGUE_DIFF_PRESETS[difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
-            return Math.max(60, D.defenseHoldSec | 0 || 300);
+            return Math.max(60, (D.defenseHoldSec | 0) || WOD_ROGUE_BATTLE_HOLD_SEC);
+        }
+        function wodRogueDefenseHoldSeconds(difficulty) {
+            return wodRogueBattleHoldSeconds(difficulty);
         }
         function wodFormatHoldClock(sec) {
             sec = Math.max(0, Math.ceil(sec || 0));
@@ -41799,20 +41922,22 @@
                             (node.ai > 1 ? ' · two commands' : '') + '</p>' +
                             '<p class="wod-camp-intel"><strong>Enemy upkeep (est.):</strong> ' + wodRogueNodeEnemyUpkeepIntel(node) + '</p>';
                     }
+                    let holdClock = wodFormatHoldClock(wodRogueBattleHoldSeconds(c.settings && c.settings.difficulty));
                     let blockNote = '';
                     if(blocked && st.owner === 'enemy')
                         blockNote = '<p style="color:#ff9d8f">Advance blocked — clear the Concord counterattack first.</p>';
                     else if(blocked && alert)
                         blockNote = '<p style="color:#ffd968">This defense must be fought before the front can move again. Hold ' +
-                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
-                            ' or take all enemy cities.</p>';
+                            holdClock + ' or take all enemy cities.</p>';
                     else if(alert)
-                        blockNote = '<p style="color:#ffd968">Defense: hold ' +
-                            wodFormatHoldClock(wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty)) +
+                        blockNote = '<p style="color:#ffd968">Defense: hold ' + holdClock +
                             ' or capture every enemy city.</p>';
+                    else if(st.owner === 'enemy')
+                        blockNote = '<p style="color:#ffd968">Assault: capture every enemy city within ' +
+                            holdClock + ' or the attack fails.</p>';
                     info.innerHTML = '<h3>' + node.name + (node.industry ? ' 🏭' : node.capital ? ' ★' : node.hq ? ' ⚑' : '') + '</h3>' +
                         tag +
-                        '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield</p>' +
+                        '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield · ' + holdClock + ' battle clock</p>' +
                         '<p>' + node.brief + '</p>' +
                         (node.industry ? '<p style="color:#d4af37">Industrial region — still worth +' + WOD_ROGUE_REQ_PER_TERRITORY + ' requisition each turn while held.</p>' : '') +
                         blockNote +
@@ -42422,7 +42547,7 @@
             let node = wodRogueNodeTemplate(nodeId);
             if(!c || !node || c.over || !wodRogueNodePlayable(nodeId) || !c.roster.length) return;
             let defense = !!c.alerts[nodeId];
-            let holdSec = defense ? wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty) : 0;
+            let holdSec = wodRogueBattleHoldSeconds(c.settings && c.settings.difficulty);
             gameData._campaignRun = { nodeId, defense, synced: false, holdSec, holdElapsed: 0, battleLive: false, deploying: false };
             gameData._matchReadyForEndChecks = false;
             gameData._selectedMissionEntry = null;
@@ -42682,15 +42807,14 @@
             gameData.playerUnitsKilled = 0;
             if(run) run.rosterAtStart = c.roster.length;
             wodSyncCampaignBattleHud();
-            if(run && run.defense) wodUpdateCampaignDefenseHoldBanner();
             // Campaign AI should press the attack, not sit on hold lines — after deployment.
             gameData._campaignAiAggressive = true;
             gameData.aiStrategyTimer = 99;
             // Story briefing, then interactive deployment in friendly territory.
             let kicker = run.defense ? 'Counterattack at ' + node.name : 'War turn ' + c.turn;
             let title = run.defense ? 'Hold ' + node.name : node.name;
-            let holdSec = run.holdSec || (run.defense ? wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty) : 0);
-            if(run.defense && !run.holdSec) run.holdSec = holdSec;
+            let holdSec = run.holdSec || wodRogueBattleHoldSeconds(c.settings && c.settings.difficulty);
+            run.holdSec = holdSec;
             let myUpkeep = wodRogueRosterUpkeep(c.roster);
             let startCash = wodRogueBattleStartMoney(c);
             let startMp = wodRogueBattleStartManpower(c);
@@ -42713,7 +42837,8 @@
             let body = (run.defense
                 ? 'The Iron Concord is counterattacking ' + node.name + '. Hold for ' +
                   wodFormatHoldClock(holdSec) + ' or capture every enemy city to throw them back.'
-                : node.brief) +
+                : (node.brief + '\n\nAssault: capture every enemy city within ' + wodFormatHoldClock(holdSec) +
+                  '. If time runs out, the attack fails.')) +
                 '\n\nYour army: ' + c.roster.length + ' units · battle upkeep ' + wodRogueFormatUpkeep(myUpkeep) +
                 ' · opening reserves $' + startCash.toLocaleString() + ' / ' + startMp.toLocaleString() + ' manpower.' +
                 incomeLine +
@@ -42921,7 +43046,7 @@
             gameData._campaignAiAggressive = true;
             gameData.aiStrategyTimer = 99;
             setGameSpeed(1, true);
-            if(run.defense) wodUpdateCampaignDefenseHoldBanner();
+            wodUpdateCampaignDefenseHoldBanner();
             showNotification('Battle begun!');
         }
 

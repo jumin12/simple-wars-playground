@@ -564,3 +564,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Selected campaign regions show estimated starting cash income (cities + land) and net after army upkeep.
 - Fixed false defeat during campaign load/deploy (end checks wait until Begin battle / battleLive).
 - ESC pause menu suppresses deploy/end-countdown banners and toast popups so they cannot appear over pause.
+
+## Campaign 10-min clocks + windowed UI fit (2026-07-19)
+- Attack and defense campaign battles now share a 10-minute battle clock (assault must capture all cities before time expires; defense still wins by holding or capturing).
+- Viewport/panel CSS uses dvh/svh and scrollable overlays so menus and HUD fit in non-fullscreen browser windows as well as fullscreen.
