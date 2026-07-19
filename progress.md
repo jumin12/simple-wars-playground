@@ -552,3 +552,10 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Forest decorations use upright trunk/canopy forms with soft round contact shadows (no long sideways ellipses).
 - Campaign towns target a mid-rear band (not map-edge deep) while staying behind the front.
 - Pushed to `main`.
+
+## Campaign UX polish (2026-07-19)
+- ESC during campaign deployment hides the top Begin battle banner; closing ESC restores it if still deploying.
+- Victory/defeat summary pins Return to main menu at the panel bottom with scrollable stats on all PC viewport heights.
+- WASD / arrow keys pan the map even while paused or during deployment (game speed 0).
+- Surrender / return to menu clears end-of-battle defeat countdown banners so they cannot linger on the main menu.
+- Campaign node cards and army shop show enemy strength, opening cash/manpower, and a running battle upkeep total while recruiting.
