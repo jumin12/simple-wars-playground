@@ -559,3 +559,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - WASD / arrow keys pan the map even while paused or during deployment (game speed 0).
 - Surrender / return to menu clears end-of-battle defeat countdown banners so they cannot linger on the main menu.
 - Campaign node cards and army shop show enemy strength, opening cash/manpower, and a running battle upkeep total while recruiting.
+
+## Campaign income + ESC popup fix (2026-07-19)
+- Selected campaign regions show estimated starting cash income (cities + land) and net after army upkeep.
+- Fixed false defeat during campaign load/deploy (end checks wait until Begin battle / battleLive).
+- ESC pause menu suppresses deploy/end-countdown banners and toast popups so they cannot appear over pause.

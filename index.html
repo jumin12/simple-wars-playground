@@ -5500,6 +5500,29 @@
             z-index: 30;
             pointer-events: auto;
         }
+        /* Keep pause menu above deploy / end-countdown banners and toast notes. */
+        #escMenu:not(.hidden) {
+            z-index: 80;
+        }
+        .wod-toast-note {
+            position: absolute;
+            top: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(231, 76, 60, 0.9);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            z-index: 70;
+            pointer-events: none;
+        }
+        #escMenu:not(.hidden) ~ .wod-toast-note,
+        body.wod-esc-open .wod-toast-note,
+        body.wod-esc-open #wodEndCountdownBanner,
+        body.wod-esc-open #wodDeployBanner {
+            display: none !important;
+        }
 
         .stats-menu .stats-menu-panel {
             width: min(960px, 94vw);
@@ -11821,21 +11844,38 @@
             }
         }
 
-        function wodSyncDeployBannerForEscMenu(escOpen) {
-            let banner = document.getElementById('wodDeployBanner');
-            if(!banner) return;
+        function wodEscMenuOpen() {
+            return !!(UI && UI.escMenu && !UI.escMenu.classList.contains('hidden'));
+        }
+
+        function wodMissionPopupOpen() {
+            let ov = document.getElementById('wodMissionPopupOverlay');
+            return !!(ov && !ov.classList.contains('hidden'));
+        }
+
+        /** Hide in-game banners/toasts while the pause menu is up so they cannot look like defeat popups. */
+        function wodSyncPopupsForEscMenu(escOpen) {
+            document.body.classList.toggle('wod-esc-open', !!escOpen);
+            let deployBanner = document.getElementById('wodDeployBanner');
+            let endBanner = document.getElementById('wodEndCountdownBanner');
             if(escOpen) {
-                banner.classList.add('hidden');
+                if(deployBanner) deployBanner.classList.add('hidden');
+                if(endBanner) endBanner.classList.add('hidden');
+                document.querySelectorAll('.wod-toast-note').forEach(el => el.remove());
+                // Never leave a stale victory/defeat summary sitting under/over pause.
+                if(!gameData || !gameData._campaignEnded) hideCampaignSummaryOverlay();
                 return;
             }
-            // Re-show Begin battle only while campaign deployment is still active.
-            if(typeof wodCampaignDeployActive === 'function' && wodCampaignDeployActive())
-                banner.classList.remove('hidden');
+            if(typeof wodCampaignDeployActive === 'function' && wodCampaignDeployActive() && deployBanner)
+                deployBanner.classList.remove('hidden');
+            if(typeof wodUpdateEndCountdownBanner === 'function') wodUpdateEndCountdownBanner();
         }
 
         function toggleEscMenu(forceOpen, opts) {
             opts = opts || {};
             if(gameState !== 'PLAYING') return;
+            // Briefing / mission popups own the input — don't open pause underneath them.
+            if(forceOpen !== false && wodMissionPopupOpen()) return;
             let menu = UI.escMenu;
             if(!menu) return;
             let shouldOpen = forceOpen === undefined ? menu.classList.contains('hidden') : !!forceOpen;
@@ -11844,7 +11884,7 @@
                 for(let section of menu.querySelectorAll('.esc-section')) section.classList.remove('visible');
             }
             menu.classList.toggle('hidden', !shouldOpen);
-            wodSyncDeployBannerForEscMenu(shouldOpen);
+            wodSyncPopupsForEscMenu(shouldOpen);
             if(shouldOpen && opts.skipDefaultSection !== true)
                 showEscSection(opts.defaultSection || 'helpSection');
         }
@@ -11961,15 +12001,23 @@
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             let launchingMission = !!(opts.mission || gameData._selectedMissionEntry);
+            let launchingCampaign = !!(gameData._campaignRun);
             if(opts.mission) gameData._launchingMission = true;
-            wodPrepareForNewMatch({ keepMp: false, keepLiveMap: launchingMission });
+            wodPrepareForNewMatch({ keepMp: false, keepLiveMap: launchingMission || launchingCampaign });
             gameData._cityUnitStackTap = null;
+            gameData._campaignEnded = false;
+            gameData._matchReadyForEndChecks = false;
+            hideCampaignSummaryOverlay();
+            wodResetEndCountdowns();
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             UI.escMenu.classList.add('hidden');
+            document.body.classList.remove('wod-esc-open');
             UI.inGameUI.style.display = 'block';
             UI.canvas.style.display = 'block';
-            setGameSpeed(1);
+            // Campaign battles stay paused until the roster is fielded / deploy begins,
+            // so the loop cannot fire a false "army destroyed" defeat during load.
+            setGameSpeed(launchingCampaign ? 0 : 1, true);
             wodResetMobileHud();
             if(!gameData.layers) gameData.layers = {};
             gameData.layers.territory = false;
@@ -11982,11 +12030,16 @@
                     while((window._wodBootBusy || window._wodMenuBootstrapBusy) && bootGuard++ < 600)
                         await new Promise(r => setTimeout(r, 100));
                     await initGame();
-                    // Re-assert 1x speed: boot warm-up updates may have fired a false
-                    // campaign-end pause between the sync setGameSpeed(1) above and here.
-                    setGameSpeed(1);
                     gameData._campaignEnded = false;
-                    if(gameData._campaignRun) wodCampaignOnBattleStart();
+                    hideCampaignSummaryOverlay();
+                    wodResetEndCountdowns();
+                    if(gameData._campaignRun) {
+                        wodCampaignOnBattleStart();
+                        // End checks stay off until Begin battle; speed remains 0 for deploy.
+                    } else {
+                        setGameSpeed(1, true);
+                        gameData._matchReadyForEndChecks = true;
+                    }
                     wodSyncCampaignBattleHud();
                 } catch(e) {
                     console.error(e);
@@ -23091,6 +23144,9 @@
 
         function triggerCampaignVictory(message, countAsBattleWon) {
             if(gameData._campaignEnded) return;
+            if(gameData._campaignRun && !gameData._campaignRun.battleLive) return;
+            if(gameData._matchReadyForEndChecks === false) return;
+            if(wodEscMenuOpen()) toggleEscMenu(false);
             gameData._campaignEnded = true;
             setGameSpeed(0, true);
             wodResetEndCountdowns();
@@ -23175,6 +23231,10 @@
 
         function triggerCampaignDefeat(message) {
             if(gameData._campaignEnded) return;
+            // Ignore false defeats before the match/army is actually live.
+            if(gameData._campaignRun && !gameData._campaignRun.battleLive) return;
+            if(gameData._matchReadyForEndChecks === false) return;
+            if(wodEscMenuOpen()) toggleEscMenu(false);
             gameData._campaignEnded = true;
             setGameSpeed(0, true);
             wodResetEndCountdowns();
@@ -23206,6 +23266,10 @@
         function wodUpdateEndCountdownBanner() {
             let el = document.getElementById('wodEndCountdownBanner');
             if(!el) return;
+            if(wodEscMenuOpen() || wodMissionPopupOpen()) {
+                el.classList.add('hidden');
+                return;
+            }
             let cds = gameData._endCountdowns;
             let active = null;
             if(cds) for(let k in cds) { if(!active || cds[k].left < active.left) active = cds[k]; }
@@ -23228,6 +23292,10 @@
             let el = document.getElementById('wodEndCountdownBanner');
             let run = gameData._campaignRun;
             if(!el || !run || !run.defense || gameData._campaignEnded || gameState !== 'PLAYING' || gameData.menuAttractMode) return;
+            if(wodEscMenuOpen() || wodMissionPopupOpen()) {
+                el.classList.add('hidden');
+                return;
+            }
             // Prefer end-condition countdowns when they are active.
             let cds = gameData._endCountdowns;
             if(cds) for(let k in cds) { if(cds[k]) return; }
@@ -23248,6 +23316,8 @@
         function checkCampaignEndConditions(dt) {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
             if(wodCampaignDeployActive()) return;
+            if(wodEscMenuOpen() || wodMissionPopupOpen()) return;
+            if(gameData._matchReadyForEndChecks === false) return;
             if(window._wodBootBusy || window._wodMenuBootstrapBusy || gameData._mapGenInProgress) return;
             if(gameData.mp && gameData.mp.enabled) {
                 if(gameData.mp.isHost) wodMpCheckEndConditionsHost(dt);
@@ -23263,6 +23333,8 @@
             // Campaign battles: a fixed army that is wiped out cannot be rebuilt — losing
             // every combat unit is a defeat even in domination mode.
             if(gameData._campaignRun) {
+                // Briefing / load / deploy: roster is not battle-live yet — never arm wipe defeat.
+                if(!gameData._campaignRun.battleLive) return;
                 if(wodTickEndCountdown('campArmyLost', countPlayerCombatUnitsExcludingConvoys() === 0, simDt, 'Your army is destroyed! Defeat in', true)) {
                     triggerCampaignDefeat('Defeat — your army was destroyed.');
                     return;
@@ -41701,10 +41773,25 @@
                     let myUpkeep = wodRogueRosterUpkeep(c.roster);
                     let startCash = wodRogueBattleStartMoney(c);
                     let startMp = wodRogueBattleStartManpower(c);
+                    let startEcon = wodRogueEstimateBattleStartIncome(node);
+                    let incomeLine = startEcon
+                        ? '<p class="wod-camp-intel"><strong>Starting income:</strong> +' +
+                          wodRogueFormatUpkeep(startEcon.cashIncome) +
+                          ' <span style="opacity:.85">(cities +' + wodRogueFormatUpkeep(startEcon.cityIncome) +
+                          ' · land +' + wodRogueFormatUpkeep(startEcon.landIncome) +
+                          ' · ' + startEcon.cities + ' towns)</span></p>'
+                        : '';
+                    let netHint = startEcon
+                        ? '<p class="wod-camp-intel"><strong>Net after upkeep:</strong> ' +
+                          (startEcon.cashIncome - myUpkeep >= 0 ? '+' : '') +
+                          wodRogueFormatUpkeep(startEcon.cashIncome - myUpkeep) + '</p>'
+                        : '';
                     let missionInfo = '<p class="wod-camp-intel"><strong>Your army:</strong> ' + c.roster.length + ' units · upkeep ' +
                         wodRogueFormatUpkeep(myUpkeep) + ' in battle</p>' +
                         '<p class="wod-camp-intel"><strong>Opening reserves:</strong> $' + startCash.toLocaleString() +
-                        ' · ' + startMp.toLocaleString() + ' manpower</p>';
+                        ' · ' + startMp.toLocaleString() + ' manpower</p>' +
+                        incomeLine +
+                        netHint;
                     let intel = '';
                     if(st.owner === 'enemy' || alert) {
                         intel = '<p class="wod-camp-intel"><strong>Enemy strength:</strong> ' + wodRogueNodeIntel(node) +
@@ -42290,13 +42377,53 @@
             };
         }
 
+        let _wodRogueStartIncomeCache = { key: '', econ: null };
+
+        /** Estimate opening city + land cash income for a selected campaign region battle. */
+        function wodRogueEstimateBattleStartIncome(node) {
+            let c = wodRogueLoad();
+            if(!c || !node) return null;
+            let defense = !!(c.alerts && c.alerts[node.id]);
+            let battles = (c.nodesState[node.id] && c.nodesState[node.id].battles) || 0;
+            let key = c.seed + ':' + node.id + ':' + (defense ? 1 : 0) + ':' + battles + ':' + (node.size || 0) + ':' + (node.ai || 1);
+            if(_wodRogueStartIncomeCache.key === key && _wodRogueStartIncomeCache.econ)
+                return _wodRogueStartIncomeCache.econ;
+            let regionMap = null;
+            try { regionMap = wodRogueBuildRegionBattleMap(node.id); } catch(_) { regionMap = null; }
+            if(!regionMap || !regionMap.cities) return null;
+            let cityIncome = 0;
+            let cityN = 0;
+            let mult = WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT;
+            for(let city of regionMap.cities) {
+                if(!city || city.owner !== 1) continue;
+                cityN++;
+                let total = 5;
+                if(city.hasFactory) total += 15;
+                if(city.hasHarbor) total += 3;
+                total += city.incomeBonus || 0;
+                cityIncome += Math.round(total * mult * 1000) / 1000;
+            }
+            let landTiles = 0;
+            for(let h of regionMap.hexList || []) {
+                if(!h || h.owner !== 1) continue;
+                if(h.type === 'water' || h.type === 'deep_water') continue;
+                landTiles++;
+            }
+            let landIncome = Math.round(landTiles * WOD_LAND_INCOME_PER_HEX * WOD_INCOME_MULT * 1000) / 1000;
+            let cashIncome = Math.round((cityIncome + landIncome) * 1000) / 1000;
+            let econ = { cashIncome, cityIncome, landIncome, cities: cityN, landTiles };
+            _wodRogueStartIncomeCache = { key, econ };
+            return econ;
+        }
+
         function wodRogueStartBattle(nodeId) {
             let c = wodRogueLoad();
             let node = wodRogueNodeTemplate(nodeId);
             if(!c || !node || c.over || !wodRogueNodePlayable(nodeId) || !c.roster.length) return;
             let defense = !!c.alerts[nodeId];
             let holdSec = defense ? wodRogueDefenseHoldSeconds(c.settings && c.settings.difficulty) : 0;
-            gameData._campaignRun = { nodeId, defense, synced: false, holdSec, holdElapsed: 0 };
+            gameData._campaignRun = { nodeId, defense, synced: false, holdSec, holdElapsed: 0, battleLive: false, deploying: false };
+            gameData._matchReadyForEndChecks = false;
             gameData._selectedMissionEntry = null;
             gameData.mission = null;
             let st = c.nodesState[nodeId];
@@ -42566,16 +42693,29 @@
             let myUpkeep = wodRogueRosterUpkeep(c.roster);
             let startCash = wodRogueBattleStartMoney(c);
             let startMp = wodRogueBattleStartManpower(c);
+            let startEcon = wodRogueEstimateBattleStartIncome(node);
+            let incomeLine = startEcon
+                ? '\nStarting income: +' + wodRogueFormatUpkeep(startEcon.cashIncome) +
+                  ' (net ' + (startEcon.cashIncome - myUpkeep >= 0 ? '+' : '') +
+                  wodRogueFormatUpkeep(startEcon.cashIncome - myUpkeep) + ' after army upkeep).'
+                : '';
             let enemyLine = (run.defense || (node.gar && (node.gar.light || node.gar.heavy || node.gar.ship)))
                 ? '\n\nEnemy strength: ' + wodRogueNodeIntel(node) +
                   ' · est. upkeep ' + wodRogueNodeEnemyUpkeepIntel(node)
                 : '';
+            if(run) {
+                run.battleLive = false;
+                run.deploying = false;
+            }
+            gameData._matchReadyForEndChecks = false;
+            wodResetEndCountdowns();
             let body = (run.defense
                 ? 'The Iron Concord is counterattacking ' + node.name + '. Hold for ' +
                   wodFormatHoldClock(holdSec) + ' or capture every enemy city to throw them back.'
                 : node.brief) +
                 '\n\nYour army: ' + c.roster.length + ' units · battle upkeep ' + wodRogueFormatUpkeep(myUpkeep) +
                 ' · opening reserves $' + startCash.toLocaleString() + ' / ' + startMp.toLocaleString() + ' manpower.' +
+                incomeLine +
                 enemyLine +
                 '\n\nThere are no reinforcements — every loss is permanent.' +
                 '\n\nDeployment: place your troops in your territory — right-click, drag a formation line, or stroke a path — then Begin battle. Pan with WASD or arrow keys.';
@@ -42767,7 +42907,10 @@
             let run = gameData._campaignRun;
             if(!run || !run.deploying) return;
             run.deploying = false;
+            run.battleLive = true;
             run.holdElapsed = 0;
+            gameData._matchReadyForEndChecks = true;
+            wodResetEndCountdowns();
             let banner = document.getElementById('wodDeployBanner');
             if(banner) banner.classList.add('hidden');
             // Clear any leftover march orders from placement clicks.
@@ -46824,21 +46967,13 @@
         }
 
         function showNotification(msg) {
+            // Never flash red toasts over the pause menu (they read like a defeat popup).
+            if(wodEscMenuOpen() || wodMissionPopupOpen()) return;
             let el = document.createElement('div');
+            el.className = 'wod-toast-note';
             el.innerText = msg;
-            el.style.position = 'absolute';
-            el.style.top = '100px';
-            el.style.left = '50%';
-            el.style.transform = 'translateX(-50%)';
-            el.style.backgroundColor = 'rgba(231, 76, 60, 0.9)';
-            el.style.color = 'white';
-            el.style.padding = '10px 20px';
-            el.style.borderRadius = '5px';
-            el.style.fontWeight = 'bold';
-            el.style.zIndex = '1000';
-            el.style.pointerEvents = 'none';
             document.body.appendChild(el);
-            setTimeout(() => el.remove(), 2000);
+            setTimeout(() => { if(el && el.parentNode) el.remove(); }, 2000);
         }
 
         function renameSelected() {
