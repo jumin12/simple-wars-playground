@@ -23966,18 +23966,26 @@
                 let sessionAccSolo = gameData._sessionIncomeAcc || { byOwner: {} };
                 let byOSolo = sessionAccSolo.byOwner || {};
                 let pfEnd = wodActivePeriodFlavor();
-                let rowHtmlSolo = '';
-                for(let o of soloOppOwners) {
+                function soloBreakdownRow(o, label) {
                     let citiesN = countCitiesForOwner(o);
                     let armiesN = countFriendlyCombatExcludingConvoys(o);
-                    let status = (citiesN <= 0 && armiesN <= 0)
-                        ? '<span class="cs-mp-res-lost">Eliminated</span>'
-                        : '<span class="cs-mp-res-won">Active</span>';
+                    let status;
+                    if(o === lo) {
+                        status = outcomeKind === 'victory'
+                            ? '<span class="cs-mp-res-won">Victory</span>'
+                            : '<span class="cs-mp-res-lost">Defeat</span>';
+                    } else {
+                        status = (citiesN <= 0 && armiesN <= 0)
+                            ? '<span class="cs-mp-res-lost">Eliminated</span>'
+                            : '<span class="cs-mp-res-won">Active</span>';
+                    }
                     let col = factionColors[o] || '#999999';
-                    let inc = Math.max(0, Math.floor(byOSolo[o] || 0));
-                    let cash = Math.floor((gameData.aiMoneyByOwner && gameData.aiMoneyByOwner[o]) || 0);
-                    rowHtmlSolo += '<tr>' +
-                        '<td><div class="cs-mp-fname"><span class="cs-mp-swatch" style="background:' + col + '"></span>AI ' + (o - 1) + '</div></td>' +
+                    let inc = Math.max(0, Math.floor(byOSolo[o] || (o === lo ? plyIncomeAcc : 0)));
+                    let cash = o === lo
+                        ? endCashVal
+                        : Math.floor((gameData.aiMoneyByOwner && gameData.aiMoneyByOwner[o]) || 0);
+                    return '<tr>' +
+                        '<td><div class="cs-mp-fname"><span class="cs-mp-swatch" style="background:' + col + '"></span>' + label + '</div></td>' +
                         '<td>' + status + '</td>' +
                         '<td>' + citiesN + '</td>' +
                         '<td>' + armiesN + '</td>' +
@@ -23988,12 +23996,14 @@
                         '<td>$' + cash.toLocaleString('en-US') + '</td>' +
                         '</tr>';
                 }
+                let rowHtmlSolo = soloBreakdownRow(lo, 'You');
+                for(let o of soloOppOwners) rowHtmlSolo += soloBreakdownRow(o, 'AI ' + (o - 1));
                 soloOppSection =
                     '<section class="cs-card">' +
-                    '<p class="cs-card-title">Opponent breakdown</p>' +
-                    '<p style="margin:0 0 10px;color:#95a5a6;font-size:0.88rem;line-height:1.45;">Per-AI snapshot at match end (combined AI totals above stay the same).</p>' +
+                    '<p class="cs-card-title">Faction breakdown</p>' +
+                    '<p style="margin:0 0 10px;color:#95a5a6;font-size:0.88rem;line-height:1.45;">You first, then each AI at match end (combined AI totals above stay the same).</p>' +
                     '<div class="cs-mp-table-wrap"><table class="cs-mp-table">' +
-                    '<thead><tr><th>Opponent</th><th>Status</th><th>Cities</th><th>Armies</th><th>Income</th><th>MP losses</th><th>' + pfEnd.statOwnHeavy + '</th><th>' + pfEnd.statOwnShips + '</th><th>Cash</th></tr></thead>' +
+                    '<thead><tr><th>Faction</th><th>Status</th><th>Cities</th><th>Armies</th><th>Income</th><th>MP losses</th><th>' + pfEnd.statOwnHeavy + '</th><th>' + pfEnd.statOwnShips + '</th><th>Cash</th></tr></thead>' +
                     '<tbody>' + rowHtmlSolo + '</tbody></table></div>' +
                     '</section>';
             }
