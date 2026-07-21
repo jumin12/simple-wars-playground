@@ -11442,7 +11442,7 @@
                     else p.setAttribute('hidden', '');
                 });
                 if(expand !== false) openExpanded();
-                if(panelId === 'structures' && typeof wodRefreshBuildCitySelectors === 'function')
+                if(panelId === 'structures' && typeof wodRefreshBuildCitySelectors === 'function' && typeof wodGameDataReady === 'function' && wodGameDataReady())
                     wodRefreshBuildCitySelectors();
             }
             tabs.forEach(t => {
@@ -11503,7 +11503,7 @@
                     if(cur === id) root.removeAttribute('data-mtab');
                     else root.setAttribute('data-mtab', id);
                     syncTabAria();
-                    if(root.getAttribute('data-mtab') === 'build' && typeof wodRefreshBuildCitySelectors === 'function')
+                    if(root.getAttribute('data-mtab') === 'build' && typeof wodRefreshBuildCitySelectors === 'function' && typeof wodGameDataReady === 'function' && wodGameDataReady())
                         wodRefreshBuildCitySelectors();
                 });
             });
@@ -11609,7 +11609,6 @@
         initWodMobileHud();
         wodInitStatsMobileTabs();
         initWodPcProductionDock();
-        if(typeof initWodBuildCitySelectors === 'function') initWodBuildCitySelectors();
         initWodHudDeselectOnClick();
         wodSyncPcTopUiClearance();
         window.addEventListener('resize', () => {
@@ -48900,7 +48899,13 @@
             return true;
         }
 
+        /** Safe before `let gameData` runs (early HUD init); typeof on TDZ lets still throws. */
+        function wodGameDataReady() {
+            try { return !!(gameData && gameData.cities); } catch(e) { return false; }
+        }
+
         function wodOwnedPlayerCitiesForBuildPanel() {
+            if(!wodGameDataReady()) return [];
             let lo = wodLocalPlayerOwner();
             let list = [];
             for(let i = 0, n = (gameData.cities || []).length; i < n; i++) {
@@ -48918,6 +48923,7 @@
         }
 
         function wodGetBuildPanelSelectedCity() {
+            if(!wodGameDataReady()) return null;
             let sel = document.querySelector('.wod-build-city-select');
             let id = sel ? sel.value : '';
             if(!id) return null;
@@ -48930,6 +48936,7 @@
         }
 
         function wodSelectCityKeepingBuildHud(city) {
+            if(!wodGameDataReady()) return;
             for(let i = 0; i < gameData.selection.length; i++) {
                 let old = gameData.selection[i];
                 if(old && old !== city) old.selected = false;
@@ -48975,6 +48982,7 @@
         };
 
         function wodRefreshBuildStructureButtons() {
+            if(!wodGameDataReady()) return;
             let city = wodGetBuildPanelSelectedCity();
             let cityModes = ['factory', 'farm', 'harbor'];
             document.querySelectorAll('[data-wod-build]').forEach(btn => {
@@ -48995,6 +49003,7 @@
 
         let _wodBuildCitySelectSyncing = false;
         function wodRefreshBuildCitySelectors(opts) {
+            if(!wodGameDataReady()) return;
             opts = opts || {};
             let cities = wodOwnedPlayerCitiesForBuildPanel();
             let force = opts.forceValue;
@@ -49045,7 +49054,7 @@
         }
 
         function wodSyncBuildCitySelectorFromGameSelection() {
-            if(_wodBuildCitySelectSyncing) return;
+            if(_wodBuildCitySelectSyncing || !wodGameDataReady()) return;
             let list = gameData.selection || [];
             let lo = wodLocalPlayerOwner();
             if(list.length === 1 && list[0] && list[0].id && list[0].owner === lo) {
@@ -49079,10 +49088,10 @@
                 if(sel._wodBuildCityBound) return;
                 sel._wodBuildCityBound = true;
                 sel.addEventListener('change', () => wodOnBuildCitySelectChange(sel));
-                sel.addEventListener('mousedown', () => wodRefreshBuildCitySelectors());
-                sel.addEventListener('focus', () => wodRefreshBuildCitySelectors());
+                sel.addEventListener('mousedown', () => { if(wodGameDataReady()) wodRefreshBuildCitySelectors(); });
+                sel.addEventListener('focus', () => { if(wodGameDataReady()) wodRefreshBuildCitySelectors(); });
             });
-            wodRefreshBuildCitySelectors({ forceValue: '' });
+            if(wodGameDataReady()) wodRefreshBuildCitySelectors({ forceValue: '' });
         }
 
         function beginFactoryBuild() {
