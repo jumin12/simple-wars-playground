@@ -1095,11 +1095,99 @@
             text-align: center;
             color: #95a5a6;
         }
-        @media (max-width: 720px) {
-            .cities-chart thead th:nth-child(3),
-            .cities-chart td:nth-child(3) { display: none; }
-            .cities-actions { max-width: 220px; }
-            .cities-build-btn { font-size: 0.68rem; padding: 4px 6px; }
+        .cities-card-list {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+            padding: 2px 2px 8px;
+        }
+        .cities-card {
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 12px 10px;
+        }
+        .cities-card.cities-row--selected {
+            background: rgba(46, 204, 113, 0.12);
+            border-color: rgba(46, 204, 113, 0.45);
+        }
+        .cities-card-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .cities-card-yields {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
+            font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .cities-card .cities-name-btn {
+            font-size: 1.02rem;
+            line-height: 1.25;
+            text-decoration: none;
+            padding: 2px 0;
+        }
+        .cities-card .cities-bldg-slots {
+            margin-bottom: 8px;
+        }
+        .cities-card .cities-actions {
+            max-width: none;
+            gap: 6px;
+        }
+        .cities-card .cities-build-btn {
+            flex: 1 1 auto;
+            min-height: 36px;
+            padding: 8px 10px;
+            font-size: 0.78rem;
+            border-radius: 10px;
+        }
+        .cities-card .cities-complete {
+            color: #7f8c8d;
+            font-size: 0.78rem;
+            font-weight: 700;
+        }
+        @media (max-width: 720px), ((hover: none) and (pointer: coarse)) {
+            #citiesMenu {
+                padding: 0;
+                align-items: stretch;
+                justify-content: flex-end;
+            }
+            .cities-menu-panel {
+                max-width: none;
+                width: 100%;
+                max-height: min(92dvh, 92vh);
+                min-height: min(62dvh, 520px);
+                margin: 0;
+                border-radius: 18px 18px 0 0;
+                border-left: 0;
+                border-right: 0;
+                border-bottom: 0;
+            }
+            .cities-menu-panel > h2 {
+                padding: 14px 14px 4px;
+                font-size: 1.2rem;
+            }
+            .cities-menu-sub {
+                display: none;
+            }
+            .cities-chart-wrap {
+                padding: 0 10px 6px;
+            }
+            .cities-chart { display: none; }
+            .cities-card-list { display: flex; }
+            .cities-menu-actions {
+                padding: 10px 12px calc(12px + env(safe-area-inset-bottom, 0px));
+            }
+            .cities-menu-actions .menu-btn {
+                max-width: none;
+                min-height: 44px;
+                border-radius: 12px;
+            }
         }
 
         .resources {
@@ -11946,6 +12034,7 @@
                 if(s && s.id && s.owner === lo) { selectedId = s.id; break; }
             }
             let rows = '';
+            let cards = '';
             for(let city of cities) {
                 let cash = getCityIncome(city);
                 let mp = getCityManpowerIncome(city);
@@ -11956,6 +12045,8 @@
                 let name = wodEscapeHtmlLite(city.name || 'Town');
                 let cid = wodEscapeHtmlLite(city.id);
                 let sel = city.id === selectedId ? ' cities-row--selected' : '';
+                let cashTxt = '+$' + cash.toLocaleString('en-US', { maximumFractionDigits: 1 }) + '/s';
+                let mpTxt = '+' + mp.toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' MP/s';
                 let factorySlot = city.hasFactory
                     ? '<span class="cities-bldg is-built" title="Factory">Factory</span>'
                     : '<span class="cities-bldg is-missing" title="No factory">Factory</span>';
@@ -11983,19 +12074,31 @@
                         (canHarbor ? '' : ' disabled') +
                         ' title="Build Harbor ($' + WOD_PRICE_HARBOR + ')">+ Harbor $' + (WOD_PRICE_HARBOR / 1000) + 'k</button>';
                 }
-                if(!actions) actions = '<span style="color:#7f8c8d;font-size:0.75rem;">Complete</span>';
+                let actionsOrDone = actions || '<span class="cities-complete">Complete</span>';
                 rows += '<tr class="cities-row' + sel + '" data-city-id="' + cid + '">' +
                     '<td><button type="button" class="cities-name-btn" data-city-focus="' + cid + '">' + name + '</button></td>' +
-                    '<td><span class="cities-yield">+$' + cash.toLocaleString('en-US', { maximumFractionDigits: 1 }) + '/s</span></td>' +
-                    '<td><span class="cities-yield cities-yield-mp">+' + mp.toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' MP/s</span></td>' +
+                    '<td><span class="cities-yield">' + cashTxt + '</span></td>' +
+                    '<td><span class="cities-yield cities-yield-mp">' + mpTxt + '</span></td>' +
                     '<td><div class="cities-bldg-slots">' + factorySlot + farmSlot + harborSlot + '</div></td>' +
-                    '<td><div class="cities-actions">' + actions + '</div></td>' +
+                    '<td><div class="cities-actions">' + actionsOrDone + '</div></td>' +
                     '</tr>';
+                cards += '<article class="cities-card' + sel + '" data-city-id="' + cid + '">' +
+                    '<div class="cities-card-head">' +
+                        '<button type="button" class="cities-name-btn" data-city-focus="' + cid + '">' + name + '</button>' +
+                        '<div class="cities-card-yields">' +
+                            '<span class="cities-yield">' + cashTxt + '</span>' +
+                            '<span class="cities-yield cities-yield-mp">' + mpTxt + '</span>' +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="cities-bldg-slots">' + factorySlot + farmSlot + harborSlot + '</div>' +
+                    '<div class="cities-actions">' + actionsOrDone + '</div>' +
+                    '</article>';
             }
             wrap.innerHTML =
                 '<table class="cities-chart" aria-label="Owned cities">' +
                 '<thead><tr><th>City</th><th>Gold</th><th>Manpower</th><th>Buildings</th><th>Construct</th></tr></thead>' +
-                '<tbody>' + rows + '</tbody></table>';
+                '<tbody>' + rows + '</tbody></table>' +
+                '<div class="cities-card-list" aria-label="Owned cities">' + cards + '</div>';
         }
         function wodFindOwnedCityById(cityId) {
             if(!cityId) return null;
@@ -46198,11 +46301,11 @@
             }
 
             // Draw Cities
+            // Construction rings are independent of the Cities layer — players still need
+            // to see eligible towns while placing factories/farms/harbors/units.
             let bmPick =
                 gameState === 'PLAYING' &&
                 gameData.buildMode &&
-                gameData.layers &&
-                gameData.layers.cities &&
                 gameData.buildMode !== 'fort' &&
                 gameData.buildMode !== 'bridge';
             let bmPickEligible = null;
@@ -46230,16 +46333,6 @@
                             ctx.strokeStyle = '#f1c40f';
                             ctx.lineWidth = gfxLite ? 3 : 4;
                             ctx.stroke();
-                        }
-
-                        if(bmPickEligible && city.id && bmPickEligible.has(city.id)) {
-                            ctx.beginPath();
-                            ctx.arc(city.x, city.y, 40, 0, Math.PI * 2);
-                            ctx.strokeStyle = 'rgba(241, 196, 15, 0.95)';
-                            ctx.lineWidth = gfxLite ? 2.5 : 3;
-                            ctx.setLineDash([9, 7]);
-                            ctx.stroke();
-                            ctx.setLineDash([]);
                         }
 
                         if(citySiegeShowsCombatIndicator(city)) {
@@ -46286,6 +46379,23 @@
                         ctx.fillRect(city.x - 20, city.y + 20, fillW, 4);
                     }
                 }
+            }
+            if(bmPickEligible && bmPickEligible.size) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(241, 196, 15, 0.95)';
+                ctx.lineWidth = gfxLite ? 2.5 : 3;
+                ctx.setLineDash([9, 7]);
+                for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                    let city = gameData.cities[ci];
+                    if(!city || !city.id || !bmPickEligible.has(city.id)) continue;
+                    if(!wodFogCanSeeCity(city)) continue;
+                    if(wodCull && !wodInView(city.x, city.y, culPad)) continue;
+                    ctx.beginPath();
+                    ctx.arc(city.x, city.y, 40, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+                ctx.restore();
             }
 
             let structsOn = !(gameData.layers && gameData.layers.structures === false);

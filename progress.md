@@ -608,3 +608,4 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Cities list panel (2026-07-21)
 - Desktop HUD Cities button + mobile Cities tab open a Civ5-style chart of owned towns (gold/MP yields, building slots).
 - Construct Factory / Farm / Harbor directly from the list; city name focuses the camera and selects the town.
+- Construction yellow rings draw even when the Cities map layer is off; mobile Cities menu uses a bottom-sheet card list.
