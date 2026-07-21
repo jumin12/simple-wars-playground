@@ -576,3 +576,9 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Campaign war-map nodes and battle towns keep stronger minimum spacing (no packed clusters after land snap).
 - Campaign event log flex-fills the map column instead of leaving a short capped strip with empty space below.
 - Dead selected units are pruned from `gameData.selection` so the info-card count updates immediately.
+
+## Encirclement / navy / coast fronts / sack chance (2026-07-20)
+- Encirclement flood-fill is cardinal-only so a 1-cell cut can seal a pocket (8-way connectivity previously needed a 2-cell wall).
+- Ships/sea convoys hard-reject land in pathfinding and AI ship moves use water corridors (no straight-line over land).
+- Unowned water/mountains inherit neighboring ownership (mapgen, campaign region maps, claim ticks) and multi-faction frontline ends are stitched at triple junctions.
+- Capturing a city has per-building ruin chances; capturing a fort hex has a raze chance; destructions toast via `showNotification`.
