@@ -604,3 +604,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Victory screen multi-opponent breakdown (2026-07-20)
 - Solo victory/defeat summary shows a per-AI table (status, cities, armies, income, losses, cash) when there are 2+ opponents.
 - Solo matches now accumulate session income per owner so that breakdown can show each AI's revenue.
+
+## Buildings tab city selector (2026-07-21)
+- Buildings panel has a city dropdown sized like the build option buttons (PC + mobile).
+- Default is map placement (current tap-to-place flow); choosing a city selects it and enables/disables factory/farm/harbor for that town.
