@@ -6304,6 +6304,9 @@
         .wod-camp-map-col {
             flex: 1 1 auto;
             min-width: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
         }
         #wodCampMapCanvas {
             width: 100%;
@@ -6314,10 +6317,13 @@
             display: block;
             touch-action: manipulation;
             -webkit-tap-highlight-color: transparent;
+            flex: 0 0 auto;
         }
         .wod-camp-log {
             margin-top: 8px;
-            max-height: 108px;
+            flex: 1 1 auto;
+            min-height: 140px;
+            max-height: none;
             overflow-y: auto;
             font-size: 0.78rem;
             line-height: 1.5;
@@ -6325,6 +6331,7 @@
             background: rgba(0, 0, 0, 0.22);
             border-radius: 8px;
             padding: 8px 10px;
+            box-sizing: border-box;
         }
         .wod-camp-log p { margin: 0 0 3px; }
         .wod-camp-log p strong { color: #d9e6f2; }
@@ -6406,6 +6413,7 @@
             border-radius: 8px;
             font-size: 0.76rem;
             color: #9db3c7;
+            flex: 0 0 auto;
         }
         .wod-camp-stats strong { color: #ecf0f1; }
         .wod-camp-intel {
@@ -12490,10 +12498,10 @@
                     ddx = (ddx / m) * maxPush;
                     ddy = (ddy / m) * maxPush;
                 }
-                let sepScale = (u.target && !u.retreating) ? 0.22 : 0.55;
-                if(u.target && !u.retreating && wodMpIsHumanOwner(u.owner)) continue;
-                // Ghosting AI units squeeze through their own stack — don't shove them back.
-                if(u.target && (u._wodAiFriendBlockT || 0) > 3) continue;
+                // Marching units still separate (lighter push) so player/AI columns cannot stack.
+                let sepScale = (u.target && !u.retreating) ? 0.28 : 0.55;
+                if(u.target && !u.retreating && wodMpIsHumanOwner(u.owner)) sepScale = 0.32;
+                else if(u.target && (u._wodAiFriendBlockT || 0) > 3) sepScale = 0.24;
                 let snx = u.x + ddx * sepScale, sny = u.y + ddy * sepScale;
                 // Terrain-validated: separation must not push units onto mountains/water.
                 if(wodSamplePosOnWalkableTerrain(u, snx, sny)) {
@@ -12504,7 +12512,7 @@
         }
         function wodKickSepWorker(sepPad, cellSize) {
             if(wodSepBusy || !wodSepWorker) return false;
-            if((gameData._wodPlayerMovingN || 0) > 0) return false;
+            // Player marches use sync separation every tick instead of the worker.
             let ents = gameData.entities;
             let k = 0;
             for(let i = 0, el = ents.length; i < el; i++) {
@@ -12573,18 +12581,22 @@
                     let minDist = (u1.radius || 10) + (u2.radius || 10) + 6;
                     if(dist < minDist && dist > 0) {
                         let overlap = minDist - dist;
-                        let pushStrength = u1.owner === u2.owner ? 0.42 : 0.48;
+                        let pushStrength = u1.owner === u2.owner ? 0.48 : 0.52;
+                        // Hard overlaps always get a strong push so stacks cannot persist.
+                        if(dist < ((u1.radius || 10) + (u2.radius || 10)) * 0.85)
+                            pushStrength = Math.max(pushStrength, 0.62);
                         if(u1.target && !u1.retreating) {
-                            if(wodMpIsHumanOwner(u1.owner)) return;
-                            // Ghosting AI units are squeezing through their own stack —
-                            // separation push-back cancelled their movement exactly.
-                            if((u1._wodAiFriendBlockT || 0) > 3 && u2.owner === u1.owner) return;
-                            pushStrength *= 0.35;
+                            // Lighter push while marching (avoids stutter) but never skip entirely.
+                            if(wodMpIsHumanOwner(u1.owner)) pushStrength *= 0.38;
+                            else if((u1._wodAiFriendBlockT || 0) > 3 && u2.owner === u1.owner)
+                                pushStrength *= 0.32;
+                            else pushStrength *= 0.42;
                         }
                         if(u2.target && !u2.retreating) {
-                            if(wodMpIsHumanOwner(u2.owner)) return;
-                            if((u2._wodAiFriendBlockT || 0) > 3 && u2.owner === u1.owner) return;
-                            pushStrength *= 0.35;
+                            if(wodMpIsHumanOwner(u2.owner)) pushStrength *= 0.38;
+                            else if((u2._wodAiFriendBlockT || 0) > 3 && u2.owner === u1.owner)
+                                pushStrength *= 0.32;
+                            else pushStrength *= 0.42;
                         }
                         let pushX = (dx / dist) * overlap * pushStrength;
                         let pushY = (dy / dist) * overlap * pushStrength;
@@ -12621,10 +12633,14 @@
         }
         function wodRunUnitSeparation(wodSkipSep, sepPad, cellSize) {
             if(wodSkipSep) return;
-            if((gameData._wodPlayerMovingN || 0) > 0) return;
             if(gameData._wodSepApply) {
                 wodApplySepWorkerResult(gameData._wodSepApply);
                 gameData._wodSepApply = null;
+            }
+            // While the player marches, run sync separation every tick so columns cannot stack.
+            if((gameData._wodPlayerMovingN || 0) > 0) {
+                wodRunUnitSeparationSync(sepPad, cellSize);
+                return;
             }
             wodEnsureSepWorker();
             if(wodSepBusy) return;
@@ -24877,19 +24893,29 @@
             let mr = mover.radius || 10;
             let found = false;
             let playerMarch = wodIsPlayerMarchOrder(mover);
-            // AI units jammed behind friendlies for 3s+ ghost through their own troops the
-            // same way player march columns always have — dense AI stacks in forests and
-            // passes used to freeze whole groups for a minute+.
+            // AI units jammed behind friendlies for 3s+ may skim closer, but never hard-stack.
             let aiGhost = mover.owner > 1 && !wodMpIsHumanOwner(mover.owner) && (mover._wodAiFriendBlockT || 0) > 3;
             forEachNearbyUnit(gameData.unitSpatialGrid, wx, wy, mr + 55, (u) => {
                 if(found) return;
                 if(u === mover || u.hp <= 0 || u.type === 'convoy') return;
-                if((playerMarch || aiGhost) && u.owner === mover.owner) return;
                 let ur = u.radius || 10;
                 let dx = u.x - wx;
                 let dy = u.y - wy;
+                let dist2 = dx * dx + dy * dy;
+                // Hard body overlap is always blocked for player and AI alike.
+                let hardMin = (mr + ur) * 0.92;
+                if(dist2 < hardMin * hardMin) {
+                    found = true;
+                    return;
+                }
+                // Columns may pack closer to friendlies than enemies, but not occupy one point.
+                if((playerMarch || aiGhost) && u.owner === mover.owner) {
+                    let softMin = mr + ur + Math.max(1, gapExtra * 0.35);
+                    if(dist2 < softMin * softMin) found = true;
+                    return;
+                }
                 let minD = mr + ur + gapExtra;
-                if(dx * dx + dy * dy < minD * minD) found = true;
+                if(dist2 < minD * minD) found = true;
             });
             return found;
         }
@@ -35850,6 +35876,14 @@
                     unit.target = null;
                     unit.path = null;
                     unit.orderTarget = null;
+                    // Drop dead units from the current selection so the info card count updates.
+                    if(unit.selected || (gameData.selection && gameData.selection.indexOf(unit) >= 0)) {
+                        unit.selected = false;
+                        if(gameData.selection && gameData.selection.length) {
+                            gameData.selection = gameData.selection.filter(s => s && s !== unit && !(s.hp !== undefined && !s.id && s.hp <= 0));
+                            _infoCardUiThrottle.s = null;
+                        }
+                    }
                     // Swap-and-pop: O(1) vs splice O(n) during mass casualties.
                     let last = gameData.entities.length - 1;
                     if(i !== last) {
@@ -37016,7 +37050,9 @@
             bridgePass(0.44, 1.19, 4, 2);
             bridgePass(0.32, 1.42, 6, 2);
             bridgePass(0.26, 1.55, 4, 2);
-            let stitch2 = Math.pow(spacing * 1.42, 2);
+            // Extra coastal stitch: shore chains often leave short open ends at water.
+            bridgePass(0.18, 1.85, 5, 3);
+            let stitch2 = Math.pow(spacing * 1.72, 2);
             for(let ek of keys) {
                 if(deg(ek) !== 0) continue;
                 let p = midpointByEdge.get(ek);
@@ -37264,11 +37300,13 @@
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
             let bordersByPair = {};
 
+            // Include owned water so frontline strokes continue along coastlines instead of
+            // leaving gaps where land ownership meets the shore.
             for(let hex of hexList) {
-                if(hex.owner === 0 || isWaterHex(hex)) continue;
+                if(hex.owner === 0) continue;
                 for(let dir of cardinalHexDirections) {
                     let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(!nHex || nHex.owner === 0 || isWaterHex(nHex) || nHex.owner === hex.owner) continue;
+                    if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
                     let owners = [hex.owner, nHex.owner].sort((a, b) => a - b);
                     let pairKey = owners.join(':');
                     let ek = hexPairBorderKey(hex, nHex);
@@ -41071,14 +41109,16 @@
             pts.push({ gx: capP.gx, gy: capP.gy, capital: true });
             // Poisson-ish scatter with ADAPTIVE spacing: worlds with lots of ocean can't
             // fit every region at full spacing, so the radius (and the land requirement)
-            // relaxes until the full node count fits.
-            let minD = Math.sqrt((W * H) / count) * 0.78;
+            // relaxes until the full node count fits — but never collapses into clumps.
+            let minD0 = Math.sqrt((W * H) / count) * 0.92;
+            let minD = minD0;
+            let minDFloor = minD0 * 0.62;
             let landReq = 0.42;
             let guard = 0;
             while(pts.length < count && guard++ < 20000) {
                 if(guard % 900 === 0) {
-                    minD *= 0.88;
-                    landReq = Math.max(0.28, landReq - 0.04);
+                    minD = Math.max(minDFloor, minD * 0.92);
+                    landReq = Math.max(0.28, landReq - 0.03);
                 }
                 let gx = Math.round((0.06 + rng() * 0.88) * W);
                 let gy = Math.round((0.08 + rng() * 0.84) * H);
@@ -41097,6 +41137,33 @@
                 let snapped = wodRogueSnapToLand(cells, W, H, p.gx, p.gy);
                 p.gx = snapped.gx;
                 p.gy = snapped.gy;
+            }
+            // Snap-to-land can pull neighbors together — push them back apart on land.
+            let enforceMin = minDFloor;
+            let enforceMin2 = enforceMin * enforceMin;
+            for(let pass = 0; pass < 10; pass++) {
+                let moved = false;
+                for(let i = 0; i < pts.length; i++) {
+                    for(let j = i + 1; j < pts.length; j++) {
+                        let a = pts[i], b = pts[j];
+                        let dx = b.gx - a.gx, dy = b.gy - a.gy;
+                        let d2 = dx * dx + dy * dy;
+                        if(d2 >= enforceMin2 || d2 < 1e-6) continue;
+                        let d = Math.sqrt(d2) || 1;
+                        let push = (enforceMin - d) * 0.55;
+                        let ux = dx / d, uy = dy / d;
+                        a.gx = Math.round(a.gx - ux * push);
+                        a.gy = Math.round(a.gy - uy * push);
+                        b.gx = Math.round(b.gx + ux * push);
+                        b.gy = Math.round(b.gy + uy * push);
+                        let sa = wodRogueSnapToLand(cells, W, H, a.gx, a.gy);
+                        let sb = wodRogueSnapToLand(cells, W, H, b.gx, b.gy);
+                        a.gx = sa.gx; a.gy = sa.gy;
+                        b.gx = sb.gx; b.gy = sb.gy;
+                        moved = true;
+                    }
+                }
+                if(!moved) break;
             }
             // Terrain profile per node → battle shape/size, name, brief, garrison.
             let nodes = [];
@@ -42292,7 +42359,9 @@
                     }
                     return false;
                 }
-                let minDistBase = Math.max(hr * 18, mapR * hr * 0.3);
+                // Keep towns clearly separated (urban footprints are ~2 hexes wide).
+                let minDistBase = Math.max(hr * 26, mapR * hr * 0.42);
+                let minDistFloor = Math.max(hr * 18, mapR * hr * 0.28);
                 let depthFracs = [0.28, 0.22, 0.16, 0.10, 0.06];
                 let bestPartial = [];
 
@@ -42318,10 +42387,10 @@
                     let rRange = Math.max(1, rMax - rMin);
 
                     for(let sepPass = 0; sepPass < 5; sepPass++) {
-                        let minDist = minDistBase * (1 - sepPass * 0.11);
-                        let avoidDist = minDist * 0.9;
+                        let minDist = Math.max(minDistFloor, minDistBase * (1 - sepPass * 0.08));
+                        let avoidDist = minDist * 0.95;
                         let out = [];
-                        let bandPad = rRange * (0.12 + sepPass * 0.04);
+                        let bandPad = rRange * (0.08 + sepPass * 0.03);
 
                         for(let bi = 0; bi < count; bi++) {
                             let t0 = bi / Math.max(1, count);
@@ -42352,8 +42421,8 @@
                             for(let h of rest) {
                                 if(out.length >= count) break;
                                 if(out.indexOf(h) >= 0) continue;
-                                if(tooCloseTo(h, out, minDist * 0.72)) continue;
-                                if(avoid && avoid.length && tooCloseTo(h, avoid, avoidDist * 0.72)) continue;
+                                if(tooCloseTo(h, out, minDist * 0.88)) continue;
+                                if(avoid && avoid.length && tooCloseTo(h, avoid, avoidDist * 0.88)) continue;
                                 out.push(h);
                             }
                         }
@@ -42363,16 +42432,33 @@
                     }
                 }
 
+                // Prefer fewer well-spaced towns over a packed cluster.
                 if(bestPartial.length) return bestPartial.slice(0, count);
-                // Last resort: deepest land on that side, ignore spacing.
                 let fallback = [];
                 for(let h of hexList) {
                     if(!isLandHex(h)) continue;
                     if(sideDepth(h) <= 0) continue;
+                    if(tooCloseTo(h, fallback, minDistFloor)) continue;
+                    if(avoid && avoid.length && tooCloseTo(h, avoid, minDistFloor * 0.9)) continue;
                     fallback.push(h);
+                    if(fallback.length >= count) break;
                 }
-                fallback.sort((a, b) => siteScore(b) - siteScore(a));
-                return fallback.slice(0, count);
+                if(fallback.length) return fallback.slice(0, count);
+                // Absolute last resort: deepest land, still trying to keep spacing.
+                let deep = [];
+                for(let h of hexList) {
+                    if(!isLandHex(h)) continue;
+                    if(sideDepth(h) <= 0) continue;
+                    deep.push(h);
+                }
+                deep.sort((a, b) => siteScore(b) - siteScore(a));
+                let spaced = [];
+                for(let h of deep) {
+                    if(spaced.length >= count) break;
+                    if(tooCloseTo(h, spaced, minDistFloor * 0.75)) continue;
+                    spaced.push(h);
+                }
+                return spaced.length ? spaced : deep.slice(0, Math.min(count, 1));
             }
 
             let townNames = wodRogueEnsureNodeTowns(node, c).slice();
@@ -45887,7 +45973,7 @@
 
         function getMovableSelectedUnits() {
             let o = wodLocalPlayerOwner();
-            return gameData.selection.filter(s => s.hp !== undefined && !s.id && s.type !== 'convoy' && s.owner === o);
+            return gameData.selection.filter(s => s && s.hp !== undefined && s.hp > 0 && !s.id && s.type !== 'convoy' && s.owner === o);
         }
 
         function wodMovableSelectionHasActiveMarch() {
@@ -46837,6 +46923,16 @@
                 if(gameState === 'PLAYING') {
                     e.preventDefault();
                     toggleEscMenu();
+                    return;
+                }
+            }
+            if((e.code === 'Space' || e.key === ' ') && gameState === 'PLAYING') {
+                let tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+                let typing = tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable);
+                if(!typing && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                    e.preventDefault();
+                    // Toggle pause (same as the HUD Pause control). Resume to 1×.
+                    setGameSpeed(gameData.speed === 0 ? 1 : 0);
                     return;
                 }
             }

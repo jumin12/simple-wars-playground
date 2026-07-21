@@ -568,3 +568,11 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Campaign 10-min clocks + windowed UI fit (2026-07-19)
 - Attack and defense campaign battles now share a 10-minute battle clock (assault must capture all cities before time expires; defense still wins by holding or capturing).
 - Viewport/panel CSS uses dvh/svh and scrollable overlays so menus and HUD fit in non-fullscreen browser windows as well as fullscreen.
+
+## Stacking / pause / coast / campaign polish (2026-07-20)
+- Player and AI units no longer hard-stack: separation still runs during marches, friend-block keeps a soft body gap, and hard overlaps always push apart.
+- Spacebar toggles pause/1× during play (ignored while typing in inputs).
+- Diplomacy frontlines include owned water so strokes continue at coastlines; extra border-chain stitch for shore gaps.
+- Campaign war-map nodes and battle towns keep stronger minimum spacing (no packed clusters after land snap).
+- Campaign event log flex-fills the map column instead of leaving a short capped strip with empty space below.
+- Dead selected units are pruned from `gameData.selection` so the info-card count updates immediately.
