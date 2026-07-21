@@ -595,3 +595,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## 3+ faction mapgen speed fix (2026-07-20)
 - Removed full-sea BFS from every equalize iteration (it stalled 3+ starts); sea paint runs once after politics settle.
 - Skip per-iter water votes during land equalize; trim second 3+ equalize; batch Voronoi writes.
+
+## 2+ AI mapgen hang fix (2026-07-20)
+- Root cause: `pickBacklineSpawnHex` / fallback spawn scanned the full hex list per unit×front try; 3+ factions made start-unit placement take minutes after politics finished.
+- Local ring search for backline spawn; city-neighborhood fallback pool; capped front tries; shorter equalize + land-only Voronoi; O(n) land-bridge pair find; politics retries on same terrain; soft fair-start for 3+ factions.
+- Verified headless: 1/2/3 AI medium island mapgen ~2–3s each (was often 60–200s+ for 2 AI).
