@@ -46327,14 +46327,6 @@
                     if(showCities) {
                         drawCitySkinMarker(ctx, city);
 
-                        if(isSel) {
-                            ctx.beginPath();
-                            ctx.arc(city.x, city.y, 35, 0, Math.PI*2);
-                            ctx.strokeStyle = '#f1c40f';
-                            ctx.lineWidth = gfxLite ? 3 : 4;
-                            ctx.stroke();
-                        }
-
                         if(citySiegeShowsCombatIndicator(city)) {
                             ctx.save();
                             let py = city.y - (!gfxLite ? 52 : 44);
@@ -46380,8 +46372,21 @@
                     }
                 }
             }
+            // Selection + construction rings: always draw (Cities layer off must not hide them).
+            ctx.save();
+            for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
+                let city = gameData.cities[ci];
+                if(!city || !city.selected) continue;
+                if(!wodFogCanSeeCity(city)) continue;
+                if(wodCull && !wodInView(city.x, city.y, culPad)) continue;
+                ctx.beginPath();
+                ctx.arc(city.x, city.y, 35, 0, Math.PI * 2);
+                ctx.strokeStyle = '#f1c40f';
+                ctx.lineWidth = gfxLite ? 3 : 4;
+                ctx.setLineDash([]);
+                ctx.stroke();
+            }
             if(bmPickEligible && bmPickEligible.size) {
-                ctx.save();
                 ctx.strokeStyle = 'rgba(241, 196, 15, 0.95)';
                 ctx.lineWidth = gfxLite ? 2.5 : 3;
                 ctx.setLineDash([9, 7]);
@@ -46395,8 +46400,8 @@
                     ctx.stroke();
                 }
                 ctx.setLineDash([]);
-                ctx.restore();
             }
+            ctx.restore();
 
             let structsOn = !(gameData.layers && gameData.layers.structures === false);
             if(structsOn && gameData.forts && gameData.forts.length) {
