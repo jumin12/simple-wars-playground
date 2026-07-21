@@ -30539,6 +30539,16 @@
             return 1;
         }
 
+        function wodAreaClearOfEnemyCombat(wx, wy, friendlyOwner, radiusPx) {
+            if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return true;
+            let found = false;
+            forEachNearbyUnit(gameData.unitSpatialGrid, wx, wy, radiusPx, (u) => {
+                if(found || !u || u.hp <= 0 || u.type === 'convoy' || u.owner === friendlyOwner) return;
+                found = true;
+            });
+            return !found;
+        }
+
         function claimTerritoryAroundUnit(unit, atX, atY, hexOverride) {
             if(unit.type === 'convoy') return;
             let px = atX != null ? atX : unit.x;
@@ -30549,6 +30559,9 @@
             if(!standingHex) return;
             let uHex = {q: standingHex.q, r: standingHex.r};
             let claimRadius = unit.type === 'heavy' ? 2 : 1;
+            // Uncontested grabs claim one extra ring of land.
+            let clearR = (gameData.hexRadius || 20) * 3.4;
+            if(wodAreaClearOfEnemyCombat(px, py, unit.owner, clearR)) claimRadius += 1;
             let claimH = getHexesInHexRadius(uHex.q, uHex.r, claimRadius);
 
             if(wodCanClaimTerritoryHex(unit, standingHex, standingHex) && !wodHexOccupiedByEnemyCombat(standingHex, unit.owner))
@@ -32534,6 +32547,8 @@
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(64, f * 13));
             wodSyncUrbanFootprintOwners();
             await wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
+            await wodAssignWaterAndNonclaimablePoliticalVotes();
+            wodFillUnownedPoliticalHexes(10);
             wodNormalizeStartingCityEconomy(ownersSorted);
 
             if(!wodVerifyFairFactionStart(ownersSorted)) return false;
@@ -32610,6 +32625,9 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
+                // Match campaign: seal coastal / mountain ownership before the first border bake.
+                await wodAssignWaterAndNonclaimablePoliticalVotes();
+                wodFillUnownedPoliticalHexes(10);
                 if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false) && !gameData._wodMpLaunchFromCommitted) {
                     gameData.entities = [];
                     spawnInitialFrontlineUnits(ownersList);
@@ -32846,6 +32864,9 @@
 
             await smoothStartingTerritory(ownersList, 6, 1);
             await wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
+            // Always paint water/mountains like campaign maps so diplomacy strokes meet at coasts.
+            await wodAssignWaterAndNonclaimablePoliticalVotes();
+            wodFillUnownedPoliticalHexes(10);
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
 
@@ -37437,59 +37458,103 @@
 
         /**
          * World-space midpoints of faction–faction diplomacy edges (shared by main map renderer and lobby/setup previews).
+         * Uses ONE unified graph across all owner-pairs so 3+ faction junctions form continuous strokes
+         * (pairwise graphs left gaps where A–B / A–C / B–C tips never met).
          * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
-            let bordersByPair = {};
+            let midpointByEdge = new Map();
+            let cornerMap = new Map();
 
-            // Include owned water so frontline strokes continue along coastlines instead of
-            // leaving gaps where land ownership meets the shore.
             for(let hex of hexList) {
-                if(hex.owner === 0) continue;
+                if(!hex || hex.owner === 0) continue;
                 for(let dir of cardinalHexDirections) {
                     let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
-                    let owners = [hex.owner, nHex.owner].sort((a, b) => a - b);
-                    let pairKey = owners.join(':');
                     let ek = hexPairBorderKey(hex, nHex);
-                    if(!bordersByPair[pairKey]) bordersByPair[pairKey] = new Map();
-                    if(bordersByPair[pairKey].has(ek)) continue;
+                    if(midpointByEdge.has(ek)) continue;
                     let mx = (hex.x + nHex.x) / 2 + offsetX;
                     let my = (hex.y + nHex.y) / 2 + offsetY;
-                    bordersByPair[pairKey].set(ek, { x: mx, y: my, hex, nHex, dir });
+                    midpointByEdge.set(ek, { x: mx, y: my });
+                    registerBorderCornersForPair(cornerMap, hex, nHex, dir, ek, mx, my, spacing);
                 }
             }
+
+            let adj = wodLinkUnifiedDiplomacyCorners(cornerMap, midpointByEdge, spacing, offsetX, offsetY);
+            bridgeBorderChainGaps(adj, midpointByEdge, spacing);
+            let chains = walkBorderEdgeChains(adj, midpointByEdge);
+            chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
 
             let out = [];
-            for(let pairKey in bordersByPair) {
-                let edgeMap = bordersByPair[pairKey];
-                let midpointByEdge = new Map();
-                let cornerMap = new Map();
-
-                for(let [ek, meta] of edgeMap) {
-                    midpointByEdge.set(ek, { x: meta.x, y: meta.y });
-                    registerBorderCornersForPair(cornerMap, meta.hex, meta.nHex, meta.dir, ek, meta.x, meta.y, spacing);
-                }
-
-                let adj = linkBorderEdgesAroundCorners(cornerMap);
-                bridgeBorderChainGaps(adj, midpointByEdge, spacing);
-                let chains = walkBorderEdgeChains(adj, midpointByEdge);
-                chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
-
-                for(let { keys, closed } of chains) {
-                    let pts = keys.map(k => midpointByEdge.get(k)).filter(Boolean);
-                    if(pts.length < 2) continue;
-                    out.push({ closed, pts });
-                }
+            for(let { keys, closed } of chains) {
+                let pts = keys.map(k => midpointByEdge.get(k)).filter(Boolean);
+                if(pts.length < 2) continue;
+                out.push({ closed, pts });
             }
-            // 3+ faction meetings leave pairwise chain ends short of each other — stitch them.
+            // Residual tips (map rim / messy coasts) still get pulled together.
             wodStitchMultiFactionBorderEnds(out, spacing);
-            // Open ends that hit the void at the map rim get extended to the edge.
             wodExtendBorderEndsToMapEdge(out, hexList, offsetX, offsetY, spacing);
             return out;
         }
 
-        /** Cluster nearby open frontline ends and pull them to a shared junction (2- and 3-way). */
+        /**
+         * Link diplomacy edges at shared lattice corners across ALL owner pairs.
+         * Degree-3 (triple faction) corners get a shared junction vertex so strokes meet as one line.
+         */
+        function wodLinkUnifiedDiplomacyCorners(cornerMap, midpointByEdge, spacing, offsetX, offsetY) {
+            let adj = new Map();
+            function addUndirected(ekA, ekB) {
+                if(!ekA || !ekB || ekA === ekB) return;
+                if(!adj.has(ekA)) adj.set(ekA, new Set());
+                if(!adj.has(ekB)) adj.set(ekB, new Set());
+                adj.get(ekA).add(ekB);
+                adj.get(ekB).add(ekA);
+            }
+            let juncSeq = 0;
+            for(let [ck, arrRaw] of cornerMap) {
+                let arr = dedupeCornerBorderEdges(arrRaw);
+                arr.sort((u, v) => u.ang - v.ang || (u.ek < v.ek ? -1 : u.ek > v.ek ? 1 : 0));
+                if(arr.length < 2) continue;
+                if(arr.length === 2) {
+                    addUndirected(arr[0].ek, arr[1].ek);
+                    continue;
+                }
+                if(arr.length === 3) {
+                    // Triple junction: insert one shared point all three edges connect through.
+                    let parts = ck.split(',');
+                    let hxi = parseFloat(parts[0]), hyi = parseFloat(parts[1]);
+                    let jx = (hxi * 0.5) * spacing + offsetX;
+                    let jy = (hyi * 0.5) * spacing + offsetY;
+                    // Prefer average of the three edge midpoints (more stable than lattice guess).
+                    let sx = 0, sy = 0, n = 0;
+                    for(let it of arr) {
+                        let p = midpointByEdge.get(it.ek);
+                        if(!p) continue;
+                        sx += p.x; sy += p.y; n++;
+                    }
+                    if(n > 0) { jx = sx / n; jy = sy / n; }
+                    let jk = '__junc_' + (juncSeq++) + '_' + ck;
+                    midpointByEdge.set(jk, { x: jx, y: jy });
+                    for(let it of arr) addUndirected(it.ek, jk);
+                    continue;
+                }
+                // Degree 4+: pair angular neighbors (avoids plus-sign spurs).
+                if(arr.length % 2 === 0) {
+                    for(let i = 0; i < arr.length; i += 2)
+                        addUndirected(arr[i].ek, arr[i + 1].ek);
+                } else {
+                    for(let i = 0; i + 1 < arr.length; i += 2)
+                        addUndirected(arr[i].ek, arr[i + 1].ek);
+                    // Leftover tip: hitch to nearest already-linked neighbor by angle.
+                    let last = arr[arr.length - 1];
+                    let prev = arr[arr.length - 2];
+                    if(prev) addUndirected(last.ek, prev.ek);
+                }
+            }
+            return adj;
+        }
+
+        /** Cluster nearby open frontline ends and pull them to a shared junction. */
         function wodStitchMultiFactionBorderEnds(chains, spacing) {
             if(!chains || chains.length < 2) return;
             let ends = [];
@@ -37500,33 +37565,16 @@
                 ends.push({ ci, which: 1, p: c.pts[c.pts.length - 1] });
             }
             if(ends.length < 2) return;
-            let clusterR2 = Math.pow(spacing * 2.35, 2);
+            let clusterR2 = Math.pow(spacing * 2.8, 2);
             let assigned = new Array(ends.length).fill(-1);
             let clusters = [];
             for(let i = 0; i < ends.length; i++) {
                 if(assigned[i] >= 0) continue;
                 let group = [i];
                 assigned[i] = clusters.length;
-                for(let j = i + 1; j < ends.length; j++) {
-                    if(assigned[j] >= 0) continue;
-                    if(ends[j].ci === ends[i].ci) continue;
-                    let dx = ends[i].p.x - ends[j].p.x, dy = ends[i].p.y - ends[j].p.y;
-                    if(dx * dx + dy * dy <= clusterR2) {
-                        // Grow cluster: also accept ends near any member.
-                        let near = false;
-                        for(let gi = 0; gi < group.length; gi++) {
-                            let g = ends[group[gi]];
-                            let ddx = g.p.x - ends[j].p.x, ddy = g.p.y - ends[j].p.y;
-                            if(ddx * ddx + ddy * ddy <= clusterR2) { near = true; break; }
-                        }
-                        if(near) {
-                            assigned[j] = clusters.length;
-                            group.push(j);
-                        }
-                    }
-                }
-                // Second pass: pull in any end near the group's centroid of seeds.
-                if(group.length >= 1) {
+                let grew = true;
+                while(grew) {
+                    grew = false;
                     for(let j = 0; j < ends.length; j++) {
                         if(assigned[j] >= 0) continue;
                         for(let gi = 0; gi < group.length; gi++) {
@@ -37536,6 +37584,7 @@
                             if(ddx * ddx + ddy * ddy <= clusterR2) {
                                 assigned[j] = clusters.length;
                                 group.push(j);
+                                grew = true;
                                 break;
                             }
                         }
@@ -37545,7 +37594,6 @@
             }
             for(let group of clusters) {
                 if(group.length < 2) continue;
-                // Distinct chains only.
                 let chainSet = new Set(group.map(i => ends[i].ci));
                 if(chainSet.size < 2) continue;
                 let cx = 0, cy = 0;
