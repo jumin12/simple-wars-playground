@@ -609,3 +609,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Desktop HUD Cities button + mobile Cities tab open a Civ5-style chart of owned towns (gold/MP yields, building slots).
 - Construct Factory / Farm / Harbor directly from the list; city name focuses the camera and selects the town.
 - Construction yellow rings draw even when the Cities map layer is off; mobile Cities menu uses a bottom-sheet card list.
+
+## Surrender shows defeat summary (2026-07-21)
+- Surrendering a solo/campaign battle opens the defeat end screen with battle stats (same panel as a normal loss).
+- Campaign surrenders still sync the failed battle, then Return to main menu goes back to the war map.
