@@ -12584,15 +12584,39 @@
         function confirmSurrender() {
             wodShowConfirmDialog({
                 title: 'Surrender this war?',
-                body: 'Abandon the current match and return to the main menu. In a campaign battle this counts as a defeat.',
+                body: 'This counts as a defeat and opens the battle summary. Campaign battles return to the war map afterward.',
                 confirmLabel: 'Surrender',
                 cancelLabel: 'Keep fighting',
                 danger: true
             }).then(ok => {
                 if(!ok) return;
                 toggleEscMenu(false);
-                returnToMenu();
+                // Multiplayer leave still exits immediately (no shared end-summary path here).
+                if(gameData.mp && gameData.mp.enabled) {
+                    returnToMenu();
+                    return;
+                }
+                triggerSurrenderDefeat();
             });
+        }
+
+        /** Explicit surrender: always show the defeat summary (bypasses natural end-check gates). */
+        function triggerSurrenderDefeat() {
+            if(gameData._campaignEnded) return;
+            if(gameState !== 'PLAYING' || gameData.menuAttractMode) {
+                returnToMenu();
+                return;
+            }
+            if(wodEscMenuOpen()) toggleEscMenu(false);
+            gameData._campaignEnded = true;
+            setGameSpeed(0, true);
+            wodResetEndCountdowns();
+            if(gameData._campaignRun) wodCampaignAfterBattle(false);
+            openCampaignBattleSummary(
+                'defeat',
+                'Defeat — you surrendered.',
+                'Defeat — you surrendered the battle.'
+            );
         }
 
         function setGameSpeed(speed, allowNonRealtime) {
