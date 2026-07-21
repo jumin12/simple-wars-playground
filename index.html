@@ -6299,7 +6299,7 @@
         .wod-camp-layout {
             display: flex;
             gap: 14px;
-            align-items: stretch;
+            align-items: flex-start;
         }
         .wod-camp-map-col {
             flex: 1 1 auto;
@@ -6307,6 +6307,7 @@
             display: flex;
             flex-direction: column;
             min-height: 0;
+            overflow: hidden;
         }
         #wodCampMapCanvas {
             width: 100%;
@@ -6322,9 +6323,12 @@
         .wod-camp-log {
             margin-top: 8px;
             flex: 1 1 auto;
-            min-height: 140px;
-            max-height: none;
+            min-height: 72px;
+            max-height: 160px;
+            overflow-x: hidden;
             overflow-y: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
             font-size: 0.78rem;
             line-height: 1.5;
             color: #9db3c7;
@@ -37131,9 +37135,15 @@
                 if(arr.length < 2) continue;
                 // Pair disjoint angular neighbors — chaining arr[i]→arr[i+1] for all i creates
                 // degree-4 hubs (plus-sign spurs) when four borders touch one lattice corner.
-                if(arr.length % 2 !== 0) continue;
-                for(let i = 0; i < arr.length; i += 2)
-                    addUndirected(arr[i].ek, arr[i + 1].ek);
+                if(arr.length % 2 === 0) {
+                    for(let i = 0; i < arr.length; i += 2)
+                        addUndirected(arr[i].ek, arr[i + 1].ek);
+                } else {
+                    // Odd counts show up on map edges / jagged coasts — link consecutive pairs
+                    // and leave the last tip for bridgeBorderChainGaps instead of dropping all.
+                    for(let i = 0; i + 1 < arr.length; i += 2)
+                        addUndirected(arr[i].ek, arr[i + 1].ek);
+                }
             }
             return adj;
         }
@@ -37179,9 +37189,10 @@
             bridgePass(0.44, 1.19, 4, 2);
             bridgePass(0.32, 1.42, 6, 2);
             bridgePass(0.26, 1.55, 4, 2);
-            // Extra coastal stitch: shore chains often leave short open ends at water.
+            // Extra coastal / map-edge stitch: shore and rim chains often leave short open ends.
             bridgePass(0.18, 1.85, 5, 3);
-            let stitch2 = Math.pow(spacing * 1.72, 2);
+            bridgePass(0.12, 2.25, 4, 3);
+            let stitch2 = Math.pow(spacing * 2.05, 2);
             for(let ek of keys) {
                 if(deg(ek) !== 0) continue;
                 let p = midpointByEdge.get(ek);
@@ -37415,7 +37426,9 @@
                 let d2 = nearMajor(c.cx, c.cy);
                 if(c.closed && c.perim < SMALL_CLOSED_PERIM && c.edgeCount <= MAX_ARTIFACT_EDGES && d2 < NEAR_MAJOR_SQ)
                     continue;
-                if(!c.closed && c.perim < SHORT_OPEN_PERIM && c.edgeCount <= 2 && d2 < NEAR_MAJOR_SQ * 1.5)
+                // Keep short open stubs — they are often the tips that meet at triple
+                // junctions / map edges; dropping them left visible gaps in the stroke.
+                if(!c.closed && c.perim < SHORT_OPEN_PERIM * 0.55 && c.edgeCount <= 1 && d2 < NEAR_MAJOR_SQ * 1.5)
                     continue;
                 out.push({ keys: c.keys, closed: c.closed });
             }
@@ -37471,10 +37484,12 @@
             }
             // 3+ faction meetings leave pairwise chain ends short of each other — stitch them.
             wodStitchMultiFactionBorderEnds(out, spacing);
+            // Open ends that hit the void at the map rim get extended to the edge.
+            wodExtendBorderEndsToMapEdge(out, hexList, offsetX, offsetY, spacing);
             return out;
         }
 
-        /** Connect nearby open frontline ends from different owner-pairs (triple junctions). */
+        /** Cluster nearby open frontline ends and pull them to a shared junction (2- and 3-way). */
         function wodStitchMultiFactionBorderEnds(chains, spacing) {
             if(!chains || chains.length < 2) return;
             let ends = [];
@@ -37484,26 +37499,115 @@
                 ends.push({ ci, which: 0, p: c.pts[0] });
                 ends.push({ ci, which: 1, p: c.pts[c.pts.length - 1] });
             }
-            let maxD2 = Math.pow(spacing * 1.55, 2);
-            let used = new Set();
+            if(ends.length < 2) return;
+            let clusterR2 = Math.pow(spacing * 2.35, 2);
+            let assigned = new Array(ends.length).fill(-1);
+            let clusters = [];
             for(let i = 0; i < ends.length; i++) {
-                if(used.has(i)) continue;
-                let a = ends[i];
-                let best = -1, bestD = maxD2;
+                if(assigned[i] >= 0) continue;
+                let group = [i];
+                assigned[i] = clusters.length;
                 for(let j = i + 1; j < ends.length; j++) {
-                    if(used.has(j)) continue;
-                    let b = ends[j];
-                    if(a.ci === b.ci) continue;
-                    let dx = a.p.x - b.p.x, dy = a.p.y - b.p.y;
-                    let d2 = dx * dx + dy * dy;
-                    if(d2 < bestD) { bestD = d2; best = j; }
+                    if(assigned[j] >= 0) continue;
+                    if(ends[j].ci === ends[i].ci) continue;
+                    let dx = ends[i].p.x - ends[j].p.x, dy = ends[i].p.y - ends[j].p.y;
+                    if(dx * dx + dy * dy <= clusterR2) {
+                        // Grow cluster: also accept ends near any member.
+                        let near = false;
+                        for(let gi = 0; gi < group.length; gi++) {
+                            let g = ends[group[gi]];
+                            let ddx = g.p.x - ends[j].p.x, ddy = g.p.y - ends[j].p.y;
+                            if(ddx * ddx + ddy * ddy <= clusterR2) { near = true; break; }
+                        }
+                        if(near) {
+                            assigned[j] = clusters.length;
+                            group.push(j);
+                        }
+                    }
                 }
-                if(best < 0) continue;
-                let b = ends[best];
-                used.add(i);
-                used.add(best);
-                if(bestD < 1) continue;
-                chains.push({ closed: false, pts: [{ x: a.p.x, y: a.p.y }, { x: b.p.x, y: b.p.y }] });
+                // Second pass: pull in any end near the group's centroid of seeds.
+                if(group.length >= 1) {
+                    for(let j = 0; j < ends.length; j++) {
+                        if(assigned[j] >= 0) continue;
+                        for(let gi = 0; gi < group.length; gi++) {
+                            if(ends[j].ci === ends[group[gi]].ci) continue;
+                            let g = ends[group[gi]];
+                            let ddx = g.p.x - ends[j].p.x, ddy = g.p.y - ends[j].p.y;
+                            if(ddx * ddx + ddy * ddy <= clusterR2) {
+                                assigned[j] = clusters.length;
+                                group.push(j);
+                                break;
+                            }
+                        }
+                    }
+                }
+                clusters.push(group);
+            }
+            for(let group of clusters) {
+                if(group.length < 2) continue;
+                // Distinct chains only.
+                let chainSet = new Set(group.map(i => ends[i].ci));
+                if(chainSet.size < 2) continue;
+                let cx = 0, cy = 0;
+                for(let i of group) { cx += ends[i].p.x; cy += ends[i].p.y; }
+                cx /= group.length;
+                cy /= group.length;
+                for(let i of group) {
+                    let e = ends[i];
+                    let c = chains[e.ci];
+                    if(!c || !c.pts) continue;
+                    let junc = { x: cx, y: cy };
+                    if(e.which === 0) {
+                        let p0 = c.pts[0];
+                        if(Math.hypot(p0.x - cx, p0.y - cy) > 0.5) c.pts.unshift(junc);
+                        else { p0.x = cx; p0.y = cy; }
+                    } else {
+                        let p1 = c.pts[c.pts.length - 1];
+                        if(Math.hypot(p1.x - cx, p1.y - cy) > 0.5) c.pts.push(junc);
+                        else { p1.x = cx; p1.y = cy; }
+                    }
+                }
+            }
+        }
+
+        /** Push open stroke tips that sit on the map rim out to the void edge so borders don't stop short. */
+        function wodExtendBorderEndsToMapEdge(chains, hexList, offsetX, offsetY, spacing) {
+            if(!chains || !chains.length || !hexList || !hexList.length) return;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            for(let h of hexList) {
+                let x = h.x + offsetX, y = h.y + offsetY;
+                if(x < minX) minX = x;
+                if(x > maxX) maxX = x;
+                if(y < minY) minY = y;
+                if(y > maxY) maxY = y;
+            }
+            let pad = spacing * 0.85;
+            let edgeBand = spacing * 1.35;
+            function extendTip(pts, atStart) {
+                if(!pts || pts.length < 2) return;
+                let tip = atStart ? pts[0] : pts[pts.length - 1];
+                let nxt = atStart ? pts[1] : pts[pts.length - 2];
+                let nearL = tip.x - minX < edgeBand;
+                let nearR = maxX - tip.x < edgeBand;
+                let nearT = tip.y - minY < edgeBand;
+                let nearB = maxY - tip.y < edgeBand;
+                if(!nearL && !nearR && !nearT && !nearB) return;
+                // Continue the stroke direction, then clamp onto the nearest rim.
+                let dx = tip.x - nxt.x, dy = tip.y - nxt.y;
+                let len = Math.hypot(dx, dy) || 1;
+                let ex = tip.x + (dx / len) * pad;
+                let ey = tip.y + (dy / len) * pad;
+                if(nearL) ex = Math.min(ex, minX - pad * 0.2);
+                if(nearR) ex = Math.max(ex, maxX + pad * 0.2);
+                if(nearT) ey = Math.min(ey, minY - pad * 0.2);
+                if(nearB) ey = Math.max(ey, maxY + pad * 0.2);
+                if(atStart) pts.unshift({ x: ex, y: ey });
+                else pts.push({ x: ex, y: ey });
+            }
+            for(let c of chains) {
+                if(!c || c.closed || !c.pts || c.pts.length < 2) continue;
+                extendTip(c.pts, true);
+                extendTip(c.pts, false);
             }
         }
 
@@ -42380,6 +42484,45 @@
                     '<p>' + (i === 0 ? '<strong>' + l + '</strong>' : l) + '</p>').join('');
             }
             if(side) side.scrollTop = sideScroll;
+            // Keep the chronicle scroll box flush with the side panel (research / heal row).
+            requestAnimationFrame(() => wodCampFitEventLog());
+        }
+
+        /** Cap the campaign event log so it never hangs below the side panel actions. */
+        function wodCampFitEventLog() {
+            let panel = document.getElementById('campaignPanel');
+            let layout = panel && panel.querySelector('.wod-camp-layout');
+            let side = panel && panel.querySelector('.wod-camp-side');
+            let mapCol = panel && panel.querySelector('.wod-camp-map-col');
+            let log = document.getElementById('wodCampLog');
+            if(!layout || !side || !mapCol || !log) return;
+            if(log.style.display === 'none' || panel.classList.contains('hidden')) {
+                log.style.maxHeight = '';
+                mapCol.style.maxHeight = '';
+                return;
+            }
+            let stacked = getComputedStyle(layout).flexDirection === 'column';
+            if(stacked) {
+                mapCol.style.maxHeight = '';
+                log.style.maxHeight = 'min(160px, 22vh)';
+                log.style.overflowY = 'auto';
+                return;
+            }
+            let sideH = side.getBoundingClientRect().height;
+            if(sideH < 40) return;
+            mapCol.style.maxHeight = Math.round(sideH) + 'px';
+            let canvas = document.getElementById('wodCampMapCanvas');
+            let stats = document.getElementById('wodCampStats');
+            let used = 8;
+            if(canvas) used += canvas.getBoundingClientRect().height;
+            if(stats && stats.offsetParent !== null) {
+                let cs = getComputedStyle(stats);
+                used += stats.getBoundingClientRect().height + (parseFloat(cs.marginTop) || 0);
+            }
+            let avail = Math.floor(sideH - used - 8);
+            log.style.maxHeight = Math.max(72, avail) + 'px';
+            log.style.minHeight = '0';
+            log.style.overflowY = 'auto';
         }
 
         /* --------------------------- battle launch --------------------------- */

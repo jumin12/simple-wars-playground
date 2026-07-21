@@ -582,3 +582,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Ships/sea convoys hard-reject land in pathfinding and AI ship moves use water corridors (no straight-line over land).
 - Unowned water/mountains inherit neighboring ownership (mapgen, campaign region maps, claim ticks) and multi-faction frontline ends are stitched at triple junctions.
 - Capturing a city has per-building ruin chances; capturing a fort hex has a raze chance; destructions toast via `showNotification`.
+
+## Campaign log height + border junctions (2026-07-20)
+- Campaign event log is a scroll box capped to the side panel height (flush with Field repairs / Research).
+- Diplomacy borders: keep short open stubs, cluster-stitch 2/3-way junctions to a shared point, extend rim tips to the map edge, and bridge longer edge gaps.
