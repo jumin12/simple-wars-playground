@@ -600,3 +600,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Root cause: `pickBacklineSpawnHex` / fallback spawn scanned the full hex list per unit×front try; 3+ factions made start-unit placement take minutes after politics finished.
 - Local ring search for backline spawn; city-neighborhood fallback pool; capped front tries; shorter equalize + land-only Voronoi; O(n) land-bridge pair find; politics retries on same terrain; soft fair-start for 3+ factions.
 - Verified headless: 1/2/3 AI medium island mapgen ~2–3s each (was often 60–200s+ for 2 AI).
+
+## Victory screen multi-opponent breakdown (2026-07-20)
+- Solo victory/defeat summary shows a per-AI table (status, cities, armies, income, losses, cash) when there are 2+ opponents.
+- Solo matches now accumulate session income per owner so that breakdown can show each AI's revenue.

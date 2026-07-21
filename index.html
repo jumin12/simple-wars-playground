@@ -23226,6 +23226,27 @@
             return sum;
         }
 
+        /** Solo AI seats that were in the match (by setup count, plus any extras still on the map). */
+        function wodCollectSoloOpponentOwners() {
+            let out = [];
+            let seen = new Set();
+            let n = Math.max(0, gameData.aiCount | 0);
+            for(let o = 2; o <= n + 1; o++) {
+                seen.add(o);
+                out.push(o);
+            }
+            for(let c of gameData.cities || []) {
+                let o = c && c.owner;
+                if(o > 1 && !seen.has(o)) { seen.add(o); out.push(o); }
+            }
+            for(let u of gameData.entities || []) {
+                let o = u && u.owner;
+                if(o > 1 && !seen.has(o)) { seen.add(o); out.push(o); }
+            }
+            out.sort((a, b) => a - b);
+            return out;
+        }
+
         /** CSS widths for two-segment stacked bar (you vs combined AI). */
         function wodDualLossBarWidths(youVal, aiVal) {
             let y = Math.max(0, youVal || 0);
@@ -23243,9 +23264,10 @@
             let statsEl = document.getElementById('campaignSummaryStats');
             if(!overlay || !panel || !titleEl || !subEl || !statsEl) return;
             let isMp = !!(gameData.mp && gameData.mp.enabled);
+            let soloOppOwners = isMp ? [] : wodCollectSoloOpponentOwners();
             panel.classList.toggle('campaign-summary--victory', outcomeKind === 'victory');
             panel.classList.toggle('campaign-summary--defeat', outcomeKind === 'defeat');
-            panel.classList.toggle('campaign-summary--mp-wide', isMp);
+            panel.classList.toggle('campaign-summary--mp-wide', isMp || soloOppOwners.length >= 2);
             titleEl.textContent = outcomeKind === 'victory' ? 'Victory' : 'Defeat';
             subEl.textContent = reasonLine || headline || '';
 
@@ -23399,6 +23421,43 @@
                     '</section>';
             }
 
+            let soloOppSection = '';
+            if(!isMp && soloOppOwners.length >= 2) {
+                let sessionAccSolo = gameData._sessionIncomeAcc || { byOwner: {} };
+                let byOSolo = sessionAccSolo.byOwner || {};
+                let pfEnd = wodActivePeriodFlavor();
+                let rowHtmlSolo = '';
+                for(let o of soloOppOwners) {
+                    let citiesN = countCitiesForOwner(o);
+                    let armiesN = countFriendlyCombatExcludingConvoys(o);
+                    let status = (citiesN <= 0 && armiesN <= 0)
+                        ? '<span class="cs-mp-res-lost">Eliminated</span>'
+                        : '<span class="cs-mp-res-won">Active</span>';
+                    let col = factionColors[o] || '#999999';
+                    let inc = Math.max(0, Math.floor(byOSolo[o] || 0));
+                    let cash = Math.floor((gameData.aiMoneyByOwner && gameData.aiMoneyByOwner[o]) || 0);
+                    rowHtmlSolo += '<tr>' +
+                        '<td><div class="cs-mp-fname"><span class="cs-mp-swatch" style="background:' + col + '"></span>AI ' + (o - 1) + '</div></td>' +
+                        '<td>' + status + '</td>' +
+                        '<td>' + citiesN + '</td>' +
+                        '<td>' + armiesN + '</td>' +
+                        '<td>$' + inc.toLocaleString('en-US') + '</td>' +
+                        '<td>' + formatFullCount(getOwnerCasualties(o)) + '</td>' +
+                        '<td>' + formatTanks(getOwnerTankCasualties(o)) + '</td>' +
+                        '<td>' + formatTanks(getOwnerShipCasualties(o)) + '</td>' +
+                        '<td>$' + cash.toLocaleString('en-US') + '</td>' +
+                        '</tr>';
+                }
+                soloOppSection =
+                    '<section class="cs-card">' +
+                    '<p class="cs-card-title">Opponent breakdown</p>' +
+                    '<p style="margin:0 0 10px;color:#95a5a6;font-size:0.88rem;line-height:1.45;">Per-AI snapshot at match end (combined AI totals above stay the same).</p>' +
+                    '<div class="cs-mp-table-wrap"><table class="cs-mp-table">' +
+                    '<thead><tr><th>Opponent</th><th>Status</th><th>Cities</th><th>Armies</th><th>Income</th><th>MP losses</th><th>' + pfEnd.statOwnHeavy + '</th><th>' + pfEnd.statOwnShips + '</th><th>Cash</th></tr></thead>' +
+                    '<tbody>' + rowHtmlSolo + '</tbody></table></div>' +
+                    '</section>';
+            }
+
             statsEl.innerHTML =
                 '<section class="cs-card">' +
                     '<p class="cs-card-title">Objective</p>' +
@@ -23472,7 +23531,8 @@
                         '</div>' +
                     '</div>' +
                 '</section>' +
-                mpFactionSection;
+                mpFactionSection +
+                soloOppSection;
 
             overlay.classList.remove('hidden');
         }
@@ -36175,8 +36235,14 @@
                     }
                 } else {
                     gameData._sessionIncomeAcc.player += incomeTick * dt;
+                    gameData._sessionIncomeAcc.byOwner[1] = (gameData._sessionIncomeAcc.byOwner[1] || 0) + incomeTick * dt;
                     let aiGross = 0;
-                    for(let k in aiIncomeByOwner) aiGross += aiIncomeByOwner[k] || 0;
+                    for(let k in aiIncomeByOwner) {
+                        let v = aiIncomeByOwner[k] || 0;
+                        aiGross += v;
+                        let ow = parseInt(k, 10);
+                        if(ow > 1) gameData._sessionIncomeAcc.byOwner[ow] = (gameData._sessionIncomeAcc.byOwner[ow] || 0) + v * dt;
+                    }
                     gameData._sessionIncomeAcc.ai += aiGross * dt;
                 }
             }
