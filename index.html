@@ -15233,6 +15233,49 @@
             }
             return changed;
         }
+
+        /**
+         * Full-map water/mountain ownership: multi-source BFS from owned land so every sea cell
+         * belongs to a faction (campaign + skirmish parity with Voronoi water wedges).
+         */
+        function wodAssignAllWaterFromNearestLand() {
+            if(!gameData || !gameData.hexList || !gameData.hexList.length) return false;
+            let queue = [];
+            let bestDist = new Map();
+            for(let h of gameData.hexList) {
+                if(!h || h.owner <= 0) continue;
+                if(isWaterHex(h) || h.type === 'mountain') continue;
+                let k = getHexKey(h);
+                bestDist.set(k, 0);
+                queue.push(h);
+            }
+            if(!queue.length) return false;
+            let qi = 0;
+            let changed = false;
+            while(qi < queue.length) {
+                let cur = queue[qi++];
+                let cd = bestDist.get(getHexKey(cur));
+                for(let di = 0; di < cardinalHexDirections.length; di++) {
+                    let dir = cardinalHexDirections[di];
+                    let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
+                    if(!nb) continue;
+                    if(!isWaterHex(nb) && nb.type !== 'mountain') continue;
+                    let nk = getHexKey(nb);
+                    let nd = cd + 1;
+                    let prev = bestDist.get(nk);
+                    if(prev !== undefined && prev <= nd) continue;
+                    bestDist.set(nk, nd);
+                    if(nb.owner !== cur.owner) {
+                        nb.owner = cur.owner;
+                        changed = true;
+                    }
+                    queue.push(nb);
+                }
+            }
+            // Any leftover owner-0 land/water (islands of void) inherit nearest owned neighbor votes.
+            if(wodFillUnownedPoliticalHexes(12)) changed = true;
+            return changed;
+        }
         /** Water + mountains pick majority neighbor ownership so diplomacy strokes continue through coasts. */
         async function wodAssignWaterAndNonclaimablePoliticalVotes() {
             let hi = 0;
@@ -15260,6 +15303,7 @@
                 if((++hi & wodMapGenLoopYieldMask(127)) === 0) await wodMapGenYieldSlice();
             }
             wodFillUnownedPoliticalHexes(8);
+            wodAssignAllWaterFromNearestLand();
             wodMarkTerrainPoliticalDirty();
         }
         function wodBuildPoliticalSeedsByOwner(ownerIds) {
@@ -30539,14 +30583,15 @@
             return 1;
         }
 
-        function wodAreaClearOfEnemyCombat(wx, wy, friendlyOwner, radiusPx) {
-            if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return true;
+        function wodUnitHasNearbyEnemyCombat(unit, radiusPx) {
+            if(!unit || !gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return false;
+            let r = radiusPx != null ? radiusPx : (gameData.hexRadius || 20) * 3.6;
             let found = false;
-            forEachNearbyUnit(gameData.unitSpatialGrid, wx, wy, radiusPx, (u) => {
-                if(found || !u || u.hp <= 0 || u.type === 'convoy' || u.owner === friendlyOwner) return;
+            forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, r, (u) => {
+                if(found || !u || u.hp <= 0 || u.type === 'convoy' || u.owner === unit.owner) return;
                 found = true;
             });
-            return !found;
+            return found;
         }
 
         function claimTerritoryAroundUnit(unit, atX, atY, hexOverride) {
@@ -30559,9 +30604,9 @@
             if(!standingHex) return;
             let uHex = {q: standingHex.q, r: standingHex.r};
             let claimRadius = unit.type === 'heavy' ? 2 : 1;
-            // Uncontested grabs claim one extra ring of land.
-            let clearR = (gameData.hexRadius || 20) * 3.4;
-            if(wodAreaClearOfEnemyCombat(px, py, unit.owner, clearR)) claimRadius += 1;
+            // Land units claiming uncontested ground take +1 cell of territory.
+            if(unit.type !== 'ship' && !wodUnitHasNearbyEnemyCombat(unit))
+                claimRadius += 1;
             let claimH = getHexesInHexRadius(uHex.q, uHex.r, claimRadius);
 
             if(wodCanClaimTerritoryHex(unit, standingHex, standingHex) && !wodHexOccupiedByEnemyCombat(standingHex, unit.owner))
@@ -32547,8 +32592,6 @@
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(64, f * 13));
             wodSyncUrbanFootprintOwners();
             await wodExactEqualizePoliticalLandCounts(ownersSorted, gameData.cities, gameData.hexList.length * 3);
-            await wodAssignWaterAndNonclaimablePoliticalVotes();
-            wodFillUnownedPoliticalHexes(10);
             wodNormalizeStartingCityEconomy(ownersSorted);
 
             if(!wodVerifyFairFactionStart(ownersSorted)) return false;
@@ -32625,9 +32668,8 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
-                // Match campaign: seal coastal / mountain ownership before the first border bake.
-                await wodAssignWaterAndNonclaimablePoliticalVotes();
-                wodFillUnownedPoliticalHexes(10);
+                // Guarantee full-map water ownership so skirmish diplomacy strokes match campaign.
+                wodAssignAllWaterFromNearestLand();
                 if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false) && !gameData._wodMpLaunchFromCommitted) {
                     gameData.entities = [];
                     spawnInitialFrontlineUnits(ownersList);
@@ -32675,6 +32717,8 @@
                 }
                 delete gameData._mapExportHadStartEconomy;
                 gameData._landIncomeCacheDirty = true;
+                // Campaign / loaded maps: paint the whole sea like skirmish Voronoi water wedges.
+                wodAssignAllWaterFromNearestLand();
                 wodMarkTerrainPoliticalDirty();
 
                 let startMe =
@@ -32864,9 +32908,6 @@
 
             await smoothStartingTerritory(ownersList, 6, 1);
             await wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
-            // Always paint water/mountains like campaign maps so diplomacy strokes meet at coasts.
-            await wodAssignWaterAndNonclaimablePoliticalVotes();
-            wodFillUnownedPoliticalHexes(10);
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
 
@@ -37154,14 +37195,20 @@
                 let arr = dedupeCornerBorderEdges(arrRaw);
                 arr.sort((u, v) => u.ang - v.ang || (u.ek < v.ek ? -1 : u.ek > v.ek ? 1 : 0));
                 if(arr.length < 2) continue;
+                // Triple junction (3 factions meet): chain angular neighbors into one polyline
+                // so A–B / B–C / A–C strokes form a continuous frontline through the point.
+                if(arr.length === 3) {
+                    addUndirected(arr[0].ek, arr[1].ek);
+                    addUndirected(arr[1].ek, arr[2].ek);
+                    continue;
+                }
                 // Pair disjoint angular neighbors — chaining arr[i]→arr[i+1] for all i creates
                 // degree-4 hubs (plus-sign spurs) when four borders touch one lattice corner.
                 if(arr.length % 2 === 0) {
                     for(let i = 0; i < arr.length; i += 2)
                         addUndirected(arr[i].ek, arr[i + 1].ek);
                 } else {
-                    // Odd counts show up on map edges / jagged coasts — link consecutive pairs
-                    // and leave the last tip for bridgeBorderChainGaps instead of dropping all.
+                    // Odd counts on map edges / jagged coasts — link consecutive pairs.
                     for(let i = 0; i + 1 < arr.length; i += 2)
                         addUndirected(arr[i].ek, arr[i + 1].ek);
                 }
@@ -37458,31 +37505,34 @@
 
         /**
          * World-space midpoints of faction–faction diplomacy edges (shared by main map renderer and lobby/setup previews).
-         * Uses ONE unified graph across all owner-pairs so 3+ faction junctions form continuous strokes
-         * (pairwise graphs left gaps where A–B / A–C / B–C tips never met).
          * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
+            // One unified edge graph across ALL owner pairs so 3+ faction meetings form a
+            // single continuous frontline (per-pair graphs left gaps at every triple point).
             let midpointByEdge = new Map();
             let cornerMap = new Map();
+            let edgeMeta = new Map();
 
             for(let hex of hexList) {
-                if(!hex || hex.owner === 0) continue;
+                if(hex.owner === 0) continue;
                 for(let dir of cardinalHexDirections) {
                     let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
                     let ek = hexPairBorderKey(hex, nHex);
-                    if(midpointByEdge.has(ek)) continue;
+                    if(edgeMeta.has(ek)) continue;
                     let mx = (hex.x + nHex.x) / 2 + offsetX;
                     let my = (hex.y + nHex.y) / 2 + offsetY;
+                    edgeMeta.set(ek, { x: mx, y: my, hex, nHex, dir });
                     midpointByEdge.set(ek, { x: mx, y: my });
                     registerBorderCornersForPair(cornerMap, hex, nHex, dir, ek, mx, my, spacing);
                 }
             }
 
-            let adj = wodLinkUnifiedDiplomacyCorners(cornerMap, midpointByEdge, spacing, offsetX, offsetY);
+            let adj = linkBorderEdgesAroundCorners(cornerMap);
             bridgeBorderChainGaps(adj, midpointByEdge, spacing);
             let chains = walkBorderEdgeChains(adj, midpointByEdge);
+            // Soft filter only — multi-faction maps have many short legitimate segments.
             chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
 
             let out = [];
@@ -37491,70 +37541,13 @@
                 if(pts.length < 2) continue;
                 out.push({ closed, pts });
             }
-            // Residual tips (map rim / messy coasts) still get pulled together.
+            // Safety net for any remaining open tips near each other / the rim.
             wodStitchMultiFactionBorderEnds(out, spacing);
             wodExtendBorderEndsToMapEdge(out, hexList, offsetX, offsetY, spacing);
             return out;
         }
 
-        /**
-         * Link diplomacy edges at shared lattice corners across ALL owner pairs.
-         * Degree-3 (triple faction) corners get a shared junction vertex so strokes meet as one line.
-         */
-        function wodLinkUnifiedDiplomacyCorners(cornerMap, midpointByEdge, spacing, offsetX, offsetY) {
-            let adj = new Map();
-            function addUndirected(ekA, ekB) {
-                if(!ekA || !ekB || ekA === ekB) return;
-                if(!adj.has(ekA)) adj.set(ekA, new Set());
-                if(!adj.has(ekB)) adj.set(ekB, new Set());
-                adj.get(ekA).add(ekB);
-                adj.get(ekB).add(ekA);
-            }
-            let juncSeq = 0;
-            for(let [ck, arrRaw] of cornerMap) {
-                let arr = dedupeCornerBorderEdges(arrRaw);
-                arr.sort((u, v) => u.ang - v.ang || (u.ek < v.ek ? -1 : u.ek > v.ek ? 1 : 0));
-                if(arr.length < 2) continue;
-                if(arr.length === 2) {
-                    addUndirected(arr[0].ek, arr[1].ek);
-                    continue;
-                }
-                if(arr.length === 3) {
-                    // Triple junction: insert one shared point all three edges connect through.
-                    let parts = ck.split(',');
-                    let hxi = parseFloat(parts[0]), hyi = parseFloat(parts[1]);
-                    let jx = (hxi * 0.5) * spacing + offsetX;
-                    let jy = (hyi * 0.5) * spacing + offsetY;
-                    // Prefer average of the three edge midpoints (more stable than lattice guess).
-                    let sx = 0, sy = 0, n = 0;
-                    for(let it of arr) {
-                        let p = midpointByEdge.get(it.ek);
-                        if(!p) continue;
-                        sx += p.x; sy += p.y; n++;
-                    }
-                    if(n > 0) { jx = sx / n; jy = sy / n; }
-                    let jk = '__junc_' + (juncSeq++) + '_' + ck;
-                    midpointByEdge.set(jk, { x: jx, y: jy });
-                    for(let it of arr) addUndirected(it.ek, jk);
-                    continue;
-                }
-                // Degree 4+: pair angular neighbors (avoids plus-sign spurs).
-                if(arr.length % 2 === 0) {
-                    for(let i = 0; i < arr.length; i += 2)
-                        addUndirected(arr[i].ek, arr[i + 1].ek);
-                } else {
-                    for(let i = 0; i + 1 < arr.length; i += 2)
-                        addUndirected(arr[i].ek, arr[i + 1].ek);
-                    // Leftover tip: hitch to nearest already-linked neighbor by angle.
-                    let last = arr[arr.length - 1];
-                    let prev = arr[arr.length - 2];
-                    if(prev) addUndirected(last.ek, prev.ek);
-                }
-            }
-            return adj;
-        }
-
-        /** Cluster nearby open frontline ends and pull them to a shared junction. */
+        /** Cluster nearby open frontline ends and pull them to a shared junction (2- and 3-way). */
         function wodStitchMultiFactionBorderEnds(chains, spacing) {
             if(!chains || chains.length < 2) return;
             let ends = [];
@@ -37565,16 +37558,33 @@
                 ends.push({ ci, which: 1, p: c.pts[c.pts.length - 1] });
             }
             if(ends.length < 2) return;
-            let clusterR2 = Math.pow(spacing * 2.8, 2);
+            let clusterR2 = Math.pow(spacing * 3.1, 2);
             let assigned = new Array(ends.length).fill(-1);
             let clusters = [];
             for(let i = 0; i < ends.length; i++) {
                 if(assigned[i] >= 0) continue;
                 let group = [i];
                 assigned[i] = clusters.length;
-                let grew = true;
-                while(grew) {
-                    grew = false;
+                for(let j = i + 1; j < ends.length; j++) {
+                    if(assigned[j] >= 0) continue;
+                    if(ends[j].ci === ends[i].ci) continue;
+                    let dx = ends[i].p.x - ends[j].p.x, dy = ends[i].p.y - ends[j].p.y;
+                    if(dx * dx + dy * dy <= clusterR2) {
+                        // Grow cluster: also accept ends near any member.
+                        let near = false;
+                        for(let gi = 0; gi < group.length; gi++) {
+                            let g = ends[group[gi]];
+                            let ddx = g.p.x - ends[j].p.x, ddy = g.p.y - ends[j].p.y;
+                            if(ddx * ddx + ddy * ddy <= clusterR2) { near = true; break; }
+                        }
+                        if(near) {
+                            assigned[j] = clusters.length;
+                            group.push(j);
+                        }
+                    }
+                }
+                // Second pass: pull in any end near the group's centroid of seeds.
+                if(group.length >= 1) {
                     for(let j = 0; j < ends.length; j++) {
                         if(assigned[j] >= 0) continue;
                         for(let gi = 0; gi < group.length; gi++) {
@@ -37584,7 +37594,6 @@
                             if(ddx * ddx + ddy * ddy <= clusterR2) {
                                 assigned[j] = clusters.length;
                                 group.push(j);
-                                grew = true;
                                 break;
                             }
                         }
@@ -37594,6 +37603,7 @@
             }
             for(let group of clusters) {
                 if(group.length < 2) continue;
+                // Distinct chains only.
                 let chainSet = new Set(group.map(i => ends[i].ci));
                 if(chainSet.size < 2) continue;
                 let cx = 0, cy = 0;
@@ -42918,26 +42928,28 @@
                 }
                 if(best) h.owner = best.owner;
             }
-            // Paint water/mountains from abutting land so coast frontlines have no owner-0 gaps.
-            for(let pass = 0; pass < 8; pass++) {
-                let updates = [];
-                for(let h of hexList) {
-                    if(!h || h.owner > 0) continue;
-                    if(h.type !== 'water' && h.type !== 'deep_water' && h.type !== 'mountain') continue;
-                    let votes = {};
-                    for(let dir of cardinalHexDirections) {
-                        let nb = hexes[`${h.q + dir.q},${h.r + dir.r}`];
-                        if(!nb || nb.owner <= 0) continue;
-                        votes[nb.owner] = (votes[nb.owner] || 0) + (nb.type !== 'water' && nb.type !== 'deep_water' ? 3 : 1);
-                    }
-                    let bo = 0, bv = 0;
-                    for(let ok in votes) {
-                        if(votes[ok] > bv) { bv = votes[ok]; bo = parseInt(ok, 10); }
-                    }
-                    if(bo > 0) updates.push({ h, bo });
+            // Full-map water/mountain ownership from nearest land (same idea as skirmish Voronoi seas).
+            let waterQ = [];
+            let waterSeen = new Set();
+            for(let h of hexList) {
+                if(!h || h.owner <= 0) continue;
+                if(h.type === 'water' || h.type === 'deep_water' || h.type === 'mountain') continue;
+                waterSeen.add(`${h.q},${h.r}`);
+                waterQ.push(h);
+            }
+            for(let qi = 0; qi < waterQ.length; qi++) {
+                let cur = waterQ[qi];
+                for(let di = 0; di < cardinalHexDirections.length; di++) {
+                    let dir = cardinalHexDirections[di];
+                    let nb = hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
+                    if(!nb) continue;
+                    if(nb.type !== 'water' && nb.type !== 'deep_water' && nb.type !== 'mountain') continue;
+                    let nk = `${nb.q},${nb.r}`;
+                    if(waterSeen.has(nk)) continue;
+                    waterSeen.add(nk);
+                    nb.owner = cur.owner;
+                    waterQ.push(nb);
                 }
-                if(!updates.length) break;
-                for(let u of updates) u.h.owner = u.bo;
             }
 
             let roads = [];

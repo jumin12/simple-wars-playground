@@ -587,7 +587,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Campaign event log is a scroll box capped to the side panel height (flush with Field repairs / Research).
 - Diplomacy borders: keep short open stubs, cluster-stitch 2/3-way junctions to a shared point, extend rim tips to the map edge, and bridge longer edge gaps.
 
-## Unified 3+ faction borders + uncontested claim (2026-07-20)
-- Diplomacy strokes use one graph across all owner-pairs; degree-3 corners get a shared junction vertex so 3+ faction fronts connect as continuous lines.
-- Skirmish/procgen maps always fill water/mountain ownership like campaign before the first border bake.
-- Land claim radius +1 when no enemy combat units are nearby (light 1→2, heavy 2→3).
+## Unified multi-faction borders + full-sea ownership + claim radius (2026-07-20)
+- Diplomacy borders build one graph across all owner pairs so 3+ factions form continuous strokes at triple points.
+- Campaign and skirmish both assign full-map water/mountain ownership from nearest land (BFS).
+- Land units claiming with no nearby enemies take +1 cell claim radius.
