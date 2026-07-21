@@ -15193,13 +15193,55 @@
                 if((++hi2 & wodMapGenLoopYieldMask(1023)) === 0) await wodMapGenYieldSlice();
             }
         }
-        /** Water already follows the global Voronoi above; leftover non-passable fillers pick majority neighbor (mountain pockets). */
+        /** Fill unowned water / mountains from neighboring ownership so coast frontlines have no owner-0 gaps. */
+        function wodFillUnownedPoliticalHexes(passes) {
+            let maxPass = Math.max(1, passes || 4);
+            let changed = false;
+            for(let pass = 0; pass < maxPass; pass++) {
+                let updates = [];
+                for(let h of gameData.hexList) {
+                    if(!h || h.owner > 0) continue;
+                    let votes = {};
+                    // Prefer cardinal shore neighbors so coastal water inherits the abutting land faction.
+                    for(let dir of cardinalHexDirections) {
+                        let nb = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                        if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 2;
+                    }
+                    for(let nb of getNeighborHexes(h)) {
+                        if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
+                    }
+                    let bo = 0, bv = 0;
+                    for(let ok in votes) {
+                        if(votes[ok] > bv) {
+                            bv = votes[ok];
+                            bo = parseInt(ok, 10);
+                        }
+                    }
+                    if(bo > 0) updates.push({ h, bo });
+                }
+                if(!updates.length) break;
+                for(let u of updates) {
+                    if(u.h.owner !== u.bo) {
+                        u.h.owner = u.bo;
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+        /** Water + mountains pick majority neighbor ownership so diplomacy strokes continue through coasts. */
         async function wodAssignWaterAndNonclaimablePoliticalVotes() {
             let hi = 0;
             for(let h of gameData.hexList) {
-                if(isClaimableLand(h)) continue;
-                if(isWaterHex(h)) continue;
+                if(!h) continue;
+                if(!isWaterHex(h) && h.type !== 'mountain') continue;
                 let votes = {};
+                for(let dir of cardinalHexDirections) {
+                    let nb = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                    if(!nb || nb.owner <= 0) continue;
+                    // Prefer abutting land owners for coastal water inheritance.
+                    votes[nb.owner] = (votes[nb.owner] || 0) + (!isWaterHex(nb) ? 3 : 1);
+                }
                 for(let nb of getNeighborHexes(h)) {
                     if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
                 }
@@ -15211,9 +15253,9 @@
                     }
                 }
                 if(bo > 0) setHexOwner(h, bo);
-                else setHexOwner(h, 0);
                 if((++hi & wodMapGenLoopYieldMask(127)) === 0) await wodMapGenYieldSlice();
             }
+            wodFillUnownedPoliticalHexes(8);
             wodMarkTerrainPoliticalDirty();
         }
         function wodBuildPoliticalSeedsByOwner(ownerIds) {
@@ -22288,9 +22330,20 @@
             if(!city || newOwner <= 0 || city.owner === newOwner) return;
             let prevCityOwner = city.owner;
             city.owner = newOwner;
-            city.hasFactory = false;
-            city.hasHarbor = false;
-            city.hasFarm = false;
+            let destroyed = [];
+            // Chance each standing building is ruined during the sack.
+            if(city.hasFactory && Math.random() < 0.55) {
+                city.hasFactory = false;
+                destroyed.push('factory');
+            }
+            if(city.hasHarbor && Math.random() < 0.5) {
+                city.hasHarbor = false;
+                destroyed.push('harbor');
+            }
+            if(city.hasFarm && Math.random() < 0.45) {
+                city.hasFarm = false;
+                destroyed.push('farm');
+            }
             let cityHex = gameData.hexes[`${city.q},${city.r}`];
             if(cityHex) setHexOwner(cityHex, newOwner);
             handleWodTownCaptureAndElimination(prevCityOwner, newOwner);
@@ -22304,7 +22357,65 @@
                 if(isClaimableLand(hex) && (hex.owner === newOwner || hasOwnerNeighbor(hex, newOwner)))
                     setHexOwner(hex, newOwner);
             }
+            // Forts in the town footprint may be razed when the city falls.
+            destroyed = destroyed.concat(wodMaybeDestroyFortsAroundCity(city, prevCityOwner, newOwner));
+            if(destroyed.length && typeof showNotification === 'function') {
+                let label = city.name || 'Town';
+                let uniq = [];
+                for(let d of destroyed) if(uniq.indexOf(d) < 0) uniq.push(d);
+                showNotification(label + ': ' + uniq.join(', ') + ' destroyed!');
+            }
             wodMarkTerrainPoliticalDirty();
+            wodFillUnownedPoliticalHexes(3);
+        }
+
+        function wodMaybeDestroyFortsAroundCity(city, prevOwner, newOwner) {
+            let razed = [];
+            if(!city || !gameData.forts || !gameData.forts.length) return razed;
+            let urbanKeys = new Set();
+            urbanKeys.add(`${city.q},${city.r}`);
+            for(let uh of getCityUrbanTerrainHexes(city)) urbanKeys.add(getHexKey(uh));
+            for(let fi = gameData.forts.length - 1; fi >= 0; fi--) {
+                let ft = gameData.forts[fi];
+                if(!ft) continue;
+                let fk = `${ft.q},${ft.r}`;
+                if(!urbanKeys.has(fk)) continue;
+                let fo = wodEffectiveFortOwner(ft);
+                if(fo !== newOwner && fo !== prevOwner && ft.owner !== prevOwner) continue;
+                if(Math.random() < 0.4) {
+                    gameData.forts.splice(fi, 1);
+                    razed.push('fort');
+                } else {
+                    ft.owner = newOwner;
+                    ft._lastOwner = newOwner;
+                }
+            }
+            return razed;
+        }
+
+        /** When a fort hex flips to a new owner, chance to raze it; otherwise transfer control. */
+        function wodSyncFortCapturesAfterTerritory() {
+            let list = gameData.forts;
+            if(!list || !list.length) return;
+            for(let fi = list.length - 1; fi >= 0; fi--) {
+                let ft = list[fi];
+                if(!ft) continue;
+                let h = gameData.hexes[`${ft.q},${ft.r}`];
+                let newO = (h && h.owner >= 1) ? (h.owner | 0) : (ft.owner | 0);
+                let prev = (ft._lastOwner != null) ? (ft._lastOwner | 0) : (ft.owner | 0);
+                if(newO > 0 && prev > 0 && newO !== prev) {
+                    if(Math.random() < 0.4) {
+                        list.splice(fi, 1);
+                        if(typeof showNotification === 'function')
+                            showNotification('Fort destroyed!');
+                        continue;
+                    }
+                    ft.owner = newO;
+                } else if(newO > 0) {
+                    ft.owner = newO;
+                }
+                ft._lastOwner = ft.owner | 0;
+            }
         }
 
         function wodEvaluateAllCityCaptures() {
@@ -24408,6 +24519,9 @@
 
         function wodCanStepBetweenHexes(unit, fromHex, toHex, forbidWater) {
             if(!fromHex || !toHex) return false;
+            if(unit && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute))) {
+                return wodIsOpenWaterHex(fromHex) && wodIsOpenWaterHex(toHex);
+            }
             if(wodBridgePortalLinked(fromHex, toHex)) return true;
             if(isBridgeHex(fromHex) && isBridgeHex(toHex)) {
                 let bf = bridgeAtHex(fromHex),
@@ -26292,10 +26406,11 @@
                     else if(b.type === 'mountain') terrain += 140;
                     let seaConvoy = unit.type === 'convoy' && unit.convoySeaRoute;
                     if(unit.type === 'ship' || seaConvoy) {
+                        // Ships / sea convoys never path onto land — hard reject.
+                        if(!wodIsOpenWaterHex(b)) return Infinity;
                         if(isWaterHex(b)) terrain -= 0.35;
                     }
                     if(unit.type !== 'ship' && !pathSeaConvoy && isWaterHex(b) && !isBridgeHex(b)) terrain += pathMarine ? 2.65 : 62;
-                    if((unit.type === 'ship' || seaConvoy) && !isWaterHex(b)) terrain += 80;
                     // Route land units away from mountain edges and one-tile mountain moats.
                     if(unit.type !== 'ship' && !seaConvoy && b.type !== 'mountain') {
                         let bk = key(b);
@@ -26381,7 +26496,12 @@
                     if(!nHex) return;
                     let nKey = key(nHex);
                     if(visited.has(nKey)) return;
+                    // Naval units: only open-water steps — never land, bridges, or decks.
+                    if(unit.type === 'ship' || pathSeaConvoy) {
+                        if(!wodIsOpenWaterHex(nHex) || !wodIsOpenWaterHex(current)) return;
+                    }
                     if(bridgeLink) {
+                        if(unit.type === 'ship' || pathSeaConvoy) return;
                         if(!wodPathTileWalkable(unit, nHex, false)) return;
                         if(forbidWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
                             isWaterHex(nHex) && !isBridgeHex(nHex)) return;
@@ -28654,7 +28774,9 @@
                     let hex = queue.pop();
                     region.push(hex);
 
-                    for(let dir of hexDirections) {
+                    // Cardinal-only connectivity: 8-way flood let single-cell cuts leak through
+                    // diagonals, so pockets needed a 2-cell-thick wall before they counted.
+                    for(let dir of cardinalHexDirections) {
                         let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
                         if(!nHex || isWaterHex(nHex)) {
                             touchesOpenEdge = true;
@@ -30333,13 +30455,20 @@
                 gameData._wodClaimBatch = null;
                 return;
             }
+            let changed = false;
             for(let rec of batch.values()) {
                 if(!rec || rec.contested || rec.owner <= 0) continue;
                 if(rec.hex.owner === rec.owner) continue;
                 if(wodHexOccupiedByEnemyCombat(rec.hex, rec.owner)) continue;
                 setHexOwner(rec.hex, rec.owner);
+                changed = true;
             }
             gameData._wodClaimBatch = null;
+            if(changed) {
+                wodSyncFortCapturesAfterTerritory();
+                // Keep coastal water painted so frontlines don't break on owner-0 shore cells.
+                if(((gameData._wodSimTick | 0) % 8) === 0) wodFillUnownedPoliticalHexes(2);
+            }
         }
 
         function wodTerritoryClaimAttach(unit, hex, standingHex) {
@@ -37340,7 +37469,42 @@
                     out.push({ closed, pts });
                 }
             }
+            // 3+ faction meetings leave pairwise chain ends short of each other — stitch them.
+            wodStitchMultiFactionBorderEnds(out, spacing);
             return out;
+        }
+
+        /** Connect nearby open frontline ends from different owner-pairs (triple junctions). */
+        function wodStitchMultiFactionBorderEnds(chains, spacing) {
+            if(!chains || chains.length < 2) return;
+            let ends = [];
+            for(let ci = 0; ci < chains.length; ci++) {
+                let c = chains[ci];
+                if(!c || c.closed || !c.pts || c.pts.length < 2) continue;
+                ends.push({ ci, which: 0, p: c.pts[0] });
+                ends.push({ ci, which: 1, p: c.pts[c.pts.length - 1] });
+            }
+            let maxD2 = Math.pow(spacing * 1.55, 2);
+            let used = new Set();
+            for(let i = 0; i < ends.length; i++) {
+                if(used.has(i)) continue;
+                let a = ends[i];
+                let best = -1, bestD = maxD2;
+                for(let j = i + 1; j < ends.length; j++) {
+                    if(used.has(j)) continue;
+                    let b = ends[j];
+                    if(a.ci === b.ci) continue;
+                    let dx = a.p.x - b.p.x, dy = a.p.y - b.p.y;
+                    let d2 = dx * dx + dy * dy;
+                    if(d2 < bestD) { bestD = d2; best = j; }
+                }
+                if(best < 0) continue;
+                let b = ends[best];
+                used.add(i);
+                used.add(best);
+                if(bestD < 1) continue;
+                chains.push({ closed: false, pts: [{ x: a.p.x, y: a.p.y }, { x: b.p.x, y: b.p.y }] });
+            }
         }
 
         function wodOffsetBorderPoints(pts, closed, offsetPx) {
@@ -42558,6 +42722,27 @@
                 }
                 if(best) h.owner = best.owner;
             }
+            // Paint water/mountains from abutting land so coast frontlines have no owner-0 gaps.
+            for(let pass = 0; pass < 8; pass++) {
+                let updates = [];
+                for(let h of hexList) {
+                    if(!h || h.owner > 0) continue;
+                    if(h.type !== 'water' && h.type !== 'deep_water' && h.type !== 'mountain') continue;
+                    let votes = {};
+                    for(let dir of cardinalHexDirections) {
+                        let nb = hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                        if(!nb || nb.owner <= 0) continue;
+                        votes[nb.owner] = (votes[nb.owner] || 0) + (nb.type !== 'water' && nb.type !== 'deep_water' ? 3 : 1);
+                    }
+                    let bo = 0, bv = 0;
+                    for(let ok in votes) {
+                        if(votes[ok] > bv) { bv = votes[ok]; bo = parseInt(ok, 10); }
+                    }
+                    if(bo > 0) updates.push({ h, bo });
+                }
+                if(!updates.length) break;
+                for(let u of updates) u.h.owner = u.bo;
+            }
 
             let roads = [];
             for(let i = 0; i < cities.length; i++) {
@@ -45993,13 +46178,12 @@
         function wodAiMoveUnitToward(unit, x, y, holdingOpt) {
             if(!unit || unit.hp <= 0) return false;
             if(unit.type === 'ship') {
-                unit.path = null;
-                unit.orderTarget = null;
-                unit.fullMarchWaypoints = null;
-                unit.marchWpCursor = 0;
-                unit.target = { x, y, pathPrepared: false };
-                unit.holding = !!holdingOpt;
-                return true;
+                // Always pathfind on open water — never straight-line across land.
+                let reach = findReachableOrderHex(unit, x, y);
+                if(!reach || !reach.hex || !wodIsOpenWaterHex(reach.hex)) return false;
+                let ok = assignUnitMoveAlongWaypoints(unit, [{ x: reach.exactX, y: reach.exactY }]);
+                unit.holding = ok ? !!holdingOpt : false;
+                return ok;
             }
             let tx = x, ty = y;
             // Sector jitter / formation slots near rivers must not become intoWater orders
@@ -47638,7 +47822,10 @@
         function wodSyncFortOwnershipFromTerrain() {
             let list = gameData.forts;
             if(!list || !list.length) return;
-            for(let ft of list) wodEffectiveFortOwner(ft);
+            for(let ft of list) {
+                wodEffectiveFortOwner(ft);
+                if(ft && ft._lastOwner == null) ft._lastOwner = ft.owner | 0;
+            }
         }
         function wodDrawFortBunkerCore(ctx, w, h, fxLite, pal) {
             ctx.fillStyle = pal.wall;
@@ -47826,7 +48013,8 @@
                 q: hex.q,
                 r: hex.r,
                 x: hex.x,
-                y: hex.y
+                y: hex.y,
+                _lastOwner: owner
             });
             if(noisy && !opts.editor) {
                 if(wodFortInsideFriendlyAura(hex, owner))
