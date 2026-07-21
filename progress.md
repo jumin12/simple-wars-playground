@@ -591,3 +591,7 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Diplomacy borders build one graph across all owner pairs so 3+ factions form continuous strokes at triple points.
 - Campaign and skirmish both assign full-map water/mountain ownership from nearest land (BFS).
 - Land units claiming with no nearby enemies take +1 cell claim radius.
+
+## 3+ faction mapgen speed fix (2026-07-20)
+- Removed full-sea BFS from every equalize iteration (it stalled 3+ starts); sea paint runs once after politics settle.
+- Skip per-iter water votes during land equalize; trim second 3+ equalize; batch Voronoi writes.

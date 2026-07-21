@@ -15237,6 +15237,7 @@
         /**
          * Full-map water/mountain ownership: multi-source BFS from owned land so every sea cell
          * belongs to a faction (campaign + skirmish parity with Voronoi water wedges).
+         * Call once after politics settle — never inside the equalize loop (that made 3+ gen crawl).
          */
         function wodAssignAllWaterFromNearestLand() {
             if(!gameData || !gameData.hexList || !gameData.hexList.length) return false;
@@ -15254,17 +15255,16 @@
             let changed = false;
             while(qi < queue.length) {
                 let cur = queue[qi++];
-                let cd = bestDist.get(getHexKey(cur));
+                let cd = bestDist.get(getHexKey(cur)) | 0;
                 for(let di = 0; di < cardinalHexDirections.length; di++) {
                     let dir = cardinalHexDirections[di];
                     let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
                     if(!nb) continue;
                     if(!isWaterHex(nb) && nb.type !== 'mountain') continue;
                     let nk = getHexKey(nb);
-                    let nd = cd + 1;
-                    let prev = bestDist.get(nk);
-                    if(prev !== undefined && prev <= nd) continue;
-                    bestDist.set(nk, nd);
+                    // Unweighted multi-source BFS: first visit is shortest — never requeue.
+                    if(bestDist.has(nk)) continue;
+                    bestDist.set(nk, cd + 1);
                     if(nb.owner !== cur.owner) {
                         nb.owner = cur.owner;
                         changed = true;
@@ -15272,11 +15272,10 @@
                     queue.push(nb);
                 }
             }
-            // Any leftover owner-0 land/water (islands of void) inherit nearest owned neighbor votes.
-            if(wodFillUnownedPoliticalHexes(12)) changed = true;
+            if(wodFillUnownedPoliticalHexes(4)) changed = true;
             return changed;
         }
-        /** Water + mountains pick majority neighbor ownership so diplomacy strokes continue through coasts. */
+        /** Light water/mountain neighbor vote used during mapgen equalize (fast). */
         async function wodAssignWaterAndNonclaimablePoliticalVotes() {
             let hi = 0;
             for(let h of gameData.hexList) {
@@ -15302,8 +15301,7 @@
                 if(bo > 0) setHexOwner(h, bo);
                 if((++hi & wodMapGenLoopYieldMask(127)) === 0) await wodMapGenYieldSlice();
             }
-            wodFillUnownedPoliticalHexes(8);
-            wodAssignAllWaterFromNearestLand();
+            wodFillUnownedPoliticalHexes(3);
             wodMarkTerrainPoliticalDirty();
         }
         function wodBuildPoliticalSeedsByOwner(ownerIds) {
@@ -15339,22 +15337,31 @@
             let ownerIdxByO = {};
             let oi = 0;
             for(let o of ownerIds) ownerIdxByO[o] = oi++;
-            for(let h of gameData.hexList) {
-                let bestO = 0, bestScore = Infinity;
-                for(let o of ownerIds) {
-                    let s = seedsByOwner[o];
-                    if(!s || !valid.has(o)) continue;
-                    let dx = h.x - s.x, dy = h.y - s.y;
-                    let d = dx * dx + dy * dy;
-                    let geo = wodTerrainPoliticalDistanceWeight(h);
-                    let score = d * geo * wodStartSplitNoiseMult(h, ownerIdxByO[o]) - (bias[o] || 0);
-                    if(bestScore - score > 0) {
-                        bestScore = score;
-                        bestO = o;
+            // Direct writes during equalize — avoid per-hex political dirty churn.
+            let savedBatch = batchHexOwner;
+            batchHexOwner = true;
+            batchHexOwnerDirty = false;
+            try {
+                for(let h of gameData.hexList) {
+                    let bestO = 0, bestScore = Infinity;
+                    for(let o of ownerIds) {
+                        let s = seedsByOwner[o];
+                        if(!s || !valid.has(o)) continue;
+                        let dx = h.x - s.x, dy = h.y - s.y;
+                        let d = dx * dx + dy * dy;
+                        let geo = wodTerrainPoliticalDistanceWeight(h);
+                        let score = d * geo * wodStartSplitNoiseMult(h, ownerIdxByO[o]) - (bias[o] || 0);
+                        if(bestScore - score > 0) {
+                            bestScore = score;
+                            bestO = o;
+                        }
                     }
+                    if(h.owner !== (bestO || 0)) h.owner = bestO || 0;
+                    if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
                 }
-                setHexOwner(h, bestO || 0);
-                if((++hi & wodMapGenLoopYieldMask(127)) === 0) await wodMapGenYieldSlice();
+            } finally {
+                batchHexOwner = savedBatch;
+                batchHexOwnerDirty = false;
             }
         }
         /** One seed per faction (capital with factory when available) keeps continents simply connected like classic wedge maps. */
@@ -15389,12 +15396,13 @@
             let fCount = sorted.length;
             /** More factions need more adjustment passes for an even playable-land wedge (solo 3-player too). */
             let multiFaction = fCount >= 3;
-            let effIter = iterations + (mpBoost ? Math.round(iterations * 0.52) : 0) + (fCount >= 4 ? 18 : (multiFaction ? 22 : 0));
-            effIter = Math.min(198, Math.max(iterations + (multiFaction && !mpBoost ? 20 : 0), effIter));
-            let minRelaxIter = Math.max(26, mpBoost ? 28 : 22, multiFaction ? 34 : (fCount === 2 ? 28 : 0));
+            // Cap 3+ work: land equalize doesn't need per-iter water, and a second full BFS made gen stall.
+            let effIter = iterations + (mpBoost ? Math.round(iterations * 0.52) : 0) + (fCount >= 4 ? 12 : (multiFaction ? 14 : 0));
+            effIter = Math.min(multiFaction ? 96 : 160, Math.max(iterations + (multiFaction && !mpBoost ? 10 : 0), effIter));
+            let minRelaxIter = Math.max(18, mpBoost ? 24 : 16, multiFaction ? 22 : (fCount === 2 ? 24 : 0));
             for(let it = 0; it < effIter; it++) {
                 await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
-                await wodAssignWaterAndNonclaimablePoliticalVotes();
+                // Dry-land balance only — skip water work inside the loop (Voronoi already paints seas).
                 let cts = {};
                 let total = 0;
                 for(let o of sorted) cts[o] = 0;
@@ -15418,11 +15426,12 @@
                 let gain = (mpBoost ? 0.114 : 0.104) + gainBump + Math.min(0.82, it * ((mpBoost ? 0.035 : 0.032) + (multiFaction ? 0.0045 : (f === 2 ? 0.004 : 0))));
                 for(let o of sorted) bias[o] += gain * stepScale * (tgt[o] - cts[o]);
                 let acceptErr = exactDivide ? 0 : 1;
-                if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 27 : minRelaxIter - 4)) break;
+                if(err <= acceptErr && it > Math.max(minRelaxIter + (exactDivide ? 4 : 0), mpBoost ? 22 : minRelaxIter - 4)) break;
                 if((it & wodMapGenLoopYieldMask(3)) === 0) await wodMapGenYieldSlice();
             }
             await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias);
             await wodAssignWaterAndNonclaimablePoliticalVotes();
+            wodAssignAllWaterFromNearestLand();
         }
         function wodBuildLandBalanceTargets(ownerIds) {
             let sorted = [...ownerIds].sort((a, b) => a - b);
@@ -32372,13 +32381,15 @@
             softenMountainHexBetweenOwners(ownersSorted);
             await ensureOwnersReachableByLand(ownersSorted);
             await smoothStartingTerritory(ownersSorted, 4, 4);
-            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 42 : 36);
+            await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, 36);
             await smoothStartingTerritory(ownersSorted, 5, 2);
             if(ownersSorted.length >= 3) {
-                await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(38, f * 5));
-                await wodAssignWaterAndNonclaimablePoliticalVotes();
+                // Light touch-up only — avoid a second heavy equalize that stalled 3+ starts.
+                await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, Math.max(16, f * 3));
                 await smoothStartingTerritory(ownersSorted, 5, 1);
             }
+            // Final sea paint once borders are settled (borders need full-map water ownership).
+            wodAssignAllWaterFromNearestLand();
 
             let perTile = {};
             for(let ow of ownersSorted) perTile[ow] = 0;
@@ -32889,14 +32900,13 @@
             wodPaintCapitalUrbanToDeclaredOwner(startCities);
 
             await smoothStartingTerritory(ownersList, 5, 2);
-            let legacyEqIter = ownersList.length >= 4 ? 62 : ownersList.length >= 3 ? 54 : 44;
+            let legacyEqIter = ownersList.length >= 4 ? 48 : ownersList.length >= 3 ? 40 : 44;
             await wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, legacyEqIter);
 
             if(ownersList.length >= 3) {
-                await wodAssignWaterAndNonclaimablePoliticalVotes();
-                await wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(52, ownersList.length * 8));
+                // Light second pass only — full-sea paint is already done inside equalize.
+                await wodEqualizePoliticsBiasedVoronoi(ownersList, startCities, Math.max(14, ownersList.length * 3));
                 await smoothStartingTerritory(ownersList, 5, 1);
-                await wodAssignWaterAndNonclaimablePoliticalVotes();
             }
 
             wodSyncUrbanFootprintOwners();
@@ -32908,6 +32918,7 @@
 
             await smoothStartingTerritory(ownersList, 6, 1);
             await wodExactEqualizePoliticalLandCounts(ownersList, startCities, gameData.hexList.length * 3);
+            wodAssignAllWaterFromNearestLand();
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
 
