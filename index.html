@@ -11317,6 +11317,8 @@
             statsMenu: document.getElementById('statsMenu'),
             panels: document.querySelectorAll('.overlay:not(#mainMenu):not(#escMenu):not(#statsMenu):not(#campaignSummaryOverlay)')
         };
+        // Declared early (not near build helpers) so HUD boot never hits a TDZ on this flag.
+        var _wodBuildCitySelectState = { syncing: false };
 
         function wodStatsMenuOpen() {
             return UI.statsMenu && !UI.statsMenu.classList.contains('hidden');
@@ -12854,8 +12856,6 @@
             } catch(e) {}
         }
         loadUiSettingsFromStorage();
-        // Bind after `gameData` exists — early HUD init runs before this `let` is initialized.
-        if(typeof initWodBuildCitySelectors === 'function') initWodBuildCitySelectors();
 
         const WOD_MP_LOBBY_PALETTE = [
             ['#2ecc71', 'Green'], ['#3498db', 'Blue'], ['#e74c3c', 'Red'], ['#9b59b6', 'Purple'],
@@ -49003,7 +49003,8 @@
             });
         }
 
-        let _wodBuildCitySelectSyncing = false;
+        // Use a plain object so early callers never hit a `let` TDZ (HUD boot order).
+        let _wodBuildCitySelectState = { syncing: false };
         function wodRefreshBuildCitySelectors(opts) {
             if(!wodGameDataReady()) return;
             opts = opts || {};
@@ -49026,17 +49027,17 @@
                 let label = (c.name || 'Town') + (bits.length ? ' (' + bits.join(', ') + ')' : '');
                 html += '<option value="' + esc(c.id) + '">' + esc(label) + '</option>';
             }
-            _wodBuildCitySelectSyncing = true;
+            _wodBuildCitySelectState.syncing = true;
             document.querySelectorAll('.wod-build-city-select').forEach(sel => {
                 sel.innerHTML = html;
                 sel.value = keep || '';
             });
-            _wodBuildCitySelectSyncing = false;
+            _wodBuildCitySelectState.syncing = false;
             wodRefreshBuildStructureButtons();
         }
 
         function wodOnBuildCitySelectChange(sel) {
-            if(_wodBuildCitySelectSyncing || !sel) return;
+            if(_wodBuildCitySelectState.syncing || !sel) return;
             let id = sel.value || '';
             document.querySelectorAll('.wod-build-city-select').forEach(s => {
                 if(s !== sel) s.value = id;
@@ -49056,7 +49057,7 @@
         }
 
         function wodSyncBuildCitySelectorFromGameSelection() {
-            if(_wodBuildCitySelectSyncing || !wodGameDataReady()) return;
+            if(_wodBuildCitySelectState.syncing || !wodGameDataReady()) return;
             let list = gameData.selection || [];
             let lo = wodLocalPlayerOwner();
             if(list.length === 1 && list[0] && list[0].id && list[0].owner === lo) {
@@ -49095,6 +49096,7 @@
             });
             if(wodGameDataReady()) wodRefreshBuildCitySelectors({ forceValue: '' });
         }
+        initWodBuildCitySelectors();
 
         function beginFactoryBuild() {
             if(wodTryBuildWithPanelCity('factory')) return;
