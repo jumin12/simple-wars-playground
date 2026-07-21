@@ -15259,10 +15259,14 @@
                     out.push({ x: exactEnd.x, y: exactEnd.y });
                 else if(endHex) out.push({ x: endHex.x, y: endHex.y });
             } else if(exactEnd) {
-                // Ships/sea convoys: never replace the last water waypoint with a land click.
+                // Ships/sea convoys: never replace the last water waypoint with a land click,
+                // and never snap a far water goal across a land chord (truncated PF used to).
                 if(waterOnly) {
-                    if(wodSamplePosOnWalkableTerrain(unit, exactEnd.x, exactEnd.y))
-                        out[out.length - 1] = { x: exactEnd.x, y: exactEnd.y };
+                    if(wodSamplePosOnWalkableTerrain(unit, exactEnd.x, exactEnd.y)) {
+                        let lastPt = out[out.length - 1];
+                        if(lastPt && wodOpenWaterChordClear(unit, lastPt.x, lastPt.y, exactEnd.x, exactEnd.y))
+                            out[out.length - 1] = { x: exactEnd.x, y: exactEnd.y };
+                    }
                 } else {
                     // Truncate to the closest point along the path, then set exactEnd.
                     // Replacing only the LAST point left full bridge-deck sweeps that then
@@ -25246,6 +25250,24 @@
             return true;
         }
 
+        /** Sample a pixel chord; true only if every sample sits on open water (ships). */
+        function wodOpenWaterChordClear(unit, x0, y0, x1, y1) {
+            let dx = x1 - x0, dy = y1 - y0;
+            let dist = Math.sqrt(dx * dx + dy * dy);
+            if(dist < 1) {
+                let h0 = getNearestHexToPoint(x0, y0);
+                return !!(h0 && wodIsOpenWaterHex(h0));
+            }
+            let hr = gameData.hexRadius || 20;
+            let steps = Math.max(2, Math.ceil(dist / Math.max(4, hr * 0.45)));
+            for(let i = 0; i <= steps; i++) {
+                let t = i / steps;
+                let hx = getNearestHexToPoint(x0 + dx * t, y0 + dy * t);
+                if(!hx || !wodIsOpenWaterHex(hx)) return false;
+            }
+            return true;
+        }
+
         function wodCanStepBetweenHexes(unit, fromHex, toHex, forbidWater) {
             if(!fromHex || !toHex) return false;
             if(unit && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute))) {
@@ -25262,7 +25284,13 @@
                     dr = Math.abs(toHex.r - fromHex.r);
                 if(dq <= 1 && dr <= 1 && (dq + dr) > 0 && wodPathTileWalkable(unit, toHex, false)) return true;
             }
-            let allowWater = !forbidWater && (wodOrderIntoWater(unit, toHex) || wodUnitPrefersLandOnlyPath(unit));
+            // Land armies only enter water on an explicit intoWater / amphibious order — not
+            // merely because forbidWater is false (that used to open a +62 soft-water graph).
+            let allowWater = !forbidWater && (
+                wodOrderIntoWater(unit, toHex) ||
+                unit.type === 'marine' ||
+                (unit.type === 'convoy' && unit.convoySeaRoute)
+            );
             if(!wodPathTileWalkable(unit, toHex, allowWater || wodOrderIntoWater(unit, toHex))) return false;
             if(forbidWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
                 isWaterHex(toHex) && !isBridgeHex(toHex) && !wodOrderIntoWater(unit, toHex)) return false;
@@ -25376,7 +25404,17 @@
 
         /** Keeps unit pixel coords on a hex the unit may occupy (mountains / blocked tiles after jitter or combat shove). */
         function ensureUnitPixelOnWalkableHex(unit, ringMax) {
-            if(!unit || unit.hp <= 0 || unit.type === 'ship') return;
+            if(!unit || unit.hp <= 0) return;
+            if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                let sh = getNearestHexToPoint(unit.x, unit.y);
+                if(sh && wodIsOpenWaterHex(sh)) return;
+                let safeSea = getNearestWalkableHexForUnit(unit, unit.x, unit.y, ringMax != null ? Math.max(ringMax, 14) : 14);
+                if(safeSea && wodIsOpenWaterHex(safeSea)) {
+                    unit.x = safeSea.x;
+                    unit.y = safeSea.y;
+                }
+                return;
+            }
             if(wodIsPlayerMarchOrder(unit)) return;
             if(wodBridgeHexAtPoint(unit, unit.x, unit.y) || wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.2)) return;
             if(wodUnitRouteUsesBridge(unit)) return;
@@ -26341,8 +26379,11 @@
             return [];
         }
 
-        /** Fast land-only BFS for bridge approach legs; set usePortals false to test land connectivity without bridges. */
-        function wodLandBfsPath(unit, fromHex, toHex, maxNodes, usePortals) {
+        /** Fast land-only BFS for bridge approach legs; set usePortals false to test land connectivity without bridges.
+         *  Optional outMeta: { incomplete } — true when the search timed out / hit the node cap
+         *  without finishing (callers must NOT treat that as "land is disconnected"). */
+        function wodLandBfsPath(unit, fromHex, toHex, maxNodes, usePortals, outMeta) {
+            if(outMeta) outMeta.incomplete = false;
             if(!fromHex || !toHex) return [];
             if(wodHexKeysEqual(fromHex, toHex)) return [fromHex];
             if(usePortals === undefined) usePortals = true;
@@ -26371,7 +26412,10 @@
                 return path;
             }
             while(qi < q.length && nodes++ < limit) {
-                if((nodes & 255) === 0 && performance.now() - bfsT0 > bfsCeil) return [];
+                if((nodes & 255) === 0 && performance.now() - bfsT0 > bfsCeil) {
+                    if(outMeta) outMeta.incomplete = true;
+                    return [];
+                }
                 let hex = q[qi++];
                 let hk = getHexKey(hex);
                 if(wodHexKeysEqual(hex, toHex)) return rebuildPath(hk);
@@ -26396,6 +26440,9 @@
                 if(usePortals)
                     wodForEachBridgePathPortal(unit, hex, (nHex) => tryStep(nHex, true));
             }
+            // Node cap hit with unexplored frontier ⇒ incomplete; empty queue ⇒ true miss.
+            if(outMeta && qi < q.length) outMeta.incomplete = true;
+            else if(outMeta && nodes >= limit) outMeta.incomplete = true;
             return [];
         }
 
@@ -26403,7 +26450,12 @@
             if(!startHex || !targetHex) return true;
             // Same tile (or already there) is reachable without a bridge.
             if(wodHexKeysEqual(startHex, targetHex)) return false;
-            return wodLandBfsPath(unit, startHex, targetHex, 8000, false).length <= 1;
+            let meta = {};
+            let path = wodLandBfsPath(unit, startHex, targetHex, 8000, false, meta);
+            if(path.length > 1) return false;
+            // Budget timeout used to look like "no land route" and shove armies into the ocean.
+            if(meta.incomplete) return false;
+            return true;
         }
 
         function wodPickBridgeDeckEnds(deck, startHex, targetHex, br) {
@@ -26829,14 +26881,17 @@
             if(wodHexPathLength(bridgePath) > 1) return false;
             let bestLand = wodHexPathLength(landPath);
             if(bestLand <= 1) {
-                // No land route at all — accept a loose (straight-line) estimate so genuine
-                // island-to-island orders still trigger the amphibious compose.
+                // Only embark when land is proven disconnected (complete BFS miss) — never on
+                // a timed-out land search that merely looks empty.
+                if(!wodMarchBlockedWithoutBridge(unit, startHex, targetHex)) return false;
                 let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex, true);
                 return isFinite(est) && est >= 2;
             }
             let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex);
             if(!isFinite(est) || est < 2) return false;
-            return est <= Math.floor(bestLand * 0.78);
+            // Require a clearly shorter ocean hop; 0.78 let coastal columns dip into water
+            // whenever the land path hugged mountains a bit longer.
+            return est <= Math.floor(bestLand * 0.48);
         }
 
         function wodBridgeUsefulForMarch(unit, startHex, targetHex) {
@@ -26879,6 +26934,8 @@
         function wodTryAmphibiousMarchFallback(unit, startHex, targetHex) {
             if(!wodUnitPrefersLandOnlyPath(unit) || !startHex || !targetHex) return [];
             if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex) && !wodIsOpenWaterHex(startHex)) return [];
+            if(!wodOrderIntoWater(unit, targetHex) && !wodIsOpenWaterHex(startHex) &&
+                !wodMarchBlockedWithoutBridge(unit, startHex, targetHex)) return [];
             let waterPath = findAmphibiousMarchPath(unit, startHex, targetHex);
             return wodHexPathLength(waterPath) > 1 ? waterPath : [];
         }
@@ -27094,9 +27151,20 @@
                 return path;
             }
 
-            if((unit.type === 'marine' || unit.type === 'ship') && isWaterHex(startHex) && isWaterHex(targetHex)) {
-                let g = buildGreedyWaterHexChain(unit, startHex, targetHex, unit.type === 'ship' ? 170 : 120);
-                if(g.length > 1) return wodStorePfPath(smoothGridPath(g));
+            if((unit.type === 'marine' || unit.type === 'ship' ||
+                (unit.type === 'convoy' && unit.convoySeaRoute)) &&
+                isWaterHex(startHex) && isWaterHex(targetHex)) {
+                let seaOnly = unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute);
+                let g = buildGreedyWaterHexChain(unit, startHex, targetHex, seaOnly ? 220 : 120);
+                // Only accept a complete greedy chain — a partial hop used to become the
+                // whole path, then the far goal snapped across land and ships got stuck.
+                if(g.length > 1 && wodPathReachesTarget(g, targetHex))
+                    return wodStorePfPath(smoothGridPath(g));
+                if(seaOnly && wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(targetHex)) {
+                    let wbfs = wodWaterBfsPath(unit, startHex, targetHex, allowOverBudget ? 32000 : 16000);
+                    if(wbfs.length > 1 && wodPathReachesTarget(wbfs, targetHex))
+                        return wodStorePfPath(wbfs);
+                }
             }
 
             function runPathAst(forbidWater) {
@@ -27307,7 +27375,20 @@
             if(pathMode === 'land') return wodStorePfPath(runPathAst(true).path);
             if(pathMode === 'army') return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex, allowOverBudget));
             if(wodUnitPrefersLandOnlyPath(unit)) return wodStorePfPath(wodPickLandArmyMarchPath(unit, startHex, targetHex, allowOverBudget));
-            return wodStorePfPath(runPathAst(false).path);
+            let fullPath = runPathAst(false).path;
+            if(fullPath.length > 1 && wodPathReachesTarget(fullPath, targetHex))
+                return wodStorePfPath(fullPath);
+            // Ship / sea-convoy A* often times out on long bluewater legs — finish with BFS.
+            if((unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) &&
+                wodIsOpenWaterHex(startHex) && wodIsOpenWaterHex(targetHex)) {
+                let wbfs = wodWaterBfsPath(unit, startHex, targetHex, allowOverBudget ? 36000 : 18000);
+                if(wbfs.length > 1 && wodPathReachesTarget(wbfs, targetHex))
+                    return wodStorePfPath(wbfs);
+                // Progress hop only (incomplete) — never a destination snap across land.
+                let gHop = buildGreedyWaterHexChain(unit, startHex, targetHex, 48);
+                if(gHop.length > 1) return wodStorePfPath(smoothGridPath(gHop));
+            }
+            return wodStorePfPath(fullPath);
             } finally {
                 wodPfChargeMs(performance.now() - pfT0);
             }
@@ -27321,7 +27402,10 @@
             if(waterOnly && !wodIsOpenWaterHex(cur)) return null;
             let best = null;
             let bestScore = Infinity;
-            for(let dir of cardinalHexDirections) {
+            // Ships need 8-way hops around concave coasts; cardinal-only stalls against peninsulas.
+            let dirs = waterOnly ? hexDirections : cardinalHexDirections;
+            for(let di = 0; di < dirs.length; di++) {
+                let dir = dirs[di];
                 let nHex = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
                 if(!isWaterHex(nHex) || !canUseHexForMovement(unit, nHex)) continue;
                 if(waterOnly && !wodIsOpenWaterHex(nHex)) continue;
@@ -27882,6 +27966,14 @@
             let nPts = leadCorridor.length;
             let corridor = [{ x: unit.x, y: unit.y }];
             let landUnit = isLandArmyUnit(unit);
+            // Never clone an amphibious lead lane onto followers that were not ordered into water —
+            // coastal offsets were marching whole columns into the ocean.
+            if(landUnit && !intoWater) {
+                for(let ki = 0; ki < leadCorridor.length; ki++) {
+                    let lh = getNearestHexToPoint(leadCorridor[ki].x, leadCorridor[ki].y);
+                    if(lh && wodIsOpenWaterHex(lh)) return false;
+                }
+            }
             let funnel = landUnit ? wodLeadCorridorBridgeFunnelScales(leadCorridor) : null;
             if(funnel) return false;
             for(let k = 1; k < nPts; k++) {
@@ -28393,9 +28485,13 @@
 
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             let allowOver = wodMpIsHumanOwner(unit.owner) ||
+                unit.type === 'ship' ||
+                (unit.type === 'convoy' && unit.convoySeaRoute) ||
                 !!(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length);
             let path = findPathAroundTerrain(unit, reachNext.hex, startHex, false, 'auto', allowOver);
-            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex) {
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex &&
+                (wodOrderIntoWater(unit, reachNext.hex) || wodIsOpenWaterHex(startHex) ||
+                    wodMarchBlockedWithoutBridge(unit, startHex, reachNext.hex))) {
                 let ampPath = findAmphibiousMarchPath(unit, startHex, reachNext.hex);
                 if(wodHexPathLength(ampPath) > 1) path = ampPath;
             }
@@ -28497,11 +28593,31 @@
                 let exactNext = {x: reachNext.exactX, y: reachNext.exactY};
                 unit.path = wodHexPathToWorldWaypoints(unit, path, exactNext);
                 if(!wodTakeNextPathTarget(unit)) {
+                    // Ships: never fall through to a straight-line water goal across land.
+                    if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                        let hop = findGreedyWaterStep(unit, reachNext.hex, { fromHex: startHex });
+                        if(hop) {
+                            unit.path = null;
+                            unit.target = { x: hop.x, y: hop.y, pathPrepared: true, shipGreedy: true };
+                            return true;
+                        }
+                        return false;
+                    }
                     unit.path = null;
                     unit.target = {x: reachNext.exactX, y: reachNext.exactY, pathPrepared: true};
                 }
                 if(!fromAdvance) wodSeedOrderArrowCurrentLeg(unit, path);
                 return true;
+            }
+            if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                unit._wodPfRelaxUntil = performance.now() + 160;
+                let hop = findGreedyWaterStep(unit, reachNext.hex, { fromHex: startHex });
+                if(hop) {
+                    unit.path = null;
+                    unit.target = { x: hop.x, y: hop.y, pathPrepared: true, shipGreedy: true };
+                    return true;
+                }
+                return false;
             }
             if(wodMpIsHumanOwner(unit.owner)) return false;
             unit.path = null;
@@ -30571,13 +30687,17 @@
             }
             let path = findPathAroundTerrain(unit, targetHex, startHex, false, 'auto',
                 wodMpIsHumanOwner(unit.owner) ||
+                unit.type === 'ship' ||
+                (unit.type === 'convoy' && unit.convoySeaRoute) ||
                 !!(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length));
-            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex && startHex) {
+            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && targetHex && startHex &&
+                (wodOrderIntoWater(unit, targetHex) || wodIsOpenWaterHex(startHex) ||
+                    wodMarchBlockedWithoutBridge(unit, startHex, targetHex))) {
                 let ampPath = findAmphibiousMarchPath(unit, startHex, targetHex);
                 if(wodHexPathLength(ampPath) > 1) path = ampPath;
             }
             if(path.length <= 1 && unit.type === 'ship' && targetHex) {
-                let hop = findGreedyWaterStep(unit, targetHex);
+                let hop = findGreedyWaterStep(unit, targetHex, { fromHex: startHex });
                 if(hop) {
                     unit.path = null;
                     unit.target = {x: hop.x, y: hop.y, pathPrepared: true, shipGreedy: true};
@@ -30676,10 +30796,17 @@
                 return true;
             }
             if(targetHex && (unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute))) {
+                // Never aim straight at a distant water hex — chords cross land and clamp forever.
                 if(!wodIsOpenWaterHex(targetHex)) return false;
-                unit.path = null;
-                unit.target = { x: targetHex.x, y: targetHex.y, pathPrepared: true };
-                return true;
+                unit._wodPfRelaxUntil = performance.now() + 180;
+                let hop = findGreedyWaterStep(unit, targetHex, { fromHex: startHex });
+                if(hop) {
+                    unit.path = null;
+                    unit.target = { x: hop.x, y: hop.y, pathPrepared: true, shipGreedy: true };
+                    return true;
+                }
+                unit._wodPathGiveUpUntil = performance.now() + 500;
+                return false;
             }
             if(targetHex) {
                 unit.path = null;

@@ -618,3 +618,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Region battle maps orient by war-map attack direction (N/S/E/W) instead of fixed west attacker / east defender.
 - Player picks which adjacent province to attack from (or which enemy province a counterattack advances from); city placement follows that approach edge.
 - Defense alerts store the Concord origin province; legacy numeric alerts still work.
+
+## Pathfinding land/water fix (2026-07-21)
+- Land armies no longer treat BFS timeouts as "no land route" (that was pushing columns into the ocean); ocean shortcuts require a proven land disconnect or a much shorter verified hop.
+- Group corridor clones refuse amphibious lead lanes unless ordered into water; land step graph no longer soft-opens water for every land unit.
+- Ships reject incomplete greedy paths and land-crossing destination snaps; long sea orders use water BFS + 8-way greedy hops instead of straight-line targets across land.
