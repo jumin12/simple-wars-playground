@@ -613,3 +613,8 @@ Original prompt: as a single index.html file, make a game that is a combination 
 ## Surrender shows defeat summary (2026-07-21)
 - Surrendering a solo/campaign battle opens the defeat end screen with battle stats (same panel as a normal loss).
 - Campaign surrenders still sync the failed battle, then Return to main menu goes back to the war map.
+
+## Campaign attack direction + origin picker (2026-07-21)
+- Region battle maps orient by war-map attack direction (N/S/E/W) instead of fixed west attacker / east defender.
+- Player picks which adjacent province to attack from (or which enemy province a counterattack advances from); city placement follows that approach edge.
+- Defense alerts store the Concord origin province; legacy numeric alerts still work.

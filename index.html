@@ -6726,6 +6726,27 @@
         .wod-camp-node-tag.friendly { background: rgba(46, 204, 113, 0.18); color: #7ee2a8; }
         .wod-camp-node-tag.hostile { background: rgba(231, 76, 60, 0.18); color: #ff9d8f; }
         .wod-camp-node-tag.alert { background: rgba(241, 196, 15, 0.2); color: #ffd968; }
+        .wod-camp-from-row {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin: 8px 0 6px;
+        }
+        .wod-camp-from-row label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #d4e4f2;
+            letter-spacing: 0.02em;
+        }
+        .wod-camp-from-row select {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.35);
+            color: #ecf0f1;
+            border: 1px solid rgba(155, 179, 199, 0.35);
+            border-radius: 6px;
+            padding: 6px 8px;
+            font-size: 0.8rem;
+        }
         .wod-camp-launch { width: 100%; margin: 0; }
         .wod-camp-army-head {
             display: flex;
@@ -32687,7 +32708,8 @@
                 } else if(launchingCampaign) {
                     // Region battle map already loaded in wodRogueStartBattle.
                     if(!gameData.loadedCustomMap || !gameData.hexList.length) {
-                        let regionMap = gameData._campaignRegionMap || wodRogueBuildRegionBattleMap(gameData._campaignRun.nodeId);
+                        let regionMap = gameData._campaignRegionMap ||
+                            wodRogueBuildRegionBattleMap(gameData._campaignRun.nodeId, gameData._campaignRun.fromNodeId);
                         if(regionMap && window.WOD && typeof WOD.loadMapData === 'function') {
                             WOD.loadMapData(regionMap);
                             gameData.loadedCustomMap = true;
@@ -42522,6 +42544,7 @@
             _wodRogueWorldCache = null;
             wodRogueInvalidateMapCache();
             _wodRogueSelectedNode = null;
+            _wodRogueSelectedFromNode = null;
             _wodRogueDraft = wodRogueFreshDraft();
         }
 
@@ -42562,6 +42585,7 @@
             _wodRogueWorldCache = null;
             wodRogueInvalidateMapCache();
             _wodRogueSelectedNode = null;
+            _wodRogueSelectedFromNode = null;
             wodRogueSave();
         }
 
@@ -42583,6 +42607,64 @@
             }
             return out;
         }
+        /** Normalize alert payload (legacy number → {turn, fromId}). */
+        function wodRogueAlertEntry(c, id) {
+            if(!c || !c.alerts) return null;
+            let a = c.alerts[id];
+            if(a == null) return null;
+            if(typeof a === 'number') return { turn: a, fromId: null };
+            return { turn: a.turn | 0, fromId: a.fromId != null ? a.fromId : null };
+        }
+        function wodRogueHasAlert(c, id) {
+            return !!wodRogueAlertEntry(c, id);
+        }
+        function wodRogueAlertTurn(c, id) {
+            let e = wodRogueAlertEntry(c, id);
+            return e ? e.turn : -1;
+        }
+        function wodRogueNodeMapXY(n) {
+            if(!n) return { x: 0, y: 0 };
+            if(n.gx != null && n.gy != null) return { x: +n.gx, y: +n.gy };
+            return { x: +(n.x || 0), y: +(n.y || 0) };
+        }
+        /** Which battle-map edge the attacker enters from, based on war-map geometry. */
+        function wodRogueAttackSide(fromNode, toNode) {
+            let a = wodRogueNodeMapXY(fromNode);
+            let b = wodRogueNodeMapXY(toNode);
+            let dx = a.x - b.x;
+            let dy = a.y - b.y;
+            if(Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? 'east' : 'west';
+            return dy >= 0 ? 'south' : 'north';
+        }
+        function wodRogueOppositeSide(side) {
+            if(side === 'west') return 'east';
+            if(side === 'east') return 'west';
+            if(side === 'north') return 'south';
+            return 'north';
+        }
+        function wodRogueSideLabel(side) {
+            if(side === 'west') return 'west';
+            if(side === 'east') return 'east';
+            if(side === 'north') return 'north';
+            if(side === 'south') return 'south';
+            return side || 'west';
+        }
+        /** Provinces the player can choose as the attack / enemy-advance origin. */
+        function wodRogueBattleOriginOptions(nodeId) {
+            let c = wodRogueLoad();
+            if(!c) return [];
+            let st = c.nodesState[nodeId];
+            if(!st) return [];
+            if(wodRogueHasAlert(c, nodeId)) {
+                return wodRogueNeighbors(nodeId).filter(nb =>
+                    c.nodesState[nb] && c.nodesState[nb].owner === 'enemy');
+            }
+            if(st.owner === 'enemy') {
+                return wodRogueNeighbors(nodeId).filter(nb =>
+                    c.nodesState[nb] && c.nodesState[nb].owner === 'player');
+            }
+            return [];
+        }
         function wodRogueHasActiveAlerts(c) {
             if(!c || !c.alerts) return false;
             return Object.keys(c.alerts).some(id => c.nodesState[id] && c.nodesState[id].owner === 'player');
@@ -42596,7 +42678,7 @@
             if(!c || c.over) return false;
             let st = c.nodesState[id];
             if(!st) return false;
-            let alert = !!c.alerts[id];
+            let alert = wodRogueHasAlert(c, id);
             if(wodRogueAdvanceBlocked(c)) return alert && st.owner === 'player';
             if(st.owner === 'enemy') return wodRogueNeighbors(id).some(n => c.nodesState[n] && c.nodesState[n].owner === 'player');
             return alert;
@@ -42881,6 +42963,7 @@
 
         /* --------------------------- panel UI --------------------------- */
         let _wodRogueSelectedNode = null;
+        let _wodRogueSelectedFromNode = null;
         let _wodRoguePanelWired = false;
 
         function wodRogueSelectableNodeAtCanvas(mx, my) {
@@ -42915,15 +42998,24 @@
                 let n = wodRogueSelectableNodeAtCanvas(mx, my);
                 if(!n || n.id === _wodRogueSelectedNode) return;
                 _wodRogueSelectedNode = n.id;
+                _wodRogueSelectedFromNode = null;
                 // Selection-only: blit cached map + update side info. Avoids mobile flash
                 // from rebuilding the whole campaign panel / terrain every tap.
                 wodRoguePaintMap();
                 wodRefreshCampaignNodeInfoOnly();
             });
+            let infoEl = document.getElementById('wodCampNodeInfo');
+            if(infoEl) infoEl.addEventListener('change', (ev) => {
+                let t = ev.target;
+                if(!t || t.id !== 'wodCampFromSelect') return;
+                let v = parseInt(t.value, 10);
+                _wodRogueSelectedFromNode = Number.isFinite(v) ? v : null;
+                wodRefreshCampaignNodeInfoOnly();
+            });
             let launch = document.getElementById('wodCampLaunchBtn');
             if(launch) launch.addEventListener('click', () => {
                 if(_wodRogueSelectedNode == null) return;
-                wodRogueStartBattle(_wodRogueSelectedNode);
+                wodRogueStartBattle(_wodRogueSelectedNode, _wodRogueSelectedFromNode);
             });
             let heal = document.getElementById('wodCampHealBtn');
             if(heal) heal.addEventListener('click', () => {
@@ -43129,15 +43221,30 @@
                         : '<p>Select a region on the map. Highlighted regions can be attacked or must be defended.</p>';
                 } else {
                     let st = c.nodesState[node.id];
-                    let alert = !!c.alerts[node.id];
+                    let alert = wodRogueHasAlert(c, node.id);
                     let blocked = wodRogueAdvanceBlocked(c);
+                    let origins = wodRogueBattleOriginOptions(node.id);
+                    let alertEnt = wodRogueAlertEntry(c, node.id);
+                    if(origins.length) {
+                        if(_wodRogueSelectedFromNode == null || origins.indexOf(_wodRogueSelectedFromNode) < 0) {
+                            if(alertEnt && alertEnt.fromId != null && origins.indexOf(alertEnt.fromId) >= 0)
+                                _wodRogueSelectedFromNode = alertEnt.fromId;
+                            else
+                                _wodRogueSelectedFromNode = origins[0];
+                        }
+                    } else if(_wodRogueSelectedNode === node.id) {
+                        _wodRogueSelectedFromNode = null;
+                    }
+                    let fromNode = _wodRogueSelectedFromNode != null
+                        ? wodRogueNodeTemplate(_wodRogueSelectedFromNode) : null;
+                    let approachSide = fromNode ? wodRogueAttackSide(fromNode, node) : null;
                     let tag = alert ? '<span class="wod-camp-node-tag alert">UNDER ATTACK — defend it</span>'
                         : st.owner === 'player' ? '<span class="wod-camp-node-tag friendly">Held by the Remnant</span>'
                         : '<span class="wod-camp-node-tag hostile">Iron Concord — ' + '★'.repeat(node.diff + 1) + '</span>';
                     let myUpkeep = wodRogueRosterUpkeep(c.roster);
                     let startCash = wodRogueBattleStartMoney(c);
                     let startMp = wodRogueBattleStartManpower(c);
-                    let startEcon = wodRogueEstimateBattleStartIncome(node);
+                    let startEcon = wodRogueEstimateBattleStartIncome(node, _wodRogueSelectedFromNode);
                     let incomeLine = startEcon
                         ? '<p class="wod-camp-intel"><strong>Starting income:</strong> +' +
                           wodRogueFormatUpkeep(startEcon.cashIncome) +
@@ -43175,22 +43282,44 @@
                     else if(st.owner === 'enemy')
                         blockNote = '<p style="color:#ffd968">Assault: capture every enemy city within ' +
                             holdClock + ' or the attack fails.</p>';
+                    let fromPicker = '';
+                    if(origins.length && (alert || st.owner === 'enemy')) {
+                        let opts = origins.map(oid => {
+                            let on = wodRogueNodeTemplate(oid);
+                            let side = on ? wodRogueAttackSide(on, node) : 'west';
+                            let sel = oid === _wodRogueSelectedFromNode ? ' selected' : '';
+                            return '<option value="' + oid + '"' + sel + '>' +
+                                (on ? on.name : ('Region ' + oid)) +
+                                ' (' + wodRogueSideLabel(side) + ')</option>';
+                        }).join('');
+                        let lbl = alert ? 'Enemy advances from' : 'Attack from';
+                        let approachHint = approachSide
+                            ? '<p class="wod-camp-intel">Battle map orients with the ' +
+                              (alert ? 'Concord' : 'Remnant') + ' entering from the ' +
+                              wodRogueSideLabel(approachSide) + '.</p>'
+                            : '';
+                        fromPicker = '<div class="wod-camp-from-row"><label for="wodCampFromSelect">' + lbl + '</label>' +
+                            '<select id="wodCampFromSelect">' + opts + '</select></div>' + approachHint;
+                    }
                     info.innerHTML = '<h3>' + node.name + (node.industry ? ' 🏭' : node.capital ? ' ★' : node.hq ? ' ⚑' : '') + '</h3>' +
                         tag +
                         '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield · ' + holdClock + ' battle clock</p>' +
                         '<p>' + node.brief + '</p>' +
                         (node.industry ? '<p style="color:#d4af37">Industrial region — still worth +' + WOD_ROGUE_REQ_PER_TERRITORY + ' requisition each turn while held.</p>' : '') +
                         blockNote +
+                        fromPicker +
                         missionInfo +
                         intel;
                 }
             }
             if(launch) {
                 let playable = node && wodRogueNodePlayable(node.id) && c.roster.length > 0;
+                if(playable && wodRogueBattleOriginOptions(node.id).length && _wodRogueSelectedFromNode == null)
+                    playable = false;
                 launch.disabled = !playable;
                 if(!node) launch.textContent = 'Launch battle';
                 else if(c.roster.length === 0) launch.textContent = 'No army — recruit units below';
-                else if(c.alerts[node.id]) launch.textContent = 'Defend ' + node.name;
+                else if(wodRogueHasAlert(c, node.id)) launch.textContent = 'Defend ' + node.name;
                 else if(wodRogueAdvanceBlocked(c) && c.nodesState[node.id].owner === 'enemy')
                     launch.textContent = 'Roads blocked — defend first';
                 else if(c.nodesState[node.id].owner === 'enemy') launch.textContent = 'Attack ' + node.name;
@@ -43460,7 +43589,7 @@
          * City names come from the node's towns list so the battlefield matches the
          * area being attacked rather than a random similarly-shaped map.
          */
-        function wodRogueBuildRegionBattleMap(nodeId) {
+        function wodRogueBuildRegionBattleMap(nodeId, fromNodeId) {
             let c = wodRogueLoad();
             let node = wodRogueNodeTemplate(nodeId);
             if(!c || !node) return null;
@@ -43498,10 +43627,20 @@
             let aiCount = Math.max(1, node.ai || 1);
             let owners = [1];
             for(let o = 2; o <= aiCount + 1; o++) owners.push(o);
-            let defense = !!(c.alerts && c.alerts[nodeId]);
-            // Attacker comes from the west of the zoomed region; defender holds the east.
-            // On defense missions the player already owns the region, so flip sides.
-            let playerSide = defense ? 'east' : 'west';
+            let defense = wodRogueHasAlert(c, nodeId);
+            let origins = wodRogueBattleOriginOptions(nodeId);
+            let resolvedFrom = fromNodeId;
+            if(resolvedFrom == null || origins.indexOf(resolvedFrom) < 0) {
+                let alertEnt = wodRogueAlertEntry(c, nodeId);
+                if(alertEnt && alertEnt.fromId != null && origins.indexOf(alertEnt.fromId) >= 0)
+                    resolvedFrom = alertEnt.fromId;
+                else if(origins.length) resolvedFrom = origins[0];
+                else resolvedFrom = null;
+            }
+            let fromNode = resolvedFrom != null ? wodRogueNodeTemplate(resolvedFrom) : null;
+            // Attacker enters from the war-map direction of the chosen origin province.
+            let attackerSide = fromNode ? wodRogueAttackSide(fromNode, node) : 'west';
+            let playerSide = defense ? wodRogueOppositeSide(attackerSide) : attackerSide;
 
             let hexList = [];
             let hexes = {};
@@ -43530,24 +43669,34 @@
             function isLandHex(h) {
                 return h && h.type !== 'water' && h.type !== 'mountain';
             }
-            /** Pick cities in each side's rear (behind the front), spread N–S — not map-edge deep. */
+            function sideDepth(h, side) {
+                if(side === 'west') return -h.q;
+                if(side === 'east') return h.q;
+                if(side === 'north') return -h.r;
+                return h.r;
+            }
+            function sideBand(h, side) {
+                return (side === 'west' || side === 'east') ? h.r : h.q;
+            }
+            function sideDepthSpan(side) {
+                return (side === 'west' || side === 'east') ? mapR : Math.max(rows, 1);
+            }
+            /** Pick cities in each side's rear (behind the front), spread along the front — not map-edge deep. */
             function pickLandSites(side, count, avoid) {
                 let rowSpan = Math.max(rows, 1);
+                let depthSpan = sideDepthSpan(side);
                 // Mid-rear band: behind the front, but not jammed against the outer rim.
-                let idealDepth = mapR * 0.38;
-                let maxDepth = mapR * 0.55;
+                let idealDepth = depthSpan * 0.38;
+                let maxDepth = depthSpan * 0.55;
                 let rimQ = mapR * 0.88;
                 let rimR = rowSpan * 0.88;
-                function sideDepth(h) {
-                    return side === 'west' ? -h.q : h.q;
-                }
                 function siteScore(h) {
-                    let depth = sideDepth(h);
+                    let depth = sideDepth(h, side);
                     // Prefer a mid-rear band — not the front, not the far back wall.
                     let score = depth * 1.6 - Math.abs(depth - idealDepth) * 2.4;
                     if(depth > maxDepth) score -= (depth - maxDepth) * 5.5;
                     // Keep clear of the central front strip.
-                    let frontClear = mapR * 0.18;
+                    let frontClear = depthSpan * 0.18;
                     if(depth < frontClear) score -= (frontClear - depth) * 5.5;
                     // Soft rim penalty so towns are not jammed on the map edge.
                     if(Math.abs(h.q) > rimQ) score -= (Math.abs(h.q) - rimQ) * 6;
@@ -43578,44 +43727,48 @@
                 let bestPartial = [];
 
                 for(let di = 0; di < depthFracs.length; di++) {
-                    let minDepth = mapR * depthFracs[di];
+                    let minDepth = depthSpan * depthFracs[di];
                     let pool = [];
                     for(let h of hexList) {
                         if(!isLandHex(h)) continue;
-                        if(sideDepth(h) < minDepth) continue;
+                        if(sideDepth(h, side) < minDepth) continue;
                         // Cap how far back towns can sit.
-                        if(sideDepth(h) > mapR * 0.62) continue;
+                        if(sideDepth(h, side) > depthSpan * 0.62) continue;
                         if(Math.abs(h.r) > rowSpan * 0.92) continue;
                         if(Math.abs(h.q) > mapR * 0.92) continue;
                         pool.push(h);
                     }
                     if(pool.length < Math.max(1, count)) continue;
 
-                    let rMin = Infinity, rMax = -Infinity;
+                    let bMin = Infinity, bMax = -Infinity;
                     for(let h of pool) {
-                        if(h.r < rMin) rMin = h.r;
-                        if(h.r > rMax) rMax = h.r;
+                        let bc = sideBand(h, side);
+                        if(bc < bMin) bMin = bc;
+                        if(bc > bMax) bMax = bc;
                     }
-                    let rRange = Math.max(1, rMax - rMin);
+                    let bRange = Math.max(1, bMax - bMin);
 
                     for(let sepPass = 0; sepPass < 5; sepPass++) {
                         let minDist = Math.max(minDistFloor, minDistBase * (1 - sepPass * 0.08));
                         let avoidDist = minDist * 0.95;
                         let out = [];
-                        let bandPad = rRange * (0.08 + sepPass * 0.03);
+                        let bandPad = bRange * (0.08 + sepPass * 0.03);
 
                         for(let bi = 0; bi < count; bi++) {
                             let t0 = bi / Math.max(1, count);
                             let t1 = (bi + 1) / Math.max(1, count);
-                            let bandLo = rMin + rRange * t0 - bandPad;
-                            let bandHi = rMin + rRange * t1 + bandPad;
-                            // Stagger depth slightly so cities aren't on one longitude.
+                            let bandLo = bMin + bRange * t0 - bandPad;
+                            let bandHi = bMin + bRange * t1 + bandPad;
+                            // Stagger depth slightly so cities aren't on one line.
                             let depthBias = idealDepth * (0.88 + (bi % 3) * 0.08);
-                            let band = pool.filter(h => h.r >= bandLo && h.r <= bandHi);
+                            let band = pool.filter(h => {
+                                let bc = sideBand(h, side);
+                                return bc >= bandLo && bc <= bandHi;
+                            });
                             if(band.length < 3) band = pool;
                             band.sort((a, b) => {
-                                let sa = siteScore(a) - Math.abs(sideDepth(a) - depthBias) * 0.4;
-                                let sb = siteScore(b) - Math.abs(sideDepth(b) - depthBias) * 0.4;
+                                let sa = siteScore(a) - Math.abs(sideDepth(a, side) - depthBias) * 0.4;
+                                let sb = siteScore(b) - Math.abs(sideDepth(b, side) - depthBias) * 0.4;
                                 return sb - sa;
                             });
                             let picked = null;
@@ -43649,7 +43802,7 @@
                 let fallback = [];
                 for(let h of hexList) {
                     if(!isLandHex(h)) continue;
-                    if(sideDepth(h) <= 0) continue;
+                    if(sideDepth(h, side) <= 0) continue;
                     if(tooCloseTo(h, fallback, minDistFloor)) continue;
                     if(avoid && avoid.length && tooCloseTo(h, avoid, minDistFloor * 0.9)) continue;
                     fallback.push(h);
@@ -43660,7 +43813,7 @@
                 let deep = [];
                 for(let h of hexList) {
                     if(!isLandHex(h)) continue;
-                    if(sideDepth(h) <= 0) continue;
+                    if(sideDepth(h, side) <= 0) continue;
                     deep.push(h);
                 }
                 deep.sort((a, b) => siteScore(b) - siteScore(a));
@@ -43681,16 +43834,18 @@
             }
             if(c) wodRogueSave();
             let citiesPerSide = Math.max(2, Math.min(4, Math.ceil(townNames.length / 2)));
-            let enemySide = playerSide === 'west' ? 'east' : 'west';
+            let enemySide = wodRogueOppositeSide(playerSide);
             let playerSites = pickLandSites(playerSide, citiesPerSide, []);
             let enemySites = pickLandSites(enemySide, citiesPerSide, playerSites);
             // Capitals/factories first: deepest sites in each rear.
             function orderDeepestFirst(sites, side) {
                 return (sites || []).slice().sort((a, b) => {
-                    let da = side === 'west' ? -a.q : a.q;
-                    let db = side === 'west' ? -b.q : b.q;
+                    let da = sideDepth(a, side);
+                    let db = sideDepth(b, side);
                     if(db !== da) return db - da;
-                    return (a.r - b.r);
+                    let ba = sideBand(a, side);
+                    let bb = sideBand(b, side);
+                    return ba - bb;
                 });
             }
             playerSites = orderDeepestFirst(playerSites, playerSide);
@@ -43820,6 +43975,9 @@
                 savedStartEconomy: false,
                 _campaignRegion: true,
                 _regionNodeId: nodeId,
+                _regionFromNodeId: resolvedFrom,
+                _regionPlayerSide: playerSide,
+                _regionAttackerSide: attackerSide,
                 _regionName: node.name
             };
         }
@@ -43827,16 +43985,17 @@
         let _wodRogueStartIncomeCache = { key: '', econ: null };
 
         /** Estimate opening city + land cash income for a selected campaign region battle. */
-        function wodRogueEstimateBattleStartIncome(node) {
+        function wodRogueEstimateBattleStartIncome(node, fromNodeId) {
             let c = wodRogueLoad();
             if(!c || !node) return null;
-            let defense = !!(c.alerts && c.alerts[node.id]);
+            let defense = wodRogueHasAlert(c, node.id);
             let battles = (c.nodesState[node.id] && c.nodesState[node.id].battles) || 0;
-            let key = c.seed + ':' + node.id + ':' + (defense ? 1 : 0) + ':' + battles + ':' + (node.size || 0) + ':' + (node.ai || 1);
+            let fromKey = fromNodeId != null ? fromNodeId : 'auto';
+            let key = c.seed + ':' + node.id + ':' + fromKey + ':' + (defense ? 1 : 0) + ':' + battles + ':' + (node.size || 0) + ':' + (node.ai || 1);
             if(_wodRogueStartIncomeCache.key === key && _wodRogueStartIncomeCache.econ)
                 return _wodRogueStartIncomeCache.econ;
             let regionMap = null;
-            try { regionMap = wodRogueBuildRegionBattleMap(node.id); } catch(_) { regionMap = null; }
+            try { regionMap = wodRogueBuildRegionBattleMap(node.id, fromNodeId); } catch(_) { regionMap = null; }
             if(!regionMap || !regionMap.cities) return null;
             let cityIncome = 0;
             let cityN = 0;
@@ -43863,18 +44022,37 @@
             return econ;
         }
 
-        function wodRogueStartBattle(nodeId) {
+        function wodRogueStartBattle(nodeId, fromNodeId) {
             let c = wodRogueLoad();
             let node = wodRogueNodeTemplate(nodeId);
             if(!c || !node || c.over || !wodRogueNodePlayable(nodeId) || !c.roster.length) return;
-            let defense = !!c.alerts[nodeId];
+            let defense = wodRogueHasAlert(c, nodeId);
+            let origins = wodRogueBattleOriginOptions(nodeId);
+            let resolvedFrom = fromNodeId;
+            if(resolvedFrom == null || origins.indexOf(resolvedFrom) < 0) {
+                let alertEnt = wodRogueAlertEntry(c, nodeId);
+                if(alertEnt && alertEnt.fromId != null && origins.indexOf(alertEnt.fromId) >= 0)
+                    resolvedFrom = alertEnt.fromId;
+                else if(origins.length) resolvedFrom = origins[0];
+                else resolvedFrom = null;
+            }
+            if(origins.length && resolvedFrom == null) return;
             let holdSec = wodRogueBattleHoldSeconds(c.settings && c.settings.difficulty);
-            gameData._campaignRun = { nodeId, defense, synced: false, holdSec, holdElapsed: 0, battleLive: false, deploying: false };
+            gameData._campaignRun = {
+                nodeId,
+                fromNodeId: resolvedFrom,
+                defense,
+                synced: false,
+                holdSec,
+                holdElapsed: 0,
+                battleLive: false,
+                deploying: false
+            };
             gameData._matchReadyForEndChecks = false;
             gameData._selectedMissionEntry = null;
             gameData.mission = null;
             let st = c.nodesState[nodeId];
-            gameData._mapGenSeed = (c.seed ^ wodRogueMul32(nodeId + 13, 0x9e3779b9) ^ wodRogueMul32((st.battles || 0) + 1, 0x85ebca6b)) >>> 0;
+            gameData._mapGenSeed = (c.seed ^ wodRogueMul32(nodeId + 13, 0x9e3779b9) ^ wodRogueMul32((st.battles || 0) + 1, 0x85ebca6b) ^ wodRogueMul32((resolvedFrom || 0) + 7, 0xc2b2ae35)) >>> 0;
             if(!gameData._mapGenSeed) gameData._mapGenSeed = 0x51ed270b;
             gameData._wodReuseMapGenSeed = true;
             let sizeEl = document.getElementById('setupMapSize');
@@ -43887,7 +44065,7 @@
             if(vmEl) vmEl.value = 'domination';
             wodApplyGamePeriod(wodGetCampaignGamePeriod(), { saveProfile: true });
             // Zoom the war-map region into a playable battle map (same terrain + town names).
-            let regionMap = wodRogueBuildRegionBattleMap(nodeId);
+            let regionMap = wodRogueBuildRegionBattleMap(nodeId, resolvedFrom);
             if(regionMap && window.WOD && typeof WOD.loadMapData === 'function') {
                 WOD.loadMapData(regionMap);
                 gameData.loadedCustomMap = true;
@@ -44139,7 +44317,7 @@
             let myUpkeep = wodRogueRosterUpkeep(c.roster);
             let startCash = wodRogueBattleStartMoney(c);
             let startMp = wodRogueBattleStartManpower(c);
-            let startEcon = wodRogueEstimateBattleStartIncome(node);
+            let startEcon = wodRogueEstimateBattleStartIncome(node, run.fromNodeId);
             let incomeLine = startEcon
                 ? '\nStarting income: +' + wodRogueFormatUpkeep(startEcon.cashIncome) +
                   ' (net ' + (startEcon.cashIncome - myUpkeep >= 0 ? '+' : '') +
@@ -44148,6 +44326,11 @@
             let enemyLine = (run.defense || (node.gar && (node.gar.light || node.gar.heavy || node.gar.ship)))
                 ? '\n\nEnemy strength: ' + wodRogueNodeIntel(node) +
                   ' · est. upkeep ' + wodRogueNodeEnemyUpkeepIntel(node)
+                : '';
+            let fromNodeBrief = run.fromNodeId != null ? wodRogueNodeTemplate(run.fromNodeId) : null;
+            let approachBrief = fromNodeBrief
+                ? '\nApproach: ' + (run.defense ? 'Concord columns from ' : 'Launching from ') +
+                  fromNodeBrief.name + ' (' + wodRogueSideLabel(wodRogueAttackSide(fromNodeBrief, node)) + ').'
                 : '';
             if(run) {
                 run.battleLive = false;
@@ -44160,6 +44343,7 @@
                   wodFormatHoldClock(holdSec) + ' or capture every enemy city to throw them back.'
                 : (node.brief + '\n\nAssault: capture every enemy city within ' + wodFormatHoldClock(holdSec) +
                   '. If time runs out, the attack fails.')) +
+                approachBrief +
                 '\n\nYour army: ' + c.roster.length + ' units · battle upkeep ' + wodRogueFormatUpkeep(myUpkeep) +
                 ' · opening reserves $' + startCash.toLocaleString() + ' / ' + startMp.toLocaleString() + ' manpower.' +
                 incomeLine +
@@ -44515,7 +44699,7 @@
             // Unanswered alerts fall.
             for(let idStr of Object.keys(c.alerts)) {
                 let id = parseInt(idStr, 10);
-                if(c.alerts[id] <= c.turn - 2) {
+                if(wodRogueAlertTurn(c, id) <= c.turn - 2) {
                     delete c.alerts[id];
                     if(c.nodesState[id] && c.nodesState[id].owner === 'player') {
                         c.nodesState[id].owner = 'enemy';
@@ -44543,22 +44727,29 @@
             if(canSpawnDefense && c.turn > 2 && rng() < D.counterChance && !wodRogueHasActiveAlerts(c)) {
                 let targets = wodRogueNodes().filter(n =>
                     c.nodesState[n.id].owner === 'player' &&
-                    !c.alerts[n.id] &&
+                    !wodRogueHasAlert(c, n.id) &&
                     (!n.hq || held > total * 0.6) &&
                     wodRogueNeighbors(n.id).some(nb => c.nodesState[nb] && c.nodesState[nb].owner === 'enemy'));
                 if(targets.length) {
                     let t = targets[(rng() * targets.length) | 0];
-                    c.alerts[t.id] = c.turn;
+                    let enemyOrigins = wodRogueNeighbors(t.id).filter(nb =>
+                        c.nodesState[nb] && c.nodesState[nb].owner === 'enemy');
+                    let fromId = enemyOrigins.length ? enemyOrigins[(rng() * enemyOrigins.length) | 0] : null;
+                    c.alerts[t.id] = { turn: c.turn, fromId };
+                    let fromName = fromId != null ? (wodRogueNodeTemplate(fromId) || {}).name : null;
                     let canForce = (c.forcedDefenses | 0) < WOD_ROGUE_MAX_FORCED_DEFENSES;
                     let forceChance = D.blockChance != null ? D.blockChance : 0.38;
                     if(canForce && rng() < forceChance) {
                         c.blockedAdvance = true;
                         c.forcedDefenses = (c.forcedDefenses | 0) + 1;
                         wodRogueLogPush('Concord columns seal the roads around ' + t.name +
+                            (fromName ? ' from ' + fromName : '') +
                             ' — defend it before the front can advance again (' +
                             c.forcedDefenses + '/' + WOD_ROGUE_MAX_FORCED_DEFENSES + ').');
                     } else {
-                        wodRogueLogPush('Concord columns are massing against ' + t.name + ' — defend it this turn or lose it.');
+                        wodRogueLogPush('Concord columns are massing against ' + t.name +
+                            (fromName ? ' from ' + fromName : '') +
+                            ' — defend it this turn or lose it.');
                     }
                 }
             }
@@ -49562,6 +49753,7 @@
                 devMenu: wodDevMenuOpen(),
                 campaign: gameData._campaignRun ? {
                     nodeId: gameData._campaignRun.nodeId,
+                    fromNodeId: gameData._campaignRun.fromNodeId != null ? gameData._campaignRun.fromNodeId : null,
                     defense: !!gameData._campaignRun.defense,
                     deploying: !!gameData._campaignRun.deploying,
                     holdSec: gameData._campaignRun.holdSec || 0,
