@@ -11022,6 +11022,19 @@
                         <span>Draw move arrows along the computed march path (pathfinding) instead of waypoint / stroke guide lines.</span>
                     </label>
                 </div>
+                <div class="settings-section">
+                    <h3 style="color:#f1c40f;margin-top:0;">Sound</h3>
+                    <p style="margin:0 0 8px 0;">Music volume for the classical playlist (main menu and in-match). Saved in this browser.</p>
+                    <label style="display:flex;align-items:center;gap:10px;max-width:420px;">
+                        <span style="min-width:70px;">Volume</span>
+                        <input type="range" class="wod-music-vol" min="0" max="100" value="45" style="flex:1;" aria-label="Music volume" />
+                        <span class="wod-music-vol-label" style="min-width:3ch;text-align:right;">45</span>%
+                    </label>
+                    <label style="display:flex;align-items:center;gap:10px;margin-top:10px;cursor:pointer;">
+                        <input type="checkbox" class="wod-music-mute" aria-label="Mute music" />
+                        <span>Mute</span>
+                    </label>
+                </div>
                 <button class="menu-btn" onclick="hidePanels()">Back</button>
             </div>
         </div>
@@ -11040,6 +11053,10 @@
                     <div class="credit-card">
                         <div class="credit-role">Development &amp; QA</div>
                         <div class="credit-name">Andrew Meehan</div>
+                    </div>
+                    <div class="credit-card">
+                        <div class="credit-role">Music</div>
+                        <div class="credit-name">Public-domain / CC classical recordings (Musopen, Wikimedia Commons, historical &amp; U.S. government bands). See <code>sounds/music/SOURCES.txt</code>. Attribution: Handel Sarabande (CC BY 3.0), Mozart Clarinet Adagio (CC BY 2.5), Albéniz Asturias — David Hernando Vitores (CC BY-SA 4.0), Vivaldi Largo (CC BY-SA 3.0).</div>
                     </div>
                 </div>
                 <button class="menu-btn" onclick="hidePanels()">Back</button>
@@ -11523,6 +11540,18 @@
                             <span>Draw move arrows along the computed march path instead of waypoint lines from painted strokes or shift-waypoint paths.</span>
                         </label>
                     </div>
+                    <div class="settings-section" style="margin-top:14px;padding:0;border:none;background:transparent;">
+                        <h4 style="color:#f1c40f;margin:0 0 8px 0;">Sound</h4>
+                        <label style="display:flex;align-items:center;gap:10px;max-width:420px;">
+                            <span style="min-width:70px;">Volume</span>
+                            <input type="range" class="wod-music-vol" min="0" max="100" value="45" style="flex:1;" aria-label="Music volume" />
+                            <span class="wod-music-vol-label" style="min-width:3ch;text-align:right;">45</span>%
+                        </label>
+                        <label style="display:flex;align-items:center;gap:10px;margin-top:10px;cursor:pointer;">
+                            <input type="checkbox" class="wod-music-mute" aria-label="Mute music" />
+                            <span>Mute</span>
+                        </label>
+                    </div>
                     <p style="margin-top:12px;font-size:0.88rem;color:#bdc3c7;">Progress reset and other options are under <strong>Main menu → Settings</strong>.</p>
                 </div>
                 <div id="surrenderSection" class="esc-section surrender-box">
@@ -11558,6 +11587,7 @@
     </script>
     <script src="multiplayer-client.js"></script>
     <script src="ancient-civ-emblems.js"></script>
+    <script src="music-player.js"></script>
     <script>
         // --- Core UI & State ---
         const UI = {
@@ -12327,6 +12357,9 @@
                 syncOrderArrowsPathfindingCheckbox();
                 wodInitPeriodSettingsBinding();
                 wodSyncAllPeriodSelects();
+                if(window.wodMusic) {
+                    try { window.wodMusic.bindUi(); } catch(e) {}
+                }
             }
             if(panelId === 'multiplayer') {
                 wodMpWireLobbyUi();
@@ -12575,6 +12608,9 @@
             if(sectionId === 'settingsSection') {
                 syncShowOrdersCheckbox();
                 syncOrderArrowsPathfindingCheckbox();
+                if(window.wodMusic) {
+                    try { window.wodMusic.bindUi(); } catch(e) {}
+                }
             }
         }
 
@@ -12692,6 +12728,9 @@
             document.body.classList.remove('wod-esc-open');
             UI.inGameUI.style.display = 'block';
             UI.canvas.style.display = 'block';
+            if(window.wodMusic) {
+                try { window.wodMusic.bindUi(); window.wodMusic.start(); } catch(e) { console.warn(e); }
+            }
             // Campaign battles stay paused until the roster is fielded / deploy begins,
             // so the loop cannot fire a false "army destroyed" defeat during load.
             setGameSpeed(launchingCampaign ? 0 : 1, true);
@@ -12762,6 +12801,9 @@
             document.body.classList.remove('wod-esc-open');
             UI.mainMenu.classList.remove('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
+            if(window.wodMusic) {
+                try { window.wodMusic.bindUi(); window.wodMusic.start(); } catch(e) {}
+            }
             stopGame();
             if(menuBattleLive && applyMenuBattleState(menuBattleLive)) {
                 resumeMenuBackgroundBattle();
@@ -20304,6 +20346,9 @@
                     UI.escMenu.classList.add('hidden');
                     UI.inGameUI.style.display = 'block';
                     UI.canvas.style.display = 'block';
+                    if(window.wodMusic) {
+                        try { window.wodMusic.bindUi(); window.wodMusic.start(); } catch(e) { console.warn(e); }
+                    }
                     wodSetMpMatchUiFlag(true);
                     wodResetMobileHud();
                     setGameSpeed(0, true);
@@ -20510,6 +20555,9 @@
                     UI.escMenu.classList.add('hidden');
                     UI.inGameUI.style.display = 'block';
                     UI.canvas.style.display = 'block';
+                    if(window.wodMusic) {
+                        try { window.wodMusic.bindUi(); window.wodMusic.start(); } catch(e) { console.warn(e); }
+                    }
                     wodSetMpMatchUiFlag(true);
                     wodResetMobileHud();
                     wodMpEnsureDefaultMatchLayers();
@@ -20692,6 +20740,9 @@
                     UI.escMenu.classList.add('hidden');
                     UI.inGameUI.style.display = 'block';
                     UI.canvas.style.display = 'block';
+                    if(window.wodMusic) {
+                        try { window.wodMusic.bindUi(); window.wodMusic.start(); } catch(e) { console.warn(e); }
+                    }
                     wodSetMpMatchUiFlag(true);
                     wodResetMobileHud();
                     wodMpEnsureDefaultMatchLayers();
@@ -35245,6 +35296,13 @@
                         if(gameState === 'MENU') {
                             if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
                             if(menuDemoSeeded) resumeMenuBackgroundBattle();
+                            if(window.wodMusic) {
+                                try {
+                                    window.wodMusic.bindUi();
+                                    window.wodMusic.bindUnlockGestures();
+                                    window.wodMusic.start();
+                                } catch(e) { console.warn(e); }
+                            }
                         }
                     }
                     gameData._wodSkipMapGenLoader = false;
@@ -35268,8 +35326,18 @@
                         updateTerrainKey({ skipHelp: true });
                     }, 18);
                     await bootStage('Precaching battle effects…', 28, () => wodEnsureFxPrecache(), 22);
-                    await bootStage('Menu UI chrome…', 34, null, 14);
-                    await wodBootRunWithProgress(caption, 36, 62, 'Building menu battlefield', () => bootstrapMenuBackgroundBattle());
+                    await bootStage('Loading music…', 32, async () => {
+                        if(!window.wodMusic || typeof window.wodMusic.preloadAll !== 'function') return;
+                        try {
+                            await window.wodMusic.preloadAll((frac, label) => {
+                                let pct = 32 + Math.round(Math.max(0, Math.min(1, frac || 0)) * 6);
+                                if(caption && label) caption.textContent = label;
+                                wodSetBootSplashProgress(pct);
+                            });
+                        } catch(e) { console.warn(e); }
+                    }, 10);
+                    await bootStage('Menu UI chrome…', 40, null, 14);
+                    await wodBootRunWithProgress(caption, 42, 66, 'Building menu battlefield', () => bootstrapMenuBackgroundBattle());
                     await bootStage('Baking terrain layers…', 72, () => {
                         updateTerrainCache();
                         draw();
