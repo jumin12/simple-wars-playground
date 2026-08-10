@@ -5615,6 +5615,41 @@
             border-color: rgba(52, 152, 219, 0.45);
             background: rgba(12, 28, 42, 0.35);
         }
+        .wod-music-transport {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            margin-top: 12px;
+            max-width: 520px;
+        }
+        .wod-music-transport .menu-btn {
+            margin: 0;
+            padding: 8px 14px;
+            min-width: 0;
+            font-size: 0.9rem;
+        }
+        .wod-music-track {
+            width: 100%;
+            max-width: 520px;
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(241, 196, 15, 0.35);
+            background: rgba(20, 18, 12, 0.55);
+            color: #f5f0e6;
+            font: inherit;
+        }
+        .wod-music-now-row {
+            margin-top: 8px;
+            font-size: 0.9rem;
+            color: #d5d8dc;
+            max-width: 520px;
+        }
+        .wod-music-now {
+            color: #f7dc6f;
+            font-weight: 600;
+        }
         .wod-save-folder-status {
             font-size: 0.9rem;
             color: #bdc3c7;
@@ -11061,7 +11096,7 @@
                 </div>
                 <div class="settings-section">
                     <h3 style="color:#f1c40f;margin-top:0;">Sound</h3>
-                    <p style="margin:0 0 8px 0;">Music volume for the classical playlist (main menu and in-match). Saved in this browser.</p>
+                    <p style="margin:0 0 8px 0;">Classical playlist (main menu and in-match). Pick a track to jump there — playback continues down the list afterward. Saved in this browser.</p>
                     <label style="display:flex;align-items:center;gap:10px;max-width:420px;">
                         <span style="min-width:70px;">Volume</span>
                         <input type="range" class="wod-music-vol" min="0" max="100" value="100" style="flex:1;" aria-label="Music volume" />
@@ -11071,6 +11106,20 @@
                         <input type="checkbox" class="wod-music-mute" aria-label="Mute music" />
                         <span>Mute</span>
                     </label>
+                    <div class="wod-music-now-row">Now playing: <span class="wod-music-now">—</span></div>
+                    <label style="display:block;margin-top:10px;max-width:520px;">
+                        <span style="display:block;margin-bottom:4px;">Track</span>
+                        <select class="wod-music-track" aria-label="Choose music track"></select>
+                    </label>
+                    <div class="wod-music-transport">
+                        <button type="button" class="menu-btn wod-music-prev" aria-label="Previous track">Prev</button>
+                        <button type="button" class="menu-btn wod-music-pause" aria-label="Pause music">Pause</button>
+                        <button type="button" class="menu-btn wod-music-next" aria-label="Next track">Next</button>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-left:4px;">
+                            <input type="checkbox" class="wod-music-repeat" aria-label="Repeat current song" />
+                            <span>Repeat song</span>
+                        </label>
+                    </div>
                 </div>
                 <button class="menu-btn" onclick="hidePanels()">Back</button>
             </div>
@@ -11588,6 +11637,20 @@
                             <input type="checkbox" class="wod-music-mute" aria-label="Mute music" />
                             <span>Mute</span>
                         </label>
+                        <div class="wod-music-now-row">Now playing: <span class="wod-music-now">—</span></div>
+                        <label style="display:block;margin-top:10px;max-width:520px;">
+                            <span style="display:block;margin-bottom:4px;">Track</span>
+                            <select class="wod-music-track" aria-label="Choose music track"></select>
+                        </label>
+                        <div class="wod-music-transport">
+                            <button type="button" class="menu-btn wod-music-prev" aria-label="Previous track">Prev</button>
+                            <button type="button" class="menu-btn wod-music-pause" aria-label="Pause music">Pause</button>
+                            <button type="button" class="menu-btn wod-music-next" aria-label="Next track">Next</button>
+                            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-left:4px;">
+                                <input type="checkbox" class="wod-music-repeat" aria-label="Repeat current song" />
+                                <span>Repeat song</span>
+                            </label>
+                        </div>
                     </div>
                     <p style="margin-top:12px;font-size:0.88rem;color:#bdc3c7;">Progress reset and other options are under <strong>Main menu → Settings</strong>.</p>
                 </div>
@@ -12219,17 +12282,7 @@
             let lo = wodLocalPlayerOwner();
             if(!city || !mode) return;
             if(!cityEligibleForBuildPlacementForOwner(city, mode, lo)) {
-                if(mode === 'factory') {
-                    if(city.hasFactory) showNotification('This town already has a factory.');
-                    else showNotification('Not enough money!');
-                } else if(mode === 'farm') {
-                    if(city.hasFarm) showNotification('This town already has a farm.');
-                    else showNotification('Not enough money!');
-                } else if(mode === 'harbor') {
-                    if(city.hasHarbor) showNotification('This town already has a harbor.');
-                    else if(wodPlayerTreasury(lo) < WOD_PRICE_HARBOR) showNotification('Not enough money!');
-                    else showNotification('Harbors require water next to the town.');
-                }
+                showNotification(wodExplainBuildBlockReason(mode, lo, city));
                 refreshWodCitiesPanel();
                 return;
             }
@@ -50425,6 +50478,85 @@
             return cityEligibleForBuildPlacementForOwner(city, mode, wodLocalPlayerOwner());
         }
 
+        /** Human-readable reason a train/build action is blocked (money, MP, city requirements). */
+        function wodExplainBuildBlockReason(mode, owner, city) {
+            if(!mode) return 'That action is not available right now.';
+            let money = Math.floor(wodPlayerTreasury(owner) || 0);
+            let mp = Math.floor(wodPlayerMpPool(owner) || 0);
+            if(mode === 'factory') {
+                if(city && city.hasFactory) return 'This town already has a factory.';
+                if(money < WOD_PRICE_FACTORY)
+                    return 'Not enough money for a factory — needs $' + WOD_PRICE_FACTORY + ' (you have $' + money + ').';
+                return 'No town can build a factory right now.';
+            }
+            if(mode === 'farm') {
+                if(city && city.hasFarm) return 'This town already has a farm.';
+                if(money < WOD_PRICE_FARM)
+                    return 'Not enough money for a farm — needs $' + WOD_PRICE_FARM + ' (you have $' + money + ').';
+                return 'No town can build a farm right now.';
+            }
+            if(mode === 'harbor') {
+                if(city && city.hasHarbor) return 'This town already has a harbor.';
+                if(money < WOD_PRICE_HARBOR)
+                    return 'Not enough money for a harbor — needs $' + WOD_PRICE_HARBOR + ' (you have $' + money + ').';
+                if(city && !cityHasWaterNeighbor(city)) return 'Harbors require water next to the town.';
+                return 'No coastal town can build a harbor right now.';
+            }
+            if(mode === 'fort') return 'No usable ground for a fort right now.';
+            if(mode === 'bridge') {
+                if(money < WOD_PRICE_BRIDGE)
+                    return 'Not enough money for a bridge — needs $' + WOD_PRICE_BRIDGE + ' (you have $' + money + ').';
+                return 'Not enough money for a bridge.';
+            }
+            let cost = getUnitCost(mode);
+            let unitName = mode === 'heavy' ? 'armor' : mode === 'ship' ? 'a ship' : mode === 'marine' ? 'marines' : 'light infantry';
+            let shortMoney = money < cost.money;
+            let shortMp = mp < cost.manpower;
+            if(shortMoney && shortMp) {
+                return 'Not enough money or manpower to train ' + unitName
+                    + ' — needs $' + cost.money + ' and ' + formatPeople(cost.manpower) + ' MP'
+                    + ' (you have $' + money + ' and ' + formatPeople(mp) + ' MP).';
+            }
+            if(shortMoney) {
+                return 'Not enough money to train ' + unitName
+                    + ' — needs $' + cost.money + ' (you have $' + money + ').';
+            }
+            if(shortMp) {
+                return 'Not enough manpower to train ' + unitName
+                    + ' — needs ' + formatPeople(cost.manpower) + ' MP (you have ' + formatPeople(mp) + ' MP).';
+            }
+            if(city) {
+                if(mode === 'heavy' && !city.hasFactory) return 'Armor requires a factory in this town.';
+                if(mode === 'ship' && !city.hasHarbor) return 'Ships require a harbor in this town.';
+                if(mode === 'marine' && !cityHasWaterNeighbor(city)) return 'Marines train only at coastal towns (water adjacent).';
+                if(isCityEncircledForProduction(city)) return 'This town is encircled — training and shipbuilding are cut off until a corridor reopens.';
+                if(isCitySiegeBlockedForProduction(city)) return 'Urban combat at this town — training and shipbuilding are paused until the battle clears.';
+                return mode === 'ship' ? 'No water nearby to launch a ship from this town.' : 'No clear spawn area near this town.';
+            }
+            // Global: resources OK but no city can host this unit type.
+            let owned = 0, factoryOk = 0, harborOk = 0, coastOk = 0, clearOk = 0, blocked = 0;
+            for(let i = 0, cl = gameData.cities.length; i < cl; i++) {
+                let c = gameData.cities[i];
+                if(!c || c.owner !== owner || !c.id) continue;
+                owned++;
+                if(isCitySiegeBlockedForProduction(c)) { blocked++; continue; }
+                if(mode === 'heavy' && c.hasFactory) factoryOk++;
+                if(mode === 'ship' && c.hasHarbor) harborOk++;
+                if(mode === 'marine' && cityHasWaterNeighbor(c)) coastOk++;
+                let ut = mode === 'heavy' ? 'heavy' : mode === 'ship' ? 'ship' : mode === 'marine' ? 'marine' : 'light';
+                if((mode !== 'heavy' || c.hasFactory) && (mode !== 'ship' || c.hasHarbor)
+                    && (mode !== 'marine' || cityHasWaterNeighbor(c)) && findSpawnHex(ut, c, owner))
+                    clearOk++;
+            }
+            if(!owned) return 'You need a town before you can train ' + unitName + '.';
+            if(mode === 'heavy' && !factoryOk) return 'Armor requires a factory — build one in a town first.';
+            if(mode === 'ship' && !harborOk) return 'Ships require a harbor — build one at a coastal town first.';
+            if(mode === 'marine' && !coastOk) return 'Marines need a coastal town (water adjacent).';
+            if(blocked && !clearOk) return 'All eligible towns are under combat or encircled — training is paused.';
+            if(!clearOk) return 'No clear spawn area near your towns for ' + unitName + '.';
+            return 'No towns can train ' + unitName + ' right now.';
+        }
+
         function wodApplyBuildAtCityForOwner(city, mode, owner) {
             if(mode === 'factory') {
                 wodDeductPlayerMoney(owner, WOD_PRICE_FACTORY);
@@ -50505,13 +50637,7 @@
                 }
             }
             if(!any) {
-                showNotification(
-                    mode === 'fort'
-                        ? 'No usable ground for a fort right now.'
-                        : mode === 'bridge'
-                          ? 'Not enough money for a bridge.'
-                          : 'No towns qualify for that action right now.'
-                );
+                showNotification(wodExplainBuildBlockReason(mode, lo, null));
                 return;
             }
             gameData.buildMode = mode;
@@ -50529,27 +50655,7 @@
                 return true;
             }
             if(!cityEligibleForBuildPlacementForOwner(city, mode, lo)) {
-                if(mode === 'factory') {
-                    if(city.hasFactory) showNotification('This town already has a factory.');
-                    else showNotification('Not enough money!');
-                } else if(mode === 'farm') {
-                    if(city.hasFarm) showNotification('This town already has a farm.');
-                    else showNotification('Not enough money!');
-                } else if(mode === 'harbor') {
-                    if(city.hasHarbor) showNotification('This town already has a harbor.');
-                    else if(wodPlayerTreasury(lo) < WOD_PRICE_HARBOR) showNotification('Not enough money!');
-                    else showNotification('Harbors require water next to the town.');
-                } else {
-                    let cost = getUnitCost(mode);
-                    if(wodPlayerTreasury(lo) < cost.money) showNotification('Not enough money!');
-                    else if(wodPlayerMpPool(lo) < cost.manpower) showNotification('Not enough manpower!');
-                    else if(mode === 'heavy' && !city.hasFactory) showNotification('Armor requires a factory!');
-                    else if(mode === 'ship' && !city.hasHarbor) showNotification('Requires harbor!');
-                    else if(mode === 'marine' && !cityHasWaterNeighbor(city)) showNotification('Marines train only at coastal towns (water adjacent).');
-                    else if(isCityEncircledForProduction(city)) showNotification('This town is encircled — training and shipbuilding are cut off until a corridor reopens.');
-                    else if(isCitySiegeBlockedForProduction(city)) showNotification('Urban combat at this town — training and shipbuilding are paused until the battle clears.');
-                    else showNotification(mode === 'ship' ? 'No water nearby!' : 'No clear spawn area near this town!');
-                }
+                showNotification(wodExplainBuildBlockReason(mode, lo, city));
                 return true;
             }
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
