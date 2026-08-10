@@ -10586,7 +10586,7 @@
 
                 <div class="esc-help-block">
                     <h4>Encirclement</h4>
-                    <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units caught inside take about <strong>3.5% max HP attrition per second</strong>, flash a warning, and <strong>cannot heal</strong> until the pocket is broken. You may still attack outward and seize tiles to reopen a corridor — the penalty is meant to reward tightening sieges without making escape impossible.</p>
+                    <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units caught inside take about <strong>3.5% max HP attrition per second</strong>, flash a warning, and <strong>cannot heal</strong> until the pocket is broken. <strong>Towns inside an encircled pocket cannot train units or build ships</strong> until a land corridor reopens. You may still attack outward and seize tiles to reopen a corridor — the penalty is meant to reward tightening sieges without making escape impossible.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -24742,14 +24742,29 @@
             return list;
         }
 
-        /** True when last tick had active combat on this town's urban tiles (production blocked this tick). */
+        /** True when the town hex / urban footprint sits in an encircled pocket. */
+        function isCityEncircledForProduction(city) {
+            if(!city || !city.id) return false;
+            let ch = gameData.hexes[`${city.q},${city.r}`];
+            if(ch && wodGetHexEncirclementState(ch)) return true;
+            let urban = getCityUrbanTerrainHexes(city);
+            for(let i = 0, n = urban.length; i < n; i++) {
+                if(urban[i] && wodGetHexEncirclementState(urban[i])) return true;
+            }
+            return false;
+        }
+
+        /** True when urban combat or encirclement blocks recruiting from this town. */
         function isCitySiegeBlockedForProduction(city) {
-            if(!city || !city.id || !gameData.cityCombatBlockForProd) return false;
+            if(!city || !city.id) return false;
+            if(isCityEncircledForProduction(city)) return true;
+            if(!gameData.cityCombatBlockForProd) return false;
             return gameData.cityCombatBlockForProd.has(`${city.q},${city.r}`);
         }
 
         function citySiegeShowsCombatIndicator(city) {
             if(!city || !city.id) return false;
+            if(isCityEncircledForProduction(city)) return true;
             let k = `${city.q},${city.r}`;
             let staged = !!(gameData._cityCombatStagingKeys && gameData._cityCombatStagingKeys.has(k));
             let blocked = !!(gameData.cityCombatBlockForProd && gameData.cityCombatBlockForProd.has(k));
@@ -35663,6 +35678,31 @@
             return false;
         }
 
+        function wodAiCountFortGuards(fort, ownerId) {
+            if(!fort || !ownerId) return 0;
+            let r2 = wodAiFortGuardReachSq();
+            let n = 0;
+            for(let u of gameData.entities) {
+                if(u.hp <= 0 || u.owner !== ownerId || u.type === 'convoy' || u.type === 'ship') continue;
+                let dx = u.x - fort.x, dy = u.y - fort.y;
+                if(dx * dx + dy * dy <= r2) n++;
+            }
+            return n;
+        }
+
+        function wodAiFortThreatNeed(fort, ownerId) {
+            if(!fort || fort.owner !== ownerId) return 0;
+            let hr = gameData.hexRadius || 20;
+            let enemies = countNearbyUnits(ownerId, fort.x, fort.y, Math.max(300, hr * 13), true);
+            let fh = gameData.hexes[`${fort.q},${fort.r}`];
+            let frontTouch = fh && (isFrontlineHex(fh, ownerId)
+                || getNeighborHexes(fh).some(n => n && n.owner > 0 && n.owner !== ownerId));
+            if(enemies <= 0 && !frontTouch) return 0;
+            let guards = wodAiCountFortGuards(fort, ownerId);
+            if(enemies > 0) return Math.max(1, Math.min(5, enemies + 1 - Math.min(guards, enemies + 1)));
+            return guards < 1 ? 1 : 0;
+        }
+
         function wodAiEnsureFortGuard(ownerId, fortHex) {
             if(!ownerId || !fortHex || !gameData.forts || !gameData.forts.length) return;
             let fort = null;
@@ -35673,24 +35713,40 @@
                     break;
                 }
             }
-            if(!fort || wodAiFortHasGuard(fort, ownerId)) return;
-            let best = null, bestD = Infinity;
-            for(let u of gameData.entities) {
-                if(u.hp <= 0 || u.owner !== ownerId || u.type === 'convoy' || u.type === 'ship') continue;
-                if(u.moraleBroken || u.retreating || u.hp / u.maxHp < 0.42) continue;
-                if(u.aiCityStriker) continue;
-                let dx = u.x - fort.x, dy = u.y - fort.y;
-                let d = dx * dx + dy * dy;
-                if(d < bestD) {
-                    bestD = d;
-                    best = u;
+            if(!fort) return;
+            let need = Math.max(1, wodAiFortThreatNeed(fort, ownerId) || (wodAiFortHasGuard(fort, ownerId) ? 0 : 1));
+            let have = wodAiCountFortGuards(fort, ownerId);
+            if(have >= need) return;
+            let want = need - have;
+            let hr = gameData.hexRadius || 20;
+            let pullR2 = Math.pow(hr * (need > 1 ? 22 : 16), 2);
+            while(want > 0) {
+                let best = null, bestD = Infinity;
+                for(let u of gameData.entities) {
+                    if(u.hp <= 0 || u.owner !== ownerId || u.type === 'convoy' || u.type === 'ship') continue;
+                    if(u.moraleBroken || u.retreating || u.hp / u.maxHp < 0.42) continue;
+                    if(u.aiCityStriker) continue;
+                    if(u.aiFortGuard && u.aiFortGuard !== fort.id) continue;
+                    if(u.aiTfKind === 'defend' && u.aiTfJobId) continue;
+                    let dx = u.x - fort.x, dy = u.y - fort.y;
+                    let d = dx * dx + dy * dy;
+                    if(d > pullR2) continue;
+                    // Prefer units already near the fort / already tagged as its guard.
+                    if(u.aiFortGuard === fort.id) d *= 0.35;
+                    if(d < bestD) {
+                        bestD = d;
+                        best = u;
+                    }
                 }
-            }
-            if(best) {
+                if(!best) break;
                 best.aiFortGuard = fort.id;
-                wodAiMoveUnitTowardHex(best, fortHex, true, 0.18);
-                return;
+                best.aiCityStriker = false;
+                best.aiTfKind = 'defend';
+                best.aiTfRole = 'fix';
+                wodAiMoveUnitTowardHex(best, fortHex, true, 0.22);
+                want--;
             }
+            if(want <= 0 || wodAiCountFortGuards(fort, ownerId) > 0) return;
             if(!canAffordUnit(ownerId, 'light')) return;
             let spawnCity = null, spawnD = Infinity;
             for(let c of gameData.cities) {
@@ -35708,6 +35764,8 @@
             let spawned = spawnUnit('light', spawnCity, ownerId);
             if(spawned) {
                 spawned.aiFortGuard = fort.id;
+                spawned.aiTfKind = 'defend';
+                spawned.aiTfRole = 'fix';
                 wodAiMoveUnitTowardHex(spawned, fortHex, true, 0.12);
             }
         }
@@ -35718,9 +35776,47 @@
             for(let fi = 0, fl = forts.length; fi < fl; fi++) {
                 let ft = forts[fi];
                 if(!ft || ft.owner !== ownerId) continue;
-                if(wodAiFortHasGuard(ft, ownerId)) continue;
+                let need = wodAiFortThreatNeed(ft, ownerId);
+                if(need <= 0 && wodAiFortHasGuard(ft, ownerId)) continue;
                 wodAiEnsureFortGuard(ownerId, gameData.hexes[`${ft.q},${ft.r}`] || { q: ft.q, r: ft.r, x: ft.x, y: ft.y });
             }
+        }
+
+        function wodAiPickThreatenedFortForUnit(w, unit) {
+            if(!unit || !gameData.forts || !gameData.forts.length) return null;
+            if(!w.fortThreatByOwner) w.fortThreatByOwner = {};
+            let list = w.fortThreatByOwner[unit.owner];
+            if(!list) {
+                list = [];
+                let hr = gameData.hexRadius || 20;
+                for(let fi = 0; fi < gameData.forts.length; fi++) {
+                    let ft = gameData.forts[fi];
+                    if(!ft || ft.owner !== unit.owner) continue;
+                    let need = wodAiFortThreatNeed(ft, unit.owner);
+                    if(need <= 0) continue;
+                    list.push({
+                        fort: ft,
+                        enemies: countNearbyUnits(unit.owner, ft.x, ft.y, Math.max(300, hr * 13), true),
+                        defenders: wodAiCountFortGuards(ft, unit.owner),
+                        assigned: 0,
+                        need
+                    });
+                }
+                w.fortThreatByOwner[unit.owner] = list;
+            }
+            if(!list.length) return null;
+            let hr = gameData.hexRadius || 20;
+            let reach2 = Math.pow(hr * 1.35 * 22, 2);
+            let best = null, bestD = Infinity;
+            for(let rec of list) {
+                if(rec.defenders + rec.assigned >= rec.enemies + 2 && rec.defenders + rec.assigned >= rec.need) continue;
+                let d = wodAiDist2(unit.x, unit.y, rec.fort.x, rec.fort.y);
+                if(d > reach2 || d >= bestD) continue;
+                bestD = d;
+                best = rec;
+            }
+            if(best) best.assigned++;
+            return best ? best.fort : null;
         }
 
         function wodAiUnitSlotOffset(unit, hex, jitterScale) {
@@ -36084,14 +36180,14 @@
 
         function wodAiJobStillValid(job, owner) {
             if(!job) return false;
-            if(job.kind === 'defend' && job.city) {
-                let c = job.city;
-                if(!c || c.owner !== owner) return false;
+            if(job.kind === 'defend' && (job.city || job.fort)) {
+                let t = job.city || job.fort;
+                if(!t || t.owner !== owner) return false;
                 let hr = gameData.hexRadius || 20;
-                let enemies = countNearbyUnits(owner, c.x, c.y, Math.max(320, hr * 14), true);
-                let ch = gameData.hexes[`${c.q},${c.r}`];
-                let frontTouch = ch && (isFrontlineHex(ch, owner)
-                    || getNeighborHexes(ch).some(n => n && n.owner > 0 && n.owner !== owner));
+                let enemies = countNearbyUnits(owner, t.x, t.y, Math.max(320, hr * 14), true);
+                let th = gameData.hexes[`${t.q},${t.r}`];
+                let frontTouch = th && (isFrontlineHex(th, owner)
+                    || getNeighborHexes(th).some(n => n && n.owner > 0 && n.owner !== owner));
                 return enemies > 0 || !!frontTouch;
             }
             if(job.kind === 'strike' && job.strikeHex) {
@@ -36135,7 +36231,7 @@
                 return null;
             }
 
-            // Threatened own cities — detect early so sticky plans rebuild when defense is needed.
+            // Threatened own cities + forts — detect early so sticky plans rebuild when defense is needed.
             let hr = gameData.hexRadius || 20;
             let threatJobs = [];
             for(let ci = 0; ci < gameData.cities.length; ci++) {
@@ -36155,10 +36251,34 @@
                     ? Math.max(2, Math.min(8, enemies + 2 - Math.min(defenders, enemies + 1)))
                     : (defenders < 2 ? 2 - defenders : 0);
                 if(need <= 0) continue;
-                threatJobs.push({ city: c, enemies, defenders, need, frontTouch });
+                threatJobs.push({ city: c, fort: null, enemies, defenders, need, frontTouch });
+            }
+            let forts = gameData.forts || [];
+            for(let fi = 0; fi < forts.length; fi++) {
+                let ft = forts[fi];
+                if(!ft || ft.owner !== oid) continue;
+                let enemies = countNearbyUnits(oid, ft.x, ft.y, Math.max(300, hr * 13), true);
+                let frontTouch = false;
+                let fh = gameData.hexes[`${ft.q},${ft.r}`];
+                if(fh) {
+                    frontTouch = getNeighborHexes(fh).some(n => n && n.owner > 0 && n.owner !== oid)
+                        || isFrontlineHex(fh, oid);
+                }
+                if(enemies <= 0 && !frontTouch) continue;
+                let defenders = wodAiCountFortGuards(ft, oid);
+                let need = enemies > 0
+                    ? Math.max(1, Math.min(5, enemies + 1 - Math.min(defenders, enemies + 1)))
+                    : (defenders < 1 ? 1 : 0);
+                if(need <= 0) continue;
+                threatJobs.push({ city: null, fort: ft, enemies, defenders, need, frontTouch });
             }
             threatJobs.sort((a, b) => (b.enemies - a.enemies) || (b.need - a.need));
-            let threatSig = threatJobs.map(t => (t.city.id || (t.city.q + ',' + t.city.r)) + ':' + t.need).join('|');
+            let threatSig = threatJobs.map(t => {
+                let id = t.city
+                    ? ('c:' + (t.city.id || (t.city.q + ',' + t.city.r)))
+                    : ('f:' + (t.fort.id || (t.fort.q + ',' + t.fort.r)));
+                return id + ':' + t.need;
+            }).join('|');
 
             let prev = gameData.aiTaskForces[oid];
             let sizeDelta = prev ? Math.abs((prev.readyN || 0) - n) : 99;
@@ -36183,10 +36303,13 @@
                         for(let uid in prev.unitJob) if(prev.unitJob[uid] === jid) m++;
                         return m;
                     }
-                    // Peel nearest non-defend units onto underfilled defend jobs.
+                    // Peel nearest non-defend units onto underfilled defend jobs (cities + forts).
                     for(let ji = 0; ji < aliveJobs.length; ji++) {
                         let job = aliveJobs[ji];
-                        if(job.kind !== 'defend' || !job.city) continue;
+                        if(job.kind !== 'defend') continue;
+                        let tx = job.city ? job.city.x : (job.fort && job.fort.x);
+                        let ty = job.city ? job.city.y : (job.fort && job.fort.y);
+                        if(tx == null) continue;
                         while(membersOf(job.id) < job.quota) {
                             let bestU = null, bestD = Infinity;
                             for(let ui = 0; ui < ready.length; ui++) {
@@ -36195,7 +36318,7 @@
                                 if(cur === job.id) continue;
                                 let curJob = cur && jobById[cur];
                                 if(curJob && curJob.kind === 'defend') continue;
-                                let d2 = wodAiDist2(u.x, u.y, job.city.x, job.city.y);
+                                let d2 = wodAiDist2(u.x, u.y, tx, ty);
                                 if(d2 < bestD) { bestD = d2; bestU = u; }
                             }
                             if(!bestU) break;
@@ -36204,6 +36327,7 @@
                             bestU.aiTfKind = 'defend';
                             bestU.aiTfRole = 'fix';
                             bestU.aiCityStriker = false;
+                            if(job.fort) bestU.aiFortGuard = job.fort.id;
                         }
                     }
                     for(let ui = 0; ui < ready.length; ui++) {
@@ -36224,9 +36348,13 @@
                             let members = membersOf(job.id);
                             if(members >= job.quota) continue;
                             let hx = job.kind === 'strike' && job.strikeHex ? job.strikeHex.x
-                                : (job.city ? job.city.x : (job.holdHex && job.holdHex.x));
+                                : (job.city ? job.city.x
+                                : (job.fort ? job.fort.x
+                                : (job.holdHex && job.holdHex.x)));
                             let hy = job.kind === 'strike' && job.strikeHex ? job.strikeHex.y
-                                : (job.city ? job.city.y : (job.holdHex && job.holdHex.y));
+                                : (job.city ? job.city.y
+                                : (job.fort ? job.fort.y
+                                : (job.holdHex && job.holdHex.y)));
                             if(hx == null) continue;
                             let kindBias = job.kind === 'defend' ? -200000
                                 : (job.kind === 'hold' ? -80000
@@ -36245,6 +36373,7 @@
                             u.aiTfJobId = best.id;
                             u.aiTfKind = best.kind;
                             u.aiTfRole = best.role;
+                            if(best.kind === 'defend' && best.fort) u.aiFortGuard = best.fort.id;
                         }
                     }
                     prev.readyN = n;
@@ -36281,12 +36410,13 @@
 
             let jobs = [];
             let jobId = 1;
-            function addJob(kind, role, sectorOrNull, city, quota, strikeHex) {
+            function addJob(kind, role, sectorOrNull, city, quota, strikeHex, fort) {
                 let holdHex = sectorOrNull ? sectorOrNull.holdHex
                     : (city ? (gameData.hexes[`${city.q},${city.r}`] || { x: city.x, y: city.y, q: city.q, r: city.r })
-                    : (strikeHex || null));
+                    : (fort ? (gameData.hexes[`${fort.q},${fort.r}`] || { x: fort.x, y: fort.y, q: fort.q, r: fort.r })
+                    : (strikeHex || null)));
                 let attackHex = sectorOrNull ? sectorOrNull.attackHex : (strikeHex || holdHex);
-                if(!holdHex && !city && !strikeHex) return null;
+                if(!holdHex && !city && !strikeHex && !fort) return null;
                 let job = {
                     id: oid + '-tf-' + (jobId++),
                     kind,
@@ -36294,6 +36424,7 @@
                     holdHex,
                     attackHex,
                     city: city || null,
+                    fort: fort || null,
                     strikeHex: strikeHex || null,
                     quota: Math.max(1, quota | 0)
                 };
@@ -36301,12 +36432,16 @@
                 return job;
             }
 
-            // Defense quota FIRST — never optional leftovers.
+            // Defense quota FIRST — cities and forts, never optional leftovers.
             let defendQ = 0;
             let defendCaps = [];
-            let defendBudget = Math.min(Math.floor(n * 0.45), Math.max(0, n - 2));
-            for(let ti = 0; ti < threatJobs.length && ti < 3 && defendBudget > 0; ti++) {
-                let q = Math.min(threatJobs[ti].need, defendBudget, Math.max(2, Math.ceil(n * 0.2)));
+            let defendBudget = Math.min(Math.floor(n * 0.5), Math.max(0, n - 2));
+            for(let ti = 0; ti < threatJobs.length && ti < 5 && defendBudget > 0; ti++) {
+                let isFort = !!threatJobs[ti].fort;
+                let qCap = isFort
+                    ? Math.max(1, Math.ceil(n * 0.14))
+                    : Math.max(2, Math.ceil(n * 0.2));
+                let q = Math.min(threatJobs[ti].need, defendBudget, qCap);
                 if(q <= 0) continue;
                 defendCaps.push({ threat: threatJobs[ti], q });
                 defendQ += q;
@@ -36345,13 +36480,15 @@
 
             // Create jobs: defend → main → strike → hold spread → raid → reserve.
             for(let di = 0; di < defendCaps.length; di++) {
-                addJob('defend', 'fix', null, defendCaps[di].threat.city, defendCaps[di].q);
+                let th = defendCaps[di].threat;
+                addJob('defend', 'fix', null, th.city || null, defendCaps[di].q, null, th.fort || null);
             }
 
             if(scored.length && mainQ > 0) {
                 addJob('main', 'assault', scored[0].sector, null, mainQ);
             } else if(!jobs.length && threatJobs.length) {
-                addJob('defend', 'fix', null, threatJobs[0].city, n);
+                let th0 = threatJobs[0];
+                addJob('defend', 'fix', null, th0.city || null, n, null, th0.fort || null);
             }
 
             if(strikeQ > 0 && playerCities.length) {
@@ -36459,6 +36596,7 @@
             function jobTargetXY(job) {
                 if(job.kind === 'strike' && job.strikeHex) return { x: job.strikeHex.x, y: job.strikeHex.y };
                 if(job.city) return { x: job.city.x, y: job.city.y };
+                if(job.fort) return { x: job.fort.x, y: job.fort.y };
                 if(job.kind === 'reserve' && job.holdHex) {
                     let dx = (job.attackHex.x - job.holdHex.x);
                     let dy = (job.attackHex.y - job.holdHex.y);
@@ -36478,15 +36616,19 @@
                 u.aiTfKind = job.kind;
                 u.aiTfRole = job.role;
                 u.aiCityStriker = job.kind === 'strike';
+                if(job.kind === 'defend' && job.fort) u.aiFortGuard = job.fort.id;
             }
 
-            // Pass 1: city defense — nearest free units.
+            // Pass 1: city/fort defense — nearest free units.
             for(let ji = 0; ji < jobs.length; ji++) {
                 let job = jobs[ji];
-                if(job.kind !== 'defend' || !job.city) continue;
+                if(job.kind !== 'defend') continue;
+                let tx = job.city ? job.city.x : (job.fort && job.fort.x);
+                let ty = job.city ? job.city.y : (job.fort && job.fort.y);
+                if(tx == null) continue;
                 let candidates = ready.slice()
                     .filter(u => !assignedUid.has(u.uid))
-                    .sort((a, b) => wodAiDist2(a.x, a.y, job.city.x, job.city.y) - wodAiDist2(b.x, b.y, job.city.x, job.city.y));
+                    .sort((a, b) => wodAiDist2(a.x, a.y, tx, ty) - wodAiDist2(b.x, b.y, tx, ty));
                 for(let ci = 0; ci < candidates.length && filled[job.id] < job.quota; ci++)
                     assignToJob(candidates[ci], job);
             }
@@ -36559,10 +36701,12 @@
             unit.aiTfRole = job.role;
             let hr = gameData.hexRadius || 20;
 
-            if(job.kind === 'defend' && job.city) {
-                let defHex = gameData.hexes[`${job.city.q},${job.city.r}`];
-                if(!defHex) defHex = { x: job.city.x, y: job.city.y, q: job.city.q, r: job.city.r };
-                // Hold the city tile once close; otherwise march in.
+            if(job.kind === 'defend' && (job.city || job.fort)) {
+                let t = job.city || job.fort;
+                let defHex = gameData.hexes[`${t.q},${t.r}`];
+                if(!defHex) defHex = { x: t.x, y: t.y, q: t.q, r: t.r };
+                if(job.fort) unit.aiFortGuard = job.fort.id;
+                // Hold the city/fort tile once close; otherwise march in.
                 let near = wodAiDist2(unit.x, unit.y, defHex.x, defHex.y) < Math.pow(hr * 3.2, 2);
                 let moved = wodAiMoveUnitTowardHex(unit, defHex, near, near ? 0.35 : 0.55);
                 if(moved) wodAiStampOrder(unit, near, defHex);
@@ -37405,18 +37549,21 @@
                     }
                     {
                         let defCity = wodAiPickThreatenedCityForUnit(w, unit);
-                        if(defCity && (!tfJob || tfJob.kind !== 'defend')) {
+                        let defFort = (!defCity) ? wodAiPickThreatenedFortForUnit(w, unit) : null;
+                        let defT = defCity || defFort;
+                        if(defT && (!tfJob || tfJob.kind !== 'defend')) {
                             let hrE = gameData.hexRadius || 20;
                             let reach2 = Math.pow(hrE * 16, 2);
-                            let d2 = wodAiDist2(unit.x, unit.y, defCity.x, defCity.y);
+                            let d2 = wodAiDist2(unit.x, unit.y, defT.x, defT.y);
                             let onStrike = tfJob && (tfJob.kind === 'strike' || tfJob.kind === 'main');
                             // Always peel if close; also peel non-strike units from farther away.
                             if(d2 <= reach2 && (!onStrike || d2 <= Math.pow(hrE * 10, 2))) {
-                                let defHex = gameData.hexes[`${defCity.q},${defCity.r}`];
+                                let defHex = gameData.hexes[`${defT.q},${defT.r}`];
                                 if(defHex && wodAiMoveUnitTowardHex(unit, defHex, false, 0.5)) {
                                     unit.aiTfKind = 'defend';
                                     unit.aiTfRole = 'fix';
                                     unit.aiCityStriker = false;
+                                    if(defFort) unit.aiFortGuard = defFort.id;
                                     wodAiStampOrder(unit, false, defHex);
                                     continue;
                                 }
@@ -37666,7 +37813,7 @@
 
             if(!gameData._aiFortGuardTimer) gameData._aiFortGuardTimer = 0;
             gameData._aiFortGuardTimer += dt;
-            if(gameData._aiFortGuardTimer > 14) {
+            if(gameData._aiFortGuardTimer > 6.5) {
                 gameData._aiFortGuardTimer = 0;
                 if(!gameData._aiFortGuardOwners) {
                     gameData._aiFortGuardOwners = [];
@@ -50399,6 +50546,7 @@
                     else if(mode === 'heavy' && !city.hasFactory) showNotification('Armor requires a factory!');
                     else if(mode === 'ship' && !city.hasHarbor) showNotification('Requires harbor!');
                     else if(mode === 'marine' && !cityHasWaterNeighbor(city)) showNotification('Marines train only at coastal towns (water adjacent).');
+                    else if(isCityEncircledForProduction(city)) showNotification('This town is encircled — training and shipbuilding are cut off until a corridor reopens.');
                     else if(isCitySiegeBlockedForProduction(city)) showNotification('Urban combat at this town — training and shipbuilding are paused until the battle clears.');
                     else showNotification(mode === 'ship' ? 'No water nearby!' : 'No clear spawn area near this town!');
                 }
@@ -50524,6 +50672,10 @@
         }
 
         function spawnUnit(type, city, owner) {
+            if(isCityEncircledForProduction(city)) {
+                if(owner === 1) showNotification('This town is encircled — cannot produce combat units until a corridor reopens.');
+                return;
+            }
             if(isCitySiegeBlockedForProduction(city)) {
                 if(owner === 1) showNotification('Urban combat at this town — cannot produce combat units until the plaza is clear.');
                 return;
