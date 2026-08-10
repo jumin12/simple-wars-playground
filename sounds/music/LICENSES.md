@@ -10,7 +10,7 @@ Only public-domain / CC commercial-use recordings are shipped.
 ## Playlist (playback order)
 
 1. Albinoni Adagio — PD (Musopen)
-2. Bach Air — PD (1920)
+2. Bach Air on the G String — PD (U.S. Air Force Strings, *Collage* 2000)
 3. Bach Badinerie — CC0
 4. Suppé Light Cavalry — PD (U.S. Marine Band) *[added]*
 5. Berlioz Hungarian March — PD (U.S. Marine Band)
@@ -30,13 +30,22 @@ Only public-domain / CC commercial-use recordings are shipped.
 19. Mussorgsky Hut on Fowl's Legs — PD (Musopen)
 20. Verdi Aida Triumphal March — PD (U.S. Marine Band) *[added]*
 21. Strauss Radetzky March — PD (U.S. Marine Band) *[added]*
-22. Tchaikovsky Marche Slave — PD (1921 78) *[added]*
+22. Tchaikovsky Marche Slave — **CC BY 4.0** (Omega13a) *[added]*
 23. Tchaikovsky 1812 Overture — PD (Skidmore / Musopen)
 24. Vivaldi Largo — **CC BY-SA 3.0**
 25. Wagner Entry of the Gods — PD (1920 78)
 26. Wagner Lohengrin Act 3 Prelude — PD (1917 78)
-27. Wagner Siegfried's Funeral March — PD (1920 78) *[added]*
-28. Wagner Ride of the Valkyries — PD (1921 Edison)
+27. Wagner Siegfried's Funeral March and Finale — PD (U.S. Marine Band, 1981) *[added]*
+28. Wagner Ride of the Valkyries — **CC BY 3.0** (Philip Milman)
+
+## Attribution-required (must credit in-game / credits)
+
+- Handel Sarabande — CC BY 3.0 — Soundtrack Organ
+- Mozart Clarinet Adagio — CC BY 2.5 — Commons performer
+- Albéniz Asturias — CC BY-SA 4.0 — David Hernando Vitores
+- Vivaldi Largo — CC BY-SA 3.0 — Commons performer
+- Tchaikovsky Marche Slave — CC BY 4.0 — Omega13a
+- Wagner Ride of the Valkyries — CC BY 3.0 — Philip Milman
 
 ## Still missing from original HOI1 list
 
