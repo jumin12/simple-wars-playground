@@ -20,16 +20,18 @@
 
   function clamp01(n) {
     n = Number(n);
-    if (!isFinite(n)) return 0.45;
+    if (!isFinite(n)) return 1;
     return Math.max(0, Math.min(1, n));
   }
 
   function getVolume() {
     try {
       const v = localStorage.getItem(STORAGE_VOL);
-      return v == null ? 0.45 : clamp01(v);
+      // New default is 100%; migrate the previous 45% factory default once.
+      if (v == null || v === '0.45') return 1;
+      return clamp01(v);
     } catch (_) {
-      return 0.45;
+      return 1;
     }
   }
 
@@ -159,20 +161,26 @@
   /**
    * Preload playlist audio during boot splash.
    * onProgress(fraction 0..1, label) is optional.
+   * opts.playAsSoonAsReady — start BGM after the first track is buffered (during splash).
    */
-  async function preloadAll(onProgress) {
+  async function preloadAll(onProgress, opts) {
+    opts = opts || {};
     await loadPlaylist();
     if (preloadPromise) return preloadPromise;
     preloadPromise = (async () => {
       const list = tracks.slice();
       if (!list.length) return { loaded: 0, total: 0 };
       let loaded = 0;
-      // First track first (menu starts sooner), then the rest in parallel batches
+      // First track first so playback can begin during the splash, then the rest
       if (list[0]) {
         if (onProgress) onProgress(0.02, 'Loading music…');
         await preloadOne(list[0].file);
         loaded = 1;
         if (onProgress) onProgress(loaded / list.length, 'Loading music…');
+        if (opts.playAsSoonAsReady) {
+          wanted = true;
+          playCurrent();
+        }
       }
       const rest = list.slice(1);
       const batchSize = 3;

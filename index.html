@@ -11027,8 +11027,8 @@
                     <p style="margin:0 0 8px 0;">Music volume for the classical playlist (main menu and in-match). Saved in this browser.</p>
                     <label style="display:flex;align-items:center;gap:10px;max-width:420px;">
                         <span style="min-width:70px;">Volume</span>
-                        <input type="range" class="wod-music-vol" min="0" max="100" value="45" style="flex:1;" aria-label="Music volume" />
-                        <span class="wod-music-vol-label" style="min-width:3ch;text-align:right;">45</span>%
+                        <input type="range" class="wod-music-vol" min="0" max="100" value="100" style="flex:1;" aria-label="Music volume" />
+                        <span class="wod-music-vol-label" style="min-width:3ch;text-align:right;">100</span>%
                     </label>
                     <label style="display:flex;align-items:center;gap:10px;margin-top:10px;cursor:pointer;">
                         <input type="checkbox" class="wod-music-mute" aria-label="Mute music" />
@@ -11544,8 +11544,8 @@
                         <h4 style="color:#f1c40f;margin:0 0 8px 0;">Sound</h4>
                         <label style="display:flex;align-items:center;gap:10px;max-width:420px;">
                             <span style="min-width:70px;">Volume</span>
-                            <input type="range" class="wod-music-vol" min="0" max="100" value="45" style="flex:1;" aria-label="Music volume" />
-                            <span class="wod-music-vol-label" style="min-width:3ch;text-align:right;">45</span>%
+                            <input type="range" class="wod-music-vol" min="0" max="100" value="100" style="flex:1;" aria-label="Music volume" />
+                            <span class="wod-music-vol-label" style="min-width:3ch;text-align:right;">100</span>%
                         </label>
                         <label style="display:flex;align-items:center;gap:10px;margin-top:10px;cursor:pointer;">
                             <input type="checkbox" class="wod-music-mute" aria-label="Mute music" />
@@ -35314,39 +35314,43 @@
 
             (async () => {
                 try {
-                    await bootStage('Loading interface…', 6, null, 20);
-                    await bootStage('Starting worker pool…', 14, () => {
+                    // Music first: buffer playlist and begin playback during the splash (before menu).
+                    await bootStage('Loading music…', 4, async () => {
+                        if(!window.wodMusic || typeof window.wodMusic.preloadAll !== 'function') return;
+                        try {
+                            window.wodMusic.bindUi();
+                            window.wodMusic.bindUnlockGestures();
+                            await window.wodMusic.preloadAll((frac, label) => {
+                                let pct = 4 + Math.round(Math.max(0, Math.min(1, frac || 0)) * 40);
+                                if(caption && label) caption.textContent = label;
+                                wodSetBootSplashProgress(pct);
+                            }, { playAsSoonAsReady: true });
+                            await window.wodMusic.start();
+                        } catch(e) { console.warn(e); }
+                    }, 8);
+                    await bootStage('Loading interface…', 48, null, 16);
+                    await bootStage('Starting worker pool…', 54, () => {
                         wodEnsureMapGenWorkerPool();
                         wodEnsurePowWorkers();
                         wodEnsureSepWorker();
                         try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
                     }, 16);
-                    await bootStage('Terrain palettes…', 22, () => {
+                    await bootStage('Terrain palettes…', 58, () => {
                         normalizeTerrainHexes();
                         updateTerrainKey({ skipHelp: true });
                     }, 18);
-                    await bootStage('Precaching battle effects…', 28, () => wodEnsureFxPrecache(), 22);
-                    await bootStage('Loading music…', 32, async () => {
-                        if(!window.wodMusic || typeof window.wodMusic.preloadAll !== 'function') return;
-                        try {
-                            await window.wodMusic.preloadAll((frac, label) => {
-                                let pct = 32 + Math.round(Math.max(0, Math.min(1, frac || 0)) * 6);
-                                if(caption && label) caption.textContent = label;
-                                wodSetBootSplashProgress(pct);
-                            });
-                        } catch(e) { console.warn(e); }
-                    }, 10);
-                    await bootStage('Menu UI chrome…', 40, null, 14);
-                    await wodBootRunWithProgress(caption, 42, 66, 'Building menu battlefield', () => bootstrapMenuBackgroundBattle());
-                    await bootStage('Baking terrain layers…', 72, () => {
+                    await bootStage('Precaching battle effects…', 62, () => wodEnsureFxPrecache(), 22);
+                    await bootStage('Menu UI chrome…', 66, null, 14);
+                    await wodBootRunWithProgress(caption, 68, 84, 'Building menu battlefield', () => bootstrapMenuBackgroundBattle());
+                    await bootStage('Baking terrain layers…', 88, () => {
                         updateTerrainCache();
                         draw();
                     }, 20);
-                    await bootStage('Warming battle AI…', 82, () => {
+                    await bootStage('Warming battle AI…', 92, () => {
                         let dtSim = 2 / 60;
                         for(let i = 0; i < 6; i++) update(dtSim);
                     }, 18);
-                    await bootStage('Pathfinding caches…', 90, () => {
+                    await bootStage('Pathfinding caches…', 95, () => {
                         let movable = gameData.entities.filter(u => u && u.hp > 0 && u.type !== 'convoy').slice(0, 6);
                         for(let u of movable) {
                             let h = getNearestWalkableHexForUnit(u, u.x, u.y, 8);
@@ -35354,7 +35358,7 @@
                         }
                         syncInfoCardPanelThrottled();
                     }, 18);
-                    await bootStage('Final frame…', 96, () => {
+                    await bootStage('Final frame…', 97, () => {
                         draw();
                     }, 14);
 
