@@ -35777,14 +35777,22 @@
             let cached = w.threatByOwner[owner];
             if(cached) return cached;
             let out = [];
+            let hr = gameData.hexRadius || 20;
             for(let c of gameData.cities) {
                 if(c.owner !== owner) continue;
-                let enemies = countNearbyUnits(owner, c.x, c.y, 300, true);
-                if(enemies <= 0) continue;
+                let enemies = countNearbyUnits(owner, c.x, c.y, Math.max(320, hr * 14), true);
+                let frontTouch = false;
+                let ch = gameData.hexes[`${c.q},${c.r}`];
+                if(ch) {
+                    frontTouch = isFrontlineHex(ch, owner)
+                        || getNeighborHexes(ch).some(n => n && n.owner > 0 && n.owner !== owner);
+                }
+                if(enemies <= 0 && !frontTouch) continue;
+                let defenders = countNearbyUnits(owner, c.x, c.y, Math.max(260, hr * 11));
                 out.push({
                     city: c,
-                    enemies,
-                    defenders: countNearbyUnits(owner, c.x, c.y, 240),
+                    enemies: Math.max(enemies, frontTouch ? 1 : 0),
+                    defenders,
                     assigned: 0
                 });
             }
@@ -35888,7 +35896,8 @@
                 }
                 // Fixing / reserve task forces are meant to stay on the line — do not
                 // dissolve just because a couple of friends showed up nearby.
-                if(unit.aiTfRole === 'fix' || unit.aiTfRole === 'reserve' || unit.aiTfKind === 'hold') {
+                if(unit.aiTfRole === 'fix' || unit.aiTfRole === 'reserve'
+                    || unit.aiTfKind === 'hold' || unit.aiTfKind === 'defend') {
                     if(!unit.aiOrderUntil || performance.now() >= unit.aiOrderUntil) return false;
                     return true;
                 }
@@ -36078,12 +36087,21 @@
             if(job.kind === 'defend' && job.city) {
                 let c = job.city;
                 if(!c || c.owner !== owner) return false;
-                return countNearbyUnits(owner, c.x, c.y, 320, true) > 0;
+                let hr = gameData.hexRadius || 20;
+                let enemies = countNearbyUnits(owner, c.x, c.y, Math.max(320, hr * 14), true);
+                let ch = gameData.hexes[`${c.q},${c.r}`];
+                let frontTouch = ch && (isFrontlineHex(ch, owner)
+                    || getNeighborHexes(ch).some(n => n && n.owner > 0 && n.owner !== owner));
+                return enemies > 0 || !!frontTouch;
+            }
+            if(job.kind === 'strike' && job.strikeHex) {
+                let h = job.strikeHex;
+                return !!(h && h.owner !== owner);
             }
             if(!job.holdHex) return false;
             let h = gameData.hexes[`${job.holdHex.q},${job.holdHex.r}`] || job.holdHex;
+            if(job.kind === 'reserve') return !!(h && (h.owner === owner || h.owner === 0));
             if(!h || h.owner !== owner) return false;
-            if(job.kind === 'reserve') return true;
             // Front jobs die when the hold tile is no longer contested / near enemies.
             if(job.kind === 'hold' || job.kind === 'main' || job.kind === 'raid') {
                 let enemies = countNearbyUnits(owner, h.x, h.y, 280, true);
@@ -36117,9 +36135,35 @@
                 return null;
             }
 
+            // Threatened own cities — detect early so sticky plans rebuild when defense is needed.
+            let hr = gameData.hexRadius || 20;
+            let threatJobs = [];
+            for(let ci = 0; ci < gameData.cities.length; ci++) {
+                let c = gameData.cities[ci];
+                if(c.owner !== oid) continue;
+                let enemies = countNearbyUnits(oid, c.x, c.y, Math.max(320, hr * 14), true);
+                let frontTouch = false;
+                let ch = gameData.hexes[`${c.q},${c.r}`];
+                if(ch) {
+                    frontTouch = getNeighborHexes(ch).some(n => n && n.owner > 0 && n.owner !== oid)
+                        || isFrontlineHex(ch, oid);
+                }
+                if(enemies <= 0 && !frontTouch) continue;
+                let defenders = countNearbyUnits(oid, c.x, c.y, Math.max(260, hr * 11));
+                // Keep a real garrison: at least enemies+2, or 2 if only front-adjacent.
+                let need = enemies > 0
+                    ? Math.max(2, Math.min(8, enemies + 2 - Math.min(defenders, enemies + 1)))
+                    : (defenders < 2 ? 2 - defenders : 0);
+                if(need <= 0) continue;
+                threatJobs.push({ city: c, enemies, defenders, need, frontTouch });
+            }
+            threatJobs.sort((a, b) => (b.enemies - a.enemies) || (b.need - a.need));
+            let threatSig = threatJobs.map(t => (t.city.id || (t.city.q + ',' + t.city.r)) + ':' + t.need).join('|');
+
             let prev = gameData.aiTaskForces[oid];
             let sizeDelta = prev ? Math.abs((prev.readyN || 0) - n) : 99;
-            let stickyOk = prev && prev.expireAt > now && sizeDelta <= Math.max(2, Math.floor(n * 0.28));
+            let threatChanged = prev && (prev.threatSig || '') !== threatSig;
+            let stickyOk = prev && prev.expireAt > now && sizeDelta <= Math.max(2, Math.floor(n * 0.28)) && !threatChanged;
             if(stickyOk) {
                 // Drop dead jobs / dead members; rehome orphans without full rebuild.
                 let aliveJobs = [];
@@ -36131,14 +36175,36 @@
                     prev.jobs = aliveJobs;
                     let jobById = {};
                     for(let ji = 0; ji < aliveJobs.length; ji++) jobById[aliveJobs[ji].id] = aliveJobs[ji];
-                    let claimed = new Set();
                     for(let uid in prev.unitJob) {
-                        let jid = prev.unitJob[uid];
-                        if(!jobById[jid]) {
-                            delete prev.unitJob[uid];
-                            continue;
+                        if(!jobById[prev.unitJob[uid]]) delete prev.unitJob[uid];
+                    }
+                    function membersOf(jid) {
+                        let m = 0;
+                        for(let uid in prev.unitJob) if(prev.unitJob[uid] === jid) m++;
+                        return m;
+                    }
+                    // Peel nearest non-defend units onto underfilled defend jobs.
+                    for(let ji = 0; ji < aliveJobs.length; ji++) {
+                        let job = aliveJobs[ji];
+                        if(job.kind !== 'defend' || !job.city) continue;
+                        while(membersOf(job.id) < job.quota) {
+                            let bestU = null, bestD = Infinity;
+                            for(let ui = 0; ui < ready.length; ui++) {
+                                let u = ready[ui];
+                                let cur = prev.unitJob[u.uid];
+                                if(cur === job.id) continue;
+                                let curJob = cur && jobById[cur];
+                                if(curJob && curJob.kind === 'defend') continue;
+                                let d2 = wodAiDist2(u.x, u.y, job.city.x, job.city.y);
+                                if(d2 < bestD) { bestD = d2; bestU = u; }
+                            }
+                            if(!bestU) break;
+                            prev.unitJob[bestU.uid] = job.id;
+                            bestU.aiTfJobId = job.id;
+                            bestU.aiTfKind = 'defend';
+                            bestU.aiTfRole = 'fix';
+                            bestU.aiCityStriker = false;
                         }
-                        claimed.add(uid);
                     }
                     for(let ui = 0; ui < ready.length; ui++) {
                         let u = ready[ui];
@@ -36151,19 +36217,29 @@
                                 continue;
                             }
                         }
-                        // Orphan: park on nearest underfilled job.
+                        // Orphan: prefer underfilled defend/hold/raid — never dump everyone on main.
                         let best = null, bestSc = Infinity;
                         for(let ji = 0; ji < aliveJobs.length; ji++) {
                             let job = aliveJobs[ji];
-                            let members = 0;
-                            for(let uid in prev.unitJob) if(prev.unitJob[uid] === job.id) members++;
-                            if(members >= job.quota && job.kind !== 'main') continue;
-                            let hx = job.holdHex ? job.holdHex.x : (job.city && job.city.x);
-                            let hy = job.holdHex ? job.holdHex.y : (job.city && job.city.y);
+                            let members = membersOf(job.id);
+                            if(members >= job.quota) continue;
+                            let hx = job.kind === 'strike' && job.strikeHex ? job.strikeHex.x
+                                : (job.city ? job.city.x : (job.holdHex && job.holdHex.x));
+                            let hy = job.kind === 'strike' && job.strikeHex ? job.strikeHex.y
+                                : (job.city ? job.city.y : (job.holdHex && job.holdHex.y));
                             if(hx == null) continue;
-                            let sc = wodAiDist2(u.x, u.y, hx, hy) + members * 40000;
+                            let kindBias = job.kind === 'defend' ? -200000
+                                : (job.kind === 'hold' ? -80000
+                                : (job.kind === 'raid' ? -40000
+                                : (job.kind === 'strike' ? -20000
+                                : (job.kind === 'main' ? 120000 : 0))));
+                            let sc = wodAiDist2(u.x, u.y, hx, hy) + members * 50000 + kindBias;
                             if(sc < bestSc) { bestSc = sc; best = job; }
                         }
+                        if(!best) best = aliveJobs.find(j => j.kind === 'hold')
+                            || aliveJobs.find(j => j.kind === 'raid')
+                            || aliveJobs.find(j => j.kind === 'reserve')
+                            || aliveJobs[0];
                         if(best) {
                             prev.unitJob[u.uid] = best.id;
                             u.aiTfJobId = best.id;
@@ -36172,6 +36248,7 @@
                         }
                     }
                     prev.readyN = n;
+                    prev.threatSig = threatSig;
                     return prev;
                 }
             }
@@ -36191,22 +36268,25 @@
                     let c = gameData.cities[ci];
                     if(c.owner === oid) continue;
                     let ddx = c.x - s.attackHex.x, ddy = c.y - s.attackHex.y;
-                    if(ddx * ddx + ddy * ddy < 280 * 280) cityNear += (c.owner === 1 ? 10 : 5);
+                    if(ddx * ddx + ddy * ddy < 280 * 280) cityNear += (c.owner === 1 ? 6 : 3);
                 }
-                let playerAdj = getNeighborHexes(s.holdHex).some(nh => nh && nh.owner === 1) ? 4 : 0;
+                let playerAdj = getNeighborHexes(s.holdHex).some(nh => nh && nh.owner === 1) ? 3 : 0;
+                // Mild penalty if this sector already has a friendly blob — spreads pressure.
                 scored.push({
                     sector: s,
-                    sc: sup * 2.2 - en * 1.35 + cityNear + playerAdj - si * 0.4
+                    sc: sup * 1.1 - en * 1.2 + cityNear + playerAdj - si * 0.55 - Math.max(0, sup - 4) * 1.8
                 });
             }
             scored.sort((a, b) => b.sc - a.sc);
 
             let jobs = [];
             let jobId = 1;
-            function addJob(kind, role, sectorOrNull, city, quota) {
-                let holdHex = sectorOrNull ? sectorOrNull.holdHex : (city ? (gameData.hexes[`${city.q},${city.r}`] || { x: city.x, y: city.y, q: city.q, r: city.r }) : null);
-                let attackHex = sectorOrNull ? sectorOrNull.attackHex : holdHex;
-                if(!holdHex && !city) return null;
+            function addJob(kind, role, sectorOrNull, city, quota, strikeHex) {
+                let holdHex = sectorOrNull ? sectorOrNull.holdHex
+                    : (city ? (gameData.hexes[`${city.q},${city.r}`] || { x: city.x, y: city.y, q: city.q, r: city.r })
+                    : (strikeHex || null));
+                let attackHex = sectorOrNull ? sectorOrNull.attackHex : (strikeHex || holdHex);
+                if(!holdHex && !city && !strikeHex) return null;
                 let job = {
                     id: oid + '-tf-' + (jobId++),
                     kind,
@@ -36214,71 +36294,86 @@
                     holdHex,
                     attackHex,
                     city: city || null,
+                    strikeHex: strikeHex || null,
                     quota: Math.max(1, quota | 0)
                 };
                 jobs.push(job);
                 return job;
             }
 
-            // Threatened cities first (defense always available as a job).
-            let threatJobs = [];
-            for(let ci = 0; ci < gameData.cities.length; ci++) {
-                let c = gameData.cities[ci];
-                if(c.owner !== oid) continue;
-                let enemies = countNearbyUnits(oid, c.x, c.y, 300, true);
-                if(enemies <= 0) continue;
-                let defenders = countNearbyUnits(oid, c.x, c.y, 240);
-                let need = Math.max(1, Math.min(6, enemies + 1 - Math.min(defenders, enemies)));
-                threatJobs.push({ city: c, enemies, need });
+            // Defense quota FIRST — never optional leftovers.
+            let defendQ = 0;
+            let defendCaps = [];
+            let defendBudget = Math.min(Math.floor(n * 0.45), Math.max(0, n - 2));
+            for(let ti = 0; ti < threatJobs.length && ti < 3 && defendBudget > 0; ti++) {
+                let q = Math.min(threatJobs[ti].need, defendBudget, Math.max(2, Math.ceil(n * 0.2)));
+                if(q <= 0) continue;
+                defendCaps.push({ threat: threatJobs[ti], q });
+                defendQ += q;
+                defendBudget -= q;
             }
-            threatJobs.sort((a, b) => b.enemies - a.enemies);
 
-            // Army-size doctrine: how many concurrent jobs.
-            let mainQ = 0, holdQ = 0, raidQ = 0, reserveQ = 0, defendQ = 0;
-            if(n <= 7) {
-                mainQ = Math.max(2, Math.ceil(n * 0.55));
-                holdQ = Math.max(1, n - mainQ);
-            } else if(n <= 18) {
-                mainQ = Math.ceil(n * (campAggro ? 0.5 : 0.45));
-                reserveQ = Math.max(1, Math.round(n * 0.12));
-                holdQ = Math.max(2, n - mainQ - reserveQ);
-            } else {
-                mainQ = Math.ceil(n * (campAggro ? 0.48 : 0.42));
-                raidQ = Math.max(2, Math.round(n * 0.14));
-                reserveQ = Math.max(2, Math.round(n * 0.12));
-                holdQ = Math.max(2, n - mainQ - raidQ - reserveQ);
-            }
-            for(let ti = 0; ti < threatJobs.length && ti < 2; ti++) {
-                let need = Math.min(threatJobs[ti].need, Math.max(1, Math.floor(n * 0.22)));
-                defendQ += need;
-            }
-            // Steal defense quota from hold/raid/reserve, never gut main below ~35%.
-            let steal = defendQ;
-            let stealFrom = () => {
-                if(holdQ > 1 && steal > 0) { holdQ--; steal--; return; }
-                if(raidQ > 0 && steal > 0) { raidQ--; steal--; return; }
-                if(reserveQ > 1 && steal > 0) { reserveQ--; steal--; return; }
-                if(mainQ > Math.ceil(n * 0.35) && steal > 0) { mainQ--; steal--; }
-            };
-            while(steal > 0) {
-                let before = steal;
-                stealFrom();
-                if(steal === before) break;
-            }
-            defendQ -= steal;
+            let remaining = Math.max(0, n - defendQ);
+            // Hard-cap main effort so the army cannot blob on one hex.
+            let mainCap = n <= 8 ? Math.max(2, Math.ceil(n * 0.38))
+                : (n <= 20 ? Math.ceil(n * (campAggro ? 0.34 : 0.30))
+                : Math.ceil(n * (campAggro ? 0.32 : 0.28)));
+            mainCap = Math.min(mainCap, Math.max(2, remaining - 2));
+            let mainQ = scored.length ? Math.min(mainCap, Math.max(2, Math.ceil(remaining * (campAggro ? 0.4 : 0.34)))) : 0;
+            remaining -= mainQ;
 
-            if(scored.length) {
+            let strikeQ = 0;
+            let playerCities = wodAiCollectPlayerCityAttackHexes(oid);
+            if(playerCities.length && remaining >= 3 && n >= 8) {
+                strikeQ = Math.min(Math.max(2, Math.round(n * 0.16)), Math.floor(remaining * 0.35));
+                remaining -= strikeQ;
+            }
+
+            let raidQ = 0;
+            if(remaining >= 4 && n >= 14 && scored.length >= 3) {
+                raidQ = Math.min(Math.max(2, Math.round(n * 0.12)), Math.floor(remaining * 0.35));
+                remaining -= raidQ;
+            }
+
+            let reserveQ = 0;
+            if(remaining >= 3 && n >= 10) {
+                reserveQ = Math.min(Math.max(1, Math.round(n * 0.1)), Math.floor(remaining * 0.3));
+                remaining -= reserveQ;
+            }
+
+            let holdQ = Math.max(remaining, scored.length > 1 ? 1 : 0);
+
+            // Create jobs: defend → main → strike → hold spread → raid → reserve.
+            for(let di = 0; di < defendCaps.length; di++) {
+                addJob('defend', 'fix', null, defendCaps[di].threat.city, defendCaps[di].q);
+            }
+
+            if(scored.length && mainQ > 0) {
                 addJob('main', 'assault', scored[0].sector, null, mainQ);
-            } else if(threatJobs.length) {
-                // No front — fall back to defending / gathering at threatened city.
+            } else if(!jobs.length && threatJobs.length) {
                 addJob('defend', 'fix', null, threatJobs[0].city, n);
             }
 
-            // Hold jobs: next-best fronts that are spatially away from main.
+            if(strikeQ > 0 && playerCities.length) {
+                // Dedicated limited strike on a player city — not the whole army.
+                let tgt = playerCities[0];
+                let best = null, bestD = Infinity;
+                let focus = gameData.aiFrontFocus && gameData.aiFrontFocus[oid];
+                let fx = focus ? focus.x : (scored[0] ? scored[0].sector.holdHex.x : 0);
+                let fy = focus ? focus.y : (scored[0] ? scored[0].sector.holdHex.y : 0);
+                for(let pi = 0; pi < playerCities.length; pi++) {
+                    let h = playerCities[pi];
+                    let d2 = wodAiDist2(fx, fy, h.x, h.y);
+                    if(d2 < bestD) { bestD = d2; best = h; }
+                }
+                tgt = best || tgt;
+                addJob('strike', 'assault', null, null, strikeQ, tgt);
+            }
+
             let holdSlots = holdQ;
-            let holdJobCount = n <= 7 ? 1 : (n <= 18 ? 2 : 3);
+            let holdJobCount = n <= 8 ? 1 : (n <= 18 ? 2 : 3);
             let mainHold = scored[0] && scored[0].sector.holdHex;
-            let minHoldSep2 = Math.pow((gameData.hexRadius || 20) * 7.5, 2);
+            let minHoldSep2 = Math.pow(hr * 6.5, 2);
             for(let si = 1; si < scored.length && holdJobCount > 0 && holdSlots > 0; si++) {
                 let s = scored[si].sector;
                 if(mainHold) {
@@ -36290,118 +36385,154 @@
                 holdSlots -= q;
                 holdJobCount--;
             }
-            if(holdSlots > 0 && jobs.length) {
-                // Leftover hold quota reinforces the first hold job, else main.
-                let hj = jobs.find(j => j.kind === 'hold') || jobs.find(j => j.kind === 'main');
+            if(holdSlots > 0) {
+                let hj = jobs.find(j => j.kind === 'hold');
                 if(hj) hj.quota += holdSlots;
+                else if(scored.length > 1) addJob('hold', 'fix', scored[1].sector, null, holdSlots);
+                else if(reserveQ >= 0) reserveQ += holdSlots; // never dump into main
             }
 
-            // Raid: farthest high-value sector from main (flank pressure).
             if(raidQ > 0 && scored.length >= 3) {
                 let mainH = scored[0].sector.holdHex;
                 let bestRaid = null, bestD = -1;
-                for(let si = 2; si < Math.min(scored.length, 8); si++) {
+                for(let si = 2; si < Math.min(scored.length, 10); si++) {
                     let s = scored[si].sector;
                     let d2 = wodAiDist2(s.holdHex.x, s.holdHex.y, mainH.x, mainH.y);
                     if(d2 > bestD) { bestD = d2; bestRaid = s; }
                 }
-                if(bestRaid && bestD > Math.pow((gameData.hexRadius || 20) * 6, 2))
+                if(bestRaid && bestD > Math.pow(hr * 6, 2))
                     addJob('raid', 'screen', bestRaid, null, raidQ);
-                else if(jobs[0]) jobs[0].quota += raidQ;
-            }
-
-            for(let ti = 0; ti < threatJobs.length && defendQ > 0; ti++) {
-                let q = Math.min(threatJobs[ti].need, defendQ);
-                addJob('defend', 'fix', null, threatJobs[ti].city, q);
-                defendQ -= q;
+                else {
+                    let hj = jobs.find(j => j.kind === 'hold');
+                    if(hj) hj.quota += raidQ;
+                    else reserveQ += raidQ;
+                }
             }
 
             if(reserveQ > 0 && scored.length) {
                 addJob('reserve', 'reserve', scored[0].sector, null, reserveQ);
             }
 
-            // Normalize quotas to army size.
+            // Normalize quotas: surplus spreads to hold/raid/reserve — NOT main.
             let sumQ = 0;
             for(let ji = 0; ji < jobs.length; ji++) sumQ += jobs[ji].quota;
             if(sumQ < n && jobs.length) {
-                let mainJob = jobs.find(j => j.kind === 'main') || jobs[0];
-                mainJob.quota += (n - sumQ);
+                let extra = n - sumQ;
+                let sink = jobs.find(j => j.kind === 'hold')
+                    || jobs.find(j => j.kind === 'raid')
+                    || jobs.find(j => j.kind === 'reserve')
+                    || jobs.find(j => j.kind === 'defend')
+                    || jobs.find(j => j.kind === 'strike');
+                if(sink) sink.quota += extra;
+                else {
+                    let mj = jobs.find(j => j.kind === 'main');
+                    if(mj) mj.quota = Math.min(mainCap, mj.quota + extra);
+                }
             } else if(sumQ > n) {
-                // Trim from raid/reserve/hold first.
                 let over = sumQ - n;
-                let order = ['raid', 'reserve', 'hold', 'defend', 'main'];
+                let order = ['reserve', 'raid', 'strike', 'hold', 'main', 'defend'];
                 for(let oi = 0; oi < order.length && over > 0; oi++) {
                     for(let ji = 0; ji < jobs.length && over > 0; ji++) {
                         if(jobs[ji].kind !== order[oi]) continue;
-                        let cut = Math.min(over, Math.max(0, jobs[ji].quota - 1));
+                        let minKeep = jobs[ji].kind === 'defend' ? 1 : 1;
+                        let cut = Math.min(over, Math.max(0, jobs[ji].quota - minKeep));
                         jobs[ji].quota -= cut;
                         over -= cut;
                     }
                 }
             }
+            // Final hard cap on main blob size.
+            for(let ji = 0; ji < jobs.length; ji++) {
+                if(jobs[ji].kind === 'main' && jobs[ji].quota > mainCap) {
+                    let spill = jobs[ji].quota - mainCap;
+                    jobs[ji].quota = mainCap;
+                    let sink = jobs.find(j => j.kind === 'hold') || jobs.find(j => j.kind === 'reserve');
+                    if(sink) sink.quota += spill;
+                }
+            }
 
-            // Assign units: greedy fitness into underfilled jobs.
+            // Assign: fill defend first (nearest units), then other jobs.
             let unitJob = {};
             let filled = {};
+            let assignedUid = new Set();
             for(let ji = 0; ji < jobs.length; ji++) filled[jobs[ji].id] = 0;
-            let pool = ready.slice().sort((a, b) => wodAiUnitCombatPower(b) - wodAiUnitCombatPower(a));
             function jobTargetXY(job) {
+                if(job.kind === 'strike' && job.strikeHex) return { x: job.strikeHex.x, y: job.strikeHex.y };
                 if(job.city) return { x: job.city.x, y: job.city.y };
                 if(job.kind === 'reserve' && job.holdHex) {
-                    // Sit behind the main axis.
                     let dx = (job.attackHex.x - job.holdHex.x);
                     let dy = (job.attackHex.y - job.holdHex.y);
                     let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
                     return {
-                        x: job.holdHex.x - (dx / len) * (gameData.hexRadius || 20) * 3.2,
-                        y: job.holdHex.y - (dy / len) * (gameData.hexRadius || 20) * 3.2
+                        x: job.holdHex.x - (dx / len) * hr * 3.2,
+                        y: job.holdHex.y - (dy / len) * hr * 3.2
                     };
                 }
                 return job.holdHex ? { x: job.holdHex.x, y: job.holdHex.y } : null;
             }
+            function assignToJob(u, job) {
+                unitJob[u.uid] = job.id;
+                filled[job.id] = (filled[job.id] || 0) + 1;
+                assignedUid.add(u.uid);
+                u.aiTfJobId = job.id;
+                u.aiTfKind = job.kind;
+                u.aiTfRole = job.role;
+                u.aiCityStriker = job.kind === 'strike';
+            }
+
+            // Pass 1: city defense — nearest free units.
+            for(let ji = 0; ji < jobs.length; ji++) {
+                let job = jobs[ji];
+                if(job.kind !== 'defend' || !job.city) continue;
+                let candidates = ready.slice()
+                    .filter(u => !assignedUid.has(u.uid))
+                    .sort((a, b) => wodAiDist2(a.x, a.y, job.city.x, job.city.y) - wodAiDist2(b.x, b.y, job.city.x, job.city.y));
+                for(let ci = 0; ci < candidates.length && filled[job.id] < job.quota; ci++)
+                    assignToJob(candidates[ci], job);
+            }
+
+            // Pass 2: everyone else by fitness; overfill prefers hold/raid over main.
+            let pool = ready.filter(u => !assignedUid.has(u.uid))
+                .sort((a, b) => wodAiUnitCombatPower(b) - wodAiUnitCombatPower(a));
             for(let ui = 0; ui < pool.length; ui++) {
                 let u = pool[ui];
                 let best = null, bestSc = Infinity;
                 for(let ji = 0; ji < jobs.length; ji++) {
                     let job = jobs[ji];
+                    if(job.kind === 'defend') continue;
                     if(filled[job.id] >= job.quota) continue;
                     let xy = jobTargetXY(job);
                     if(!xy) continue;
-                    let d2 = wodAiDist2(u.x, u.y, xy.x, xy.y);
-                    let fit = d2;
-                    // Prefer heavies on main; lights on raid/screen; anyone for hold/defend.
-                    if(job.kind === 'main' && u.type === 'heavy') fit *= 0.72;
-                    if(job.kind === 'raid' && (u.type === 'light' || u.type === 'medium')) fit *= 0.75;
-                    if(job.kind === 'raid' && u.type === 'heavy') fit *= 1.25;
-                    if(job.kind === 'reserve' && u.type === 'heavy') fit *= 0.85;
-                    if(job.kind === 'defend') fit *= 0.8;
-                    // Slight preference to keep previous membership.
-                    if(prev && prev.unitJob && prev.unitJob[u.uid] === job.id) fit *= 0.62;
+                    let fit = wodAiDist2(u.x, u.y, xy.x, xy.y);
+                    if(job.kind === 'main' && u.type === 'heavy') fit *= 0.78;
+                    if(job.kind === 'strike' && (u.type === 'light' || u.type === 'medium')) fit *= 0.7;
+                    if(job.kind === 'raid' && u.type === 'light') fit *= 0.72;
+                    if(job.kind === 'raid' && u.type === 'heavy') fit *= 1.2;
+                    if(job.kind === 'main') fit *= 1.15; // mild anti-blob bias in scoring
+                    if(prev && prev.unitJob && prev.unitJob[u.uid] === job.id) fit *= 0.65;
                     if(fit < bestSc) { bestSc = fit; best = job; }
                 }
                 if(!best) {
-                    // All quotas full — dump into main.
-                    best = jobs.find(j => j.kind === 'main') || jobs[0];
+                    best = jobs.find(j => j.kind === 'hold' && filled[j.id] < j.quota + 2)
+                        || jobs.find(j => j.kind === 'raid' && filled[j.id] < j.quota + 2)
+                        || jobs.find(j => j.kind === 'reserve')
+                        || jobs.find(j => j.kind === 'strike')
+                        || jobs.find(j => j.kind === 'defend')
+                        || jobs.find(j => j.kind === 'main')
+                        || jobs[0];
                 }
-                if(best) {
-                    unitJob[u.uid] = best.id;
-                    filled[best.id] = (filled[best.id] || 0) + 1;
-                    u.aiTfJobId = best.id;
-                    u.aiTfKind = best.kind;
-                    u.aiTfRole = best.role;
-                    u.aiCityStriker = best.kind === 'main' && !!best.attackHex && gameData.cities.some(c =>
-                        c.owner !== oid && Math.abs(c.q - best.attackHex.q) + Math.abs(c.r - best.attackHex.r) <= 1);
-                }
+                if(best) assignToJob(u, best);
             }
 
             let plan = {
                 owner: oid,
                 builtAt: now,
-                expireAt: now + (campAggro ? 42000 : 65000),
+                expireAt: now + (campAggro ? 38000 : 55000),
                 readyN: n,
                 jobs,
                 unitJob,
-                sectors
+                sectors,
+                threatSig
             };
             gameData.aiTaskForces[oid] = plan;
             return plan;
@@ -36431,8 +36562,17 @@
             if(job.kind === 'defend' && job.city) {
                 let defHex = gameData.hexes[`${job.city.q},${job.city.r}`];
                 if(!defHex) defHex = { x: job.city.x, y: job.city.y, q: job.city.q, r: job.city.r };
-                let moved = wodAiMoveUnitTowardHex(unit, defHex, false, 0.45);
-                if(moved) wodAiStampOrder(unit, false, defHex);
+                // Hold the city tile once close; otherwise march in.
+                let near = wodAiDist2(unit.x, unit.y, defHex.x, defHex.y) < Math.pow(hr * 3.2, 2);
+                let moved = wodAiMoveUnitTowardHex(unit, defHex, near, near ? 0.35 : 0.55);
+                if(moved) wodAiStampOrder(unit, near, defHex);
+                return moved;
+            }
+
+            if(job.kind === 'strike' && job.strikeHex) {
+                unit.aiCityStriker = true;
+                let moved = wodAiMoveUnitTowardHex(unit, job.strikeHex, false, 0.5);
+                if(moved) wodAiStampOrder(unit, false, job.strikeHex);
                 return moved;
             }
 
@@ -37255,27 +37395,37 @@
                         unit.blockedTimer = 0;
                     }
 
-                    // Prefer sticky task-force job (general's assignment). City defense is
-                    // already a TF job; only emergency-steal if this unit has no TF plan yet.
+                    // Prefer sticky task-force job. Emergency: peel nearby units onto a
+                    // threatened own city even if their job was attack/hold.
                     let tfJob = wodAiGetUnitTaskJob(unit);
                     if(!tfJob) {
                         let grp = w.aiGroups[unit.owner];
                         if(grp) wodAiEnsureTaskForcePlan(unit.owner, grp);
                         tfJob = wodAiGetUnitTaskJob(unit);
                     }
+                    {
+                        let defCity = wodAiPickThreatenedCityForUnit(w, unit);
+                        if(defCity && (!tfJob || tfJob.kind !== 'defend')) {
+                            let hrE = gameData.hexRadius || 20;
+                            let reach2 = Math.pow(hrE * 16, 2);
+                            let d2 = wodAiDist2(unit.x, unit.y, defCity.x, defCity.y);
+                            let onStrike = tfJob && (tfJob.kind === 'strike' || tfJob.kind === 'main');
+                            // Always peel if close; also peel non-strike units from farther away.
+                            if(d2 <= reach2 && (!onStrike || d2 <= Math.pow(hrE * 10, 2))) {
+                                let defHex = gameData.hexes[`${defCity.q},${defCity.r}`];
+                                if(defHex && wodAiMoveUnitTowardHex(unit, defHex, false, 0.5)) {
+                                    unit.aiTfKind = 'defend';
+                                    unit.aiTfRole = 'fix';
+                                    unit.aiCityStriker = false;
+                                    wodAiStampOrder(unit, false, defHex);
+                                    continue;
+                                }
+                            }
+                        }
+                    }
                     if(tfJob) {
                         wodAiIssueTaskForceOrder(unit, tfJob, hpRatio);
                         continue;
-                    }
-
-                    // Fallback for edge cases (no front, plan failed): threatened city then sector.
-                    let defCity = wodAiPickThreatenedCityForUnit(w, unit);
-                    if(defCity) {
-                        let defHex = gameData.hexes[`${defCity.q},${defCity.r}`];
-                        if(defHex && wodAiMoveUnitTowardHex(unit, defHex, false, 0.5)) {
-                            wodAiStampOrder(unit, false, defHex);
-                            continue;
-                        }
                     }
 
                     let sectors = w.sectorsByOwner[unit.owner];
