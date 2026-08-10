@@ -308,6 +308,42 @@
             letter-spacing: 0.04em;
             color: rgba(255,255,255,0.72);
         }
+        .wod-boot-continue {
+            display: none;
+            margin-top: 4px;
+            min-width: 160px;
+            padding: 12px 28px;
+            font-size: 1rem;
+            letter-spacing: 0.06em;
+            border: 1px solid rgba(212, 175, 55, 0.65);
+            background: linear-gradient(180deg, rgba(60, 48, 28, 0.95), rgba(28, 22, 14, 0.98));
+            color: #f5e6b8;
+            cursor: pointer;
+            border-radius: 4px;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+        }
+        .wod-boot-continue.visible {
+            display: inline-block;
+            animation: wod-boot-continue-in 0.35s ease-out;
+        }
+        .wod-boot-continue:hover {
+            border-color: rgba(241, 196, 15, 0.9);
+            color: #fff6d0;
+            background: linear-gradient(180deg, rgba(80, 62, 32, 0.98), rgba(40, 30, 16, 1));
+        }
+        .wod-boot-continue:focus-visible {
+            outline: 2px solid rgba(241, 196, 15, 0.85);
+            outline-offset: 3px;
+        }
+        @keyframes wod-boot-continue-in {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .wod-load-panel.wod-boot-ready .wod-load-spinner {
+            animation: none;
+            border-color: rgba(212, 175, 55, 0.35);
+            border-top-color: rgba(212, 175, 55, 0.85);
+        }
 
         #wodMissionPopupOverlay {
             z-index: 100004;
@@ -9794,12 +9830,13 @@
 
     <div id="gameWrapper">
         <div id="wodBootOverlay" class="wod-load-overlay" aria-busy="true" aria-label="Loading game">
-            <div class="wod-load-panel">
+            <div class="wod-load-panel" id="wodBootPanel">
                 <div class="wod-load-spinner" aria-hidden="true"></div>
                 <div class="wod-load-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="wodBootBarTrack">
                     <div id="wodBootBarInner" class="wod-load-bar-inner"></div>
                 </div>
                 <div class="wod-load-caption" id="wodBootCaption">Preparing menu…</div>
+                <button type="button" id="wodBootContinue" class="wod-boot-continue" aria-label="Continue to main menu">Continue</button>
             </div>
         </div>
         <div id="wodMapGenOverlay" class="wod-load-overlay hidden" aria-busy="true" aria-label="Generating map">
@@ -35279,12 +35316,11 @@
                 await nextFrame();
             }
 
+            let continueBtn = document.getElementById('wodBootContinue');
+            let bootPanel = document.getElementById('wodBootPanel');
+
             function revealMenu() {
                 if(inner) inner.classList.remove('wod-boot-tween-suppress');
-                if(!bootErr) {
-                    if(caption) caption.textContent = 'Ready.';
-                    wodSetBootSplashProgress(100);
-                }
                 requestAnimationFrame(() => {
                     if(!bootErr) {
                         if(ov) {
@@ -35296,13 +35332,6 @@
                         if(gameState === 'MENU') {
                             if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
                             if(menuDemoSeeded) resumeMenuBackgroundBattle();
-                            if(window.wodMusic) {
-                                try {
-                                    window.wodMusic.bindUi();
-                                    window.wodMusic.bindUnlockGestures();
-                                    window.wodMusic.start();
-                                } catch(e) { console.warn(e); }
-                            }
                         }
                     }
                     gameData._wodSkipMapGenLoader = false;
@@ -35312,20 +35341,62 @@
                 });
             }
 
+            function showContinuePrompt() {
+                if(inner) inner.classList.remove('wod-boot-tween-suppress');
+                if(bootErr) {
+                    revealMenu();
+                    return;
+                }
+                wodSetBootSplashProgress(100);
+                if(caption) caption.textContent = 'Ready.';
+                if(bootPanel) bootPanel.classList.add('wod-boot-ready');
+                if(continueBtn) {
+                    continueBtn.classList.add('visible');
+                    continueBtn.focus();
+                } else {
+                    // Fallback if the button is missing for any reason
+                    if(window.wodMusic) {
+                        try {
+                            window.wodMusic.bindUi();
+                            window.wodMusic.unlockFromGesture();
+                            window.wodMusic.start();
+                        } catch(e) { console.warn(e); }
+                    }
+                    revealMenu();
+                }
+            }
+
+            function onBootContinue() {
+                if(continueBtn) {
+                    continueBtn.disabled = true;
+                    continueBtn.classList.remove('visible');
+                }
+                if(window.wodMusic) {
+                    try {
+                        window.wodMusic.bindUi();
+                        window.wodMusic.unlockFromGesture();
+                        window.wodMusic.start();
+                    } catch(e) { console.warn(e); }
+                }
+                revealMenu();
+            }
+            if(continueBtn && !continueBtn.dataset.bound) {
+                continueBtn.dataset.bound = '1';
+                continueBtn.addEventListener('click', onBootContinue);
+            }
+
             (async () => {
                 try {
-                    // Music first: buffer playlist and begin playback during the splash (before menu).
+                    // Music first: buffer the playlist during the splash; playback waits for Continue.
                     await bootStage('Loading music…', 4, async () => {
                         if(!window.wodMusic || typeof window.wodMusic.preloadAll !== 'function') return;
                         try {
                             window.wodMusic.bindUi();
-                            window.wodMusic.bindUnlockGestures();
                             await window.wodMusic.preloadAll((frac, label) => {
                                 let pct = 4 + Math.round(Math.max(0, Math.min(1, frac || 0)) * 40);
                                 if(caption && label) caption.textContent = label;
                                 wodSetBootSplashProgress(pct);
-                            }, { playAsSoonAsReady: true });
-                            await window.wodMusic.start();
+                            });
                         } catch(e) { console.warn(e); }
                     }, 8);
                     await bootStage('Loading interface…', 48, null, 16);
@@ -35371,7 +35442,7 @@
                         let eased = 1 - Math.pow(1 - u, 2.2);
                         wodSetBootSplashProgress(fillFrom + (100 - fillFrom) * eased);
                         if(u < 1) requestAnimationFrame(fillTick);
-                        else setTimeout(revealMenu, 120);
+                        else setTimeout(showContinuePrompt, 120);
                     }
                     requestAnimationFrame(fillTick);
                 } catch(err) {
@@ -35379,8 +35450,14 @@
                     console.error(err);
                     if(caption) caption.textContent = 'Could not load. Try refreshing.';
                     if(inner) inner.classList.remove('wod-boot-tween-suppress');
-                    gameData._wodSkipMapGenLoader = false;
-                    window._wodBootBusy = false;
+                    if(continueBtn) {
+                        continueBtn.textContent = 'Continue anyway';
+                        continueBtn.classList.add('visible');
+                        continueBtn.disabled = false;
+                    } else {
+                        gameData._wodSkipMapGenLoader = false;
+                        window._wodBootBusy = false;
+                    }
                 }
             })();
         }
