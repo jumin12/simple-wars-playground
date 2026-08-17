@@ -710,7 +710,7 @@ MISSIONS.push(function m01() {
   b.unit('light', 2, 6, -5); b.unit('light', 2, 9, -4); b.unit('light', 2, 19, 3); b.unit('light', 2, 21, 6);
   return {
     file: 'mission_01_first_landing.json',
-    entry: { name: '1 · First Landing', description: 'Beach invasion — land on the island and take both towns. (Easy)', aiCount: 1 },
+    entry: { name: '1 · First Landing', description: 'The Remnant comes ashore. Morren holds both towns. Take them or stay in the surf.', aiCount: 1, generals: ['morren'] },
     data: b.export({
       money: 20000, manpower: 12000,
       aiMoney: { 1: 0, 2: 3500 }, aiManpower: { 1: 0, 2: 4000 },
@@ -718,12 +718,12 @@ MISSIONS.push(function m01() {
         version: 1, title: 'First Landing', victoryMode: 'domination',
         events: [
           ev('m1_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'Operation First Landing', body: 'Commander — ferry your marines across the strait and seize the beach. Capture Seabreak and Highmoor to take the island. Your gunboats can soften anything near the shore.', style: 'briefing', kicker: 'Mission 1' }),
+            { title: 'First Landing', body: 'The Remnant comes ashore. Morren holds Seabreak and Highmoor. Ferry the marines, take both towns, or stay in the surf. Gunboats can soften anything near the shore.', style: 'briefing', kicker: 'Mission 1' }),
           ev('m1_reserves', 'Enemy reserves', { type: 'timer', seconds: 200 },
-            { title: 'Enemy reserves inbound', body: 'Island command has called up its reserve battalion. Push hard before they dig in.', style: 'alert' },
+            { title: 'Morren calls the reserve', body: 'The Field Army has called up a reserve battalion. Push before they dig in.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 5, anchor: 'faction_city', cityOwner: 2 }]),
           ev('m1_2ndwave', 'Second wave', { type: 'troops_killed', count: 400 },
-            { title: 'Second wave ashore', body: 'High command is impressed — a second wave of marines is landing at your staging islet.', style: 'victory' },
+            { title: 'Second wave ashore', body: 'High command is sending a second wave of marines to the staging islet.', style: 'victory' },
             [{ owner: 1, type: 'marine', count: 4, anchor: 'player_city' }]),
         ],
       },
@@ -765,12 +765,12 @@ MISSIONS.push(function m02() {
   b.bridge(be.q, be.r, Math.PI / 2, 0);
   // Armies mirror each other
   for (let i = 0; i < 5; i++) b.unit('light', 1, -14 + i * 6, 8);
-  b.unit('heavy', 1, -12, 11, 'Loyal Guard Armor');
+  b.unit('heavy', 1, -12, 11, 'Remnant Guard');
   for (let i = 0; i < 5; i++) b.unit('light', 2, -14 + i * 6, -8);
-  b.unit('heavy', 2, -10, -11, 'Rebel Armor');
+  b.unit('heavy', 2, -10, -11, '7th Corps Armor');
   return {
     file: 'mission_02_brothers_at_war.json',
-    entry: { name: '2 · Brothers at War', description: 'Civil war — cross the river and crush the rebellion.', aiCount: 1 },
+    entry: { name: '2 · Brothers at War', description: 'The 7th Corps broke ranks at the river. Colonel Vos still wears Remnant colors. Cross and finish it.', aiCount: 1, generals: ['vos'] },
     data: b.export({
       money: 18000, manpower: 10000,
       aiMoney: { 1: 0, 2: 6000 }, aiManpower: { 1: 0, 2: 5000 },
@@ -778,12 +778,12 @@ MISSIONS.push(function m02() {
         version: 1, title: 'Brothers at War', victoryMode: 'domination',
         events: [
           ev('m2_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'Brothers at War', body: 'The northern provinces are in open revolt. Only two bridges span the Greywater — hold them, cross in force, and take Redhall and Northgate.', style: 'briefing', kicker: 'Mission 2' }),
+            { title: 'Brothers at War', body: 'The 7th Corps broke ranks at the river. Colonel Vos still wears Remnant colors. Two bridges span the Greywater — hold them, cross, and take Redhall and Northgate.', style: 'briefing', kicker: 'Mission 2' }),
           ev('m2_defect', 'Defectors', { type: 'troops_killed', count: 500 },
-            { title: 'Defectors join the crown', body: 'Rebel morale is cracking — a defecting battalion marches under your banner.', style: 'victory' },
+            { title: 'The 7th splits', body: 'Some of the 7th are coming back. A battalion marches under your banner.', style: 'victory' },
             [{ owner: 1, type: 'light', count: 3, anchor: 'player_city' }]),
           ev('m2_conscript', 'Rebel conscription', { type: 'timer', seconds: 300 },
-            { title: 'Rebel conscription', body: 'The rebels are pressing farmhands into service. Expect fresh regiments in the north.', style: 'alert' },
+            { title: 'Vos presses the farms', body: 'Vos is pressing farmhands. Expect fresh regiments north of the river.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 6, anchor: 'faction_city', cityOwner: 2 }]),
         ],
       },
@@ -830,10 +830,10 @@ MISSIONS.push(function m03() {
   for (let i = 0; i < 6; i++) b.unit('light', 1, -16 - (i % 3) * 3, -6 + Math.floor(i / 3) * 8);
   b.unit('heavy', 1, -19, 3, '1st Armor Bn.');
   for (let i = 0; i < 7; i++) b.unit('light', 2, 15 + (i % 3) * 3, -8 + Math.floor(i / 3) * 7);
-  b.unit('heavy', 2, 18, 4, 'Ostmark Panzer');
+  b.unit('heavy', 2, 18, 4, 'Highland Armor');
   return {
     file: 'mission_03_mountain_passes.json',
-    entry: { name: '3 · The Mountain Passes', description: 'Nation vs nation — force the two fortified passes.', aiCount: 1 },
+    entry: { name: '3 · The Mountain Passes', description: 'Tal’s Highland Host has both gates. Force them or freeze in the approaches.', aiCount: 1, generals: ['tal'] },
     data: b.export({
       money: 18000, manpower: 10000,
       aiMoney: { 1: 0, 2: 8000 }, aiManpower: { 1: 0, 2: 6000 },
@@ -841,12 +841,12 @@ MISSIONS.push(function m03() {
         version: 1, title: 'The Mountain Passes', victoryMode: 'domination',
         events: [
           ev('m3_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'The Mountain Passes', body: 'Only two passes cross the Iron Spine, and Ostmark has fortified both. Mass your army, pick a pass, and break through before their economy out-builds yours.', style: 'briefing', kicker: 'Mission 3' }),
+            { title: 'The Mountain Passes', body: 'Only two passes cross the Iron Spine. Tal has fortified both from Ostmark. Mass, pick a gate, and break through before his foundries out-build you.', style: 'briefing', kicker: 'Mission 3' }),
           ev('m3_wave1', 'Enemy offensive', { type: 'timer', seconds: 240 },
-            { title: 'Ostmark marches', body: 'Enemy columns are moving toward the northern pass.', style: 'alert' },
+            { title: 'Tal moves', body: 'The Highland Host is moving columns toward the northern pass.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 5, anchor: 'faction_city', cityOwner: 2 }]),
           ev('m3_wave2', 'Enemy armor', { type: 'timer', seconds: 480 },
-            { title: 'Panzer reserve committed', body: 'Ostmark has committed its armored reserve.', style: 'alert' },
+            { title: 'Highland armor', body: 'Tal has committed his armored reserve.', style: 'alert' },
             [{ owner: 2, type: 'heavy', count: 2, anchor: 'faction_city', cityOwner: 2 }]),
         ],
       },
@@ -895,7 +895,7 @@ MISSIONS.push(function m04() {
   b.unit('ship', 2, 4, -2, 'Raider Shark');
   return {
     file: 'mission_04_isle_campaign.json',
-    entry: { name: '4 · Isle Campaign', description: 'Island hopping — take three enemy isles with marines and gunboats.', aiCount: 1 },
+    entry: { name: '4 · Isle Campaign', description: 'Venn’s water. Three isles, her gunboats between them.', aiCount: 1, generals: ['venn'] },
     data: b.export({
       money: 19000, manpower: 12000,
       aiMoney: { 1: 0, 2: 9000 }, aiManpower: { 1: 0, 2: 6000 },
@@ -903,12 +903,12 @@ MISSIONS.push(function m04() {
         version: 1, title: 'Isle Campaign', victoryMode: 'domination',
         events: [
           ev('m4_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'Isle Campaign', body: 'Three enemy-held isles ring your anchorage. Marines can swim between shores, and your harbor can build more ships. Hop isle to isle — and watch for their raider.', style: 'briefing', kicker: 'Mission 4' }),
+            { title: 'Isle Campaign', body: 'Three isles ring your anchorage. This is Venn’s water. Marines can swim the gaps; the harbor can build more ships. Hop isle to isle — and watch for her raider.', style: 'briefing', kicker: 'Mission 4' }),
           ev('m4_navy', 'Enemy flotilla', { type: 'timer', seconds: 280 },
-            { title: 'Enemy flotilla sighted', body: 'An enemy flotilla has slipped anchor to contest the sea lanes.', style: 'alert' },
+            { title: 'Ashcoast flotilla', body: 'Venn’s flotilla has slipped anchor to contest the lanes.', style: 'alert' },
             [{ owner: 2, type: 'ship', count: 2, anchor: 'faction_city', cityOwner: 2 }]),
           ev('m4_marines', 'Marine reserve', { type: 'troops_killed', count: 600 },
-            { title: 'Marine reserve arrives', body: 'Fresh marine companies have arrived at Anchorhold.', style: 'victory' },
+            { title: 'Marines at Anchorhold', body: 'Fresh marine companies have reached Anchorhold.', style: 'victory' },
             [{ owner: 1, type: 'marine', count: 4, anchor: 'player_city' }]),
         ],
       },
@@ -969,7 +969,7 @@ MISSIONS.push(function m05() {
   for (let i = 0; i < 5; i++) b.unit('light', 3, 34 - (i % 3) * 3, -8 + Math.floor(i / 3) * 8);
   return {
     file: 'mission_05_two_front_gambit.json',
-    entry: { name: '5 · Two-Front Gambit', description: 'Two hostile nations, one on each border. Survive, then conquer both.', aiCount: 2 },
+    entry: { name: '5 · Two-Front Gambit', description: 'Morren on one border, Tal on the other. You are the hinge.', aiCount: 2, generals: ['morren', 'tal'] },
     data: b.export({
       money: 20000, manpower: 14000,
       aiMoney: { 1: 0, 2: 8000, 3: 8000 }, aiManpower: { 1: 0, 2: 6000, 3: 6000 },
@@ -977,15 +977,15 @@ MISSIONS.push(function m05() {
         version: 1, title: 'Two-Front Gambit', victoryMode: 'domination',
         events: [
           ev('m5_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'Two-Front Gambit', body: 'Vestmark and Ostravia have both declared war. You cannot win two attritional fronts at once — cripple one neighbor fast, then swing your army to the other border.', style: 'briefing', kicker: 'Mission 5' }),
+            { title: 'Two-Front Gambit', body: 'Morren holds Vestmark. Tal holds Ostravia. You cannot win two attritional fronts at once — cripple one command, then swing.', style: 'briefing', kicker: 'Mission 5' }),
           ev('m5_west', 'Western push', { type: 'timer', seconds: 300 },
-            { title: 'Vestmark mobilizes', body: 'Fresh Vestmark regiments are heading for your western towns.', style: 'alert' },
+            { title: 'Morren mobilizes', body: 'Fresh Field Army regiments are heading for your western towns.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 5, anchor: 'faction_city', cityOwner: 2 }]),
           ev('m5_east', 'Eastern push', { type: 'timer', seconds: 380 },
-            { title: 'Ostravia mobilizes', body: 'Ostravia has answered with a mobilization of its own.', style: 'alert' },
+            { title: 'Tal answers', body: 'The Highland Host is moving off Ostravia.', style: 'alert' },
             [{ owner: 3, type: 'light', count: 5, anchor: 'faction_city', cityOwner: 3 }]),
           ev('m5_reserve', 'National reserve', { type: 'time_survived', seconds: 480 },
-            { title: 'The nation stands', body: 'You have held both fronts. The national reserve is released to your command.', style: 'victory' },
+            { title: 'Both fronts hold', body: 'You have held both fronts. High command releases the reserve.', style: 'victory' },
             [{ owner: 1, type: 'light', count: 4, anchor: 'player_city' }, { owner: 1, type: 'heavy', count: 1, anchor: 'player_city' }]),
         ],
       },
@@ -1033,10 +1033,10 @@ MISSIONS.push(function m06() {
   b.unit('heavy', 1, -24, 0, '2nd Armor Bn.');
   b.unit('heavy', 1, -20, 4, '5th Armor Bn.');
   for (let i = 0; i < 6; i++) b.unit('light', 2, 8, -22 + i * 9);
-  b.unit('heavy', 2, 12, 0, 'Festung Panzer');
+  b.unit('heavy', 2, 12, 0, 'Field Army Armor');
   return {
     file: 'mission_06_greywater_crossing.json',
-    entry: { name: '6 · The Greywater Crossing', description: 'Force a fortified river line over three defended bridges.', aiCount: 1 },
+    entry: { name: '6 · The Greywater Crossing', description: 'Morren dug the river. Three bridges. He will make you pay for each.', aiCount: 1, generals: ['morren'] },
     data: b.export({
       money: 19000, manpower: 12000,
       aiMoney: { 1: 0, 2: 12000 }, aiManpower: { 1: 0, 2: 8000 },
@@ -1044,15 +1044,15 @@ MISSIONS.push(function m06() {
         version: 1, title: 'The Greywater Crossing', victoryMode: 'domination',
         events: [
           ev('m6_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'The Greywater Crossing', body: 'Three bridges cross the Greywater, each covered by a fort on the far bank. Feint at one, strike another — and never feed men piecemeal into a fortified crossing.', style: 'briefing', kicker: 'Mission 6' }),
+            { title: 'The Greywater Crossing', body: 'Morren dug the river. Three bridges, each covered by a fort on the far bank. Feint at one, strike another — do not feed men piecemeal into a crossing.', style: 'briefing', kicker: 'Mission 6' }),
           ev('m6_armor', 'Armored counterattack', { type: 'timer', seconds: 280 },
-            { title: 'Enemy armor moving', body: 'Enemy armor has been spotted moving toward the bridges.', style: 'alert' },
+            { title: 'Field Army armor', body: 'Morren’s armor is moving toward the bridges.', style: 'alert' },
             [{ owner: 2, type: 'heavy', count: 2, anchor: 'faction_city', cityOwner: 2 }]),
           ev('m6_supp', 'Fire support', { type: 'troops_killed', count: 900 },
             { title: 'Breakthrough brigade', body: 'The breakthrough brigade is released to exploit your bridgehead.', style: 'victory' },
             [{ owner: 1, type: 'heavy', count: 2, anchor: 'player_city' }, { owner: 1, type: 'light', count: 2, anchor: 'player_city' }]),
           ev('m6_late', 'Enemy levy', { type: 'timer', seconds: 560 },
-            { title: 'East bank levy', body: 'Hochburg has raised a citizen levy.', style: 'alert' },
+            { title: 'Hochburg levy', body: 'Hochburg has raised a levy for Morren.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 6, anchor: 'faction_city', cityOwner: 2 }]),
         ],
       },
@@ -1108,7 +1108,7 @@ MISSIONS.push(function m07() {
   b.unit('light', 2, 6, -18); b.unit('light', 2, 8, -21);
   return {
     file: 'mission_07_winter_citadel.json',
-    entry: { name: '7 · Winter Citadel', description: 'Break into a fortified mountain ring held by a rich garrison.', aiCount: 1 },
+    entry: { name: '7 · Winter Citadel', description: 'Tal’s last ring in the high country. Rich garrison. No easy road in.', aiCount: 1, generals: ['tal'] },
     data: b.export({
       money: 20000, manpower: 14000,
       aiMoney: { 1: 0, 2: 15000 }, aiManpower: { 1: 0, 2: 10000 },
@@ -1116,9 +1116,9 @@ MISSIONS.push(function m07() {
         version: 1, title: 'Winter Citadel', victoryMode: 'domination',
         events: [
           ev('m7_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'Winter Citadel', body: 'Citadel Karsk sits inside a ring of peaks with three narrow gates, each covered by a fort. Take Outpost Verd first to starve their income, then storm a gate with everything at once.', style: 'briefing', kicker: 'Mission 7' }),
+            { title: 'Winter Citadel', body: 'Citadel Karsk sits in a ring of peaks. This is Tal’s ground. Three gates, each covered. Take Outpost Verd first to starve his income, then storm a gate with everything at once.', style: 'briefing', kicker: 'Mission 7' }),
           ev('m7_sortie', 'Garrison sortie', { type: 'timer', seconds: 320 },
-            { title: 'Sortie from the gates', body: 'The garrison is sallying out of the citadel!', style: 'alert' },
+            { title: 'Sortie from the gates', body: 'Tal’s garrison is sallying from the citadel.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 6, anchor: 'faction_city', cityOwner: 2 }],
             [{ owner: 2, scope: 'reinforcements', x: -34 * SPACING, y: -6 * SPACING }]),
           ev('m7_vets', 'Veteran relief', { type: 'troops_killed', count: 1100 },
@@ -1190,7 +1190,7 @@ MISSIONS.push(function m08() {
   for (let i = 0; i < 5; i++) b.unit('light', 4, 26 + (i % 3) * 3, 16 + Math.floor(i / 3) * 3);
   return {
     file: 'mission_08_shattered_realm.json',
-    entry: { name: '8 · The Shattered Realm', description: 'Four-way war of warlords. You start smallest — unify the realm.', aiCount: 3 },
+    entry: { name: '8 · The Shattered Realm', description: 'The Concord commands have turned on each other — and on you. You start smallest.', aiCount: 3, generals: ['morren', 'venn', 'tal'] },
     data: b.export({
       money: 18000, manpower: 12000,
       aiMoney: { 1: 0, 2: 11000, 3: 11000, 4: 11000 }, aiManpower: { 1: 0, 2: 8000, 3: 8000, 4: 8000 },
@@ -1198,16 +1198,16 @@ MISSIONS.push(function m08() {
         version: 1, title: 'The Shattered Realm', victoryMode: 'domination',
         events: [
           ev('m8_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'The Shattered Realm', body: 'The old kingdom is split between you and three warlords, each richer than you. Let them bleed each other in the middle — expand where they are weakest and unify the realm.', style: 'briefing', kicker: 'Mission 8' }),
+            { title: 'The Shattered Realm', body: 'The Concord commands have turned on each other — and on you. Morren, Venn, and Tal each hold more than you do. Let them bleed in the middle. Expand where they are weakest.', style: 'briefing', kicker: 'Mission 8' }),
           ev('m8_war', 'Warlords mobilize', { type: 'timer', seconds: 360 },
-            { title: 'The warlords mobilize', body: 'All three warlords are raising fresh warbands.', style: 'alert' },
+            { title: 'The commands mobilize', body: 'All three Concord commands are raising fresh formations.', style: 'alert' },
             [
               { owner: 2, type: 'light', count: 4, anchor: 'faction_city', cityOwner: 2 },
               { owner: 3, type: 'light', count: 4, anchor: 'faction_city', cityOwner: 3 },
               { owner: 4, type: 'light', count: 4, anchor: 'faction_city', cityOwner: 4 },
             ]),
           ev('m8_rally', 'Militia rally', { type: 'time_survived', seconds: 540 },
-            { title: 'The people rally', body: 'Your just rule draws volunteers from across the realm.', style: 'victory' },
+            { title: 'The Remnant still draws', body: 'Volunteers are arriving. Arm them if you can.', style: 'victory' },
             [{ owner: 1, type: 'light', count: 5, anchor: 'player_city' }]),
         ],
       },
@@ -1272,7 +1272,7 @@ MISSIONS.push(function m09() {
   b.unit('ship', 2, -8, 2, 'Patrol Gunship');
   return {
     file: 'mission_09_ironshore.json',
-    entry: { name: '9 · Ironshore', description: 'D-Day. Storm a fortified coast under fire and crack the mainland. (Hard)', aiCount: 1 },
+    entry: { name: '9 · Ironshore', description: 'Venn’s fortress coast. Land under her guns and break the mainland.', aiCount: 1, generals: ['venn'] },
     data: b.export({
       money: 24000, manpower: 16000,
       aiMoney: { 1: 0, 2: 18000 }, aiManpower: { 1: 0, 2: 12000 },
@@ -1280,12 +1280,12 @@ MISSIONS.push(function m09() {
         version: 1, title: 'Ironshore', victoryMode: 'domination',
         events: [
           ev('m9_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'Operation Ironshore', body: 'The entire coast is fortified and their fleet patrols the strait. Sweep the sea first, pick the weakest stretch of beach, and land both waves together — half-measures die in the surf.', style: 'briefing', kicker: 'Mission 9' }),
+            { title: 'Ironshore', body: 'Venn’s fortress coast. Her fleet patrols the strait. Sweep the sea first, pick the weakest stretch of beach, and land both waves together — half-measures die in the surf.', style: 'briefing', kicker: 'Mission 9' }),
           ev('m9_counter1', 'First counterattack', { type: 'timer', seconds: 180 },
-            { title: 'Counterattack', body: 'Enemy infantry is converging on the landing beaches.', style: 'alert' },
+            { title: 'Ashcoast counterattack', body: 'Venn’s infantry is converging on the landing beaches.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 6, anchor: 'faction_city', cityOwner: 2 }]),
           ev('m9_armor', 'Armored counterattack', { type: 'timer', seconds: 420 },
-            { title: 'Panzers at the beach', body: 'An armored reserve is rolling toward the coast.', style: 'alert' },
+            { title: 'Armor at the beach', body: 'An armored reserve is rolling toward the coast.', style: 'alert' },
             [{ owner: 2, type: 'heavy', count: 3, anchor: 'faction_city', cityOwner: 2 }]),
           ev('m9_wave2', 'Second wave', { type: 'troops_killed', count: 1500 },
             { title: 'Second wave ashore', body: 'Follow-on forces are landing at your staging islands.', style: 'victory' },
@@ -1353,17 +1353,17 @@ MISSIONS.push(function m10() {
     { q: -10, r: 32, owner: 4, reach: 26 },
   ]);
   for (let i = 0; i < 8; i++) b.unit('light', 1, -42 + (i % 4) * 3, 0 + Math.floor(i / 4) * 5);
-  b.unit('heavy', 1, -38, 4, 'Republic Armor');
-  b.unit('heavy', 1, -40, 12, 'Republic Guard');
+  b.unit('heavy', 1, -38, 4, 'Remnant Armor');
+  b.unit('heavy', 1, -40, 12, 'Remnant Guard');
   for (let i = 0; i < 6; i++) b.unit('light', 2, 8 + (i % 3) * 6, -28 + Math.floor(i / 3) * 4);
-  b.unit('heavy', 2, 18, -28, 'Nordheim Panzer');
+  b.unit('heavy', 2, 18, -28, 'Field Army Armor');
   for (let i = 0; i < 6; i++) b.unit('light', 3, 38 + (i % 3) * 3, -2 + Math.floor(i / 3) * 6);
   b.unit('heavy', 3, 40, 8, 'Aurelian Armor');
   for (let i = 0; i < 6; i++) b.unit('light', 4, -6 + (i % 3) * 6, 30 + Math.floor(i / 3) * 3);
   b.unit('heavy', 4, -12, 32, 'Sunspire Armor');
   return {
     file: 'mission_10_world_at_war.json',
-    entry: { name: '10 · World at War', description: 'Finale — three empires against your small republic. (Very hard)', aiCount: 3 },
+    entry: { name: '10 · World at War', description: 'Morren, Venn, and Tal on one map. The Remnant is outnumbered. Finish the war.', aiCount: 3, generals: ['morren', 'venn', 'tal'] },
     data: b.export({
       money: 22000, manpower: 15000,
       aiMoney: { 1: 0, 2: 15000, 3: 18000, 4: 20000 }, aiManpower: { 1: 0, 2: 10000, 3: 12000, 4: 12000 },
@@ -1371,13 +1371,13 @@ MISSIONS.push(function m10() {
         version: 1, title: 'World at War', victoryMode: 'domination',
         events: [
           ev('m10_brief', 'Briefing', { type: 'timer', seconds: 1 },
-            { title: 'World at War', body: 'Three empires have carved up the world and yours is next. They will also fight each other — trade land for time, strike where their fronts are thin, and take every city on the map.', style: 'briefing', kicker: 'Final Mission' }),
+            { title: 'World at War', body: 'Morren, Venn, and Tal on one map. They will also fight each other. Trade land for time, strike where their fronts are thin, and take every city.', style: 'briefing', kicker: 'Final Mission' }),
           ev('m10_north', 'Northern offensive', { type: 'timer', seconds: 260 },
-            { title: 'Nordheim marches south', body: 'Nordheim has launched an offensive toward your republic.', style: 'alert' },
+            { title: 'Morren marches south', body: 'The Field Army has launched an offensive out of Nordheim toward the Remnant coast.', style: 'alert' },
             [{ owner: 2, type: 'light', count: 5, anchor: 'faction_city', cityOwner: 2 }],
             [{ owner: 2, scope: 'reinforcements', x: -40 * SPACING, y: -2 * SPACING }]),
           ev('m10_total', 'Total mobilization', { type: 'timer', seconds: 520 },
-            { title: 'Total mobilization', body: 'All three empires are conscripting at full tilt.', style: 'alert' },
+            { title: 'Total mobilization', body: 'All three Concord commands are conscripting at full tilt.', style: 'alert' },
             [
               { owner: 2, type: 'light', count: 4, anchor: 'faction_city', cityOwner: 2 },
               { owner: 3, type: 'light', count: 4, anchor: 'faction_city', cityOwner: 3 },
@@ -1385,7 +1385,7 @@ MISSIONS.push(function m10() {
               { owner: 3, type: 'heavy', count: 1, anchor: 'faction_city', cityOwner: 3 },
             ]),
           ev('m10_allies', 'Allied volunteers', { type: 'troops_killed', count: 2200 },
-            { title: 'Volunteers of the free world', body: 'Your defiance has inspired volunteers from every occupied land.', style: 'victory' },
+            { title: 'Occupied towns send men', body: 'Occupied towns are sending volunteers. They are yours if you can arm them.', style: 'victory' },
             [{ owner: 1, type: 'light', count: 5, anchor: 'player_city' }, { owner: 1, type: 'heavy', count: 2, anchor: 'player_city' }]),
         ],
       },
@@ -1459,13 +1459,15 @@ function main() {
       if (cut.length) throw new Error(m.file + ': cities unreachable by land: ' + cut.join(', '));
     }
     fs.writeFileSync(path.join(OUT_DIR, m.file), JSON.stringify(m.data));
-    manifest.push({
+    let row = {
       id: m.file.replace(/\.json$/, ''),
       name: m.entry.name,
       description: m.entry.description,
       file: m.file,
       aiCount: m.entry.aiCount,
-    });
+    };
+    if(m.entry.generals && m.entry.generals.length) row.generals = m.entry.generals;
+    manifest.push(row);
     console.log('wrote', m.file, Math.round(fs.statSync(path.join(OUT_DIR, m.file)).size / 1024) + 'KB',
       'cities:', m.data.cities.length, 'units:', m.data.entities.length);
   }
