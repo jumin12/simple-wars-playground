@@ -22038,13 +22038,13 @@
             '#000', // 0 = Neutral
             '#2ecc71', // 1 = Player (Green) — Federation Remnant
             '#e74c3c', // 2 = AI 1 (Red) — Morren, Concord Field Army
-            '#9b59b6', // 3 = AI 2 (Purple) — Venn, Ashcoast Command
+            '#9b59b6', // 3 = AI 2 (Purple) — Venn, Ashcoast League
             '#e67e22', // 4 = AI 3 (Orange) — Tal, Highland Host
             '#3498db', // 5 = AI 4 (Blue)
             '#f1c40f'  // 6 = AI 5 (Yellow)
         ];
 
-        /** One war, two states, three Concord commands. Player is always the Remnant. */
+        /** One war. The Remnant fights Concord, and later the Ashcoast League and Highland Host as allied countries. */
         const WOD_WORLD = {
             war: 'the Ashen Front',
             player: {
@@ -22055,7 +22055,8 @@
             enemy: {
                 short: 'Concord',
                 name: 'Iron Concord'
-            }
+            },
+            pact: 'the Concord Pact'
         };
         const WOD_GENERALS = {
             2: {
@@ -22064,6 +22065,8 @@
                 rank: 'General',
                 command: 'Field Army',
                 side: 'concord',
+                country: 'Iron Concord',
+                countryShort: 'Concord',
                 line: 'Towns first. Then the road between them.',
                 doctrine: 'cities',
                 mainMul: 1.12,
@@ -22079,6 +22082,8 @@
                 rank: 'Admiral',
                 command: 'Ashcoast Command',
                 side: 'concord',
+                country: 'Ashcoast League',
+                countryShort: 'Ashcoast',
                 line: 'She will not hold a line she can go around.',
                 doctrine: 'raid',
                 mainMul: 0.86,
@@ -22094,6 +22099,8 @@
                 rank: 'Marshal',
                 command: 'Highland Host',
                 side: 'concord',
+                country: 'Highland Host',
+                countryShort: 'Highlands',
                 line: 'Given the high ground. Means to die on it.',
                 doctrine: 'hold',
                 mainMul: 0.82,
@@ -22109,6 +22116,8 @@
                 rank: 'Colonel',
                 command: '7th Corps',
                 side: 'remnant',
+                country: 'Federation Remnant',
+                countryShort: 'Remnant',
                 line: 'Same drill as ours. He took the 7th across the river.',
                 doctrine: 'cities',
                 mainMul: 1.08,
@@ -22161,7 +22170,11 @@
                 return 'You';
             if(wodMatchUsesWorldLore()) {
                 let g = wodGeneralForOwner(o);
-                if(g) return opts.short ? g.name.split(' ').pop() : (g.rank + ' ' + g.name);
+                if(g) {
+                    if(opts.short) return g.countryShort || g.name.split(' ').pop();
+                    if(g.country) return g.country;
+                    return g.rank + ' ' + g.name;
+                }
             }
             return 'AI ' + (o - 1);
         }
@@ -22170,8 +22183,8 @@
         }
         function wodGeneralSideLabel(g) {
             if(!g) return WOD_WORLD.enemy.short;
-            if(g.side === 'remnant') return WOD_WORLD.player.short;
-            return WOD_WORLD.enemy.short;
+            if(g.side === 'remnant') return g.countryShort || WOD_WORLD.player.short;
+            return g.countryShort || WOD_WORLD.enemy.short;
         }
         function wodSyncSetupOpponentsBrief() {
             let el = document.getElementById('setupOpponentsBrief');
@@ -44099,9 +44112,45 @@
             used.add(fallback);
             return fallback;
         }
+        function wodRogueEffectiveAiCount(node) {
+            if(!node || node.hq) return Math.max(1, node && node.ai ? (node.ai | 0) : 1);
+            let baked = Math.max(0, node.ai | 0);
+            let fromDiff = 1;
+            if(node.capital || (node.diff | 0) >= 4) fromDiff = 3;
+            else if((node.diff | 0) >= 2) fromDiff = 2;
+            return Math.max(1, Math.min(3, Math.max(baked, fromDiff)));
+        }
+        function wodRogueScaleMapSize(baseSize, aiCount) {
+            let size = (baseSize === 40 || baseSize === 80) ? baseSize : 60;
+            let ai = Math.max(1, aiCount | 0);
+            if(ai >= 3) return 80;
+            if(ai >= 2) return size === 40 ? 60 : 80;
+            return size;
+        }
+        function wodRogueAllyAiOwners(aiCount) {
+            let n = Math.max(0, aiCount | 0);
+            let pairs = [];
+            for(let a = 2; a <= n + 1; a++) {
+                for(let b = a + 1; b <= n + 1; b++) pairs.push([a, b]);
+            }
+            return pairs;
+        }
+        function wodRogueCountryNames(node) {
+            let ids = wodRoguePickGenerals(node);
+            let names = [];
+            let seen = new Set();
+            for(let i = 0; i < ids.length; i++) {
+                let g = typeof wodGeneralById === 'function' ? wodGeneralById(ids[i]) : null;
+                let nm = (g && g.country) || WOD_WORLD.enemy.name;
+                if(seen.has(nm)) continue;
+                seen.add(nm);
+                names.push(nm);
+            }
+            return names;
+        }
         function wodRoguePickGenerals(node, force) {
-            if(!force && node && node.generals && node.generals.length) return node.generals.slice();
-            let n = Math.max(1, (node && node.ai) || 1);
+            let n = wodRogueEffectiveAiCount(node);
+            if(!force && node && node.generals && node.generals.length >= n) return node.generals.slice(0, n);
             let primary = 'morren';
             if(node) {
                 if(node.shape === 'island' || node.shape === 'archipelago') primary = 'venn';
@@ -44124,17 +44173,24 @@
             }
             return names;
         }
+        function wodRogueJoinList(items) {
+            if(!items || !items.length) return '';
+            if(items.length === 1) return items[0];
+            if(items.length === 2) return items[0] + ' and ' + items[1];
+            return items.slice(0, -1).join(', ') + ', and ' + items[items.length - 1];
+        }
         function wodRogueGeneralBriefLine(node, kind) {
+            let countries = wodRogueCountryNames(node);
             let names = wodRogueGeneralNames(node);
-            if(!names.length) return '';
+            if(!countries.length && !names.length) return '';
+            let pact = wodRogueJoinList(countries);
+            let cmds = wodRogueJoinList(names);
             if(kind === 'capital') {
-                if(names.length === 1) return names[0] + ' holds the palace.';
-                if(names.length === 2) return names[0] + ' and ' + names[1] + ' stand between you and the palace.';
-                return names[0] + ', ' + names[1] + ', and ' + names[2] + ' stand between you and the palace.';
+                if(countries.length <= 1) return (cmds || pact) + ' holds the palace.';
+                return pact + ' stand allied at the palace. ' + cmds + ' share the defense.';
             }
-            if(names.length === 1) return ' ' + names[0] + ' commands here.';
-            if(names.length === 2) return ' ' + names[0] + ' and ' + names[1] + ' share the command.';
-            return ' ' + names[0] + ', ' + names[1] + ', and ' + names[2] + ' share the command.';
+            if(countries.length <= 1) return ' ' + (cmds || pact) + ' commands here.';
+            return ' ' + pact + ' are allied against the Remnant. ' + cmds + ' hold the line together.';
         }
         function wodRogueMakeBrief(rng, node) {
             let by = {
@@ -44312,9 +44368,11 @@
                 // Difficulty ramps west→east.
                 let prog = Math.max(0, Math.min(1, (p.gx / W - hqP.gx / W) / Math.max(0.2, capP.gx / W - hqP.gx / W)));
                 let diff = p.hq ? 0 : p.capital ? 5 : Math.min(5, Math.round(prog * 4.6 + rng() * 0.7));
+                let aiN = p.hq ? 1 : (p.capital || diff >= 4 ? 3 : (diff >= 2 ? 2 : 1));
                 let size = diff <= 1 ? 40 : diff >= 4 ? (rng() < 0.55 ? 80 : 60) : (rng() < 0.3 ? 40 : 60);
+                size = wodRogueScaleMapSize(size, aiN);
                 // Garrison composition (bakes the difficulty preset in).
-                let m = D.mult;
+                let m = D.mult * (0.82 + 0.22 * aiN);
                 let gar = {
                     light: Math.max(2, Math.round((3 + diff * 1.9 + rng() * 2) * m)),
                     heavy: Math.max(0, Math.round((diff * 0.65 + rng() * 0.8) * m)),
@@ -44328,7 +44386,7 @@
                     gx: p.gx,
                     gy: p.gy,
                     shape, size, diff,
-                    ai: p.capital ? 2 : 1,
+                    ai: aiN,
                     hq: !!p.hq,
                     capital: !!p.capital,
                     industry: false,
@@ -44341,7 +44399,7 @@
                 }
                 if(p.capital) node.name = wodRogueMakeName(rng, 'grass', used);
                 // Named settlements inside this region — reused as battle-map city names.
-                let townN = node.hq ? 2 : (node.capital ? 4 : (2 + (diff >= 3 ? 1 : 0) + (rng() < 0.45 ? 1 : 0)));
+                let townN = node.hq ? 2 : (2 + aiN * 2 + (node.capital ? 1 : 0) + (rng() < 0.4 ? 1 : 0));
                 node.towns.push(node.name);
                 while(node.towns.length < townN) {
                     let tn = wodRogueMakeName(rng, terr, used);
@@ -44358,7 +44416,8 @@
             for(let n of nodes) {
                 n.generals = wodRoguePickGenerals(n, true);
                 if(n.hq) n.brief = 'Our last foothold on this coast. From ' + n.name + ' the Federation Remnant strikes back — if it falls, the war is over.';
-                else if(n.capital) n.brief = 'The Iron Concord\u2019s capital, ' + n.name + '. ' + wodRogueGeneralBriefLine(n, 'capital') + ' End this war.';
+                else if(n.capital) n.brief = (wodRogueEffectiveAiCount(n) > 1 ? WOD_WORLD.pact : WOD_WORLD.enemy.name) +
+                    '\u2019s capital, ' + n.name + '. ' + wodRogueGeneralBriefLine(n, 'capital') + ' End this war.';
                 else n.brief = wodRogueMakeBrief(rng, n) + wodRogueGeneralBriefLine(n, 'field') + (n.industry ? ' Its foundries mark a vital industrial region.' : '');
             }
             // Edges: 2-3 nearest neighbors + union-find connectivity repair.
@@ -45168,8 +45227,9 @@
                     let approachSide = fromNode ? wodRogueAttackSide(fromNode, node) : null;
                     let tag = alert ? '<span class="wod-camp-node-tag alert">UNDER ATTACK — defend it</span>'
                         : st.owner === 'player' ? '<span class="wod-camp-node-tag friendly">Held by the Remnant</span>'
-                        : '<span class="wod-camp-node-tag hostile">Iron Concord — ' +
-                          (wodRogueGeneralNames(node, { short: true }).join(' / ') || 'garrison') +
+                        : '<span class="wod-camp-node-tag hostile">' +
+                          (wodRogueCountryNames(node).join(' + ') || WOD_WORLD.enemy.name) +
+                          (wodRogueEffectiveAiCount(node) > 1 ? ' — allied' : '') +
                           ' · ' + '★'.repeat(node.diff + 1) + '</span>';
                     let myUpkeep = wodRogueRosterUpkeep(c.roster);
                     let startCash = wodRogueBattleStartMoney(c);
@@ -45196,7 +45256,11 @@
                     let intel = '';
                     if(st.owner === 'enemy' || alert) {
                         intel = '<p class="wod-camp-intel"><strong>Enemy strength:</strong> ' + wodRogueNodeIntel(node) +
-                            (node.ai > 1 ? ' · ' + (wodRogueGeneralNames(node, { short: true }).join(' & ') || 'two commands') : '') + '</p>' +
+                            (wodRogueEffectiveAiCount(node) > 1
+                                ? ' · ' + wodRogueJoinList(wodRogueCountryNames(node)) + ' allied vs the Remnant'
+                                : '') + '</p>' +
+                            '<p class="wod-camp-intel"><strong>Commanders:</strong> ' +
+                            (wodRogueJoinList(wodRogueGeneralNames(node)) || 'unknown garrison') + '</p>' +
                             '<p class="wod-camp-intel"><strong>Enemy upkeep (est.):</strong> ' + wodRogueNodeEnemyUpkeepIntel(node) + '</p>';
                     }
                     let holdClock = wodFormatHoldClock(wodRogueBattleHoldSeconds(c.settings && c.settings.difficulty));
@@ -45233,7 +45297,12 @@
                     }
                     info.innerHTML = '<h3>' + node.name + (node.industry ? ' 🏭' : node.capital ? ' ★' : node.hq ? ' ⚑' : '') + '</h3>' +
                         tag +
-                        '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' + (node.size >= 80 ? 'vast' : node.size >= 60 ? 'large' : 'compact') + ' battlefield · ' + holdClock + ' battle clock</p>' +
+                        '<p class="wod-camp-intel">' + wodRogueShapeLabel(node.shape) + ' · ' +
+                          (wodRogueScaleMapSize(node.size || 60, wodRogueEffectiveAiCount(node)) >= 80 ? 'vast' :
+                            (wodRogueScaleMapSize(node.size || 60, wodRogueEffectiveAiCount(node)) >= 60 ? 'large' : 'compact')) +
+                          ' battlefield' +
+                          (wodRogueEffectiveAiCount(node) > 1 ? ' · ' + (wodRogueEffectiveAiCount(node) + 1) + ' factions' : '') +
+                          ' · ' + holdClock + ' battle clock</p>' +
                         '<p>' + node.brief + '</p>' +
                         (node.industry ? '<p style="color:#d4af37">Industrial region — still worth +' + WOD_ROGUE_REQ_PER_TERRITORY + ' requisition each turn while held.</p>' : '') +
                         blockNote +
@@ -45505,7 +45574,7 @@
                 : node.shape === 'forest' ? 'forest'
                 : node.shape === 'desert' ? 'sand' : 'grass';
             let towns = [node.name || 'Front'];
-            let want = node.hq ? 2 : (node.capital ? 4 : 3);
+            let want = node.hq ? 2 : (2 + wodRogueEffectiveAiCount(node) * 2 + (node.capital ? 1 : 0));
             while(towns.length < want) {
                 let tn = wodRogueMakeName(rng, terr, used);
                 if(towns.indexOf(tn) < 0) towns.push(tn);
@@ -45526,7 +45595,8 @@
             let world = wodRogueEnsureWorldCells();
             if(!world || !world.cells || !world.W) return null;
             let W = world.W, H = world.H, cells = world.cells;
-            let sizeVal = node.size || 60;
+            let aiCount = wodRogueEffectiveAiCount(node);
+            let sizeVal = wodRogueScaleMapSize(node.size || 60, aiCount);
             let preset = wodMapSizePreset(sizeVal);
             let mapR = preset.mapRadius;
             let hr = preset.hexRadius;
@@ -45535,8 +45605,9 @@
             let cx = node.gx != null ? (node.gx | 0) : Math.round(node.x * W);
             let cy = node.gy != null ? (node.gy | 0) : Math.round(node.y * H);
             // Zoom window: cover the battle grid with a bit of padding so coasts stay visible.
-            let halfCellsX = Math.max(10, Math.ceil(mapR * 0.42));
-            let halfCellsY = Math.max(8, Math.ceil(rows * 0.42));
+            let zoomPad = aiCount >= 3 ? 0.5 : (aiCount >= 2 ? 0.46 : 0.42);
+            let halfCellsX = Math.max(10, Math.ceil(mapR * zoomPad));
+            let halfCellsY = Math.max(8, Math.ceil(rows * zoomPad));
             let x0 = Math.max(0, Math.min(W - 1, cx - halfCellsX));
             let x1 = Math.max(0, Math.min(W - 1, cx + halfCellsX));
             let y0 = Math.max(0, Math.min(H - 1, cy - halfCellsY));
@@ -45554,7 +45625,6 @@
             let cellH = Math.max(1, y1 - y0 + 1);
             let seed = (c.seed ^ wodRogueMul32(nodeId + 91, 0x85ebca6b)) >>> 0;
             let rng = wodRogueRng(seed || 0x51ed270b);
-            let aiCount = Math.max(1, node.ai || 1);
             let owners = [1];
             for(let o = 2; o <= aiCount + 1; o++) owners.push(o);
             let defense = wodRogueHasAlert(c, nodeId);
@@ -45757,16 +45827,18 @@
             }
 
             let townNames = wodRogueEnsureNodeTowns(node, c).slice();
-            while(townNames.length < 4) {
+            let townWant = Math.max(4, 2 + aiCount * 2 + (node.capital ? 1 : 0));
+            while(townNames.length < townWant) {
                 let used = new Set(townNames);
                 for(let n of c.world.nodes || []) if(n && n.name) used.add(n.name);
                 townNames.push(wodRogueMakeName(rng, node.shape === 'desert' ? 'sand' : 'grass', used));
             }
             if(c) wodRogueSave();
-            let citiesPerSide = Math.max(2, Math.min(4, Math.ceil(townNames.length / 2)));
+            let citiesPerPlayer = aiCount >= 3 ? 3 : (aiCount >= 2 ? 3 : Math.max(2, Math.min(4, Math.ceil(townNames.length / 2))));
+            let citiesPerAi = aiCount >= 3 ? 2 : (aiCount >= 2 ? 2 : citiesPerPlayer);
             let enemySide = wodRogueOppositeSide(playerSide);
-            let playerSites = pickLandSites(playerSide, citiesPerSide, []);
-            let enemySites = pickLandSites(enemySide, citiesPerSide, playerSites);
+            let playerSites = pickLandSites(playerSide, citiesPerPlayer, []);
+            let enemySites = pickLandSites(enemySide, citiesPerAi * aiCount, playerSites);
             // Capitals/factories first: deepest sites in each rear.
             function orderDeepestFirst(sites, side) {
                 return (sites || []).slice().sort((a, b) => {
@@ -45827,7 +45899,7 @@
                     }
                 }
                 // Claim a hinterland blob around each town.
-                let claimR = Math.max(5, Math.floor(mapR * 0.2));
+                let claimR = Math.max(5, Math.floor(mapR * (aiCount >= 3 ? 0.15 : (aiCount >= 2 ? 0.17 : 0.2))));
                 for(let dq = -claimR; dq <= claimR; dq++) {
                     for(let dr = -claimR; dr <= claimR; dr++) {
                         if(dq * dq + dr * dr > claimR * claimR) continue;
@@ -45838,10 +45910,17 @@
                 }
             }
             for(let i = 0; i < playerSites.length; i++) addCity(playerSites[i], 1, i === 0);
-            // Split enemy cities across AI owners when the capital has 2 armies.
-            for(let i = 0; i < enemySites.length; i++) {
-                let ow = owners[1 + (i % Math.max(1, owners.length - 1))];
-                addCity(enemySites[i], ow, i < (owners.length - 1));
+            // Each allied country holds a sector of the enemy rear, not a shared pile.
+            let aiOwners = owners.filter(o => o > 1);
+            let enemySorted = enemySites.slice().sort((a, b) => sideBand(a, enemySide) - sideBand(b, enemySide));
+            let firstCityForOwner = {};
+            for(let i = 0; i < enemySorted.length; i++) {
+                let slot = aiOwners.length
+                    ? Math.min(aiOwners.length - 1, Math.floor(i * aiOwners.length / Math.max(1, enemySorted.length)))
+                    : 0;
+                let ow = aiOwners[slot] || 2;
+                addCity(enemySorted[i], ow, !firstCityForOwner[ow]);
+                firstCityForOwner[ow] = true;
             }
 
             // Fill remaining unclaimed land by nearest city (keeps a clear front).
@@ -45902,6 +45981,7 @@
                 entities: [],
                 forts: [],
                 bridges: [],
+                alliances: wodRogueAllyAiOwners(aiCount),
                 savedStartEconomy: false,
                 _campaignRegion: true,
                 _regionNodeId: nodeId,
@@ -45921,7 +46001,8 @@
             let defense = wodRogueHasAlert(c, node.id);
             let battles = (c.nodesState[node.id] && c.nodesState[node.id].battles) || 0;
             let fromKey = fromNodeId != null ? fromNodeId : 'auto';
-            let key = c.seed + ':' + node.id + ':' + fromKey + ':' + (defense ? 1 : 0) + ':' + battles + ':' + (node.size || 0) + ':' + (node.ai || 1);
+            let key = c.seed + ':' + node.id + ':' + fromKey + ':' + (defense ? 1 : 0) + ':' + battles + ':' +
+                wodRogueScaleMapSize(node.size || 0, wodRogueEffectiveAiCount(node)) + ':' + wodRogueEffectiveAiCount(node);
             if(_wodRogueStartIncomeCache.key === key && _wodRogueStartIncomeCache.econ)
                 return _wodRogueStartIncomeCache.econ;
             let regionMap = null;
@@ -45985,12 +46066,15 @@
             gameData._mapGenSeed = (c.seed ^ wodRogueMul32(nodeId + 13, 0x9e3779b9) ^ wodRogueMul32((st.battles || 0) + 1, 0x85ebca6b) ^ wodRogueMul32((resolvedFrom || 0) + 7, 0xc2b2ae35)) >>> 0;
             if(!gameData._mapGenSeed) gameData._mapGenSeed = 0x51ed270b;
             gameData._wodReuseMapGenSeed = true;
+            let aiN = wodRogueEffectiveAiCount(node);
+            let battleSize = wodRogueScaleMapSize(node.size || 60, aiN);
             let sizeEl = document.getElementById('setupMapSize');
-            if(sizeEl) sizeEl.value = String(node.size);
+            if(sizeEl) sizeEl.value = String(battleSize);
             let aiEl = document.getElementById('setupAI');
-            if(aiEl) aiEl.value = String(node.ai || 1);
-            gameData.aiCount = node.ai || 1;
+            if(aiEl) aiEl.value = String(aiN);
+            gameData.aiCount = aiN;
             wodAssignMatchGenerals(wodRoguePickGenerals(node));
+            gameData.alliances = wodNormalizeAlliances(wodRogueAllyAiOwners(aiN));
             gameData.victoryMode = 'domination';
             let vmEl = document.getElementById('setupVictoryMode');
             if(vmEl) vmEl.value = 'domination';
@@ -46121,7 +46205,7 @@
                 return u;
             }
 
-            let unitsPerOwner = Math.max(12, Math.min(28, Math.floor((gameData.mapRadius || 40) / 3.5)));
+            let unitsPerOwner = Math.max(10, Math.min(24, Math.floor((gameData.mapRadius || 40) / (3.1 + owners.length * 0.35))));
             for(let owner of owners) {
                 for(let i = 0; i < unitsPerOwner; i++) {
                     // Mostly on the frontage; every 5th unit garrisons a city.
@@ -46163,14 +46247,24 @@
             gameData.entities = [];
             gameData.selection = [];
             let owners = [];
-            for(let o = 2; o <= (node.ai || 1) + 1; o++) owners.push(o);
+            let aiN = wodRogueEffectiveAiCount(node);
+            for(let o = 2; o <= aiN + 1; o++) owners.push(o);
+            gameData.aiCount = aiN;
+            gameData.alliances = wodNormalizeAlliances(wodRogueAllyAiOwners(aiN));
             let diff = node.diff || 0;
             let D = WOD_ROGUE_DIFF_PRESETS[c.settings.difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
             for(let o of owners) {
                 gameData.aiMoneyByOwner[o] = Math.round((5200 + diff * 3400) * D.mult);
                 gameData.aiManpowerByOwner[o] = Math.round((4600 + diff * 2400) * D.mult);
             }
-            let gar = node.gar || { light: 0, heavy: 0, ship: 0 };
+            let gar = Object.assign({}, node.gar || { light: 0, heavy: 0, ship: 0 });
+            let bakedAi = Math.max(1, node.ai | 0);
+            if(aiN > bakedAi) {
+                let sc = aiN / bakedAi;
+                gar.light = Math.round((gar.light || 0) * sc);
+                gar.heavy = Math.round((gar.heavy || 0) * sc);
+                gar.ship = Math.round((gar.ship || 0) * sc);
+            }
             let spawnRng = wodRogueRng((c.seed ^ wodRogueMul32(run.nodeId + 31, 0x27d4eb2f)) >>> 0);
             if(owners.length) {
                 try { wodCampaignSpawnAiStartingUnits(owners, gar, spawnRng); }
@@ -46270,12 +46364,18 @@
             gameData._matchReadyForEndChecks = false;
             wodResetEndCountdowns();
             let cmdNames = wodRogueGeneralNames(node);
-            let cmdLead = cmdNames[0] || 'The Iron Concord';
+            let countries = wodRogueCountryNames(node);
+            let cmdLead = wodRogueJoinList(countries) || cmdNames[0] || WOD_WORLD.enemy.name;
+            let allyNote = countries.length > 1
+                ? '\n\n' + wodRogueJoinList(countries) + ' are allied against you here. ' +
+                  (wodRogueJoinList(cmdNames) || 'Their commanders') + ' will not fight each other.'
+                : '';
             let body = (run.defense
                 ? cmdLead + ' is counterattacking ' + node.name + '. Hold for ' +
                   wodFormatHoldClock(holdSec) + ' or capture every enemy city to throw them back.'
                 : (node.brief + '\n\nAssault: capture every enemy city within ' + wodFormatHoldClock(holdSec) +
                   '. If time runs out, the attack fails.')) +
+                allyNote +
                 approachBrief +
                 '\n\nYour army: ' + c.roster.length + ' units · battle upkeep ' + wodRogueFormatUpkeep(myUpkeep) +
                 ' · opening reserves $' + startCash.toLocaleString() + ' / ' + startMp.toLocaleString() + ' manpower.' +
