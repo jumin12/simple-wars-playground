@@ -428,7 +428,8 @@ function buildNormandyDDay() {
   b.city(-10, -22, 1, 'Portsmouth', { factory: true, harbor: true, incomeBonus: 50 });
   b.city(8, -23, 1, 'Southampton', { factory: true, harbor: true, incomeBonus: 30 });
   b.city(-26, -21, 1, 'Plymouth', { factory: false, harbor: true });
-  b.city(24, -22, 1, 'Dover', { factory: false, harbor: true });
+  // Sussex/Channel port opposite the eastern beaches — Dover is far off this sheet in Kent.
+  b.city(24, -22, 1, 'Newhaven', { factory: false, harbor: true });
 
   b.city(-42, -7, 2, 'Cherbourg', { factory: true, harbor: true, incomeBonus: 40 });
   b.city(-38, -2, 2, 'Valognes', { factory: false });
@@ -442,6 +443,14 @@ function buildNormandyDDay() {
   b.city(30, 26, 2, 'Falaise', { factory: true });
   b.city(-54, 16, 2, 'Saint-Malo', { factory: false, harbor: true });
   b.city(-50, 28, 2, 'Rennes', { factory: true });
+  b.ensureLand(8, 4, 2);
+  b.ensureLand(18, 3, 2);
+  b.ensureLand(2, 3, 2);
+  b.ensureLand(-10, 3, 2);
+  b.city(8, 4, 2, 'Arromanches', { factory: false, harbor: true });
+  b.city(18, 3, 2, 'Courseulles-sur-Mer', { factory: false, harbor: true });
+  b.city(2, 3, 2, 'Longues-sur-Mer', { factory: false });
+  b.city(-10, 3, 2, 'Vierville-sur-Mer', { factory: false });
 
   // Ownership.
   b.each((h) => {
@@ -475,6 +484,7 @@ function buildNormandyDDay() {
     [16, 1], [20, 2],
     [26, 1], [30, 2], [34, 2],
     [-44, -5], [-40, -9],
+    [-36, -2],
   ];
   for (const [fq, fr] of wallForts) b.fort(fq, fr, 2);
 
@@ -510,6 +520,8 @@ function buildNormandyDDay() {
   manFort(26, 1, '441st Ost Bn.');
   manFort(30, 2);
   manFort(34, 2);
+  manFort(8, 2, '726th Grenadier Regt.');
+  manFort(2, 3, 'Longues-sur-Mer Battery');
 
   // Allied assault — shifted RIGHT into open Channel water (east of Cotentin), never on land.
   for (let i = 0; i < 5; i++) {
@@ -538,6 +550,14 @@ function buildNormandyDDay() {
     assaultAfloat('marine', 1, 30 + (i % 2), -4 - Math.floor(i / 2), i === 0 ? '3rd Inf. Div. (Sword)' : null);
   }
   assaultAfloat('heavy', 1, 32, -5, '27th Armoured Bde.');
+  assaultAfloat('marine', 1, -22, -6, '90th Inf. Div. (Utah follow-on)');
+  assaultAfloat('marine', 1, -14, -3, '5th Ranger Bn.');
+  assaultAfloat('heavy', 1, 6, -4, '79th Armoured Div. (Funnies)');
+  assaultAfloat('marine', 1, 28, -3, '1st Special Service Bde.');
+  assaultAfloat('marine', 1, 34, -3, 'No. 4 Commando');
+  assaultAfloat('marine', 1, 16, -3, '48 Royal Marine Commando');
+  assaultAfloat('marine', 1, 32, -3, '41 RM Commando');
+  assaultAfloat('marine', 1, 14, -3, '46 RM Commando');
 
   // Airborne inland only (not on beaches). Clear ownership so Allied drops can place.
   function dropZone(q, r, rad) {
@@ -552,13 +572,24 @@ function buildNormandyDDay() {
   }
   dropZone(-36, 5, 3);
   dropZone(-30, 6, 3);
+  dropZone(-40, 4, 2);
+  dropZone(-26, 8, 2);
   dropZone(34, 5, 3);
+  dropZone(38, 4, 2);
+  dropZone(32, 7, 2);
   b.unit('marine', 1, -36, 5, '82nd Airborne Div.');
   b.unit('marine', 1, -38, 6, '505th PIR');
+  b.unit('marine', 1, -40, 4, '507th PIR');
   b.unit('marine', 1, -30, 6, '101st Airborne Div.');
   b.unit('marine', 1, -28, 8, '506th PIR');
+  b.unit('marine', 1, -32, 8, '502nd PIR');
+  b.unit('marine', 1, -26, 8, '501st PIR');
+  b.unit('marine', 1, -34, 7, '508th PIR');
   b.unit('marine', 1, 34, 5, '6th Airborne Div.');
   b.unit('marine', 1, 36, 6, '9th Para Bn. (Merville)');
+  b.unit('marine', 1, 32, 7, '7th Para Bn. (Pegasus)');
+  b.unit('marine', 1, 36, 8, '6th Airlanding Bde.');
+  b.unit('marine', 1, 38, 4, '1st Cdn Para Bn.');
 
   // Allied navy — behind assault, also shifted right of Cotentin.
   b.unit('ship', 1, -24, -8, 'Force U (Utah)');
@@ -572,6 +603,15 @@ function buildNormandyDDay() {
   b.unit('ship', 1, 16, -12, 'HMCS Algonquin');
   b.unit('ship', 1, 26, -12, 'HMS Warspite');
   b.unit('ship', 1, -20, -11, 'USS Nevada');
+  b.unit('ship', 1, -28, -10, 'USS Quincy');
+  b.unit('ship', 1, -8, -14, 'USS Augusta');
+  b.unit('ship', 1, -2, -11, 'Montcalm');
+  b.unit('ship', 1, 8, -10, 'HMS Ajax');
+  b.unit('ship', 1, 22, -10, 'HMS Mauritius');
+  b.unit('ship', 1, 34, -10, 'HMS Ramillies');
+  b.unit('ship', 1, 36, -12, 'HMS Roberts');
+  b.unit('ship', 1, 28, -14, 'HMS Rodney');
+  b.unit('ship', 1, -22, -10, 'Georges Leygues');
 
   // Follow-on in thin England.
   function englandPad(q, r) {
@@ -594,6 +634,13 @@ function buildNormandyDDay() {
   b.unit('heavy', 1, 10, -22, '7th Armoured Div. (Desert Rats)');
   b.unit('heavy', 1, -22, -20, '2nd Armored Div. (US)');
   b.unit('light', 1, 4, -22, '51st Highland Div.');
+  englandPad(-12, -21);
+  englandPad(16, -22);
+  b.unit('light', 1, -12, -21, 'VII Corps Reserve');
+  b.unit('light', 1, 16, -22, '15th (Scottish) Inf. Div.');
+  b.unit('heavy', 1, 18, -21, '11th Armoured Div.');
+  englandPad(-8, -21);
+  b.unit('light', 1, -8, -21, '2nd Inf. Div. (US)');
 
   // German inland reserves (Wall already manned above).
   b.ensureLand(-40, -4, 2);
@@ -612,6 +659,22 @@ function buildNormandyDDay() {
   b.unit('light', 2, 8, 10, 'Bayeux Garrison');
   b.unit('light', 2, 32, 24, 'Falaise Depot');
   b.unit('light', 2, -52, 18, 'Saint-Malo Garrison');
+  b.ensureLand(-8, 8, 1);
+  b.ensureLand(40, 6, 2);
+  b.ensureLand(16, 12, 1);
+  b.ensureLand(-20, 4, 1);
+  b.unit('light', 2, -8, 8, '915th Grenadier Regt.');
+  b.unit('light', 2, 40, 6, '711th Inf. Div.');
+  b.unit('light', 2, 16, 12, 'Schnelle Brigade 30');
+  b.unit('light', 2, -20, 4, 'Maisy Battery');
+  b.unit('light', 2, 36, 8, '736th Ost Bn.');
+  b.fort(40, 5, 2);
+  b.ensureLand(-36, -2, 1);
+  b.ensureLand(-38, -2, 1);
+  b.ensureLand(28, 22, 1);
+  b.unit('light', 2, -36, -2, 'Crisbecq Battery');
+  b.unit('light', 2, -38, -2, '729th Grenadier Regt.');
+  b.unit('heavy', 2, 28, 22, '12th SS Panzer (HJ)');
 
   return {
     file: 'normandy-dday.json',
@@ -696,8 +759,8 @@ function buildNormandyDDay() {
             '21st Panzer',
             { type: 'timer', seconds: 420 },
             {
-              title: 'Only panzers in sector',
-              body: '21st Panzer is counter-attacking from Caen toward the Juno–Sword gap. German armour is moving — meet them as you choose.',
+              title: '21st Panzer — 12th SS on the road',
+              body: '21st Panzer is counter-attacking from Caen toward the Juno–Sword gap. Hitlerjugend (12th SS) is leaving Evrecy for the same sector. Meet them as you choose.',
               style: 'alert',
             },
             [
@@ -739,6 +802,586 @@ function buildNormandyDDay() {
 }
 
 
+function landUnit(b, type, owner, q, r, name) {
+  b.ensureLand(q, r, 1);
+  const h = b.at(q, r);
+  if (h && h.type !== 'urban' && h.type !== 'water' && h.type !== 'mountain') h.owner = owner;
+  return b.unit(type, owner, q, r, name);
+}
+
+function fortLine(b, q0, r0, q1, r1, n, owner) {
+  for (let i = 0; i < n; i++) {
+    const t = n <= 1 ? 0.5 : i / (n - 1);
+    const q = Math.round(q0 + (q1 - q0) * t);
+    const r = Math.round(r0 + (r1 - r0) * t);
+    b.fort(q, r, owner);
+  }
+}
+
+/**
+ * Operation Citadel — Kursk salient, 5 July 1943.
+ *
+ * North: Model's 9th Army (Orel)  — AI owner 2
+ * Center/west: Soviet Central + Voronezh Fronts holding the bulge — player 1
+ * South: Hoth's 4th Panzer Army + Kempf (Belgorod / Kharkov) — AI owner 3
+ *
+ * Axial layout (r increases south, q increases east), ~36°E rail as the spine:
+ *   Orel → Ponyri → Fatezh → Kursk → Oboyan → Belgorod → Kharkov
+ * Salient nose west at Rylsk / Lgov; Prokhorovka east of the Belgorod–Oboyan road.
+ */
+function buildKurskCitadel() {
+  const b = new MapBuilder(76, 19430705);
+
+  b.generateBase('rectangle', 1943, {
+    waterElevThresh: 0.06,
+    sandThresh: 0.18,
+    grassThresh: 0.58,
+    forestThresh: 0.84,
+    mountElevThresh: 0.97,
+    moistShift: -0.05,
+    forestMoistBoost: 0.02,
+    mountainStyle: 'low',
+    mountainPeakJitter: 0.03,
+    biomeAccent: 'balanced',
+  });
+  b.each((h) => {
+    if (h.type === 'water' || h.type === 'sand') h.type = 'grass';
+  });
+
+  // Open steppe on the southern face; mixed woodland on the Orel–Ponyri north.
+  for (let i = 0; i < 16; i++) {
+    b.blob(Math.round(-20 + b.rng() * 40), Math.round(-40 + b.rng() * 18), 2.2 + b.rng() * 2.8, 'forest', {
+      noise: 0.35,
+    });
+  }
+  for (let i = 0; i < 7; i++) {
+    b.blob(Math.round(-28 + b.rng() * 24), Math.round(-8 + b.rng() * 20), 1.6 + b.rng() * 2.0, 'forest', {
+      noise: 0.3,
+    });
+  }
+  // Olkhovatka / Ponyri heights — Model's northern killing ground.
+  b.blob(2, -16, 5.5, 'hill', { noise: 0.22 });
+  b.blob(6, -20, 4.2, 'hill', { noise: 0.2 });
+  b.blob(-2, -18, 3.4, 'hill', { noise: 0.18 });
+  // Southern rolling steppe stays mostly grass; a few balkas as swamp.
+  b.blob(12, 22, 2.4, 'swamp', { noise: 0.28 });
+  b.blob(20, 24, 2.0, 'swamp', { noise: 0.24 });
+  b.blob(8, 18, 1.8, 'swamp', { noise: 0.22 });
+
+  // Rivers (historical courses).
+  b.ridge(10, -40, 8, -8, 1, 'water', { wobble: 1.6, skipUrban: true }); // Oka / Orel drainage
+  b.ridge(-22, 2, 10, 2, 1, 'water', { wobble: 1.8, skipUrban: true }); // Seym through Kursk, west
+  b.ridge(10, 2, 26, 4, 0, 'water', { wobble: 1.2, skipUrban: true });
+  b.ridge(8, 18, 20, 22, 1, 'water', { wobble: 1.4, skipUrban: true }); // Psel (Oboyan–Prokhorovka)
+  b.ridge(10, 34, 6, 46, 1, 'water', { wobble: 1.5, skipUrban: true }); // Northern Donets (Belgorod–Kharkov)
+  b.ridge(-8, 28, 8, 32, 0, 'water', { wobble: 1.2, skipUrban: true }); // Vorskla approach
+
+  b.landCorridor(6, -36, 6, -18, 2);
+  b.landCorridor(6, -18, 8, 0, 2);
+  b.landCorridor(8, 0, 8, 18, 2);
+  b.landCorridor(8, 18, 10, 34, 2);
+  b.landCorridor(10, 34, 8, 44, 2);
+  b.landCorridor(8, 0, -18, 2, 1);
+  b.landCorridor(10, 34, 20, 22, 1);
+
+  const seat = (q, r, rad) => {
+    b.ensureLand(q, r, rad || 3);
+  };
+  seat(6, -36, 4);
+  seat(6, -20, 3);
+  seat(4, -10, 2);
+  seat(8, 0, 4);
+  seat(8, 16, 3);
+  seat(20, 22, 3);
+  seat(10, 34, 3);
+  seat(8, 44, 4);
+  seat(-12, 2, 3);
+  seat(-22, 4, 3);
+  seat(-16, 16, 3);
+  seat(28, 8, 3);
+  seat(4, -24, 2);
+  seat(8, 30, 2);
+  seat(-38, -8, 3);
+
+  b.city(6, -36, 2, 'Orel', { factory: true, incomeBonus: 40 });
+  b.city(6, -20, 1, 'Ponyri', { factory: false });
+  b.city(4, -24, 1, 'Olkhovatka', { factory: false });
+  b.city(4, -10, 1, 'Fatezh', { factory: false });
+  b.city(8, 0, 1, 'Kursk', { factory: true, incomeBonus: 50 });
+  b.city(8, 16, 1, 'Oboyan', { factory: false });
+  b.city(20, 22, 1, 'Prokhorovka', { factory: false });
+  b.city(8, 30, 3, 'Tomarovka', { factory: false });
+  b.city(10, 34, 3, 'Belgorod', { factory: true, incomeBonus: 20 });
+  b.city(8, 44, 3, 'Kharkov', { factory: true, incomeBonus: 40 });
+  b.city(-12, 2, 1, 'Lgov', { factory: false });
+  b.city(-22, 4, 1, 'Rylsk', { factory: false });
+  b.city(-16, 16, 1, 'Sumy', { factory: false });
+  b.city(28, 8, 1, 'Stary Oskol', { factory: true });
+  b.city(-38, -8, 2, 'Sevsk', { factory: false });
+
+  // Westward Soviet salient: 9th Army on the Orel shoulder, 2nd Army on the
+  // Sevsk–Rylsk west face, 4th Panzer / Kempf on the Belgorod–Kharkov south.
+  function northFront(q) {
+    if (q <= 6) return -6 - 0.435 * (q + 40);
+    return -26 + 0.09 * (q - 6);
+  }
+  function southFront(q) {
+    if (q <= 8) return 14 + 0.437 * (q + 24);
+    return 28 + 0.2 * (q - 8);
+  }
+  function westFace(r) {
+    return -36 + 0.33 * (r + 8);
+  }
+  b.each((h) => {
+    if (h.type === 'urban') return;
+    if (h.type === 'water') {
+      h.owner = 0;
+      return;
+    }
+    const wob = Math.sin(h.q * 0.11) * 1.3 + Math.cos(h.r * 0.13) * 1.1;
+    if (h.r <= northFront(h.q) + wob) h.owner = 2;
+    else if (h.r >= southFront(h.q) + wob * 0.6) h.owner = 3;
+    else if (h.q <= westFace(h.r) + wob * 0.4) h.owner = 2;
+    else h.owner = 1;
+  });
+  for (const c of b.cities) {
+    for (const h of b.hexes.values()) {
+      if (h.cityId === c.id) h.owner = c.owner;
+    }
+  }
+
+  // Three Soviet defensive belts — north face (13th Army) and south face (6th/7th Guards).
+  fortLine(b, -6, -24, 16, -24, 7, 1);
+  fortLine(b, -8, -20, 14, -18, 6, 1);
+  fortLine(b, -4, -14, 12, -12, 5, 1);
+  fortLine(b, -4, 24, 22, 26, 7, 1);
+  fortLine(b, -2, 20, 20, 22, 6, 1);
+  fortLine(b, 0, 16, 16, 18, 5, 1);
+  fortLine(b, -18, -10, -14, 12, 6, 1);
+
+  // —— Central Front (Rokossovsky) on the northern face ——
+  landUnit(b, 'light', 1, 6, -22, '13th Army (Pukhov)');
+  landUnit(b, 'light', 1, 2, -22, '17th Guards Rifle Corps');
+  landUnit(b, 'light', 1, 10, -22, '29th Rifle Corps');
+  landUnit(b, 'light', 1, 8, -18, '81st Rifle Div.');
+  landUnit(b, 'light', 1, 4, -18, '15th Rifle Div.');
+  landUnit(b, 'light', 1, 0, -16, '70th Army');
+  landUnit(b, 'light', 1, -4, -14, '65th Army');
+  landUnit(b, 'light', 1, 14, -16, '48th Army');
+  landUnit(b, 'light', 1, -10, -8, '60th Army');
+  landUnit(b, 'heavy', 1, 8, -12, '2nd Tank Army');
+  landUnit(b, 'heavy', 1, 4, -12, '16th Tank Corps');
+  landUnit(b, 'heavy', 1, 10, -12, '3rd Tank Corps');
+  landUnit(b, 'light', 1, 10, -8, 'Central Front HQ');
+
+  // —— Voronezh Front (Vatutin) on the southern face ——
+  landUnit(b, 'light', 1, 8, 20, '6th Guards Army');
+  landUnit(b, 'light', 1, 4, 22, '22nd Guards Rifle Corps');
+  landUnit(b, 'light', 1, 12, 22, '23rd Guards Rifle Corps');
+  landUnit(b, 'light', 1, 18, 26, '7th Guards Army');
+  landUnit(b, 'light', 1, 22, 28, '24th Guards Rifle Corps');
+  landUnit(b, 'light', 1, 14, 18, '69th Army');
+  landUnit(b, 'light', 1, -4, 14, '40th Army');
+  landUnit(b, 'light', 1, -10, 14, '38th Army');
+  landUnit(b, 'heavy', 1, 6, 12, '1st Tank Army (Katukov)');
+  landUnit(b, 'heavy', 1, 10, 12, '6th Tank Corps');
+  landUnit(b, 'heavy', 1, 2, 12, '31st Tank Corps');
+  landUnit(b, 'heavy', 1, 8, 10, '3rd Mechanized Corps');
+  landUnit(b, 'light', 1, 8, 4, 'Voronezh Front HQ');
+
+  // Steppe Front (Konev) — strategic reserve east of Kursk; 5th GTA arrives at Prokhorovka by event.
+  landUnit(b, 'light', 1, 24, 6, '5th Guards Army');
+  landUnit(b, 'light', 1, 28, 10, '33rd Guards Rifle Corps');
+  landUnit(b, 'light', 1, 26, 2, '27th Army');
+  landUnit(b, 'light', 1, 30, 4, '53rd Army');
+  landUnit(b, 'light', 1, 32, 6, '47th Army');
+  landUnit(b, 'heavy', 1, 26, 8, '5th Guards Tank Army');
+  landUnit(b, 'light', 1, 8, 2, 'Kursk Garrison');
+  landUnit(b, 'light', 1, -20, 6, 'Rylsk Garrison');
+  landUnit(b, 'light', 1, -14, 16, 'Sumy Garrison');
+
+  // —— 9th Army (Model) from Orel ——
+  landUnit(b, 'heavy', 2, 4, -32, '2nd Panzer Div.');
+  landUnit(b, 'heavy', 2, 8, -32, '9th Panzer Div.');
+  landUnit(b, 'heavy', 2, 2, -30, '18th Panzer Div.');
+  landUnit(b, 'heavy', 2, 10, -30, '20th Panzer Div.');
+  landUnit(b, 'heavy', 2, 6, -34, '12th Panzer Div.');
+  landUnit(b, 'heavy', 2, 8, -36, '4th Panzer Div.');
+  landUnit(b, 'heavy', 2, 0, -28, 'sPzAbt 505 (Tigers)');
+  landUnit(b, 'heavy', 2, 12, -28, 'sPzJgAbt 653 (Ferdinand)');
+  landUnit(b, 'heavy', 2, 14, -28, 'sPzJgAbt 654 (Ferdinand)');
+  landUnit(b, 'light', 2, 6, -28, '10th Panzergrenadier');
+  landUnit(b, 'light', 2, 0, -32, '78th Sturm Div.');
+  landUnit(b, 'light', 2, 12, -32, '86th Inf. Div.');
+  landUnit(b, 'light', 2, -2, -30, '292nd Inf. Div.');
+  landUnit(b, 'light', 2, 14, -30, '6th Inf. Div.');
+  landUnit(b, 'light', 2, 8, -38, '216th Inf. Div.');
+  landUnit(b, 'light', 2, 2, -38, '383rd Inf. Div.');
+  landUnit(b, 'light', 2, -6, -28, '7th Inf. Div.');
+  landUnit(b, 'light', 2, -4, -32, '31st Inf. Div.');
+  landUnit(b, 'light', 2, -8, -30, '102nd Inf. Div.');
+  landUnit(b, 'light', 2, 6, -40, '9th Army HQ (Model)');
+  landUnit(b, 'light', 2, -34, -4, '82nd Inf. Div. (2nd Army)');
+  landUnit(b, 'light', 2, -32, 4, '88th Inf. Div. (2nd Army)');
+  landUnit(b, 'light', 2, -30, 12, '68th Inf. Div. (2nd Army)');
+
+  // —— 4th Panzer Army (Hoth) + Army Detachment Kempf from Belgorod ——
+  landUnit(b, 'heavy', 3, 6, 32, 'Großdeutschland');
+  landUnit(b, 'heavy', 3, 4, 34, '3rd Panzer Div.');
+  landUnit(b, 'heavy', 3, 8, 34, '11th Panzer Div.');
+  landUnit(b, 'heavy', 3, 14, 32, 'LSSAH');
+  landUnit(b, 'heavy', 3, 16, 34, 'Das Reich');
+  landUnit(b, 'heavy', 3, 18, 32, 'Totenkopf');
+  landUnit(b, 'heavy', 3, 22, 36, '6th Panzer Div.');
+  landUnit(b, 'heavy', 3, 24, 34, '7th Panzer Div.');
+  landUnit(b, 'heavy', 3, 20, 38, '19th Panzer Div.');
+  landUnit(b, 'heavy', 3, 12, 36, 'sPzAbt 503 (Tigers)');
+  landUnit(b, 'light', 3, 2, 36, '167th Inf. Div.');
+  landUnit(b, 'light', 3, 0, 32, '332nd Inf. Div.');
+  landUnit(b, 'light', 3, -4, 34, '57th Inf. Div.');
+  landUnit(b, 'light', 3, -2, 36, '255th Inf. Div.');
+  landUnit(b, 'light', 3, 26, 36, '168th Inf. Div.');
+  landUnit(b, 'light', 3, 28, 34, '106th Inf. Div.');
+  landUnit(b, 'light', 3, 30, 36, '320th Inf. Div.');
+  landUnit(b, 'light', 3, 10, 38, '4th Panzer Army HQ (Hoth)');
+  landUnit(b, 'light', 3, 8, 46, 'Kharkov Garrison');
+  landUnit(b, 'light', 3, 12, 42, 'Army Det. Kempf');
+
+  return {
+    file: 'kursk-citadel.json',
+    entry: {
+      id: 'kursk-citadel',
+      name: 'Kursk: Operation Citadel',
+      description:
+        '5 July 1943 — hold the Kursk bulge. Model’s 9th Army comes down the Orel–Ponyri rail; Hoth’s 4th Panzer and Kempf come up from Belgorod toward Oboyan and Prokhorovka. (One-shot)',
+      price: 200,
+      file: 'kursk-citadel.json',
+      aiCount: 2,
+      packType: 'oneshot',
+    },
+    data: b.export({
+      money: 28000,
+      manpower: 26000,
+      aiMoney: { 1: 0, 2: 22000, 3: 26000 },
+      aiManpower: { 1: 0, 2: 16000, 3: 18000 },
+      mission: {
+        version: 1,
+        title: 'Operation Citadel',
+        victoryMode: 'domination',
+        events: [
+          ev(
+            'kursk_brief',
+            'Briefing',
+            { type: 'timer', seconds: 1 },
+            {
+              title: 'Zitadelle',
+              body: '05:00, 5 July 1943. You hold the Kursk salient — Central Front to the north, Voronezh Front to the south, Steppe Front in reserve east of the city. Model is coming from Orel; Hoth and Kempf from Belgorod. The belts at Ponyri and Oboyan must hold.',
+              style: 'briefing',
+              kicker: 'Store Mission · One-shot',
+            }
+          ),
+          ev(
+            'kursk_barrage',
+            'Opening barrage',
+            { type: 'timer', seconds: 40 },
+            {
+              title: 'Artillery preparation',
+              body: 'German guns open on both faces. On the north, Ferdinands of sPzJgAbt 653 are already grinding toward Ponyri. On the south, II SS Panzer Corps is forming for the Oboyan road.',
+              style: 'alert',
+            }
+          ),
+          ev(
+            'kursk_ponyri',
+            'Ponyri',
+            { type: 'timer', seconds: 180 },
+            {
+              title: 'Ponyri — the northern hinge',
+              body: '13th Army reports XLI and XLVII Panzer Corps in the second belt. Commit 2nd Tank Army if the Olkhovatka heights start to go.',
+              style: 'alert',
+            },
+            [{ owner: 2, type: 'heavy', count: 2, anchor: 'faction_city', cityOwner: 2 }],
+            [{ owner: 2, scope: 'reinforcements', x: 160, y: -480 }]
+          ),
+          ev(
+            'kursk_psel',
+            'Psel crossings',
+            { type: 'timer', seconds: 320 },
+            {
+              title: 'II SS on the Psel',
+              body: 'Hausser’s corps has punched 6th Guards Army and is reaching for the Psel crossings above Prokhorovka. Katukov’s 1st Tank Army is your first counter-weight.',
+              style: 'alert',
+            },
+            [
+              { owner: 3, type: 'heavy', count: 3, anchor: 'faction_city', cityOwner: 3 },
+              { owner: 3, type: 'light', count: 3, anchor: 'faction_city', cityOwner: 3 },
+            ],
+            [{ owner: 3, scope: 'reinforcements', x: 280, y: 520 }]
+          ),
+          ev(
+            'kursk_prokhorovka',
+            'Prokhorovka',
+            { type: 'timer', seconds: 480 },
+            {
+              title: '5th Guards Tank Army',
+              body: 'Rotmistrov’s 5th Guards Tank Army is releasing from the Steppe Front toward Prokhorovka. Meet II SS on the rolling ground east of the Psel — this is the counter-blow Vatutin asked for.',
+              style: 'victory',
+            },
+            [
+              { owner: 1, type: 'heavy', count: 4, anchor: 'faction_city', cityOwner: 1 },
+              { owner: 1, type: 'light', count: 3, anchor: 'faction_city', cityOwner: 1 },
+            ]
+          ),
+          ev(
+            'kursk_kutuzov',
+            'Kutuzov',
+            { type: 'troops_killed', count: 2500 },
+            {
+              title: 'Operation Kutuzov',
+              body: 'The northern face is bleeding. Stavka has opened Kutuzov against Orel — if you can take the city, Model’s pincer dies on the rail.',
+              style: 'briefing',
+            },
+            [{ owner: 1, type: 'heavy', count: 2, anchor: 'player_city' }]
+          ),
+          ev(
+            'kursk_rumyantsev',
+            'Rumyantsev',
+            { type: 'time_survived', seconds: 700 },
+            {
+              title: 'Hold, then strike south',
+              body: 'Citadel has shot its bolt. The prize is now Belgorod and Kharkov. Keep Prokhorovka and the Oboyan road, then drive Army Group South back down the Donets.',
+              style: 'briefing',
+            },
+            [{ owner: 1, type: 'light', count: 4, anchor: 'player_city' }]
+          ),
+        ],
+      },
+    }),
+  };
+}
+
+/**
+ * Battle of Midway — 4–7 June 1942.
+ *
+ * Open Pacific sheet. Midway Atoll (Sand + Eastern Islands) east of center;
+ * Kure Atoll to the west. US carriers at Point Luck (northeast). Kidō Butai
+ * northwest on bearing ~320°. Invasion / Kondō west; Yamamoto’s Main Body
+ * farther west — historically too late if you win the carrier fight.
+ */
+function buildMidway() {
+  const b = new MapBuilder(70, 19420604);
+
+  b.each((h) => {
+    h.type = 'water';
+    h.owner = 0;
+  });
+
+  function paintReef(cq, cr, rx, ry) {
+    for (let dq = -Math.ceil(rx + 2); dq <= Math.ceil(rx + 2); dq++) {
+      for (let dr = -Math.ceil(ry + 2); dr <= Math.ceil(ry + 2); dr++) {
+        const h = b.at(cq + dq, cr + dr);
+        if (!h) continue;
+        const a = (dq * dq) / (rx * rx) + (dr * dr) / (ry * ry);
+        if (a >= 0.88 && a <= 1.08) h.type = 'sand';
+      }
+    }
+  }
+
+  // Midway: thin reef + two solid islands on the south rim (not doughnut land).
+  // Sand Island (larger, west) and Eastern Island (smaller, ESE). Ocean distances
+  // are compressed; relative bearings match 4 June: US NE, Kido Butai closer NW.
+  paintReef(18, 4, 5.4, 3.8);
+  b.blob(15, 5, 2.3, 'grass', { noise: 0.16 });
+  b.blob(14, 4, 1.7, 'sand', { noise: 0.14 });
+  b.blob(21, 6, 1.5, 'grass', { noise: 0.14 });
+  b.blob(22, 5, 1.2, 'sand', { noise: 0.12 });
+  b.blob(18, 3, 1.8, 'water', { noise: 0.12 });
+  // Kure Atoll ~WNW — empty reef, no extra land stamps.
+  paintReef(-14, 0, 2.8, 2.0);
+  b.blob(-14, 1, 0.8, 'sand', { noise: 0.08 });
+
+  b.city(15, 5, 1, 'Sand Island', { factory: false, harbor: true, incomeBonus: 20 });
+  b.city(21, 6, 1, 'Eastern Island', { factory: true, harbor: false, incomeBonus: 10 });
+
+  b.each((h) => {
+    if (h.type === 'urban') return;
+    if (h.type === 'water') {
+      h.owner = 0;
+      return;
+    }
+    const dMid = (h.q - 18) * (h.q - 18) + (h.r - 5) * (h.r - 5);
+    h.owner = dMid < 80 ? 1 : 0;
+  });
+  for (const c of b.cities) {
+    for (const h of b.hexes.values()) {
+      if (h.cityId === c.id) h.owner = c.owner;
+    }
+  }
+
+  b.fort(14, 4, 1);
+  b.fort(16, 6, 1);
+  b.fort(21, 5, 1);
+
+  // Midway garrison — snap onto existing island hexes only (no ensureLand specks).
+  b.unit('light', 1, 14, 5, '6th Marine Defense Bn.');
+  b.unit('marine', 1, 16, 4, 'VMF-221');
+  b.unit('marine', 1, 20, 6, 'VMSB-241');
+  b.unit('light', 1, 22, 5, '7th AAF (B-17s)');
+
+  // TF 16 (Spruance) — Point Luck, farther northeast.
+  b.unit('ship', 1, 44, -22, 'USS Enterprise');
+  b.unit('ship', 1, 46, -24, 'USS Hornet');
+  b.unit('ship', 1, 42, -20, 'USS Northampton');
+  b.unit('ship', 1, 42, -24, 'USS Vincennes');
+  b.unit('ship', 1, 48, -22, 'USS Minneapolis');
+  b.unit('ship', 1, 48, -20, 'USS New Orleans');
+  b.unit('ship', 1, 46, -20, 'USS Pensacola');
+  b.unit('ship', 1, 44, -20, 'USS Atlanta');
+  b.unit('ship', 1, 40, -22, 'USS Phelps');
+  b.unit('ship', 1, 50, -24, 'USS Balch');
+  b.unit('ship', 1, 50, -20, 'USS Maury');
+
+  // TF 17 (Fletcher) — closer than TF 16, still NE of the atoll.
+  b.unit('ship', 1, 36, -16, 'USS Yorktown');
+  b.unit('ship', 1, 34, -14, 'USS Astoria');
+  b.unit('ship', 1, 38, -14, 'USS Portland');
+  b.unit('ship', 1, 34, -18, 'USS Hammann');
+  b.unit('ship', 1, 38, -16, 'USS Morris');
+  b.unit('ship', 1, 32, -16, 'USS Hughes');
+
+  // Patrol line / PT boats off the reef; Nautilus on the approach.
+  b.unit('ship', 1, 18, -2, 'MTB Flotilla 1');
+  b.unit('ship', 1, 12, 10, 'USS Nautilus');
+
+  // Kidō Butai (Nagumo) — northwest, bearing ~320° from Midway.
+  b.unit('ship', 2, -6, -16, 'Akagi');
+  b.unit('ship', 2, -2, -18, 'Kaga');
+  b.unit('ship', 2, -10, -14, 'Sōryū');
+  b.unit('ship', 2, -8, -20, 'Hiryū');
+  b.unit('ship', 2, -4, -12, 'Tone');
+  b.unit('ship', 2, 0, -14, 'Chikuma');
+  b.unit('ship', 2, -8, -12, 'Nagara');
+  b.unit('ship', 2, -12, -18, 'Haruna');
+  b.unit('ship', 2, 2, -18, 'Kirishima');
+  b.unit('ship', 2, -4, -16, 'Arashi');
+  b.unit('ship', 2, -6, -22, 'Nowaki');
+  b.unit('ship', 2, -2, -22, 'Makigumo');
+  b.unit('ship', 2, -10, -22, 'Kazagumo');
+  b.unit('ship', 2, -14, -16, 'DesRon 10');
+
+  // Close Support Force (Kurita) — west-southwest with the transports.
+  b.unit('ship', 2, -40, 10, 'Mikuma');
+  b.unit('ship', 2, -38, 12, 'Mogami');
+  b.unit('ship', 2, -42, 8, 'Suzuya');
+  b.unit('ship', 2, -36, 8, 'Kumano');
+  b.unit('ship', 2, -44, 12, 'Occupation Force');
+  b.unit('ship', 2, -42, 14, '2nd Combined SNLF');
+
+  // Midway Invasion / Kondō 2nd Fleet — west-northwest.
+  b.unit('ship', 2, -30, -4, 'Atago');
+  b.unit('ship', 2, -28, -2, 'Chōkai');
+  b.unit('ship', 2, -32, -6, 'Myōkō');
+  b.unit('ship', 2, -26, -6, 'Haguro');
+  b.unit('ship', 2, -34, -2, 'Kongō');
+  b.unit('ship', 2, -26, 0, 'Hiei');
+  b.unit('ship', 2, -30, 0, 'Zuihō');
+
+  // Main Body (Yamamoto) — far west; historically out of the 4 June fight.
+  b.unit('ship', 2, -56, -8, 'Yamato');
+  b.unit('ship', 2, -52, -6, 'Nagato');
+  b.unit('ship', 2, -54, -10, 'Mutsu');
+  b.unit('ship', 2, -50, -4, 'Hōshō');
+  b.unit('ship', 2, 16, 16, 'I-168');
+
+  return {
+    file: 'midway-1942.json',
+    entry: {
+      id: 'midway-1942',
+      name: 'Midway',
+      description:
+        '4 June 1942 — three American carriers at Point Luck, northeast of the atoll. Nagumo’s Kidō Butai is coming down from the northwest. Sink the Japanese carriers. (One-shot)',
+      price: 200,
+      file: 'midway-1942.json',
+      aiCount: 1,
+      packType: 'oneshot',
+    },
+    data: b.export({
+      money: 18000,
+      manpower: 12000,
+      aiMoney: { 1: 0, 2: 16000 },
+      aiManpower: { 1: 0, 2: 8000 },
+      mission: {
+        version: 1,
+        title: 'Operation MI',
+        victoryMode: 'annihilation',
+        events: [
+          ev(
+            'midway_brief',
+            'Briefing',
+            { type: 'timer', seconds: 1 },
+            {
+              title: 'Point Luck',
+              body: '04 June 1942. Fletcher in Yorktown and Spruance in Enterprise/Hornet wait northeast of Midway. PBY reports: many planes heading Midway from 320°, 150 miles. The atoll’s MAG-22 and 6th Marines are already at general quarters.',
+              style: 'briefing',
+              kicker: 'Store Mission · One-shot',
+            }
+          ),
+          ev(
+            'midway_strike',
+            'Midway under attack',
+            { type: 'timer', seconds: 50 },
+            {
+              title: 'First Midway strike',
+              body: 'Nagumo’s first wave is on the atoll. VMF-221 is up. The Japanese carriers will have to re-arm for a second land strike — or for your ships, if they find you.',
+              style: 'alert',
+            }
+          ),
+          ev(
+            'midway_rearm',
+            'Nagumo re-arms',
+            { type: 'timer', seconds: 140 },
+            {
+              title: 'Spotting the decks',
+              body: 'Tone’s scout has you. Nagumo is caught between a second Midway strike and a re-arm for ships. This is the window — get your SBDs into the air.',
+              style: 'alert',
+            }
+          ),
+          ev(
+            'midway_dive',
+            'McClusky inbound',
+            { type: 'timer', seconds: 240 },
+            {
+              title: 'Dive bombers inbound',
+              body: 'Enterprise and Yorktown dive bombers are reported over the Kidō Butai. Akagi, Kaga and Sōryū are the prize. Hiryū, if she lives, will hit back at Yorktown.',
+              style: 'victory',
+            }
+          ),
+          ev(
+            'midway_hiryu',
+            'Hiryū counterstroke',
+            { type: 'timer', seconds: 360 },
+            {
+              title: 'Hiryū still fights',
+              body: 'If Hiryū is still afloat she will throw everything at Yorktown. Screen the carrier. Kondō’s cruisers and the transport group are still to the west.',
+              style: 'alert',
+            }
+          ),
+          ev(
+            'midway_pursuit',
+            'Westward pursuit',
+            { type: 'troops_killed', count: 800 },
+            {
+              title: 'Mikuma and Mogami',
+              body: 'The surviving Japanese surface force is retiring west. Mikuma and Mogami collided in the night. Spruance can chase — Yamamoto’s Main Body is still out there in the west.',
+              style: 'briefing',
+            },
+            [{ owner: 1, type: 'ship', count: 1, anchor: 'player_city' }]
+          ),
+        ],
+      },
+    }),
+  };
+}
+
 function validateMission(m) {
   const data = m.data;
   if (!data.mission || !Array.isArray(data.mission.events) || !data.mission.events.length) {
@@ -752,19 +1395,21 @@ function validateMission(m) {
     // Soft check — unit() already snapped; just ensure entities exist.
     if (!u.type || !u.owner) throw new Error(m.file + ': bad unit');
   }
-  if (!data.cities || data.cities.length < 4) throw new Error(m.file + ': too few cities');
+  if (!data.cities || data.cities.length < 2) throw new Error(m.file + ': too few cities');
 }
 
 function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
-  const missions = [buildNormandyDDay()];
+  const missions = [buildNormandyDDay(), buildKurskCitadel(), buildMidway()];
+  const keep = new Set(missions.map((m) => m.entry.id));
   const manifest = { maps: [], missions: [] };
   // Preserve any legacy skirmish maps key for older clients.
   const existingPath = path.join(OUT_DIR, 'manifest.json');
   if (fs.existsSync(existingPath)) {
     try {
       const prev = JSON.parse(fs.readFileSync(existingPath, 'utf8'));
-      if (Array.isArray(prev.maps)) manifest.maps = prev.maps.filter((m) => m && m.id && m.id !== 'normandy-dday');
+      if (Array.isArray(prev.maps))
+        manifest.maps = prev.maps.filter((m) => m && m.id && !keep.has(m.id));
     } catch (_) { /* ignore */ }
   }
 

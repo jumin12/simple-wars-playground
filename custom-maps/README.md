@@ -44,8 +44,10 @@ Drop map-editor / mission exports here to sell them in the in-game **Shop → Mi
 - One-shot completion is tracked in `storeMissions.spent`; mini-campaigns only use `storeMissions.completed`.
 - Serve the repo root (e.g. local static server) — opening `index.html` directly may block `fetch` for local files.
 
-## Regenerate Normandy
+## Regenerate store missions
 
 ```bash
 node scripts/generate-store-missions.js
 ```
+
+Writes `normandy-dday.json`, `kursk-citadel.json`, and `midway-1942.json`.
