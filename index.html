@@ -614,6 +614,47 @@
             white-space: nowrap;
         }
         .cs-mp-table tr:last-child td { border-bottom: none; }
+        .cs-mp-table tbody.cs-team-block + tbody.cs-team-block {
+            border-top: 1px solid rgba(212, 175, 39, 0.2);
+        }
+        .cs-mp-table tr.cs-team-banner td {
+            padding: 8px 8px 6px;
+            background: rgba(212, 175, 39, 0.08);
+            border-bottom: 1px solid rgba(212, 175, 39, 0.16);
+        }
+        .cs-team-banner-inner {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+        }
+        .cs-team-banner-name {
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-size: 0.72rem;
+            color: #f1c40f;
+        }
+        .cs-team-banner-tag {
+            font-size: 0.62rem;
+            font-weight: 800;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: #2ecc71;
+            background: rgba(46, 204, 113, 0.12);
+            border: 1px solid rgba(46, 204, 113, 0.28);
+            border-radius: 999px;
+            padding: 2px 8px;
+        }
+        .cs-team-swatches { display: inline-flex; align-items: center; gap: 4px; }
+        .cs-team-banner-res { margin-left: auto; }
+        .cs-mp-table tr.cs-team-member .cs-mp-fname { padding-left: 10px; }
+        .cs-mp-table tr.cs-team-sum td {
+            color: #bdc3c7;
+            font-weight: 700;
+            font-size: 0.78rem;
+            background: rgba(255, 255, 255, 0.03);
+        }
         .cs-mp-fname { display: flex; align-items: center; gap: 8px; min-width: 120px; }
         .cs-mp-swatch {
             width: 10px;
@@ -13946,7 +13987,7 @@
                 else outcomes[String(s)] = 'lost';
             }
             wodMpHostBroadcastMatchEnd({
-                outcomes: wodMpMergeOutcomesAllActiveSlots(outcomes),
+                outcomes: wodMpMergeOutcomesAllActiveSlots(wodMpShareWinWithAllies(outcomes, quitSlot ? [quitSlot] : [])),
                 message: 'Match ended.',
                 countAsBattleWon: false
             });
@@ -17366,7 +17407,28 @@
                 seen.add(s);
                 outcomes[String(s)] = (s === winnerSlot) ? 'won' : 'lost';
             }
-            wodMpHostBroadcastMatchEnd({ outcomes, message, countAsBattleWon: false });
+            wodMpHostBroadcastMatchEnd({ outcomes: wodMpShareWinWithAllies(outcomes), message, countAsBattleWon: false });
+        }
+        function wodMpShareWinWithAllies(outcomes, exceptSlots) {
+            let out = Object.assign({}, outcomes || {});
+            let skip = {};
+            for(let i = 0; i < (exceptSlots || []).length; i++) skip[exceptSlots[i] | 0] = 1;
+            let winners = [];
+            for(let k of Object.keys(out)) {
+                if(out[k] === 'won') winners.push(parseInt(k, 10));
+            }
+            if(!winners.length) return out;
+            for(let k of Object.keys(out)) {
+                let o = parseInt(k, 10);
+                if(out[k] === 'won' || skip[o]) continue;
+                for(let wi = 0; wi < winners.length; wi++) {
+                    if(wodAreAllies(o, winners[wi])) {
+                        out[k] = 'won';
+                        break;
+                    }
+                }
+            }
+            return out;
         }
         function wodMpMergeOutcomesAllActiveSlots(baseOutcomes) {
             let merged = Object.assign({}, baseOutcomes || {});
@@ -24329,6 +24391,242 @@
             return out;
         }
 
+        function wodParticipatingOwnersForSummary(isMp, soloOppOwners, lo) {
+            let set = new Set();
+            if(isMp && typeof wodMpAllFactionSlotsForScoreboard === 'function') {
+                for(let o of wodMpAllFactionSlotsForScoreboard()) if(o > 0) set.add(o);
+            } else {
+                set.add((lo | 0) || 1);
+                for(let o of soloOppOwners || []) if(o > 0) set.add(o);
+            }
+            return [...set].sort((a, b) => a - b);
+        }
+
+        /** Connected components of alliances. Isolated factions stay one-player teams. */
+        function wodBuildAllianceTeams(owners, lo) {
+            let list = [];
+            let seen = new Set();
+            for(let i = 0; i < (owners || []).length; i++) {
+                let o = owners[i] | 0;
+                if(o < 1 || seen.has(o)) continue;
+                seen.add(o);
+                list.push(o);
+            }
+            let parent = {};
+            for(let i = 0; i < list.length; i++) parent[list[i]] = list[i];
+            function find(x) {
+                while(parent[x] !== x) {
+                    parent[x] = parent[parent[x]];
+                    x = parent[x];
+                }
+                return x;
+            }
+            function union(a, b) {
+                a = find(a); b = find(b);
+                if(a === b) return;
+                if(a > b) { let t = a; a = b; b = t; }
+                parent[b] = a;
+            }
+            let pairs = (typeof wodNormalizeAlliances === 'function')
+                ? wodNormalizeAlliances(gameData.alliances)
+                : (gameData.alliances || []);
+            for(let i = 0; i < pairs.length; i++) {
+                let p = pairs[i];
+                if(!p) continue;
+                let a = p[0] | 0, b = p[1] | 0;
+                if(parent[a] != null && parent[b] != null) union(a, b);
+            }
+            let buckets = {};
+            for(let i = 0; i < list.length; i++) {
+                let o = list[i];
+                let r = find(o);
+                if(!buckets[r]) buckets[r] = [];
+                buckets[r].push(o);
+            }
+            let teams = Object.keys(buckets).map(function(k) {
+                let mem = buckets[k].sort((a, b) => a - b);
+                return { owners: mem, allied: mem.length > 1 };
+            });
+            let local = lo | 0;
+            teams.sort(function(a, b) {
+                let ah = a.owners.indexOf(local) >= 0 ? 0 : 1;
+                let bh = b.owners.indexOf(local) >= 0 ? 0 : 1;
+                if(ah !== bh) return ah - bh;
+                return a.owners[0] - b.owners[0];
+            });
+            return teams;
+        }
+
+        function wodSumByOwnerMapForOwners(owners, byOwnerObj) {
+            let sum = 0;
+            if(!byOwnerObj || typeof byOwnerObj !== 'object') return 0;
+            for(let i = 0; i < (owners || []).length; i++) sum += byOwnerObj[owners[i]] || 0;
+            return sum;
+        }
+
+        function wodCountCitiesForOwners(owners) {
+            let n = 0;
+            for(let i = 0; i < (owners || []).length; i++) n += countCitiesForOwner(owners[i]);
+            return n;
+        }
+
+        function wodCountArmiesForOwners(owners) {
+            let n = 0;
+            for(let i = 0; i < (owners || []).length; i++) n += countFriendlyCombatExcludingConvoys(owners[i]);
+            return n;
+        }
+
+        function wodCountHostileCitiesFor(owner) {
+            let n = 0;
+            for(let c of gameData.cities || []) {
+                if(wodIsHostileOwner(c.owner, owner)) n++;
+            }
+            return n;
+        }
+
+        function wodSummaryOwnerLabel(o, lo, isMp) {
+            if(isMp) {
+                if(typeof wodMpIsHumanOwner === 'function' && wodMpIsHumanOwner(o))
+                    return wodMpEscapeHtml(wodMpDisplayNameForSlot(o, { gameDataMp: gameData.mp }));
+                return 'AI seat ' + o;
+            }
+            if(o === lo) return 'You';
+            let nm = (typeof wodSideLabel === 'function') ? wodSideLabel(o, { short: true }) : ('AI ' + (o - 1));
+            return (typeof wodMpEscapeHtml === 'function') ? wodMpEscapeHtml(nm) : nm;
+        }
+
+        function wodSummaryOwnerResultHtml(o, lo, isMp, outcomeKind, ocEnd) {
+            if(isMp) {
+                let resRaw = ocEnd[String(o)];
+                if(resRaw == null && ocEnd[o] != null) resRaw = ocEnd[o];
+                return resRaw === 'won' ? '<span class="cs-mp-res-won">Victory</span>'
+                    : (resRaw === 'lost' ? '<span class="cs-mp-res-lost">Defeat</span>'
+                    : (resRaw === 'ongoing' ? '—' : (resRaw ? String(resRaw) : '—')));
+            }
+            if(o === lo) {
+                return outcomeKind === 'victory'
+                    ? '<span class="cs-mp-res-won">Victory</span>'
+                    : '<span class="cs-mp-res-lost">Defeat</span>';
+            }
+            let citiesN = countCitiesForOwner(o);
+            let armiesN = countFriendlyCombatExcludingConvoys(o);
+            return (citiesN <= 0 && armiesN <= 0)
+                ? '<span class="cs-mp-res-lost">Eliminated</span>'
+                : '<span class="cs-mp-res-won">Active</span>';
+        }
+
+        function wodSummaryTeamResultHtml(team, lo, isMp, outcomeKind, ocEnd) {
+            if(team.owners.indexOf(lo) >= 0) {
+                return outcomeKind === 'victory'
+                    ? '<span class="cs-mp-res-won">Victory</span>'
+                    : '<span class="cs-mp-res-lost">Defeat</span>';
+            }
+            if(isMp) {
+                let wins = 0, losses = 0;
+                for(let i = 0; i < team.owners.length; i++) {
+                    let r = ocEnd[String(team.owners[i])];
+                    if(r == null && ocEnd[team.owners[i]] != null) r = ocEnd[team.owners[i]];
+                    if(r === 'won') wins++;
+                    else if(r === 'lost') losses++;
+                }
+                if(wins && !losses) return '<span class="cs-mp-res-won">Victory</span>';
+                if(losses && !wins) return '<span class="cs-mp-res-lost">Defeat</span>';
+                if(wins && losses) return 'Split';
+                return '—';
+            }
+            let cities = wodCountCitiesForOwners(team.owners);
+            let armies = wodCountArmiesForOwners(team.owners);
+            return (cities <= 0 && armies <= 0)
+                ? '<span class="cs-mp-res-lost">Eliminated</span>'
+                : '<span class="cs-mp-res-won">Active</span>';
+        }
+
+        function wodSummaryFactionRow(o, lo, isMp, outcomeKind, ocEnd, byO, extraClass) {
+            let label = wodSummaryOwnerLabel(o, lo, isMp);
+            let col = factionColors[o] || '#999999';
+            let inc = Math.max(0, Math.floor(byO[o] || 0));
+            let cash = Math.floor(wodPlayerTreasury(o));
+            let cls = extraClass ? (' class="' + extraClass + '"') : '';
+            return '<tr' + cls + '>' +
+                '<td><div class="cs-mp-fname"><span class="cs-mp-swatch" style="background:' + col + '"></span>' + label + '</div></td>' +
+                '<td>' + wodSummaryOwnerResultHtml(o, lo, isMp, outcomeKind, ocEnd) + '</td>' +
+                '<td>' + countCitiesForOwner(o) + '</td>' +
+                '<td>' + countFriendlyCombatExcludingConvoys(o) + '</td>' +
+                '<td>$' + inc.toLocaleString('en-US') + '</td>' +
+                '<td>' + formatFullCount(getOwnerCasualties(o)) + '</td>' +
+                '<td>' + formatTanks(getOwnerTankCasualties(o)) + '</td>' +
+                '<td>' + formatTanks(getOwnerShipCasualties(o)) + '</td>' +
+                '<td>$' + cash.toLocaleString('en-US') + '</td>' +
+                '</tr>';
+        }
+
+        function wodRenderEndScreenTeamTable(isMp, teams, hasAlliedTeam, lo, outcomeKind, ocEnd, byO) {
+            let pf = wodActivePeriodFlavor();
+            let statusHead = isMp ? 'Result' : 'Status';
+            let title, blurb;
+            if(hasAlliedTeam) {
+                title = 'Team results';
+                blurb = 'Allied factions share a team. Each member still has their own cities, armies, income, and losses.';
+            } else if(isMp) {
+                title = 'Faction results (multiplayer)';
+                blurb = 'Per-faction snapshot at match end: cities, armies on the field, gross city revenue this session, casualties, and treasuries.';
+            } else {
+                title = 'Faction breakdown';
+                blurb = 'You first, then each opponent at match end (combined enemy totals above stay the same).';
+            }
+            let bodies = '';
+            for(let ti = 0; ti < teams.length; ti++) {
+                let team = teams[ti];
+                let rows = '';
+                if(hasAlliedTeam) {
+                    let swatches = '';
+                    for(let i = 0; i < team.owners.length; i++) {
+                        swatches += '<span class="cs-mp-swatch" style="background:' + (factionColors[team.owners[i]] || '#999999') + '"></span>';
+                    }
+                    rows += '<tr class="cs-team-banner"><td colspan="9"><div class="cs-team-banner-inner">' +
+                        '<span class="cs-team-banner-name">Team ' + (ti + 1) + '</span>' +
+                        (team.allied ? '<span class="cs-team-banner-tag">Allied</span>' : '') +
+                        '<span class="cs-team-swatches">' + swatches + '</span>' +
+                        '<span class="cs-team-banner-res">' + wodSummaryTeamResultHtml(team, lo, isMp, outcomeKind, ocEnd) + '</span>' +
+                        '</div></td></tr>';
+                }
+                for(let i = 0; i < team.owners.length; i++) {
+                    rows += wodSummaryFactionRow(team.owners[i], lo, isMp, outcomeKind, ocEnd, byO, team.allied ? 'cs-team-member' : '');
+                }
+                if(hasAlliedTeam && team.allied) {
+                    let cities = wodCountCitiesForOwners(team.owners);
+                    let armies = wodCountArmiesForOwners(team.owners);
+                    let inc = 0, mpL = 0, tk = 0, sh = 0, cash = 0;
+                    for(let i = 0; i < team.owners.length; i++) {
+                        let o = team.owners[i];
+                        inc += Math.max(0, Math.floor(byO[o] || 0));
+                        mpL += getOwnerCasualties(o);
+                        tk += getOwnerTankCasualties(o);
+                        sh += getOwnerShipCasualties(o);
+                        cash += Math.floor(wodPlayerTreasury(o));
+                    }
+                    rows += '<tr class="cs-team-sum">' +
+                        '<td>Team total</td><td></td>' +
+                        '<td>' + cities + '</td>' +
+                        '<td>' + armies + '</td>' +
+                        '<td>$' + inc.toLocaleString('en-US') + '</td>' +
+                        '<td>' + formatFullCount(mpL) + '</td>' +
+                        '<td>' + formatTanks(tk) + '</td>' +
+                        '<td>' + formatTanks(sh) + '</td>' +
+                        '<td>$' + cash.toLocaleString('en-US') + '</td>' +
+                        '</tr>';
+                }
+                bodies += '<tbody class="cs-team-block">' + rows + '</tbody>';
+            }
+            return '<section class="cs-card">' +
+                '<p class="cs-card-title">' + title + '</p>' +
+                '<p style="margin:0 0 10px;color:#95a5a6;font-size:0.88rem;line-height:1.45;">' + blurb + '</p>' +
+                '<div class="cs-mp-table-wrap"><table class="cs-mp-table">' +
+                '<thead><tr><th>Faction</th><th>' + statusHead + '</th><th>Cities</th><th>Armies</th><th>Income</th><th>MP losses</th><th>' + pf.statOwnHeavy + '</th><th>' + pf.statOwnShips + '</th><th>Cash</th></tr></thead>' +
+                bodies +
+                '</table></div></section>';
+        }
+
         /** CSS widths for two-segment stacked bar (you vs combined AI). */
         function wodDualLossBarWidths(youVal, aiVal) {
             let y = Math.max(0, youVal || 0);
@@ -24347,9 +24645,17 @@
             if(!overlay || !panel || !titleEl || !subEl || !statsEl) return;
             let isMp = !!(gameData.mp && gameData.mp.enabled);
             let soloOppOwners = isMp ? [] : wodCollectSoloOpponentOwners();
+            let lo = wodLocalPlayerOwner();
+            let summaryTeams = wodBuildAllianceTeams(wodParticipatingOwnersForSummary(isMp, soloOppOwners, lo), lo);
+            let hasAlliedTeam = summaryTeams.some(function(t) { return t.allied; });
+            let myTeam = summaryTeams.find(function(t) { return t.owners.indexOf(lo) >= 0; }) || { owners: [lo], allied: false };
+            let rivalOwners = [];
+            for(let ti = 0; ti < summaryTeams.length; ti++) {
+                if(summaryTeams[ti].owners.indexOf(lo) < 0) rivalOwners.push.apply(rivalOwners, summaryTeams[ti].owners);
+            }
             panel.classList.toggle('campaign-summary--victory', outcomeKind === 'victory');
             panel.classList.toggle('campaign-summary--defeat', outcomeKind === 'defeat');
-            panel.classList.toggle('campaign-summary--mp-wide', isMp || soloOppOwners.length >= 2);
+            panel.classList.toggle('campaign-summary--mp-wide', isMp || soloOppOwners.length >= 2 || hasAlliedTeam);
             titleEl.textContent = outcomeKind === 'victory' ? 'Victory' : 'Defeat';
             subEl.textContent = reasonLine || headline || '';
 
@@ -24366,30 +24672,47 @@
                     ? ('Capture all enemy cities within ' + wodFormatHoldClock(campRun.holdSec) + '.')
                     : (WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || ''));
 
-            let lo = wodLocalPlayerOwner();
             let plyCities, enCities, enArmies, plyArmies, plyIncomeAcc, aiIncomeAcc;
             let plyMpLoss, aiMpLoss, plyTkLoss, aiTkLoss, plyShLoss, aiShLoss;
             let endCashVal, endMpVal;
             let rivalIncomeTitle, rivalIncomeSub, shareRivalLabel, lossCardTitle, rivalLossShort, rivalLossLegend;
+            let youIncomeSub = 'Gross revenue from your cities this match';
+            let snapCityYou = 'Your cities';
+            let snapArmyYou = 'Your field armies';
             let mpSelfNameEsc = '';
 
             if(isMp) {
                 mpSelfNameEsc = wodMpEscapeHtml(wodMpDisplayNameForSlot(lo, { gameDataMp: gameData.mp }));
-                plyCities = countCitiesForOwner(lo);
-                enCities = 0;
-                for(let c of gameData.cities) if(c.owner > 0 && c.owner !== lo) enCities++;
+                plyCities = myTeam.allied ? wodCountCitiesForOwners(myTeam.owners) : countCitiesForOwner(lo);
+                enCities = wodCountHostileCitiesFor(lo);
                 enArmies = countEnemyCombatExcludingConvoysFor(lo);
-                plyArmies = countFriendlyCombatExcludingConvoys(lo);
+                plyArmies = myTeam.allied ? wodCountArmiesForOwners(myTeam.owners) : countFriendlyCombatExcludingConvoys(lo);
                 let sessionAcc = gameData._sessionIncomeAcc || { player: 0, ai: 0, byOwner: {} };
                 let byO = sessionAcc.byOwner || {};
-                plyIncomeAcc = Math.max(0, Math.floor(byO[lo] || 0));
-                aiIncomeAcc = Math.max(0, Math.floor(wodSumByOwnerMapExcluding(lo, byO)));
-                plyMpLoss = getOwnerCasualties(lo);
-                aiMpLoss = wodSumByOwnerMapExcluding(lo, gameData.casualtiesByOwner);
-                plyTkLoss = getOwnerTankCasualties(lo);
-                aiTkLoss = wodSumByOwnerMapExcluding(lo, gameData.tankCasualtiesByOwner);
-                plyShLoss = getOwnerShipCasualties(lo);
-                aiShLoss = wodSumByOwnerMapExcluding(lo, gameData.shipCasualtiesByOwner);
+                if(myTeam.allied) {
+                    plyIncomeAcc = Math.max(0, Math.floor(wodSumByOwnerMapForOwners(myTeam.owners, byO)));
+                    aiIncomeAcc = Math.max(0, Math.floor(wodSumByOwnerMapForOwners(rivalOwners, byO)));
+                    plyMpLoss = 0; aiMpLoss = 0; plyTkLoss = 0; aiTkLoss = 0; plyShLoss = 0; aiShLoss = 0;
+                    for(let i = 0; i < myTeam.owners.length; i++) {
+                        plyMpLoss += getOwnerCasualties(myTeam.owners[i]);
+                        plyTkLoss += getOwnerTankCasualties(myTeam.owners[i]);
+                        plyShLoss += getOwnerShipCasualties(myTeam.owners[i]);
+                    }
+                    for(let i = 0; i < rivalOwners.length; i++) {
+                        aiMpLoss += getOwnerCasualties(rivalOwners[i]);
+                        aiTkLoss += getOwnerTankCasualties(rivalOwners[i]);
+                        aiShLoss += getOwnerShipCasualties(rivalOwners[i]);
+                    }
+                } else {
+                    plyIncomeAcc = Math.max(0, Math.floor(byO[lo] || 0));
+                    aiIncomeAcc = Math.max(0, Math.floor(wodSumByOwnerMapExcluding(lo, byO)));
+                    plyMpLoss = getOwnerCasualties(lo);
+                    aiMpLoss = wodSumByOwnerMapExcluding(lo, gameData.casualtiesByOwner);
+                    plyTkLoss = getOwnerTankCasualties(lo);
+                    aiTkLoss = wodSumByOwnerMapExcluding(lo, gameData.tankCasualtiesByOwner);
+                    plyShLoss = getOwnerShipCasualties(lo);
+                    aiShLoss = wodSumByOwnerMapExcluding(lo, gameData.shipCasualtiesByOwner);
+                }
                 endCashVal = Math.floor(wodPlayerTreasury(lo));
                 endMpVal = Math.floor(wodPlayerMpPool(lo));
                 rivalIncomeTitle = 'All rivals (combined)';
@@ -24399,20 +24722,36 @@
                 rivalLossShort = 'Rivals';
                 rivalLossLegend = 'Combined rival losses';
             } else {
-                plyCities = countCitiesForOwner(1);
-                enCities = 0;
-                for(let c of gameData.cities) if(c.owner > 1) enCities++;
+                plyCities = myTeam.allied ? wodCountCitiesForOwners(myTeam.owners) : countCitiesForOwner(1);
+                enCities = wodCountHostileCitiesFor(1);
                 enArmies = countEnemyCombatUnitsExcludingConvoys();
-                plyArmies = countPlayerCombatUnitsExcludingConvoys();
-                let sessionAcc = gameData._sessionIncomeAcc || { player: 0, ai: 0 };
-                plyIncomeAcc = Math.max(0, Math.floor(sessionAcc.player || 0));
-                aiIncomeAcc = Math.max(0, Math.floor(sessionAcc.ai || 0));
-                plyMpLoss = getOwnerCasualties(1);
-                aiMpLoss = wodSumNumericOwnedByAi(gameData.casualtiesByOwner);
-                plyTkLoss = getOwnerTankCasualties(1);
-                aiTkLoss = wodSumNumericOwnedByAi(gameData.tankCasualtiesByOwner);
-                plyShLoss = getOwnerShipCasualties(1);
-                aiShLoss = wodSumNumericOwnedByAi(gameData.shipCasualtiesByOwner);
+                plyArmies = myTeam.allied ? wodCountArmiesForOwners(myTeam.owners) : countPlayerCombatUnitsExcludingConvoys();
+                let sessionAcc = gameData._sessionIncomeAcc || { player: 0, ai: 0, byOwner: {} };
+                let byOSoloAcc = sessionAcc.byOwner || {};
+                if(myTeam.allied) {
+                    plyIncomeAcc = Math.max(0, Math.floor(wodSumByOwnerMapForOwners(myTeam.owners, byOSoloAcc)));
+                    aiIncomeAcc = Math.max(0, Math.floor(wodSumByOwnerMapForOwners(rivalOwners, byOSoloAcc)));
+                    plyMpLoss = 0; aiMpLoss = 0; plyTkLoss = 0; aiTkLoss = 0; plyShLoss = 0; aiShLoss = 0;
+                    for(let i = 0; i < myTeam.owners.length; i++) {
+                        plyMpLoss += getOwnerCasualties(myTeam.owners[i]);
+                        plyTkLoss += getOwnerTankCasualties(myTeam.owners[i]);
+                        plyShLoss += getOwnerShipCasualties(myTeam.owners[i]);
+                    }
+                    for(let i = 0; i < rivalOwners.length; i++) {
+                        aiMpLoss += getOwnerCasualties(rivalOwners[i]);
+                        aiTkLoss += getOwnerTankCasualties(rivalOwners[i]);
+                        aiShLoss += getOwnerShipCasualties(rivalOwners[i]);
+                    }
+                } else {
+                    plyIncomeAcc = Math.max(0, Math.floor(sessionAcc.player || 0));
+                    aiIncomeAcc = Math.max(0, Math.floor(sessionAcc.ai || 0));
+                    plyMpLoss = getOwnerCasualties(1);
+                    aiMpLoss = wodSumNumericOwnedByAi(gameData.casualtiesByOwner);
+                    plyTkLoss = getOwnerTankCasualties(1);
+                    aiTkLoss = wodSumNumericOwnedByAi(gameData.tankCasualtiesByOwner);
+                    plyShLoss = getOwnerShipCasualties(1);
+                    aiShLoss = wodSumNumericOwnedByAi(gameData.shipCasualtiesByOwner);
+                }
                 endCashVal = Math.floor(gameData.money || 0);
                 endMpVal = Math.floor(gameData.manpower || 0);
                 rivalIncomeTitle = 'All AI (combined)';
@@ -24422,6 +24761,19 @@
                 rivalLossShort = 'AI';
                 rivalLossLegend = 'Combined AI losses';
             }
+            if(myTeam.allied) {
+                youIncomeSub = 'Gross revenue from your team\'s cities this match';
+                snapCityYou = 'Team cities';
+                snapArmyYou = 'Team field armies';
+                rivalIncomeTitle = 'Opposing teams';
+                rivalIncomeSub = isMp
+                    ? 'Sum of every opposing team\'s city revenue this match'
+                    : 'Sum of every opposing team\'s city revenue';
+                shareRivalLabel = 'Opposing teams';
+                lossCardTitle = 'Total losses (your team vs opposing teams)';
+                rivalLossShort = 'Opposing';
+                rivalLossLegend = 'Combined opposing-team losses';
+            }
 
             let barMp = wodDualLossBarWidths(plyMpLoss, aiMpLoss);
             let barTk = wodDualLossBarWidths(plyTkLoss, aiTkLoss);
@@ -24430,9 +24782,11 @@
             let grossSum = plyIncomeAcc + aiIncomeAcc;
             let pctYouUsd = grossSum > 0 ? Math.round((100 * plyIncomeAcc) / grossSum) : 50;
             let pctAiUsd = grossSum > 0 ? Math.round((100 * aiIncomeAcc) / grossSum) : 50;
-            let townsCapSummary = isMp
-                ? ((gameData.sessionCitiesCapturedByOwner && gameData.sessionCitiesCapturedByOwner[lo]) || 0)
-                : (gameData.sessionCitiesCaptured || 0);
+            let townsCapSummary = myTeam.allied
+                ? wodSumByOwnerMapForOwners(myTeam.owners, gameData.sessionCitiesCapturedByOwner)
+                : (isMp
+                    ? ((gameData.sessionCitiesCapturedByOwner && gameData.sessionCitiesCapturedByOwner[lo]) || 0)
+                    : (gameData.sessionCitiesCaptured || 0));
             let campUnitsLostThisBattle = 0;
             if(campMeta) {
                 campUnitsLostThisBattle = campMeta.unitsLost | 0;
@@ -24460,97 +24814,14 @@
                 }
             }
 
-            let csYouLbl = isMp ? mpSelfNameEsc : 'You';
+            let csYouLbl = myTeam.allied ? 'Your team' : (isMp ? mpSelfNameEsc : 'You');
 
-            let mpFactionSection = '';
-            if(isMp) {
+            let teamTableSection = '';
+            if(isMp || soloOppOwners.length >= 2 || hasAlliedTeam) {
                 let endSpec = gameData._mpLastMatchEnd || {};
                 let ocEnd = endSpec.outcomes || {};
-                let facs = wodMpAllFactionSlotsForScoreboard();
-                let sessionAccMp = gameData._sessionIncomeAcc || { byOwner: {} };
-                let byOMp = sessionAccMp.byOwner || {};
-                let rowHtml = '';
-                for(let o of facs) {
-                    let rk = String(o);
-                    let resRaw = ocEnd[rk];
-                    let resCell = resRaw === 'won' ? '<span class="cs-mp-res-won">Victory</span>'
-                        : (resRaw === 'lost' ? '<span class="cs-mp-res-lost">Defeat</span>'
-                        : (resRaw === 'ongoing' ? '—' : (resRaw ? String(resRaw) : '—')));
-                    let label = wodMpIsHumanOwner(o)
-                        ? wodMpEscapeHtml(wodMpDisplayNameForSlot(o, { gameDataMp: gameData.mp }))
-                        : ('AI seat ' + o);
-                    let col = factionColors[o] || '#999999';
-                    let inc = Math.max(0, Math.floor(byOMp[o] || 0));
-                    rowHtml += '<tr>' +
-                        '<td><div class="cs-mp-fname"><span class="cs-mp-swatch" style="background:' + col + '"></span>' + label + '</div></td>' +
-                        '<td>' + resCell + '</td>' +
-                        '<td>' + countCitiesForOwner(o) + '</td>' +
-                        '<td>' + countFriendlyCombatExcludingConvoys(o) + '</td>' +
-                        '<td>$' + inc.toLocaleString('en-US') + '</td>' +
-                        '<td>' + formatFullCount(getOwnerCasualties(o)) + '</td>' +
-                        '<td>' + formatTanks(getOwnerTankCasualties(o)) + '</td>' +
-                        '<td>' + formatTanks(getOwnerShipCasualties(o)) + '</td>' +
-                        '<td>$' + Math.floor(wodPlayerTreasury(o)).toLocaleString('en-US') + '</td>' +
-                        '</tr>';
-                }
-                mpFactionSection =
-                    '<section class="cs-card">' +
-                    '<p class="cs-card-title">Faction results (multiplayer)</p>' +
-                    '<p style="margin:0 0 10px;color:#95a5a6;font-size:0.88rem;line-height:1.45;">Per-faction snapshot at match end: cities, armies on the field, gross city revenue this session, casualties, and treasuries.</p>' +
-                    '<div class="cs-mp-table-wrap"><table class="cs-mp-table">' +
-                    '<thead><tr><th>Faction</th><th>Result</th><th>Cities</th><th>Armies</th><th>Income</th><th>MP losses</th><th>' + wodActivePeriodFlavor().statOwnHeavy + '</th><th>' + wodActivePeriodFlavor().statOwnShips + '</th><th>Cash</th></tr></thead>' +
-                    '<tbody>' + rowHtml + '</tbody></table></div>' +
-                    '</section>';
-            }
-
-            let soloOppSection = '';
-            if(!isMp && soloOppOwners.length >= 2) {
-                let sessionAccSolo = gameData._sessionIncomeAcc || { byOwner: {} };
-                let byOSolo = sessionAccSolo.byOwner || {};
-                let pfEnd = wodActivePeriodFlavor();
-                function soloBreakdownRow(o, label) {
-                    let citiesN = countCitiesForOwner(o);
-                    let armiesN = countFriendlyCombatExcludingConvoys(o);
-                    let status;
-                    if(o === lo) {
-                        status = outcomeKind === 'victory'
-                            ? '<span class="cs-mp-res-won">Victory</span>'
-                            : '<span class="cs-mp-res-lost">Defeat</span>';
-                    } else {
-                        status = (citiesN <= 0 && armiesN <= 0)
-                            ? '<span class="cs-mp-res-lost">Eliminated</span>'
-                            : '<span class="cs-mp-res-won">Active</span>';
-                    }
-                    let col = factionColors[o] || '#999999';
-                    let inc = Math.max(0, Math.floor(byOSolo[o] || (o === lo ? plyIncomeAcc : 0)));
-                    let cash = o === lo
-                        ? endCashVal
-                        : Math.floor((gameData.aiMoneyByOwner && gameData.aiMoneyByOwner[o]) || 0);
-                    return '<tr>' +
-                        '<td><div class="cs-mp-fname"><span class="cs-mp-swatch" style="background:' + col + '"></span>' + label + '</div></td>' +
-                        '<td>' + status + '</td>' +
-                        '<td>' + citiesN + '</td>' +
-                        '<td>' + armiesN + '</td>' +
-                        '<td>$' + inc.toLocaleString('en-US') + '</td>' +
-                        '<td>' + formatFullCount(getOwnerCasualties(o)) + '</td>' +
-                        '<td>' + formatTanks(getOwnerTankCasualties(o)) + '</td>' +
-                        '<td>' + formatTanks(getOwnerShipCasualties(o)) + '</td>' +
-                        '<td>$' + cash.toLocaleString('en-US') + '</td>' +
-                        '</tr>';
-                }
-                let rowHtmlSolo = soloBreakdownRow(lo, 'You');
-                for(let o of soloOppOwners) {
-                    let nm = (typeof wodSideLabel === 'function') ? wodSideLabel(o, { short: true }) : ('AI ' + (o - 1));
-                    rowHtmlSolo += soloBreakdownRow(o, nm);
-                }
-                soloOppSection =
-                    '<section class="cs-card">' +
-                    '<p class="cs-card-title">Faction breakdown</p>' +
-                    '<p style="margin:0 0 10px;color:#95a5a6;font-size:0.88rem;line-height:1.45;">You first, then each opponent at match end (combined enemy totals above stay the same).</p>' +
-                    '<div class="cs-mp-table-wrap"><table class="cs-mp-table">' +
-                    '<thead><tr><th>Faction</th><th>Status</th><th>Cities</th><th>Armies</th><th>Income</th><th>MP losses</th><th>' + pfEnd.statOwnHeavy + '</th><th>' + pfEnd.statOwnShips + '</th><th>Cash</th></tr></thead>' +
-                    '<tbody>' + rowHtmlSolo + '</tbody></table></div>' +
-                    '</section>';
+                let byOTable = (gameData._sessionIncomeAcc && gameData._sessionIncomeAcc.byOwner) || {};
+                teamTableSection = wodRenderEndScreenTeamTable(isMp, summaryTeams, hasAlliedTeam, lo, outcomeKind, ocEnd, byOTable);
             }
 
             statsEl.innerHTML =
@@ -24563,10 +24834,10 @@
                     '<p class="cs-card-title">Battle snapshot</p>' +
                     '<div class="cs-kv-grid">' +
                         '<span>Duration</span><span>' + formatGameDurationForSummary(elapsedSec) + '</span>' +
-                        '<span>Your cities</span><span>' + plyCities + '</span>' +
+                        '<span>' + snapCityYou + '</span><span>' + plyCities + '</span>' +
                         '<span>Enemy cities</span><span>' + enCities + '</span>' +
                         '<span>Towns captured</span><span>' + townsCapSummary + '</span>' +
-                        '<span>Your field armies</span><span>' + plyArmies + '</span>' +
+                        '<span>' + snapArmyYou + '</span><span>' + plyArmies + '</span>' +
                         '<span>Enemy field armies</span><span>' + enArmies + '</span>' +
                         '<span>Ending cash</span><span>$' + endCashVal.toLocaleString('en-US') + '</span>' +
                         '<span>Manpower pool</span><span>' + formatFullCount(endMpVal) + '</span>' +
@@ -24578,7 +24849,7 @@
                         '<div class="cs-pillar">' +
                             '<h5>' + csYouLbl + '</h5>' +
                             '<div class="cs-big">$' + plyIncomeAcc.toLocaleString('en-US') + '</div>' +
-                            '<div class="cs-sub">Gross revenue from your cities this match</div>' +
+                            '<div class="cs-sub">' + youIncomeSub + '</div>' +
                         '</div>' +
                         '<div class="cs-pillar">' +
                             '<h5>' + rivalIncomeTitle + '</h5>' +
@@ -24626,8 +24897,7 @@
                         '</div>' +
                     '</div>' +
                 '</section>' +
-                mpFactionSection +
-                soloOppSection;
+                teamTableSection;
 
             overlay.classList.remove('hidden');
         }
