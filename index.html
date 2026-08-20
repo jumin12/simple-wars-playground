@@ -10691,7 +10691,7 @@
 
                 <div class="esc-help-block">
                     <h4>Orders on desktop</h4>
-                    <p class="esc-help-prose">Click or box-select troops; hold <strong>Shift</strong> to add to the selection. Issue moves with a <strong>right-click</strong>, chain <strong>Shift + right-click</strong> waypoints along a path, or click-drag from a selected unit to paint a <strong>stroke</strong> of destinations across the map.</p>
+                    <p class="esc-help-prose">Click or box-select troops; hold <strong>Shift</strong> to add to the selection. Issue moves with a <strong>right-click</strong>, chain <strong>Shift + right-click</strong> waypoints (the group keeps its current formation), <strong>Shift + right-drag</strong> a line to waypoint a new formation, or click-drag from a selected unit to paint a <strong>stroke</strong> of destinations across the map.</p>
                     <figure class="esc-help-figure">
                         <canvas id="menuHelpCanvasMove" width="200" height="70" aria-hidden="true"></canvas>
                     </figure>
@@ -10699,7 +10699,7 @@
 
                 <div class="esc-help-block">
                     <h4>Touch controls</h4>
-                    <p class="esc-help-prose">On narrow screens the unit sheet surfaces <strong>Move</strong>, <strong>Waypoint</strong>, and <strong>Formation</strong> buttons. Pick a mode, then tap the map to issue that order class without a right mouse button. Camera zoom and pan still use the usual pinch and drag gestures layered underneath.</p>
+                    <p class="esc-help-prose">On narrow screens the unit sheet surfaces <strong>Move</strong>, <strong>Waypoint</strong>, and <strong>Formation</strong> buttons. Pick a mode, then tap the map to issue that order class without a right mouse button. In <strong>Waypoint</strong> mode, taps keep the current formation and a drag draws a formation-line waypoint. Camera zoom and pan still use the usual pinch and drag gestures layered underneath.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -21120,8 +21120,6 @@
                         assignUnitMoveTarget(units[i], tx, ty);
                     }
                 } else if(d.cmd.kind === 'shiftMarch') {
-                    let wps = d.cmd.wps;
-                    if(!wps || !wps.length) return;
                     let units = [];
                     for(let id of d.cmd.uids || []) {
                         let u = gameData.entities.find(e => e.uid === id);
@@ -21129,29 +21127,20 @@
                     }
                     if(units.length === 0) return;
                     gameData.playerShiftWaypoints = [];
-                    let spacing = Math.max(22, gameData.hexRadius * 1.25);
-                    let cols = Math.ceil(Math.sqrt(units.length));
-                    let rows = Math.ceil(units.length / cols);
-                    let midCol = (cols - 1) / 2;
-                    let midRow = (rows - 1) / 2;
-                    units.forEach((unit, index) => {
-                        let r = Math.floor(index / cols), c = index % cols;
-                        let ox = (c - midCol) * spacing;
-                        let oy = (r - midRow) * spacing;
-                        let pathPts = wps.map((w, wi) => {
-                            let last = wi === wps.length - 1;
-                            return { x: w.x + (last ? ox : 0), y: w.y + (last ? oy : 0) };
-                        });
-                        let trimR2 = Math.pow(Math.max(20, gameData.hexRadius * 1.45), 2);
-                        while(pathPts.length > 1) {
-                            let p = pathPts[0];
-                            let dx = p.x - unit.x;
-                            let dy = p.y - unit.y;
-                            if(dx * dx + dy * dy < trimR2) pathPts.shift();
-                            else break;
+                    if(d.cmd.paths && d.cmd.paths.length) {
+                        let byUid = {};
+                        for(let i = 0; i < (d.cmd.uids || []).length; i++)
+                            byUid[d.cmd.uids[i]] = d.cmd.paths[i];
+                        for(let unit of units) {
+                            let pathPts = byUid[unit.uid];
+                            if(pathPts && pathPts.length)
+                                assignUnitMoveAlongWaypoints(unit, pathPts.map(p => ({ x: p.x, y: p.y })));
                         }
-                        assignUnitMoveAlongWaypoints(unit, pathPts);
-                    });
+                    } else {
+                        let wps = d.cmd.wps;
+                        if(!wps || !wps.length) return;
+                        wodApplyShiftWaypointPaths(units, wps, d.cmd.line || null);
+                    }
                 } else if(d.cmd.kind === 'strokeMove') {
                     let strokePts = d.cmd.pts;
                     if(!strokePts || strokePts.length < 2) return;
@@ -48601,7 +48590,7 @@
         let formationDrag = {active: false, startWorld: {x: 0, y: 0}, endWorld: {x: 0, y: 0}};
         let pathOrderStroke = {active: false, pts: [], moved: false};
         let pathStrokePreviewAt = 0;
-        let shiftWaypointDrag = {active: false, startClient: {x: 0, y: 0}};
+        let shiftWaypointDrag = {active: false, startClient: {x: 0, y: 0}, startWorld: {x: 0, y: 0}};
         let mobileOrderMode = null;
         let touchCamGesture = null;
         let wodSuppressCanvasMouseUntil = 0;
@@ -48986,11 +48975,132 @@
             return wodAiMoveUnitToward(unit, hex.x + slot.ox, hex.y + slot.oy, holdingOpt);
         }
 
+        function wodUnitRemainingMarchPoints(unit) {
+            if(!unit) return [];
+            if(unit.fullMarchWaypoints && unit.fullMarchWaypoints.length > 0) {
+                let c = Math.max(0, unit.marchWpCursor || 0);
+                return unit.fullMarchWaypoints.slice(c).map(p => ({ x: p.x, y: p.y }));
+            }
+            if(unit.orderTarget && unit.orderTarget.x != null)
+                return [{ x: unit.orderTarget.x, y: unit.orderTarget.y }];
+            if(unit.target && unit.target.x != null && !unit.target.isCity)
+                return [{ x: unit.target.x, y: unit.target.y }];
+            return [];
+        }
+
+        function wodGroupFormationOffsetMap(units) {
+            let map = new Map();
+            if(!units || !units.length) return map;
+            let pts = units.map(u => {
+                let rem = wodUnitRemainingMarchPoints(u);
+                return rem.length ? rem[rem.length - 1] : { x: u.x, y: u.y };
+            });
+            let cx = 0, cy = 0;
+            for(let p of pts) { cx += p.x; cy += p.y; }
+            cx /= pts.length;
+            cy /= pts.length;
+            for(let i = 0; i < units.length; i++)
+                map.set(units[i], { ox: pts[i].x - cx, oy: pts[i].y - cy });
+            return map;
+        }
+
+        function wodSortUnitsAlongLine(units, start, end) {
+            let dx = end.x - start.x;
+            let dy = end.y - start.y;
+            let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            units.sort((a, b) => {
+                let ax = ((a.x - start.x) * dx + (a.y - start.y) * dy) / len;
+                let bx = ((b.x - start.x) * dx + (b.y - start.y) * dy) / len;
+                return ax - bx;
+            });
+            return units;
+        }
+
+        function wodLineFormationSlot(start, end, index, count) {
+            let t = count <= 1 ? 0.5 : index / (count - 1);
+            return {
+                x: start.x + (end.x - start.x) * t,
+                y: start.y + (end.y - start.y) * t
+            };
+        }
+
+        function wodSnapWaypointWorldPoint(unit, px, py) {
+            if(!unit) return { x: px, y: py };
+            if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
+                let sea = wodResolveShipMarchHex(unit, px, py);
+                return sea ? { x: sea.exactX, y: sea.exactY } : null;
+            }
+            if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
+                let h = getNearestHexToPoint(px, py);
+                if(h && (wodIsOpenWaterHex(h) || isBridgeHex(h))) {
+                    let landNear = null,
+                        landD = Infinity;
+                    let jc = pixelToHex(px, py);
+                    for(let pt of getHexesInRadius(jc.q, jc.r, 2)) {
+                        let lh = gameData.hexes[`${pt.q},${pt.r}`];
+                        if(!lh || lh.type === 'mountain' || isWaterHex(lh) || isBridgeHex(lh)) continue;
+                        if(!wodHexWalkableForLandPath(unit, lh, false)) continue;
+                        let dx = lh.x - px,
+                            dy = lh.y - py;
+                        let d = dx * dx + dy * dy;
+                        if(d < landD) {
+                            landD = d;
+                            landNear = lh;
+                        }
+                    }
+                    let hr = gameData.hexRadius || 20;
+                    if(landNear && landD <= Math.pow(hr * 2.4, 2))
+                        return { x: landNear.x, y: landNear.y };
+                    if(wodPointOnBridgeForUnit(unit, px, py, 1.05) || wodIsOpenWaterHex(h)) {
+                        let snap = wodSnapLandArmyOrderPoint(unit, px, py);
+                        if(snap) return { x: snap.x, y: snap.y };
+                    }
+                }
+            }
+            return { x: px, y: py };
+        }
+
+        function wodTrimNearMarchPoints(unit, pathPts) {
+            if(!pathPts || pathPts.length <= 1) return pathPts;
+            let trimR2 = Math.pow(Math.max(20, gameData.hexRadius * 1.45), 2);
+            while(pathPts.length > 1) {
+                let p = pathPts[0];
+                let dx = p.x - unit.x;
+                let dy = p.y - unit.y;
+                if(dx * dx + dy * dy < trimR2) pathPts.shift();
+                else break;
+            }
+            return pathPts;
+        }
+
+        function wodApplyShiftWaypointPaths(units, wps, line) {
+            if(!units || !units.length || !wps || !wps.length) return;
+            let offsets = wodGroupFormationOffsetMap(units);
+            if(line && units.length > 1)
+                wodSortUnitsAlongLine(units, line.start, line.end);
+            wodApplyPlayerMoveOrders(units, (unit) => {
+                let off = offsets.get(unit) || { ox: 0, oy: 0 };
+                let lastIdx = wps.length - 1;
+                let pathPts = [];
+                for(let wi = 0; wi < wps.length; wi++) {
+                    let dest;
+                    if(line && wi === lastIdx)
+                        dest = wodLineFormationSlot(line.start, line.end, units.indexOf(unit), units.length);
+                    else
+                        dest = { x: wps[wi].x + off.ox, y: wps[wi].y + off.oy };
+                    let snapped = wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
+                    if(snapped) pathPts.push(snapped);
+                }
+                return wodTrimNearMarchPoints(unit, pathPts);
+            });
+        }
+
         function seedPlayerShiftWaypointsFromActiveMarch(units) {
             let wq = gameData.playerShiftWaypoints;
             if(!units || units.length === 0) return;
             if(wq && wq.length > 0) return;
-            let moving = units.filter(u => u.target || (u.path && u.path.length > 0));
+            let moving = units.filter(u => u.target || (u.path && u.path.length > 0)
+                || (u.fullMarchWaypoints && u.fullMarchWaypoints.length));
             if(!moving.length) return;
             if(units.length === 1) {
                 let ref = units[0];
@@ -49054,20 +49164,92 @@
             if(n) gameData.playerShiftWaypoints = [{x: sx / n, y: sy / n}];
         }
 
-        function wodCommitShiftWaypointAt(worldPos) {
-            let units = getMovableSelectedUnits();
-            if(!units.length || !worldPos) return false;
+        function wodPrepareShiftWaypointQueue(units) {
             let allIdle = units.every(u => !u.target && (!u.path || u.path.length === 0)
                 && !(u.fullMarchWaypoints && u.fullMarchWaypoints.length));
             if(allIdle) gameData.playerShiftWaypoints = [];
             if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
             seedPlayerShiftWaypointsFromActiveMarch(units);
-            gameData.playerShiftWaypoints.push({x: worldPos.x, y: worldPos.y});
+        }
+
+        function wodShiftWaypointNotice(n) {
+            showNotification(n <= 1 ? 'Marching to waypoint' : `Marching via ${n} waypoints`);
+        }
+
+        function wodSendOrApplyShiftWaypointPaths(units, wps, line) {
+            if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
+            if(wps.length > 32) wps.splice(0, wps.length - 32);
+            let offsets = wodGroupFormationOffsetMap(units);
+            let order = units.slice();
+            if(line && order.length > 1)
+                wodSortUnitsAlongLine(order, line.start, line.end);
+            let paths = order.map((unit) => {
+                let off = offsets.get(unit) || { ox: 0, oy: 0 };
+                let lastIdx = wps.length - 1;
+                let pathPts = [];
+                for(let wi = 0; wi < wps.length; wi++) {
+                    let dest;
+                    if(line && wi === lastIdx)
+                        dest = wodLineFormationSlot(line.start, line.end, order.indexOf(unit), order.length);
+                    else
+                        dest = { x: wps[wi].x + off.ox, y: wps[wi].y + off.oy };
+                    let snapped = wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
+                    if(snapped) pathPts.push(snapped);
+                }
+                return wodTrimNearMarchPoints(unit, pathPts);
+            });
+            if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
+                if(wodMpSendCmd({
+                    kind: 'shiftMarch',
+                    uids: order.map(u => u.uid),
+                    wps: wps.map(w => ({ x: w.x, y: w.y })),
+                    line: line ? { start: { x: line.start.x, y: line.start.y }, end: { x: line.end.x, y: line.end.y } } : null,
+                    paths: paths.map(p => (p || []).map(pt => ({ x: pt.x, y: pt.y })))
+                })) {
+                    wodShiftWaypointNotice(wps.length);
+                    return;
+                }
+            }
+            wodApplyPlayerMoveOrders(order, (unit) => {
+                let i = order.indexOf(unit);
+                return paths[i] && paths[i].length ? paths[i] : null;
+            });
+            wodShiftWaypointNotice(wps.length);
+        }
+
+        function wodCommitShiftWaypointAt(worldPos) {
+            let units = getMovableSelectedUnits();
+            if(!units.length || !worldPos) return false;
+            if(wodCampaignDeployActive()) {
+                wodCampaignDeployUnitsAt(worldPos);
+                gameData.playerShiftWaypoints = [];
+                return true;
+            }
+            wodPrepareShiftWaypointQueue(units);
+            gameData.playerShiftWaypoints.push({ x: worldPos.x, y: worldPos.y });
             applyShiftWaypointMarch();
             return true;
         }
 
-        function applyShiftWaypointMarch() {
+        function wodCommitShiftFormationWaypoint(start, end) {
+            let units = getMovableSelectedUnits();
+            if(!units.length || !start || !end) return false;
+            if(wodCampaignDeployActive()) {
+                wodCampaignDeployUnitsAlongLine(start, end);
+                gameData.playerShiftWaypoints = [];
+                return true;
+            }
+            if(units.length < 2) return wodCommitShiftWaypointAt(end);
+            wodPrepareShiftWaypointQueue(units);
+            gameData.playerShiftWaypoints.push({
+                x: (start.x + end.x) * 0.5,
+                y: (start.y + end.y) * 0.5
+            });
+            applyShiftWaypointMarch({ line: { start: { x: start.x, y: start.y }, end: { x: end.x, y: end.y } } });
+            return true;
+        }
+
+        function applyShiftWaypointMarch(opt) {
             if(wodCampaignDeployActive()) {
                 let wps = gameData.playerShiftWaypoints;
                 if(wps && wps.length >= 2) wodCampaignDeployUnitsAlongStroke(wps);
@@ -49075,88 +49257,11 @@
                 gameData.playerShiftWaypoints = [];
                 return;
             }
-            if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
             let units = getMovableSelectedUnits();
             if(units.length === 0) return;
             let wps = gameData.playerShiftWaypoints;
             if(!wps || wps.length === 0) return;
-            if(wps.length > 32) wps.splice(0, wps.length - 32);
-            if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
-                if(wodMpSendCmd({
-                    kind: 'shiftMarch',
-                    uids: units.map(u => u.uid),
-                    wps: wps.map(w => ({ x: w.x, y: w.y }))
-                })) {
-                    showNotification(wps.length === 1 ? 'Marching to waypoint' : `Marching via ${wps.length} waypoints`);
-                    return;
-                }
-            }
-            let spacing = Math.max(22, gameData.hexRadius * 1.25);
-            let cols = Math.ceil(Math.sqrt(units.length));
-            let rows = Math.ceil(units.length / cols);
-            let midCol = (cols - 1) / 2;
-            let midRow = (rows - 1) / 2;
-            wodApplyPlayerMoveOrders(units, (unit) => {
-                let r = units.indexOf(unit);
-                let c = r % cols, row = Math.floor(r / cols);
-                let ox = (c - midCol) * spacing;
-                let oy = (row - midRow) * spacing;
-                if(unit.type === 'ship' || (unit.type === 'convoy' && unit.convoySeaRoute)) {
-                    let last = wps[wps.length - 1];
-                    let sea = wodResolveShipMarchHex(unit, last.x + ox, last.y + oy);
-                    if(!sea) return null;
-                    let pathPts = [];
-                    for(let wi = 0; wi < wps.length - 1; wi++) {
-                        let seaWp = wodResolveShipMarchHex(unit, wps[wi].x, wps[wi].y);
-                        if(seaWp) pathPts.push({ x: seaWp.exactX, y: seaWp.exactY });
-                    }
-                    pathPts.push({ x: sea.exactX, y: sea.exactY });
-                    return pathPts.length ? pathPts : null;
-                }
-                let pathPts = wps.map((w, wi) => {
-                    let last = wi === wps.length - 1;
-                    let px = w.x + (last ? ox : 0);
-                    let py = w.y + (last ? oy : 0);
-                    if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
-                        let h = getNearestHexToPoint(px, py);
-                        if(h && (wodIsOpenWaterHex(h) || isBridgeHex(h))) {
-                            let landNear = null,
-                                landD = Infinity;
-                            let jc = pixelToHex(px, py);
-                            for(let pt of getHexesInRadius(jc.q, jc.r, 2)) {
-                                let lh = gameData.hexes[`${pt.q},${pt.r}`];
-                                if(!lh || lh.type === 'mountain' || isWaterHex(lh) || isBridgeHex(lh)) continue;
-                                if(!wodHexWalkableForLandPath(unit, lh, false)) continue;
-                                let dx = lh.x - px,
-                                    dy = lh.y - py;
-                                let d = dx * dx + dy * dy;
-                                if(d < landD) {
-                                    landD = d;
-                                    landNear = lh;
-                                }
-                            }
-                            let hr = gameData.hexRadius || 20;
-                            if(landNear && landD <= Math.pow(hr * 2.4, 2))
-                                return { x: landNear.x, y: landNear.y };
-                            if(wodPointOnBridgeForUnit(unit, px, py, 1.05) || wodIsOpenWaterHex(h)) {
-                                let snap = wodSnapLandArmyOrderPoint(unit, px, py);
-                                if(snap) return { x: snap.x, y: snap.y };
-                            }
-                        }
-                    }
-                    return { x: px, y: py };
-                });
-                let trimR2 = Math.pow(Math.max(20, gameData.hexRadius * 1.45), 2);
-                while(pathPts.length > 1) {
-                    let p = pathPts[0];
-                    let dx = p.x - unit.x;
-                    let dy = p.y - unit.y;
-                    if(dx * dx + dy * dy < trimR2) pathPts.shift();
-                    else break;
-                }
-                return pathPts;
-            });
-            showNotification(wps.length === 1 ? 'Marching to waypoint' : `Marching via ${wps.length} waypoints`);
+            wodSendOrApplyShiftWaypointPaths(units, wps, opt && opt.line ? opt.line : null);
         }
 
         function issueMoveOrder(worldPos) {
@@ -49316,6 +49421,10 @@
             } else if (e.button === 2 && e.shiftKey && getMovableSelectedUnits().length > 0) {
                 shiftWaypointDrag.active = true;
                 shiftWaypointDrag.startClient = {x: cx, y: cy};
+                shiftWaypointDrag.startWorld = {x: worldPos.x, y: worldPos.y};
+                formationDrag.active = true;
+                formationDrag.startWorld = {x: worldPos.x, y: worldPos.y};
+                formationDrag.endWorld = {x: worldPos.x, y: worldPos.y};
             } else if (e.button === 2 && getMovableSelectedUnits().length > 0) {
                 formationDrag.active = true;
                 formationDrag.startWorld = worldPos;
@@ -49408,8 +49517,14 @@
                 }
             } else if (e.button === 2 && shiftWaypointDrag.active) {
                 shiftWaypointDrag.active = false;
-                if(getMovableSelectedUnits().length > 0)
-                    wodCommitShiftWaypointAt(getMouseWorldPos(e));
+                formationDrag.active = false;
+                let endWorld = getMouseWorldPos(e);
+                let startWorld = shiftWaypointDrag.startWorld || endWorld;
+                let dragDist = Math.hypot(endWorld.x - startWorld.x, endWorld.y - startWorld.y);
+                if(getMovableSelectedUnits().length > 1 && dragDist > 35)
+                    wodCommitShiftFormationWaypoint(startWorld, endWorld);
+                else if(getMovableSelectedUnits().length > 0)
+                    wodCommitShiftWaypointAt(endWorld);
             } else if (e.button === 2 && formationDrag.active) {
                 let endWorld = getMouseWorldPos(e);
                 formationDrag.endWorld = endWorld;
@@ -49566,11 +49681,22 @@
                 let mdx = touch.clientX - g.startClientX;
                 let mdy = touch.clientY - g.startClientY;
                 if(Math.hypot(mdx, mdy) > 24) {
-                    wodMobileOrderGesture = null;
-                    isPanning = true;
-                    panStart = { x: touch.clientX, y: touch.clientY };
-                    cameraStart = { x: gameData.camera.x, y: gameData.camera.y };
-                    wodBumpCamInteract(140);
+                    if(mobileOrderMode === 'waypoint' && getMovableSelectedUnits().length > 1) {
+                        let start = getWorldPosFromClientXY(g.startClientX, g.startClientY);
+                        let now = getWorldPosFromClientXY(touch.clientX, touch.clientY);
+                        wodMobileOrderGesture = null;
+                        shiftWaypointDrag.active = true;
+                        shiftWaypointDrag.startWorld = { x: start.x, y: start.y };
+                        formationDrag.active = true;
+                        formationDrag.startWorld = { x: start.x, y: start.y };
+                        formationDrag.endWorld = { x: now.x, y: now.y };
+                    } else {
+                        wodMobileOrderGesture = null;
+                        isPanning = true;
+                        panStart = { x: touch.clientX, y: touch.clientY };
+                        cameraStart = { x: gameData.camera.x, y: gameData.camera.y };
+                        wodBumpCamInteract(140);
+                    }
                 }
             } else if(wodMobileNavTouch && wodUsesVisualViewportLayout()) {
                 let g = wodMobileNavTouch;
@@ -49687,14 +49813,22 @@
             if(formationDrag.active) {
                 let endWorld = getWorldPosFromClientXY(touch.clientX, touch.clientY);
                 formationDrag.endWorld = endWorld;
-                let dx = formationDrag.endWorld.x - formationDrag.startWorld.x;
-                let dy = formationDrag.endWorld.y - formationDrag.startWorld.y;
-                if(Math.sqrt(dx * dx + dy * dy) > 35 && getMovableSelectedUnits().length > 1) {
-                    issueLineFormationOrder(formationDrag.startWorld, formationDrag.endWorld);
-                } else {
-                    issueMoveOrder(formationDrag.endWorld);
-                }
+                let startWorld = formationDrag.startWorld;
+                let dx = endWorld.x - startWorld.x;
+                let dy = endWorld.y - startWorld.y;
+                let asWaypoint = shiftWaypointDrag.active || mobileOrderMode === 'waypoint';
+                shiftWaypointDrag.active = false;
                 formationDrag.active = false;
+                if(asWaypoint) {
+                    if(Math.sqrt(dx * dx + dy * dy) > 35 && getMovableSelectedUnits().length > 1)
+                        wodCommitShiftFormationWaypoint(startWorld, endWorld);
+                    else if(getMovableSelectedUnits().length > 0)
+                        wodCommitShiftWaypointAt(endWorld);
+                } else if(Math.sqrt(dx * dx + dy * dy) > 35 && getMovableSelectedUnits().length > 1) {
+                    issueLineFormationOrder(startWorld, endWorld);
+                } else {
+                    issueMoveOrder(endWorld);
+                }
             }
         }
 
