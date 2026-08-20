@@ -32,7 +32,10 @@ const PURCHASABLE_SKINS = new Set([
 ]);
 
 const SHOP_VISUAL_IDS = new Set([
-  'viz_frontline_dotted', 'viz_frontline_double', 'viz_arrow_dotted', 'viz_arrow_line',
+  'viz_frontline_dotted', 'viz_frontline_double', 'viz_frontline_dashed', 'viz_frontline_dashdot',
+  'viz_frontline_thick', 'viz_frontline_glow',
+  'viz_arrow_dotted', 'viz_arrow_line', 'viz_arrow_dashed', 'viz_arrow_chevron',
+  'viz_arrow_bold', 'viz_arrow_rail',
   'viz_color_gold', 'viz_color_white', 'viz_color_red', 'viz_color_blue',
 ]);
 
