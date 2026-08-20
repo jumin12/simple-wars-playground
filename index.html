@@ -16223,6 +16223,7 @@
                         changed = true;
                     }
                 }
+                if(changed) gameData._landIncomeCacheDirty = true;
             }
             return changed;
         }
@@ -23264,11 +23265,14 @@
         }
 
         function getNeighborHexes(hex) {
+            if(!hex) return [];
+            if(hex._nbrs) return hex._nbrs;
             let neighbors = [];
             for (let dir of hexDirections) {
                 let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
                 if (nHex) neighbors.push(nHex);
             }
+            hex._nbrs = neighbors;
             return neighbors;
         }
 
@@ -23704,17 +23708,25 @@
         }
 
         function getSpatialCellKey(x, y, cellSize) {
-            return `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`;
+            let cx = (Math.floor(x / cellSize) + 32768) | 0;
+            let cy = (Math.floor(y / cellSize) + 32768) | 0;
+            return cx * 65536 + cy;
         }
 
         function buildUnitSpatialGrid(cellSize = 96) {
             let grid = gameData._unitGridScratch;
             if(!grid || grid.cellSize !== cellSize) {
-                grid = {cellSize, cells: new Map()};
+                grid = {cellSize, cells: new Map(), _pool: []};
                 gameData._unitGridScratch = grid;
             } else {
+                let pool = grid._pool;
+                for(let bucket of grid.cells.values()) {
+                    bucket.length = 0;
+                    pool.push(bucket);
+                }
                 grid.cells.clear();
             }
+            let pool = grid._pool;
             for(let i = 0; i < gameData.entities.length; i++) {
                 let unit = gameData.entities[i];
                 if(unit.hp <= 0) continue;
@@ -23722,7 +23734,7 @@
                 let key = getSpatialCellKey(unit.x, unit.y, cellSize);
                 let bucket = grid.cells.get(key);
                 if(!bucket) {
-                    bucket = [];
+                    bucket = pool.length ? pool.pop() : [];
                     grid.cells.set(key, bucket);
                 }
                 bucket.push(unit);
@@ -23732,7 +23744,9 @@
 
         function forEachNearbyUnit(grid, x, y, radius, visitor) {
             if(!grid || !grid.cells) {
-                for(let unit of gameData.entities) visitor(unit);
+                for(let unit of gameData.entities) {
+                    if(visitor(unit)) return;
+                }
                 return;
             }
             let cellSize = grid.cellSize;
@@ -23742,9 +23756,11 @@
             let maxCy = Math.floor((y + radius) / cellSize);
             for(let cy = minCy; cy <= maxCy; cy++) {
                 for(let cx = minCx; cx <= maxCx; cx++) {
-                    let bucket = grid.cells.get(`${cx},${cy}`);
+                    let bucket = grid.cells.get((cx + 32768) * 65536 + (cy + 32768));
                     if(!bucket) continue;
-                    for(let unit of bucket) visitor(unit);
+                    for(let bi = 0, bl = bucket.length; bi < bl; bi++) {
+                        if(visitor(bucket[bi])) return;
+                    }
                 }
             }
         }
@@ -24217,7 +24233,9 @@
 
         function forEachNearbyCity(grid, x, y, radius, visitor) {
             if(!grid || !grid.cells) {
-                for(let city of gameData.cities) visitor(city);
+                for(let city of gameData.cities) {
+                    if(visitor(city)) return;
+                }
                 return;
             }
             let cellSize = grid.cellSize;
@@ -24228,12 +24246,13 @@
             let r2 = radius * radius;
             for(let cy = minCy; cy <= maxCy; cy++) {
                 for(let cx = minCx; cx <= maxCx; cx++) {
-                    let bucket = grid.cells.get(`${cx},${cy}`);
+                    let bucket = grid.cells.get((cx + 32768) * 65536 + (cy + 32768));
                     if(!bucket) continue;
-                    for(let city of bucket) {
+                    for(let ci = 0, cl = bucket.length; ci < cl; ci++) {
+                        let city = bucket[ci];
                         let dx = city.x - x;
                         let dy = city.y - y;
-                        if(dx * dx + dy * dy <= r2) visitor(city);
+                        if(dx * dx + dy * dy <= r2 && visitor(city)) return;
                     }
                 }
             }
@@ -30483,7 +30502,8 @@
         }
 
         function getHexKey(hex) {
-            return `${hex.q},${hex.r}`;
+            if(!hex) return '';
+            return hex._k || (hex._k = hex.q + ',' + hex.r);
         }
 
         function wodHexKeyIsEncircled(key) {
@@ -31868,6 +31888,7 @@
             // Cap waypoint snaps per tick so catch-up / large dt never teleports through a
             // whole corridor in one frame (draw smoothing alone can't hide that).
             let maxWpSnaps = playerMarch ? 2 : (gameData.entities.length > 220 ? 4 : 6);
+            if(dt > 0.04) maxWpSnaps = Math.max(maxWpSnaps, Math.ceil(maxWpSnaps * (dt / 0.036)));
             let guard = 0;
             while(unit.target && stepLeft > 0.0001 && guard++ < maxWpSnaps) {
                 let dx = unit.target.x - unit.x;
@@ -32128,14 +32149,84 @@
             }
         }
 
+        function wodRebuildHexCombatOccupancy() {
+            let map = gameData._hexCombatOcc;
+            if(!map) map = gameData._hexCombatOcc = new Map();
+            else map.clear();
+            let ents = gameData.entities;
+            for(let i = 0, n = ents.length; i < n; i++) {
+                let u = ents[i];
+                if(!u || u.hp <= 0 || u.type === 'convoy') {
+                    if(u) u._occHexKey = '';
+                    continue;
+                }
+                let h = getNearestHexToPoint(u.x, u.y);
+                if(!h) {
+                    u._occHexKey = '';
+                    continue;
+                }
+                let k = getHexKey(h);
+                let rec = map.get(k);
+                if(!rec) {
+                    rec = [];
+                    map.set(k, rec);
+                }
+                rec.push(u.owner);
+                u._occHexKey = k;
+            }
+        }
+
+        function wodNoteUnitOccupancyHex(unit, hex) {
+            if(!unit || unit.type === 'convoy' || unit.hp <= 0) return;
+            let map = gameData._hexCombatOcc;
+            if(!map) return;
+            let newK = hex ? getHexKey(hex) : '';
+            let oldK = unit._occHexKey || '';
+            if(oldK === newK) return;
+            if(oldK) {
+                let rec = map.get(oldK);
+                if(rec) {
+                    for(let i = rec.length - 1; i >= 0; i--) {
+                        if(rec[i] === unit.owner) {
+                            rec.splice(i, 1);
+                            break;
+                        }
+                    }
+                    if(!rec.length) map.delete(oldK);
+                }
+            }
+            if(newK) {
+                let rec = map.get(newK);
+                if(!rec) {
+                    rec = [];
+                    map.set(newK, rec);
+                }
+                rec.push(unit.owner);
+            }
+            unit._occHexKey = newK;
+        }
+
         function wodHexOccupiedByEnemyCombat(hex, friendlyOwner) {
-            if(!hex || !gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return false;
+            if(!hex) return false;
+            let map = gameData._hexCombatOcc;
+            if(map && map.size) {
+                let rec = map.get(getHexKey(hex));
+                if(!rec || !rec.length) return false;
+                for(let i = 0, n = rec.length; i < n; i++) {
+                    if(wodIsHostileOwner(rec[i], friendlyOwner)) return true;
+                }
+                return false;
+            }
+            if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return false;
             let occ = false;
             let pad = (gameData.hexRadius || 20) * 1.55;
             forEachNearbyUnit(gameData.unitSpatialGrid, hex.x, hex.y, pad, (u) => {
-                if(occ || u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, friendlyOwner)) return;
+                if(u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, friendlyOwner)) return;
                 let uh = getNearestHexToPoint(u.x, u.y);
-                if(uh && uh.q === hex.q && uh.r === hex.r) occ = true;
+                if(uh && uh.q === hex.q && uh.r === hex.r) {
+                    occ = true;
+                    return true;
+                }
             });
             return occ;
         }
@@ -32258,8 +32349,9 @@
             let r = radiusPx != null ? radiusPx : (gameData.hexRadius || 20) * 3.6;
             let found = false;
             forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, r, (u) => {
-                if(found || !u || u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, unit.owner)) return;
+                if(!u || u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, unit.owner)) return;
                 found = true;
+                return true;
             });
             return found;
         }
@@ -32325,6 +32417,7 @@
             let h0 = getNearestHexToPoint(x0, y0);
             if(h0 && h0.q === h1.q && h0.r === h1.r) return;
             unit._lastClaimHexKey = key;
+            wodNoteUnitOccupancyHex(unit, h1);
             claimTerritoryAroundUnit(unit, x1, y1, h1);
         }
 
@@ -32333,9 +32426,17 @@
 
         function setHexOwner(hex, owner) {
             if (hex.owner === owner) return;
+            let prev = hex.owner;
+            if(gameData._landIncomeCache && !gameData._landIncomeCacheDirty &&
+                typeof wodHexCountsTowardLandPoliticsBalance === 'function' &&
+                wodHexCountsTowardLandPoliticsBalance(hex)) {
+                if(prev > 0) gameData._landIncomeCache[prev] = (gameData._landIncomeCache[prev] || 0) - 1;
+                if(owner > 0) gameData._landIncomeCache[owner] = (gameData._landIncomeCache[owner] || 0) + 1;
+            } else {
+                gameData._landIncomeCacheDirty = true;
+            }
             hex.owner = owner;
             hex.renderColor = hex.baseColor;
-            gameData._landIncomeCacheDirty = true;
             if (batchHexOwner) batchHexOwnerDirty = true;
             else wodMarkTerrainPoliticalDirty();
         }
@@ -38608,6 +38709,7 @@
                 if(!hh || !canUnitEnterHex(u, hh)) ensureUnitPixelOnWalkableHex(u, 28);
             }
             gameData.unitSpatialGrid = buildUnitSpatialGrid(gridCell);
+            wodRebuildHexCombatOccupancy();
             if(!gameData.citySpatialGrid || !gameData.citySpatialGrid.cells)
                 gameData.citySpatialGrid = buildCitySpatialGrid(wodMob ? 280 : 260);
 
@@ -38703,7 +38805,10 @@
                             if((other.damage || 0) <= 0) return;
                             let dx = other.x - unit.x;
                             let dy = other.y - unit.y;
-                            if(dx * dx + dy * dy < capDist2) captor = other;
+                            if(dx * dx + dy * dy < capDist2) {
+                                captor = other;
+                                return true;
+                            }
                         });
                         if(captor) {
                             let prevConvOwner = unit.owner;
@@ -38838,6 +38943,7 @@
             // Rebuild grid after movement so separation / late queries see current positions.
             gameData.unitSpatialGrid = buildUnitSpatialGrid(gridCell);
             wodRunUnitSeparation(wodSkipSep, sepPad, gridCell);
+            wodRebuildHexCombatOccupancy();
 
             wodApplyTerritoryClaimBatch();
             gameData._cityCapTimer = (gameData._cityCapTimer || 0) + dt;
@@ -42700,30 +42806,72 @@
             renderHelpEffectCards();
         }
 
-        function drawUnitSkin(ctx, unit, radius, color) {
-            let skin = getEffectiveUnitSkin(unit);
+        function wodDrawUnitBodyUncached(ctx, unit, radius, color, skin) {
             if(skin === 'goldenChip') {
                 drawGoldenChipUnit(ctx, unit, radius, color);
-                return true;
+                return;
             }
             if(WOD_COUNTRYBALL_SKIN_IDS.includes(skin)) {
-                let ut = wodSkinShapeType(unit);
-                drawCountryBall(ctx, skin, radius, ut);
-                return true;
+                drawCountryBall(ctx, skin, radius, wodSkinShapeType(unit));
+                return;
             }
             if(WOD_RUSE_SKIN_IDS.includes(skin)) {
                 drawRuseChip(ctx, unit, radius, skin);
-                return true;
+                return;
             }
             if(WOD_ANCIENT_CIV_SKIN_IDS.includes(skin)) {
                 drawPeriodCounter(ctx, unit, radius, color, 'ancient', skin);
-                return true;
+                return;
             }
             if(WOD_PERIOD_SKIN_IDS.includes(skin)) {
                 drawPeriodCounter(ctx, unit, radius, color, skin);
-                return true;
+                return;
             }
             drawNatoCounter(ctx, unit, radius, color);
+        }
+
+        function wodEnsureUnitBodySprite(unit, radius, color) {
+            let skin = getEffectiveUnitSkin(unit);
+            let rQ = Math.round((radius || 10) * 2) / 2;
+            let type = unit.type || 'light';
+            let faceQ = 0;
+            if(type === 'ship' && skin === 'goldenChip') {
+                let ang = (typeof getUnitFacingAngle === 'function') ? getUnitFacingAngle(unit) : 0;
+                faceQ = Math.round(ang / (Math.PI / 16)) & 31;
+            }
+            let key = skin + '|' + type + '|' + (color || '') + '|' + rQ + '|' + faceQ +
+                (unit.convoySeaRoute ? '|s' : '');
+            let cache = gameData._unitSpriteCache;
+            if(!cache) cache = gameData._unitSpriteCache = new Map();
+            let hit = cache.get(key);
+            if(hit) return hit;
+            let pad = Math.ceil(Math.max(16, rQ * 2.2));
+            let tw = Math.ceil(rQ * 4.2 + pad * 2);
+            let th = Math.ceil(rQ * 4.4 + pad * 2);
+            let scale = 2;
+            let c = document.createElement('canvas');
+            c.width = Math.max(2, tw * scale);
+            c.height = Math.max(2, th * scale);
+            let cctx = c.getContext('2d');
+            cctx.scale(scale, scale);
+            cctx.translate(tw * 0.5, th * 0.5);
+            wodDrawUnitBodyUncached(cctx, unit, rQ, color, skin);
+            let rec = { c: c, ox: tw * 0.5, oy: th * 0.5, dw: tw, dh: th };
+            if(cache.size > 280) {
+                let first = cache.keys().next().value;
+                if(first != null) cache.delete(first);
+            }
+            cache.set(key, rec);
+            return rec;
+        }
+
+        function drawUnitSkin(ctx, unit, radius, color) {
+            let spr = wodEnsureUnitBodySprite(unit, radius, color);
+            if(spr) {
+                ctx.drawImage(spr.c, -spr.ox, -spr.oy, spr.dw, spr.dh);
+                return true;
+            }
+            wodDrawUnitBodyUncached(ctx, unit, radius, color, getEffectiveUnitSkin(unit));
             return true;
         }
 
@@ -48766,8 +48914,14 @@
             let wodSheetOpen = wodMobileHud && UI.inGameUI && UI.inGameUI.getAttribute('data-mtab');
             if(!wodPinchHudOff && !wodSheetOpen) {
             // UI (hidden while on main menu — skip DOM work for attract-mode performance)
-            syncHudObjectiveDisplay();
+            let entN = gameData.entities.length;
+            let hudNow = performance.now();
+            let hudGap = entN > 280 ? 180 : (entN > 160 ? 110 : 0);
+            let skipHudDom = hudGap > 0 && (hudNow - (gameData._hudDomAt || 0)) < hudGap;
+            if(!skipHudDom) gameData._hudDomAt = hudNow;
             let hudOwner = wodLocalPlayerOwner();
+            if(!skipHudDom) {
+            syncHudObjectiveDisplay();
             setUiText('ui-money', Math.floor(wodHudMoney()));
             setUiText('ui-income', formatSigned(gameData.income || 0, '/s'));
             setUiText('ui-land-income', formatSigned(getOwnerLandIncome(hudOwner), '/s'));
@@ -48794,8 +48948,8 @@
             setUiText('ui-tank-casualties', formatTanks(getOwnerTankCasualties(loHud)));
             setUiText('ui-enemy-casualties', formatFullCount(getOwnerTroopKills(loHud)));
             setUiText('ui-tank-kills', formatTanks(getOwnerTankKills(loHud)));
+            }
             let nowSm = performance.now();
-            let entN = gameData.entities.length;
             let smInt = wodUsesVisualViewportLayout()
                 ? (entN > 350 ? 2200 : entN > 180 ? 1600 : 950)
                 : 400;
@@ -48890,16 +49044,24 @@
                     let baseChunk = wodUsesVisualViewportLayout() ? 0.033 : 0.036;
                     let maxSingleStep = baseChunk * 1.35;
                     gameData._frameSimDt = 0;
-                    if(simDt <= maxSingleStep) {
+                    let entNLoop = (gameData.entities && gameData.entities.length) || 0;
+                    let lastUp = gameData._lastUpdateMs || 0;
+                    // Heavy battles: one full-dt step instead of stacking updates (3x death spiral).
+                    let forceOne = entNLoop > 260 || lastUp > 11;
+                    if(forceOne || simDt <= maxSingleStep) {
+                        let t0 = performance.now();
                         wodDevMark('update');
                         update(simDt);
+                        gameData._lastUpdateMs = performance.now() - t0;
                         gameData._frameSimDt = simDt;
                     } else {
                         let simChunk = baseChunk * Math.max(1, Math.min(2, gameData.speed || 1));
                         let simRemain = simDt;
                         // Prefer more small steps over a few large ones — smoother marches.
                         let marchCap = (gameData._wodPlayerMovingN || 0) > 0 ? 3 : 8;
+                        if(entNLoop > 180 || lastUp > 8) marchCap = Math.min(marchCap, 2);
                         let steps = 0;
+                        let t0 = performance.now();
                         while(simRemain > 0.0001 && steps++ < marchCap) {
                             let step = Math.min(simRemain, simChunk);
                             wodDevMark('update');
@@ -48907,6 +49069,7 @@
                             gameData._frameSimDt += step;
                             simRemain -= step;
                         }
+                        gameData._lastUpdateMs = (performance.now() - t0) / Math.max(1, steps);
                     }
                 } else {
                     gameData._frameSimDt = 0;
