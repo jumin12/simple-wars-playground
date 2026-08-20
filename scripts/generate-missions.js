@@ -660,6 +660,7 @@ class MapBuilder {
       manpower: opt.manpower != null ? opt.manpower : 10000,
       aiMoneyByOwner: opt.aiMoney || {},
       aiManpowerByOwner: opt.aiManpower || {},
+      alliances: Array.isArray(opt.alliances) ? opt.alliances : [],
       mission: opt.mission,
       format: 'simple-wars-mission',
       version: 1,

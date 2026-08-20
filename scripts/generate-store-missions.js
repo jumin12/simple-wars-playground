@@ -1064,6 +1064,7 @@ function buildKurskCitadel() {
       manpower: 26000,
       aiMoney: { 1: 0, 2: 22000, 3: 26000 },
       aiManpower: { 1: 0, 2: 16000, 3: 18000 },
+      alliances: [[2, 3]],
       mission: {
         version: 1,
         title: 'Operation Citadel',
@@ -1075,7 +1076,7 @@ function buildKurskCitadel() {
             { type: 'timer', seconds: 1 },
             {
               title: 'Zitadelle',
-              body: '05:00, 5 July 1943. You hold the Kursk salient — Central Front to the north, Voronezh Front to the south, Steppe Front in reserve east of the city. Model is coming from Orel; Hoth and Kempf from Belgorod. The belts at Ponyri and Oboyan must hold.',
+              body: '05:00, 5 July 1943. You hold the Kursk salient — Central Front to the north, Voronezh Front to the south, Steppe Front in reserve east of the city. Model is coming from Orel; Hoth and Kempf from Belgorod. Those two German armies are allied and will not fight each other. The belts at Ponyri and Oboyan must hold.',
               style: 'briefing',
               kicker: 'Store Mission · One-shot',
             }

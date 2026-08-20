@@ -404,6 +404,92 @@
     host.classList.remove("editor-hint");
   }
 
+  function editorEnsureAlliances() {
+    if (!window.WOD || !WOD.gameData) return [];
+    const norm = typeof WOD.normalizeAlliances === "function"
+      ? WOD.normalizeAlliances
+      : (raw) => (Array.isArray(raw) ? raw : []);
+    WOD.gameData.alliances = norm(WOD.gameData.alliances).filter(
+      (p) => p && p[0] >= 1 && p[1] >= 1 && p[0] <= state.maxFactionSlots && p[1] <= state.maxFactionSlots
+    );
+    return WOD.gameData.alliances;
+  }
+
+  function fillAllianceSelect(sel, preferred) {
+    if (!sel) return;
+    const keep = preferred != null ? preferred : parseInt(sel.value, 10);
+    let html = "";
+    const cols = factionPalette();
+    for (let i = 1; i <= state.maxFactionSlots; i++) {
+      const col = cols[i] || "#cccccc";
+      const lbl = i === 1 ? "Faction 1 (player)" : `Faction ${i}`;
+      html += `<option value="${i}" style="background:${col};color:#061208;font-weight:700">${lbl}</option>`;
+    }
+    sel.innerHTML = html;
+    let v = Number.isFinite(keep) ? keep : 1;
+    if (v < 1 || v > state.maxFactionSlots) v = 1;
+    sel.value = String(v);
+  }
+
+  function renderAlliancePanel() {
+    if (!state.open || !window.WOD || !WOD.gameData) return;
+    const list = editorEnsureAlliances();
+    const aSel = document.getElementById("editorAllianceA");
+    const bSel = document.getElementById("editorAllianceB");
+    fillAllianceSelect(aSel, aSel ? parseInt(aSel.value, 10) : 1);
+    fillAllianceSelect(bSel, bSel ? parseInt(bSel.value, 10) : Math.min(2, state.maxFactionSlots));
+    if (aSel && bSel && aSel.value === bSel.value && state.maxFactionSlots > 1) {
+      bSel.value = String(aSel.value === "1" ? 2 : 1);
+    }
+    const host = document.getElementById("editorAllianceList");
+    if (!host) return;
+    if (!list.length) {
+      host.innerHTML = '<p class="editor-alliance-empty">No alliances yet.</p>';
+      return;
+    }
+    const cols = factionPalette();
+    host.innerHTML = list
+      .map((p) => {
+        const a = p[0];
+        const b = p[1];
+        const ca = cols[a] || "#ccc";
+        const cb = cols[b] || "#ccc";
+        return (
+          `<div class="editor-alliance-row" data-ally-a="${a}" data-ally-b="${b}">` +
+          `<span><span class="efc-dot" style="background:${ca}"></span>Faction ${a}` +
+          ` <span style="opacity:.6">+</span> ` +
+          `<span class="efc-dot" style="background:${cb}"></span>Faction ${b}</span>` +
+          `<button type="button" class="editor-btn editor-alliance-remove">Remove</button></div>`
+        );
+      })
+      .join("");
+    host.querySelectorAll(".editor-alliance-remove").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const row = btn.closest(".editor-alliance-row");
+        if (!row || !WOD.removeAlliance) return;
+        WOD.removeAlliance(parseInt(row.getAttribute("data-ally-a"), 10), parseInt(row.getAttribute("data-ally-b"), 10));
+        renderAlliancePanel();
+        editorPushSnapshot();
+      });
+    });
+  }
+
+  function wireAlliancePanel(root) {
+    const app = root || document.getElementById("mapEditorApp");
+    if (!app || app.dataset.allianceWired === "1") return;
+    app.dataset.allianceWired = "1";
+    const add = document.getElementById("editorAllianceAdd");
+    if (!add) return;
+    add.addEventListener("click", () => {
+      const a = parseInt(document.getElementById("editorAllianceA").value, 10);
+      const b = parseInt(document.getElementById("editorAllianceB").value, 10);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return;
+      if (WOD.addAlliance) WOD.addAlliance(a, b);
+      renderAlliancePanel();
+      editorPushSnapshot();
+    });
+  }
+
   function wireMapBrowserPager() {
     const prev = document.getElementById("mapBrowserPrev");
     const next = document.getElementById("mapBrowserNext");
@@ -1762,6 +1848,14 @@
       .editor-economy-hint {
         margin:8px 0 0;font-size:11px;color:#8aa4b8;line-height:1.35;
       }
+      .editor-alliance-list { margin-top:10px; display:flex; flex-direction:column; gap:6px; }
+      .editor-alliance-row {
+        display:flex; align-items:center; justify-content:space-between; gap:8px;
+        background:rgba(255,255,255,.04); border:1px solid rgba(120,150,175,.28);
+        border-radius:7px; padding:6px 8px; font-size:12px; color:#dbe8f5;
+      }
+      .editor-alliance-row .efc-dot { margin-right:5px; }
+      .editor-alliance-empty { margin:8px 0 0; font-size:11px; color:#8aa4b8; }
       .editor-mission-event-toolbar {
         display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:8px 0 6px;
       }
@@ -2227,6 +2321,18 @@
             <div id="editorFactionChart" class="editor-hint" style="margin:0"></div>
           </div>
         </section>
+        <section class="editor-card" id="editorAllianceCard">
+          <h3>Alliances</h3>
+          <p class="editor-hint" style="margin-top:0">Pair two factions so they will not attack each other and can move through each other’s land without capturing it.</p>
+          <div class="editor-row"><label>Faction A</label>
+            <select id="editorAllianceA" aria-label="Alliance faction A"></select>
+          </div>
+          <div class="editor-row"><label>Faction B</label>
+            <select id="editorAllianceB" aria-label="Alliance faction B"></select>
+          </div>
+          <button type="button" class="editor-btn" id="editorAllianceAdd" style="width:100%;margin-top:4px">Make allies</button>
+          <div id="editorAllianceList" class="editor-alliance-list"></div>
+        </section>
         <section class="editor-card" id="editorMissionCard">
           <h3>Mission</h3>
           <p class="editor-hint" style="margin-top:0">Victory rules plus scripted popups and reinforcements. Saved with <strong>Export mission</strong>.</p>
@@ -2348,6 +2454,7 @@
     rebuildOwnerSelect();
 
     wireFactionEconomyPanel(app);
+    wireAlliancePanel(app);
 
     wireMapBrowserPager();
 
@@ -2378,6 +2485,7 @@
         state.maxFactionSlots++;
         rebuildOwnerSelect();
         rebuildUnitPalette();
+        renderAlliancePanel();
       }
     });
 
@@ -2387,6 +2495,7 @@
       syncMaxFactionSlotsFromGameData();
       rebuildOwnerSelect();
       rebuildUnitPalette();
+      renderAlliancePanel();
       state.selected = null;
       state.viewPanX = 0;
       state.viewPanY = 0;
@@ -2444,6 +2553,7 @@
       syncMaxFactionSlotsFromGameData();
       rebuildOwnerSelect();
       rebuildUnitPalette();
+      renderAlliancePanel();
       state.selected = null;
       state.viewPanX = 0;
       state.viewPanY = 0;
@@ -2548,6 +2658,7 @@
     state.editorTerrainDirty = true;
     rebuildOwnerSelect();
     rebuildUnitPalette();
+    renderAlliancePanel();
     refreshEditorGameplayLayerButtons();
     resizeEditorCanvas();
     renderSelection();
@@ -3648,6 +3759,7 @@
     syncMaxFactionSlotsFromGameData();
     rebuildOwnerSelect();
     rebuildUnitPalette();
+    renderAlliancePanel();
     state.selected = null;
     state.cityUnitStackTap = null;
     state.editorMarquee = null;
@@ -3665,6 +3777,7 @@
     syncMaxFactionSlotsFromGameData();
     rebuildOwnerSelect();
     rebuildUnitPalette();
+    renderAlliancePanel();
     state.missionEventIndex = 0;
     ensureGameMission();
     renderMissionPanel();

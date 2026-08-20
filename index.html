@@ -13504,6 +13504,7 @@
             hexRadius: 20, mapRadius: 40,
             mapShape: 'island',
             loadedCustomMap: false,
+            alliances: [],
             mission: null,
             layers: { terrain: true, diplomacy: true, territory: false, cities: false, cityNames: true, structures: true, units: true },
             aiCount: 1,
@@ -13609,6 +13610,70 @@
             if(!shopId) return true;
             wodEnsureOwnedShopVisuals();
             return !!gameData.ownedShopVisuals[shopId];
+        }
+
+        function wodNormalizeAlliances(raw) {
+            if(!Array.isArray(raw)) return [];
+            let seen = Object.create(null);
+            let out = [];
+            for(let i = 0; i < raw.length; i++) {
+                let p = raw[i];
+                if(!p) continue;
+                let a = (p.a != null ? p.a : p[0]) | 0;
+                let b = (p.b != null ? p.b : p[1]) | 0;
+                if(a < 1 || b < 1 || a === b) continue;
+                if(a > b) { let t = a; a = b; b = t; }
+                let k = a + ':' + b;
+                if(seen[k]) continue;
+                seen[k] = 1;
+                out.push([a, b]);
+            }
+            return out;
+        }
+
+        function wodAreAllies(a, b) {
+            a = a | 0; b = b | 0;
+            if(a < 1 || b < 1 || a === b) return false;
+            let list = gameData.alliances;
+            if(!list || !list.length) return false;
+            if(a > b) { let t = a; a = b; b = t; }
+            for(let i = 0; i < list.length; i++) {
+                let p = list[i];
+                if(p && (p[0] | 0) === a && (p[1] | 0) === b) return true;
+            }
+            return false;
+        }
+
+        function wodIsFriendlyOwner(a, b) {
+            a = a | 0; b = b | 0;
+            if(a < 1 || b < 1) return false;
+            return a === b || wodAreAllies(a, b);
+        }
+
+        function wodIsHostileOwner(a, b) {
+            a = a | 0; b = b | 0;
+            if(a < 1 || b < 1 || a === b) return false;
+            return !wodAreAllies(a, b);
+        }
+
+        function wodAddAlliance(a, b) {
+            a = a | 0; b = b | 0;
+            if(a < 1 || b < 1 || a === b) return false;
+            gameData.alliances = wodNormalizeAlliances((gameData.alliances || []).concat([[a, b]]));
+            return true;
+        }
+
+        function wodRemoveAlliance(a, b) {
+            a = a | 0; b = b | 0;
+            if(a > b) { let t = a; a = b; b = t; }
+            let list = gameData.alliances || [];
+            let next = [];
+            for(let i = 0; i < list.length; i++) {
+                let p = list[i];
+                if(!p || (p[0] | 0) !== a || (p[1] | 0) !== b) next.push(p);
+            }
+            gameData.alliances = next;
+            return next.length !== list.length;
         }
 
         function loadUiSettingsFromStorage() {
@@ -16926,6 +16991,7 @@
                 hexRadius: gameData.hexRadius,
                 aiCount: gameData.aiCount,
                 victoryMode: gameData.victoryMode,
+                alliances: wodNormalizeAlliances(gameData.alliances),
                 humanSlots: hs,
                 factionSlots: factions,
                 connectedSlots: conn,
@@ -17090,6 +17156,7 @@
             gameData.hexRadius = p.hexRadius;
             gameData.aiCount = p.aiCount;
             gameData.victoryMode = p.victoryMode || 'domination';
+            gameData.alliances = wodNormalizeAlliances(p.alliances);
             gameData.money = p.money;
             gameData.manpower = p.manpower;
             gameData.income = p.income;
@@ -23157,7 +23224,7 @@
                 }
                 if (isBridgeHex(hex)) return true;
                 if (!isClaimableLand(hex) || hex.type === 'mountain') return false;
-                return hex.owner === 0 || hex.owner === unit.owner;
+                return hex.owner === 0 || wodIsFriendlyOwner(hex.owner, unit.owner);
             }
             // Light / heavy: mountains blocked; may enter open water when explicitly ordered.
             if (hex.type === 'mountain') return false;
@@ -23178,7 +23245,7 @@
             if(unit.type === 'convoy') {
                 if(isBridgeHex(hex)) return true;
                 if(!isClaimableLand(hex) || hex.type === 'mountain') return false;
-                return hex.owner === 0 || hex.owner === unit.owner;
+                return hex.owner === 0 || wodIsFriendlyOwner(hex.owner, unit.owner);
             }
             if(hex.type === 'mountain') return false;
             if(isBridgeHex(hex)) return true;
@@ -23439,6 +23506,7 @@
 
         function wodExecuteCityCapture(city, newOwner) {
             if(!city || newOwner <= 0 || city.owner === newOwner) return;
+            if(wodAreAllies(newOwner, city.owner)) return;
             let prevCityOwner = city.owner;
             city.owner = newOwner;
             let destroyed = [];
@@ -23548,6 +23616,7 @@
                     else if(capturer !== hx.owner) { capturer = null; break; }
                 }
                 if(capturer == null || capturer <= 0 || capturer === city.owner) continue;
+                if(wodAreAllies(capturer, city.owner)) continue;
                 if(wodCityUrbanHasDefenderCombat(city, city.owner)) continue;
                 wodExecuteCityCapture(city, capturer);
             }
@@ -23569,7 +23638,7 @@
         }
 
         function isFrontlineHex(hex, owner) {
-            return hex && hex.owner === owner && getNeighborHexes(hex).some(nHex => isClaimableLand(nHex) && nHex.owner !== owner);
+            return hex && hex.owner === owner && getNeighborHexes(hex).some(nHex => isClaimableLand(nHex) && (nHex.owner === 0 || wodIsHostileOwner(nHex.owner, owner)));
         }
 
         function getSpatialCellKey(x, y, cellSize) {
@@ -24113,7 +24182,7 @@
             let r2 = radius * radius;
             forEachNearbyUnit(gameData.unitSpatialGrid, x, y, radius, (unit) => {
                 if(unit.type === 'convoy' || unit.hp <= 0) return;
-                let isMatch = enemyOnly ? unit.owner !== owner : unit.owner === owner;
+                let isMatch = enemyOnly ? wodIsHostileOwner(unit.owner, owner) : wodIsFriendlyOwner(unit.owner, owner);
                 if(!isMatch) return;
                 let dx = unit.x - x;
                 let dy = unit.y - y;
@@ -24178,7 +24247,7 @@
             return gameData.cities.some(c => c.owner === owner);
         }
         function anyEnemyOwnedCityRemainsFor(owner) {
-            return gameData.cities.some(c => c.owner > 0 && c.owner !== owner);
+            return gameData.cities.some(c => wodIsHostileOwner(c.owner, owner));
         }
         function countFriendlyCombatExcludingConvoys(owner) {
             let n = 0;
@@ -24192,7 +24261,7 @@
             let n = 0;
             for(let u of gameData.entities) {
                 if(u.hp <= 0 || u.type === 'convoy') continue;
-                if(u.owner !== owner) n++;
+                if(wodIsHostileOwner(u.owner, owner)) n++;
             }
             return n;
         }
@@ -29450,7 +29519,7 @@
             if(unit.manpower == null) unit.manpower = Math.round((unit.hp / unit.maxHp) * mpCap);
             if(unit.hp >= unit.maxHp && unit.manpower >= mpCap) return false;
             let hex = getNearestHexToPoint(unit.x, unit.y);
-            if(!hex || hex.owner !== unit.owner) return false;
+            if(!hex || !wodIsFriendlyOwner(hex.owner, unit.owner)) return false;
             if(wodGetHexEncirclementState(hex)) return false;
             return countNearbyUnits(unit.owner, unit.x, unit.y, 115, true) === 0;
         }
@@ -29930,13 +29999,13 @@
                 for(let dir of hexDirections) {
                     let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
                     if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
-                    if(nHex.owner > 0 && nHex.owner !== owner)
+                    if(wodIsHostileOwner(nHex.owner, owner))
                         counts[nHex.owner] = (counts[nHex.owner] || 0) + 1;
                     else if(nHex.owner === 0) {
                         for(let dir2 of hexDirections) {
                             let nn = gameData.hexes[`${nHex.q + dir2.q},${nHex.r + dir2.r}`];
                             if(!nn || isWaterHex(nn) || !isClaimableLand(nn)) continue;
-                            if(nn.owner > 0 && nn.owner !== owner && !regionKeys.has(getHexKey(nn)))
+                            if(wodIsHostileOwner(nn.owner, owner) && !regionKeys.has(getHexKey(nn)))
                                 counts[nn.owner] = (counts[nn.owner] || 0) + 1;
                         }
                     }
@@ -29959,7 +30028,7 @@
                     for(let dir2 of hexDirections) {
                         let nn = gameData.hexes[`${nHex.q + dir2.q},${nHex.r + dir2.r}`];
                         if(!nn || isWaterHex(nn) || !isClaimableLand(nn)) continue;
-                        if(nn.owner > 0 && nn.owner !== owner && !regionKeys.has(getHexKey(nn)))
+                        if(wodIsHostileOwner(nn.owner, owner) && !regionKeys.has(getHexKey(nn)))
                             proxy[nn.owner] = (proxy[nn.owner] || 0) + 1;
                     }
                 }
@@ -30119,7 +30188,7 @@
                             touchesOpenEdge = true;
                             continue;
                         }
-                        if(nHex.owner === owner) {
+                        if(wodIsFriendlyOwner(nHex.owner, owner)) {
                             let nKey = getHexKey(nHex);
                             if(!w.visited.has(nKey)) {
                                 w.visited.add(nKey);
@@ -30266,7 +30335,7 @@
         function getOwnerFrontlineHexes(owner) {
             return gameData.hexList.filter(hex => {
                 if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain') return false;
-                return getNeighborHexes(hex).some(nHex => isClaimableLand(nHex) && nHex.owner !== owner);
+                return getNeighborHexes(hex).some(nHex => isClaimableLand(nHex) && (nHex.owner === 0 || wodIsHostileOwner(nHex.owner, owner)));
             });
         }
 
@@ -30287,7 +30356,7 @@
             let probeR = (gameData.hexRadius || 20) * 32;
             if(grid && grid.cells) {
                 forEachNearbyUnit(grid, x, y, probeR, (u) => {
-                    if(u.hp <= 0 || u.type === 'convoy' || u.owner === owner) return;
+                    if(u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, owner)) return;
                     let dx = u.x - x;
                     let dy = u.y - y;
                     let d = dx * dx + dy * dy;
@@ -30296,7 +30365,7 @@
                 if(best !== Infinity) return best;
             }
             for(let u of gameData.entities) {
-                if(u.hp <= 0 || u.type === 'convoy' || u.owner === owner) continue;
+                if(u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, owner)) continue;
                 let dx = u.x - x;
                 let dy = u.y - y;
                 let d = dx * dx + dy * dy;
@@ -30400,7 +30469,7 @@
         }
 
         function pickBacklineSpawnHex(frontHex, owner, enemyFrontHexes, usedPositions, minSepSq, forGameStart) {
-            let enemyNeighbors = getNeighborHexes(frontHex).filter(nHex => isClaimableLand(nHex) && nHex.owner !== owner);
+            let enemyNeighbors = getNeighborHexes(frontHex).filter(nHex => isClaimableLand(nHex) && wodIsHostileOwner(nHex.owner, owner));
             let enemyX = 0;
             let enemyY = 0;
             if(enemyNeighbors.length > 0) {
@@ -30812,7 +30881,7 @@
             for(let i = 0, n = list.length; i < n; i++) {
                 let hex = list[i];
                 if(!hex || !isClaimableLand(hex)) continue;
-                if(!(hex.owner > 0) || hex.owner === owner) continue;
+                if(!wodIsHostileOwner(hex.owner, owner)) continue;
                 let d = wodHexCellDist(fromHex, hex);
                 if(d > maxR || d >= bestD) continue;
                 bestD = d;
@@ -30848,7 +30917,7 @@
                 let pullR = (gameData.hexRadius || 20) * 14;
                 if(gameData.unitSpatialGrid) {
                     forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, pullR, (other) => {
-                        if(!other || other === unit || other.owner === owner || other.type === 'convoy' || other.hp <= 0) return;
+                        if(!other || other === unit || !wodIsHostileOwner(other.owner, owner) || other.type === 'convoy' || other.hp <= 0) return;
                         enemyPullX += other.x;
                         enemyPullY += other.y;
                         enemyN++;
@@ -31043,14 +31112,14 @@
                 let enemyPressure = 0;
                 let bestAttackScore = -Infinity;
                 for(let nHex of getNeighborHexes(hex)) {
-                    if(!canUnitEnterHex(unit, nHex) || nHex.owner === unit.owner) continue;
-                    let friendlyAround = getNeighborHexes(nHex).filter(aHex => aHex.owner === unit.owner).length;
-                    let hostileAround = getNeighborHexes(nHex).filter(aHex => isClaimableLand(aHex) && aHex.owner !== unit.owner).length;
-                    let cityBonus = gameData.cities.some(city => city.owner !== unit.owner && city.q === nHex.q && city.r === nHex.r)
+                    if(!canUnitEnterHex(unit, nHex) || wodIsFriendlyOwner(nHex.owner, unit.owner)) continue;
+                    let friendlyAround = getNeighborHexes(nHex).filter(aHex => wodIsFriendlyOwner(aHex.owner, unit.owner)).length;
+                    let hostileAround = getNeighborHexes(nHex).filter(aHex => isClaimableLand(aHex) && wodIsHostileOwner(aHex.owner, unit.owner)).length;
+                    let cityBonus = gameData.cities.some(city => wodIsHostileOwner(city.owner, unit.owner) && city.q === nHex.q && city.r === nHex.r)
                         ? (nHex.owner === 1 ? 140 : 70) : 0;
                     let playerBonus = nHex.owner === 1 ? 95 : 24;
                     // Prefer pushing into the weakest enemy: compare our fielded manpower vs theirs.
-                    if(nHex.owner > 0 && nHex.owner !== unit.owner) {
+                    if(wodIsHostileOwner(nHex.owner, unit.owner)) {
                         let foePow = nHex.owner === 1
                             ? (gameData._aiStratPowPlayer || 0)
                             : ((gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[nHex.owner]) || 0);
@@ -31080,8 +31149,8 @@
                 let dy = hex.y - unit.y;
                 let support = countNearbyUnits(unit.owner, hex.x, hex.y, 170);
                 let enemies = countNearbyUnits(unit.owner, hex.x, hex.y, 190, true);
-                let friendlyAroundTarget = getNeighborHexes(attackHex).filter(nHex => nHex.owner === unit.owner).length;
-                let enemyAroundTarget = getNeighborHexes(attackHex).filter(nHex => isClaimableLand(nHex) && nHex.owner !== unit.owner).length;
+                let friendlyAroundTarget = getNeighborHexes(attackHex).filter(nHex => wodIsFriendlyOwner(nHex.owner, unit.owner)).length;
+                let enemyAroundTarget = getNeighborHexes(attackHex).filter(nHex => isClaimableLand(nHex) && wodIsHostileOwner(nHex.owner, unit.owner)).length;
                 let encirclePressure = friendlyAroundTarget * 18000 + Math.max(0, 4 - enemyAroundTarget) * 9000;
                 // Bonus for holding from defensible terrain (forest, hill, urban for infantry).
                 let holdBonus = 0;
@@ -31097,7 +31166,7 @@
                     let ch = gameData.hexes[`${c.q},${c.r}`];
                     if(!ch) continue;
                     if(!getNeighborHexes(hex).some(n => n.q === ch.q && n.r === ch.r)) continue;
-                    if(getNeighborHexes(ch).some(n => n.owner > 0 && n.owner !== unit.owner))
+                    if(getNeighborHexes(ch).some(n => wodIsHostileOwner(n.owner, unit.owner)))
                         cityDefenseBonus -= 420000;
                 }
                 let playerNearHold = countPlayerThreatNear(hex.x, hex.y, 205);
@@ -31416,7 +31485,7 @@
             let enemy = null;
             let engaged = false;
             forEachNearbyUnit(grid, unit.x, unit.y, range, (other) => {
-                if(other === unit || other.owner === unit.owner || other.type === 'convoy' || other.hp <= 0) return;
+                if(other === unit || !wodIsHostileOwner(other.owner, unit.owner) || other.type === 'convoy' || other.hp <= 0) return;
                 let dx = unit.x - other.x;
                 let dy = unit.y - other.y;
                 let dist2 = dx * dx + dy * dy;
@@ -31794,7 +31863,7 @@
             let occ = false;
             let pad = (gameData.hexRadius || 20) * 1.55;
             forEachNearbyUnit(gameData.unitSpatialGrid, hex.x, hex.y, pad, (u) => {
-                if(occ || u.hp <= 0 || u.type === 'convoy' || u.owner === friendlyOwner) return;
+                if(occ || u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, friendlyOwner)) return;
                 let uh = getNearestHexToPoint(u.x, u.y);
                 if(uh && uh.q === hex.q && uh.r === hex.r) occ = true;
             });
@@ -31899,17 +31968,18 @@
         function wodCanClaimTerritoryHex(unit, hex, standingHex) {
             if(!hex || !unit || !canUnitEnterHex(unit, hex)) return false;
             if(hex.owner === unit.owner) return false;
+            if(wodAreAllies(hex.owner, unit.owner)) return false;
             let onTile = standingHex && hex.q === standingHex.q && hex.r === standingHex.r;
             if(onTile) return true;
             if(hex.owner === 0) return wodTerritoryClaimAttach(unit, hex, standingHex);
-            if(hex.owner > 0 && hex.owner !== unit.owner) return wodSpearheadCanClaimEnemyHex(unit, hex, standingHex);
+            if(wodIsHostileOwner(hex.owner, unit.owner)) return wodSpearheadCanClaimEnemyHex(unit, hex, standingHex);
             return false;
         }
 
         function wodTerritoryClaimPriority(unit, hex, standingHex) {
             if(!hex || !standingHex) return 1;
             if(hex.q === standingHex.q && hex.r === standingHex.r) return 3;
-            if(hex.owner > 0 && hex.owner !== unit.owner && wodSpearheadCanClaimEnemyHex(unit, hex, standingHex)) return 3;
+            if(wodIsHostileOwner(hex.owner, unit.owner) && wodSpearheadCanClaimEnemyHex(unit, hex, standingHex)) return 3;
             return 1;
         }
 
@@ -31918,7 +31988,7 @@
             let r = radiusPx != null ? radiusPx : (gameData.hexRadius || 20) * 3.6;
             let found = false;
             forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, r, (u) => {
-                if(found || !u || u.hp <= 0 || u.type === 'convoy' || u.owner === unit.owner) return;
+                if(found || !u || u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, unit.owner)) return;
                 found = true;
             });
             return found;
@@ -34446,6 +34516,7 @@
             }
             try {
             gameData._mapGenInProgress = true;
+            if(!gameData.loadedCustomMap) gameData.alliances = [];
             wodRefreshMapPreviewGeneratingUi();
             gameData._wodFastMapGen = true;
             wodMapGenYieldingStart(wodMapGenCooperativeMode() ? 5 : 4);
@@ -35996,7 +36067,7 @@
                 }
                 for(let hi = 0, hl = frontHexes.length; hi < hl; hi++) {
                     let hex = frontHexes[hi];
-                    let enemyNeighbors = getNeighborHexes(hex).filter(nHex => isClaimableLand(nHex) && nHex.owner !== owner).length;
+                    let enemyNeighbors = getNeighborHexes(hex).filter(nHex => isClaimableLand(nHex) && wodIsHostileOwner(nHex.owner, owner)).length;
                     let playerAdj = getNeighborHexes(hex).some(nHex => nHex && nHex.owner === 1) ? 22 : 0;
                     let playerUnits = countPlayerThreatNear(hex.x, hex.y, 200);
                     let support = countNearbyUnits(owner, hex.x, hex.y, 260);
@@ -36083,7 +36154,7 @@
             let enemies = countNearbyUnits(ownerId, fort.x, fort.y, Math.max(300, hr * 13), true);
             let fh = gameData.hexes[`${fort.q},${fort.r}`];
             let frontTouch = fh && (isFrontlineHex(fh, ownerId)
-                || getNeighborHexes(fh).some(n => n && n.owner > 0 && n.owner !== ownerId));
+                || getNeighborHexes(fh).some(n => n && wodIsHostileOwner(n.owner, ownerId)));
             if(enemies <= 0 && !frontTouch) return 0;
             let guards = wodAiCountFortGuards(fort, ownerId);
             if(enemies > 0) return Math.max(1, Math.min(5, enemies + 1 - Math.min(guards, enemies + 1)));
@@ -36268,7 +36339,7 @@
                 let ch = gameData.hexes[`${c.q},${c.r}`];
                 if(ch) {
                     frontTouch = isFrontlineHex(ch, owner)
-                        || getNeighborHexes(ch).some(n => n && n.owner > 0 && n.owner !== owner);
+                        || getNeighborHexes(ch).some(n => n && wodIsHostileOwner(n.owner, owner));
                 }
                 if(enemies <= 0 && !frontTouch) continue;
                 let defenders = countNearbyUnits(owner, c.x, c.y, Math.max(260, hr * 11));
@@ -36433,7 +36504,7 @@
                 let cityObj = 0;
                 if(gameData.cities.some(c => c.owner === 1 && c.q === s.attackHex.q && c.r === s.attackHex.r))
                     cityObj = -520000;
-                else if(gameData.cities.some(c => c.owner !== unit.owner && c.q === s.attackHex.q && c.r === s.attackHex.r))
+                else if(gameData.cities.some(c => wodIsHostileOwner(c.owner, unit.owner) && c.q === s.attackHex.q && c.r === s.attackHex.r))
                     cityObj = -180000;
                 let dx = s.holdHex.x - unit.x;
                 let dy = s.holdHex.y - unit.y;
@@ -36456,9 +36527,9 @@
                 let attackHex = null;
                 let bestWeak = Infinity;
                 for(let nHex of getNeighborHexes(hex)) {
-                    if(!canUnitEnterHex(fake, nHex) || nHex.owner === owner) continue;
+                    if(!canUnitEnterHex(fake, nHex) || wodIsFriendlyOwner(nHex.owner, owner)) continue;
                     let enemyWeight = countNearbyUnits(owner, nHex.x, nHex.y, 125, true);
-                    let isCityTile = gameData.cities.some(city => city.owner !== owner && city.q === nHex.q && city.r === nHex.r);
+                    let isCityTile = gameData.cities.some(city => wodIsHostileOwner(city.owner, owner) && city.q === nHex.q && city.r === nHex.r);
                     let isPlayerCity = gameData.cities.some(city => city.owner === 1 && city.q === nHex.q && city.r === nHex.r);
                     let weak = enemyWeight + (isCityTile ? -3 : 0) - (isPlayerCity ? 11 : 0);
                     if(weak < bestWeak) {
@@ -36473,7 +36544,7 @@
                     if(c.owner !== owner) continue;
                     let ch = gameData.hexes[`${c.q},${c.r}`];
                     if(!ch) continue;
-                    if(!getNeighborHexes(ch).some(n => n.owner > 0 && n.owner !== owner)) continue;
+                    if(!getNeighborHexes(ch).some(n => wodIsHostileOwner(n.owner, owner))) continue;
                     let ddx = hex.x - c.x, ddy = hex.y - c.y;
                     if(ddx * ddx + ddy * ddy < Math.pow(gameData.hexRadius * 12, 2)) cityDefenseBias -= 25;
                 }
@@ -36574,7 +36645,7 @@
                 let enemies = countNearbyUnits(owner, t.x, t.y, Math.max(320, hr * 14), true);
                 let th = gameData.hexes[`${t.q},${t.r}`];
                 let frontTouch = th && (isFrontlineHex(th, owner)
-                    || getNeighborHexes(th).some(n => n && n.owner > 0 && n.owner !== owner));
+                    || getNeighborHexes(th).some(n => n && wodIsHostileOwner(n.owner, owner));
                 return enemies > 0 || !!frontTouch;
             }
             if(job.kind === 'strike' && job.strikeHex) {
@@ -37291,7 +37362,7 @@
             if(!city || city.owner !== ownerId) return false;
             let cityHex = gameData.hexes[`${city.q},${city.r}`];
             if(!cityHex) return false;
-            if(getNeighborHexes(cityHex).some(n => n && n.owner > 0 && n.owner !== ownerId)) return true;
+            if(getNeighborHexes(cityHex).some(n => n && wodIsHostileOwner(n.owner, ownerId))) return true;
             for(let pt of getHexesInRadius(city.q, city.r, 2)) {
                 let h = gameData.hexes[`${pt.q},${pt.r}`];
                 if(h && isFrontlineHex(h, ownerId)) return true;
@@ -37317,7 +37388,7 @@
             let neighbors = getNeighborHexes(hex);
             let mountainAdj = neighbors.filter(n => n && n.type === 'mountain').length;
             if(mountainAdj === 0) return false;
-            let enemyAdj = neighbors.some(n => isClaimableLand(n) && n.owner > 0 && n.owner !== ownerId);
+            let enemyAdj = neighbors.some(n => isClaimableLand(n) && wodIsHostileOwner(n.owner, ownerId));
             if(!enemyAdj) return false;
             let blocked = neighbors.filter(n => !n || isWaterHex(n) || n.type === 'mountain' || n.type === 'urban').length;
             if(mountainAdj >= 2) return true;
@@ -38357,7 +38428,7 @@
                         let capDist = (unit.radius || 6) + 22;
                         let capDist2 = capDist * capDist;
                         forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, capDist + 48, (other) => {
-                            if(captor || other.owner === unit.owner || other.type === 'convoy' || other.hp <= 0) return;
+                            if(captor || !wodIsHostileOwner(other.owner, unit.owner) || other.type === 'convoy' || other.hp <= 0) return;
                             if(other.type === 'ship' && !unit.convoySeaRoute) return;
                             if((other.damage || 0) <= 0) return;
                             let dx = other.x - unit.x;
@@ -51865,6 +51936,7 @@
             makeBlankMap(size) {
                 gameData.hexes = {}; gameData.hexList = []; gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = []; gameData.bridges = [];
                 gameData.loadedCustomMap = false;
+                gameData.alliances = [];
                 delete gameData._mapExportHadStartEconomy;
                 let p = wodApplyMapSizePreset(size);
                 let spacing = p.hexRadius * 1.35;
@@ -51926,6 +51998,7 @@
                     gameData._mapExportHadStartEconomy = true;
                 } else delete gameData._mapExportHadStartEconomy;
                 gameData.mission = wodNormalizeMission(mapData.mission);
+                gameData.alliances = wodNormalizeAlliances(mapData.alliances);
                 snapEditorRoadRefsToCities();
                 normalizeTerrainHexes();
                 wodMarkTerrainFullDirty();
@@ -51948,6 +52021,7 @@
                     manpower: gameData.manpower,
                     aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner || {}),
                     aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner || {}),
+                    alliances: wodNormalizeAlliances(gameData.alliances),
                 };
                 if(gameData.mission && Array.isArray(gameData.mission.events) && gameData.mission.events.length)
                     out.mission = JSON.parse(JSON.stringify(gameData.mission));
@@ -51956,6 +52030,10 @@
             rebuildEditorTradeRoutes() { rebuildEditorTradeRoutesFromCities(); },
             snapEditorRoadRefsToCities() { snapEditorRoadRefsToCities(); },
             getEditorFactionEconomy(owner) { return wodEditorFactionStats(owner); },
+            normalizeAlliances: wodNormalizeAlliances,
+            areAllies: wodAreAllies,
+            addAlliance: wodAddAlliance,
+            removeAlliance: wodRemoveAlliance,
             drawEditorUnitAtScreen(ctx, canvasX, canvasY, pxPerWorld, unit) {
                 let uColor = unit.colorOverride || factionColors[unit.owner] || '#cccccc';
                 let ur = Math.max(8, (unit.radius || 10) * pxPerWorld);
