@@ -33650,24 +33650,39 @@
             }
         }
 
+        function wodJsonCloneReplacer(key, value) {
+            // Neighbor caches point at other hexes and cannot be JSON-cloned.
+            if(key === '_nbrs') return undefined;
+            if(key && key.charAt(0) === '_' && value && typeof value === 'object') return undefined;
+            return value;
+        }
         function wodDeepClonePlain(obj) {
-            return JSON.parse(JSON.stringify(obj));
+            return JSON.parse(JSON.stringify(obj, wodJsonCloneReplacer));
         }
 
         function wodCaptureSoloPreviewSnapshot() {
-            gameData._soloPreviewSnapshot = {
-                fingerprint: wodComputeMapFingerprint(),
-                mapRadius: gameData.mapRadius,
-                mapShape: gameData.mapShape,
-                aiCount: gameData._mapGenLockedAiCount != null ? gameData._mapGenLockedAiCount : gameData.aiCount,
-                mapGenSeed: gameData._mapGenSeed || 0,
-                hexList: wodDeepClonePlain(gameData.hexList || []),
-                cities: wodDeepClonePlain(gameData.cities || []),
-                roads: wodDeepClonePlain(gameData.roads || []),
-                entities: wodDeepClonePlain(gameData.entities || []),
-                camera: wodDeepClonePlain(gameData.camera || { x: 0, y: 0, zoom: 0.5 }),
-                citySplitAnglePhase: gameData._wodCitySplitAnglePhase,
-            };
+            try {
+                let hexList = wodDeepClonePlain(gameData.hexList || []);
+                if(!hexList) return false;
+                gameData._soloPreviewSnapshot = {
+                    fingerprint: wodComputeMapFingerprint(),
+                    mapRadius: gameData.mapRadius,
+                    mapShape: gameData.mapShape,
+                    aiCount: gameData._mapGenLockedAiCount != null ? gameData._mapGenLockedAiCount : gameData.aiCount,
+                    mapGenSeed: gameData._mapGenSeed || 0,
+                    hexList: hexList,
+                    cities: wodDeepClonePlain(gameData.cities || []),
+                    roads: wodDeepClonePlain(gameData.roads || []),
+                    entities: wodDeepClonePlain(gameData.entities || []),
+                    camera: wodDeepClonePlain(gameData.camera || { x: 0, y: 0, zoom: 0.5 }),
+                    citySplitAnglePhase: gameData._wodCitySplitAnglePhase,
+                };
+                return true;
+            } catch(e) {
+                console.warn(e);
+                gameData._soloPreviewSnapshot = null;
+                return false;
+            }
         }
 
         function wodRestoreSoloPreviewSnapshot(newRadius, requestedShape) {
