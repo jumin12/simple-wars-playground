@@ -12722,9 +12722,10 @@
                         .finally(() => {
                             if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
                                 gameData._soloPreviewGenerating = false;
+                                wodEndMapGenAiLock();
                                 wodDisarmMapPreviewSpinner('mapPreview');
                                 wodHideMapGenOverlay();
-                                wodForceUnlockSkirmishSetupControls();
+                                wodRefreshMapPreviewGeneratingUi();
                                 return;
                             }
                             gameData._soloPreviewGenerating = false;
@@ -12997,6 +12998,10 @@
 
         function startGame(mode, opts) {
             opts = opts || {};
+            if(mode === 'ai' && !opts.mission && typeof wodIsMapPreviewGenerating === 'function' && wodIsMapPreviewGenerating()) {
+                showNotification('Map is still generating...');
+                return;
+            }
             if(mode === 'ai' && !opts.mission && typeof wodAbandonSoloPreviewForLaunch === 'function')
                 wodAbandonSoloPreviewForLaunch();
             gameState = 'PLAYING';
@@ -19569,10 +19574,7 @@
             let cols = mapR;
             let rows = Math.floor(mapR * 0.8);
             let mapShape = gameData.mapShape;
-            if(!(gameData.mp && gameData.mp.enabled)) {
-                let aiSync = document.getElementById('setupAI');
-                if(aiSync) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiSync.value, 10) || 1));
-            }
+            if(!(gameData.mp && gameData.mp.enabled)) wodSyncAiCountForMapGen();
             let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
             gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
             let procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
@@ -19635,13 +19637,32 @@
             el.toggleAttribute('disabled', !!on);
         }
         let _wodSoloPreviewQueued = null;
+        const WOD_SETUP_LOCK_WHILE_GENERATING = [
+            'setupMapSize', 'setupMapShape', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney',
+            'setupPlayerColor', 'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap',
+            'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack'
+        ];
         function wodCurrentSetupAiCount() {
             let aiEl = document.getElementById('setupAI');
             return Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl && aiEl.value, 10) || 1));
         }
+        function wodBeginMapGenAiLock() {
+            if(gameData.mp && gameData.mp.enabled) return;
+            if(gameData._mapGenLockedAiCount == null)
+                gameData._mapGenLockedAiCount = wodCurrentSetupAiCount();
+            gameData.aiCount = gameData._mapGenLockedAiCount;
+        }
+        function wodEndMapGenAiLock() {
+            gameData._mapGenLockedAiCount = null;
+        }
+        function wodSyncAiCountForMapGen() {
+            if(gameData.mp && gameData.mp.enabled) return gameData.aiCount;
+            wodBeginMapGenAiLock();
+            return gameData.aiCount;
+        }
         function wodApplySetupAiCountFromUi() {
             let n = wodCurrentSetupAiCount();
-            gameData.aiCount = n;
+            if(gameData._mapGenLockedAiCount == null) gameData.aiCount = n;
             if(gameData._soloPreviewSnapshot && gameData._soloPreviewSnapshot.aiCount !== n) {
                 gameData._soloPreviewSnapshot = null;
                 gameData._soloMapPreviewMatchesStart = false;
@@ -19656,8 +19677,10 @@
                 politicsOnly: true,
                 requestId: gameData._soloPreviewRequestId
             };
-            wodForceUnlockSkirmishSetupControls();
-            if(wodIsMapPreviewGenerating()) return;
+            if(wodIsMapPreviewGenerating()) {
+                wodRefreshMapPreviewGeneratingUi();
+                return;
+            }
             gameData._wodReuseMapGenSeed = false;
             gameData._lastMapFingerprint = null;
             wodFlushQueuedSoloPreview();
@@ -19665,17 +19688,13 @@
         function wodFlushQueuedSoloPreview() {
             if(gameState === 'PLAYING') {
                 _wodSoloPreviewQueued = null;
-                wodForceUnlockSkirmishSetupControls();
                 return;
             }
             let setupPanel = document.getElementById('setupPanel');
-            if(!setupPanel || setupPanel.classList.contains('hidden')) {
-                wodForceUnlockSkirmishSetupControls();
-                return;
-            }
+            if(!setupPanel || setupPanel.classList.contains('hidden')) return;
             if(wodIsMapPreviewGenerating()) return;
             if(!_wodSoloPreviewQueued) {
-                wodForceUnlockSkirmishSetupControls();
+                wodRefreshMapPreviewGeneratingUi();
                 return;
             }
             let q = _wodSoloPreviewQueued;
@@ -19688,22 +19707,15 @@
             el.classList.add('hidden');
             el.setAttribute('aria-busy', 'false');
         }
-        function wodForceUnlockSkirmishSetupControls() {
-            for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupFogOfWar',
-                'setupMoney', 'setupPlayerColor', 'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap',
-                'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
-                wodSetElementDisabled(document.getElementById(id), false);
-            }
-        }
         function wodAbandonSoloPreviewForLaunch() {
             gameData._soloPreviewEpoch = (gameData._soloPreviewEpoch || 0) + 1;
             gameData._soloPreviewGenerating = false;
             gameData._soloPreviewSnapshot = null;
             gameData._soloMapPreviewMatchesStart = false;
+            gameData._mapGenLockedAiCount = null;
             _wodSoloPreviewQueued = null;
             if(typeof wodDisarmMapPreviewSpinner === 'function') wodDisarmMapPreviewSpinner('mapPreview');
             wodHideMapGenOverlay();
-            wodForceUnlockSkirmishSetupControls();
             wodRefreshMapPreviewGeneratingUi();
         }
         async function wodAwaitMapGenIdle() {
@@ -19712,7 +19724,12 @@
                 await new Promise(r => setTimeout(r, 50));
         }
         function wodRefreshMapPreviewGeneratingUi() {
-            wodForceUnlockSkirmishSetupControls();
+            let setupPanel = document.getElementById('setupPanel');
+            let setupOpen = !!(setupPanel && !setupPanel.classList.contains('hidden'));
+            let soloOn = !!(setupOpen && (gameData._soloPreviewGenerating || gameData._mapGenInProgress));
+            for(let id of WOD_SETUP_LOCK_WHILE_GENERATING)
+                wodSetElementDisabled(document.getElementById(id), soloOn);
+            wodSetElementDisabled(document.getElementById('setupAI'), false);
             let on = !!_wodMpLobbyPreviewBusy;
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch',
                 'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
@@ -33672,7 +33689,7 @@
                 fingerprint: wodComputeMapFingerprint(),
                 mapRadius: gameData.mapRadius,
                 mapShape: gameData.mapShape,
-                aiCount: gameData.aiCount,
+                aiCount: gameData._mapGenLockedAiCount != null ? gameData._mapGenLockedAiCount : gameData.aiCount,
                 mapGenSeed: gameData._mapGenSeed || 0,
                 hexList: wodDeepClonePlain(gameData.hexList || []),
                 cities: wodDeepClonePlain(gameData.cities || []),
@@ -33744,15 +33761,18 @@
                 requestAnimationFrame(async () => {
                     if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
                         gameData._soloPreviewGenerating = false;
+                        wodEndMapGenAiLock();
                         wodDisarmMapPreviewSpinner('mapPreview');
                         wodHideMapGenOverlay();
-                        wodForceUnlockSkirmishSetupControls();
+                        wodRefreshMapPreviewGeneratingUi();
                         return;
                     }
                     let ok = true;
                     try {
                         let prevSz = document.getElementById('setupMapSize');
                         wodApplyMapSizePreset(prevSz ? prevSz.value : 60);
+                        wodEndMapGenAiLock();
+                        wodBeginMapGenAiLock();
                         if(typeof wodApplySetupAiCountFromUi === 'function') wodApplySetupAiCountFromUi();
                         if(!politicsOnly) {
                             gameData.loadedCustomMap = false;
@@ -33789,9 +33809,10 @@
                     } finally {
                         if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
                             gameData._soloPreviewGenerating = false;
+                            wodEndMapGenAiLock();
                             wodDisarmMapPreviewSpinner('mapPreview');
                             wodHideMapGenOverlay();
-                            wodForceUnlockSkirmishSetupControls();
+                            wodRefreshMapPreviewGeneratingUi();
                             return;
                         }
                         gameData._soloMapPreviewMatchesStart = ok;
@@ -33803,6 +33824,7 @@
                             wodFlushQueuedSoloPreview();
                             return;
                         }
+                        wodEndMapGenAiLock();
                         wodDisarmMapPreviewSpinner('mapPreview');
                         wodHideMapGenOverlay();
                         wodRefreshMapPreviewGeneratingUi();
@@ -34240,10 +34262,7 @@
          */
         async function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape) {
             gameData._wodProcgenBorderFirstApplied = false;
-            if(!(gameData.mp && gameData.mp.enabled)) {
-                let aiSync = document.getElementById('setupAI');
-                if(aiSync) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiSync.value, 10) || 1));
-            }
+            if(!(gameData.mp && gameData.mp.enabled)) wodSyncAiCountForMapGen();
             let ownersListRaw = wodOwnersListActiveForProcgen();
             let ownersSorted = [...ownersListRaw].sort((a, b) => a - b);
             if(ownersSorted.length === 0) return false;
@@ -35012,6 +35031,7 @@
         }
 
         async function generateMap() {
+            if(gameData._mapGenInProgress) return;
             let ownsInnerRng = !_wodSavedMathRandom;
             let skipMapGenLoader = !!gameData._wodSkipMapGenLoader;
             let showMapGenOverlay = wodShouldShowMapGenOverlay() && !skipMapGenLoader;
@@ -35027,6 +35047,7 @@
             }
             try {
             gameData._mapGenInProgress = true;
+            wodBeginMapGenAiLock();
             if(!gameData.loadedCustomMap) gameData.alliances = [];
             wodRefreshMapPreviewGeneratingUi();
             gameData._wodFastMapGen = true;
@@ -35406,11 +35427,8 @@
 
             await wodMapGenYieldSlice();
 
-            // Generate Cities — uses live faction count from solo setup or lobby before placing towns.
-            if(!(gameData.mp && gameData.mp.enabled)) {
-                let aiSync = document.getElementById('setupAI');
-                if(aiSync) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiSync.value, 10) || 1));
-            }
+            // Faction count is frozen for this generateMap call so changing AI mid-build cannot hang packing.
+            if(!(gameData.mp && gameData.mp.enabled)) wodSyncAiCountForMapGen();
             factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
             landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
             landNC = Math.max(1, landForCities.length);
@@ -35592,6 +35610,7 @@
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
                 gameData._mapGenInProgress = false;
+                wodEndMapGenAiLock();
                 wodHideMapGenOverlay();
                 wodRefreshMapPreviewGeneratingUi();
                 gameData._wodFastMapGen = false;
