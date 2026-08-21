@@ -12566,11 +12566,10 @@
             }
             if(aiSel && !aiSel._wodBound) {
                 aiSel._wodBound = true;
-                aiSel.addEventListener('change', () => {
+                aiSel.addEventListener('change', (ev) => {
                     if(typeof wodApplySetupAiCountFromUi === 'function') wodApplySetupAiCountFromUi();
                     if(typeof wodSyncSetupOpponentsBrief === 'function') wodSyncSetupOpponentsBrief();
-                    // Opponent count is applied at match start. Regenerating the preview
-                    // here used to disable Start Game for the whole (often long) politics pass.
+                    regenerateSetupPreview(ev);
                 });
             }
             let playerColorSel = document.getElementById('setupPlayerColor');
@@ -12721,6 +12720,7 @@
                             if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                             gameData._soloPreviewGenerating = false;
                             wodRefreshMapPreviewGeneratingUi();
+                            if(typeof wodFlushQueuedSoloPreview === 'function') wodFlushQueuedSoloPreview();
                         });
                 } else {
                     previewLoadedMap();
@@ -19620,6 +19620,7 @@
             el.disabled = !!on;
             el.toggleAttribute('disabled', !!on);
         }
+        let _wodSoloPreviewQueued = null;
         function wodApplySetupAiCountFromUi() {
             let aiEl = document.getElementById('setupAI');
             let n = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl && aiEl.value, 10) || 1));
@@ -19630,11 +19631,21 @@
             }
             return n;
         }
+        function wodFlushQueuedSoloPreview() {
+            let q = _wodSoloPreviewQueued;
+            _wodSoloPreviewQueued = null;
+            if(!q) return;
+            if(gameState === 'PLAYING') return;
+            let setupPanel = document.getElementById('setupPanel');
+            if(!setupPanel || setupPanel.classList.contains('hidden')) return;
+            previewMap(q.politicsOnly ? { politicsOnly: true } : {});
+        }
         function wodAbandonSoloPreviewForLaunch() {
             gameData._soloPreviewEpoch = (gameData._soloPreviewEpoch || 0) + 1;
             gameData._soloPreviewGenerating = false;
             gameData._soloPreviewSnapshot = null;
             gameData._soloMapPreviewMatchesStart = false;
+            _wodSoloPreviewQueued = null;
             if(typeof wodDisarmMapPreviewSpinner === 'function') wodDisarmMapPreviewSpinner('mapPreview');
             wodRefreshMapPreviewGeneratingUi();
         }
@@ -33660,7 +33671,11 @@
 
         function previewMap(opts) {
             opts = opts || {};
-            if(wodIsMapPreviewGenerating()) return;
+            if(wodIsMapPreviewGenerating()) {
+                _wodSoloPreviewQueued = { politicsOnly: !!(opts.politicsOnly) };
+                return;
+            }
+            _wodSoloPreviewQueued = null;
             let politicsOnly = !!(opts.politicsOnly && wodCanRegeneratePoliticsOnly());
             let previewEpoch = gameData._soloPreviewEpoch || 0;
             wodArmMapPreviewSpinner('mapPreview');
@@ -33715,6 +33730,7 @@
                         if(ok) wodCaptureSoloPreviewSnapshot();
                         gameData._soloPreviewGenerating = false;
                         wodRefreshMapPreviewGeneratingUi();
+                        if(typeof wodFlushQueuedSoloPreview === 'function') wodFlushQueuedSoloPreview();
                     }
                 });
             });
