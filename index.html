@@ -12720,11 +12720,21 @@
                             gameData._soloMapPreviewMatchesStart = false;
                         })
                         .finally(() => {
-                            wodDisarmMapPreviewSpinner('mapPreview');
-                            if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
+                            if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
+                                gameData._soloPreviewGenerating = false;
+                                wodDisarmMapPreviewSpinner('mapPreview');
+                                wodHideMapGenOverlay();
+                                wodForceUnlockSkirmishSetupControls();
+                                return;
+                            }
                             gameData._soloPreviewGenerating = false;
+                            if(_wodSoloPreviewQueued) {
+                                wodFlushQueuedSoloPreview();
+                                return;
+                            }
+                            wodDisarmMapPreviewSpinner('mapPreview');
+                            wodHideMapGenOverlay();
                             wodRefreshMapPreviewGeneratingUi();
-                            if(typeof wodFlushQueuedSoloPreview === 'function') wodFlushQueuedSoloPreview();
                         });
                 } else {
                     previewLoadedMap();
@@ -19642,27 +19652,48 @@
             wodApplySetupAiCountFromUi();
             if(typeof wodSyncSetupOpponentsBrief === 'function') wodSyncSetupOpponentsBrief();
             gameData._soloPreviewRequestId = (gameData._soloPreviewRequestId || 0) + 1;
-            gameData._wodReuseMapGenSeed = false;
-            gameData._lastMapFingerprint = null;
-            gameData._mapGenSeed = (Math.imul((gameData._mapGenSeed || (Date.now() >>> 0)) >>> 0, 1664525) + 1013904223) >>> 0;
             _wodSoloPreviewQueued = {
-                politicsOnly: false,
+                politicsOnly: true,
                 requestId: gameData._soloPreviewRequestId
             };
+            wodForceUnlockSkirmishSetupControls();
             if(wodIsMapPreviewGenerating()) return;
+            gameData._wodReuseMapGenSeed = false;
+            gameData._lastMapFingerprint = null;
             wodFlushQueuedSoloPreview();
         }
         function wodFlushQueuedSoloPreview() {
             if(gameState === 'PLAYING') {
                 _wodSoloPreviewQueued = null;
+                wodForceUnlockSkirmishSetupControls();
                 return;
             }
             let setupPanel = document.getElementById('setupPanel');
-            if(!setupPanel || setupPanel.classList.contains('hidden')) return;
+            if(!setupPanel || setupPanel.classList.contains('hidden')) {
+                wodForceUnlockSkirmishSetupControls();
+                return;
+            }
             if(wodIsMapPreviewGenerating()) return;
-            if(!_wodSoloPreviewQueued) return;
+            if(!_wodSoloPreviewQueued) {
+                wodForceUnlockSkirmishSetupControls();
+                return;
+            }
+            let q = _wodSoloPreviewQueued;
             _wodSoloPreviewQueued = null;
-            previewMap({});
+            previewMap(q.politicsOnly ? { politicsOnly: true } : {});
+        }
+        function wodHideMapGenOverlay() {
+            let el = document.getElementById('wodMapGenOverlay');
+            if(!el) return;
+            el.classList.add('hidden');
+            el.setAttribute('aria-busy', 'false');
+        }
+        function wodForceUnlockSkirmishSetupControls() {
+            for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupFogOfWar',
+                'setupMoney', 'setupPlayerColor', 'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap',
+                'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
+                wodSetElementDisabled(document.getElementById(id), false);
+            }
         }
         function wodAbandonSoloPreviewForLaunch() {
             gameData._soloPreviewEpoch = (gameData._soloPreviewEpoch || 0) + 1;
@@ -19671,6 +19702,8 @@
             gameData._soloMapPreviewMatchesStart = false;
             _wodSoloPreviewQueued = null;
             if(typeof wodDisarmMapPreviewSpinner === 'function') wodDisarmMapPreviewSpinner('mapPreview');
+            wodHideMapGenOverlay();
+            wodForceUnlockSkirmishSetupControls();
             wodRefreshMapPreviewGeneratingUi();
         }
         async function wodAwaitMapGenIdle() {
@@ -19679,13 +19712,8 @@
                 await new Promise(r => setTimeout(r, 50));
         }
         function wodRefreshMapPreviewGeneratingUi() {
-            let on = wodIsMapPreviewGenerating();
-            for(let id of ['setupMapSize', 'setupMapShape', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney', 'setupPlayerColor',
-                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnMpReturn']) {
-                wodSetElementDisabled(document.getElementById(id), on);
-            }
-            // Start Game, Back, and AI count stay usable — locking them behind preview
-            // regen made skirmish look broken after changing opponent count.
+            wodForceUnlockSkirmishSetupControls();
+            let on = !!_wodMpLobbyPreviewBusy;
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch',
                 'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
                 'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgFogOfWar', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
@@ -33716,6 +33744,9 @@
                 requestAnimationFrame(async () => {
                     if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
                         gameData._soloPreviewGenerating = false;
+                        wodDisarmMapPreviewSpinner('mapPreview');
+                        wodHideMapGenOverlay();
+                        wodForceUnlockSkirmishSetupControls();
                         return;
                     }
                     let ok = true;
@@ -33756,18 +33787,25 @@
                         ok = false;
                         console.warn(e);
                     } finally {
-                        wodDisarmMapPreviewSpinner('mapPreview');
                         if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
                             gameData._soloPreviewGenerating = false;
+                            wodDisarmMapPreviewSpinner('mapPreview');
+                            wodHideMapGenOverlay();
+                            wodForceUnlockSkirmishSetupControls();
                             return;
                         }
                         gameData._soloMapPreviewMatchesStart = ok;
                         if(ok) wodCaptureSoloPreviewSnapshot();
                         gameData._soloPreviewGenerating = false;
-                        wodRefreshMapPreviewGeneratingUi();
                         if((gameData._soloPreviewRequestId || 0) !== requestId && !_wodSoloPreviewQueued)
-                            _wodSoloPreviewQueued = { politicsOnly: false, requestId: gameData._soloPreviewRequestId };
-                        if(typeof wodFlushQueuedSoloPreview === 'function') wodFlushQueuedSoloPreview();
+                            _wodSoloPreviewQueued = { politicsOnly: true, requestId: gameData._soloPreviewRequestId };
+                        if(_wodSoloPreviewQueued) {
+                            wodFlushQueuedSoloPreview();
+                            return;
+                        }
+                        wodDisarmMapPreviewSpinner('mapPreview');
+                        wodHideMapGenOverlay();
+                        wodRefreshMapPreviewGeneratingUi();
                     }
                 });
             });
@@ -34965,6 +35003,9 @@
         function wodShouldShowMapGenOverlay() {
             if(gameData._wodSkipMapGenLoader) return false;
             if(gameData._wodPreviewSpinnerCanvasIds && gameData._wodPreviewSpinnerCanvasIds.size > 0) return false;
+            if(gameData._soloPreviewGenerating) return false;
+            let setupPanel = document.getElementById('setupPanel');
+            if(setupPanel && !setupPanel.classList.contains('hidden')) return false;
             if(gameData.mp && gameData.mp.enabled) return true;
             if(typeof wodUsesVisualViewportLayout === 'function' && wodUsesVisualViewportLayout()) return false;
             return true;
@@ -35551,6 +35592,7 @@
                 gameData._lastMapFingerprint = wodComputeMapFingerprint();
             } finally {
                 gameData._mapGenInProgress = false;
+                wodHideMapGenOverlay();
                 wodRefreshMapPreviewGeneratingUi();
                 gameData._wodFastMapGen = false;
                 gameData._wodFastMapGenLobby = false;
