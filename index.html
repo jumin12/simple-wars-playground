@@ -12566,9 +12566,11 @@
             }
             if(aiSel && !aiSel._wodBound) {
                 aiSel._wodBound = true;
-                aiSel.addEventListener('change', (ev) => {
+                aiSel.addEventListener('change', () => {
+                    if(typeof wodApplySetupAiCountFromUi === 'function') wodApplySetupAiCountFromUi();
                     if(typeof wodSyncSetupOpponentsBrief === 'function') wodSyncSetupOpponentsBrief();
-                    regenerateSetupPreview(ev);
+                    // Opponent count is applied at match start. Regenerating the preview
+                    // here used to disable Start Game for the whole (often long) politics pass.
                 });
             }
             let playerColorSel = document.getElementById('setupPlayerColor');
@@ -12685,16 +12687,17 @@
                     gameData._missionRuntime = null;
                     gameData._selectedMissionEntry = null;
                 }
-                let aiEl = document.getElementById('setupAI');
-                if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
+                if(typeof wodApplySetupAiCountFromUi === 'function') wodApplySetupAiCountFromUi();
                 let mapSizeEl = document.getElementById('setupMapSize');
                 wodApplyMapSizePreset(mapSizeEl ? mapSizeEl.value : 60);
                 if(!opts.preserveMap) {
+                    let previewEpoch = gameData._soloPreviewEpoch || 0;
                     wodArmMapPreviewSpinner('mapPreview');
                     gameData._soloPreviewGenerating = true;
                     wodRefreshMapPreviewGeneratingUi();
                     void generateMap()
                         .then(() => {
+                            if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                             previewLoadedMap();
                             try {
                                 if(!wodLiveMapLooksLikeMenuAttract()) {
@@ -12709,11 +12712,13 @@
                         })
                         .catch(e => {
                             console.warn(e);
+                            if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                             previewLoadedMap();
                             gameData._soloMapPreviewMatchesStart = false;
                         })
                         .finally(() => {
                             wodDisarmMapPreviewSpinner('mapPreview');
+                            if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                             gameData._soloPreviewGenerating = false;
                             wodRefreshMapPreviewGeneratingUi();
                         });
@@ -12978,10 +12983,8 @@
 
         function startGame(mode, opts) {
             opts = opts || {};
-            if(mode === 'ai' && gameData._soloPreviewGenerating && !opts.mission) {
-                showNotification('Map is still generating...');
-                return;
-            }
+            if(mode === 'ai' && !opts.mission && typeof wodAbandonSoloPreviewForLaunch === 'function')
+                wodAbandonSoloPreviewForLaunch();
             gameState = 'PLAYING';
             pauseMenuBackgroundBattle();
             let launchingMission = !!(opts.mission || gameData._selectedMissionEntry);
@@ -13023,6 +13026,8 @@
                     let bootGuard = 0;
                     while((window._wodBootBusy || window._wodMenuBootstrapBusy) && bootGuard++ < 600)
                         await new Promise(r => setTimeout(r, 100));
+                    if(mode === 'ai' && !opts.mission && typeof wodAwaitMapGenIdle === 'function')
+                        await wodAwaitMapGenIdle();
                     await initGame();
                     gameData._campaignEnded = false;
                     hideCampaignSummaryOverlay();
@@ -19615,12 +19620,37 @@
             el.disabled = !!on;
             el.toggleAttribute('disabled', !!on);
         }
+        function wodApplySetupAiCountFromUi() {
+            let aiEl = document.getElementById('setupAI');
+            let n = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl && aiEl.value, 10) || 1));
+            gameData.aiCount = n;
+            if(gameData._soloPreviewSnapshot && gameData._soloPreviewSnapshot.aiCount !== n) {
+                gameData._soloPreviewSnapshot = null;
+                gameData._soloMapPreviewMatchesStart = false;
+            }
+            return n;
+        }
+        function wodAbandonSoloPreviewForLaunch() {
+            gameData._soloPreviewEpoch = (gameData._soloPreviewEpoch || 0) + 1;
+            gameData._soloPreviewGenerating = false;
+            gameData._soloPreviewSnapshot = null;
+            gameData._soloMapPreviewMatchesStart = false;
+            if(typeof wodDisarmMapPreviewSpinner === 'function') wodDisarmMapPreviewSpinner('mapPreview');
+            wodRefreshMapPreviewGeneratingUi();
+        }
+        async function wodAwaitMapGenIdle() {
+            let n = 0;
+            while(gameData._mapGenInProgress && n++ < 1200)
+                await new Promise(r => setTimeout(r, 50));
+        }
         function wodRefreshMapPreviewGeneratingUi() {
             let on = wodIsMapPreviewGenerating();
-            for(let id of ['setupMapSize', 'setupMapShape', 'setupAI', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney', 'setupPlayerColor',
-                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack']) {
+            for(let id of ['setupMapSize', 'setupMapShape', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney', 'setupPlayerColor',
+                'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap', 'setupBtnLoadMap', 'setupBtnMpReturn']) {
                 wodSetElementDisabled(document.getElementById(id), on);
             }
+            // Start Game, Back, and AI count stay usable — locking them behind preview
+            // regen made skirmish look broken after changing opponent count.
             for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch',
                 'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
                 'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgVictoryMode', 'mpCfgFogOfWar', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
@@ -33632,6 +33662,7 @@
             opts = opts || {};
             if(wodIsMapPreviewGenerating()) return;
             let politicsOnly = !!(opts.politicsOnly && wodCanRegeneratePoliticsOnly());
+            let previewEpoch = gameData._soloPreviewEpoch || 0;
             wodArmMapPreviewSpinner('mapPreview');
             gameData._soloPreviewGenerating = true;
             gameData._soloMapPreviewMatchesStart = false;
@@ -33639,12 +33670,12 @@
             wodRefreshMapPreviewGeneratingUi();
             requestAnimationFrame(() => {
                 requestAnimationFrame(async () => {
+                    if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                     let ok = true;
                     try {
                         let prevSz = document.getElementById('setupMapSize');
                         wodApplyMapSizePreset(prevSz ? prevSz.value : 60);
-                        let aiEl = document.getElementById('setupAI');
-                        if(aiEl) gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl.value, 10) || 1));
+                        if(typeof wodApplySetupAiCountFromUi === 'function') wodApplySetupAiCountFromUi();
                         if(!politicsOnly) {
                             gameData.loadedCustomMap = false;
                             gameData._equippedShopMapId = null;
@@ -33672,12 +33703,14 @@
                         } finally {
                             wodMapGenYieldingStop();
                         }
+                        if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                         previewLoadedMap('mapPreview');
                     } catch(e) {
                         ok = false;
                         console.warn(e);
                     } finally {
                         wodDisarmMapPreviewSpinner('mapPreview');
+                        if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                         gameData._soloMapPreviewMatchesStart = ok;
                         if(ok) wodCaptureSoloPreviewSnapshot();
                         gameData._soloPreviewGenerating = false;
