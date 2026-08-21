@@ -12566,10 +12566,14 @@
             }
             if(aiSel && !aiSel._wodBound) {
                 aiSel._wodBound = true;
-                aiSel.addEventListener('change', (ev) => {
-                    if(typeof wodApplySetupAiCountFromUi === 'function') wodApplySetupAiCountFromUi();
-                    if(typeof wodSyncSetupOpponentsBrief === 'function') wodSyncSetupOpponentsBrief();
-                    regenerateSetupPreview(ev);
+                aiSel.addEventListener('change', () => {
+                    if(typeof wodRequestSkirmishPreviewForAiChange === 'function')
+                        wodRequestSkirmishPreviewForAiChange();
+                    else {
+                        if(typeof wodApplySetupAiCountFromUi === 'function') wodApplySetupAiCountFromUi();
+                        if(typeof wodSyncSetupOpponentsBrief === 'function') wodSyncSetupOpponentsBrief();
+                        regenerateSetupPreview({ target: aiSel });
+                    }
                 });
             }
             let playerColorSel = document.getElementById('setupPlayerColor');
@@ -19621,9 +19625,12 @@
             el.toggleAttribute('disabled', !!on);
         }
         let _wodSoloPreviewQueued = null;
-        function wodApplySetupAiCountFromUi() {
+        function wodCurrentSetupAiCount() {
             let aiEl = document.getElementById('setupAI');
-            let n = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl && aiEl.value, 10) || 1));
+            return Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiEl && aiEl.value, 10) || 1));
+        }
+        function wodApplySetupAiCountFromUi() {
+            let n = wodCurrentSetupAiCount();
             gameData.aiCount = n;
             if(gameData._soloPreviewSnapshot && gameData._soloPreviewSnapshot.aiCount !== n) {
                 gameData._soloPreviewSnapshot = null;
@@ -19631,14 +19638,31 @@
             }
             return n;
         }
+        function wodRequestSkirmishPreviewForAiChange() {
+            wodApplySetupAiCountFromUi();
+            if(typeof wodSyncSetupOpponentsBrief === 'function') wodSyncSetupOpponentsBrief();
+            gameData._soloPreviewRequestId = (gameData._soloPreviewRequestId || 0) + 1;
+            gameData._wodReuseMapGenSeed = false;
+            gameData._lastMapFingerprint = null;
+            gameData._mapGenSeed = (Math.imul((gameData._mapGenSeed || (Date.now() >>> 0)) >>> 0, 1664525) + 1013904223) >>> 0;
+            _wodSoloPreviewQueued = {
+                politicsOnly: false,
+                requestId: gameData._soloPreviewRequestId
+            };
+            if(wodIsMapPreviewGenerating()) return;
+            wodFlushQueuedSoloPreview();
+        }
         function wodFlushQueuedSoloPreview() {
-            let q = _wodSoloPreviewQueued;
-            _wodSoloPreviewQueued = null;
-            if(!q) return;
-            if(gameState === 'PLAYING') return;
+            if(gameState === 'PLAYING') {
+                _wodSoloPreviewQueued = null;
+                return;
+            }
             let setupPanel = document.getElementById('setupPanel');
             if(!setupPanel || setupPanel.classList.contains('hidden')) return;
-            previewMap(q.politicsOnly ? { politicsOnly: true } : {});
+            if(wodIsMapPreviewGenerating()) return;
+            if(!_wodSoloPreviewQueued) return;
+            _wodSoloPreviewQueued = null;
+            previewMap({});
         }
         function wodAbandonSoloPreviewForLaunch() {
             gameData._soloPreviewEpoch = (gameData._soloPreviewEpoch || 0) + 1;
@@ -33672,12 +33696,17 @@
         function previewMap(opts) {
             opts = opts || {};
             if(wodIsMapPreviewGenerating()) {
-                _wodSoloPreviewQueued = { politicsOnly: !!(opts.politicsOnly) };
+                _wodSoloPreviewQueued = {
+                    politicsOnly: !!(opts.politicsOnly),
+                    requestId: gameData._soloPreviewRequestId || 0
+                };
                 return;
             }
+            let queuedForceFull = _wodSoloPreviewQueued && _wodSoloPreviewQueued.politicsOnly === false;
             _wodSoloPreviewQueued = null;
-            let politicsOnly = !!(opts.politicsOnly && wodCanRegeneratePoliticsOnly());
+            let politicsOnly = !queuedForceFull && !!(opts.politicsOnly && wodCanRegeneratePoliticsOnly());
             let previewEpoch = gameData._soloPreviewEpoch || 0;
+            let requestId = gameData._soloPreviewRequestId || 0;
             wodArmMapPreviewSpinner('mapPreview');
             gameData._soloPreviewGenerating = true;
             gameData._soloMapPreviewMatchesStart = false;
@@ -33685,7 +33714,10 @@
             wodRefreshMapPreviewGeneratingUi();
             requestAnimationFrame(() => {
                 requestAnimationFrame(async () => {
-                    if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
+                    if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
+                        gameData._soloPreviewGenerating = false;
+                        return;
+                    }
                     let ok = true;
                     try {
                         let prevSz = document.getElementById('setupMapSize');
@@ -33725,11 +33757,16 @@
                         console.warn(e);
                     } finally {
                         wodDisarmMapPreviewSpinner('mapPreview');
-                        if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
+                        if((gameData._soloPreviewEpoch || 0) !== previewEpoch) {
+                            gameData._soloPreviewGenerating = false;
+                            return;
+                        }
                         gameData._soloMapPreviewMatchesStart = ok;
                         if(ok) wodCaptureSoloPreviewSnapshot();
                         gameData._soloPreviewGenerating = false;
                         wodRefreshMapPreviewGeneratingUi();
+                        if((gameData._soloPreviewRequestId || 0) !== requestId && !_wodSoloPreviewQueued)
+                            _wodSoloPreviewQueued = { politicsOnly: false, requestId: gameData._soloPreviewRequestId };
                         if(typeof wodFlushQueuedSoloPreview === 'function') wodFlushQueuedSoloPreview();
                     }
                 });
