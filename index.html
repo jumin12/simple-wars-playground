@@ -19682,8 +19682,6 @@
         function wodAbandonSoloPreviewForLaunch() {
             gameData._soloPreviewEpoch = (gameData._soloPreviewEpoch || 0) + 1;
             gameData._soloPreviewGenerating = false;
-            gameData._soloPreviewSnapshot = null;
-            gameData._soloMapPreviewMatchesStart = false;
             gameData._mapGenLockedAiCount = null;
             if(typeof wodDisarmMapPreviewSpinner === 'function') wodDisarmMapPreviewSpinner('mapPreview');
             wodHideMapGenOverlay();
@@ -33704,7 +33702,7 @@
             gameData.cities = wodDeepClonePlain(snap.cities);
             gameData.roads = wodDeepClonePlain(snap.roads);
             gameData.entities = wodDeepClonePlain(snap.entities);
-            gameData.camera = wodDeepClonePlain(snap.camera);
+            wodRelinkSnapshotRoads();
 
             let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 10000;
             let owners = wodOwnersListActiveForProcgen();
@@ -33721,6 +33719,21 @@
             gameData._wodProcgenBorderFirstApplied = true;
             wodMarkTerrainFullDirty();
             return true;
+        }
+        function wodRelinkSnapshotRoads() {
+            let byId = {};
+            let byQr = {};
+            for(let c of gameData.cities || []) {
+                if(!c) continue;
+                if(c.id) byId[c.id] = c;
+                byQr[c.q + ',' + c.r] = c;
+            }
+            for(let r of gameData.roads || []) {
+                if(!r) continue;
+                let from = r.from, to = r.to;
+                if(from) r.from = (from.id && byId[from.id]) || byQr[from.q + ',' + from.r] || from;
+                if(to) r.to = (to.id && byId[to.id]) || byQr[to.q + ',' + to.r] || to;
+            }
         }
 
         function previewMap(opts) {
@@ -33915,15 +33928,27 @@
                             await assignStartingCities();
                         }
                     } else {
-                        // Never play the setup preview clone. Build a real match map.
+                        let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
+                        let snap = gameData._soloPreviewSnapshot;
+                        let restoredPreviewMap = wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
                         gameData._soloMapPreviewMatchesStart = false;
+                        if(restoredPreviewMap) {
+                            await assignStartingCities();
+                        } else {
+                            if(snap && snap.mapGenSeed && snap.mapRadius === newRadius && snap.mapShape === requestedShape &&
+                                (snap.aiCount == null || snap.aiCount === gameData.aiCount)) {
+                                gameData._mapGenSeed = snap.mapGenSeed;
+                                gameData._wodReuseMapGenSeed = true;
+                            } else if(previewCommitted && gameData._mapGenSeed &&
+                                gameData.mapRadius === newRadius && gameData.mapShape === requestedShape &&
+                                !wodLiveMapLooksLikeMenuAttract()) {
+                                gameData._wodReuseMapGenSeed = true;
+                            }
+                            gameData.mapRadius = newRadius;
+                            gameData.mapShape = requestedShape;
+                            await generateMap();
+                        }
                         gameData._soloPreviewSnapshot = null;
-                        gameData._wodReuseMapGenSeed = false;
-                        gameData._wodProcgenBorderFirstApplied = false;
-                        gameData._mapGenInProgress = false;
-                        gameData.mapRadius = newRadius;
-                        gameData.mapShape = requestedShape;
-                        await generateMap();
                     }
                 }
             }
