@@ -33915,23 +33915,15 @@
                             await assignStartingCities();
                         }
                     } else {
-                        let previewCommitted = !!gameData._soloMapPreviewMatchesStart;
-                        let restoredPreviewMap = wodRestoreSoloPreviewSnapshot(newRadius, requestedShape);
+                        // Never play the setup preview clone. Build a real match map.
                         gameData._soloMapPreviewMatchesStart = false;
-                        if(restoredPreviewMap) {
-                            await assignStartingCities();
-                        } else if(previewCommitted && gameData.hexList.length > 0 && gameData.mapRadius === newRadius && gameData.mapShape === requestedShape && !wodLiveMapLooksLikeMenuAttract()) {
-                            let fp = wodComputeMapFingerprint(newRadius, requestedShape, gameData.aiCount);
-                            if(fp === gameData._lastMapFingerprint && gameData._mapGenSeed)
-                                gameData._wodReuseMapGenSeed = true;
-                            gameData.mapRadius = newRadius;
-                            gameData.mapShape = requestedShape;
-                            await generateMap();
-                        } else {
-                            gameData.mapRadius = newRadius;
-                            gameData.mapShape = requestedShape;
-                            await generateMap();
-                        }
+                        gameData._soloPreviewSnapshot = null;
+                        gameData._wodReuseMapGenSeed = false;
+                        gameData._wodProcgenBorderFirstApplied = false;
+                        gameData._mapGenInProgress = false;
+                        gameData.mapRadius = newRadius;
+                        gameData.mapShape = requestedShape;
+                        await generateMap();
                     }
                 }
             }
