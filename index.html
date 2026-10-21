@@ -124,7 +124,8 @@
         #mainMenu .menu-btn,
         #mainMenu .main-menu-land-wrap,
         #mainMenu .main-menu-hero,
-        #mainMenu .main-menu-btns {
+        #mainMenu .main-menu-btns,
+        #mainMenu .wod-changelog {
             pointer-events: auto;
         }
         #mainMenu .main-menu-land-wrap {
@@ -151,6 +152,98 @@
         }
         #mainMenu h1 {
             margin-top: 0;
+        }
+
+        /* Changelog stays off the button column: a side rail on a wide screen, under the buttons when the screen is narrow. */
+        #mainMenu .wod-changelog {
+            position: relative;
+            z-index: 3;
+            width: min(440px, 100%);
+            margin-top: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            box-sizing: border-box;
+        }
+        #mainMenu .wod-changelog-toggle {
+            width: auto;
+            align-self: center;
+            margin: 0;
+            padding: 8px 16px;
+            font-size: 15px;
+        }
+        #mainMenu .wod-changelog-toggle.is-new {
+            box-shadow: 0 0 0 1px rgba(231, 76, 60, 0.85), 0 4px 12px rgba(0, 0, 0, 0.35);
+        }
+        #mainMenu .wod-changelog-body {
+            margin-top: 8px;
+            max-height: min(34vh, 280px);
+            overflow: auto;
+            text-align: left;
+            background: rgba(10, 18, 28, 0.9);
+            border: 1px solid var(--wod-gold-line);
+            border-radius: var(--wod-radius-sm);
+            padding: 12px 14px 14px;
+            box-sizing: border-box;
+        }
+        #mainMenu .wod-changelog-body[hidden] {
+            display: none !important;
+        }
+        #mainMenu .wod-changelog-body h2 {
+            margin: 0 0 4px;
+            font-size: 16px;
+            color: var(--wod-gold-bright);
+            letter-spacing: 0.04em;
+        }
+        #mainMenu .wod-changelog-entry {
+            padding: 10px 0 2px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        #mainMenu .wod-changelog-entry time {
+            display: block;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: rgba(241, 196, 15, 0.85);
+            margin-bottom: 2px;
+        }
+        #mainMenu .wod-changelog-entry h3 {
+            margin: 0 0 6px;
+            font-size: 15px;
+            color: #ecf0f1;
+        }
+        #mainMenu .wod-changelog-entry ul {
+            margin: 0;
+            padding-left: 16px;
+            color: #bdc3c7;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        #mainMenu .wod-changelog-entry li + li {
+            margin-top: 4px;
+        }
+        @media (min-width: 1100px) and (min-height: 680px) {
+            #mainMenu .wod-changelog {
+                position: absolute;
+                top: max(16px, env(safe-area-inset-top, 0px));
+                right: max(16px, env(safe-area-inset-right, 0px));
+                bottom: auto;
+                width: min(320px, calc((100vw - 520px) / 2));
+                margin-top: 0;
+                align-items: flex-end;
+            }
+            #mainMenu .wod-changelog.is-open {
+                bottom: max(16px, env(safe-area-inset-bottom, 0px));
+            }
+            #mainMenu .wod-changelog-toggle {
+                align-self: flex-end;
+            }
+            #mainMenu .wod-changelog.is-open .wod-changelog-body {
+                width: 100%;
+                flex: 1 1 auto;
+                min-height: 0;
+                max-height: none;
+            }
         }
 
         .hidden {
@@ -10035,6 +10128,13 @@
                     <button class="menu-btn" onclick="showPanel('credits')">Credits</button>
                 </div>
             </div>
+            <aside id="wodChangelog" class="wod-changelog">
+                <button type="button" class="menu-btn wod-changelog-toggle" id="wodChangelogToggle" aria-expanded="false" aria-controls="wodChangelogBody">Changelog</button>
+                <div id="wodChangelogBody" class="wod-changelog-body" role="region" aria-label="Changelog" hidden>
+                    <h2>Changelog</h2>
+                    <div id="wodChangelogList"></div>
+                </div>
+            </aside>
         </div>
 
         <!-- Sub Panels -->
@@ -11915,6 +12015,90 @@
             panels: document.querySelectorAll('.overlay:not(#mainMenu):not(#escMenu):not(#statsMenu):not(#citiesMenu):not(#campaignSummaryOverlay)'),
             citiesMenu: document.getElementById('citiesMenu')
         };
+
+        const WOD_CHANGELOG = [
+            {
+                date: '2026-10-21',
+                title: 'Menu and Steam',
+                items: [
+                    'The changelog opens beside the main menu, and the menu buttons stay where they are.',
+                    'The Steam version launches in fullscreen.'
+                ]
+            },
+            {
+                date: '2026-10-20',
+                title: 'The computer fights back',
+                items: [
+                    'AI attacks along one front, hooks around your line, and tries to close a pocket.',
+                    'It garrisons a city or fort when troops are actually threatening it, and pulls damaged units back.',
+                    'The main menu opens without waiting for the whole soundtrack.'
+                ]
+            },
+            {
+                date: '2026-08-21',
+                title: 'Skirmish maps',
+                items: [
+                    'Starting a skirmish builds the match map, instead of dropping you onto the setup preview.',
+                    'Changing how many opponents you face refreshes that preview, and Start stays usable while the map is generating.'
+                ]
+            },
+            {
+                date: '2026-08-20',
+                title: 'Campaign and battles',
+                items: [
+                    'Campaign battles field allied enemy countries, and the end screen shows those armies as teams.',
+                    'Large battles stay smoother at 3x speed.'
+                ]
+            }
+        ];
+
+        function wodChangelogEscape(text) {
+            return String(text).replace(/[&<>]/g, function(ch) {
+                if(ch === '&') return '&amp;';
+                if(ch === '<') return '&lt;';
+                return '&gt;';
+            });
+        }
+
+        function wodChangelogFormatDate(iso) {
+            let parts = String(iso || '').split('-');
+            let months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            if(parts.length !== 3) return iso;
+            let month = months[(parseInt(parts[1], 10) || 1) - 1] || parts[1];
+            return month + ' ' + (parseInt(parts[2], 10) || parts[2]) + ', ' + parts[0];
+        }
+
+        function wodInitChangelog() {
+            let root = document.getElementById('wodChangelog');
+            let btn = document.getElementById('wodChangelogToggle');
+            let list = document.getElementById('wodChangelogList');
+            let body = document.getElementById('wodChangelogBody');
+            if(!root || !btn || !list || !body) return;
+            let latest = WOD_CHANGELOG[0] ? WOD_CHANGELOG[0].date : '';
+            let seen = '';
+            try { seen = localStorage.getItem('wodChangelogSeen') || ''; } catch(e) {}
+            if(latest && seen !== latest) btn.classList.add('is-new');
+            list.innerHTML = WOD_CHANGELOG.map(function(entry) {
+                let items = (entry.items || []).map(function(line) {
+                    return '<li>' + wodChangelogEscape(line) + '</li>';
+                }).join('');
+                return '<article class="wod-changelog-entry"><time datetime="' + wodChangelogEscape(entry.date) + '">'
+                    + wodChangelogEscape(wodChangelogFormatDate(entry.date)) + '</time><h3>'
+                    + wodChangelogEscape(entry.title) + '</h3><ul>' + items + '</ul></article>';
+            }).join('');
+            btn.addEventListener('click', function() {
+                let open = !root.classList.contains('is-open');
+                root.classList.toggle('is-open', open);
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                if(open) body.removeAttribute('hidden');
+                else body.setAttribute('hidden', '');
+                if(open) {
+                    btn.classList.remove('is-new');
+                    try { localStorage.setItem('wodChangelogSeen', latest); } catch(e) {}
+                }
+            });
+        }
+        wodInitChangelog();
 
         function wodStatsMenuOpen() {
             return UI.statsMenu && !UI.statsMenu.classList.contains('hidden');
