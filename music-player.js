@@ -254,9 +254,11 @@
       };
       el.addEventListener('canplaythrough', () => finish(true), { once: true });
       el.addEventListener('error', () => finish(false), { once: true });
-      // Some browsers never fire canplaythrough for long oggs — accept canplay / timeout
+      // Packaged builds serve audio without a fast canplaythrough. Accept the first
+      // playable signal, and never hold the boot splash on a long file.
       el.addEventListener('canplay', () => finish(true), { once: true });
-      setTimeout(() => finish(el.readyState >= 2), 12000);
+      el.addEventListener('loadeddata', () => finish(true), { once: true });
+      setTimeout(() => finish(true), 2500);
       el.src = trackUrl(file);
       try { el.load(); } catch (_) {}
     });
@@ -274,27 +276,26 @@
     preloadPromise = (async () => {
       const list = tracks.slice();
       if (!list.length) return { loaded: 0, total: 0 };
-      let loaded = 0;
       const startFile = (tracks[index] && tracks[index].file) || (list[0] && list[0].file);
       if (startFile) {
-        if (onProgress) onProgress(0.02, 'Loading music…');
+        if (onProgress) onProgress(0.15, 'Loading music…');
         await preloadOne(startFile);
-        loaded = 1;
-        if (onProgress) onProgress(loaded / list.length, 'Loading music…');
+        if (onProgress) onProgress(1, 'Loading music…');
         if (opts.playAsSoonAsReady) {
           wanted = true;
           playCurrent();
         }
       }
-      const rest = list.filter((t) => t.file !== startFile);
-      const batchSize = 3;
-      for (let i = 0; i < rest.length; i += batchSize) {
-        const batch = rest.slice(i, i + batchSize);
-        await Promise.all(batch.map((t) => preloadOne(t.file)));
-        loaded += batch.length;
-        if (onProgress) onProgress(Math.min(1, loaded / list.length), 'Loading music…');
-      }
-      return { loaded, total: list.length };
+      // Buffer the rest after the splash can finish. A full playlist preload
+      // stalls the Steam build, which serves each file through a local server.
+      const rest = list.filter((t) => t.file && t.file !== startFile);
+      const pump = () => {
+        const next = rest.shift();
+        if (!next) return;
+        preloadOne(next.file).then(pump);
+      };
+      pump();
+      return { loaded: startFile ? 1 : 0, total: list.length };
     })();
     return preloadPromise;
   }

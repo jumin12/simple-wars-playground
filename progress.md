@@ -623,3 +623,13 @@ Original prompt: as a single index.html file, make a game that is a combination 
 - Land armies no longer treat BFS timeouts as "no land route" (that was pushing columns into the ocean); ocean shortcuts require a proven land disconnect or a much shorter verified hop.
 - Group corridor clones refuse amphibious lead lanes unless ordered into water; land step graph no longer soft-opens water for every land unit.
 - Ships reject incomplete greedy paths and land-crossing destination snaps; long sea orders use water BFS + 8-way greedy hops instead of straight-line targets across land.
+
+## Steam trailer (2026-10-20)
+- Gameplay reel recorded to `playground/output/trailer/capture.webm` (island, battle, city, territory, campaign, title card).
+- `scripts/capture-trailer.js` records it. `scripts/mix-trailer.js` is ready to add ElevenLabs narration, instrumental score, and an impact, then write `simple wars steam/steam/art/trailer/simple-wars-trailer.mp4`.
+- ElevenLabs narration, instrumental score, and title hit are mixed into `simple wars steam/steam/art/trailer/simple-wars-trailer.mp4`.
+
+## Steam store screenshots (2026-10-19)
+- Replaced the opening-line canvas grabs with five 1920x1080 shots in `simple wars steam/steam/art/screenshots`: battle, industrial city, full island, territory layer, campaign map.
+- Regenerator: `playground/scripts/capture-store-page-shots.js` (autostart, 2 AI, small island). A lone-ship ocean frame was dropped.
+- These files are not uploaded to Steamworks yet.

@@ -4399,6 +4399,22 @@
             font-size: 16px;
         }
 
+        .supporter-pack {
+            margin: 0 0 16px;
+            padding: 14px 16px;
+            border: 1px solid var(--wod-gold-line);
+            border-radius: 10px;
+            background: rgba(212, 175, 55, 0.08);
+            text-align: left;
+        }
+        .supporter-pack h3 {
+            margin: 0 0 6px;
+            color: var(--wod-gold-bright);
+            font-size: 1.05rem;
+        }
+        .supporter-pack p { margin: 0 0 10px; color: #d5dde3; }
+        .supporter-pack .menu-btn { margin: 0; }
+        .supporter-pack.owned { border-color: rgba(46, 204, 113, 0.7); }
         #shopPanel .shop-unlock-note {
             text-align: center;
         }
@@ -5138,6 +5154,21 @@
             }
         }
 
+        .supporter-pack {
+            margin: 0 0 16px;
+            padding: 14px 16px;
+            border: 1px solid var(--wod-gold-line);
+            border-radius: 10px;
+            background: rgba(212, 175, 55, 0.08);
+        }
+        .supporter-pack h3 {
+            margin: 0 0 6px;
+            color: var(--wod-gold-bright);
+            font-size: 1.05rem;
+        }
+        .supporter-pack p { margin: 0 0 10px; color: #d5dde3; }
+        .supporter-pack .menu-btn { margin: 0; }
+        .supporter-pack.owned { border-color: rgba(46, 204, 113, 0.7); }
         .shop-unlock-note {
             color: rgba(220,230,238,.82);
             font-size: 14px;
@@ -10818,6 +10849,11 @@
         <div id="shopPanel" class="overlay hidden">
             <div class="panel panel-wide">
                 <h2>Shop</h2>
+                <div id="supporterPackCard" class="supporter-pack">
+                    <h3>Supporter Pack — $5</h3>
+                    <p id="supporterPackCopy">Simple Wars is free. The Supporter Pack is $5 on Steam and unlocks every item in this shop: troop skins, missions, map skins, frontlines, and command styles. The Steam store page is not public yet.</p>
+                    <button type="button" class="menu-btn" id="supporterPackBtn" onclick="wodOpenSupporterPack()">Get the Supporter Pack — $5</button>
+                </div>
                 <p>Gold: <strong id="shopGold">1000</strong></p>
                 <nav class="shop-tabs" role="tablist" aria-label="Shop categories">
                     <button type="button" class="shop-tab active" data-shop-tab="troops" role="tab" aria-selected="true">Troop skins</button>
@@ -13664,12 +13700,62 @@
             if(!u.mapSkin) u.mapSkin = 'default';
         }
 
+        const WOD_STEAM_APP_ID = 5043620;
+        const WOD_SUPPORTER_DLC_APP_ID = 5475970;
+
+        function wodHasSupporterPack() {
+            return !!(gameData && gameData.supporterPack);
+        }
+
+        function wodApplySupporterFromLaunch() {
+            let fromSteam = false;
+            try {
+                fromSteam = new URLSearchParams(location.search).get('supporter') === '1';
+            } catch (e) { fromSteam = false; }
+            if(fromSteam) {
+                gameData.supporterPack = true;
+                if(typeof scheduleSaveWodProgress === 'function') scheduleSaveWodProgress();
+            } else if(wodProgress && wodProgress.profile && wodProgress.profile.supporterPack)
+                gameData.supporterPack = true;
+            if(gameData.supporterPack && wodProgress && wodProgress.profile)
+                wodProgress.profile.supporterPack = true;
+        }
+
+        function wodOpenSupporterPack() {
+            if(wodHasSupporterPack()) {
+                showNotification('Supporter Pack owned. The whole shop is unlocked.');
+                return;
+            }
+            if(WOD_SUPPORTER_DLC_APP_ID) {
+                let url = 'https://store.steampowered.com/app/' + WOD_SUPPORTER_DLC_APP_ID;
+                window.open(url, '_blank', 'noopener');
+                return;
+            }
+            showNotification('The $5 Supporter Pack is set up on Steam. The store page is not public yet.');
+        }
+
+        function wodRefreshSupporterPackCard() {
+            let card = document.getElementById('supporterPackCard');
+            let copy = document.getElementById('supporterPackCopy');
+            let btn = document.getElementById('supporterPackBtn');
+            if(!card || !btn) return;
+            let owned = wodHasSupporterPack();
+            card.classList.toggle('owned', owned);
+            if(copy) {
+                copy.textContent = owned
+                    ? 'Supporter Pack owned. Every shop item is unlocked.'
+                    : 'Simple Wars is free. The Supporter Pack is $5 on Steam and unlocks every item in this shop: troop skins, missions, map skins, frontlines, and command styles. The Steam store page is not public yet.';
+            }
+            btn.textContent = owned ? 'Owned — shop unlocked' : 'Get the Supporter Pack — $5';
+        }
+
         function wodEnsureOwnedShopVisuals() {
             if(!gameData.ownedShopVisuals) gameData.ownedShopVisuals = {};
         }
 
         function wodOwnsShopVisual(shopId) {
             if(!shopId) return true;
+            if(wodHasSupporterPack()) return true;
             wodEnsureOwnedShopVisuals();
             return !!gameData.ownedShopVisuals[shopId];
         }
@@ -22454,7 +22540,7 @@
                     campaignsWon: 0,
                     campaignBattlesWon: 0
                 },
-                profile: { gold: 0, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
+                profile: { gold: 0, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, supporterPack: false, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
                 missions: { completed: {} },
                 storeMissions: { completed: {}, spent: {} },
@@ -22587,6 +22673,7 @@
                 gameData.shopPreviewAiColor = p.shopPreviewAiColor;
             gameData.ownedUnitSkins = Object.assign({ nato: true }, p.ownedUnitSkins || {});
             gameData.ownedShopVisuals = Object.assign({}, p.ownedShopVisuals || {});
+            gameData.supporterPack = !!p.supporterPack;
             if(gameData.ownedUnitSkins.default) delete gameData.ownedUnitSkins.default;
             if(gameData.ownedUnitSkins.goldenChip && wodProgress.achievements) wodProgress.achievements.goldenChipMaster = true;
             for(let pid of ['napoleonic', 'medieval', 'ancient']) {
@@ -22635,6 +22722,7 @@
                     : [],
                 ownedUnitSkins: Object.assign({}, gameData.ownedUnitSkins || { nato: true }),
                 ownedShopVisuals: Object.assign({}, gameData.ownedShopVisuals || {}),
+                supporterPack: !!gameData.supporterPack,
                 equippedShopMapId: gameData._equippedShopMapId || null,
                 gamePeriod: gameData.gamePeriod || 'modern'
             };
@@ -22699,6 +22787,7 @@
                     gold: mergedGold,
                     ownedUnitSkins: mergedOwned,
                     ownedShopVisuals: mergedVisuals,
+                    supporterPack: !!(local.profile.supporterPack || sp.supporterPack || (gameData && gameData.supporterPack)),
                     unitSkin: sp.unitSkin || local.profile.unitSkin,
                     aiUnitSkin: sp.aiUnitSkin || local.profile.aiUnitSkin,
                     equippedShopMapId: (sp.equippedShopMapId != null ? sp.equippedShopMapId : local.profile.equippedShopMapId) || null,
@@ -22740,6 +22829,7 @@
                     aiUnitSkin: wodProgress.profile.aiUnitSkin,
                     ownedUnitSkins: wodProgress.profile.ownedUnitSkins,
                     ownedShopVisuals: wodProgress.profile.ownedShopVisuals,
+                    supporterPack: !!wodProgress.profile.supporterPack,
                     equippedShopMapId: wodProgress.profile.equippedShopMapId,
                     mpDisplayName: wodProgress.profile.mpDisplayName || '',
                     friends: wodProgress.profile.friends,
@@ -41609,6 +41699,7 @@
         }
 
         function wodShopSkinOwned(skin) {
+            if(skin && skin !== 'goldenChip' && wodHasSupporterPack()) return true;
             if(!gameData.ownedUnitSkins) return false;
             if(WOD_ANCIENT_CIV_PACK_IDS.includes(skin) && typeof wodAncientCivPackOwned === 'function')
                 return wodAncientCivPackOwned(gameData.ownedUnitSkins, skin);
@@ -41631,6 +41722,7 @@
 
         function wodIsPeriodUnlocked(id) {
             if(!id || id === 'modern') return true;
+            if(wodHasSupporterPack()) return true;
             return !!(gameData.ownedUnitSkins && gameData.ownedUnitSkins[id]);
         }
 
@@ -47561,6 +47653,7 @@
             renderShopArmyCanvases();
             renderSkinShopGridCanvases();
             updateShopPurchaseAllButtons();
+            wodRefreshSupporterPackCard();
         }
 
         function updateShopPurchaseAllButtons() {
@@ -52773,6 +52866,7 @@
         void wodMpBackgroundConnect();
         wodMpApplyInviteQueryFromUrl();
         applyWodProfileToGame();
+        wodApplySupporterFromLaunch();
         wodInitBrowserSaves();
         checkWodAchievements();
         updateSkinShop();
