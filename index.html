@@ -154,6 +154,9 @@
             margin-top: 0;
         }
 
+        #mainMenu #wodQuitBtn {
+            margin-top: 18px;
+        }
         /* Changelog stays off the button column: a side rail on a wide screen, under the buttons when the screen is narrow. */
         #mainMenu .wod-changelog {
             position: relative;
@@ -165,18 +168,7 @@
             align-items: stretch;
             box-sizing: border-box;
         }
-        #mainMenu .wod-changelog-toggle {
-            width: auto;
-            align-self: center;
-            margin: 0;
-            padding: 8px 16px;
-            font-size: 15px;
-        }
-        #mainMenu .wod-changelog-toggle.is-new {
-            box-shadow: 0 0 0 1px rgba(231, 76, 60, 0.85), 0 4px 12px rgba(0, 0, 0, 0.35);
-        }
         #mainMenu .wod-changelog-body {
-            margin-top: 8px;
             max-height: min(34vh, 280px);
             overflow: auto;
             text-align: left;
@@ -185,9 +177,6 @@
             border-radius: var(--wod-radius-sm);
             padding: 12px 14px 14px;
             box-sizing: border-box;
-        }
-        #mainMenu .wod-changelog-body[hidden] {
-            display: none !important;
         }
         #mainMenu .wod-changelog-body h2 {
             margin: 0 0 4px;
@@ -227,18 +216,11 @@
                 position: absolute;
                 top: max(16px, env(safe-area-inset-top, 0px));
                 right: max(16px, env(safe-area-inset-right, 0px));
-                bottom: auto;
+                bottom: max(16px, env(safe-area-inset-bottom, 0px));
                 width: min(320px, calc((100vw - 520px) / 2));
                 margin-top: 0;
-                align-items: flex-end;
             }
-            #mainMenu .wod-changelog.is-open {
-                bottom: max(16px, env(safe-area-inset-bottom, 0px));
-            }
-            #mainMenu .wod-changelog-toggle {
-                align-self: flex-end;
-            }
-            #mainMenu .wod-changelog.is-open .wod-changelog-body {
+            #mainMenu .wod-changelog-body {
                 width: 100%;
                 flex: 1 1 auto;
                 min-height: 0;
@@ -10126,11 +10108,11 @@
                     <button class="menu-btn" onclick="showPanel('helpGuide')">Help &amp; guide</button>
                     <button class="menu-btn" onclick="showPanel('settings')">Settings</button>
                     <button class="menu-btn" onclick="showPanel('credits')">Credits</button>
+                    <button type="button" class="menu-btn" id="wodQuitBtn" onclick="wodQuitApplication()">Quit</button>
                 </div>
             </div>
             <aside id="wodChangelog" class="wod-changelog">
-                <button type="button" class="menu-btn wod-changelog-toggle" id="wodChangelogToggle" aria-expanded="false" aria-controls="wodChangelogBody">Changelog</button>
-                <div id="wodChangelogBody" class="wod-changelog-body" role="region" aria-label="Changelog" hidden>
+                <div id="wodChangelogBody" class="wod-changelog-body" role="region" aria-label="Changelog">
                     <h2>Changelog</h2>
                     <div id="wodChangelogList"></div>
                 </div>
@@ -12018,24 +12000,31 @@
 
         const WOD_CHANGELOG = [
             {
-                date: '2026-10-21',
-                title: 'Menu and Steam',
+                at: '2026-10-21T03:02:00-04:00',
+                title: 'Menu',
                 items: [
-                    'The changelog opens beside the main menu, and the menu buttons stay where they are.',
+                    'The changelog stays open beside the main menu.',
+                    'Quit, at the bottom of the main menu, closes the game.',
                     'The Steam version launches in fullscreen.'
                 ]
             },
             {
-                date: '2026-10-20',
+                at: '2026-10-20T23:50:31-04:00',
                 title: 'The computer fights back',
                 items: [
                     'AI attacks along one front, hooks around your line, and tries to close a pocket.',
-                    'It garrisons a city or fort when troops are actually threatening it, and pulls damaged units back.',
+                    'It garrisons a city or fort when troops are actually threatening it, and pulls damaged units back.'
+                ]
+            },
+            {
+                at: '2026-10-20T21:56:51-04:00',
+                title: 'Main menu',
+                items: [
                     'The main menu opens without waiting for the whole soundtrack.'
                 ]
             },
             {
-                date: '2026-08-21',
+                at: '2026-08-21T01:35:10-04:00',
                 title: 'Skirmish maps',
                 items: [
                     'Starting a skirmish builds the match map, instead of dropping you onto the setup preview.',
@@ -12043,7 +12032,7 @@
                 ]
             },
             {
-                date: '2026-08-20',
+                at: '2026-08-20T19:39:45-04:00',
                 title: 'Campaign and battles',
                 items: [
                     'Campaign battles field allied enemy countries, and the end screen shows those armies as teams.',
@@ -12060,45 +12049,42 @@
             });
         }
 
-        function wodChangelogFormatDate(iso) {
-            let parts = String(iso || '').split('-');
+        function wodChangelogFormatStamp(iso) {
+            let when = new Date(iso);
+            if(isNaN(when.getTime())) return String(iso || '');
+            let rounded = new Date(Math.round(when.getTime() / 60000) * 60000);
             let months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-            if(parts.length !== 3) return iso;
-            let month = months[(parseInt(parts[1], 10) || 1) - 1] || parts[1];
-            return month + ' ' + (parseInt(parts[2], 10) || parts[2]) + ', ' + parts[0];
+            let hour24 = rounded.getHours();
+            let hour12 = hour24 % 12;
+            if(hour12 === 0) hour12 = 12;
+            let minute = String(rounded.getMinutes()).padStart(2, '0');
+            let suffix = hour24 >= 12 ? 'PM' : 'AM';
+            return months[rounded.getMonth()] + ' ' + rounded.getDate() + ', ' + rounded.getFullYear()
+                + ', ' + hour12 + ':' + minute + ' ' + suffix;
         }
 
         function wodInitChangelog() {
-            let root = document.getElementById('wodChangelog');
-            let btn = document.getElementById('wodChangelogToggle');
             let list = document.getElementById('wodChangelogList');
-            let body = document.getElementById('wodChangelogBody');
-            if(!root || !btn || !list || !body) return;
-            let latest = WOD_CHANGELOG[0] ? WOD_CHANGELOG[0].date : '';
-            let seen = '';
-            try { seen = localStorage.getItem('wodChangelogSeen') || ''; } catch(e) {}
-            if(latest && seen !== latest) btn.classList.add('is-new');
+            if(!list) return;
             list.innerHTML = WOD_CHANGELOG.map(function(entry) {
                 let items = (entry.items || []).map(function(line) {
                     return '<li>' + wodChangelogEscape(line) + '</li>';
                 }).join('');
-                return '<article class="wod-changelog-entry"><time datetime="' + wodChangelogEscape(entry.date) + '">'
-                    + wodChangelogEscape(wodChangelogFormatDate(entry.date)) + '</time><h3>'
+                let stamp = wodChangelogFormatStamp(entry.at);
+                return '<article class="wod-changelog-entry"><time datetime="' + wodChangelogEscape(entry.at) + '">'
+                    + wodChangelogEscape(stamp) + '</time><h3>'
                     + wodChangelogEscape(entry.title) + '</h3><ul>' + items + '</ul></article>';
             }).join('');
-            btn.addEventListener('click', function() {
-                let open = !root.classList.contains('is-open');
-                root.classList.toggle('is-open', open);
-                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-                if(open) body.removeAttribute('hidden');
-                else body.setAttribute('hidden', '');
-                if(open) {
-                    btn.classList.remove('is-new');
-                    try { localStorage.setItem('wodChangelogSeen', latest); } catch(e) {}
-                }
-            });
         }
         wodInitChangelog();
+
+        function wodQuitApplication() {
+            if(window.simpleWarsDesktop && typeof window.simpleWarsDesktop.quit === 'function') {
+                window.simpleWarsDesktop.quit();
+                return;
+            }
+            window.close();
+        }
 
         function wodStatsMenuOpen() {
             return UI.statsMenu && !UI.statsMenu.classList.contains('hidden');
