@@ -5636,7 +5636,7 @@
 
         .ach-card {
             display: grid;
-            grid-template-columns: 56px 1fr;
+            grid-template-columns: 64px 1fr;
             gap: 16px;
             align-items: start;
             padding: 16px 18px;
@@ -5652,8 +5652,8 @@
         }
 
         .ach-icon {
-            width: 56px;
-            height: 56px;
+            width: 64px;
+            height: 64px;
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -5661,11 +5661,24 @@
             font-size: 26px;
             background: rgba(0, 0, 0, 0.4);
             border: 1px solid rgba(255, 255, 255, 0.06);
+            overflow: hidden;
+        }
+
+        .ach-icon .ach-art {
+            width: 64px;
+            height: 64px;
+            object-fit: cover;
+            display: block;
         }
 
         .ach-card.unlocked .ach-icon {
             background: rgba(46, 204, 113, 0.18);
             border-color: rgba(46, 204, 113, 0.35);
+        }
+
+        .ach-icon:has(.ach-art) {
+            background: transparent;
+            border: none;
         }
 
         .ach-title {
@@ -11999,6 +12012,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-21T11:45:00-04:00',
+                title: 'Achievements',
+                items: [
+                    'Each achievement on the Progress screen now shows its picture, gray until you earn it.',
+                    'On Steam, earning an achievement also unlocks it on your Steam profile.'
+                ]
+            },
             {
                 at: '2026-10-21T03:02:45-04:00',
                 title: 'Menu',
@@ -23165,11 +23186,28 @@
                 updateSkinShop();
             }
             wodGrantNewAchievementGold();
+            wodSyncSteamAchievements(L, A);
             let achPanel = document.getElementById('achievementsPanel');
             if(achPanel && !achPanel.classList.contains('hidden')) renderAchievementsUi();
         }
 
         let _achStatsPeriodFilter = 'all';
+        let _wodSteamAchSent = {};
+
+        function wodAchievementIconHtml(id, unlocked) {
+            let state = unlocked ? 'ACHIEVED' : 'UNACHIEVED';
+            return '<img class="ach-art" src="achievements/' + id + '_' + state + '.png" alt="" width="64" height="64" draggable="false">';
+        }
+
+        function wodSyncSteamAchievements(L, A) {
+            let desk = window.simpleWarsDesktop;
+            if(!desk || typeof desk.unlockAchievement !== 'function') return;
+            for(let r of wodAchievementBadgeDefs(L, A)) {
+                if((r.prog || 0) < r.need || _wodSteamAchSent[r.id]) continue;
+                _wodSteamAchSent[r.id] = true;
+                desk.unlockAchievement(r.id);
+            }
+        }
 
         function renderAchievementsUi() {
             if(!wodProgress) return;
@@ -23179,6 +23217,7 @@
             let L = wodProgress.lifetime, A = wodProgress.achievements;
             let badgeFlavor = wodPeriodFlavor('modern');
             let rows = wodAchievementBadgeDefs(L, A).filter(r => r.id !== 'sovereignChip').map(r => ({
+                id: r.id,
                 title: r.title,
                 desc: ({
                     brokenShield: 'Eliminate an enemy faction by capturing all of their cities.',
@@ -23207,12 +23246,12 @@
                 let ok = r.prog >= r.need;
                 let pct = r.need > 0 ? Math.min(100, (r.prog / r.need) * 100) : 0;
                 let sub = `${formatLifetimeBig(Math.min(r.prog, r.need))} / ${formatLifetimeBig(r.need)}`;
-                return `<div class="ach-card${ok ? ' unlocked' : ''}"><div class="ach-icon">${ok ? '&#10003;' : '&#8226;'}</div><div><div class="ach-title">${r.title}</div><div class="ach-desc">${r.desc}</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${pct}%"></div></div><div class="ach-progress-footer"><span>Progress</span><strong>${sub}</strong></div></div></div>`;
+                return `<div class="ach-card${ok ? ' unlocked' : ''}"><div class="ach-icon">${wodAchievementIconHtml(r.id, ok)}</div><div><div class="ach-title">${r.title}</div><div class="ach-desc">${r.desc}</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:${pct}%"></div></div><div class="ach-progress-footer"><span>Progress</span><strong>${sub}</strong></div></div></div>`;
             }).join('');
 
             let secretOk = !!A.goldenChipMaster;
             html += secretOk
-                ? `<div class="ach-card unlocked ach-secret"><div class="ach-icon">&#10003;</div><div><div class="ach-title">Sovereign chip</div><div class="ach-desc">Secret skin unlocked — equip <strong>Sovereign chip</strong> in the Shop.</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:100%"></div></div><div class="ach-progress-footer"><span>Status</span><strong>Complete</strong></div></div></div>`
+                ? `<div class="ach-card unlocked ach-secret"><div class="ach-icon">${wodAchievementIconHtml('sovereignChip', true)}</div><div><div class="ach-title">Sovereign chip</div><div class="ach-desc">Secret skin unlocked — equip <strong>Sovereign chip</strong> in the Shop.</div><div class="ach-progress-track"><div class="ach-progress-fill" style="width:100%"></div></div><div class="ach-progress-footer"><span>Status</span><strong>Complete</strong></div></div></div>`
                 : `<div class="ach-card ach-secret locked"><div class="ach-icon">?</div><div><div class="ach-title">???</div><div class="ach-desc">???</div><div class="ach-progress-footer" style="margin-top:10px"><span>???</span><span>???</span></div></div></div>`;
             html += '</div>';
             badges.innerHTML = html;
