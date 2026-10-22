@@ -51,9 +51,37 @@
   let editorPinch = null;
 
   let editorFrame = null;
+  let editorBoundsCache = null;
+  let editorPaintPending = null;
   function markEditorMapChanged() {
+    editorBoundsCache = null;
+    editorPaintPending = null;
     state.editorTerrainDirty = true;
     if (window.WOD && typeof WOD.invalidateTerrain === "function") WOD.invalidateTerrain();
+  }
+
+  function queueEditorPatch(hexes, opts) {
+    if (!hexes || !hexes.length || !window.WOD || typeof WOD.patchEditorPaint !== "function") {
+      markEditorMapChanged();
+      return;
+    }
+    if (!editorPaintPending) editorPaintPending = { hexes: [], terrain: false, owners: false, seen: new Set() };
+    if (opts && opts.terrain) editorPaintPending.terrain = true;
+    if (opts && opts.owners) editorPaintPending.owners = true;
+    for (const h of hexes) {
+      if (!h) continue;
+      const k = h.q + "," + h.r;
+      if (editorPaintPending.seen.has(k)) continue;
+      editorPaintPending.seen.add(k);
+      editorPaintPending.hexes.push(h);
+    }
+  }
+
+  function flushEditorPatch() {
+    const job = editorPaintPending;
+    editorPaintPending = null;
+    if (!job || !job.hexes.length || !window.WOD || typeof WOD.patchEditorPaint !== "function") return;
+    WOD.patchEditorPaint(job.hexes, { terrain: job.terrain, owners: job.owners });
   }
 
   function touchEditorMutation() {
@@ -2610,6 +2638,10 @@
     const app = document.getElementById("mapEditorApp");
     app.classList.add("visible");
     state.open = true;
+    state.paintStampKey = null;
+    editorBoundsCache = null;
+    editorPaintPending = null;
+    if (window.WOD && typeof WOD.setEditorSuppressTerrainBake === "function") WOD.setEditorSuppressTerrainBake(true);
     state.owner = 1;
     state.viewPanX = 0;
     state.viewPanY = 0;
@@ -2697,6 +2729,10 @@
     const app = document.getElementById("mapEditorApp");
     if (app) app.classList.remove("visible");
     state.open = false;
+    state.paintStampKey = null;
+    editorBoundsCache = null;
+    editorPaintPending = null;
+    if (window.WOD && typeof WOD.setEditorSuppressTerrainBake === "function") WOD.setEditorSuppressTerrainBake(false);
     hideEditorSaveDialog();
     state.editorMarquee = null;
     state.cityMoveAttachedHexRefs = null;
@@ -2816,13 +2852,15 @@
   }
 
   function bounds() {
+    if (editorBoundsCache) return editorBoundsCache;
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const h of WOD.gameData.hexList) {
       minX = Math.min(minX, h.x); maxX = Math.max(maxX, h.x);
       minY = Math.min(minY, h.y); maxY = Math.max(maxY, h.y);
     }
     if (!isFinite(minX)) return { cx: 0, cy: 0, w: 1000, h: 800 };
-    return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX + 80, h: maxY - minY + 80 };
+    editorBoundsCache = { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w: maxX - minX + 80, h: maxY - minY + 80 };
+    return editorBoundsCache;
   }
 
   function toCanvas(x, y) {
@@ -2914,8 +2952,15 @@
     city.x = target.x;
     city.y = target.y;
     applyUrbanSprawlAtAnchor(city, target);
+    const moved = attached.slice();
+    for (const pt of WOD.getHexesInRadius(target.q, target.r, 2)) {
+      const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
+      if (h) moved.push(h);
+    }
+    queueEditorPatch(moved, { terrain: true });
     touchEditorMutation();
     editorRefreshTradeRoutes();
+    scheduleEditorRender();
     state.cityMoveGhostAnchor = null;
     state.cityMoveAttachedHexRefs = null;
     return true;
@@ -3096,45 +3141,86 @@
 
   function paintAt(pos) {
     const hex = nearestHex(pos);
-    if (!hex) return;
+    if (!hex) return false;
 
     const brushTargets = paintUsesBrush(state.tool) ? hexesForBrush(hex) : [hex];
+    if (paintUsesBrush(state.tool)) {
+      const stamp = state.tool + "|" + (state.tool === "territory" ? state.territoryPaintOwner : state.terrain) + "|" + state.brushSize;
+      const key = hex.q + "," + hex.r + "|" + stamp;
+      if (state.paintStampKey === key) return false;
+      state.paintStampKey = key;
+    }
 
     if (state.tool === "territory") {
-      touchEditorMutation();
       const own = Math.max(0, Math.min(state.territoryPaintOwner | 0, state.maxFactionSlots));
-      for (const h of brushTargets) WOD.setHexOwner(h, own);
-      markEditorMapChanged();
-      return;
+      const changed = [];
+      for (const h of brushTargets) {
+        if (h.owner === own) continue;
+        changed.push(h);
+      }
+      if (!changed.length) return false;
+      touchEditorMutation();
+      for (const h of changed) WOD.setHexOwner(h, own);
+      queueEditorPatch(changed, { owners: true });
+      return true;
     }
     if (state.tool === "paint") {
-      touchEditorMutation();
+      const changed = [];
+      const seen = new Set();
+      const add = (h) => {
+        if (!h) return;
+        const k = h.q + "," + h.r;
+        if (seen.has(k)) return;
+        seen.add(k);
+        changed.push(h);
+      };
+      let any = false;
       for (const h of brushTargets) {
-        h.type = state.terrain;
-        h.baseColor = WOD.getTerrainColor(h.type);
-        if (h.type === "urban") attachUrbanHex(h);
+        const next = state.terrain;
+        const same = h.type === next && (next !== "urban" || h.cityId);
+        if (!same) {
+          any = true;
+          h.type = next;
+          h.baseColor = WOD.getTerrainColor(next);
+          if (next !== "urban") h.cityId = null;
+          add(h);
+        }
+        if (next === "urban") {
+          const extras = attachUrbanHex(h);
+          if (extras) {
+            any = true;
+            for (const e of extras) add(e);
+          }
+        }
       }
-      markEditorMapChanged();
-      return;
+      if (!any) return false;
+      touchEditorMutation();
+      queueEditorPatch(changed, { terrain: true });
+      return true;
     }
     if (state.tool === "erase") {
-      touchEditorMutation();
+      const changed = [];
       for (const h of brushTargets) {
+        let fortIdx = -1;
+        if (WOD.gameData.forts && WOD.gameData.forts.length)
+          fortIdx = WOD.gameData.forts.findIndex(f => f.q === h.q && f.r === h.r);
+        if (h.type === "grass" && !h.cityId && fortIdx < 0) continue;
         h.type = "grass";
         h.baseColor = WOD.getTerrainColor("grass");
         h.cityId = null;
-        if (WOD.gameData.forts && WOD.gameData.forts.length) {
-          const idx = WOD.gameData.forts.findIndex(f => f.q === h.q && f.r === h.r);
-          if (idx >= 0) WOD.gameData.forts.splice(idx, 1);
-        }
+        if (fortIdx >= 0) WOD.gameData.forts.splice(fortIdx, 1);
+        changed.push(h);
       }
-      markEditorMapChanged();
-      return;
+      if (!changed.length) return false;
+      touchEditorMutation();
+      queueEditorPatch(changed, { terrain: true });
+      return true;
     }
     if (state.tool === "city") {
       touchEditorMutation();
       createTown(hex);
-      return;
+      queueEditorPatch(hexesInDisk(hex, 2), { terrain: true });
+      return true;
     }
     if (state.tool === "unit") {
       touchEditorMutation();
@@ -3142,33 +3228,53 @@
       const unit = WOD.createUnitAt("light", hex.x, hex.y, uo);
       state.selected = { type: "unit", value: unit };
       renderSelection();
-      markEditorMapChanged();
-      return;
+      return true;
     }
     if (state.tool === "factory" || state.tool === "harbor") {
       touchEditorMutation();
-      const city = nearestCity(pos, 80) || createTown(hex);
+      let city = nearestCity(pos, 80);
+      if (!city) {
+        city = createTown(hex);
+        queueEditorPatch(hexesInDisk(hex, 2), { terrain: true });
+      }
       if (state.tool === "factory") city.hasFactory = true;
       if (state.tool === "harbor") city.hasHarbor = true;
       state.selected = { type: "city", value: city };
       renderSelection();
-      markEditorMapChanged();
-      return;
+      return true;
     }
     if (state.tool === "fort") {
       touchEditorMutation();
       const uo = Math.max(1, state.owner || 1);
-      if (hex.owner !== uo && typeof WOD.setHexOwner === "function") WOD.setHexOwner(hex, uo);
+      if (hex.owner !== uo && typeof WOD.setHexOwner === "function") {
+        WOD.setHexOwner(hex, uo);
+        queueEditorPatch([hex], { owners: true });
+      }
       if (typeof WOD.placeFortAtHex === "function") WOD.placeFortAtHex(hex, uo, { editor: true, suppressNotes: true });
-      markEditorMapChanged();
+      return true;
     }
+    return false;
+  }
+
+  function hexesInDisk(hex, radius) {
+    const out = [];
+    for (const pt of hexesInHexDisk(hex.q, hex.r, radius)) {
+      const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
+      if (h) out.push(h);
+    }
+    return out;
   }
 
   function attachUrbanHex(hex) {
     let city = nearestCity(hex, 120);
-    if (!city) city = createTown(hex);
+    let spawned = null;
+    if (!city) {
+      city = createTown(hex);
+      spawned = hexesInDisk(hex, 2);
+    }
     hex.cityId = city.id;
-    hex.urbanVariant = Math.floor(Math.random() * 5);
+    if (typeof hex.urbanVariant !== "number") hex.urbanVariant = Math.floor(Math.random() * 5);
+    return spawned;
   }
 
   function createTown(hex) {
@@ -3239,8 +3345,8 @@
         state.editorMarquee = { ax, ay, bx: ax, by: ay };
       }
       renderSelection();
-    } else {
-      paintAt(pos);
+    } else if (!paintAt(pos)) {
+      return;
     }
     scheduleEditorRender();
   }
@@ -3297,9 +3403,8 @@
       obj.y = hex.y;
       obj.q = hex.q;
       obj.r = hex.r;
-      markEditorMapChanged();
     } else if (state.tool !== "select") {
-      paintAt(posMid);
+      if (!paintAt(posMid)) return;
     }
     scheduleEditorRender();
   }
@@ -3322,6 +3427,8 @@
     state.viewPanDrag = null;
     state.dragging = false;
     state.dragKind = null;
+    state.paintStampKey = null;
+    if (state.open) renderFactionBalanceChart();
   }
 
   function renderEditor() {
@@ -3342,7 +3449,10 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     const needHeavyTerrainSync = state.editorTerrainDirty;
-    if (needHeavyTerrainSync) state.editorTerrainDirty = false;
+    if (needHeavyTerrainSync) {
+      state.editorTerrainDirty = false;
+      editorPaintPending = null;
+    }
 
     if (needHeavyTerrainSync && typeof WOD.syncTerrainCacheForEditorView === "function") {
       try {
@@ -3353,6 +3463,8 @@
           terrainViewMode: WOD.gameData.terrainViewMode,
         });
       } catch (e) { /* ignore snapshot errors during init */ }
+    } else {
+      flushEditorPatch();
     }
     if (typeof WOD.getTerrainBitmap === "function") {
       try {
@@ -3473,7 +3585,7 @@
     }
     drawMissionEventMarkers(ctx, toCanvas);
 
-    renderFactionBalanceChart();
+    if (!state.dragging) renderFactionBalanceChart();
     state.renderView = null;
   }
 

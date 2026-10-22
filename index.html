@@ -12013,6 +12013,13 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-22T00:16:00-04:00',
+                title: 'Map editor',
+                items: [
+                    'Painting terrain and territory updates under the brush immediately, instead of redrawing the whole map.'
+                ]
+            },
+            {
                 at: '2026-10-21T11:45:00-04:00',
                 title: 'Achievements',
                 items: [
@@ -39908,6 +39915,12 @@
         let terrainCtx = terrainCanvas.getContext('2d', {alpha: false});
         let terrainBaseCanvas = document.createElement('canvas');
         let terrainBaseCtx = terrainBaseCanvas.getContext('2d', {alpha: false});
+        let wodDrawHexSet = null;
+        let wodSuppressTerrainBake = false;
+        let wodEditorPatchCanvas = null;
+        let wodEditorPatchCtx = null;
+        let wodBorderLayerCanvas = null;
+        let wodBorderLayerCtx = null;
         let territoryOverlayCanvas = null;
         let wodPoliticalStagingCanvas = null;
         let terrainBounds = {minX: 0, maxX: 0, minY: 0, maxY: 0};
@@ -40194,7 +40207,9 @@
             terrainCtx.drawImage(terrainBaseCanvas, 0, 0);
 
             drawTerritoryOverlay(terrainCtx, -terrainBounds.minX, -terrainBounds.minY);
-            drawPaintedTerritoryBorders(terrainCtx, -terrainBounds.minX, -terrainBounds.minY);
+            wodRedrawBorderLayer();
+            if(gameData.layers.diplomacy && wodBorderLayerCanvas)
+                terrainCtx.drawImage(wodBorderLayerCanvas, 0, 0);
 
             wodTerrainPoliticalDirty = false;
             wodTerrainNeedFullRebuild = false;
@@ -40239,12 +40254,14 @@
             ctx.fillStyle = '#1d5b96';
             ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(!isWaterHex(hex)) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
                 ctx.fillStyle = getTerrainColor('water');
                 ctx.fillRect(px - wsqW / 2, py - wsqW / 2, wsqW, wsqW);
             }
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(isWaterHex(hex)) continue;
                 let px = hex.x + offsetX, py = hex.y + offsetY;
                 ctx.beginPath();
@@ -40262,6 +40279,7 @@
             ctx.lineJoin = 'round';
             let points = [];
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(isWaterHex(hex)) continue;
                 for(let dir of hexDirections) {
                     let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
@@ -40531,6 +40549,7 @@
             let shadowDy = 0.28;
 
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(hex.type !== 'forest') continue;
                 if(det01(hex.q, hex.r, 9.4) < 0.04) continue;
                 let bx = hex.x + offsetX, by = hex.y + offsetY;
@@ -40588,6 +40607,7 @@
                 return x - Math.floor(x);
             }
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(hex.type !== 'mountain' && hex.type !== 'hill') continue;
                 let density = det01(hex.q, hex.r, 8.2);
                 let bx = hex.x + offsetX, by = hex.y + offsetY;
@@ -40646,6 +40666,7 @@
                 return x - Math.floor(x);
             }
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(!isWaterHex(hex)) continue;
                 let u1 = det01(hex.q, hex.r, 3.1);
                 let u2 = det01(hex.q, hex.r, 7.7);
@@ -40675,6 +40696,7 @@
             ctx.lineJoin = 'round';
 
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(hex.type !== type) continue;
                 for(let dir of sameTerrainDirs) {
                     let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
@@ -40687,6 +40709,7 @@
             }
 
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(hex.type !== type) continue;
                 drawTerrainCell(ctx, hex, offsetX, offsetY);
             }
@@ -40698,6 +40721,7 @@
             for(let city of gameData.cities) cityById[city.id] = city;
             let us = wodUrbanPeriodStyle(wodGetRenderPeriod());
             for(let hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(hex.type !== 'urban') continue;
                 let city = cityById[hex.cityId] || gameData.cities.find(c => Math.abs(c.q - hex.q) <= 3 && Math.abs(c.r - hex.r) <= 3);
                 let style = city ? (city.urbanStyle || 0) : 0;
@@ -40830,20 +40854,32 @@
                 adj.get(b).add(a);
             }
             let keys = [...midpointByEdge.keys()];
-            function bridgePass(loMul, hiMul, passes, maxNbDeg) {
-                let lo2 = Math.pow(spacing * loMul, 2);
-                let hi2 = Math.pow(spacing * hiMul, 2);
-                for(let pass = 0; pass < passes; pass++) {
-                    for(let ek of keys) {
-                        let d = deg(ek);
-                        if(d > 1) continue;
-                        let p = midpointByEdge.get(ek);
-                        let best = null;
-                        let bestD = Infinity;
-                        for(let ek2 of keys) {
+            let cell = Math.max(8, spacing * 2.3);
+            let buckets = new Map();
+            function bucketKey(ix, iy) { return ix + ',' + iy; }
+            for(let ek of keys) {
+                let p = midpointByEdge.get(ek);
+                if(!p) continue;
+                let ix = Math.floor(p.x / cell);
+                let iy = Math.floor(p.y / cell);
+                let bk = bucketKey(ix, iy);
+                let arr = buckets.get(bk);
+                if(!arr) buckets.set(bk, arr = []);
+                arr.push(ek);
+            }
+            function nearestInRange(ek, p, lo2, hi2, maxNbDeg, ix, iy, reach) {
+                let best = null;
+                let bestD = Infinity;
+                for(let oy = -reach; oy <= reach; oy++) {
+                    for(let ox = -reach; ox <= reach; ox++) {
+                        let arr = buckets.get(bucketKey(ix + ox, iy + oy));
+                        if(!arr) continue;
+                        for(let i = 0; i < arr.length; i++) {
+                            let ek2 = arr[i];
                             if(ek2 === ek) continue;
                             if(deg(ek2) > maxNbDeg) continue;
                             let q = midpointByEdge.get(ek2);
+                            if(!q) continue;
                             let dx = p.x - q.x;
                             let dy = p.y - q.y;
                             let dist2 = dx * dx + dy * dy;
@@ -40852,6 +40888,22 @@
                                 best = ek2;
                             }
                         }
+                    }
+                }
+                return best;
+            }
+            function bridgePass(loMul, hiMul, passes, maxNbDeg) {
+                let lo2 = Math.pow(spacing * loMul, 2);
+                let hi2 = Math.pow(spacing * hiMul, 2);
+                let reach = Math.max(1, Math.ceil((spacing * hiMul) / cell));
+                for(let pass = 0; pass < passes; pass++) {
+                    for(let ek of keys) {
+                        if(deg(ek) > 1) continue;
+                        let p = midpointByEdge.get(ek);
+                        if(!p) continue;
+                        let ix = Math.floor(p.x / cell);
+                        let iy = Math.floor(p.y / cell);
+                        let best = nearestInRange(ek, p, lo2, hi2, maxNbDeg, ix, iy, reach);
                         if(best) link(ek, best);
                     }
                 }
@@ -40863,22 +40915,14 @@
             bridgePass(0.18, 1.85, 5, 3);
             bridgePass(0.12, 2.25, 4, 3);
             let stitch2 = Math.pow(spacing * 2.05, 2);
+            let stitchReach = Math.max(1, Math.ceil((spacing * 2.05) / cell));
             for(let ek of keys) {
                 if(deg(ek) !== 0) continue;
                 let p = midpointByEdge.get(ek);
-                let best = null;
-                let bestD = Infinity;
-                for(let ek2 of keys) {
-                    if(ek2 === ek || deg(ek2) > 2) continue;
-                    let q = midpointByEdge.get(ek2);
-                    let dx = p.x - q.x;
-                    let dy = p.y - q.y;
-                    let dist2 = dx * dx + dy * dy;
-                    if(dist2 < stitch2 && dist2 < bestD) {
-                        bestD = dist2;
-                        best = ek2;
-                    }
-                }
+                if(!p) continue;
+                let ix = Math.floor(p.x / cell);
+                let iy = Math.floor(p.y / cell);
+                let best = nearestInRange(ek, p, 0, stitch2, 2, ix, iy, stitchReach);
                 if(best && deg(best) <= 1) link(ek, best);
             }
         }
@@ -41323,6 +41367,202 @@
             });
         }
 
+        function wodAcquirePatchCtx(w, h) {
+            if(!wodEditorPatchCanvas) {
+                wodEditorPatchCanvas = document.createElement('canvas');
+                wodEditorPatchCtx = wodEditorPatchCanvas.getContext('2d', {alpha: false});
+            }
+            if(wodEditorPatchCanvas.width !== w || wodEditorPatchCanvas.height !== h) {
+                wodEditorPatchCanvas.width = w;
+                wodEditorPatchCanvas.height = h;
+            }
+            wodEditorPatchCtx.setTransform(1, 0, 0, 1, 0, 0);
+            wodEditorPatchCtx.clearRect(0, 0, w, h);
+            return wodEditorPatchCtx;
+        }
+
+        function wodRedrawBorderLayer() {
+            if(!terrainCanvas.width || !terrainCanvas.height) return;
+            if(!wodBorderLayerCanvas) {
+                wodBorderLayerCanvas = document.createElement('canvas');
+                wodBorderLayerCtx = wodBorderLayerCanvas.getContext('2d');
+            }
+            if(wodBorderLayerCanvas.width !== terrainCanvas.width || wodBorderLayerCanvas.height !== terrainCanvas.height) {
+                wodBorderLayerCanvas.width = terrainCanvas.width;
+                wodBorderLayerCanvas.height = terrainCanvas.height;
+            }
+            wodBorderLayerCtx.setTransform(1, 0, 0, 1, 0, 0);
+            wodBorderLayerCtx.clearRect(0, 0, wodBorderLayerCanvas.width, wodBorderLayerCanvas.height);
+            if(!gameData.layers.diplomacy) return;
+            drawPaintedTerritoryBorders(wodBorderLayerCtx, -terrainBounds.minX, -terrainBounds.minY);
+        }
+
+        function wodCollectHexHalo(seeds, R) {
+            let seen = new Set();
+            let out = [];
+            for(let s = 0; s < seeds.length; s++) {
+                let seed = seeds[s];
+                if(!seed) continue;
+                for(let dq = -R; dq <= R; dq++) {
+                    let drMin = Math.max(-R, -dq - R);
+                    let drMax = Math.min(R, -dq + R);
+                    for(let dr = drMin; dr <= drMax; dr++) {
+                        let hex = gameData.hexes[(seed.q + dq) + ',' + (seed.r + dr)];
+                        if(!hex) continue;
+                        let k = hex.q + ',' + hex.r;
+                        if(seen.has(k)) continue;
+                        seen.add(k);
+                        out.push(hex);
+                    }
+                }
+            }
+            return out;
+        }
+
+        function wodPatchTerritoryOverlay(halo, x0, y0, w, h, ox, oy) {
+            if(!gameData.layers.territory) return;
+            let spacing = gameData.hexRadius * 1.35;
+            let discR = spacing * 0.78;
+            if(!territoryOverlayCanvas) territoryOverlayCanvas = document.createElement('canvas');
+            if(territoryOverlayCanvas.width !== terrainCanvas.width || territoryOverlayCanvas.height !== terrainCanvas.height) {
+                territoryOverlayCanvas.width = terrainCanvas.width;
+                territoryOverlayCanvas.height = terrainCanvas.height;
+            }
+            let overlayCtx = territoryOverlayCanvas.getContext('2d');
+            overlayCtx.save();
+            overlayCtx.beginPath();
+            overlayCtx.rect(x0, y0, w, h);
+            overlayCtx.clip();
+            overlayCtx.clearRect(x0, y0, w, h);
+            for(let owner = 1; owner < factionColors.length; owner++) {
+                overlayCtx.fillStyle = factionColors[owner];
+                overlayCtx.strokeStyle = factionColors[owner];
+                overlayCtx.lineWidth = spacing * 1.32;
+                overlayCtx.lineCap = 'round';
+                overlayCtx.lineJoin = 'round';
+                for(let i = 0; i < halo.length; i++) {
+                    let hex = halo[i];
+                    if(hex.owner !== owner || isWaterHex(hex)) continue;
+                    for(let d = 0; d < hexDirections.length; d++) {
+                        let dir = hexDirections[d];
+                        let nHex = gameData.hexes[hex.q + dir.q + ',' + (hex.r + dir.r)];
+                        if(!nHex || nHex.owner !== owner || isWaterHex(nHex)) continue;
+                        overlayCtx.beginPath();
+                        overlayCtx.moveTo(hex.x + ox, hex.y + oy);
+                        overlayCtx.lineTo(nHex.x + ox, nHex.y + oy);
+                        overlayCtx.stroke();
+                    }
+                }
+                for(let i = 0; i < halo.length; i++) {
+                    let hex = halo[i];
+                    if(hex.owner !== owner || isWaterHex(hex)) continue;
+                    overlayCtx.beginPath();
+                    overlayCtx.arc(hex.x + ox, hex.y + oy, discR, 0, Math.PI * 2);
+                    overlayCtx.fill();
+                }
+            }
+            overlayCtx.restore();
+        }
+
+        function wodCompositeTerrainRect(x, y, w, h) {
+            terrainCtx.setTransform(1, 0, 0, 1, 0, 0);
+            terrainCtx.save();
+            terrainCtx.imageSmoothingEnabled = false;
+            terrainCtx.drawImage(terrainBaseCanvas, x, y, w, h, x, y, w, h);
+            if(gameData.layers.territory && territoryOverlayCanvas &&
+                territoryOverlayCanvas.width === terrainCanvas.width && territoryOverlayCanvas.height === terrainCanvas.height) {
+                terrainCtx.globalAlpha = 0.32;
+                terrainCtx.drawImage(territoryOverlayCanvas, x, y, w, h, x, y, w, h);
+                terrainCtx.globalAlpha = 1;
+            }
+            if(gameData.layers.diplomacy && wodBorderLayerCanvas &&
+                wodBorderLayerCanvas.width === terrainCanvas.width && wodBorderLayerCanvas.height === terrainCanvas.height)
+                terrainCtx.drawImage(wodBorderLayerCanvas, x, y, w, h, x, y, w, h);
+            terrainCtx.restore();
+        }
+
+        function wodPatchEditorTerrain(seeds, opts) {
+            if(!seeds || !seeds.length) return;
+            if(terrainBaseCanvas.width < 2 || terrainCanvas.width !== terrainBaseCanvas.width || terrainCanvas.height !== terrainBaseCanvas.height) {
+                updateTerrainCache();
+                return;
+            }
+            let spacing = gameData.hexRadius * 1.35;
+            let halo = wodCollectHexHalo(seeds, 2);
+            if(!halo.length) return;
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            let pad = spacing * 2.05;
+            for(let i = 0; i < seeds.length; i++) {
+                let hex = seeds[i];
+                if(!hex) continue;
+                if(hex.x < minX) minX = hex.x;
+                if(hex.x > maxX) maxX = hex.x;
+                if(hex.y < minY) minY = hex.y;
+                if(hex.y > maxY) maxY = hex.y;
+            }
+            if(!isFinite(minX)) return;
+            minX -= pad;
+            maxX += pad;
+            minY -= pad;
+            maxY += pad;
+            let ox = -terrainBounds.minX;
+            let oy = -terrainBounds.minY;
+            let x0 = Math.max(0, Math.floor(minX + ox));
+            let y0 = Math.max(0, Math.floor(minY + oy));
+            let x1 = Math.min(terrainBaseCanvas.width, Math.ceil(maxX + ox));
+            let y1 = Math.min(terrainBaseCanvas.height, Math.ceil(maxY + oy));
+            let w = x1 - x0;
+            let hgt = y1 - y0;
+            if(w < 1 || hgt < 1) return;
+            if(w * hgt > terrainBaseCanvas.width * terrainBaseCanvas.height * 0.4) {
+                updateTerrainCache();
+                return;
+            }
+            let terrainChanged = !opts || opts.terrain !== false;
+            let ownersChanged = !!(opts && opts.owners);
+            if(terrainChanged) {
+                let step = Math.max(2, Math.min(4, Math.round((gameData.hexRadius || 20) * 0.18)));
+                let margin = step * 8;
+                let pw = w + margin * 2;
+                let ph = hgt + margin * 2;
+                let pctx = wodAcquirePatchCtx(pw, ph);
+                let offX = ox - x0 + margin;
+                let offY = oy - y0 + margin;
+                pctx.fillStyle = getTerrainColor('water');
+                pctx.fillRect(0, 0, pw, ph);
+                let set = new Set();
+                for(let i = 0; i < halo.length; i++) set.add(halo[i].q + ',' + halo[i].r);
+                wodDrawHexSet = set;
+                try {
+                    if(gameData.terrainViewMode === 'schematic') {
+                        drawTerrainSchematicMap(pctx, offX, offY);
+                    } else {
+                        let paintOrder = ['water', 'sand', 'grass', 'forest', 'swamp', 'hill', 'mountain', 'urban'];
+                        for(let ti = 0; ti < paintOrder.length; ti++)
+                            drawTerrainBlobLayer(pctx, paintOrder[ti], offX, offY);
+                        drawTerrainTopography(pctx, offX, offY);
+                        drawForestTreeDecorations(pctx, offX, offY);
+                        drawMountainRockDecorations(pctx, offX, offY);
+                        drawTerrainWaterRipples(pctx, offX, offY);
+                        drawUrbanTerrainDetails(pctx, offX, offY);
+                    }
+                } finally {
+                    wodDrawHexSet = null;
+                }
+                terrainBaseCtx.save();
+                terrainBaseCtx.imageSmoothingEnabled = false;
+                terrainBaseCtx.drawImage(wodEditorPatchCanvas, margin, margin, w, hgt, x0, y0, w, hgt);
+                terrainBaseCtx.restore();
+            }
+            if(gameData.layers.territory && (terrainChanged || ownersChanged))
+                wodPatchTerritoryOverlay(halo, x0, y0, w, hgt, ox, oy);
+            if(ownersChanged && gameData.layers.diplomacy)
+                wodRedrawBorderLayer();
+            wodCompositeTerrainRect(x0, y0, w, hgt);
+            wodTerrainPoliticalDirty = false;
+            terrainNeedsUpdate = false;
+        }
+
         function wodPaintFrontlineStyle(style, spacing, strokeFn) {
             if(style === 'double') {
                 let rail = Math.max(8, spacing * 0.28);
@@ -41599,7 +41839,7 @@
                 wodTerrainPolWork = null;
                 gameData._terrDirtyNext = performance.now() + 380;
             }
-            if(terrainNeedsUpdate) {
+            if(terrainNeedsUpdate && !wodSuppressTerrainBake) {
                 let now = performance.now();
                 let forceImmediate = wodTerrainNeedFullRebuild || !wodTerrainBaseBuilt;
                 let ownersChanging = !!(gameData.layers && (gameData.layers.diplomacy || gameData.layers.territory));
@@ -53304,7 +53544,6 @@
         }
 
         function wodEditorFactionStats(owner) {
-            gameData._landIncomeCacheDirty = true;
             let income = getOwnerIncome(owner);
             let manpowerIncome = getOwnerManpowerIncome(owner);
             let expenses = getOwnerExpenses(owner);
@@ -53360,6 +53599,8 @@
                 return { img: terrainCanvas, minX: terrainBounds.minX, minY: terrainBounds.minY, width: terrainCanvas.width, height: terrainCanvas.height };
             },
             invalidateTerrain() { wodMarkTerrainFullDirty(); },
+            setEditorSuppressTerrainBake(on) { wodSuppressTerrainBake = !!on; },
+            patchEditorPaint(hexes, opts) { wodPatchEditorTerrain(hexes, opts || {}); },
             resizeCanvas,
             returnToMenu,
             showPanel,
