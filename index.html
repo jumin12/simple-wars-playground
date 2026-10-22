@@ -10171,6 +10171,142 @@
             }
         }
 
+        #campaignPanel.overlay,
+        #shopPanel.overlay,
+        #missionsPanel.overlay {
+            padding: 0;
+            align-items: stretch;
+            justify-content: stretch;
+        }
+        #campaignPanel .wod-camp-panel,
+        #shopPanel .panel.panel-wide,
+        #missionsPanel .panel.panel-wide {
+            width: 100%;
+            max-width: none;
+            height: 100%;
+            max-height: none;
+            margin: 0;
+            border-radius: 0;
+            border-left: none;
+            border-right: none;
+            box-shadow: none;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            text-align: left;
+            padding: 18px 22px 14px;
+            box-sizing: border-box;
+        }
+        #campaignPanel .wod-camp-header,
+        #campaignPanel .wod-camp-footer,
+        #missionsPanel h2,
+        #missionsPanel .wod-mission-source-tabs,
+        #missionsPanel .wod-map-lib-sub,
+        #shopPanel .panel > h2,
+        #shopPanel .supporter-pack,
+        #shopPanel .shop-tabs {
+            flex: 0 0 auto;
+        }
+        #campaignPanel .wod-camp-layout {
+            flex: 1 1 auto;
+            min-height: 0;
+            align-items: stretch;
+        }
+        #campaignPanel .wod-camp-map-col {
+            flex: 1 1 auto;
+            min-height: 0;
+        }
+        #campaignPanel #wodCampMapCanvas {
+            width: 100%;
+            height: auto;
+            max-height: none;
+            flex: 1 1 auto;
+            min-height: 180px;
+            object-fit: contain;
+        }
+        #campaignPanel .wod-camp-log {
+            max-height: 120px;
+        }
+        #campaignPanel .wod-camp-side {
+            flex: 0 0 min(400px, 34vw);
+            width: min(400px, 34vw);
+            max-height: none;
+            overflow: auto;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+        #campaignPanel .wod-camp-roster {
+            flex: 1 1 auto;
+            max-height: none;
+            min-height: 120px;
+        }
+        #shopPanel .panel > p {
+            margin-bottom: 10px;
+        }
+        #shopPanel .shop-tab-pane.active {
+            display: block;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow: auto;
+        }
+        #shopPanel .shop-preview-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+        }
+        #shopPanel .skin-grid {
+            max-width: none;
+        }
+        #missionsPanel .wod-map-lib-layout {
+            flex: 1 1 auto;
+            min-height: 0;
+            flex-wrap: nowrap;
+            align-items: stretch;
+        }
+        #missionsPanel .wod-map-lib-list-column {
+            flex: 0 0 min(440px, 36vw);
+            min-height: 0;
+        }
+        #missionsPanel .wod-map-lib-list {
+            flex: 1 1 auto;
+            max-height: none;
+            min-height: 0;
+        }
+        #missionsPanel .wod-map-lib-detail {
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        #missionsPanel #wodMissionPreview {
+            width: 100%;
+            height: auto;
+            max-height: min(52vh, 520px);
+        }
+        @media (max-width: 900px) {
+            #campaignPanel .wod-camp-layout,
+            #missionsPanel .wod-map-lib-layout,
+            #shopPanel .shop-preview-row {
+                flex-direction: column;
+                display: flex;
+                grid-template-columns: none;
+            }
+            #campaignPanel .wod-camp-side,
+            #missionsPanel .wod-map-lib-list-column {
+                width: 100%;
+                flex: 1 1 auto;
+                max-height: 46vh;
+            }
+            #shopPanel .panel.panel-wide,
+            #campaignPanel .wod-camp-panel,
+            #missionsPanel .panel.panel-wide {
+                width: 100%;
+                max-width: none;
+                padding: 14px 12px 12px;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -11541,7 +11677,6 @@
                                 <li>Tchaikovsky — 1812 Overture — Skidmore College Orchestra / Musopen (PD)</li>
                                 <li>Vivaldi — Largo (Recorder / Piccolo Concerto) — Wikimedia Commons performance (CC BY-SA 3.0)</li>
                                 <li>Wagner — Entry of the Gods into Valhalla — Royal Albert Hall Orchestra / Landon Ronald (1920 HMV 78; PD)</li>
-                                <li>Wagner — Prelude to Act 3 (Lohengrin) — Boston Symphony / Karl Muck (1917 78; PD)</li>
                                 <li>Wagner — Siegfried’s Funeral March and Finale — U.S. Marine Band, <em>Music of Richard Wagner</em> (1981) (PD — U.S. government work)</li>
                                 <li>Wagner — Ride of the Valkyries — Philip Milman (pmmusic.pro) (CC BY 3.0)</li>
                             </ol>
@@ -12599,6 +12734,7 @@
         /** Snapshot of the running menu background battle (preserved while browsing menus or playing). */
         let menuBattleLive = null;
         let menuBattleHexListRef = null;
+        let menuTerrainSnap = null;
         let menuDemoAnimId = 0;
         let menuDemoLastTime = 0;
         let menuDemoPausedByVisibility = false;
@@ -22335,9 +22471,27 @@
             return wodFormatUnitName(type, n, convoySea);
         }
 
+        function wodRenumberOwnerUnits(owner) {
+            let groups = {};
+            for(let u of gameData.entities) {
+                if(!u || u.owner !== owner || u.hp <= 0 || u.nameCustom) continue;
+                let key = wodUnitNameSerialKey(u.type);
+                if(!groups[key]) groups[key] = [];
+                groups[key].push(u);
+            }
+            for(let key of Object.keys(groups)) {
+                groups[key].sort((a, b) => (a._nameOrder || 0) - (b._nameOrder || 0));
+                for(let i = 0; i < groups[key].length; i++) {
+                    let u = groups[key][i];
+                    u.name = wodFormatUnitName(u.type, i + 1, !!u.convoySeaRoute);
+                }
+            }
+        }
+
         function wodRenumberAllFactionUnits() {
-            // Numbers only climb. Destroyed divisions keep their number retired
-            // and are not handed to the next unit raised.
+            let owners = new Set();
+            for(let u of gameData.entities) if(u && u.owner > 0 && u.hp > 0) owners.add(u.owner);
+            for(let owner of owners) wodRenumberOwnerUnits(owner);
         }
 
         function generateUnitName(type, convoySea, owner) {
@@ -26423,6 +26577,7 @@
                 addShipCasualties(unit.owner, 1, source);
             }
             if(prevHpAlive && unit.hp <= 0 && unit.type !== 'convoy') {
+                wodRenumberOwnerUnits(unit.owner);
                 let killer = (source && typeof source === 'object' && source.owner != null)
                     ? source.owner
                     : (typeof source === 'number' ? source : 0);
@@ -36495,6 +36650,7 @@
         }
         function wodPrepareForNewMatch(opts) {
             opts = opts || {};
+            wodClearMenuBattleMemory();
             gameData.menuAttractMode = false;
             menuDemoPausedByVisibility = false;
             if(menuDemoAnimId) {
@@ -36555,6 +36711,57 @@
         function captureMenuBattleLive() {
             if(!gameData.hexList || !gameData.hexList.length) return;
             menuBattleLive = cloneMenuBattleState();
+            wodSnapshotMenuTerrain();
+        }
+
+        function wodCloneCanvas(src) {
+            if(!src || src.width < 2 || src.height < 2) return null;
+            let c = document.createElement('canvas');
+            c.width = src.width;
+            c.height = src.height;
+            c.getContext('2d').drawImage(src, 0, 0);
+            return c;
+        }
+
+        function wodSnapshotMenuTerrain() {
+            menuTerrainSnap = {
+                base: wodCloneCanvas(terrainBaseCanvas),
+                composite: wodCloneCanvas(terrainCanvas),
+                overlay: wodCloneCanvas(territoryOverlayCanvas),
+                borders: wodCloneCanvas(wodBorderLayerCanvas),
+                bounds: { minX: terrainBounds.minX, maxX: terrainBounds.maxX, minY: terrainBounds.minY, maxY: terrainBounds.maxY }
+            };
+        }
+
+        function wodBlitCanvas(src, dst) {
+            if(!src || !dst) return;
+            dst.width = src.width;
+            dst.height = src.height;
+            let bctx = dst.getContext('2d');
+            bctx.setTransform(1, 0, 0, 1, 0, 0);
+            bctx.drawImage(src, 0, 0);
+        }
+
+        function wodRestoreMenuTerrain() {
+            if(!menuTerrainSnap || !menuTerrainSnap.base) return false;
+            wodBlitCanvas(menuTerrainSnap.base, terrainBaseCanvas);
+            wodBlitCanvas(menuTerrainSnap.composite, terrainCanvas);
+            if(menuTerrainSnap.overlay && territoryOverlayCanvas) wodBlitCanvas(menuTerrainSnap.overlay, territoryOverlayCanvas);
+            if(menuTerrainSnap.borders && wodBorderLayerCanvas) wodBlitCanvas(menuTerrainSnap.borders, wodBorderLayerCanvas);
+            terrainBounds = menuTerrainSnap.bounds;
+            wodTerrainNeedFullRebuild = false;
+            wodTerrainPoliticalDirty = false;
+            terrainNeedsUpdate = false;
+            wodTerrainBaseBuilt = true;
+            wodTerrainPolWork = null;
+            return true;
+        }
+
+        function wodClearMenuBattleMemory() {
+            menuBattleLive = null;
+            menuBattleHexListRef = null;
+            menuTerrainSnap = null;
+            menuDemoSeeded = false;
         }
 
         function applyMenuBattleState(s) {
@@ -36642,7 +36849,12 @@
                 return;
             }
             let mapUntouched = menuBattleHexListRef && gameData.hexList === menuBattleHexListRef;
-            if(!mapUntouched && menuBattleLive) applyMenuBattleState(menuBattleLive);
+            if(!mapUntouched && menuBattleLive) {
+                applyMenuBattleState(menuBattleLive);
+                // The setup preview replaced the live map. Put the paused menu
+                // picture back instead of rebuilding it.
+                wodRestoreMenuTerrain();
+            }
             menuBattleHexListRef = null;
             menuDemoSeeded = true;
             gameData.menuAttractMode = true;
@@ -45950,20 +46162,33 @@
             if(wodRogue.log.length > 50) wodRogue.log.splice(0, wodRogue.log.length - 50);
         }
 
+        function wodRogueRenumberRoster(c) {
+            if(!c || !c.roster) return;
+            let groups = {};
+            for(let u of c.roster) {
+                if(!u || u.nameCustom) continue;
+                let key = u.type || 'light';
+                if(!groups[key]) groups[key] = [];
+                groups[key].push(u);
+            }
+            for(let key of Object.keys(groups)) {
+                groups[key].sort((a, b) => (a._nameOrder || 0) - (b._nameOrder || 0));
+                for(let i = 0; i < groups[key].length; i++)
+                    groups[key][i].name = wodFormatUnitName(key, i + 1, false);
+            }
+        }
+
         function wodRogueRosterAdd(type) {
             let c = wodRogueLoad();
             if(!c) return null;
             c.unitSeq++;
-            if(!c.unitNameSerial || typeof c.unitNameSerial !== 'object') c.unitNameSerial = {};
-            let serialKey = wodUnitNameSerialKey(type);
-            let nameNum = (c.unitNameSerial[serialKey] || 0) + 1;
-            c.unitNameSerial[serialKey] = nameNum;
-            let base = wodFormatUnitName(type, nameNum, false);
+            let base = 'Unit';
             let maxHp = type === 'heavy' ? 300 : type === 'ship' ? 200 : 100;
             let unit = {
                 id: 'rg_' + c.unitSeq,
                 type,
                 name: base,
+                _nameOrder: c.unitSeq,
                 hp: maxHp, maxHp,
                 manpower: type === 'ship' ? 5000 : 1000,
                 maxManpower: type === 'ship' ? 5000 : 1000,
@@ -45974,6 +46199,7 @@
                 battles: 0
             };
             c.roster.push(unit);
+            wodRogueRenumberRoster(c);
             c.stats.unitsBought++;
             return unit;
         }
@@ -46019,6 +46245,7 @@
             let cost = WOD_ROGUE_UNIT_COSTS[u.type] || 0;
             let refund = Math.floor(cost * 0.5);
             c.roster.splice(idx, 1);
+            wodRogueRenumberRoster(c);
             c.points += refund;
             wodRogueLogPush('Dismissed ' + u.name + (refund ? ' (+' + refund + ' req refund).' : '.'));
             wodRogueSave();
@@ -47579,6 +47806,7 @@
                 }
                 if(!unit) continue;
                 unit.name = r.name;
+                unit.nameCustom = !!r.nameCustom;
                 unit.hp = Math.max(1, Math.min(r.maxHp, r.hp));
                 unit.maxHp = r.maxHp;
                 unit.manpower = Math.max(50, Math.min(r.maxManpower, r.manpower));
@@ -47910,6 +48138,7 @@
             }
             let lost = before - kept.length;
             c.roster = kept;
+            wodRogueRenumberRoster(c);
             // Campaign stats.
             if(!c.stats) c.stats = { battles: 0, wins: 0, defeats: 0, unitsLost: 0, unitsKilled: 0, unitsBought: 0, kills: 0, losses: 0 };
             if(c.stats.unitsKilled == null) c.stats.unitsKilled = 0;
@@ -53242,7 +53471,10 @@
                     unit.y = safeHex.y + (Math.random() * j * 2 - j);
                 }
             }
+            if(!gameData._unitNameOrderSeq) gameData._unitNameOrderSeq = 1;
+            unit._nameOrder = gameData._unitNameOrderSeq++;
             gameData.entities.push(unit);
+            if(!opts.keepName) wodRenumberOwnerUnits(unit.owner);
             if(type !== 'ship') {
                 if(opts.startSpawn) ensureStartUnitOnLandHex(unit, getNearestArmyStartSpawnHex(unit, unit.x, unit.y, 8));
                 snapUnitApartFromNeighbors(unit);
