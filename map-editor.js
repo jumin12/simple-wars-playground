@@ -2354,14 +2354,14 @@
         </section>
         <section class="editor-card">
           <h3>Faction start (saved map)</h3>
-          <p class="editor-hint" style="margin-top:0">Starting cash and manpower for each slot when playing this exported map.</p>
+          <p class="editor-hint" style="margin-top:0">Starting $ and manpower for each slot when playing this exported map.</p>
           <div class="editor-row"><label>Faction slot</label>
             <select id="editorEconomyFaction" class="editor-economy-faction-select" aria-label="Faction economy slot"></select>
           </div>
           <div class="editor-row"><label>Color</label>
             <input type="color" id="editorEconomyColor" value="#2ecc71" />
           </div>
-          <div class="editor-row"><label title="Faction 1 = human player treasury">Cash</label>
+          <div class="editor-row"><label title="Faction 1 = human player treasury">$</label>
             <input type="number" id="editorEconomyCash" min="0" step="250" />
           </div>
           <div class="editor-row"><label title="Faction 1 = human manpower pool">Manpower</label>
@@ -2371,7 +2371,7 @@
         </section>
         <section class="editor-card">
           <h3>Balance preview</h3>
-          <p class="editor-hint" style="margin-top:0">Live cash income (territory + towns) vs troop manpower. Updates while you edit.</p>
+          <p class="editor-hint" style="margin-top:0">Live $ income (territory + towns) vs troop manpower. Updates while you edit.</p>
           <div id="editorFactionChartWrap" class="editor-faction-chart-wrap">
             <div id="editorFactionChart" class="editor-hint" style="margin:0"></div>
           </div>
