@@ -460,11 +460,15 @@
     if (window._wodMusicUnlockBound) return;
     window._wodMusicUnlockBound = true;
     const unlock = () => {
+      if (window._wodDeferMusic) return;
+      ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
+        window.removeEventListener(ev, unlock, true);
+      });
       unlockFromGesture();
       if (wanted && !paused) start();
     };
     ['pointerdown', 'keydown', 'touchstart'].forEach((ev) => {
-      window.addEventListener(ev, unlock, { once: true, capture: true });
+      window.addEventListener(ev, unlock, { capture: true });
     });
   }
 
