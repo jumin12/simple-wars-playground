@@ -12016,7 +12016,8 @@
                 at: '2026-10-22T00:16:00-04:00',
                 title: 'Map editor',
                 items: [
-                    'Painting terrain and territory updates under the brush immediately, instead of redrawing the whole map.'
+                    'Painting terrain and territory updates under the brush immediately, instead of redrawing the whole map.',
+                    'A terrain stroke no longer leaves specks of water in the paint.'
                 ]
             },
             {
@@ -41403,10 +41404,10 @@
             for(let s = 0; s < seeds.length; s++) {
                 let seed = seeds[s];
                 if(!seed) continue;
+                // Square neighborhood. The map is a square lattice, and a hex disk
+                // leaves the diagonal cells out, which the water fill then shows through.
                 for(let dq = -R; dq <= R; dq++) {
-                    let drMin = Math.max(-R, -dq - R);
-                    let drMax = Math.min(R, -dq + R);
-                    for(let dr = drMin; dr <= drMax; dr++) {
+                    for(let dr = -R; dr <= R; dr++) {
                         let hex = gameData.hexes[(seed.q + dq) + ',' + (seed.r + dr)];
                         if(!hex) continue;
                         let k = hex.q + ',' + hex.r;
@@ -41488,10 +41489,12 @@
                 return;
             }
             let spacing = gameData.hexRadius * 1.35;
-            let halo = wodCollectHexHalo(seeds, 2);
+            let halo = wodCollectHexHalo(seeds, 3);
             if(!halo.length) return;
             let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-            let pad = spacing * 2.05;
+            // Stay inside the redrawn neighborhood so the flat water fill at the
+            // patch edge is never copied onto the map.
+            let pad = spacing * 1.35;
             for(let i = 0; i < seeds.length; i++) {
                 let hex = seeds[i];
                 if(!hex) continue;
@@ -41528,8 +41531,19 @@
                 let pctx = wodAcquirePatchCtx(pw, ph);
                 let offX = ox - x0 + margin;
                 let offY = oy - y0 + margin;
+                // Keep the existing ground. A flat water fill left blue specks wherever
+                // the local redraw did not cover a pixel the full map had already sealed.
                 pctx.fillStyle = getTerrainColor('water');
                 pctx.fillRect(0, 0, pw, ph);
+                pctx.drawImage(terrainBaseCanvas, x0 - margin, y0 - margin, pw, ph, 0, 0, pw, ph);
+                let clearR = spacing * 0.95;
+                for(let si = 0; si < seeds.length; si++) {
+                    let seed = seeds[si];
+                    if(!seed || !isWaterHex(seed)) continue;
+                    pctx.beginPath();
+                    pctx.arc(seed.x + offX, seed.y + offY, clearR, 0, Math.PI * 2);
+                    pctx.fill();
+                }
                 let set = new Set();
                 for(let i = 0; i < halo.length; i++) set.add(halo[i].q + ',' + halo[i].r);
                 wodDrawHexSet = set;
