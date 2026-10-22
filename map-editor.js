@@ -12,6 +12,7 @@
     territoryPainting: false,
     territoryPaintOwner: 1,
     brushSize: 1,
+    placeUnitType: "light",
     viewPanX: 0,
     viewPanY: 0,
     viewZoom: 1,
@@ -407,8 +408,24 @@
 
   function editorRefreshTradeRoutes() {
     if (window.WOD && typeof WOD.rebuildEditorTradeRoutes === "function") WOD.rebuildEditorTradeRoutes();
-    markEditorMapChanged();
     scheduleEditorRender();
+  }
+
+  function toolIsClickPlace(tool) {
+    return tool === "unit" || tool === "city" || tool === "factory" || tool === "harbor" || tool === "fort";
+  }
+
+  function queueEditorSnapshot() {
+    if (state._snapshotQueued) return;
+    state._snapshotQueued = true;
+    const run = () => {
+      state._snapshotQueued = false;
+      if (!state.open || !state.editorGestureMutatedMap) return;
+      editorPushSnapshot();
+      state.editorGestureMutatedMap = false;
+    };
+    if (typeof requestIdleCallback === "function") requestIdleCallback(run, { timeout: 500 });
+    else setTimeout(run, 32);
   }
 
   function renderFactionBalanceChart() {
@@ -1825,9 +1842,9 @@
         padding:10px 16px 12px; display:flex; flex-wrap:wrap; gap:14px; align-items:center;
         border-top:1px solid rgba(201,162,39,.22);
       }
-      .editor-gen-hint { font-size:11px; color:#7a92a8; flex:1 1 200px; line-height:1.35; min-width:160px; }
-      .editor-gen-shape { display:flex; align-items:flex-start; gap:8px; flex-wrap:wrap; }
-      .editor-gen-shape > span { font-size:10px; color:#9db3c7; text-transform:uppercase; letter-spacing:.1em; font-weight:800; flex:0 0 100%; }
+      .editor-gen-hint { font-size:11px; color:#7a92a8; flex:0 1 260px; line-height:1.35; min-width:160px; margin:0; }
+      .editor-gen-shape { display:flex; align-items:center; gap:12px; flex-wrap:wrap; flex:1 1 auto; }
+      .editor-gen-shape > span { font-size:10px; color:#9db3c7; text-transform:uppercase; letter-spacing:.1em; font-weight:800; flex:0 0 auto; }
       .editor-shape-btns { display:flex; flex-wrap:wrap; gap:5px; }
       .editor-shape-btns .editor-seg-btn { flex:1 1 auto; min-width:72px; font-size:11px; padding:6px 8px; }
       .editor-seg-btn {
@@ -1996,12 +2013,15 @@
         grid-template-columns: 1fr 1fr;
         gap: 8px;
       }
-      .editor-territory-inline {
+      .editor-territory-inline,
+      .editor-tool-inline {
         grid-column: 1 / -1;
         display: flex;
         gap: 8px;
         align-items: stretch;
       }
+      .editor-tool-inline > .editor-btn { flex: 1; min-width: 0; }
+      .editor-tool-inline > select { flex: 0 0 min(148px, 46%); }
       .editor-territory-inline > .editor-btn { flex: 1; min-width: 0; }
       .editor-terr-owner-wrap {
         flex: 0 0 min(148px, 42%);
@@ -2179,7 +2199,7 @@
     app.innerHTML = `
       <header class="editor-toolbar">
         <h1>Map editor</h1>
-        <p class="editor-toolbar-hint editor-toolbar-hint-desktop">Paint terrain and ownership, place towns and units. <strong>Left-drag</strong> to paint; use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Mouse wheel</strong> zooms. <strong>Middle-click drag</strong> pans the view. Drag unit chips from the palette onto the map (ships need water).</p>
+        <p class="editor-toolbar-hint editor-toolbar-hint-desktop">Paint terrain and ownership. <strong>Left-drag</strong> paints terrain. <strong>Click</strong> places a town, factory, harbor, or one unit. Use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Mouse wheel</strong> zooms. <strong>Middle-click drag</strong> pans the view. Drag unit chips from the palette onto the map (ships need water).</p>
         <p class="editor-toolbar-hint editor-toolbar-hint-touch">Paint terrain and ownership, place towns and units. Drag unit chips onto the map — ships need water. Use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Two fingers</strong> on the canvas pan and pinch-zoom.</p>
         <button type="button" class="editor-btn editor-btn-main" id="editorExitBtn">← Main menu</button>
       </header>
@@ -2196,7 +2216,7 @@
         </div>
         <div id="editorGenPanelGenerate" class="editor-gen-panel" data-gen-panel="generate">
           <div class="editor-gen-shape">
-            <span>Shape</span>
+            <p class="editor-gen-hint">Territory and units apply when cities are on. Use <strong>Random gen</strong> in the left panel to run with these settings.</p>
             <div class="editor-shape-btns">
             <button type="button" class="editor-seg-btn active" data-ed-shape="island">Island</button>
             <button type="button" class="editor-seg-btn" data-ed-shape="rectangle">Rectangle</button>
@@ -2211,7 +2231,6 @@
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenCities" checked /> Cities during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenTerritory" checked /> Territory during gen</label>
           <label class="editor-gen-tgl"><input type="checkbox" id="editorGenUnits" checked /> Units during gen</label>
-          <p class="editor-gen-hint">Territory and units apply when cities are on. Use <strong>Random gen</strong> in the left panel to run with these settings.</p>
         </div>
         <div id="editorGenPanelFiles" class="editor-gen-panel" data-gen-panel="files" style="display:none">
           <button type="button" class="editor-btn" id="editorExportJson">Export map JSON</button>
@@ -2267,7 +2286,15 @@
                 <select id="editorTerritoryOwner" class="editor-territory-owner-select" aria-label="Faction for territory paint"></select>
               </div>
             </div>
-            <button type="button" class="editor-btn" data-tool="unit">Click unit</button>
+            <div class="editor-tool-inline">
+              <button type="button" class="editor-btn" data-tool="unit">Place unit</button>
+              <select id="editorPlaceUnitType" class="editor-territory-owner-select" aria-label="Unit to place">
+                <option value="light">Infantry</option>
+                <option value="marine">Marines</option>
+                <option value="heavy">Armor</option>
+                <option value="ship">Ship</option>
+              </select>
+            </div>
             <button type="button" class="editor-btn" data-tool="factory">Add factory</button>
             <button type="button" class="editor-btn" data-tool="harbor">Add harbor</button>
             <button type="button" class="editor-btn" data-tool="fort">Place fort</button>
@@ -2469,12 +2496,25 @@
         syncTerritoryOwnerUi();
       });
     });
+    const placeUnitSel = app.querySelector("#editorPlaceUnitType");
+    if (placeUnitSel) {
+      placeUnitSel.value = state.placeUnitType;
+      placeUnitSel.addEventListener("change", () => {
+        const v = placeUnitSel.value;
+        state.placeUnitType = v === "marine" || v === "heavy" || v === "ship" ? v : "light";
+      });
+    }
     app.querySelectorAll("[data-gl]").forEach(btn => {
       btn.addEventListener("click", () => {
         if (!window.WOD || typeof WOD.toggleGameplayLayer !== "function") return;
-        WOD.toggleGameplayLayer(btn.dataset.gl);
+        const layer = btn.dataset.gl;
+        WOD.toggleGameplayLayer(layer);
         refreshEditorGameplayLayerButtons();
-        state.editorTerrainDirty = true;
+        if (layer === "terrain") state.editorTerrainDirty = true;
+        else if (layer === "diplomacy" && WOD.gameData.layers.diplomacy && typeof WOD.ensureEditorBorderLayer === "function")
+          WOD.ensureEditorBorderLayer();
+        else if (layer === "territory" && WOD.gameData.layers.territory && typeof WOD.ensureEditorTerritoryOverlay === "function")
+          WOD.ensureEditorTerritoryOverlay();
         scheduleEditorRender();
       });
     });
@@ -3133,10 +3173,8 @@
     const unit = WOD.createUnitAt(type, hex.x, hex.y, faction);
     state.selected = { type: "unit", value: unit };
     renderSelection();
-    markEditorMapChanged();
     scheduleEditorRender();
-    editorPushSnapshot();
-    state.editorGestureMutatedMap = false;
+    queueEditorSnapshot();
   }
 
   function paintAt(pos) {
@@ -3223,9 +3261,15 @@
       return true;
     }
     if (state.tool === "unit") {
-      touchEditorMutation();
+      const type = state.placeUnitType || "light";
       const uo = Math.max(1, state.owner || 1);
-      const unit = WOD.createUnitAt("light", hex.x, hex.y, uo);
+      let at = hex;
+      if (type === "ship" && !(WOD.isWaterHex && WOD.isWaterHex(hex))) {
+        at = findSpawnHexForType("ship", pos);
+        if (!at) return false;
+      }
+      touchEditorMutation();
+      const unit = WOD.createUnitAt(type, at.x, at.y, uo);
       state.selected = { type: "unit", value: unit };
       renderSelection();
       return true;
@@ -3290,14 +3334,12 @@
     };
     touchEditorMutation();
     WOD.gameData.cities.push(city);
-    for (const pt of WOD.getHexesInRadius(hex.q, hex.r, 2)) {
-      const h = WOD.gameData.hexes[`${pt.q},${pt.r}`];
-      if (h && h.type !== "water" && h.type !== "deep_water") {
-        h.type = "urban";
-        h.baseColor = WOD.getTerrainColor("urban");
-        h.cityId = city.id;
-        h.urbanVariant = Math.floor(Math.random() * 5);
-      }
+    for (const h of hexesInDisk(hex, 2)) {
+      if (h.type === "water" || h.type === "deep_water") continue;
+      h.type = "urban";
+      h.baseColor = WOD.getTerrainColor("urban");
+      h.cityId = city.id;
+      h.urbanVariant = Math.floor(Math.random() * 5);
     }
     state.selected = { type: "city", value: city };
     editorRefreshTradeRoutes();
@@ -3403,6 +3445,8 @@
       obj.y = hex.y;
       obj.q = hex.q;
       obj.r = hex.r;
+    } else if (toolIsClickPlace(state.tool)) {
+      return;
     } else if (state.tool !== "select") {
       if (!paintAt(posMid)) return;
     }
@@ -3420,7 +3464,7 @@
       state.cityMoveGhostAnchor = null;
       state.cityMoveAttachedHexRefs = null;
     }
-    if (state.open && state.editorGestureMutatedMap) {
+    if (state.open && state.editorGestureMutatedMap && !state._snapshotQueued) {
       editorPushSnapshot();
       state.editorGestureMutatedMap = false;
     }
@@ -3429,6 +3473,36 @@
     state.dragKind = null;
     state.paintStampKey = null;
     if (state.open) renderFactionBalanceChart();
+  }
+
+  function drawEditorTerrainLayers(ctx, canvas, vc, scale, L) {
+    const parts = window.WOD && typeof WOD.getEditorTerrainParts === "function" ? WOD.getEditorTerrainParts() : null;
+    if (parts && parts.base && parts.base.width > 1) {
+      const x0 = canvas.width / 2 + (parts.minX - vc.cx) * scale;
+      const y0 = canvas.height / 2 + (parts.minY - vc.cy) * scale;
+      const dw = parts.base.width * scale;
+      const dh = parts.base.height * scale;
+      ctx.drawImage(parts.base, x0, y0, dw, dh);
+      if (L.territory && parts.overlay && parts.overlay.width === parts.base.width && parts.overlay.height === parts.base.height) {
+        ctx.save();
+        ctx.globalAlpha = 0.32;
+        ctx.drawImage(parts.overlay, x0, y0, dw, dh);
+        ctx.restore();
+      }
+      if (L.diplomacy && parts.borders && parts.borders.width === parts.base.width && parts.borders.height === parts.base.height)
+        ctx.drawImage(parts.borders, x0, y0, dw, dh);
+      return;
+    }
+    if (typeof WOD.getTerrainBitmap === "function") {
+      try {
+        const tb = WOD.getTerrainBitmap();
+        if (tb && tb.img && tb.width > 0) {
+          const x0 = canvas.width / 2 + (tb.minX - vc.cx) * scale;
+          const y0 = canvas.height / 2 + (tb.minY - vc.cy) * scale;
+          ctx.drawImage(tb.img, x0, y0, tb.width * scale, tb.height * scale);
+        }
+      } catch (e) { /* ignore */ }
+    }
   }
 
   function renderEditor() {
@@ -3466,16 +3540,7 @@
     } else {
       flushEditorPatch();
     }
-    if (typeof WOD.getTerrainBitmap === "function") {
-      try {
-        const tb = WOD.getTerrainBitmap();
-        if (tb && tb.img && tb.width > 0) {
-          const x0 = canvas.width / 2 + (tb.minX - vc.cx) * scale;
-          const y0 = canvas.height / 2 + (tb.minY - vc.cy) * scale;
-          ctx.drawImage(tb.img, x0, y0, tb.width * scale, tb.height * scale);
-        }
-      } catch (e) { /* ignore */ }
-    }
+    drawEditorTerrainLayers(ctx, canvas, vc, scale, L);
 
     if (L.cities) {
       ctx.strokeStyle = "rgba(255, 255, 255, 0.4)";

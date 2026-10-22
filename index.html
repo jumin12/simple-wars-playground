@@ -12013,6 +12013,16 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-22T01:55:00-04:00',
+                title: 'Map editor',
+                items: [
+                    'Placing a town, factory, harbor, or urban tiles no longer stalls the editor.',
+                    'Place unit is a click. Pick infantry, marines, armor, or a ship beside the button. Holding does not paint units.',
+                    'Dropping a unit on the map shows up immediately.',
+                    'View layers switch without rebuilding the map.'
+                ]
+            },
+            {
                 at: '2026-10-22T00:16:00-04:00',
                 title: 'Map editor',
                 items: [
@@ -39922,6 +39932,8 @@
         let wodEditorPatchCtx = null;
         let wodBorderLayerCanvas = null;
         let wodBorderLayerCtx = null;
+        let wodEditorBordersDirty = false;
+        let wodEditorOverlayDirty = false;
         let territoryOverlayCanvas = null;
         let wodPoliticalStagingCanvas = null;
         let terrainBounds = {minX: 0, maxX: 0, minY: 0, maxY: 0};
@@ -41568,10 +41580,17 @@
                 terrainBaseCtx.drawImage(wodEditorPatchCanvas, margin, margin, w, hgt, x0, y0, w, hgt);
                 terrainBaseCtx.restore();
             }
-            if(gameData.layers.territory && (terrainChanged || ownersChanged))
-                wodPatchTerritoryOverlay(halo, x0, y0, w, hgt, ox, oy);
-            if(ownersChanged && gameData.layers.diplomacy)
-                wodRedrawBorderLayer();
+            if(terrainChanged || ownersChanged) {
+                if(gameData.layers.territory)
+                    wodPatchTerritoryOverlay(halo, x0, y0, w, hgt, ox, oy);
+                else wodEditorOverlayDirty = true;
+            }
+            if(ownersChanged) {
+                if(gameData.layers.diplomacy) {
+                    wodRedrawBorderLayer();
+                    wodEditorBordersDirty = false;
+                } else wodEditorBordersDirty = true;
+            }
             wodCompositeTerrainRect(x0, y0, w, hgt);
             wodTerrainPoliticalDirty = false;
             terrainNeedsUpdate = false;
@@ -53611,6 +53630,27 @@
             },
             getTerrainBitmap() {
                 return { img: terrainCanvas, minX: terrainBounds.minX, minY: terrainBounds.minY, width: terrainCanvas.width, height: terrainCanvas.height };
+            },
+            getEditorTerrainParts() {
+                return {
+                    base: terrainBaseCanvas,
+                    overlay: territoryOverlayCanvas,
+                    borders: wodBorderLayerCanvas,
+                    minX: terrainBounds.minX,
+                    minY: terrainBounds.minY
+                };
+            },
+            ensureEditorBorderLayer() {
+                if(!wodEditorBordersDirty && wodBorderLayerCanvas && wodBorderLayerCanvas.width === terrainBaseCanvas.width && wodBorderLayerCanvas.height === terrainBaseCanvas.height)
+                    return;
+                wodRedrawBorderLayer();
+                wodEditorBordersDirty = false;
+            },
+            ensureEditorTerritoryOverlay() {
+                if(!wodEditorOverlayDirty && territoryOverlayCanvas && territoryOverlayCanvas.width === terrainBaseCanvas.width && territoryOverlayCanvas.height === terrainBaseCanvas.height)
+                    return;
+                drawTerritoryOverlay(terrainCtx, -terrainBounds.minX, -terrainBounds.minY);
+                wodEditorOverlayDirty = false;
             },
             invalidateTerrain() { wodMarkTerrainFullDirty(); },
             setEditorSuppressTerrainBake(on) { wodSuppressTerrainBake = !!on; },
