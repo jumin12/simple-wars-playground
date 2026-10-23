@@ -2874,7 +2874,7 @@
   function editorPointerUp(e) {
     editorPtrs.delete(e.pointerId);
     if (editorPtrs.size < 2) editorPinch = null;
-    if (editorPtrs.size === 0) onEditorUp();
+    if (editorPtrs.size === 0) onEditorUp(e.type === "pointerup" ? e : undefined);
   }
 
   function editorWorldPos(event) {
@@ -3347,6 +3347,18 @@
     return city;
   }
 
+  function paintEditorSegment(pos) {
+    const from = state.lastPaintPos || pos;
+    const step = Math.max(1, (WOD.gameData.hexRadius || 10) * 0.45);
+    const count = Math.max(1, Math.ceil(Math.hypot(pos.x-from.x, pos.y-from.y) / step));
+    let changed = false;
+    for(let i = 1; i <= count; i++) {
+      changed = paintAt({x: from.x+(pos.x-from.x)*i/count, y: from.y+(pos.y-from.y)*i/count}) || changed;
+    }
+    state.lastPaintPos = pos;
+    return changed;
+  }
+
   function onEditorDown(event) {
     if (!state.open) return;
     if (state.missionMapPick && event.button === 0) {
@@ -3365,6 +3377,8 @@
     }
     state.viewPanDrag = null;
     const pos = editorWorldPos(event);
+    state.lastPaintPos = pos;
+    state.paintStampKey = null;
     state.dragging = true;
     if (state.tool === "territory" && !state.territoryPainting) {
       state.territoryPainting = true;
@@ -3448,12 +3462,17 @@
     } else if (toolIsClickPlace(state.tool)) {
       return;
     } else if (state.tool !== "select") {
-      if (!paintAt(posMid)) return;
+      if (!paintEditorSegment(posMid)) return;
     }
     scheduleEditorRender();
   }
 
-  function onEditorUp() {
+  function onEditorUp(event) {
+    if(state.open && state.dragging && !state.viewPanDrag && paintUsesBrush(state.tool) && event && Number.isFinite(event.clientX)) {
+      paintEditorSegment(editorWorldPos(event));
+      scheduleEditorRender();
+    }
+    state.lastPaintPos = null;
     if (state.open && state.editorMarquee) finalizeEditorMarquee();
     if (state.open && state.territoryPainting) {
       WOD.endHexOwnerBatch();

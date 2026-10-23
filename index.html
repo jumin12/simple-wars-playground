@@ -2191,13 +2191,7 @@
             pointer-events: none !important;
         }
 
-        /* Campaign battles: army is fixed — hide the Units recruit tab entirely. */
-        #inGameUI.wod-campaign-battle .wod-m-tab[data-wod-mtab="units"],
-        #inGameUI.wod-campaign-battle #wodMUnitsBundle,
-        #inGameUI.wod-campaign-battle #wodPcProdTabUnits,
-        #inGameUI.wod-campaign-battle #wodPcProdPaneUnits {
-            display: none !important;
-        }
+        /* Campaign unit controls call paid reserves as reinforcements. */
 
         .mp-host-dlg {
             position: fixed;
@@ -11466,6 +11460,10 @@
                 </div>
 
                 <div class="esc-help-block">
+                    <h4>Construction and reinforcements</h4>
+                    <p class="esc-help-prose">All towns start empty. Structures take <strong>30 seconds</strong> to build. Infantry take <strong>10s</strong>, marines <strong>15s</strong>, armor <strong>20s</strong> and ships <strong>25s</strong>. Each town handles one order at a time. Pausing stops progress; siege pauses town production. In campaigns, the unit buttons call existing <strong>reserve reinforcements</strong> without charging money or manpower again. Undeployed reserves stay safe between battles.</p>
+                </div>
+                <div class="esc-help-block">
                     <h4>Encirclement</h4>
                     <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units caught inside take about <strong>3.5% max HP attrition per second</strong>, flash a warning, and <strong>cannot heal</strong> until the pocket is broken. <strong>Towns inside an encircled pocket cannot train units or build ships</strong> until a land corridor reopens. You may still attack outward and seize tiles to reopen a corridor — the penalty is meant to reward tightening sieges without making escape impossible.</p>
                 </div>
@@ -11483,7 +11481,7 @@
 
                 <div class="esc-help-block">
                     <h4>Orders on desktop</h4>
-                    <p class="esc-help-prose">Click or box-select troops; hold <strong>Shift</strong> to add to the selection. Issue moves with a <strong>right-click</strong>, chain <strong>Shift + right-click</strong> waypoints (the group keeps its current formation), <strong>Shift + right-drag</strong> a line to waypoint a new formation, or click-drag from a selected unit to paint a <strong>stroke</strong> of destinations across the map.</p>
+                    <p class="esc-help-prose">Click or box-select troops; hold <strong>Shift</strong> to add to the selection. Save selected troops with <strong>Ctrl + 0–9</strong>; press the number or click its HUD group to recall them. Issue moves with a <strong>right-click</strong>, chain <strong>Shift + right-click</strong> waypoints (the group keeps its current formation), <strong>Shift + right-drag</strong> a line to waypoint a new formation, or click-drag from a selected unit to paint a <strong>stroke</strong> of destinations across the map.</p>
                     <figure class="esc-help-figure">
                         <canvas id="menuHelpCanvasMove" width="200" height="70" aria-hidden="true"></canvas>
                     </figure>
@@ -12635,6 +12633,19 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-22T22:30:00-04:00',
+                title: 'Deployment, construction and command groups',
+                items: [
+                    'Opening armies are 50% smaller. About 20% deploy near the front and 80% around towns; armor always starts in the rear.',
+                    'All towns start without buildings. Forts, factories, farms and bridges take 30 seconds; infantry train in 10s, marines in 15s, armor in 20s and ships in 25s. AI follows the same rules.',
+                    'Ctrl + 0–9 saves a unit group; press its number or click its HUD button to select it.',
+                    'AI fields separate town/fort guards, frontline defenders, attack groups, flanking groups, armor spearheads, marines and naval groups.',
+                    'Campaigns deploy half your roster. Call remaining reserves as timed reinforcements with the unit buttons; units keep their names, wounds and experience.',
+                    'Drag campaign troops to choose deployment order. Dismiss directly with a 50% refund; Undo restores accidental dismissals.',
+                    'Fast editor brush strokes interpolate between pointer samples for continuous paint.'
+                ]
+            },
+            {
                 at: '2026-10-22T03:05:00-04:00',
                 title: 'Menu and armies',
                 items: [
@@ -12908,9 +12919,6 @@
             }
 
             function setPane(panelId, expand) {
-                if(panelId === 'units' && gameData && gameData._campaignRun) {
-                    panelId = 'structures';
-                }
                 tabs.forEach(t => {
                     let on = t.getAttribute('data-wod-pc-pane') === panelId;
                     t.classList.toggle('active', on);
@@ -12970,10 +12978,6 @@
                     if(root.getAttribute('data-build-picking') && typeof exitBuildPlacementMode === 'function')
                         exitBuildPlacementMode();
                     let id = btn.getAttribute('data-wod-mtab');
-                    if(id === 'units' && gameData && gameData._campaignRun) {
-                        showNotification('Campaign: recruit between battles on the war map.');
-                        return;
-                    }
                     if(id === 'intel') {
                         toggleWodStatsPanel();
                         syncTabAria();
@@ -13314,7 +13318,8 @@
                         (canHarbor ? '' : ' disabled') +
                         ' title="Build Harbor ($' + WOD_PRICE_HARBOR + ')">+ Harbor $' + (WOD_PRICE_HARBOR / 1000) + 'k</button>';
                 }
-                let actionsOrDone = actions || '<span class="cities-complete">Complete</span>';
+                let job = wodCityProductionJob(city);
+                let actionsOrDone = job ? '<span class="cities-complete">' + job.mode + ' · ' + Math.ceil(job.remaining) + 's</span>' : (actions || '<span class="cities-complete">Complete</span>');
                 rows += '<tr class="cities-row' + sel + '" data-city-id="' + cid + '">' +
                     '<td><button type="button" class="cities-name-btn" data-city-focus="' + cid + '">' + name + '</button></td>' +
                     '<td><span class="cities-yield">' + cashTxt + '</span></td>' +
@@ -14779,22 +14784,15 @@
             if(!root) return;
             let camp = !!(gameData && gameData._campaignRun);
             root.classList.toggle('wod-campaign-battle', camp);
-            if(camp) {
-                // Force production UI off the Units pane if it was open.
-                let unitsTab = document.getElementById('wodPcProdTabUnits');
-                if(unitsTab && unitsTab.classList.contains('active')) {
-                    let structTab = root.querySelector('.wod-pc-prod-tab[data-wod-pc-pane="structures"]');
-                    if(structTab) structTab.click();
-                }
-                if(root.getAttribute('data-mtab') === 'units') {
-                    root.removeAttribute('data-mtab');
-                    document.querySelectorAll('.wod-m-tab').forEach(b => {
-                        b.classList.toggle('active', false);
-                        b.setAttribute('aria-selected', 'false');
-                    });
-                }
+            if(!camp) {
+                root.querySelectorAll('button[onclick^="buyUnit"]').forEach(b => b.disabled = false);
+                wodApplyPeriodUiLabels();
             }
+            let label = document.getElementById('wodPcProdTabUnits');
+            if(label) label.title = camp ? 'Call reserve reinforcements' : 'Train units';
+            wodRefreshCommandHud(true);
         }
+
         function wodMpIsHumanOwner(owner) {
             if(!gameData.mp || !gameData.mp.enabled) return owner === 1;
             if(!wodMpSeatTypeIsHuman(owner)) return false;
@@ -17767,7 +17765,7 @@
 
         function wodNormalizeStartingCityEconomy(ownerIds) {
             if(!ownerIds || ownerIds.length === 0 || !gameData.cities) return;
-            let sortedOwners = [...ownerIds].sort((a, b) => a - b);
+            let sortedOwners = [...new Set([...ownerIds, ...gameData.cities.map(c => c.owner)])].sort((a, b) => a - b);
             for(let owner of sortedOwners) {
                 let cities = gameData.cities
                     .filter(c => c && c.owner === owner)
@@ -17777,7 +17775,8 @@
                         return a.r - b.r;
                     });
                 for(let i = 0; i < cities.length; i++) {
-                    cities[i].hasFactory = i === 0;
+                    cities[i].hasFactory = false;
+                    cities[i].hasFarm = false;
                     cities[i].hasHarbor = false;
                     cities[i].incomeBonus = 0;
                     cities[i].manpowerBonus = 0;
@@ -18505,6 +18504,7 @@
             if(s.manpowerIncome !== undefined && (!gameData.mp || !gameData.mp.enabled || lo === 1)) gameData.manpowerIncome = s.manpowerIncome;
             if(s.aiMoneyByOwner) Object.assign(gameData.aiMoneyByOwner, s.aiMoneyByOwner);
             if(s.aiManpowerByOwner) Object.assign(gameData.aiManpowerByOwner, s.aiManpowerByOwner);
+            if(Array.isArray(s.constructionJobs)) gameData.constructionJobs = s.constructionJobs.map(j => Object.assign({}, j));
             if(s.cities) {
                 for(let u of s.cities) {
                     let c = gameData.cities.find(cc => cc.q === u.q && cc.r === u.r);
@@ -18717,6 +18717,7 @@
                 shipKillsByOwner: Object.assign({}, gameData.shipKillsByOwner || {}),
                 sessionIncomeByOwner: Object.assign({}, (gameData._sessionIncomeAcc && gameData._sessionIncomeAcc.byOwner) || {}),
                 sessionCitiesCapturedByOwner: Object.assign({}, gameData.sessionCitiesCapturedByOwner || {}),
+                constructionJobs: gameData.constructionJobs || [],
                 entities: gameData.entities.filter(e => e.hp > 0).map(wodStripEntityForNet),
                 hexOwners: owners,
                 cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hasFarm: !!c.hasFarm, hp: c.hp })),
@@ -20170,6 +20171,7 @@
             wodNormalizeStartingCityEconomy(ownersList);
             gameData._landIncomeCacheDirty = true;
             if(!gameData.entities.length) spawnInitialFrontlineUnits(ownersList);
+            else if(gameData.loadedCustomMap) wodReduceAuthoredStartingArmy(ownersList);
             wodMarkTerrainPoliticalDirty();
             let startMe = gameData.cities.find(c => c.owner === locO && c.hasFactory) || gameData.cities.find(c => c.owner === locO);
             if(startMe) {
@@ -26189,12 +26191,12 @@
                 return;
             }
             if(gameData._endCountdowns && gameData._endCountdowns.cityLoss) return;
-            // Campaign battles: a fixed army that is wiped out cannot be rebuilt — losing
-            // every combat unit is a defeat even in domination mode.
+            // A campaign army is lost only when fielded troops and callable reserves are exhausted.
             if(gameData._campaignRun) {
                 // Briefing / load / deploy: roster is not battle-live yet — never arm wipe defeat.
                 if(!gameData._campaignRun.battleLive) return;
-                if(wodTickEndCountdown('campArmyLost', countPlayerCombatUnitsExcludingConvoys() === 0, simDt, 'Your army is destroyed! Defeat in', true)) {
+                let reservesRemain = wodCampaignReserveUnits().length > 0 || (gameData.constructionJobs || []).some(j => j.rosterId);
+                if(wodTickEndCountdown('campArmyLost', countPlayerCombatUnitsExcludingConvoys() === 0 && !reservesRemain, simDt, 'Your army is destroyed! Defeat in', true)) {
                     triggerCampaignDefeat('Defeat — your army was destroyed.');
                     return;
                 }
@@ -31978,200 +31980,64 @@
             }
         }
 
-        function spawnInitialFrontlineUnits(ownerIds) {
-            if(!ownerIds || ownerIds.length === 0) return;
-            gameData._enemyDistField = null; // territory just changed; rebuild distance fields lazily
-            let unitsPerOwner = Math.max(12, Math.min(28, Math.floor(gameData.mapRadius / 3.5))); // Doubled troops
-            let minSep = gameData.hexRadius * 2.85;
-            let minSepSq = minSep * minSep;
-            let safeUnitSepSq = START_SPAWN_MIN_UNIT_DISTANCE * START_SPAWN_MIN_UNIT_DISTANCE;
-            let frontHexesByOwner = {};
+        function wodDeployStartingArmy(ownerIds) {
+            gameData._enemyDistField = null;
             for(let owner of ownerIds) {
-                frontHexesByOwner[owner] = wodGetOwnerSpawnAnchorHexes(owner).sort(
-                    (a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x)
-                );
-            }
-            function pickFallbackStartingHex(owner, type, usedPositions, enemyFrontHexes, forGameStart) {
-                let probe = { type, owner };
-                let best = null;
-                let bestScore = Infinity;
-                let minSepSqFallback = Math.pow(gameData.hexRadius * (type === 'heavy' ? 2.4 : 2.0), 2);
-                let minEnemySqStart = START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * 0.82;
-                // Prefer tiles near owned cities, then a capped owned-land sample — never full-map × every unit.
-                let pool = [];
-                let seen = new Set();
-                for(let c of gameData.cities) {
-                    if(!c || c.owner !== owner) continue;
-                    let near = getHexesInRadius(c.q, c.r, 10);
-                    for(let pt of near) {
-                        let hex = gameData.hexes[`${pt.q},${pt.r}`];
-                        if(!hex || hex.owner !== owner) continue;
-                        let k = getHexKey(hex);
-                        if(seen.has(k)) continue;
-                        seen.add(k);
-                        pool.push(hex);
-                    }
-                }
-                if(pool.length < 80) {
-                    for(let hi = 0; hi < gameData.hexList.length && pool.length < 420; hi += 3) {
-                        let hex = gameData.hexList[hi];
-                        if(!hex || hex.owner !== owner) continue;
-                        if(isWaterHex(hex) || hex.type === 'mountain') continue;
-                        let k = getHexKey(hex);
-                        if(seen.has(k)) continue;
-                        seen.add(k);
-                        pool.push(hex);
-                    }
-                }
-                for(let relaxed = 0; relaxed < 3; relaxed++) {
-                    best = null;
-                    bestScore = Infinity;
-                    for(let hex of pool) {
-                        if(!isArmyStartSpawnHex(probe, hex)) continue;
-                        if(forGameStart && isFrontlineHex(hex, owner)) continue;
-                        if(!forGameStart && relaxed === 0 && isFrontlineHex(hex, owner)) continue;
-                        if(relaxed < 2 && !worldPositionClearOfUnits(hex.x, hex.y, gameData.hexRadius * 1.65, null)) continue;
-                        let blockedByUsed = usedPositions.some(pos => {
-                            let dx = pos.x - hex.x;
-                            let dy = pos.y - hex.y;
-                            return dx * dx + dy * dy < minSepSqFallback * (relaxed ? 0.55 : 1);
-                        });
-                        if(blockedByUsed) continue;
-                        let enemyDistSq = wodMinDistSqToEnemyTerritory(hex.x, hex.y, owner);
-                        if(enemyFrontHexes.length)
-                            enemyDistSq = Math.min(enemyDistSq, nearestHexDistanceSq(hex.x, hex.y, enemyFrontHexes));
-                        if(forGameStart && enemyDistSq < minEnemySqStart * (relaxed ? 0.65 : 1)) continue;
-                        let score = -Math.min(enemyDistSq, Math.pow(gameData.hexRadius * 24, 2));
-                        if(!forGameStart && isFrontlineHex(hex, owner)) score += 250000;
-                        score += hexMountainProximityScore(hex) * 820;
-                        if(score < bestScore) {
-                            bestScore = score;
-                            best = hex;
-                        }
-                    }
-                    if(best) return best;
-                }
-                return null;
-            }
-            function wodFixInvalidStartUnits(ownerIds, frontHexesByOwner) {
-                if(!ownerIds || !ownerIds.length) return;
-                let minEnemySq = START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * START_SPAWN_MIN_ENEMY_FRONT_DISTANCE * 0.82;
-                let usedAll = gameData.entities.filter(u => u && u.hp > 0).map(u => ({ x: u.x, y: u.y }));
-                for(let i = gameData.entities.length - 1; i >= 0; i--) {
-                    let unit = gameData.entities[i];
-                    if(!unit || unit.hp <= 0 || unit.type === 'ship' || unit.type === 'convoy') continue;
-                    if(ownerIds.indexOf(unit.owner) < 0) continue;
-                    let probe = { type: unit.type, owner: unit.owner };
-                    let h = getNearestHexToPoint(unit.x, unit.y);
-                    let invalid = !h || !isArmyStartSpawnHex(probe, h) || isFrontlineHex(h, unit.owner);
-                    if(!invalid && wodMinDistSqToEnemyTerritory(unit.x, unit.y, unit.owner) < minEnemySq) invalid = true;
-                    if(!invalid) continue;
-                    gameData.entities.splice(i, 1);
-                    let enemyFront = [];
-                    for(let o of ownerIds) {
-                        if(o !== unit.owner) enemyFront.push(...(frontHexesByOwner[o] || []));
-                    }
-                    let hex = pickFallbackStartingHex(unit.owner, unit.type, usedAll, enemyFront, true);
-                    if(!hex) continue;
-                    createUnitAt(unit.type, hex.x, hex.y, unit.owner, { startSpawn: true });
-                    usedAll.push({ x: hex.x, y: hex.y });
-                }
-            }
-            gameData.entities = [];
-            let usedAll = [];
-            for(let owner of ownerIds) {
-                let frontHexes = frontHexesByOwner[owner];
-                let enemyFrontHexes = [];
-                for(let other of ownerIds) {
-                    if(other !== owner) enemyFrontHexes.push(...(frontHexesByOwner[other] || []));
-                }
-
+                let army = gameData.entities.filter(u => u.owner === owner && u.hp > 0 && u.type !== 'convoy');
+                for(let u of army) if(u.type === 'ship') u._startDeployment = 'town';
+                let land = army.filter(u => u.type !== 'ship');
+                let towns = gameData.cities.filter(c => c.owner === owner);
+                let pool = gameData.hexList.filter(h => h.owner === owner && !isWaterHex(h) && h.type !== 'mountain');
+                let safe = pool.filter(h => !isFrontlineHex(h, owner));
+                let spacing = Math.pow(gameData.hexRadius * 2.1, 2);
                 let used = [];
-                let placedLights = 0;
-                for(let i = 0; i < unitsPerOwner; i++) {
-                    if(frontHexes.length === 0) break;
-                    let startIdx;
-                    if(frontHexes.length <= 1) startIdx = 0;
-                    else startIdx = Math.min(frontHexes.length - 1, Math.floor(((i + 0.5) / unitsPerOwner) * frontHexes.length));
-                    let chosen = null;
-                    let frontTryCap = Math.min(frontHexes.length, 36);
-                    for(let step = 0; step < frontTryCap; step++) {
-                        let candidate = frontHexes[(startIdx + step) % frontHexes.length];
-                        if(candidate.type === 'mountain') continue;
-                        let tooCloseHex = used.some(hex => {
-                            let dx = hex.x - candidate.x;
-                            let dy = hex.y - candidate.y;
-                            return dx * dx + dy * dy < minSepSq;
-                        });
-                        let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, safeUnitSepSq, true);
-                        if(!tooCloseHex && spawnHex) {
-                            chosen = spawnHex;
-                            break;
-                        }
-                    }
-                    if(!chosen) {
-                        for(let step = 0; step < frontTryCap; step++) {
-                            let candidate = frontHexes[(startIdx + step) % frontHexes.length];
-                            if(candidate.type === 'mountain') continue;
-                            let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, minSepSq, true);
-                            if(spawnHex) {
-                                chosen = spawnHex;
-                                break;
-                            }
-                        }
-                    }
-                    if(!chosen) continue;
-                    used.push(chosen);
-                    let unit = createUnitAt('light', chosen.x, chosen.y, owner, { startSpawn: true });
-                    usedAll.push({x: unit.x, y: unit.y});
-                    placedLights++;
-                }
-                while(placedLights < unitsPerOwner) {
-                    let spawnHex = pickFallbackStartingHex(owner, 'light', usedAll, enemyFrontHexes, true);
-                    if(!spawnHex) break;
-                    let unit = createUnitAt('light', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
-                    used.push(spawnHex);
-                    usedAll.push({x: unit.x, y: unit.y});
-                    placedLights++;
-                }
-
-                let numHeavies = 2;
-                let placedHeavies = 0;
-                for(let h = 0; h < numHeavies; h++) {
-                    if(frontHexes.length === 0) break;
-                    let placed = false;
-                    let hAnchor = frontHexes.length <= 1 ? 0 : Math.min(frontHexes.length - 1, Math.round(((h + 1) / (numHeavies + 1)) * (frontHexes.length - 1)));
-                    for(let attempt = 0; attempt < Math.min(80, frontHexes.length * 4); attempt++) {
-                        let candidate = frontHexes[(hAnchor + attempt) % frontHexes.length];
-                        if(candidate.type === 'mountain') continue;
-                        let spawnHex = pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, safeUnitSepSq, true);
-                        if(spawnHex && worldPositionClearOfUnits(spawnHex.x, spawnHex.y, minSep, null)) {
-                            let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
-                            usedAll.push({x: unit.x, y: unit.y});
-                            placed = true;
-                            placedHeavies++;
-                            break;
-                        }
-                    }
-                    if(!placed) {
-                        let candidate = frontHexes.find(x => x.type !== 'mountain') || frontHexes[0];
-                        let spawnHex = candidate ? pickBacklineSpawnHex(candidate, owner, enemyFrontHexes, usedAll, minSepSq, true) : null;
-                        if(spawnHex) {
-                            let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
-                            usedAll.push({x: unit.x, y: unit.y});
-                            placedHeavies++;
-                        }
-                    }
-                }
-                while(placedHeavies < numHeavies) {
-                    let spawnHex = pickFallbackStartingHex(owner, 'heavy', usedAll, enemyFrontHexes, true);
-                    if(!spawnHex) break;
-                    let unit = createUnitAt('heavy', spawnHex.x, spawnHex.y, owner, { startSpawn: true });
-                    usedAll.push({x: unit.x, y: unit.y});
-                    placedHeavies++;
+                let frontCount = Math.min(land.filter(u => u.type !== 'heavy').length, Math.round(land.length * 0.2));
+                // Armor goes last so the infantry frontage quota can never include armor.
+                land.sort((a, b) => (a.type === 'heavy') - (b.type === 'heavy'));
+                for(let i = 0; i < land.length; i++) {
+                    let u = land[i], front = i < frontCount && u.type !== 'heavy';
+                    let town = towns[(i - frontCount + towns.length * 100) % Math.max(1, towns.length)];
+                    let candidates = front ? safe : safe.filter(h => wodMinDistSqToEnemyTerritory(h.x, h.y, owner) >= Math.pow(gameData.hexRadius * 4, 2));
+                    if(!candidates.length) candidates = safe;
+                    candidates = candidates.slice().sort((a, b) => {
+                        const score = h => front ? wodMinDistSqToEnemyTerritory(h.x, h.y, owner)
+                            : (town ? (h.x-town.x)**2 + (h.y-town.y)**2 : -wodMinDistSqToEnemyTerritory(h.x, h.y, owner));
+                        return score(a) - score(b);
+                    });
+                    let h = candidates.find(h => used.every(p => (p.x-h.x)**2 + (p.y-h.y)**2 >= spacing));
+                    if(!h) h = candidates.find(h => used.every(p => (p.x-h.x)**2 + (p.y-h.y)**2 >= spacing * 0.25));
+                    // Never put armor on a border, even on an unusually narrow authored map.
+                    if(!h) h = candidates[i % Math.max(1, candidates.length)];
+                    if(!h) { gameData.entities = gameData.entities.filter(e => e !== u); continue; }
+                    u.x = h.x; u.y = h.y; u._drawX = h.x; u._drawY = h.y;
+                    u.target = null; u.path = null; u.orderTarget = null;
+                    u._startDeployment = front ? 'front' : 'town';
+                    used.push(h);
                 }
             }
-            wodFixInvalidStartUnits(ownerIds, frontHexesByOwner);
+        }
+
+        function wodReduceAuthoredStartingArmy(ownerIds) {
+            for(let owner of ownerIds) {
+                let army = gameData.entities.filter(u => u.owner === owner && u.type !== 'convoy');
+                if(army.some(u => u._startDeployment)) continue;
+                let keep = new Set(army.filter((u, i) => i % 2 === 0));
+                gameData.entities = gameData.entities.filter(u => u.owner !== owner || u.type === 'convoy' || keep.has(u));
+            }
+            wodDeployStartingArmy(ownerIds);
+        }
+
+        function spawnInitialFrontlineUnits(ownerIds) {
+            if(!ownerIds || !ownerIds.length) return;
+            gameData.entities = [];
+            let lights = Math.max(1, Math.round(Math.max(12, Math.min(28, Math.floor(gameData.mapRadius / 3.5))) * 0.5));
+            for(let owner of ownerIds) {
+                let c = gameData.cities.find(c => c.owner === owner);
+                if(!c) continue;
+                for(let i = 0; i < lights; i++) createUnitAt('light', c.x, c.y, owner, { startSpawn: true });
+                createUnitAt('heavy', c.x, c.y, owner, { startSpawn: true });
+            }
+            wodDeployStartingArmy(ownerIds);
         }
 
         function findNearestOwnedHex(owner, x, y, avoidFront = false) {
@@ -35263,7 +35129,7 @@
                     r: hx.r,
                     x: hx.x,
                     y: hx.y,
-                    hasFactory: true,
+                    hasFactory: false,
                     id: '_vor_seed_' + ow,
                 };
                 seedsByOwner[ow] = o;
@@ -35544,7 +35410,7 @@
                         q: hx.q,
                         r: hx.r,
                         owner: ow,
-                        hasFactory: ti === 0,
+                        hasFactory: false,
                         hasHarbor: false,
                         hasFarm: false,
                         hp: 1000,
@@ -35674,6 +35540,8 @@
 
             // Loaded custom map (library / JSON / editor export): keep borders, city ownership, factories/harbors, and unit positions.
             if(preserveLoadedLayout) {
+                wodNormalizeStartingCityEconomy(ownersList);
+                wodReduceAuthoredStartingArmy(ownersList);
                 gameData.tradeTimer = 0;
                 let locO = 1;
                 let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 10000;
@@ -35845,7 +35713,7 @@
                 }
 
                 startCity.owner = owner;
-                startCity.hasFactory = true;
+                startCity.hasFactory = false;
                 startCities.push(startCity);
                 gameData.aiMoneyByOwner[owner] = owner === locO ? 0 : (parseInt(document.getElementById('setupMoney').value) || 10000);
                 gameData.aiManpowerByOwner[owner] = owner === locO ? 0 : 5000;
@@ -37031,6 +36899,10 @@
             wodMpClearTerrainCachesForNewMatch();
         }
         function wodPrepareForNewMatch(opts) {
+            gameData.controlGroups = {};
+            gameData.constructionJobs = [];
+            gameData.aiTaskForces = {};
+            wodRefreshCommandHud(true);
             opts = opts || {};
             wodClearMenuBattleMemory();
             gameData.menuAttractMode = false;
@@ -37086,6 +36958,7 @@
                 aiStrategyTimer: gameData.aiStrategyTimer || 0,
                 aiFocusTimer: gameData.aiFocusTimer || 0,
                 aiFrontFocus: gameData.aiFrontFocus ? JSON.parse(JSON.stringify(gameData.aiFrontFocus)) : {},
+                constructionJobs: JSON.parse(JSON.stringify(gameData.constructionJobs || [])),
                 aiTaskForces: null
             };
         }
@@ -37155,6 +37028,7 @@
             gameData.cities = s.cities.map(c => Object.assign({}, c));
             gameData.roads = s.roads.map(r => Object.assign({}, r));
             gameData.entities = s.entities.map(e => Object.assign({}, e, e.target ? { target: Object.assign({}, e.target) } : {}));
+            gameData.constructionJobs = JSON.parse(JSON.stringify(s.constructionJobs || []));
             gameData.forts = (s.forts || []).map(f => Object.assign({}, f));
             gameData.bridges = (s.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
             for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
@@ -38034,6 +37908,7 @@
                 for(let u of gameData.entities) {
                     if(u.hp <= 0 || u.owner !== ownerId || u.type === 'convoy' || u.type === 'ship') continue;
                     if(u.moraleBroken || u.retreating || u.hp / u.maxHp < 0.42) continue;
+                    if(['armor', 'marine', 'naval', 'raid'].includes(u.aiTfKind)) continue;
                     if(u.aiCityStriker) continue;
                     if(u.aiFortGuard && u.aiFortGuard !== fort.id) continue;
                     if(u.aiTfKind === 'defend' && u.aiTfJobId) continue;
@@ -38069,14 +37944,7 @@
                 }
             }
             if(!spawnCity) return;
-            if(!spendForUnit(ownerId, 'light')) return;
-            let spawned = spawnUnit('light', spawnCity, ownerId);
-            if(spawned) {
-                spawned.aiFortGuard = fort.id;
-                spawned.aiTfKind = 'defend';
-                spawned.aiTfRole = 'fix';
-                wodAiMoveUnitTowardHex(spawned, fortHex, true, 0.12);
-            }
+            wodApplyBuildAtCityForOwner(spawnCity, 'light', ownerId);
         }
 
         function wodAiMaintainFortGuards(ownerId) {
@@ -38521,602 +38389,57 @@
          */
         function wodAiEnsureTaskForcePlan(owner, units) {
             if(!gameData.aiTaskForces) gameData.aiTaskForces = {};
-            let oid = typeof owner === 'number' ? owner : parseInt(owner, 10);
-            let now = performance.now();
-            wodAiReleaseIdleFortGuards(oid);
-            let ready = [];
-            for(let i = 0; i < units.length; i++) {
-                let u = units[i];
-                if(!u || u.hp <= 0 || u.type === 'convoy' || u.type === 'ship') continue;
-                if(u.moraleBroken || u.retreating || u.hp <= u.maxHp * 0.42) continue;
-                if(u.aiFortGuard) continue;
-                ensureUnitId(u);
-                ready.push(u);
-            }
-            let n = ready.length;
-            if(n === 0) {
-                gameData.aiTaskForces[oid] = null;
-                return null;
-            }
-
-            // Threatened own cities + forts — detect early so sticky plans rebuild when defense is needed.
-            let hr = gameData.hexRadius || 20;
-            let threatJobs = [];
-            for(let ci = 0; ci < gameData.cities.length; ci++) {
-                let c = gameData.cities[ci];
-                if(c.owner !== oid) continue;
-                let enemies = countNearbyUnits(oid, c.x, c.y, Math.max(320, hr * 14), true);
-                if(enemies <= 0) continue;
-                let defenders = countNearbyUnits(oid, c.x, c.y, Math.max(260, hr * 11));
-                let need = Math.max(2, Math.min(6, enemies + 1 - Math.min(defenders, enemies)));
-                if(need <= 0) continue;
-                threatJobs.push({ city: c, fort: null, enemies, defenders, need, frontTouch: false });
-            }
-            let forts = gameData.forts || [];
-            for(let fi = 0; fi < forts.length; fi++) {
-                let ft = forts[fi];
-                if(!ft || ft.owner !== oid) continue;
-                let enemies = countNearbyUnits(oid, ft.x, ft.y, Math.max(300, hr * 13), true);
-                if(enemies <= 0) continue;
-                let frontTouch = false;
-                let defenders = wodAiCountFortGuards(ft, oid);
-                let need = enemies > 0
-                    ? Math.max(1, Math.min(5, enemies + 1 - Math.min(defenders, enemies + 1)))
-                    : (defenders < 1 ? 1 : 0);
-                if(need <= 0) continue;
-                threatJobs.push({ city: null, fort: ft, enemies, defenders, need, frontTouch });
-            }
-            threatJobs.sort((a, b) => (b.enemies - a.enemies) || (b.need - a.need));
-            let threatSig = threatJobs.map(t => {
-                let id = t.city
-                    ? ('c:' + (t.city.id || (t.city.q + ',' + t.city.r)))
-                    : ('f:' + (t.fort.id || (t.fort.q + ',' + t.fort.r)));
-                return id + ':' + t.need;
-            }).join('|');
-
-            let contact = wodAiReadContact(oid);
-            if(!contact.scanned) {
-                contact.relief = contact.ownCut > 0 ? wodAiFindReliefGap(oid) : null;
-                contact.pocket = contact.relief ? null : wodAiFindPocketSeals(oid, contact);
-                contact.scanned = true;
-            }
-            let sitSig = contact.sig
-                + (contact.pocket ? ('/p' + contact.pocket.gaps.length) : '')
-                + (contact.relief ? '/r' : '');
-
-            let prev = gameData.aiTaskForces[oid];
-            let sizeDelta = prev ? Math.abs((prev.readyN || 0) - n) : 99;
-            let threatChanged = prev && (prev.threatSig || '') !== threatSig;
-            let situationChanged = prev && (prev.sitSig || '') !== sitSig;
-            let lostAxis = false;
-            if(prev && prev.jobs) {
-                for(let ji = 0; ji < prev.jobs.length; ji++) {
-                    let jk = prev.jobs[ji].kind;
-                    if((jk === 'main' || jk === 'encircle') && !wodAiJobStillValid(prev.jobs[ji], oid)) lostAxis = true;
-                }
-            }
-            let stickyOk = prev && prev.expireAt > now && sizeDelta <= Math.max(2, Math.floor(n * 0.22)) && !threatChanged && !situationChanged && !lostAxis;
-            if(stickyOk) {
-                // Drop dead jobs / dead members; rehome orphans without full rebuild.
-                let aliveJobs = [];
-                for(let ji = 0; ji < prev.jobs.length; ji++) {
-                    let job = prev.jobs[ji];
-                    if(wodAiJobStillValid(job, oid)) aliveJobs.push(job);
-                }
-                if(aliveJobs.length) {
-                    prev.jobs = aliveJobs;
-                    let jobById = {};
-                    for(let ji = 0; ji < aliveJobs.length; ji++) jobById[aliveJobs[ji].id] = aliveJobs[ji];
-                    for(let uid in prev.unitJob) {
-                        if(!jobById[prev.unitJob[uid]]) delete prev.unitJob[uid];
-                    }
-                    function membersOf(jid) {
-                        let m = 0;
-                        for(let uid in prev.unitJob) if(prev.unitJob[uid] === jid) m++;
-                        return m;
-                    }
-                    // Peel nearest non-defend units onto underfilled defend jobs (cities + forts).
-                    for(let ji = 0; ji < aliveJobs.length; ji++) {
-                        let job = aliveJobs[ji];
-                        if(job.kind !== 'defend') continue;
-                        let tx = job.city ? job.city.x : (job.fort && job.fort.x);
-                        let ty = job.city ? job.city.y : (job.fort && job.fort.y);
-                        if(tx == null) continue;
-                        while(membersOf(job.id) < job.quota) {
-                            let bestU = null, bestD = Infinity;
-                            for(let ui = 0; ui < ready.length; ui++) {
-                                let u = ready[ui];
-                                let cur = prev.unitJob[u.uid];
-                                if(cur === job.id) continue;
-                                let curJob = cur && jobById[cur];
-                                if(curJob && curJob.kind === 'defend') continue;
-                                let d2 = wodAiDist2(u.x, u.y, tx, ty);
-                                if(d2 < bestD) { bestD = d2; bestU = u; }
-                            }
-                            if(!bestU) break;
-                            prev.unitJob[bestU.uid] = job.id;
-                            bestU.aiTfJobId = job.id;
-                            bestU.aiTfKind = 'defend';
-                            bestU.aiTfRole = 'fix';
-                            bestU.aiCityStriker = false;
-                            if(job.fort) bestU.aiFortGuard = job.fort.id;
-                        }
-                    }
-                    for(let ui = 0; ui < ready.length; ui++) {
-                        let u = ready[ui];
-                        if(prev.unitJob[u.uid]) {
-                            let job = jobById[prev.unitJob[u.uid]];
-                            if(job) {
-                                u.aiTfJobId = job.id;
-                                u.aiTfKind = job.kind;
-                                u.aiTfRole = job.role;
-                                continue;
-                            }
-                        }
-                        // Orphan: fill the attack and the pocket before parking more units on a quiet sector.
-                        let best = null, bestSc = Infinity;
-                        for(let ji = 0; ji < aliveJobs.length; ji++) {
-                            let job = aliveJobs[ji];
-                            let members = membersOf(job.id);
-                            if(members >= job.quota) continue;
-                            let hx = job.strikeHex ? job.strikeHex.x
-                                : (job.city ? job.city.x
-                                : (job.fort ? job.fort.x
-                                : (job.holdHex && job.holdHex.x)));
-                            let hy = job.strikeHex ? job.strikeHex.y
-                                : (job.city ? job.city.y
-                                : (job.fort ? job.fort.y
-                                : (job.holdHex && job.holdHex.y)));
-                            if(hx == null) continue;
-                            let kindBias = job.kind === 'defend' ? -200000
-                                : (job.kind === 'encircle' ? -170000
-                                : (job.kind === 'main' ? -90000
-                                : (job.kind === 'strike' ? -60000
-                                : (job.kind === 'raid' ? -50000
-                                : (job.kind === 'hold' ? -20000 : 0)))));
-                            let sc = wodAiDist2(u.x, u.y, hx, hy) + members * 50000 + kindBias;
-                            if(sc < bestSc) { bestSc = sc; best = job; }
-                        }
-                        if(!best) best = aliveJobs.find(j => j.kind === 'encircle')
-                            || aliveJobs.find(j => j.kind === 'main')
-                            || aliveJobs.find(j => j.kind === 'hold')
-                            || aliveJobs.find(j => j.kind === 'raid')
-                            || aliveJobs[0];
-                        if(best) {
-                            prev.unitJob[u.uid] = best.id;
-                            u.aiTfJobId = best.id;
-                            u.aiTfKind = best.kind;
-                            u.aiTfRole = best.role;
-                            if(best.kind === 'defend' && best.fort) u.aiFortGuard = best.fort.id;
-                        }
-                    }
-                    prev.readyN = n;
-                    prev.threatSig = threatSig;
-                    prev.sitSig = sitSig;
-                    return prev;
-                }
-            }
-
-            // ---- Full rebuild ----
-            let press = contact.onFront + contact.approaching;
-            let hot = press >= 3 || contact.ownCut > 0;
-            let want = Math.min(22, Math.max(5, Math.ceil(n * 0.55) + Math.min(8, Math.floor(press * 0.85))));
-            let sectors = buildAiFrontlineSectors(oid, want);
-            let campAggro = !!(gameData._campaignRun || gameData._campaignAiAggressive);
-            let scored = [];
-            for(let si = 0; si < sectors.length; si++) {
-                let s = sectors[si];
-                let sup = countNearbyUnits(oid, s.holdHex.x, s.holdHex.y, 260);
-                let en = countNearbyUnits(oid, s.holdHex.x, s.holdHex.y, 260, true);
-                let cityNear = 0;
-                for(let ci = 0; ci < gameData.cities.length; ci++) {
-                    let c = gameData.cities[ci];
-                    if(c.owner === oid) continue;
-                    let ddx = c.x - s.attackHex.x, ddy = c.y - s.attackHex.y;
-                    if(ddx * ddx + ddy * ddy < 280 * 280) cityNear += (c.owner === 1 ? 6 : 3);
-                }
-                let playerAdj = getNeighborHexes(s.holdHex).some(nh => nh && nh.owner === 1) ? 3 : 0;
-                let contactBias = 0;
-                if(contact.n >= 2) {
-                    let cdx = s.holdHex.x - contact.cx, cdy = s.holdHex.y - contact.cy;
-                    contactBias = -Math.sqrt(cdx * cdx + cdy * cdy) / Math.max(48, hr);
-                }
-                let cityW = contact.n >= 4 ? 0.45 : 1.7;
-                scored.push({
-                    sector: s,
-                    sc: ((sup + 1) / (en + 1)) * 5 + cityNear * cityW + playerAdj * 1.4 + contactBias
-                });
-            }
-            scored.sort((a, b) => b.sc - a.sc);
-            if(hot && contact.n >= 2 && scored.length > 1) {
-                let bestI = 0, bestD = Infinity;
-                for(let si = 0; si < scored.length; si++) {
-                    let d = wodAiDist2(scored[si].sector.holdHex.x, scored[si].sector.holdHex.y, contact.cx, contact.cy);
-                    if(d < bestD) { bestD = d; bestI = si; }
-                }
-                if(bestI !== 0) {
-                    let tmp = scored[0];
-                    scored[0] = scored[bestI];
-                    scored[bestI] = tmp;
-                }
-            }
-
-            let jobs = [];
-            let jobId = 1;
-            function addJob(kind, role, sectorOrNull, city, quota, strikeHex, fort) {
-                let holdHex = sectorOrNull ? sectorOrNull.holdHex
-                    : (city ? (gameData.hexes[`${city.q},${city.r}`] || { x: city.x, y: city.y, q: city.q, r: city.r })
-                    : (fort ? (gameData.hexes[`${fort.q},${fort.r}`] || { x: fort.x, y: fort.y, q: fort.q, r: fort.r })
-                    : (strikeHex || null)));
-                let attackHex = sectorOrNull ? sectorOrNull.attackHex : (strikeHex || holdHex);
-                if(!holdHex && !city && !strikeHex && !fort) return null;
-                let job = {
-                    id: oid + '-tf-' + (jobId++),
-                    kind,
-                    role,
-                    holdHex,
-                    attackHex,
-                    city: city || null,
-                    fort: fort || null,
-                    strikeHex: strikeHex || null,
-                    quota: Math.max(1, quota | 0)
-                };
+            let ready = units.filter(u => u && u.hp > u.maxHp * 0.42 && !u.moraleBroken && !u.retreating && u.type !== 'convoy');
+            ready.forEach(ensureUnitId);
+            let assets = [...gameData.cities, ...(gameData.forts || [])].filter(c => c.owner === owner);
+            let signature = ready.map(u => u.uid).sort().join('|') + '/' + assets.map(c => c.id).join('|');
+            let prev = gameData.aiTaskForces[owner], now = performance.now();
+            if(prev && prev.signature === signature && now < prev.expireAt) return prev;
+            let sectors = buildAiFrontlineSectors(owner, Math.min(24, Math.max(6, Math.ceil(ready.length / 2))));
+            let jobs = [], unitJob = {}, index = 0;
+            const add = (kind, members, sector, asset) => {
+                if(!members.length) return;
+                let job = { id: owner + '-' + kind + '-' + index++, kind, role: kind, quota: members.length,
+                    holdHex: sector?.holdHex, attackHex: sector?.attackHex,
+                    city: asset && gameData.cities.includes(asset) ? asset : null,
+                    fort: asset && !gameData.cities.includes(asset) ? asset : null };
                 jobs.push(job);
-                return job;
-            }
-
-            // Garrisons only for cities and forts that have hostile troops on them.
-            // The rest of the army attacks: one push, a flank or a pocket seal, and a line.
-            let defendQ = 0;
-            let defendCaps = [];
-            let defendBudget = Math.min(Math.floor(n * 0.34), Math.max(0, n - 3));
-            for(let ti = 0; ti < threatJobs.length && ti < 4 && defendBudget > 0; ti++) {
-                let isFort = !!threatJobs[ti].fort;
-                let qCap = isFort
-                    ? Math.max(1, Math.ceil(n * 0.12))
-                    : Math.max(2, Math.ceil(n * 0.18));
-                let q = Math.min(threatJobs[ti].need, defendBudget, qCap);
-                if(q <= 0) continue;
-                defendCaps.push({ threat: threatJobs[ti], q });
-                defendQ += q;
-                defendBudget -= q;
-            }
-
-            let playerCities = wodAiCollectPlayerCityAttackHexes(oid);
-            let remaining = Math.max(0, n - defendQ);
-            let encircleQ = 0;
-            if(contact.relief && remaining >= 2) {
-                encircleQ = Math.min(Math.max(3, Math.round(n * 0.22)), remaining);
-            } else if(contact.pocket && remaining >= 2) {
-                encircleQ = Math.min(6, Math.max(2, contact.pocket.gaps.length + 1), remaining);
-            } else if(remaining >= 2 && n >= 8) {
-                encircleQ = Math.min(Math.max(2, Math.round(n * 0.18)), Math.floor(remaining * 0.4), remaining);
-            }
-            remaining -= encircleQ;
-
-            let mainCap = Math.max(2, Math.ceil(n * (hot ? (campAggro ? 0.46 : 0.4) : (campAggro ? 0.6 : 0.55))));
-            let mainQ = 0;
-            if(scored.length && remaining > 0) {
-                mainQ = Math.min(mainCap, remaining, Math.max(remaining < 2 ? 1 : 2, Math.ceil(remaining * (hot ? 0.55 : 0.72))));
-            }
-            remaining -= mainQ;
-            if(scored.length && mainQ < 2 && encircleQ > 2 && !contact.relief) {
-                let give = Math.min(2 - mainQ, encircleQ - 2);
-                if(give > 0) { encircleQ -= give; mainQ += give; }
-            }
-
-            let holdQ = 0;
-            if(remaining > 0 && scored.length > 1) {
-                let wantHold = Math.max(hot ? 2 : 1, Math.round(n * (hot ? 0.3 : 0.2)));
-                holdQ = Math.min(remaining, wantHold);
-                remaining -= holdQ;
-            }
-
-            let raidQ = 0;
-            if(!contact.relief && remaining >= 2 && n >= 8 && scored.length >= 2) {
-                raidQ = Math.min(Math.max(2, Math.round(n * 0.14)), remaining);
-                remaining -= raidQ;
-            }
-
-            let strikeQ = 0;
-            if(!hot && !contact.pocket && !contact.relief && playerCities.length && remaining >= 2 && n >= 10) {
-                strikeQ = Math.min(2, remaining);
-                remaining -= strikeQ;
-            }
-
-            let reserveQ = 0;
-            if(!hot && remaining >= 2 && n >= 14) {
-                reserveQ = Math.min(Math.max(1, Math.round(n * 0.08)), remaining);
-                remaining -= reserveQ;
-            }
-            if(remaining > 0) {
-                if(scored.length > 1) holdQ += remaining;
-                else mainQ += remaining;
-            }
-
-            let doc = typeof wodAiDoctrine === 'function' ? wodAiDoctrine(oid) : null;
-            if(doc) {
-                mainQ = Math.max(0, Math.round(mainQ * (doc.mainMul || 1)));
-                raidQ = Math.max(0, Math.round(raidQ * (doc.raidMul || 1)));
-                encircleQ = Math.max(0, Math.round(encircleQ * (doc.raidMul || 1)));
-                strikeQ = Math.max(0, Math.round(strikeQ * (doc.strikeMul || 1)));
-                holdQ = Math.max(0, Math.round(holdQ * (doc.holdMul || 1)));
-                reserveQ = Math.max(0, Math.round(reserveQ * (doc.reserveMul || 1)));
-                if(doc.doctrine === 'raid' && encircleQ < 2 && n >= 8 && holdQ > 2) {
-                    let take = Math.min(2, holdQ - 1);
-                    encircleQ += take;
-                    holdQ -= take;
+                for(let u of members) {
+                    unitJob[u.uid] = job.id;
+                    u.aiTfJobId = job.id; u.aiTfKind = kind; u.aiTfRole = kind;
+                    // This plan owns fort assignments too; legacy guards must not peel these units out.
+                    u.aiFortGuard = null; u.aiCityStriker = false;
                 }
-                if(doc.doctrine === 'raid' && raidQ < 2 && n >= 10 && scored.length >= 2 && holdQ > 2) {
-                    let take = Math.min(2, holdQ - 1);
-                    raidQ += take;
-                    holdQ -= take;
-                }
-                if(doc.doctrine === 'hold') {
-                    for(let di = 0; di < defendCaps.length; di++)
-                        defendCaps[di].q = Math.max(1, Math.round(defendCaps[di].q * (doc.defendMul || 1)));
-                    if(holdQ < 2 && mainQ > 3) {
-                        let take = Math.min(2, mainQ - 2);
-                        holdQ += take;
-                        mainQ -= take;
-                    }
-                }
-                if(doc.doctrine === 'cities' && strikeQ < 2 && n >= 8 && playerCities.length && holdQ > 2) {
-                    let take = Math.min(2, holdQ - 1);
-                    strikeQ += take;
-                    holdQ -= take;
-                }
-            }
-
-            // Create jobs: defend the threatened point, push one axis, seal or flank, hold the rest.
-            for(let di = 0; di < defendCaps.length; di++) {
-                let th = defendCaps[di].threat;
-                addJob('defend', 'fix', null, th.city || null, defendCaps[di].q, null, th.fort || null);
-            }
-
-            let flankOrigin = null, flankAx = 0, flankAy = 0;
-            if(scored.length) {
-                let hold = scored[0].sector.holdHex;
-                let atk = scored[0].sector.attackHex;
-                if(contact.n >= 2) {
-                    flankOrigin = { x: contact.cx, y: contact.cy };
-                    flankAx = contact.cx - hold.x;
-                    flankAy = contact.cy - hold.y;
-                } else {
-                    flankOrigin = { x: atk.x, y: atk.y };
-                    flankAx = atk.x - hold.x;
-                    flankAy = atk.y - hold.y;
-                }
-            }
-
-            if(scored.length && mainQ > 0) {
-                let sector = scored[0].sector;
-                let job = addJob('main', 'assault', sector, null, mainQ);
-                if(job) {
-                    let aim = sector.attackHex;
-                    if(!(hot && contact.n >= 3)) {
-                        let hx = sector.holdHex.x, hy = sector.holdHex.y;
-                        let ax = sector.attackHex.x - hx, ay = sector.attackHex.y - hy;
-                        let bestCity = null, bestCityD = Infinity;
-                        for(let pi = 0; pi < playerCities.length; pi++) {
-                            let c = playerCities[pi];
-                            let vx = c.x - hx, vy = c.y - hy;
-                            if(vx * ax + vy * ay <= 0) continue;
-                            let d = vx * vx + vy * vy;
-                            if(d < bestCityD && d < hr * 18 * hr * 18) { bestCityD = d; bestCity = c; }
-                        }
-                        aim = bestCity || wodAiExtendAttackHex(oid, sector.holdHex, sector.attackHex, 3);
-                    } else {
-                        aim = wodAiExtendAttackHex(oid, sector.holdHex, sector.attackHex, 2);
-                    }
-                    job.attackHex = aim;
-                }
-            } else if(!jobs.length && threatJobs.length) {
-                let th0 = threatJobs[0];
-                addJob('defend', 'fix', null, th0.city || null, n, null, th0.fort || null);
-            }
-
-            if(encircleQ > 0) {
-                let hex = contact.relief || (contact.pocket && contact.pocket.hex) || null;
-                if(!hex && flankOrigin) hex = wodAiPickHookHex(oid, flankOrigin, flankAx, flankAy, -1);
-                if(hex) addJob('encircle', 'assault', null, null, encircleQ, hex);
-                else {
-                    let mj = jobs.find(j => j.kind === 'main');
-                    if(mj) mj.quota += encircleQ;
-                }
-            }
-
-            if(strikeQ > 0 && playerCities.length) {
-                let tgt = playerCities[0];
-                let best = null, bestD = Infinity;
-                let focus = gameData.aiFrontFocus && gameData.aiFrontFocus[oid];
-                let fx = focus ? focus.x : (scored[0] ? scored[0].sector.holdHex.x : 0);
-                let fy = focus ? focus.y : (scored[0] ? scored[0].sector.holdHex.y : 0);
-                for(let pi = 0; pi < playerCities.length; pi++) {
-                    let h = playerCities[pi];
-                    let d2 = wodAiDist2(fx, fy, h.x, h.y);
-                    if(d2 < bestD) { bestD = d2; best = h; }
-                }
-                tgt = best || tgt;
-                addJob('strike', 'assault', null, null, strikeQ, tgt);
-            }
-
-            let holdSlots = holdQ;
-            let holdJobCount = n <= 8 ? 1 : (n <= 18 ? 2 : 3);
-            let mainHold = scored[0] && scored[0].sector.holdHex;
-            let minHoldSep2 = Math.pow(hr * (hot ? 3.4 : 5.2), 2);
-            if(hot && contact.n >= 2 && scored.length > 2) {
-                let nearI = 1, nearD = Infinity;
-                for(let si = 1; si < scored.length; si++) {
-                    let d = wodAiDist2(scored[si].sector.holdHex.x, scored[si].sector.holdHex.y, contact.cx, contact.cy);
-                    if(d < nearD) { nearD = d; nearI = si; }
-                }
-                if(nearI !== 1) {
-                    let tmp = scored[1];
-                    scored[1] = scored[nearI];
-                    scored[nearI] = tmp;
-                }
-            }
-            for(let si = 1; si < scored.length && holdJobCount > 0 && holdSlots > 0; si++) {
-                let s = scored[si].sector;
-                if(mainHold) {
-                    let d2 = wodAiDist2(s.holdHex.x, s.holdHex.y, mainHold.x, mainHold.y);
-                    if(d2 < minHoldSep2) continue;
-                }
-                let q = Math.max(1, Math.ceil(holdSlots / holdJobCount));
-                addJob('hold', 'fix', s, null, q);
-                holdSlots -= q;
-                holdJobCount--;
-            }
-            if(holdSlots > 0) {
-                let hj = jobs.find(j => j.kind === 'hold');
-                if(hj) hj.quota += holdSlots;
-                else if(scored.length > 1) addJob('hold', 'fix', scored[Math.min(1, scored.length - 1)].sector, null, holdSlots);
-                else {
-                    let mj = jobs.find(j => j.kind === 'main');
-                    if(mj) mj.quota += holdSlots;
-                }
-            }
-
-            if(raidQ > 0) {
-                let hex = flankOrigin ? wodAiPickHookHex(oid, flankOrigin, flankAx, flankAy, 1) : null;
-                if(hex) addJob('raid', 'screen', null, null, raidQ, hex);
-                else {
-                    let hj = jobs.find(j => j.kind === 'hold');
-                    if(hj) hj.quota += raidQ;
-                    else {
-                        let mj = jobs.find(j => j.kind === 'main');
-                        if(mj) mj.quota += raidQ;
-                    }
-                }
-            }
-
-            if(reserveQ > 0 && scored.length) {
-                addJob('reserve', 'reserve', scored[0].sector, null, reserveQ);
-            }
-
-            // Leftover bodies join the push when the line is quiet, and the line when it is not.
-            let sumQ = 0;
-            for(let ji = 0; ji < jobs.length; ji++) sumQ += jobs[ji].quota;
-            if(sumQ < n && jobs.length) {
-                let extra = n - sumQ;
-                let sink = hot
-                    ? (jobs.find(j => j.kind === 'hold') || jobs.find(j => j.kind === 'encircle') || jobs.find(j => j.kind === 'main'))
-                    : (jobs.find(j => j.kind === 'main') || jobs.find(j => j.kind === 'encircle') || jobs.find(j => j.kind === 'raid') || jobs.find(j => j.kind === 'hold'));
-                if(sink) sink.quota += extra;
-            } else if(sumQ > n) {
-                let over = sumQ - n;
-                let order = ['reserve', 'strike', 'raid', 'hold', 'encircle', 'main', 'defend'];
-                for(let oi = 0; oi < order.length && over > 0; oi++) {
-                    for(let ji = 0; ji < jobs.length && over > 0; ji++) {
-                        if(jobs[ji].kind !== order[oi]) continue;
-                        let minKeep = 1;
-                        let cut = Math.min(over, Math.max(0, jobs[ji].quota - minKeep));
-                        jobs[ji].quota -= cut;
-                        over -= cut;
-                    }
-                }
-            }
-            for(let ji = 0; ji < jobs.length; ji++) {
-                if(jobs[ji].kind === 'main' && jobs[ji].quota > mainCap) {
-                    let spill = jobs[ji].quota - mainCap;
-                    jobs[ji].quota = mainCap;
-                    let sink = jobs.find(j => j.kind === 'hold') || jobs.find(j => j.kind === 'encircle');
-                    if(sink) sink.quota += spill;
-                }
-            }
-
-            // Assign: fill defend first (nearest units), then other jobs.
-            let unitJob = {};
-            let filled = {};
-            let assignedUid = new Set();
-            for(let ji = 0; ji < jobs.length; ji++) filled[jobs[ji].id] = 0;
-            function jobTargetXY(job) {
-                if(job.strikeHex) return { x: job.strikeHex.x, y: job.strikeHex.y };
-                if(job.city) return { x: job.city.x, y: job.city.y };
-                if(job.fort) return { x: job.fort.x, y: job.fort.y };
-                if(job.kind === 'reserve' && job.holdHex) {
-                    let dx = (job.attackHex.x - job.holdHex.x);
-                    let dy = (job.attackHex.y - job.holdHex.y);
-                    let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-                    return {
-                        x: job.holdHex.x - (dx / len) * hr * 3.2,
-                        y: job.holdHex.y - (dy / len) * hr * 3.2
-                    };
-                }
-                return job.holdHex ? { x: job.holdHex.x, y: job.holdHex.y } : null;
-            }
-            function assignToJob(u, job) {
-                unitJob[u.uid] = job.id;
-                filled[job.id] = (filled[job.id] || 0) + 1;
-                assignedUid.add(u.uid);
-                u.aiTfJobId = job.id;
-                u.aiTfKind = job.kind;
-                u.aiTfRole = job.role;
-                u.aiCityStriker = job.kind === 'strike';
-                if(job.kind === 'defend' && job.fort) u.aiFortGuard = job.fort.id;
-            }
-
-            // Pass 1: city/fort defense — nearest free units.
-            for(let ji = 0; ji < jobs.length; ji++) {
-                let job = jobs[ji];
-                if(job.kind !== 'defend') continue;
-                let tx = job.city ? job.city.x : (job.fort && job.fort.x);
-                let ty = job.city ? job.city.y : (job.fort && job.fort.y);
-                if(tx == null) continue;
-                let candidates = ready.slice()
-                    .filter(u => !assignedUid.has(u.uid))
-                    .sort((a, b) => wodAiDist2(a.x, a.y, tx, ty) - wodAiDist2(b.x, b.y, tx, ty));
-                for(let ci = 0; ci < candidates.length && filled[job.id] < job.quota; ci++)
-                    assignToJob(candidates[ci], job);
-            }
-
-            // Pass 2: strongest units fill the attack and the flank first.
-            let pool = ready.filter(u => !assignedUid.has(u.uid))
-                .sort((a, b) => wodAiUnitCombatPower(b) - wodAiUnitCombatPower(a));
-            for(let ui = 0; ui < pool.length; ui++) {
-                let u = pool[ui];
-                let best = null, bestSc = Infinity;
-                for(let ji = 0; ji < jobs.length; ji++) {
-                    let job = jobs[ji];
-                    if(job.kind === 'defend') continue;
-                    if(filled[job.id] >= job.quota) continue;
-                    let xy = jobTargetXY(job);
-                    if(!xy) continue;
-                    let fit = wodAiDist2(u.x, u.y, xy.x, xy.y);
-                    if(job.kind === 'main' && u.type === 'heavy') fit *= 0.72;
-                    if(job.kind === 'encircle' && (u.type === 'light' || u.type === 'medium')) fit *= 0.7;
-                    if(job.kind === 'strike' && (u.type === 'light' || u.type === 'medium')) fit *= 0.7;
-                    if(job.kind === 'raid' && u.type === 'light') fit *= 0.68;
-                    if(job.kind === 'raid' && u.type === 'heavy') fit *= 1.25;
-                    if(job.kind === 'main' || job.kind === 'encircle') fit *= 0.84;
-                    if(prev && prev.unitJob && prev.unitJob[u.uid] === job.id) fit *= 0.65;
-                    if(fit < bestSc) { bestSc = fit; best = job; }
-                }
-                if(!best) {
-                    best = jobs.find(j => j.kind === 'main')
-                        || jobs.find(j => j.kind === 'encircle')
-                        || jobs.find(j => j.kind === 'hold' && filled[j.id] < j.quota + 2)
-                        || jobs.find(j => j.kind === 'raid')
-                        || jobs.find(j => j.kind === 'strike')
-                        || jobs.find(j => j.kind === 'defend')
-                        || jobs[0];
-                }
-                if(best) assignToJob(u, best);
-            }
-
-            let plan = {
-                owner: oid,
-                builtAt: now,
-                expireAt: now + (campAggro ? 14000 : 20000),
-                readyN: n,
-                jobs,
-                unitJob,
-                sectors,
-                threatSig,
-                sitSig
             };
-            gameData.aiTaskForces[oid] = plan;
+            const chunks = (kind, members, size) => {
+                for(let i = 0; i < members.length; i += size) add(kind, members.slice(i, i+size), sectors[Math.floor(i/size) % Math.max(1,sectors.length)]);
+            };
+            let infantry = ready.filter(u => !['heavy','marine','ship'].includes(u.type));
+            let guards = assets.length ? Math.min(infantry.length, Math.max(1, Math.round(infantry.length * 0.2))) : 0;
+            // Distribute permanent guards among towns and forts, even before enemies arrive.
+            let guardAssets = assets.slice().sort((a,b) => countNearbyUnits(owner,b.x,b.y,320,true)-countNearbyUnits(owner,a.x,a.y,320,true));
+            for(let i = 0; i < guards; i++) {
+                let asset = guardAssets[i % guardAssets.length];
+                infantry.sort((a,b) => wodAiDist2(a.x,a.y,asset.x,asset.y)-wodAiDist2(b.x,b.y,asset.x,asset.y));
+                add('defend', infantry.splice(0,1), null, asset);
+            }
+            let lineN = infantry.length > 1 ? Math.max(1, Math.round(infantry.length * 0.3)) : 0;
+            chunks('hold', infantry.splice(0,lineN), 3);
+            let flankN = infantry.length >= 3 ? Math.max(1, Math.round(infantry.length * 0.3)) : 0;
+            let flank = infantry.splice(-flankN || infantry.length, flankN);
+            chunks('main', infantry, 4);
+            for(let i=0; i<flank.length; i+=3) {
+                let sector = sectors[(Math.floor(i/3)+1) % Math.max(1,sectors.length)];
+                add('raid', flank.slice(i,i+3), sector);
+                let job = jobs[jobs.length-1];
+                if(sector && job) job.strikeHex = wodAiPickHookHex(owner, sector.attackHex,
+                    sector.attackHex.x-sector.holdHex.x, sector.attackHex.y-sector.holdHex.y, i%2 ? -1 : 1) || sector.attackHex;
+            }
+            chunks('armor', ready.filter(u => u.type === 'heavy'), 3);
+            chunks('marine', ready.filter(u => u.type === 'marine'), 3);
+            chunks('naval', ready.filter(u => u.type === 'ship'), 4);
+            let plan = { owner, signature, jobs, unitJob, sectors, readyN: ready.length, builtAt: now, expireAt: now + 12000 };
+            gameData.aiTaskForces[owner] = plan;
             return plan;
         }
 
@@ -39140,6 +38463,56 @@
             unit.aiTfKind = job.kind;
             unit.aiTfRole = job.role;
             let hr = gameData.hexRadius || 20;
+
+            if(['armor', 'marine', 'naval'].includes(job.kind)) {
+                let target = null;
+                if(job.objective && performance.now() - (job.objectiveAt || 0) < 3000) {
+                    target = job.objective;
+                } else if(job.kind === 'armor') {
+                    // Spearheads hunt hostile combat units instead of being absorbed into the line.
+                    let enemies = gameData.entities.filter(u => u.hp > 0 && u.type !== 'convoy' && u.type !== 'ship' && wodIsHostileOwner(u.owner, unit.owner));
+                    enemies.sort((a,b) => (wodAiDist2(unit.x,unit.y,a.x,a.y)*(0.5+a.hp/a.maxHp)) - (wodAiDist2(unit.x,unit.y,b.x,b.y)*(0.5+b.hp/b.maxHp)));
+                    target = enemies[0] || job.attackHex;
+                } else if(job.kind === 'marine') {
+                    let towns = gameData.cities.filter(c => wodIsHostileOwner(c.owner, unit.owner) && cityHasWaterNeighbor(c));
+                    towns.sort((a,b) => wodAiDist2(unit.x,unit.y,a.x,a.y)-wodAiDist2(unit.x,unit.y,b.x,b.y));
+                    target = towns[Math.abs(job.id.charCodeAt(job.id.length-1)) % Math.max(1,towns.length)] || job.attackHex;
+                } else {
+                    let ships = gameData.entities.filter(u => u.type === 'ship' && u.hp > 0 && wodIsHostileOwner(u.owner,unit.owner));
+                    ships.sort((a,b) => wodAiDist2(unit.x,unit.y,a.x,a.y)-wodAiDist2(unit.x,unit.y,b.x,b.y));
+                    target = ships[0];
+                    if(!target) {
+                        let waters = [];
+                        for(let c of gameData.cities) {
+                            if(!wodIsHostileOwner(c.owner, unit.owner)) continue;
+                            for(let pt of getHexesInRadius(c.q,c.r,6)) {
+                                let h = gameData.hexes[`${pt.q},${pt.r}`];
+                                if(h && isWaterHex(h)) waters.push(h);
+                            }
+                        }
+                        if(!waters.length) {
+                            // Bound quiet-sea patrol search; never sort the whole ocean per ship.
+                            let stride = Math.max(1, Math.floor(gameData.hexList.length/180));
+                            for(let i=0; i<gameData.hexList.length; i+=stride) {
+                                let h = gameData.hexList[i];
+                                if(isWaterHex(h) && wodIsHostileOwner(h.owner,unit.owner)) waters.push(h);
+                            }
+                        }
+                        waters.sort((a,b) => wodAiDist2(unit.x,unit.y,a.x,a.y)-wodAiDist2(unit.x,unit.y,b.x,b.y));
+                        target = waters[(parseInt(job.id.split('-').pop(),10) * 7) % Math.max(1,Math.min(60,waters.length))];
+                    }
+                }
+                if(!target) return false;
+                // Cache a shared objective per group; orders still use terrain-aware paths and slot offsets.
+                if(!job.objective || performance.now() - (job.objectiveAt || 0) > 3000) {
+                    job.objective = {x:target.x, y:target.y}; job.objectiveAt = performance.now();
+                }
+                let hex = getNearestHexToPoint(job.objective.x, job.objective.y);
+                if(!hex || (job.kind === 'naval' && !isWaterHex(hex))) return false;
+                let moved = wodAiMoveUnitTowardHex(unit, hex, false, 0.65);
+                if(moved) wodAiStampOrder(unit, false, hex);
+                return moved;
+            }
 
             if(job.kind === 'defend' && (job.city || job.fort)) {
                 let t = job.city || job.fort;
@@ -39189,9 +38562,7 @@
             };
 
             if(job.kind === 'hold') {
-                let fight = wodAiSectorFightStats(unit.owner, job.holdHex);
-                let hostileHere = countNearbyUnits(unit.owner, job.holdHex.x, job.holdHex.y, Math.max(220, hr * 8), true);
-                let canCounter = fight.localRatio >= 1.12 && fight.support >= 2 && (fight.shouldPush || hostileHere > 0);
+                let canCounter = false;
                 if(!canCounter) {
                     let dx = assignment.attackHex.x - assignment.holdHex.x;
                     let dy = assignment.attackHex.y - assignment.holdHex.y;
@@ -39246,7 +38617,7 @@
 
         function assignAiFormationOrders(owner, units, serial) {
             let readyUnits = units
-                .filter(unit => unit.type !== 'convoy' && unit.type !== 'ship' && unit.hp > unit.maxHp * 0.42 && !unit.moraleBroken && !unit.retreating)
+                .filter(unit => unit.type !== 'convoy' && unit.hp > unit.maxHp * 0.42 && !unit.moraleBroken && !unit.retreating)
                 .sort((a, b) => {
                     ensureUnitId(a);
                     ensureUnitId(b);
@@ -39747,29 +39118,29 @@
                 let farmReserve = Math.max(WOD_PRICE_LIGHT * 1.6, WOD_PRICE_FARM * 0.35);
                 let facSpend = 0;
                 while(cash >= WOD_PRICE_FACTORY + unitReserve && facSpend < 1) {
-                    let needFac = aiCities.find(ct => !ct.hasFactory);
+                    let needFac = aiCities.find(ct => cityEligibleForBuildPlacementForOwner(ct, 'factory', ownerId));
                     if(!needFac) break;
-                    needFac.hasFactory = true;
+                    wodApplyBuildAtCityForOwner(needFac, 'factory', ownerId);
                     cash -= WOD_PRICE_FACTORY;
                     facSpend++;
                 }
                 let farmSpend = 0;
                 while(cash >= WOD_PRICE_FARM + farmReserve && farmSpend < 1) {
-                    let needFarm = aiCities.find(ct => !ct.hasFarm);
+                    let needFarm = aiCities.find(ct => cityEligibleForBuildPlacementForOwner(ct, 'farm', ownerId));
                     if(!needFarm) break;
-                    needFarm.hasFarm = true;
+                    wodApplyBuildAtCityForOwner(needFarm, 'farm', ownerId);
                     cash -= WOD_PRICE_FARM;
                     farmSpend++;
                 }
                 let hbSpend = 0;
                 while(cash >= WOD_PRICE_HARBOR + unitReserve && hbSpend < 1) {
-                    let needHb = aiCities.find(ct => !ct.hasHarbor && cityHasWaterNeighbor(ct));
+                    let needHb = aiCities.find(ct => cityEligibleForBuildPlacementForOwner(ct, 'harbor', ownerId));
                     if(!needHb) break;
-                    needHb.hasHarbor = true;
+                    wodApplyBuildAtCityForOwner(needHb, 'harbor', ownerId);
                     cash -= WOD_PRICE_HARBOR;
                     hbSpend++;
                 }
-                gameData.aiMoneyByOwner[ownerKey] = cash;
+                // Build purchases already deducted from the owner treasury.
 
                 let aiForts = (gameData.forts || []).filter(f => f && f.owner === ownerId).length;
                 let fortCap = Math.max(2, aiCities.length * 2 + 1);
@@ -39831,17 +39202,7 @@
                         }
                     }
                     if(!spawnCity) continue;
-                    let spawnedUnit = spawnUnit(ut, spawnCity, ownerId);
-                    if(spawnedUnit) {
-                        spendForUnit(ownerId, ut);
-                        // March immediately toward the front focus instead of standing at
-                        // the factory for several strategy pulses (big armies took 10-30s
-                        // to task fresh spawns through the budgeted formation pass).
-                        let focus = gameData.aiFrontFocus && gameData.aiFrontFocus[ownerId];
-                        if(focus && ut !== 'ship' && ut !== 'convoy') {
-                            if(wodAiMoveUnitToward(spawnedUnit, focus.x, focus.y, false))
-                                wodAiStampOrder(spawnedUnit, false, null);
-                        }
+                    if(wodApplyBuildAtCityForOwner(spawnCity, ut, ownerId)) {
                         aiTroops++;
                         spawnedThisFrame++;
                         did = true;
@@ -39901,6 +39262,11 @@
                     let hpRatio = unit.hp / unit.maxHp;
 
                     if(unit.type === 'ship') {
+                        let naval = wodAiGetUnitTaskJob(unit);
+                        if(naval && hpRatio >= 0.42 && !unit.retreating) {
+                            if(!wodAiShouldKeepCurrentOrder(unit)) wodAiIssueTaskForceOrder(unit, naval, hpRatio);
+                            continue;
+                        }
                         if(hpRatio < 0.38) {
                             let wh = findNearestFriendlyWaterHex(unit.owner, unit.x, unit.y);
                             if(wh) {
@@ -40018,7 +39384,7 @@
                         let defCity = wodAiPickThreatenedCityForUnit(w, unit);
                         let defFort = (!defCity) ? wodAiPickThreatenedFortForUnit(w, unit) : null;
                         let defT = defCity || defFort;
-                        if(defT && (!tfJob || tfJob.kind !== 'defend')) {
+                        if(defT && (!tfJob || ['main','hold'].includes(tfJob.kind))) {
                             let hrE = gameData.hexRadius || 20;
                             let reach2 = Math.pow(hrE * 16, 2);
                             let d2 = wodAiDist2(unit.x, unit.y, defT.x, defT.y);
@@ -40132,6 +39498,7 @@
         }
 
         function update(dt) {
+            wodUpdateConstruction(dt);
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
             wodBeginSimPfBudget(gameData.entities.length);
@@ -43641,6 +43008,10 @@
                 else if(oc.indexOf("buyUnit('marine')") >= 0) btn.textContent = f.trainMarine;
                 else if(oc.indexOf("buyUnit('heavy')") >= 0) btn.textContent = f.trainHeavy;
                 else if(oc.indexOf("buyUnit('ship')") >= 0) btn.textContent = f.trainShip;
+                let unitMode = /buyUnit\('([^']+)'\)/.exec(oc)?.[1];
+                let buildMode = Object.entries({ Factory:'factory', Farm:'farm', Harbor:'harbor', Fort:'fort', Bridge:'bridge' }).find(([name]) => oc.includes('begin'+name+'Build'))?.[1];
+                let mode = unitMode || buildMode;
+                if(mode) btn.title = btn.textContent + ' · ' + WOD_PRODUCTION_SECONDS[mode] + ' seconds';
             });
             document.querySelectorAll('.shop-unit-cell-label').forEach((lab, i) => {
                 let labels = [f.light, f.marine, f.heavy, f.ship];
@@ -46409,6 +45780,7 @@
         }
 
         function wodRogueDeleteSave() {
+            wodRosterUndo = null;
             try { localStorage.removeItem(WOD_ROGUE_LS_KEY); } catch(e) {}
             wodRogue = null;
             _wodRogueWorldCache = null;
@@ -46420,6 +45792,7 @@
 
         /** Begin a campaign from the current draft: generate the world, persist the save. */
         function wodRogueBegin() {
+            wodRosterUndo = null;
             let d = wodRogueDraft();
             let world = wodRogueGenerateWorld(d.seed, d.length, d.difficulty);
             let nodesState = {};
@@ -46578,6 +45951,17 @@
             }
         }
 
+        let wodRosterUndo = null;
+        function wodRogueMoveRoster(id, targetId, after) {
+            let c = wodRogueLoad();
+            if(!c || c.over || id === targetId) return;
+            let from = c.roster.findIndex(u => u.id === id);
+            if(from < 0 || !c.roster.some(u => u.id === targetId)) return;
+            let [u] = c.roster.splice(from, 1);
+            let to = c.roster.findIndex(u => u.id === targetId);
+            c.roster.splice(to + (after ? 1 : 0), 0, u);
+            wodRogueSave(); wodRefreshCampaignPanel();
+        }
         function wodRogueRosterAdd(type) {
             let c = wodRogueLoad();
             if(!c) return null;
@@ -47024,6 +46408,27 @@
             return total;
         }
 
+        // The roster order selects the opening half; undeployed paid troops remain safe.
+        function wodRogueFieldRoster(c) {
+            return c.roster.slice(0, Math.ceil(c.roster.length / 2));
+        }
+
+        function wodCampaignReserveUnits(type) {
+            let run = gameData._campaignRun, c = wodRogueLoad();
+            if(!run || !c || !run.deployedRosterIds) return [];
+            let used = new Set(run.deployedRosterIds);
+            for(let j of gameData.constructionJobs || []) if(j.rosterId) used.add(j.rosterId);
+            return c.roster.filter(r => !used.has(r.id) && (!type || r.type === type));
+        }
+        function wodApplyCampaignUnitStats(unit, r) {
+            for(let key of ['name', 'nameCustom', 'maxHp', 'maxManpower', 'maxTanks', 'xp', 'kills', 'losses', 'tankKills', 'tankLosses']) unit[key] = r[key];
+            unit.hp = Math.max(1, Math.min(r.maxHp, r.hp));
+            unit.manpower = Math.max(50, Math.min(r.maxManpower, r.manpower));
+            unit.tanks = Math.min(r.maxTanks, r.tanks);
+            unit.veteran = !!(r.veteran || (r.xp || 0) >= WOD_VETERAN_XP_THRESHOLD);
+            unit._campRosterId = r.id;
+        }
+
         function wodRogueFormatUpkeep(rate) {
             let n = Math.round((rate || 0) * 100) / 100;
             let body = Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
@@ -47127,7 +46532,7 @@
                           (wodRogueCountryNames(node).join(' + ') || WOD_WORLD.enemy.name) +
                           (wodRogueEffectiveAiCount(node) > 1 ? ' — allied' : '') +
                           ' · ' + '★'.repeat(node.diff + 1) + '</span>';
-                    let myUpkeep = wodRogueRosterUpkeep(c.roster);
+                    let myUpkeep = wodRogueRosterUpkeep(wodRogueFieldRoster(c));
                     let startCash = wodRogueBattleStartMoney(c);
                     let startMp = wodRogueBattleStartManpower(c);
                     let startEcon = wodRogueEstimateBattleStartIncome(node, _wodRogueSelectedFromNode);
@@ -47312,9 +46717,9 @@
             let roster = document.getElementById('wodCampRoster');
             let count = document.getElementById('wodCampArmyCount');
             if(count) {
-                let upkeep = wodRogueRosterUpkeep(c.roster);
+                let upkeep = wodRogueRosterUpkeep(wodRogueFieldRoster(c));
                 count.textContent = c.roster.length + '/' + WOD_ROGUE_MAX_ROSTER + ' units · worth ' +
-                    wodRogueArmyValue() + ' · upkeep ' + wodRogueFormatUpkeep(upkeep);
+                    wodRogueArmyValue() + ' · ' + Math.ceil(c.roster.length/2) + ' fielded / ' + Math.floor(c.roster.length/2) + ' reserve · upkeep ' + wodRogueFormatUpkeep(upkeep);
             }
             if(roster) {
                 let rosterScroll = roster.scrollTop;
@@ -47322,7 +46727,7 @@
                 if(!c.roster.length) {
                     roster.innerHTML = '<div class="wod-camp-unit" style="justify-content:center;color:#95a5a6">None yet.</div>';
                 }
-                for(let u of c.roster) {
+                for(let [rosterIndex, u] of c.roster.entries()) {
                     let row = document.createElement('div');
                     let isVet = wodRogueIsRosterVeteran(u);
                     row.className = 'wod-camp-unit' + (isVet ? ' wod-camp-unit--vet' : '');
@@ -47332,8 +46737,8 @@
                         : ((u.xp | 0) > 0 ? '<span class="wod-camp-vet-tag" style="color:#95a5a6;font-weight:500">' + Math.floor(u.xp) + ' XP</span>' : '');
                     row.innerHTML =
                         '<div class="wod-camp-unit-meta">' +
-                            '<span class="wod-camp-unit-title">' + (isVet ? '<span class="vet">★</span> ' : '') + u.name +
-                            ' <span style="color:#7f9bb3">(' + (WOD_ROGUE_UNIT_LABEL[u.type] || u.type) + ')</span></span>' +
+                            '<span class="wod-camp-unit-title">' + (isVet ? '<span class="vet">★</span> ' : '') + u.name + '</span>' +
+                            '<span style="color:#7f9bb3;font-size:10px">' + (rosterIndex < Math.ceil(c.roster.length/2) ? 'Fielded' : 'Reserve') + ' · ' + (WOD_ROGUE_UNIT_LABEL[u.type] || u.type) + '</span>' +
                             vetLabel +
                         '</div>' +
                         '<div class="wod-camp-unit-right">' +
@@ -47341,6 +46746,41 @@
                             (c.over ? '' : '<button type="button" class="wod-camp-rename" data-camp-rename="' + u.id + '" title="Rename unit">✎</button>') +
                             (c.over ? '' : '<button type="button" class="wod-camp-del" data-camp-del="' + u.id + '" title="Dismiss unit (50% refund)">✕</button>') +
                         '</div>';
+                    row.dataset.rosterId = u.id;
+                    row.draggable = !c.over;
+                    row.tabIndex = 0;
+                    row.title = 'Drag to reorder; Alt + Up/Down also moves this unit.';
+                    let handle = document.createElement('span');
+                    handle.textContent = '⠿'; handle.style.cssText = 'cursor:grab;font-size:22px;padding:8px;touch-action:none';
+                    handle.setAttribute('aria-label', 'Drag to reorder');
+                    row.prepend(handle);
+                    row.addEventListener('dragstart', ev => {
+                        ev.dataTransfer.setData('application/x-wod-roster', u.id);
+                        ev.dataTransfer.setData('text/plain', u.id);
+                        ev.dataTransfer.effectAllowed = 'move';
+                    });
+                    row.addEventListener('dragover', ev => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; });
+                    row.addEventListener('drop', ev => {
+                        ev.preventDefault();
+                        let id = ev.dataTransfer.getData('application/x-wod-roster');
+                        wodRogueMoveRoster(id, u.id, ev.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2);
+                    });
+                    row.addEventListener('keydown', ev => {
+                        if(!ev.altKey || !['ArrowUp', 'ArrowDown'].includes(ev.key)) return;
+                        ev.preventDefault();
+                        let i = c.roster.findIndex(r => r.id === u.id), j = i + (ev.key === 'ArrowUp' ? -1 : 1);
+                        if(c.roster[j]) wodRogueMoveRoster(u.id, c.roster[j].id, j > i);
+                    });
+                    // Touch dragging uses the handle, leaving list scrolling on the row.
+                    handle.addEventListener('pointerdown', ev => {
+                        if(ev.pointerType === 'mouse' || c.over) return;
+                        ev.preventDefault(); handle.setPointerCapture(ev.pointerId);
+                    });
+                    handle.addEventListener('pointerup', ev => {
+                        if(ev.pointerType === 'mouse' || !handle.hasPointerCapture(ev.pointerId)) return;
+                        let target = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-roster-id]');
+                        if(target) wodRogueMoveRoster(u.id, target.dataset.rosterId, ev.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2);
+                    });
                     roster.appendChild(row);
                 }
                 roster.querySelectorAll('[data-camp-rename]').forEach(btn => {
@@ -47357,18 +46797,26 @@
                         ev.stopPropagation();
                         let id = btn.getAttribute('data-camp-del');
                         if(!id) return;
-                        wodShowConfirmDialog({
-                            title: 'Dismiss unit?',
-                            body: 'Remove this unit from your army? You get half the recruit cost back in requisition.',
-                            confirmLabel: 'Dismiss',
-                            cancelLabel: 'Keep',
-                            danger: true
-                        }).then(ok => {
-                            if(!ok) return;
-                            if(wodRogueRosterDelete(id)) wodRefreshCampaignPanel();
-                        });
+                        let idx = c.roster.findIndex(u => u.id === id);
+                        let unit = c.roster[idx];
+                        if(unit && wodRogueRosterDelete(id)) {
+                            wodRosterUndo = { unit, idx, refund: Math.floor((WOD_ROGUE_UNIT_COSTS[unit.type] || 200) * 0.5) };
+                            wodRefreshCampaignPanel();
+                        }
                     });
                 });
+                if(wodRosterUndo && !c.over) {
+                    let undo = document.createElement('button');
+                    undo.type = 'button'; undo.className = 'menu-btn'; undo.textContent = 'Undo last dismissal';
+                    undo.disabled = c.points < wodRosterUndo.refund || c.roster.length >= WOD_ROGUE_MAX_ROSTER;
+                    undo.onclick = () => {
+                        if(undo.disabled) return;
+                        c.points -= wodRosterUndo.refund;
+                        c.roster.splice(Math.min(wodRosterUndo.idx, c.roster.length), 0, wodRosterUndo.unit);
+                        wodRosterUndo = null; wodRogueSave(); wodRefreshCampaignPanel();
+                    };
+                    roster.appendChild(undo);
+                }
                 roster.scrollTop = rosterScroll;
             }
             // Shop.
@@ -47750,7 +47198,7 @@
                     name: nm,
                     x: site.x, y: site.y, q: site.q, r: site.r,
                     owner,
-                    hasFactory: !!isCapital,
+                    hasFactory: false,
                     hasHarbor: false,
                     hasFarm: false,
                     hp: 1000, maxHp: 1000,
@@ -48083,10 +47531,10 @@
             for(let owner of owners) {
                 for(let i = 0; i < unitsPerOwner; i++) {
                     // Mostly on the frontage; every 5th unit garrisons a city.
-                    let preferFront = (i % 5) !== 4;
+                    let preferFront = (i % 5) === 0;
                     placeOne(owner, 'light', preferFront);
                 }
-                for(let h = 0; h < 2; h++) placeOne(owner, 'heavy', h === 0);
+                for(let h = 0; h < 2; h++) placeOne(owner, 'heavy', false);
             }
 
             let need = gar || { light: 0, heavy: 0, ship: 0 };
@@ -48099,7 +47547,7 @@
                 for(let k = 0; k < needTotal; k++) {
                     let o = owners[k % owners.length];
                     // Garrison leftovers: mostly cities, with a frontline mix for land.
-                    let preferFront = t !== 'ship' && (k % 3) === 0;
+                    let preferFront = t !== 'ship' && t !== 'heavy' && (k % 5) === 0;
                     placeOne(o, t, preferFront);
                 }
             }
@@ -48148,6 +47596,12 @@
                     }
                 }
             }
+            // Halve each AI's complete opening army, including scenario garrisons.
+            for(let owner of owners) {
+                let army = gameData.entities.filter(u => u.owner === owner);
+                let keep = new Set(army.filter((u, i) => i % 2 === 0));
+                gameData.entities = gameData.entities.filter(u => u.owner !== owner || keep.has(u));
+            }
             // Strip any leftover player units, then split the roster across owned cities.
             gameData.entities = gameData.entities.filter(u => !(u && u.owner === 1));
             let playerCities = gameData.cities.filter(cc => cc && cc.owner === 1);
@@ -48159,8 +47613,10 @@
             let landByCity = playerCities.map(() => 0);
             let shipIdx = 0;
             let cityCursor = 0;
-            for(let ri = 0; ri < c.roster.length; ri++) {
-                let r = c.roster[ri];
+            let fieldRoster = wodRogueFieldRoster(c);
+            run.deployedRosterIds = fieldRoster.map(r => r.id);
+            for(let ri = 0; ri < fieldRoster.length; ri++) {
+                let r = fieldRoster[ri];
                 let unit;
                 if(r.type === 'ship') {
                     let home = playerCities[cityCursor % Math.max(1, playerCities.length)] || playerCities[0];
@@ -48199,12 +47655,14 @@
                 unit.veteran = !!(r.veteran || (r.xp || 0) >= WOD_VETERAN_XP_THRESHOLD);
                 unit._campRosterId = r.id;
             }
-            // Fixed army: no recruiting mid-battle, but start with cash/MP for structures.
+            wodNormalizeStartingCityEconomy([1, ...owners]);
+            wodDeployStartingArmy([1, ...owners]);
+            // Paid reserves arrive through reinforcement orders; cash/MP funds structures.
             // Research upgrades raise the opening war chest / manpower reserves.
             gameData.money = wodRogueBattleStartMoney(c);
             gameData.manpower = wodRogueBattleStartManpower(c);
             gameData.playerUnitsKilled = 0;
-            if(run) run.rosterAtStart = c.roster.length;
+            if(run) run.rosterAtStart = fieldRoster.length;
             wodSyncCampaignBattleHud();
             // Campaign AI should press the attack, not sit on hold lines — after deployment.
             gameData._campaignAiAggressive = true;
@@ -48214,7 +47672,7 @@
             let title = run.defense ? 'Hold ' + node.name : node.name;
             let holdSec = run.holdSec || wodRogueBattleHoldSeconds(c.settings && c.settings.difficulty);
             run.holdSec = holdSec;
-            let myUpkeep = wodRogueRosterUpkeep(c.roster);
+            let myUpkeep = wodRogueRosterUpkeep(fieldRoster);
             let startCash = wodRogueBattleStartMoney(c);
             let startMp = wodRogueBattleStartManpower(c);
             let startEcon = wodRogueEstimateBattleStartIncome(node, run.fromNodeId);
@@ -48252,11 +47710,11 @@
                   '. If time runs out, the attack fails.')) +
                 allyNote +
                 approachBrief +
-                '\n\nYour army: ' + c.roster.length + ' units · battle upkeep ' + wodRogueFormatUpkeep(myUpkeep) +
+                '\n\nYour army: ' + fieldRoster.length + ' fielded / ' + (c.roster.length-fieldRoster.length) + ' in reserve · battle upkeep ' + wodRogueFormatUpkeep(myUpkeep) +
                 ' · opening reserves $' + startCash.toLocaleString() + ' / ' + startMp.toLocaleString() + ' manpower.' +
                 incomeLine +
                 enemyLine +
-                '\n\nThere are no reinforcements — every loss is permanent.' +
+                '\n\nUse the unit buttons to call matching reserves as reinforcements. Arrival takes time; no extra money or manpower is charged. Every battlefield loss is permanent.' +
                 '\n\nDeployment: place your troops in your territory — right-click, drag a formation line, or stroke a path — then Begin battle. Pan with WASD or arrow keys.';
             setGameSpeed(0, true);
             wodShowMissionPopupDialog({ kicker, title, body, style: run.defense ? 'alert' : 'briefing' }, () => {
@@ -48495,6 +47953,7 @@
             let before = c.roster.length;
             let kept = [];
             for(let r of c.roster) {
+                if(run.deployedRosterIds && !run.deployedRosterIds.includes(r.id)) { kept.push(r); continue; }
                 let u = survivors.get(r.id);
                 if(!u) continue;
                 if(u.name) r.name = u.name;
@@ -48589,6 +48048,7 @@
             }
             wodRogueSave();
             gameData._campaignRun = null;
+            gameData.constructionJobs = [];
             gameData._campaignRegionMap = null;
             gameData._campaignAiAggressive = false;
             gameData._wodReturnToCampaign = true;
@@ -50143,6 +49603,7 @@
         }
 
         function syncInfoCardPanelThrottled() {
+            wodRefreshCommandHud();
             let sel = gameData.selection;
             let now = performance.now();
             let sig;
@@ -50434,6 +49895,7 @@
         }
 
         function draw() {
+            wodRefreshCommandHud();
             let viewW = canvas.clientWidth || UI.wrapper.clientWidth || wodCanvasAllocSize.w || 1;
             let viewH = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
 
@@ -50587,6 +50049,15 @@
                     }
                 }
             }
+            // In-progress objects have no combat or economic effect until their timer completes.
+            ctx.save();
+            ctx.strokeStyle = '#f1c40f'; ctx.fillStyle = '#f1c40f'; ctx.lineWidth = 3;
+            for(let j of gameData.constructionJobs || []) {
+                if(j.owner !== wodLocalPlayerOwner()) continue;
+                ctx.beginPath(); ctx.arc(j.x, j.y, 33, -Math.PI/2, -Math.PI/2 + Math.PI*2*(1-j.remaining/j.total)); ctx.stroke();
+                ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(j.mode + ' ' + Math.ceil(j.remaining) + 's', j.x, j.y - 40);
+            }
+            ctx.restore();
             // Selection + construction rings: always draw (Cities layer off must not hide them).
             ctx.save();
             for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
@@ -52446,8 +51917,77 @@
             e.preventDefault();
         });
 
+        function wodSelectControlGroup(number) {
+            let ids = new Set((gameData.controlGroups || {})[number] || []);
+            for(let e of gameData.selection) e.selected = false;
+            gameData.selection = gameData.entities.filter(u => u.hp > 0 && u.owner === wodLocalPlayerOwner() && ids.has(u.uid));
+            for(let u of gameData.selection) u.selected = true;
+            syncInfoCardPanel(); wodRefreshCommandHud(true);
+        }
+        function wodRefreshCommandHud(force) {
+            if(!UI.inGameUI || (!force && performance.now() - (wodRefreshCommandHud.last || 0) < 250)) return;
+            wodRefreshCommandHud.last = performance.now();
+            let hud = document.getElementById('wodCommandHud');
+            if(!hud) {
+                hud = document.createElement('div'); hud.id = 'wodCommandHud';
+                hud.style.cssText = 'position:absolute;left:12px;bottom:70px;max-width:min(410px,70vw);pointer-events:auto;z-index:25;font-size:12px;color:white;background:#142333e8;border-radius:8px;padding:8px';
+                hud.innerHTML = '<div style="color:#b4c5d6">Groups · Ctrl + number to save · number to select</div><div data-group-buttons></div><div data-reserve-count></div><div data-production-countdown style="margin-top:5px"></div>';
+                hud.addEventListener('click', e => {
+                    let b = e.target.closest('[data-control-group]');
+                    if(b) wodSelectControlGroup(b.dataset.controlGroup);
+                });
+                UI.inGameUI.appendChild(hud);
+            }
+            let lo = wodLocalPlayerOwner(), alive = new Set(gameData.entities.filter(u => u.hp > 0 && u.owner === lo).map(u => u.uid));
+            let groups = gameData.controlGroups || (gameData.controlGroups = {});
+            let controls = '';
+            for(let n of [1,2,3,4,5,6,7,8,9,0]) {
+                if(!groups[n]) continue;
+                groups[n] = groups[n].filter(id => alive.has(id));
+                if(!groups[n].length) { delete groups[n]; continue; }
+                let active = gameData.selection.length === groups[n].length && gameData.selection.every(u => groups[n].includes(u.uid));
+                controls += '<button type="button" data-control-group="' + n + '" style="margin:2px;padding:6px;border:1px solid ' + (active ? '#f1c40f' : '#607080') + ';border-radius:4px;background:#263c50;color:white" title="Select group ' + n + '; Ctrl+' + n + ' replaces it">' + n + ' · ' + groups[n].length + '</button>';
+            }
+            let jobs = (gameData.constructionJobs || []).filter(j => j.owner === lo);
+            hud.hidden = gameState !== 'PLAYING';
+            let groupButtons = hud.querySelector('[data-group-buttons]');
+            if(groupButtons._markup !== controls) { groupButtons.innerHTML = controls; groupButtons._markup = controls; }
+            hud.querySelector('[data-reserve-count]').textContent = gameData._campaignRun ? 'Reserve reinforcements: ' + wodCampaignReserveUnits().length : '';
+            hud.querySelector('[data-production-countdown]').textContent = jobs.slice(0,4).map(j => j.mode + (j.rosterId ? ' reinforcements ' : ' ') + Math.ceil(j.remaining) + 's').join(' · ') + (jobs.length > 4 ? ' · +' + (jobs.length - 4) : '');
+            if(gameData._campaignRun) {
+                UI.inGameUI.querySelectorAll('button[onclick^="buyUnit"]').forEach(btn => {
+                    let type = /buyUnit\('([^']+)'\)/.exec(btn.getAttribute('onclick'))?.[1];
+                    if(!type) return;
+                    let count = wodCampaignReserveUnits(type).length;
+                    let text = (WOD_ROGUE_UNIT_LABEL[type] || type) + ' reinforcements (' + count + ')';
+                    if(btn.textContent !== text) btn.textContent = text;
+                    btn.title = 'Call an existing reserve unit · ' + WOD_PRODUCTION_SECONDS[type] + 's arrival · no extra resource cost';
+                    btn.disabled = !count || !gameData._campaignRun.battleLive;
+                });
+            }
+            let production = document.getElementById('wodPcProdRoot');
+            let lift = 70;
+            if(production?.offsetParent && !production.classList.contains('wod-pc-collapsed'))
+                lift = Math.max(lift, window.innerHeight - production.getBoundingClientRect().top + 10);
+            for(let mobileSheet of UI.inGameUI.querySelectorAll('.wod-m-sheet--units, .wod-m-sheet--build'))
+                if(mobileSheet.offsetParent) lift = Math.max(lift, window.innerHeight - mobileSheet.getBoundingClientRect().top + 10);
+            hud.style.bottom = lift + 'px';
+        }
         let keys = {};
         window.addEventListener('keydown', e => {
+            let typingGroup = e.target?.closest?.('input, textarea, select, [contenteditable="true"]');
+            let digit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code);
+            if(gameState === 'PLAYING' && digit && !typingGroup && !e.altKey && !e.metaKey && (!UI.escMenu || UI.escMenu.classList.contains('hidden'))) {
+                e.preventDefault();
+                if(e.ctrlKey) {
+                    let members = gameData.selection.filter(u => u.owner === wodLocalPlayerOwner() && u.hp > 0 && gameData.entities.includes(u) && u.type !== 'convoy');
+                    for(let u of members) ensureUnitId(u);
+                    if(!gameData.controlGroups) gameData.controlGroups = {};
+                    gameData.controlGroups[digit[1]] = members.map(u => u.uid);
+                    wodRefreshCommandHud(true);
+                } else wodSelectControlGroup(digit[1]);
+                return;
+            }
             // Triple-backtick (```) anytime opens/closes the in-game dev menu.
             if(e.code === 'Backquote' || e.key === '`' || e.key === '~') {
                 let tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
@@ -52873,6 +52413,7 @@
         function hexEligibleForFortPlacementForOwner(hex, owner) {
             if(!hexEligibleForFortTerrain(hex, owner)) return false;
             if(fortAtHexKey(hex.q, hex.r)) return false;
+            if((gameData.constructionJobs || []).some(j => j.mode === 'fort' && j.q === hex.q && j.r === hex.r)) return false;
             return wodPlayerTreasury(owner) >= WOD_PRICE_FORT;
         }
         function wodFortCombatAuraRadiusPx() {
@@ -53400,12 +52941,14 @@
                 if(noisy) showNotification('There is already a fort on this hex.');
                 return false;
             }
-            if(!opts.editor) {
+            if(!opts.editor && !opts.prepaid) {
+                if((gameData.constructionJobs || []).some(j => j.mode === 'fort' && j.q === hex.q && j.r === hex.r)) return false;
                 if(!hexEligibleForFortPlacementForOwner(hex, owner)) {
                     if(noisy) showNotification('Not enough $ for this fort.');
                     return false;
                 }
                 wodDeductPlayerMoney(owner, WOD_PRICE_FORT);
+                return wodQueueProduction('fort', owner, { q: hex.q, r: hex.r, x: hex.x, y: hex.y });
             }
             wodFortPlacementSeq++;
             gameData.forts.push({
@@ -53477,12 +53020,16 @@
             if(!gameData.bridges) gameData.bridges = [];
             let noisy = !opts.suppressNotes;
             let br = { x, y, angle: angle || 0, w, h, owner: owner || 0 };
-            let err = wodBridgePlacementError(br, opts.editor ? null : owner);
+            let err = wodBridgePlacementError(br, (opts.editor || opts.prepaid) ? null : owner);
             if(err) {
                 if(noisy) showNotification(err);
                 return false;
             }
-            if(!opts.editor) wodDeductPlayerMoney(owner, WOD_PRICE_BRIDGE);
+            if(!opts.editor && !opts.prepaid) {
+                if((gameData.constructionJobs || []).some(j => j.mode === 'bridge' && Math.hypot(j.x - x, j.y - y) < Math.max(w, h))) return false;
+                wodDeductPlayerMoney(owner, WOD_PRICE_BRIDGE);
+                return wodQueueProduction('bridge', owner, { x, y, angle, w, h });
+            }
             br = wodNormalizeBridgeRecord(br);
             wodSyncBridgeWorldCoords(br);
             wodBridgePlacementSeq++;
@@ -53562,7 +53109,11 @@
         }
 
         function cityEligibleForBuildPlacementForOwner(city, mode, owner) {
-            if(!city || city.owner !== owner || !city.id || !mode) return false;
+            if(!city || city.owner !== owner || !city.id || !mode || wodCityProductionJob(city)) return false;
+            if(owner === 1 && gameData._campaignRun && ['light','marine','heavy','ship'].includes(mode)) {
+                return !!(gameData._campaignRun.battleLive && wodCampaignReserveUnits(mode).length &&
+                    !isCitySiegeBlockedForProduction(city) && findSpawnHex(mode, city, owner));
+            }
             if(mode === 'factory') {
                 if(city.hasFactory) return false;
                 return wodPlayerTreasury(owner) >= WOD_PRICE_FACTORY;
@@ -53597,6 +53148,12 @@
         /** Human-readable reason a train/build action is blocked (money, MP, city requirements). */
         function wodExplainBuildBlockReason(mode, owner, city) {
             if(!mode) return 'That action is not available right now.';
+            if(city && wodCityProductionJob(city)) return 'This town is busy: ' + wodCityProductionJob(city).mode + ' · ' + Math.ceil(wodCityProductionJob(city).remaining) + 's remaining.';
+            if(owner === 1 && gameData._campaignRun && ['light','marine','heavy','ship'].includes(mode)) {
+                if(!gameData._campaignRun.battleLive) return 'Begin the battle before calling reinforcements.';
+                if(!wodCampaignReserveUnits(mode).length) return 'No ' + mode + ' reserves remain. Recruit more between battles.';
+                return 'Reinforcements need a free friendly town with a safe arrival area (ships need water).';
+            }
             let money = Math.floor(wodPlayerTreasury(owner) || 0);
             let mp = Math.floor(wodPlayerMpPool(owner) || 0);
             if(mode === 'factory') {
@@ -53673,50 +53230,73 @@
             return 'No towns can train ' + unitName + ' right now.';
         }
 
-        function wodApplyBuildAtCityForOwner(city, mode, owner) {
-            if(mode === 'factory') {
-                wodDeductPlayerMoney(owner, WOD_PRICE_FACTORY);
-                city.hasFactory = true;
-                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodBumpLifetime('factoriesBuilt', 1);
-                    checkWodAchievements();
-                    scheduleSaveWodProgress();
-                }
-            } else if(mode === 'farm') {
-                wodDeductPlayerMoney(owner, WOD_PRICE_FARM);
-                city.hasFarm = true;
-                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodBumpLifetime('farmsBuilt', 1);
-                    checkWodAchievements();
-                    scheduleSaveWodProgress();
-                }
-            } else if(mode === 'harbor') {
-                wodDeductPlayerMoney(owner, WOD_PRICE_HARBOR);
-                city.hasHarbor = true;
-                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodBumpLifetime('harborsBuilt', 1);
-                    checkWodAchievements();
-                    scheduleSaveWodProgress();
-                }
-            } else {
-                let ut = mode === 'heavy' ? 'heavy' : mode === 'ship' ? 'ship' : mode === 'marine' ? 'marine' : 'light';
-                if(!findSpawnHex(ut, city, owner)) {
-                    showNotification(ut === 'ship' ? 'No water nearby!' : 'No clear spawn area near this town!');
-                    return false;
-                }
-                if(!spendForUnit(owner, ut)) return false;
-                spawnUnit(ut, city, owner);
-            }
+        const WOD_PRODUCTION_SECONDS = { factory: 30, harbor: 30, farm: 30, fort: 30, bridge: 30, light: 10, marine: 15, heavy: 20, ship: 25 };
+        function wodCityProductionJob(city) {
+            return (gameData.constructionJobs || []).find(j => j.cq === city.q && j.cr === city.r);
+        }
+        function wodQueueProduction(mode, owner, location) {
+            if(!gameData.constructionJobs) gameData.constructionJobs = [];
+            let total = WOD_PRODUCTION_SECONDS[mode];
+            if(!total) return false;
+            gameData.constructionJobs.push(Object.assign({ mode, owner, remaining: total, total }, location));
+            if(owner === wodLocalPlayerOwner()) showNotification(mode + (location.rosterId ? ' reinforcements called · ' : ' queued · ') + total + 's');
+            wodRefreshCommandHud(true);
             return true;
+        }
+        function wodApplyBuildAtCityForOwner(city, mode, owner) {
+            if(!cityEligibleForBuildPlacementForOwner(city, mode, owner)) return false;
+            if(owner === 1 && gameData._campaignRun && ['light','marine','heavy','ship'].includes(mode)) {
+                let reserve = wodCampaignReserveUnits(mode)[0];
+                if(!reserve) return false;
+                return wodQueueProduction(mode, owner, { cq:city.q, cr:city.r, x:city.x, y:city.y, rosterId:reserve.id });
+            }
+            let price = { factory: WOD_PRICE_FACTORY, harbor: WOD_PRICE_HARBOR, farm: WOD_PRICE_FARM }[mode];
+            if(price != null) wodDeductPlayerMoney(owner, price);
+            else if(!spendForUnit(owner, mode)) return false;
+            return wodQueueProduction(mode, owner, { cq: city.q, cr: city.r, x: city.x, y: city.y });
+        }
+        function wodUpdateConstruction(dt) {
+            if(!dt || (gameData.mp?.enabled && !gameData.mp.isHost) || wodCampaignDeployActive()) return;
+            let jobs = gameData.constructionJobs || [];
+            for(let i = jobs.length - 1; i >= 0; i--) {
+                let j = jobs[i];
+                let city = j.cq != null ? gameData.cities.find(c => c.q === j.cq && c.r === j.cr) : null;
+                let hex = getNearestHexToPoint(j.x, j.y);
+                if((j.cq != null && (!city || city.owner !== j.owner)) || (!city && (!hex || hex.owner !== j.owner))) {
+                    jobs.splice(i, 1); continue;
+                }
+                if(city && isCitySiegeBlockedForProduction(city)) continue;
+                j.remaining = Math.max(0, j.remaining - dt);
+                if(j.remaining > 0) continue;
+                let done = true;
+                if(j.mode === 'fort') done = placeFortAtHex(hex, j.owner, { prepaid: true, suppressNotes: true });
+                else if(j.mode === 'bridge') done = placeBridgeAt(j.owner, j.x, j.y, j.angle, j.w, j.h, { prepaid: true, suppressNotes: true });
+                else if(['factory', 'harbor', 'farm'].includes(j.mode)) {
+                    city[{ factory: 'hasFactory', harbor: 'hasHarbor', farm: 'hasFarm' }[j.mode]] = true;
+                    if(j.owner === wodLocalPlayerOwner() && wodProgress && !gameData.menuAttractMode) {
+                        wodBumpLifetime({ factory: 'factoriesBuilt', harbor: 'harborsBuilt', farm: 'farmsBuilt' }[j.mode], 1);
+                        checkWodAchievements(); scheduleSaveWodProgress();
+                    }
+                } else if(j.rosterId) {
+                    let run = gameData._campaignRun, r = wodRogueLoad()?.roster.find(r => r.id === j.rosterId);
+                    if(!run || !r || run.deployedRosterIds.includes(r.id)) { jobs.splice(i,1); continue; }
+                    let unit = spawnUnit(j.mode, city, j.owner);
+                    done = !!unit;
+                    if(unit) {
+                        wodApplyCampaignUnitStats(unit, r);
+                        run.deployedRosterIds.push(r.id);
+                        run.rosterAtStart = run.deployedRosterIds.length;
+                    }
+                } else done = !!spawnUnit(j.mode, city, j.owner);
+                // Training waits at zero for a free spawn slot rather than losing paid troops.
+                if(!done && city) continue;
+                jobs.splice(i, 1);
+                if(j.owner === wodLocalPlayerOwner() && done) showNotification(j.mode + ' ready');
+            }
         }
 
         function enterBuildPlacementMode(mode) {
             if(gameState !== 'PLAYING') return;
-            // Campaign battles: the army is fixed — no recruiting mid-battle.
-            if(gameData._campaignRun && (mode === 'light' || mode === 'marine' || mode === 'heavy' || mode === 'ship')) {
-                showNotification('Campaign: your army is fixed — recruit between battles on the war map.');
-                return;
-            }
             if(gameData.buildMode === mode) {
                 exitBuildPlacementMode();
                 return;
@@ -53936,8 +53516,10 @@
                 camera: gameData.camera,
                 territory,
                 landCells: Object.values(territory).reduce((sum, count) => sum + count, 0),
-                cities: gameData.cities.map(c => ({id: c.id, owner: c.owner})),
-                units: gameData.entities.map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp})),
+                construction: gameData.constructionJobs || [],
+                controlGroups: gameData.controlGroups || {},
+                cities: gameData.cities.map(c => ({id: c.id, owner: c.owner, factory: !!c.hasFactory, harbor: !!c.hasHarbor, farm: !!c.hasFarm})),
+                units: gameData.entities.map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp, group: e.aiTfJobId, role: e.aiTfKind, deployment: e._startDeployment})),
                 ui: {
                     selectionCount: gameData.selection.length,
                     mobileOrderMode: mobileOrderMode || null,
