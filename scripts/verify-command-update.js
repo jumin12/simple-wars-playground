@@ -347,7 +347,11 @@ const server = http.createServer((req, res) => {
           let q=(owner===1?-1:1)*Math.floor(span*.6),r=Math.floor(span*.6),h=g.hexes[`${q},${r}`];
           return {id:'front-test-'+owner,name:'Town '+owner,owner,q,r,x:h.x,y:h.y,hp:1000,maxHp:1000};
         });
-        for(let c of g.cities){
+        if(shape==='separate') for(const c of g.cities.slice()) {
+          const h=g.hexes[`${c.q},${-c.r}`];
+          g.cities.push({...c,id:c.id+'-south',r:h.r,x:h.x,y:h.y});
+        }
+        for(let c of g.cities.slice(0,2)){
           for(let i=0;i<19;i++)createUnitAt('light',c.x,c.y,c.owner,{startSpawn:true});
           createUnitAt('heavy',c.x,c.y,c.owner,{startSpawn:true});
         }
@@ -598,7 +602,7 @@ const server = http.createServer((req, res) => {
       fs.copyFileSync(path.join(skill,'scripts','web_game_playwright_client.js'),client);
       fs.rmSync(path.join(OUT,'skill','errors-0.json'),{force:true});
       await new Promise((resolve,reject)=>{
-        let child=spawn(process.execPath,[client,'--url',url+'/?autostart=1','--actions-file',path.join(skill,'references','action_payloads.json'),'--iterations','1','--pause-ms','1000','--screenshot-dir',path.join(OUT,'skill')],{stdio:'inherit',env:process.env});
+        let child=spawn(process.execPath,[client,'--url',url+'/?autostart=1','--actions-file',path.join(skill,'references','action_payloads.json'),'--iterations','1','--pause-ms','8000','--screenshot-dir',path.join(OUT,'skill')],{stdio:'inherit',env:process.env});
         child.on('exit',code=>code===0?resolve():reject(Error('Skill client exited '+code)));
       });
     }
