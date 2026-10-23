@@ -12630,8 +12630,8 @@
     </script>
     <script src="multiplayer-client.js"></script>
     <script src="ancient-civ-emblems.js"></script>
-    <script src="music-player.js"></script>
-    <script src="battle-audio.js"></script>
+    <script src="music-player.js?v=field-v3-2"></script>
+    <script src="battle-audio.js?v=field-v3-2"></script>
     <script>
         // --- Core UI & State ---
         const UI = {
@@ -12649,6 +12649,16 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-23T01:43:00-04:00',
+                title: 'Distant combat sound design and stronger defense',
+                items: [
+                    'Replaced every battle and building effect with a new mastered ElevenLabs Sound Effects v3 bank: two long combat variations, work, mobilization and completion sounds per era.',
+                    'Combat remains faintly audible at overview zoom. Smooth crossfades, distance filtering, controlled peaks and a gentle temporary music dip keep the mix clear without drowning out the soundtrack.',
+                    'Building work and completion now have distinct grounded cues, with limits on simultaneous sounds.',
+                    'AI allocates slightly more infantry to town and frontline defense, while attack and flank groups seek less-defended routes and avoid covered fort approaches.'
+                ]
+            },
             {
                 at: '2026-10-23T00:30:00-04:00',
                 title: 'Economy, mobilization and purposeful AI',
@@ -38347,7 +38357,7 @@
                     let enemyWeight = countNearbyUnits(owner, nHex.x, nHex.y, 125, true);
                     let isCityTile = gameData.cities.some(city => wodIsHostileOwner(city.owner, owner) && city.q === nHex.q && city.r === nHex.r);
                     let isPlayerCity = gameData.cities.some(city => city.owner === 1 && city.q === nHex.q && city.r === nHex.r);
-                    let weak = enemyWeight + (isCityTile ? -3 : 0) - (isPlayerCity ? 11 : 0);
+                    let weak = enemyWeight * 3 - (isCityTile ? 1.5 : 0) - (isPlayerCity ? 2 : 0);
                     if(weak < bestWeak) {
                         bestWeak = weak;
                         attackHex = nHex;
@@ -38367,14 +38377,17 @@
                 let playerThreat = countPlayerThreatNear(hex.x, hex.y, 200);
                 let touchesPlayerLand = getNeighborHexes(hex).some(n => n && n.owner === 1);
                 let guardBias = -playerThreat * 2.4 - (touchesPlayerLand ? 8 : 0);
-                candidates.push({holdHex: hex, attackHex, score: bestWeak + cityDefenseBias + guardBias});
+                candidates.push({holdHex: hex, attackHex, attackScore: bestWeak, score: cityDefenseBias + guardBias - Math.max(0,bestWeak)*.3});
             }
-            candidates.sort((a, b) => a.score - b.score);
+            candidates.sort((a,b)=>a.score-b.score);
+            let weakCandidates=candidates.slice().sort((a,b)=>a.attackScore-b.attackScore);
+            let mixed=[];
+            for(let i=0;i<candidates.length;i++){mixed.push(candidates[i]);mixed.push(weakCandidates[i]);}
             let out = [];
             let pressure = estimatePlayerPressureOnFront(owner);
             let sectorSpacing = pressure > 6 ? 3.45 : (pressure > 2 ? 4.25 : 5.1);
             let minDistSq = Math.pow(gameData.hexRadius * sectorSpacing, 2);
-            for(let c of candidates) {
+            for(let c of mixed) {
                 if(out.some(o => {
                     let dx = o.holdHex.x - c.holdHex.x;
                     let dy = o.holdHex.y - c.holdHex.y;
@@ -38383,7 +38396,7 @@
                 out.push(c);
                 if(out.length >= want) break;
             }
-            return out;
+            return out.sort((a,b)=>a.score-b.score);
         }
 
         function findNearestFriendlyWaterHex(owner, x, y) {
@@ -38480,10 +38493,20 @@
             return true;
         }
 
+        function wodAiAttackSectorScore(owner,sector) {
+            let h=sector.attackHex;if(!h)return Infinity;
+            let hr=gameData.hexRadius||20;
+            let defenders=countNearbyUnits(owner,h.x,h.y,Math.max(150,hr*7),true);
+            let deeper=countNearbyUnits(owner,h.x,h.y,Math.max(240,hr*11),true);
+            let fortRisk=(gameData.forts||[]).some(f=>wodIsHostileOwner(f.owner,owner)&&wodAiDist2(f.x,f.y,h.x,h.y)<Math.pow(hr*7,2));
+            let town=gameData.cities.some(c=>wodIsHostileOwner(c.owner,owner)&&wodAiDist2(c.x,c.y,h.x,h.y)<Math.pow(hr*5,2));
+            return defenders*4+deeper*1.25+(fortRisk?8:0)-(town?2:0)+(h.owner===1?-1:0);
+        }
+
         /**
          * Build sticky multi-job task forces for one AI owner.
-         * One main push, a flank or pocket-seal, a line on the contact, and garrisons
-         * only while a city or fort is actually under attack.
+         * Multiple pushes through weak sectors, flank attacks, a reinforced contact line,
+         * permanent town guards, and infantry screens behind the advance.
          */
         function wodAiEnsureTaskForcePlan(owner, units) {
             if(!gameData.aiTaskForces) gameData.aiTaskForces = {};
@@ -38494,6 +38517,8 @@
             let prev = gameData.aiTaskForces[owner], now = performance.now();
             if(prev && prev.signature === signature && now < prev.expireAt) return prev;
             let sectors = buildAiFrontlineSectors(owner, Math.min(24, Math.max(6, Math.ceil(ready.length / 2))));
+            // Keep defensive sectors near pressure; send attack groups through weaker contact points.
+            let attackSectors=sectors.map(sector=>({sector,score:wodAiAttackSectorScore(owner,sector)})).sort((a,b)=>a.score-b.score).map(row=>row.sector);
             let jobs = [], unitJob = {}, index = 0;
             const add = (kind, members, sector, asset) => {
                 if(!members.length) return;
@@ -38510,10 +38535,11 @@
                 }
             };
             const chunks = (kind, members, size) => {
-                for(let i = 0; i < members.length; i += size) add(kind, members.slice(i, i+size), sectors[Math.floor(i/size) % Math.max(1,sectors.length)]);
+                let pool=['main','armor'].includes(kind)?attackSectors:sectors;
+                for(let i = 0; i < members.length; i += size) add(kind, members.slice(i, i+size), pool[Math.floor(i/size) % Math.max(1,pool.length)]);
             };
             let infantry = ready.filter(u => !['heavy','marine','ship'].includes(u.type));
-            let guards = assets.length ? Math.min(infantry.length, Math.max(1, Math.round(infantry.length * 0.2))) : 0;
+            let guards = assets.length ? Math.min(infantry.length, Math.max(1, Math.round(infantry.length * 0.25))) : 0;
             // Distribute permanent guards among towns and forts, even before enemies arrive.
             let guardAssets = assets.slice().sort((a,b) => countNearbyUnits(owner,b.x,b.y,320,true)-countNearbyUnits(owner,a.x,a.y,320,true));
             for(let i = 0; i < guards; i++) {
@@ -38521,18 +38547,22 @@
                 infantry.sort((a,b) => wodAiDist2(a.x,a.y,asset.x,asset.y)-wodAiDist2(b.x,b.y,asset.x,asset.y));
                 add('defend', infantry.splice(0,1), null, asset);
             }
-            let lineN = infantry.length > 1 ? Math.max(1, Math.round(infantry.length * 0.3)) : 0;
+            let lineN = infantry.length > 1 ? Math.max(1, Math.round(infantry.length * 0.34)) : 0;
             chunks('hold', infantry.splice(0,lineN), 3);
             let escorts = infantry.length >= 4 ? infantry.splice(0,Math.max(1,Math.round(infantry.length*0.25))) : [];
             let flankN = infantry.length >= 4 ? Math.max(1, Math.round(infantry.length * 0.2)) : 0;
             let flank = infantry.splice(-flankN || infantry.length, flankN);
             chunks('main', infantry, 4);
             for(let i=0; i<flank.length; i+=3) {
-                let sector = sectors[(Math.floor(i/3)+1) % Math.max(1,sectors.length)];
+                let sector = attackSectors[(Math.floor(i/3)+1) % Math.max(1,attackSectors.length)];
                 add('raid', flank.slice(i,i+3), sector);
                 let job = jobs[jobs.length-1];
-                if(sector && job) job.strikeHex = wodAiPickHookHex(owner, sector.attackHex,
-                    sector.attackHex.x-sector.holdHex.x, sector.attackHex.y-sector.holdHex.y, i%2 ? -1 : 1) || sector.attackHex;
+                if(sector && job) {
+                    let dx=sector.attackHex.x-sector.holdHex.x,dy=sector.attackHex.y-sector.holdHex.y;
+                    let hooks=[wodAiPickHookHex(owner,sector.attackHex,dx,dy,-1),wodAiPickHookHex(owner,sector.attackHex,dx,dy,1)].filter(Boolean);
+                    hooks.sort((a,b)=>wodAiAttackSectorScore(owner,{attackHex:a})-wodAiAttackSectorScore(owner,{attackHex:b}));
+                    job.strikeHex=hooks[0]||sector.attackHex;
+                }
             }
             chunks('armor', ready.filter(u => u.type === 'heavy'), 3);
             let pushes = jobs.filter(j=>j.kind==='main' || j.kind==='armor');
@@ -49985,6 +50015,7 @@
                 units:gameData.entities.filter(wodFogCanSeeUnit),
                 jobs:(gameData.constructionJobs || []).filter(j=>wodFogHexVisible(getNearestHexToPoint(j.x,j.y))).map(j=>({...j,key:[j.owner,j.cq,j.cr,j.x,j.y,j.mode,j.rosterId||''].join(':')})),
                 completed:j=>{
+                    if(!wodFogHexVisible(getNearestHexToPoint(j.x,j.y)))return false;
                     let c=gameData.cities.find(c=>c.q===j.cq&&c.r===j.cr&&c.owner===j.owner);
                     if(['factory','harbor','farm'].includes(j.mode))return !!c?.[{factory:'hasFactory',harbor:'hasHarbor',farm:'hasFarm'}[j.mode]];
                     if(j.mode==='fort')return gameData.forts.some(f=>f.owner===j.owner&&wodAiDist2(f.x,f.y,j.x,j.y)<100);

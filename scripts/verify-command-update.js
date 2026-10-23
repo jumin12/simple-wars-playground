@@ -13,7 +13,7 @@ const server = http.createServer((req, res) => {
   if (!file.startsWith(ROOT + path.sep)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, body) => {
     if (err) { res.writeHead(404).end(); return; }
-    res.setHeader('Content-Type', ({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg'})[path.extname(file)] || 'application/octet-stream');
+    res.setHeader('Content-Type', ({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)] || 'application/octet-stream');
     res.end(body);
   });
 });
@@ -122,6 +122,9 @@ const server = http.createServer((req, res) => {
     });
     for(const kind of ['defend','hold','main','raid','armor','marine','naval','support']) assert(ai.groups.some(g=>g.kind===kind),'AI '+kind+' group');
     for(const [role,type] of [['armor','heavy'],['marine','marine'],['naval','ship']]) assert(ai.groups.filter(g=>g.kind===role).every(g=>g.members.every(t=>t===type)),'specialized '+role);
+    const aiInfantry=ai.groups.flatMap(g=>g.members).filter(t=>t==='light').length;
+    const aiDefenders=ai.groups.filter(g=>g.kind==='defend'||g.kind==='hold').reduce((n,g)=>n+g.members.length,0);
+    assert(aiDefenders>=Math.floor(aiInfantry*.48),'AI dedicates slightly more infantry to town/front defense');
     assert(ai.groups.filter(g=>g.kind==='main').length>1&&ai.assigned===ai.total&&ai.orders>3,'multiple coordinated AI groups');
     assert(ai.building&&!ai.instant&&ai.finished&&ai.paid===2000,'AI obeys production costs and times');
     console.log('forts, capture and AI formations passed');
@@ -365,6 +368,13 @@ const server = http.createServer((req, res) => {
         if(sec%3===0){let n=gameData.constructionJobs.length;wodRunAiSpawnBurstForOwner('2',{2:[c2,c3]},{2:getOwnerIncome(2)},{2:up});bought+=Math.max(0,gameData.constructionJobs.length-n);}
       }
       let sustained={army:gameData.entities.filter(u=>u.owner===2&&u.type!=='convoy').length,bought,cash:gameData.aiMoneyByOwner[2],mp:gameData.aiManpowerByOwner[2]};
+      let strongH=gameData.hexes['-1,-12'],weakH=gameData.hexes['-1,12'];
+      for(let i=0;i<6;i++)createUnitAt('light',strongH.x, strongH.y,1,{startSpawn:true});
+      gameData.unitSpatialGrid=buildUnitSpatialGrid(200);
+      let strongScore=wodAiAttackSectorScore(2,{attackHex:strongH}),weakScore=wodAiAttackSectorScore(2,{attackHex:weakH});
+      gameData.aiTaskForces={};
+      let attackPlan=wodAiEnsureTaskForcePlan(2,gameData.entities.filter(u=>u.owner===2));
+      let pushScores=attackPlan.jobs.filter(j=>j.kind==='main').map(j=>wodAiAttackSectorScore(2,j));
       let h=gameData.hexes['5,0'];
       gameData.forts=[{id:'existing-fort',owner:2,q:h.q,r:h.r,x:h.x,y:h.y,hp:100,maxHp:100}];
       let near=gameData.hexes['6,0'],existingScore=wodAiScoreFortHex(near,2);
@@ -387,12 +397,13 @@ const server = http.createServer((req, res) => {
       for(let r=3;r<=7;r++)gameData.hexes[`8,${r}`].type='grass';
       updateEncirclements(2);safety=0;while(gameData._encircWork&&safety++<1000)wodEncirclementProcessChunk();
       let inlandMarine=!!wodGetUnitEncirclementState(marine,ph);
-      return {priority,firstCash,earlyFort,sustained,existingScore,pendingScore,coastal,inlandMarine};
+      return {priority,firstCash,earlyFort,sustained,strongScore,weakScore,pushScores,existingScore,pendingScore,coastal,inlandMarine};
     });
     assert.deepEqual(strategy.priority,['light','light'],'under-ten AI spends on units before buildings');
     assert.equal(strategy.firstCash,99000,'AI pays for both recruits');
     assert(!strategy.earlyFort,'small army cannot fortify instead of recruit');
     assert(strategy.sustained.army>=12&&strategy.sustained.bought>=5&&strategy.sustained.cash>=0&&strategy.sustained.mp>=0,'sustained affordable AI recruitment');
+    assert(strategy.strongScore>strategy.weakScore+20&&strategy.pushScores.length&&strategy.pushScores.every(s=>s<strategy.strongScore),'AI pushes through uncovered sectors instead of the defended concentration');
     assert(strategy.existingScore===-1e9&&strategy.pendingScore===-1e9,'AI rejects overlapping completed and queued forts');
     assert(strategy.coastal.infantry&&!strategy.coastal.marine&&strategy.coastal.water&&!strategy.coastal.town,'water supplies only marines; towns supply land pockets');
     assert(strategy.coastal.damageInf>0&&strategy.coastal.damageMarine===0,'coastal attrition applies only to ordinary infantry');
@@ -405,8 +416,9 @@ const server = http.createServer((req, res) => {
     fs.writeFileSync(path.join(OUT,'audio-test.html'),`<!doctype html><base href="/"><button id="unlock">Enable sound</button>
       <input class="wod-sfx-vol" type="range" min="0" max="100"><span class="wod-sfx-vol-label"></span><input class="wod-sfx-mute" type="checkbox">
       <input class="wod-sfx-vol" type="range" min="0" max="100"><span class="wod-sfx-vol-label"></span><input class="wod-sfx-mute" type="checkbox">
-      <script src="battle-audio.js"></script>`);
+      <script src="music-player.js"></script><script src="battle-audio.js"></script>`);
     await audioPage.goto(url+'/output/command-update/audio-test.html');await audioPage.locator('#unlock').click();
+    await audioPage.evaluate(()=>{wodMusic.start();wodMusic.setVolume(1);});
     let eraResults=[];
     for(let [index,era] of ['ancient','medieval','napoleonic','modern'].entries()) {
       await audioPage.evaluate(era=>{
@@ -414,7 +426,7 @@ const server = http.createServer((req, res) => {
         if(!window.audioPump)window.audioPump=setInterval(()=>wodBattleAudio.update(audioScene),120);
         wodBattleAudio.update(audioScene);
       },era);
-      await audioPage.waitForFunction(n=>wodBattleAudio.debug().loaded>=n,(index+1)*3,{timeout:15000});
+      await audioPage.waitForFunction(n=>wodBattleAudio.debug().loaded>=n,(index+1)*5,{timeout:15000});
       await audioPage.waitForTimeout(150);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
       await audioPage.waitForTimeout(400);
       const state=await audioPage.evaluate(()=>wodBattleAudio.debug());
@@ -429,21 +441,31 @@ const server = http.createServer((req, res) => {
     });
     assert(attenuation.center.gain>attenuation.edge.gain&&!attenuation.offscreen,'camera attenuates and stops offscreen combat');
     await audioPage.waitForTimeout(150);
-    await audioPage.evaluate(()=>{audioScene.units[0].x=500;audioScene.zoom=.3;wodBattleAudio.update(audioScene);});
-    assert(!await audioPage.evaluate(()=>wodBattleAudio.debug().playing),'zoomed-out battles silent');
+    await audioPage.evaluate(()=>{audioScene.units[0].x=500;audioScene.zoom=.3;audioScene.cameraX=-350;audioScene.cameraY=-245;wodBattleAudio.update(audioScene);});
+    await audioPage.waitForTimeout(600);
+    const overview=await audioPage.evaluate(()=>({sound:wodBattleAudio.debug(),music:wodMusic.getMixState(),savedMusic:wodMusic.getVolume(),playing:wodMusic.isPlaying(),spatial:wodBattleAudio.spatial({x:500,y:350})}));
+    assert(overview.sound.playing&&overview.sound.targetGain>.5&&overview.spatial.gain>.65,'overview retains audible quiet combat');
+    assert(overview.music.target<.9&&overview.savedMusic===1&&overview.playing,'music plays with gentle temporary ducking and unchanged user volume');
     await audioPage.waitForTimeout(150);
-    await audioPage.evaluate(()=>{audioScene.zoom=1;audioScene.units[0].spawnFx=1;audioScene.jobs=[{key:'work',mode:'factory',x:500,y:350}];wodBattleAudio.update(audioScene);});
-    await audioPage.waitForTimeout(200);
+    await audioPage.evaluate(()=>{audioScene.zoom=1;audioScene.cameraX=0;audioScene.cameraY=0;audioScene.units[0].spawnFx=1;audioScene.jobs=[{key:'work',mode:'factory',x:500,y:350}];wodBattleAudio.update(audioScene);});
+    await audioPage.waitForTimeout(650);
     await audioPage.evaluate(()=>{audioScene.jobs=[];wodBattleAudio.update(audioScene);});
-    await audioPage.waitForFunction(()=>wodBattleAudio.debug().plays.mobilize>0&&wodBattleAudio.debug().plays.construction>0);
+    await audioPage.waitForFunction(()=>wodBattleAudio.debug().plays.mobilize>0&&wodBattleAudio.debug().plays.construction>0&&wodBattleAudio.debug().plays.complete>0,null,{timeout:10000});
+    await audioPage.evaluate(()=>{window.audioPump=setInterval(()=>wodBattleAudio.update(audioScene),120);});
+    await audioPage.waitForFunction(()=>wodBattleAudio.debug().voices===2,null,{timeout:26000});
+    await audioPage.waitForTimeout(1500);
+    const crossfade=await audioPage.evaluate(()=>wodBattleAudio.debug());
+    assert(crossfade.plays.battle>overview.sound.plays.battle,'long combat variations overlap for a seamless crossfade');
+    await audioPage.evaluate(()=>clearInterval(window.audioPump));
     await audioPage.locator('.wod-sfx-vol').first().evaluate(e=>{e.value='35';e.dispatchEvent(new Event('input',{bubbles:true}));});
     await audioPage.locator('.wod-sfx-mute').first().check();
     await audioPage.waitForTimeout(150);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
     const audio=await audioPage.evaluate(()=>({debug:wodBattleAudio.debug(),volumes:[...document.querySelectorAll('.wod-sfx-vol')].map(e=>e.value),mutes:[...document.querySelectorAll('.wod-sfx-mute')].map(e=>e.checked)}));
+    assert(await audioPage.evaluate(()=>wodMusic.getMixState().target===1&&wodMusic.getVolume()===1),'muting effects restores the music mix without changing saved volume');
     assert(audio.debug.muted&&!audio.debug.playing&&audio.debug.volume===.35&&audio.volumes.every(v=>v==='35')&&audio.mutes.every(Boolean),'saved synchronized independent sound controls');
     await audioPage.close();
-    fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,audio},null,2));
-    console.log('all 12 generated clips decode; era playback, camera attenuation, arrival/construction cues and sound controls passed');
+    fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,overview,crossfade,audio},null,2));
+    console.log('all 20 v3 clips decode; overview combat with music, spatial mix, work/completion cues and controls passed');
     if(errors.length) throw new Error(errors.join('\n'));
     fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,strategy,audio,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {

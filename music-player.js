@@ -69,16 +69,28 @@
     try { localStorage.setItem(STORAGE_INDEX, String(index)); } catch (_) {}
   }
 
+  let battleMixGain = 1, battleMixTarget = 1, battleMixTimer = null;
+  function setBattlePresence(presence) {
+    battleMixTarget = 1 - .22 * clamp01(presence);
+    if(battleMixTimer != null || Math.abs(battleMixTarget-battleMixGain)<.001) return;
+    battleMixTimer=setInterval(()=>{
+      const step = battleMixTarget < battleMixGain ? .22 : .055;
+      battleMixGain+=(battleMixTarget-battleMixGain)*step;
+      if(Math.abs(battleMixTarget-battleMixGain)<.001){battleMixGain=battleMixTarget;clearInterval(battleMixTimer);battleMixTimer=null;}
+      if(audio)audio.volume=isMuted()?0:getVolume()*battleMixGain;
+    },50);
+  }
+
   function setVolume(v) {
     v = clamp01(v);
     try { localStorage.setItem(STORAGE_VOL, String(v)); } catch (_) {}
-    if (audio) audio.volume = isMuted() ? 0 : v;
+    if (audio) audio.volume = isMuted() ? 0 : v * battleMixGain;
     syncUi();
   }
 
   function setMuted(m) {
     try { localStorage.setItem(STORAGE_MUTE, m ? '1' : '0'); } catch (_) {}
-    if (audio) audio.volume = m ? 0 : getVolume();
+    if (audio) audio.volume = m ? 0 : getVolume() * battleMixGain;
     syncUi();
   }
 
@@ -156,7 +168,7 @@
     if (audio) return audio;
     audio = new Audio();
     audio.preload = 'auto';
-    audio.volume = isMuted() ? 0 : getVolume();
+    audio.volume = isMuted() ? 0 : getVolume() * battleMixGain;
     audio.addEventListener('ended', () => {
       if (!wanted || !tracks.length) return;
       if (repeat) {
@@ -203,7 +215,7 @@
       a.src = cached && cached.src ? cached.src : src;
       try { a.currentTime = 0; } catch (_) {}
     }
-    a.volume = isMuted() ? 0 : getVolume();
+    a.volume = isMuted() ? 0 : getVolume() * battleMixGain;
     const p = a.play();
     if (p && typeof p.catch === 'function') {
       p.catch(() => {
@@ -385,7 +397,7 @@
     a.volume = 0;
     const p = a.play();
     const resumeUnlock = () => {
-      a.volume = isMuted() ? 0 : getVolume();
+      a.volume = isMuted() ? 0 : getVolume() * battleMixGain;
       if (wanted && !paused) playCurrent();
       else if (a && !a.paused) {
         try { a.pause(); } catch (_) {}
@@ -487,6 +499,8 @@
     togglePause,
     playIndex,
     setVolume,
+    setBattlePresence,
+    getMixState: () => ({gain:battleMixGain,target:battleMixTarget,volume:audio?.volume ?? 0}),
     setMuted,
     setRepeat,
     getVolume,
