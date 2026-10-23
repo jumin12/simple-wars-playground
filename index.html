@@ -11470,7 +11470,7 @@
                 <div class="esc-help-block">
                     <h4>Encirclement and marine water supply</h4>
                     <p class="esc-help-prose">Starting armies deploy on friendly land connected to an owned town. About 20% cover the supplied border evenly and 80% start near towns, with armor in the rear. Empty offshore holdings count toward balanced land ownership but receive no starting land troops.</p>
-                    <p class="esc-help-prose">When a land pocket is fully cut off by hostile control, it is marked <strong>encircled</strong>. Units caught inside take about <strong>3.5% max HP attrition per second</strong>, flash a warning, and <strong>cannot heal</strong> until the pocket is broken. Towns provide land supply to their connected territory; an active siege pauses town production. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though they still have a route to a city. These marines take no encirclement damage and may recover when safe. Infantry and armor in the same coastal pocket still suffer encirclement; water never supplies them. A land route to an owned town supplies every unit type. You may still attack outward and seize tiles to reopen a corridor — the penalty is meant to reward tightening sieges without making escape impossible.</p>
+                    <p class="esc-help-prose">Every <strong>friendly town supplies its connected friendly land</strong>, including a captured enemy town. A surrounded pocket containing a friendly town remains supplied: its units take no encirclement damage and can recover when safe. Units lose land supply only when they have no cardinal land connection to any friendly town. Such pockets are marked <strong>encircled</strong>; units take about <strong>3.5% max HP attrition per second</strong> and cannot heal. Map edges and neutral borders do not supply a townless pocket. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though it had a town connection. Infantry and armor in the same coastal pocket still need a friendly town. Forts only halve unsupplied attrition. Active fighting at a town can pause production even while it supplies its territory.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -12621,6 +12621,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-23T17:01:00-04:00',
+                title: 'Captured towns supply surrounded armies',
+                items: [
+                    'Every friendly town, including a captured enemy town or allied town, supplies its connected land pocket even when surrounded. Current town ownership and land routes override stale encirclement flags immediately, restoring safe recovery and removing supply-based town production blocks.',
+                    'Only pockets without a cardinal land route to a friendly town lose land supply. Map edges and neutral borders no longer exempt townless pockets. Marines retain their ocean/river supply exception; infantry and armor still require a town connection.',
+                    'Supply checks share a cached land-component search, update when territory, towns or alliances change, and use the same friendly-town rule for AI supply planning. Updated the rules with the captured-town case.'
+                ]
+            },
             {
                 at: '2026-10-23T10:15:00-04:00',
                 title: 'Empty towns at every match start',
@@ -31711,13 +31720,51 @@
         function wodRegionHasOwnerCity(regionKeys, owner) {
             for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
                 let city = gameData.cities[ci];
-                if(city.owner !== owner) continue;
+                if(!wodIsFriendlyOwner(city.owner,owner)) continue;
                 if(regionKeys.has(`${city.q},${city.r}`)) return true;
                 for(let uh of getCityUrbanTerrainHexes(city)) {
                     if(regionKeys.has(getHexKey(uh))) return true;
                 }
             }
             return false;
+        }
+
+        /** Revalidate stale pocket flags against current cities and cardinal land ownership.
+         * Cache the whole component so a large trapped army shares one search per topology change. */
+        function wodCurrentSupplyComponent(hex) {
+            if(!hex||hex.owner<=0||isWaterHex(hex))return {city:false,water:false};
+            const citySig=gameData.cities.map(c=>c.owner+':'+c.q+','+c.r).join('|');
+            const allySig=JSON.stringify(gameData.alliances||[]), version=gameData._supplyTopologyVersion||0;
+            let cache=gameData._citySupplyCache;
+            if(!cache||cache.hexes!==gameData.hexes||cache.version!==version||cache.citySig!==citySig||cache.allySig!==allySig) {
+                const sources=new Map();
+                for(const c of gameData.cities) {
+                    if(c.owner<=0)continue;
+                    for(const h of [gameData.hexes[`${c.q},${c.r}`],...getCityUrbanTerrainHexes(c)]) {
+                        if(!h||isWaterHex(h))continue;
+                        const key=getHexKey(h), list=sources.get(key)||[];list.push(c.owner);sources.set(key,list);
+                    }
+                }
+                cache=gameData._citySupplyCache={hexes:gameData.hexes,version,citySig,allySig,sources,owners:new Map()};
+            }
+            const owner=hex.owner;
+            if(!cache.owners.has(owner))cache.owners.set(owner,new Map());
+            const known=cache.owners.get(owner), start=getHexKey(hex);
+            if(known.has(start))return known.get(start);
+            const queue=[hex], seen=new Set([start]), result={city:false,water:false};
+            for(let i=0;i<queue.length;i++) {
+                const h=queue[i], key=getHexKey(h);
+                if(cache.sources.get(key)?.some(o=>wodIsFriendlyOwner(o,owner)))result.city=true;
+                for(const d of cardinalHexDirections) {
+                    const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                    if(!n)continue;
+                    if(isWaterHex(n)){result.water=true;continue;}
+                    if(!isClaimableLand(n)||!wodIsFriendlyOwner(n.owner,owner)||seen.has(getHexKey(n)))continue;
+                    seen.add(getHexKey(n));queue.push(n);
+                }
+            }
+            for(const key of seen)known.set(key,result);
+            return result;
         }
 
         function wodUnitInsideRegion(unit, regionKeys) {
@@ -31747,6 +31794,7 @@
             if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.35, 1.8);
             if(gameData.encirclementTimer < interval) return;
             gameData.encirclementTimer = 0;
+            gameData._citySupplyCache = null;
             gameData._encircWork = {
                 visited: new Set(),
                 encircledHexes: new Set(),
@@ -31850,13 +31898,12 @@
             }
 
             while(w.idx < list.length && !overBudget()) {
-                let owner, queue, region, touchesOpenEdge;
+                let owner, queue, region;
 
                 if(w.partialFill) {
                     owner = w.partialFill.owner;
                     queue = w.partialFill.queue;
                     region = w.partialFill.region;
-                    touchesOpenEdge = w.partialFill.touchesOpenEdge;
                     w.partialFill = null;
                 } else {
                     let start = list[w.idx++];
@@ -31864,13 +31911,12 @@
                     owner = start.owner;
                     queue = [start];
                     region = [];
-                    touchesOpenEdge = false;
                     w.visited.add(getHexKey(start));
                 }
 
                 while(queue.length > 0) {
                     if(overBudget()) {
-                        w.partialFill = { owner, queue, region, touchesOpenEdge };
+                        w.partialFill = { owner, queue, region };
                         return;
                     }
                     let hex = queue.pop();
@@ -31880,13 +31926,10 @@
                     // diagonals, so pockets needed a 2-cell-thick wall before they counted.
                     for(let dir of cardinalHexDirections) {
                         let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                        if(!nHex) { touchesOpenEdge = true; continue; }
+                        if(!nHex) continue;
                         if(isWaterHex(nHex)) continue;
                         if(!isClaimableLand(nHex)) continue;
-                        if(nHex.owner === 0) {
-                            touchesOpenEdge = true;
-                            continue;
-                        }
+                        if(nHex.owner === 0) continue;
                         if(wodIsFriendlyOwner(nHex.owner, owner)) {
                             let nKey = getHexKey(nHex);
                             if(!w.visited.has(nKey)) {
@@ -31896,8 +31939,6 @@
                         }
                     }
                 }
-
-                if(touchesOpenEdge) continue;
 
                 if(overBudget()) {
                     w.pendingPocket = { region, owner };
@@ -31914,12 +31955,12 @@
 
         function wodMarineHasWaterSupply(unit, hex) {
             if(!unit || unit.type !== 'marine' || !hex || !wodIsFriendlyOwner(hex.owner, unit.owner)) return false;
-            let key=getHexKey(hex), pending=gameData._encircWork?.marineWaterSupplyHexes;
-            return isWaterHex(hex) || !!(pending?.has(key) || gameData.marineWaterSupplyHexes?.has(key));
+            return isWaterHex(hex)||wodCurrentSupplyComponent(hex).water;
         }
         function wodGetUnitEncirclementState(unit, hex) {
-            if(wodMarineHasWaterSupply(unit, hex)) return null;
-            return wodGetHexEncirclementState(hex);
+            const state=wodGetHexEncirclementState(hex);
+            if(!state||wodMarineHasWaterSupply(unit,hex))return null;
+            return state;
         }
 
         function getHexKey(hex) {
@@ -31930,8 +31971,12 @@
         function wodHexKeyIsEncircled(key) {
             if(!key) return false;
             let w = gameData._encircWork;
-            if(w && w.encircledHexes && w.encircledHexes.has(key)) return true;
-            return !!(gameData.encircledHexes && gameData.encircledHexes.has(key));
+            const flagged=!!(w?.encircledHexes?.has(key)||gameData.encircledHexes?.has(key));
+            if(!flagged)return false;
+            const hex=gameData.hexes[key];
+            // Capturing a town or reconnecting a corridor restores supply immediately,
+            // even while the incremental encirclement scan still contains old flags.
+            return !hex||!wodCurrentSupplyComponent(hex).city;
         }
 
         function wodHexKeyEncirclementRelief(key) {
@@ -33756,6 +33801,7 @@
                 gameData._landIncomeCacheDirty = true;
             }
             hex.owner = owner;
+            if(!isWaterHex(hex))gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;
             hex.renderColor = hex.baseColor;
             if (batchHexOwner) batchHexOwnerDirty = true;
             else wodMarkTerrainPoliticalDirty();
@@ -37287,6 +37333,8 @@
             gameData._aiEconomyClock = 0;
             gameData._aiDefenseByOwner = {};
             gameData.marineWaterSupplyHexes = new Set();
+            gameData._citySupplyCache = null;
+            gameData._supplyTopologyVersion = 0;
             gameData._aiEconomyPlans = {};
             gameData.aiTaskForces = {};
             wodRefreshCommandHud(true);
@@ -38814,7 +38862,7 @@
             const friendly=h=>walk(h)&&wodIsFriendlyOwner(h.owner,owner);
             const tiles=gameData.hexList.filter(friendly), index=new Map(tiles.map((h,i)=>[getHexKey(h),i]));
             const edges=tiles.map(h=>cardinalHexDirections.map(d=>index.get(`${h.q+d.q},${h.r+d.r}`)).filter(i=>i!==undefined));
-            const roots=[...new Set(gameData.cities.filter(c=>c.owner===owner).map(c=>index.get(`${c.q},${c.r}`)).filter(i=>i!==undefined))];
+            const roots=[...new Set(gameData.cities.filter(c=>wodIsFriendlyOwner(c.owner,owner)).map(c=>index.get(`${c.q},${c.r}`)).filter(i=>i!==undefined))];
             const supplied=new Set(roots), queue=roots.slice();
             for(let qi=0;qi<queue.length;qi++)for(const j of edges[queue[qi]])if(!supplied.has(j)){supplied.add(j);queue.push(j);}
             const army=units.filter(u=>u.hp>0&&!['convoy','ship'].includes(u.type));

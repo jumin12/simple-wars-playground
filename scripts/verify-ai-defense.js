@@ -76,7 +76,7 @@ const server=http.createServer((req,res)=>{
    result.marineSupply={marineTrapped:defense.pockets.some(p=>p.trapped.includes(marine.uid)),infantryTrapped:defense.pockets.some(p=>p.trapped.includes(infantry.uid))};
    // Let actual strategy, pathfinding, movement and territorial capture reopen a cut.
    reset(24);for(const h of gameData.hexList)if(h.q<=-1||h.q>=1&&h.q<=10&&Math.abs(h.r)<=4)h.owner=2;
-   town(-8,0,2,'Relief base');town(-15,-15,1,'Enemy');
+   town(-8,0,2,'Relief base');town(15,-15,1,'Enemy');
    const pocketTroops=[spawn(2,-1),spawn(2,1),spawn(3,0)],relievers=[spawn(-2,-1),spawn(-2,1),spawn(-3,0)];refresh();
    gameData.aiMoneyByOwner={2:0};gameData.aiManpowerByOwner={2:100000};gameData.money=100000;gameData.manpower=100000;
    gameData._aiEconomyPlans={};gameData._aiSpawnPulse=null;gameData._aiSpawnBurst=null;gameData._aiContactByOwner={};
