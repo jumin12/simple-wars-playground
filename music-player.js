@@ -70,8 +70,18 @@
   }
 
   let battleMixGain = 1, battleMixTarget = 1, battleMixTimer = null;
+  let battlePresence=0,commandGain=1,commandTimer=null;
   function setBattlePresence(presence) {
-    battleMixTarget = 1 - .22 * clamp01(presence);
+    battlePresence=clamp01(presence);
+    updateMixTarget();
+  }
+  function setCommandPresence(durationMs) {
+    clearTimeout(commandTimer);commandTimer=null;commandGain=durationMs>0?.84:1;
+    if(durationMs>0)commandTimer=setTimeout(()=>{commandTimer=null;commandGain=1;updateMixTarget();},Math.min(1800,durationMs));
+    updateMixTarget();
+  }
+  function updateMixTarget() {
+    battleMixTarget = Math.min(1 - .22 * battlePresence,commandGain);
     if(battleMixTimer != null || Math.abs(battleMixTarget-battleMixGain)<.001) return;
     battleMixTimer=setInterval(()=>{
       const step = battleMixTarget < battleMixGain ? .22 : .055;
@@ -110,6 +120,7 @@
   }
 
   function syncUi() {
+    syncCredits();
     const vol = getVolume();
     const muted = isMuted();
     const pct = String(Math.round(vol * 100));
@@ -141,6 +152,29 @@
       el.textContent = pauseLabel;
       el.setAttribute('aria-label', pauseLabel + ' music');
     });
+  }
+
+  function syncCredits() {
+    const list=document.querySelector('.credits-music-list');
+    if(!list||!ready)return;
+    const signature=tracks.map(t=>t.file).join('|');
+    if(list.dataset.catalog===signature)return;
+    list.dataset.catalog=signature;
+    document.querySelectorAll('.credits-music-count').forEach(el=>el.textContent=tracks.length+' music tracks');
+    const link=(label,url)=>{
+      const a=document.createElement('a');a.textContent=label;
+      if(/^https:\/\//.test(url||'')){a.href=url;a.target='_blank';a.rel='noopener noreferrer';}
+      return a;
+    };
+    list.replaceChildren(...tracks.map(t=>{
+      const item=document.createElement('li');item.dataset.trackFile=t.file;
+      const title=document.createElement('strong');title.textContent=t.title;
+      item.append(title,document.createTextNode(' — '+t.credit+'. '),link(t.license,t.licenseUrl),
+        document.createTextNode(' · '),link('Original recording',t.sourceUrl),document.createTextNode('. '+t.changes));
+      return item;
+    }));
+    const required=document.querySelector('.credits-music-attr');
+    if(required)required.textContent='Attribution and recording-license links are included above for all '+tracks.length+' tracks. Courtesy credit to Musopen.org for the Musopen releases. Unlisted performers are identified as such on the source page.';
   }
 
   function fillTrackSelect(sel) {
@@ -500,6 +534,7 @@
     playIndex,
     setVolume,
     setBattlePresence,
+    setCommandPresence,
     getMixState: () => ({gain:battleMixGain,target:battleMixTarget,volume:audio?.volume ?? 0}),
     setMuted,
     setRepeat,

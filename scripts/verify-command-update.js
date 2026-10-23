@@ -172,10 +172,11 @@ const server = http.createServer((req, res) => {
       return {groups,orders,assigned:Object.keys(plan.unitJob).length,total:units.length,building,instant,finished:c2.hasFactory,paid:cash-g.aiMoneyByOwner[2]};
     });
     for(const kind of ['defend','hold','main','raid','armor','marine','naval','support']) assert(ai.groups.some(g=>g.kind===kind),'AI '+kind+' group');
-    for(const [role,type] of [['armor','heavy'],['marine','marine'],['naval','ship']]) assert(ai.groups.filter(g=>g.kind===role).every(g=>g.members.every(t=>t===type)),'specialized '+role);
+    assert(ai.groups.filter(g=>g.kind==='armor').every(g=>g.members.includes('heavy')&&g.members.includes('light')),'combined armor and infantry assault groups');
+    for(const [role,type] of [['marine','marine'],['naval','ship']]) assert(ai.groups.filter(g=>g.kind===role).every(g=>g.members.every(t=>t===type)),'specialized '+role);
     const aiInfantry=ai.groups.flatMap(g=>g.members).filter(t=>t==='light').length;
     const aiDefenders=ai.groups.filter(g=>g.kind==='defend'||g.kind==='hold').reduce((n,g)=>n+g.members.length,0);
-    assert(aiDefenders>=Math.floor(aiInfantry*.48),'AI dedicates slightly more infantry to town/front defense');
+    assert(aiDefenders>=Math.floor(aiInfantry*.25)&&aiDefenders<=Math.ceil(aiInfantry*.45),'AI retains town/front defense while committing most infantry to offense');
     assert(ai.groups.filter(g=>g.kind==='main').length>1&&ai.assigned===ai.total&&ai.orders>3,'multiple coordinated AI groups');
     assert(ai.building&&!ai.instant&&ai.finished&&ai.paid===4000,'AI obeys production costs and times');
     console.log('forts, capture and AI formations passed');
@@ -497,7 +498,7 @@ const server = http.createServer((req, res) => {
         if(!window.audioPump)window.audioPump=setInterval(()=>wodBattleAudio.update(audioScene),120);
         wodBattleAudio.update(audioScene);
       },era);
-      await audioPage.waitForFunction(n=>wodBattleAudio.debug().loaded>=n,(index+1)*10,{timeout:15000});
+      await audioPage.waitForFunction(n=>wodBattleAudio.debug().loaded>=n,(index+1)*15,{timeout:15000});
       await audioPage.waitForTimeout(150);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
       await audioPage.waitForTimeout(400);
       const state=await audioPage.evaluate(()=>wodBattleAudio.debug());
@@ -593,7 +594,7 @@ const server = http.createServer((req, res) => {
     assert(audio.debug.muted&&!audio.debug.playing&&audio.debug.volume===.35&&audio.volumes.every(v=>v==='35')&&audio.mutes.every(Boolean),'saved synchronized independent sound controls');
     await audioPage.close();
     fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,overview,crossfade,engineCombats,zoomCombats,crowd,selectionEras,rapid,audio},null,2));
-    console.log('all 40 v3 clips decode; overview combat with music, spatial mix, work/completion cues and controls passed');
+    console.log('all 60 v3 clips decode; overview combat with music, spatial mix, work/completion cues and controls passed');
     if(errors.length) throw new Error(errors.join('\n'));
     fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,purchaseBalance,strategy,audio,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {

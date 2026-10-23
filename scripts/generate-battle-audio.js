@@ -18,18 +18,27 @@ const selections={
  modern:{light:'A modern infantryman adjusts a rifle sling: a brief nylon webbing tug and small restrained equipment click. No firing.', 'light-alt':'A boot settles on gravel with a short nylon webbing rustle and a small buckle tick.',marine:'A marine adjusts wet nylon webbing: a brief fabric tug and a small metal clasp click.',heavy:'An armored vehicle hatch latch is gripped and seated: a short muted steel clunk with a tiny low diesel idle tail.',ship:'A naval vessel steel hatch latch is secured: one compact restrained metallic clunk with a brief soft deck vibration.'}
 };
 for(const[era,kinds]of Object.entries(selections))for(const[type,text]of Object.entries(kinds))eras[era]['select-'+type]=text;
+const movements={
+ ancient:{light:'Three purposeful sandal steps on dry earth, a wooden shield settles and bronze kit shifts.', 'light-alt':'Two firm sandal steps on gravel, a small leather strap and bronze buckle rattle.',marine:'Two wet sandal steps on a wooden landing plank, a leather shield strap moves and a small water splash.',heavy:'A horse steps forward twice as a wooden chariot wheel starts rolling, restrained leather harness creaks.',ship:'Two coordinated wooden trireme oar strokes catch the water, wood and rope creak softly.'},
+ medieval:{light:'Three measured boot steps on packed earth with a compact chainmail rustle and leather equipment movement.', 'light-alt':'Two brisk boot steps on gravel, a wooden shield shifts and a mail cuff rustles.',marine:'Two wet boot steps on a wooden landing plank, an iron buckle shifts and a small water splash.',heavy:'A mounted knight takes two purposeful horse steps, with saddle leather and a restrained stirrup clink.',ship:'A wooden galley starts rowing, two quiet oar strokes and rigging under gentle strain.'},
+ napoleonic:{light:'Three purposeful leather boot steps on dirt, a wooden musket sling and cartridge box shift. No firing.', 'light-alt':'Two firm leather boot steps on gravel, a small brass cartridge-box buckle rattles. No firing.',marine:'Two boot steps on a wooden ship deck, leather musket sling and quiet rigging creak. No firing.',heavy:'A cavalry horse takes two brisk forward steps, compact saddle creaks and steel stirrup ticks.',ship:'A sailing warship gets underway, brief canvas tension and rope passing through a wooden block above gentle bow water.'},
+ modern:{light:'Three deliberate infantry boot steps on gravel with close nylon webbing and quiet rifle sling movement. No firing.', 'light-alt':'Two purposeful infantry boot steps on dirt, compact nylon equipment rustle and a small buckle click. No firing.',marine:'Two wet marine boot steps with nylon webbing movement, a quiet metal clasp and small water splash. No firing.',heavy:'An armored vehicle starts moving: a short low diesel rev and two restrained tread-link clunks. No weapons or alarms.',ship:'A naval vessel gets underway: a short restrained low engine surge beneath a soft bow-water wash. No weapons or alarms.'}
+};
+for(const[era,kinds]of Object.entries(movements))for(const[type,text]of Object.entries(kinds))eras[era]['move-'+type]=text;
 
 async function main(){
- const dryRun=process.argv.includes('--dry-run'),masterOnly=process.argv.includes('--master-only');
+ const dryRun=process.argv.includes('--dry-run'),masterOnly=process.argv.includes('--master-only'),movesOnly=process.argv.includes('--moves-only');
  if(!dryRun&&!masterOnly&&!process.env.ELEVENLABS_API_KEY)throw Error('Set ELEVENLABS_API_KEY before regeneration.');
  fs.mkdirSync(out,{recursive:true});fs.mkdirSync(raw,{recursive:true});
  const manifest={provider:'ElevenLabs',model:'eleven_text_to_sound_v3',revision,generated:new Date().toISOString().slice(0,10),mastering:{battleLufs:-23,foleyLufs:-24,truePeakDb:-3,crossfadeSeconds:2,selectionLufs:-22},eraRules:{ancient:'Bronze/wood melee, shields, chariots and oared ships. No firearms, explosions, engines or electronics.',medieval:'Steel/wood melee, bows, horses and galleys. No firearms, explosions, engines or electronics.',napoleonic:'Flintlock muskets, black-powder cannons, horses and sailing ships. No automatic firearms or modern engines.',modern:'Modern infantry weapons, armored vehicles and naval vessels.'},assets:[]};
+ if(movesOnly)manifest.assets=JSON.parse(fs.readFileSync(path.join(out,'manifest.json'),'utf8')).assets.filter(a=>!a.kind.startsWith('move-'));
  for(const [era,kinds] of Object.entries(eras))for(const [kind,text] of Object.entries(kinds)){
-  const selection=kind.startsWith('select-'),strictBattle=['ancient','medieval'].includes(era)&&kind.startsWith('battle');
-  const assetRevision=selection?'era-selection-v1':strictBattle?'strict-pre-gunpowder-v1':revision;
-  const file=era+'-'+kind+'.mp3',duration=selection?1.1:kind.startsWith('battle')?24:kind==='construction'?6:kind==='mobilize'?2.5:1.5;
+  const move=kind.startsWith('move-');if(movesOnly&&!move)continue;
+  const selection=kind.startsWith('select-'),cue=selection||move,strictBattle=['ancient','medieval'].includes(era)&&kind.startsWith('battle');
+  const assetRevision=move?'era-move-v1':selection?'era-selection-v1':strictBattle?'strict-pre-gunpowder-v1':revision;
+  const file=era+'-'+kind+'.mp3',duration=move?1.6:selection?1.1:kind.startsWith('battle')?24:kind==='construction'?6:kind==='mobilize'?2.5:1.5;
   const exclusions=strictBattle?' No firearms, gunpowder, explosions, engines or electronics.':'';
-  const prompt=text+(selection?' Clean, short natural RTS selection foley. No music, voices or combat.':common)+exclusions,dest=path.join(out,file),original=path.join(raw,file),stamp=original+'.revision';
+  const prompt=text+(move?' Clean short natural RTS move-order foley. One compact action, dry and tactile. No music, voices, combat or synthetic tones.'+(['ancient','medieval'].includes(era)?' No firearms, explosions, engines or electronics.':''):selection?' Clean, short natural RTS selection foley. No music, voices or combat.':common)+exclusions,dest=path.join(out,file),original=path.join(raw,file),stamp=original+'.revision';
   if(prompt.length>450)throw Error(file+' prompt exceeds 450 characters');
   if(dryRun){console.log(file+': '+duration+'s, '+prompt.length+' characters');continue;}
   if(!fs.existsSync(original)||!fs.existsSync(stamp)||fs.readFileSync(stamp,'utf8')!==assetRevision){
@@ -39,8 +48,8 @@ async function main(){
    const bytes=Buffer.from(await response.arrayBuffer());if(bytes.length<1000)throw Error('Incomplete sound response');
    fs.writeFileSync(original,bytes);fs.writeFileSync(stamp,assetRevision);console.log('Generated '+file);
   }
-  const battle=kind.startsWith('battle'),target=selection?-22:battle?-23:-24;
-  const pre=`highpass=f=${battle?85:110},lowpass=f=${battle?6500:7200},acompressor=threshold=${selection?0.032:0.125}:ratio=${selection?4:2.5}:attack=${selection?0.5:5}:release=${selection?80:180},afade=t=in:d=0.015,afade=t=out:st=${duration-.04}:d=0.04`;
+  const battle=kind.startsWith('battle'),target=cue?-22:battle?-23:-24;
+  const pre=`highpass=f=${battle?85:110},lowpass=f=${battle?6500:7200},acompressor=threshold=${cue?0.032:0.125}:ratio=${cue?4:2.5}:attack=${cue?0.5:5}:release=${cue?80:180},afade=t=in:d=0.015,afade=t=out:st=${duration-.04}:d=0.04`;
   const measurement=spawnSync(ffmpeg,['-hide_banner','-i',original,'-af',pre+`,loudnorm=I=${target}:TP=-3:LRA=8:print_format=json`,'-f','null','NUL'],{encoding:'utf8',windowsHide:true});
   const match=measurement.stderr.match(/\{\s*"input_i"[\s\S]*?\}/);if(measurement.status!==0||!match)throw Error('Could not measure '+file);
   const m=JSON.parse(match[0]);

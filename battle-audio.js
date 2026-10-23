@@ -2,23 +2,23 @@
 (() => {
   'use strict';
   const ERAS=['modern','napoleonic','medieval','ancient'];
-  const KINDS=['battle','battle-alt','construction','mobilize','complete','select-light','select-light-alt','select-marine','select-heavy','select-ship'];
-  const REVISION='individual-engagements-v1';
+  const KINDS=['battle','battle-alt','construction','mobilize','complete','select-light','select-light-alt','select-marine','select-heavy','select-ship','move-light','move-light-alt','move-marine','move-heavy','move-ship'];
+  const REVISION='era-move-orders-v1';
   let context,master,scene,lastTick=0,lastWork=-10000,lastCue=-10000,generation=0;
   const buffers=new Map(),loading=new Map(),seen=new Set(),shots=new Set();
-  let oldJobs=new Map(),activeEra=null,selectionToken=0,lastSelection=-10000,selectionVoice=null;
+  let oldJobs=new Map(),activeEra=null,selectionToken=0,lastSelection=-10000,lastMove=-10000,selectionVoice=null;
   const buses=new Set(),battles=new Map(),selectionVariants={},recentPlays=[];
-  const plays={battle:0,mobilize:0,construction:0,complete:0,selection:0};
+  const plays={battle:0,mobilize:0,construction:0,complete:0,selection:0,move:0};
   function record(era,kind){recentPlays.push({era,kind});if(recentPlays.length>40)recentPlays.shift();}
-  let volume=.65,muted=false;
-  try{volume=Math.max(0,Math.min(1,Number(localStorage.getItem('wodSfxVolume')??.65)));muted=localStorage.getItem('wodSfxMuted')==='1';}catch(_){}
-  if(!Number.isFinite(volume))volume=.65;
+  let volume=1,muted=false;
+  try{volume=Math.max(0,Math.min(1,Number(localStorage.getItem('wodSfxVolume')??1)));muted=localStorage.getItem('wodSfxMuted')==='1';}catch(_){}
+  if(!Number.isFinite(volume))volume=1;
   function syncUi(){
     document.querySelectorAll('.wod-sfx-vol').forEach(e=>e.value=Math.round(volume*100));
     document.querySelectorAll('.wod-sfx-vol-label').forEach(e=>e.textContent=Math.round(volume*100));
     document.querySelectorAll('.wod-sfx-mute').forEach(e=>e.checked=muted);
     if(master)master.gain.setTargetAtTime(muted?0:volume,context.currentTime,.08);
-    if(muted||volume===0)stopBattle();
+    if(muted||volume===0){stopBattle();window.wodMusic?.setCommandPresence?.(0);}
   }
   async function unlock(){
     try{
@@ -84,29 +84,34 @@
     if(next!==activeEra){
       generation++;selectionToken++;activeEra=next;stopBattle(true);
       for(let shot of shots)try{shot.stop();}catch(_){}
-      selectionVoice=null;oldJobs.clear();seen.clear();lastSelection=-10000;
+      selectionVoice=null;oldJobs.clear();seen.clear();lastSelection=-10000;lastMove=-10000;
     }
     return valid;
   }
-  async function selectUnits(era,units){
+  async function acknowledge(era,units,action){
     if(!setEra(era)||scene?.selectionEnabled===false||document.hidden||muted||volume===0)return false;
     let counts={};
     for(let unit of units||[])if(['light','marine','heavy','ship'].includes(unit.type))counts[unit.type]=(counts[unit.type]||0)+1;
     let type=Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
-    if(!type||performance.now()-lastSelection<180)return false;
-    lastSelection=performance.now();let request=++selectionToken,token=generation;
-    let variant=type==='light'?((selectionVariants[era]||0)%2):0;
-    let kind='select-'+type+(variant?'-alt':'');
+    const now=performance.now();
+    if(!type||now-(action==='move'?lastMove:lastSelection)<(action==='move'?130:180))return false;
+    if(action==='move')lastMove=now;else lastSelection=now;
+    let request=++selectionToken,token=generation;
+    const variantKey=era+'/'+action;
+    let variant=type==='light'?((selectionVariants[variantKey]||0)%2):0;
+    let kind=(action==='move'?'move-':'select-')+type+(variant?'-alt':'');
     await unlock();
     if(!context||context.state!=='running')return false;
     let buffer=await load(era,kind);
     if(!buffer||request!==selectionToken||token!==generation||activeEra!==era||muted||volume===0||document.hidden)return false;
-    selectionVariants[era]=(selectionVariants[era]||0)+(type==='light'?1:0);
+    selectionVariants[variantKey]=(selectionVariants[variantKey]||0)+(type==='light'?1:0);
     if(selectionVoice)try{selectionVoice.stop();}catch(_){}
     let src=context.createBufferSource(),amp=context.createGain();src.buffer=buffer;src._wodEra=era;src._wodSelection=true;
-    amp.gain.setValueAtTime(0,context.currentTime);amp.gain.linearRampToValueAtTime(.6,context.currentTime+.012);
-    amp.gain.setValueAtTime(.6,context.currentTime+Math.max(.02,buffer.duration-.04));amp.gain.linearRampToValueAtTime(0,context.currentTime+buffer.duration);
-    src.connect(amp);amp.connect(master);shots.add(src);selectionVoice=src;plays.selection++;record(era,kind);
+    const level=action==='move'?.78:.6;
+    amp.gain.setValueAtTime(0,context.currentTime);amp.gain.linearRampToValueAtTime(level,context.currentTime+.012);
+    amp.gain.setValueAtTime(level,context.currentTime+Math.max(.02,buffer.duration-.04));amp.gain.linearRampToValueAtTime(0,context.currentTime+buffer.duration);
+    if(action==='move')window.wodMusic?.setCommandPresence?.(1200);
+    src.connect(amp);amp.connect(master);shots.add(src);selectionVoice=src;plays[action]++;record(era,kind);
     src.onended=()=>{shots.delete(src);if(selectionVoice===src)selectionVoice=null;src.disconnect();amp.disconnect();};src.start();return true;
   }
   function scheduleBed(bus,buffer,start,offset=0){
@@ -178,13 +183,13 @@
     if(work&&spatial(work).gain>0&&now-lastWork>9000){lastWork=now;oneShot('construction',work);}
     oldJobs=jobs;
   }
-  function reset(){generation++;selectionToken++;lastSelection=-10000;seen.clear();oldJobs.clear();lastCue=-10000;lastWork=-10000;stopBattle(true);for(let shot of shots)try{shot.stop();}catch(_){}}
+  function reset(){generation++;selectionToken++;lastSelection=-10000;lastMove=-10000;seen.clear();oldJobs.clear();lastCue=-10000;lastWork=-10000;stopBattle(true);for(let shot of shots)try{shot.stop();}catch(_){}}
   function bind(){
     document.querySelectorAll('.wod-sfx-vol').forEach(e=>e.addEventListener('input',()=>{volume=Number(e.value)/100;try{localStorage.setItem('wodSfxVolume',volume);}catch(_){}syncUi();}));
     document.querySelectorAll('.wod-sfx-mute').forEach(e=>e.addEventListener('change',()=>{muted=e.checked;try{localStorage.setItem('wodSfxMuted',muted?'1':'0');}catch(_){}syncUi();}));syncUi();
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden)reset();});
-  window.wodBattleAudio={update,reset,spatial,selectUnits,collectEngagements,debug:()=>({
+  window.wodBattleAudio={update,reset,spatial,selectUnits:(era,units)=>acknowledge(era,units,'selection'),moveUnits:(era,units)=>acknowledge(era,units,'move'),collectEngagements,debug:()=>({
     unlocked:context?.state==='running',era:scene?.era,playing:battles.size>0,volume,muted,loaded:buffers.size,plays:{...plays},recentPlays:recentPlays.slice(),
     audibleEras:[...new Set([...buses].filter(bus=>bus.amp.gain.value>0).map(bus=>bus.era).concat([...shots].map(voice=>voice._wodEra)))],
     gain:Math.max(0,...[...battles.values()].map(bus=>bus.amp.gain.value)),
