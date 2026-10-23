@@ -12622,6 +12622,14 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-23T10:15:00-04:00',
+                title: 'Empty towns at every match start',
+                items: [
+                    'Campaign, skirmish and multiplayer now enforce empty towns at the final launch boundary. Factories, harbors and farms are removed from every starting town, including player, AI, neutral, preview and custom-map towns.',
+                    'Multiplayer hosts clear starting town buildings before sending the map, and guests enforce the same rule when loading it. Rejoining an ongoing match preserves buildings already constructed during play.'
+                ]
+            },
+            {
                 at: '2026-10-23T05:20:00-04:00',
                 title: 'Supply corridor defense and protected forts',
                 items: [
@@ -18041,25 +18049,17 @@
             return true;
         }
 
-        function wodNormalizeStartingCityEconomy(ownerIds) {
-            if(!ownerIds || ownerIds.length === 0 || !gameData.cities) return;
-            let sortedOwners = [...new Set([...ownerIds, ...gameData.cities.map(c => c.owner)])].sort((a, b) => a - b);
-            for(let owner of sortedOwners) {
-                let cities = gameData.cities
-                    .filter(c => c && c.owner === owner)
-                    .sort((a, b) => {
-                        if(!!b.hasFactory !== !!a.hasFactory) return (b.hasFactory ? 1 : 0) - (a.hasFactory ? 1 : 0);
-                        if(a.q !== b.q) return a.q - b.q;
-                        return a.r - b.r;
-                    });
-                for(let i = 0; i < cities.length; i++) {
-                    cities[i].hasFactory = false;
-                    cities[i].hasFarm = false;
-                    cities[i].hasHarbor = false;
-                    cities[i].incomeBonus = 0;
-                    cities[i].manpowerBonus = 0;
-                }
+        /** New-match rule for every town, including neutral and authored-map towns. */
+        function wodNormalizeStartingCityEconomy() {
+            for(const city of gameData.cities || []) {
+                if(!city)continue;
+                city.hasFactory = false;
+                city.hasHarbor = false;
+                city.hasFarm = false;
+                city.incomeBonus = 0;
+                city.manpowerBonus = 0;
             }
+            gameData._landIncomeCacheDirty = true;
         }
 
         function wodReconcileCityTerrainToSettlementOwners(ownerIds) {
@@ -18428,6 +18428,8 @@
             if(opts.asyncHexes) await wodMpRebuildHexesFromListAsync(p.hexList);
             else wodMpRebuildHexesFromList(p.hexList);
             gameData.cities = (p.cities || []).map(c => Object.assign({}, c));
+            if(!opts.resumeMatch)wodNormalizeStartingCityEconomy();
+            gameData.constructionJobs = [];
             gameData.roads = (p.roads || []).map(ro => {
                 let from = gameData.cities.find(c => c.q === ro.fq && c.r === ro.fr);
                 let to = gameData.cities.find(c => c.q === ro.tq && c.r === ro.tr);
@@ -18512,6 +18514,7 @@
                 throw new Error('Multiplayer map is empty');
             wodMpNormalizeHexListTerrainColors(gameData.hexList);
             wodMpRebuildHexesFromList(gameData.hexList);
+            wodNormalizeStartingCityEconomy();
             wodCaptureTerrainPoliticsBase();
             return wodMpBuildInitPayload();
         }
@@ -22290,7 +22293,7 @@
                     let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
                     if(syncMsg) syncMsg.textContent = 'Loading host map…';
                     try {
-                        await wodMpApplyMatchStartPayload(pl, { asyncHexes: true });
+                        await wodMpApplyMatchStartPayload(pl, { asyncHexes: true, resumeMatch: true });
                     } catch(err) {
                         console.error(err);
                         showNotification('Failed to load host map on rejoin.');
@@ -35178,6 +35181,8 @@
                     }
                 }
             }
+            // Final launch boundary covers procedural, preview, custom-map and campaign paths.
+            wodNormalizeStartingCityEconomy();
             gameData._launchingMission = false;
             updateTerrainKey();
             
@@ -35912,7 +35917,7 @@
                 return;
             }
 
-            // Loaded custom map (library / JSON / editor export): keep borders, city ownership, factories/harbors, and unit positions.
+            // Loaded custom map: keep borders, town ownership and unit positions; start towns without buildings.
             if(preserveLoadedLayout) {
                 wodNormalizeStartingCityEconomy(ownersList);
                 wodReduceAuthoredStartingArmy(ownersList);

@@ -32,6 +32,7 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => window.__wodDebug?.().gameState === 'PLAYING' && window.__wodGetGameData?.()._matchReadyForEndChecks, {timeout:180000});
     await page.evaluate(() => { setGameSpeed(0,true); wodDismissChangelogPopup?.(); });
     console.log('match ready');
+    assert(await page.evaluate(()=>gameData.cities.length>0&&gameData.cities.every(c=>!c.hasFactory&&!c.hasHarbor&&!c.hasFarm)),'skirmish starts with every town empty');
     const openingEconomy=await page.evaluate(()=>{
       let rows=[];
       for(let owner of new Set(gameData.cities.map(c=>c.owner))) {
@@ -204,6 +205,25 @@ const server = http.createServer((req, res) => {
     });
     console.log('snapshot check', multiplayer);
     assert(multiplayer.queued&&multiplayer.queueLength>0&&multiplayer.guestUnchanged&&multiplayer.completed,'host-authoritative construction snapshots');
+    const emptyTownStarts=await page.evaluate(async()=>{
+      const mp=gameData.mp;
+      gameData.mp={enabled:true,isHost:true,localSlot:1,humanSlots:[1,2],factionSlots:[1,2],connectedSlots:[1,2],seatTypes:['human','human'],maxLobbySlots:2};
+      const payload=wodMpBuildInitPayload();
+      for(const city of payload.cities)Object.assign(city,{hasFactory:true,hasHarbor:true,hasFarm:true,incomeBonus:70,manpowerBonus:80});
+      gameData.constructionJobs=[{mode:'factory',owner:1,remaining:1}];
+      await wodMpApplyMatchStartPayload(payload,{bake:false});
+      const empty=gameData.cities.every(c=>!c.hasFactory&&!c.hasHarbor&&!c.hasFarm&&c.incomeBonus===0&&c.manpowerBonus===0);
+      const noQueue=gameData.constructionJobs.length===0;
+      await wodMpApplyMatchStartPayload(payload,{bake:false,resumeMatch:true});
+      const resume=gameData.cities.every(c=>c.hasFactory&&c.hasHarbor&&c.hasFarm);
+      const cities=gameData.cities;
+      gameData.cities=[0,1,2,4].map(owner=>({owner,hasFactory:true,hasHarbor:true,hasFarm:true,incomeBonus:7,manpowerBonus:8}));
+      wodNormalizeStartingCityEconomy([]);
+      const allOwners=gameData.cities.every(c=>!c.hasFactory&&!c.hasHarbor&&!c.hasFarm&&!c.incomeBonus&&!c.manpowerBonus);
+      gameData.cities=cities;wodNormalizeStartingCityEconomy();gameData.mp=mp;
+      return {empty,noQueue,resume,allOwners};
+    });
+    assert(emptyTownStarts.empty&&emptyTownStarts.noQueue&&emptyTownStarts.resume&&emptyTownStarts.allOwners,'fresh multiplayer towns are empty; ongoing-match buildings survive rejoin; all owners normalize');
     // Campaign UI uses real native drag-and-drop events.
     await page.evaluate(()=>{
       wodRogueBegin(); for(let t of ['light','light','heavy','marine','light','heavy','marine','ship'])wodRogueRosterAdd(t);
@@ -224,6 +244,7 @@ const server = http.createServer((req, res) => {
       let c=wodRogueLoad(), node=wodRogueNodes().find(n=>wodRogueNodePlayable(n.id));
       let map=wodRogueBuildRegionBattleMap(node.id);
       WOD.loadMapData(map);
+      for(const city of gameData.cities)Object.assign(city,{hasFactory:true,hasHarbor:true,hasFarm:true});
       gameData._campaignRun={nodeId:node.id,fromNodeId:null,defense:false,battleLive:false,deploying:false};
       gameData._campaignRegionMap=map;
       let popup=wodShowMissionPopupDialog;
@@ -250,7 +271,7 @@ const server = http.createServer((req, res) => {
       window.__reinforcementCheck={safe,id:reserve.id};
       document.getElementById('campaignPanel').classList.add('hidden');UI.inGameUI.classList.remove('hidden');
       document.getElementById('wodPcProdTabUnits').click();wodRefreshCommandHud(true);draw();
-      return {initial,reserves:reserveIds.length,called,queued:!!queued,early,stats,money,mp,emptyCities:gameData.cities.every(c=>!c.hasFactory&&!c.hasHarbor)};
+      return {initial,reserves:reserveIds.length,called,queued:!!queued,early,stats,money,mp,emptyCities:gameData.cities.every(c=>!c.hasFactory&&!c.hasHarbor&&!c.hasFarm)};
     });
     let reinforcementType=await page.evaluate(()=>wodCampaignReserveUnits().find(r=>r.type==='heavy')?.type);
     assert(reinforcementType,'armor reserve available for UI check');
@@ -596,7 +617,7 @@ const server = http.createServer((req, res) => {
     fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,overview,crossfade,engineCombats,zoomCombats,crowd,selectionEras,rapid,audio},null,2));
     console.log('all 60 v3 clips decode; overview combat with music, spatial mix, work/completion cues and controls passed');
     if(errors.length) throw new Error(errors.join('\n'));
-    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,purchaseBalance,strategy,audio,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
+    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,purchaseBalance,strategy,audio,groups:true,production,structures,ai,multiplayer,emptyTownStarts,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {
       const client=path.join(ROOT,'output','web-game-client.mjs');
       const skill=process.env.WEB_GAME_SKILL_DIR || path.join(require('os').homedir(),'.codex','skills','develop-web-game');

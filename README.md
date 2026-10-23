@@ -4,7 +4,7 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
 ## Run locally
 
-Opening forces are halved, with about 20% near the front and 80% around towns. Armor always starts in the rear. All starting towns have no buildings. All buildings (including forts and bridges) take 60 seconds; infantry mobilize in 15 seconds, marines in 20, heavy units in 25 and ships in 30. Campaign reinforcements use their unit type’s timer. A small circular countdown marks each production site, followed by the unit arrival animation. Each town handles one order at a time. Pausing stops production, and siege pauses town production.
+Opening forces are halved, with about 20% near the front and 80% around towns. Armor always starts in the rear. Every town starts without factories, harbors or farms in campaign, skirmish and multiplayer, including AI, neutral and custom-map towns. Rejoining a match preserves buildings constructed during play. All buildings (including forts and bridges) take 60 seconds; infantry mobilize in 15 seconds, marines in 20, heavy units in 25 and ships in 30. Campaign reinforcements use their unit type’s timer. A small circular countdown marks each production site, followed by the unit arrival animation. Each town handles one order at a time. Pausing stops production, and siege pauses town production.
 
 Use **Ctrl + 0–9** to save selected units to a group; press its number or click the HUD group to recall it. Campaign troops can be dragged to reorder or dismissed with an undo option. The first half deploys at battle start. Unit buttons call the remaining reserves as timed reinforcements without charging resources again; names, wounds and experience persist. Undeployed reserves remain safe between battles.
 
