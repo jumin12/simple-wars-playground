@@ -13319,7 +13319,7 @@
                         ' title="Build Harbor ($' + WOD_PRICE_HARBOR + ')">+ Harbor $' + (WOD_PRICE_HARBOR / 1000) + 'k</button>';
                 }
                 let job = wodCityProductionJob(city);
-                let actionsOrDone = job ? '<span class="cities-complete">' + job.mode + ' · ' + Math.ceil(job.remaining) + 's</span>' : (actions || '<span class="cities-complete">Complete</span>');
+                let actionsOrDone = job ? '<span class="cities-complete">' + wodProductionLabel(job.mode) + ' · ' + Math.ceil(job.remaining) + 's</span>' : (actions || '<span class="cities-complete">Complete</span>');
                 rows += '<tr class="cities-row' + sel + '" data-city-id="' + cid + '">' +
                     '<td><button type="button" class="cities-name-btn" data-city-focus="' + cid + '">' + name + '</button></td>' +
                     '<td><span class="cities-yield">' + cashTxt + '</span></td>' +
@@ -50055,7 +50055,7 @@
             for(let j of gameData.constructionJobs || []) {
                 if(j.owner !== wodLocalPlayerOwner()) continue;
                 ctx.beginPath(); ctx.arc(j.x, j.y, 33, -Math.PI/2, -Math.PI/2 + Math.PI*2*(1-j.remaining/j.total)); ctx.stroke();
-                ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(j.mode + ' ' + Math.ceil(j.remaining) + 's', j.x, j.y - 40);
+                ctx.font = '12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(wodProductionLabel(j.mode) + ' ' + Math.ceil(j.remaining) + 's', j.x, j.y - 40);
             }
             ctx.restore();
             // Selection + construction rings: always draw (Cities layer off must not hide them).
@@ -51953,7 +51953,7 @@
             let groupButtons = hud.querySelector('[data-group-buttons]');
             if(groupButtons._markup !== controls) { groupButtons.innerHTML = controls; groupButtons._markup = controls; }
             hud.querySelector('[data-reserve-count]').textContent = gameData._campaignRun ? 'Reserve reinforcements: ' + wodCampaignReserveUnits().length : '';
-            hud.querySelector('[data-production-countdown]').textContent = jobs.slice(0,4).map(j => j.mode + (j.rosterId ? ' reinforcements ' : ' ') + Math.ceil(j.remaining) + 's').join(' · ') + (jobs.length > 4 ? ' · +' + (jobs.length - 4) : '');
+            hud.querySelector('[data-production-countdown]').textContent = jobs.slice(0,4).map(j => wodProductionLabel(j.mode) + (j.rosterId ? ' reinforcements ' : ' ') + Math.ceil(j.remaining) + 's').join(' · ') + (jobs.length > 4 ? ' · +' + (jobs.length - 4) : '');
             if(gameData._campaignRun) {
                 UI.inGameUI.querySelectorAll('button[onclick^="buyUnit"]').forEach(btn => {
                     let type = /buyUnit\('([^']+)'\)/.exec(btn.getAttribute('onclick'))?.[1];
@@ -53148,10 +53148,10 @@
         /** Human-readable reason a train/build action is blocked (money, MP, city requirements). */
         function wodExplainBuildBlockReason(mode, owner, city) {
             if(!mode) return 'That action is not available right now.';
-            if(city && wodCityProductionJob(city)) return 'This town is busy: ' + wodCityProductionJob(city).mode + ' · ' + Math.ceil(wodCityProductionJob(city).remaining) + 's remaining.';
+            if(city && wodCityProductionJob(city)) return 'This town is busy: ' + wodProductionLabel(wodCityProductionJob(city).mode) + ' · ' + Math.ceil(wodCityProductionJob(city).remaining) + 's remaining.';
             if(owner === 1 && gameData._campaignRun && ['light','marine','heavy','ship'].includes(mode)) {
                 if(!gameData._campaignRun.battleLive) return 'Begin the battle before calling reinforcements.';
-                if(!wodCampaignReserveUnits(mode).length) return 'No ' + mode + ' reserves remain. Recruit more between battles.';
+                if(!wodCampaignReserveUnits(mode).length) return 'No ' + wodProductionLabel(mode) + ' reserves remain. Recruit more between battles.';
                 return 'Reinforcements need a free friendly town with a safe arrival area (ships need water).';
             }
             let money = Math.floor(wodPlayerTreasury(owner) || 0);
@@ -53231,6 +53231,12 @@
         }
 
         const WOD_PRODUCTION_SECONDS = { factory: 30, harbor: 30, farm: 30, fort: 30, bridge: 30, light: 10, marine: 15, heavy: 20, ship: 25 };
+        function wodProductionLabel(mode) {
+            let f = wodActivePeriodFlavor();
+            return ({factory:f.factory, harbor:f.harbor, farm:f.farm || 'Farm', fort:f.fort || 'Fort', bridge:'Bridge',
+                light:f.light, marine:f.marine, heavy:f.heavy, ship:f.ship})[mode] || mode;
+        }
+
         function wodCityProductionJob(city) {
             return (gameData.constructionJobs || []).find(j => j.cq === city.q && j.cr === city.r);
         }
@@ -53239,7 +53245,7 @@
             let total = WOD_PRODUCTION_SECONDS[mode];
             if(!total) return false;
             gameData.constructionJobs.push(Object.assign({ mode, owner, remaining: total, total }, location));
-            if(owner === wodLocalPlayerOwner()) showNotification(mode + (location.rosterId ? ' reinforcements called · ' : ' queued · ') + total + 's');
+            if(owner === wodLocalPlayerOwner()) showNotification(wodProductionLabel(mode) + (location.rosterId ? ' reinforcements called · ' : ' queued · ') + total + 's');
             wodRefreshCommandHud(true);
             return true;
         }
@@ -53291,7 +53297,7 @@
                 // Training waits at zero for a free spawn slot rather than losing paid troops.
                 if(!done && city) continue;
                 jobs.splice(i, 1);
-                if(j.owner === wodLocalPlayerOwner() && done) showNotification(j.mode + ' ready');
+                if(j.owner === wodLocalPlayerOwner() && done) showNotification(wodProductionLabel(j.mode) + (j.rosterId ? ' reinforcements ready' : ' ready'));
             }
         }
 
