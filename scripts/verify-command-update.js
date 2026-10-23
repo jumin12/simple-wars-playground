@@ -32,6 +32,16 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => window.__wodDebug?.().gameState === 'PLAYING' && window.__wodGetGameData?.()._matchReadyForEndChecks, {timeout:180000});
     await page.evaluate(() => { setGameSpeed(0,true); wodDismissChangelogPopup?.(); });
     console.log('match ready');
+    const openingEconomy=await page.evaluate(()=>{
+      let rows=[];
+      for(let owner of new Set(gameData.cities.map(c=>c.owner))) {
+        let cities=gameData.cities.filter(c=>c.owner===owner),units=gameData.entities.filter(u=>u.owner===owner);
+        let income=getOwnerIncome(owner),upkeep=units.reduce((n,u)=>n+getUnitUpkeep(u),0);
+        rows.push({owner,income,upkeep,net:income-upkeep,manpower:cities.reduce((n,c)=>n+getCityManpowerIncome(c),0)});
+      }
+      return rows;
+    });
+    for(let row of openingEconomy){assert(row.net>=8,'opening income buys infantry at least once per minute');assert(row.manpower>=13,'opening manpower supports repeat recruitment');}
     await page.screenshot({path:path.join(OUT,'01-opening.png')});
     const opening = await page.evaluate(() => {
       const g = window.__wodGetGameData();
@@ -61,16 +71,16 @@ const server = http.createServer((req, res) => {
       let g=gameData, c=g.cities.find(c=>c.owner===1); g.money=100000; g.manpower=100000;
       let money=g.money, ok=wodApplyBuildAtCityForOwner(c,'factory',1);
       let before={ok,has:c.hasFactory,money:g.money,duplicate:wodApplyBuildAtCityForOwner(c,'factory',1)};
-      wodUpdateConstruction(29); let at29=c.hasFactory;
+      wodUpdateConstruction(59); let at29=c.hasFactory;
       wodUpdateConstruction(1); let at30=c.hasFactory;
       let count=g.entities.length, trained=wodApplyBuildAtCityForOwner(c,'heavy',1);
-      wodUpdateConstruction(19); let beforeTrain=g.entities.length;
+      wodUpdateConstruction(29); let beforeTrain=g.entities.length;
       wodUpdateConstruction(1);
       return {before,at29,at30,trained,count,beforeTrain,afterTrain:g.entities.length,paid:money-g.money};
     });
     assert(production.before.ok&&!production.before.has&&!production.before.duplicate);
-    assert(!production.at29&&production.at30,'factory finishes at 30s');
-    assert(production.trained&&production.beforeTrain===production.count&&production.afterTrain===production.count+1,'armor waits 20s');
+    assert(!production.at29&&production.at30,'factory finishes at 60s');
+    assert(production.trained&&production.beforeTrain===production.count&&production.afterTrain===production.count+1,'armor waits 30s');
     await page.evaluate(()=>{let c=gameData.cities.find(c=>c.owner===1&&!wodCityProductionJob(c));wodApplyBuildAtCityForOwner(c,'farm',1);draw();});
     await page.screenshot({path:path.join(OUT,'02-groups-production.png')});
     console.log('opening, groups and production passed');
@@ -80,13 +90,13 @@ const server = http.createServer((req, res) => {
       let n=g.forts.length, money=g.money;
       let queued=placeFortAtHex(h,1,{suppressNotes:true});
       let duplicate=placeFortAtHex(h,1,{suppressNotes:true});
-      let before=g.forts.length; wodUpdateConstruction(29); let at29=g.forts.length;
+      let before=g.forts.length; wodUpdateConstruction(59); let at29=g.forts.length;
       // Completion must not charge money twice or depend on remaining treasury.
       g.money=0; wodUpdateConstruction(1); let after=g.forts.length;
       g.money=100000;
       let c=g.cities.find(c=>c.owner===1&&!c.hasFarm&&!wodCityProductionJob(c));
       let canceled=wodApplyBuildAtCityForOwner(c,'farm',1); c.owner=2;
-      wodUpdateConstruction(30); let capturedBuilt=c.hasFarm; c.owner=1;
+      wodUpdateConstruction(60); let capturedBuilt=c.hasFarm; c.owner=1;
       return {queued,duplicate,n,before,at29,after,canceled,capturedBuilt};
     });
     assert(structures.queued&&!structures.duplicate&&structures.before===structures.n&&structures.at29===structures.n&&structures.after===structures.n+1,'fort timer and no duplicate charges');
@@ -107,10 +117,10 @@ const server = http.createServer((req, res) => {
       }
       let c2=g.cities.find(c=>c.owner===2); g.aiMoneyByOwner[2]=100000;
       let cash=g.aiMoneyByOwner[2], building=wodApplyBuildAtCityForOwner(c2,'factory',2);
-      let instant=c2.hasFactory; wodUpdateConstruction(30);
+      let instant=c2.hasFactory; wodUpdateConstruction(60);
       return {groups,orders,assigned:Object.keys(plan.unitJob).length,total:units.length,building,instant,finished:c2.hasFactory,paid:cash-g.aiMoneyByOwner[2]};
     });
-    for(const kind of ['defend','hold','main','raid','armor','marine','naval']) assert(ai.groups.some(g=>g.kind===kind),'AI '+kind+' group');
+    for(const kind of ['defend','hold','main','raid','armor','marine','naval','support']) assert(ai.groups.some(g=>g.kind===kind),'AI '+kind+' group');
     for(const [role,type] of [['armor','heavy'],['marine','marine'],['naval','ship']]) assert(ai.groups.filter(g=>g.kind===role).every(g=>g.members.every(t=>t===type)),'specialized '+role);
     assert(ai.groups.filter(g=>g.kind==='main').length>1&&ai.assigned===ai.total&&ai.orders>3,'multiple coordinated AI groups');
     assert(ai.building&&!ai.instant&&ai.finished&&ai.paid===2000,'AI obeys production costs and times');
@@ -132,7 +142,7 @@ const server = http.createServer((req, res) => {
       let remaining=gameData.constructionJobs[0]?.remaining;
       wodUpdateConstruction(90);
       let guestUnchanged=gameData.constructionJobs[0]?.remaining===remaining;
-      gameData.mp.isHost=true; wodUpdateConstruction(30); wodMpHostEmitSnapshot();
+      gameData.mp.isHost=true; wodUpdateConstruction(60); wodMpHostEmitSnapshot();
       let completed=sent.constructionJobs.length===0;
       gameData.mp=oldMp; WodMultiplayer.api.connected=oldConnected; WodMultiplayer.hostSendSnap=oldSend;
       return {queued,queueLength,guestUnchanged,completed};
@@ -242,22 +252,22 @@ const server = http.createServer((req, res) => {
       for(let h of gameData.hexList){h.owner=1;if(h.q===0){h.type='water';h.baseColor=getTerrainColor('water');}}
       let h=gameData.hexes['-1,0'];h.type='urban';h.cityId='test-harbor';
       let c={id:'test-harbor',name:'Test harbor',owner:1,q:h.q,r:h.r,x:h.x,y:h.y,hp:1000,maxHp:1000,hasFactory:false,hasHarbor:false};gameData.cities=[c];
-      let harbor=wodApplyBuildAtCityForOwner(c,'harbor',1);wodUpdateConstruction(29);let earlyHarbor=c.hasHarbor;wodUpdateConstruction(1);
+      let harbor=wodApplyBuildAtCityForOwner(c,'harbor',1);wodUpdateConstruction(59);let earlyHarbor=c.hasHarbor;wodUpdateConstruction(1);
       let result={harbor,earlyHarbor,readyHarbor:c.hasHarbor};
-      for(let [type,seconds] of [['ship',25],['marine',15],['light',10]]){
+      for(let [type,seconds] of [['ship',30],['marine',30],['light',30]]){
         let count=gameData.entities.length,ok=wodApplyBuildAtCityForOwner(c,type,1);
         wodUpdateConstruction(seconds-1);let early=gameData.entities.length>count;
         wodUpdateConstruction(1);result[type]={ok,early,arrived:gameData.entities.length===count+1};
       }
       let mid=gameData.hexes['0,6'],dims=wodBridgeDefaultDims();
       let bridge=placeBridgeAt(1,mid.x,mid.y,0,dims.w,dims.h,{suppressNotes:true});
-      let pendingDeck=isBridgeHex(mid);wodUpdateConstruction(29);let earlyDeck=isBridgeHex(mid);gameData.money=0;wodUpdateConstruction(1);
+      let pendingDeck=isBridgeHex(mid);wodUpdateConstruction(59);let earlyDeck=isBridgeHex(mid);gameData.money=0;wodUpdateConstruction(1);
       result.bridge={queued:bridge,pendingDeck,earlyDeck,readyDeck:isBridgeHex(mid)};
       return result;
     });
-    assert(arrivals.harbor&&!arrivals.earlyHarbor&&arrivals.readyHarbor,'harbor waits 30 seconds');
+    assert(arrivals.harbor&&!arrivals.earlyHarbor&&arrivals.readyHarbor,'harbor waits 60 seconds');
     for(let type of ['ship','marine','light'])assert(arrivals[type].ok&&!arrivals[type].early&&arrivals[type].arrived,'timed '+type+' production');
-    assert(arrivals.bridge.queued&&!arrivals.bridge.pendingDeck&&!arrivals.bridge.earlyDeck&&arrivals.bridge.readyDeck,'bridge inactive until 30 seconds');
+    assert(arrivals.bridge.queued&&!arrivals.bridge.pendingDeck&&!arrivals.bridge.earlyDeck&&arrivals.bridge.readyDeck,'bridge inactive until 60 seconds');
     console.log('harbor, bridge, ship, marine and infantry timers passed');
     const authored=await page.evaluate(()=>{
       gameData.entities=[];
@@ -327,8 +337,115 @@ const server = http.createServer((req, res) => {
     }
     await page.screenshot({path:path.join(OUT,'06-even-border-deployment.png')});
     console.log('even straight, bent and disconnected border deployment passed');
+    const strategy=await page.evaluate(()=>{
+      WOD.makeBlankMap(25);gameState='PLAYING';gameData._campaignRun=null;gameData.mp={enabled:false};
+      gameData.entities=[];gameData.forts=[];gameData.bridges=[];gameData.constructionJobs=[];
+      gameData.encircledHexes=new Set();gameData._encircWork=null;gameData.marineWaterSupplyHexes=new Set();
+      gameData._aiEconomyPlans={};gameData._aiEconomyClock=0;gameData._landIncomeCacheDirty=true;
+      for(let h of gameData.hexList){h.owner=h.q<0?1:2;h.type='grass';h.baseColor=getTerrainColor('grass');}
+      const city=(q,r,owner,id)=>{let h=gameData.hexes[`${q},${r}`];h.type='urban';h.cityId=id;return {id,name:id,owner,q,r,x:h.x,y:h.y,hp:1000,maxHp:1000,hasFactory:false,hasHarbor:false,hasFarm:false};};
+      let c1=city(-15,0,1,'Player'),c2=city(15,0,2,'AI'),c3=city(15,10,2,'AI rear');
+      gameData.cities=[c1,c2,c3];
+      for(let i=0;i<7;i++)createUnitAt('light',c2.x,c2.y,2,{startSpawn:true});
+      gameData.aiMoneyByOwner={2:100000};gameData.aiManpowerByOwner={2:100000};
+      let income={2:getOwnerIncome(2)},upkeep={2:7*.45};
+      wodRunAiSpawnBurstForOwner('2',{2:[c2,c3]},income,upkeep);
+      let priority=gameData.constructionJobs.map(j=>j.mode),firstCash=gameData.aiMoneyByOwner[2];
+      let earlyFort=wodAiTryFortForOwner(2,'2');
+      // A realistic three-minute income/recruitment budget, with the same paid production queue.
+      gameData.aiMoneyByOwner[2]=800;gameData.aiManpowerByOwner[2]=1000;
+      let bought=priority.length;
+      for(let sec=0;sec<180;sec++) {
+        let army=gameData.entities.filter(u=>u.owner===2&&u.type!=='convoy');
+        let up=army.reduce((n,u)=>n+getUnitUpkeep(u),0);
+        gameData.aiMoneyByOwner[2]+=getOwnerIncome(2)-up;
+        gameData.aiManpowerByOwner[2]+=getCityManpowerIncome(c2)+getCityManpowerIncome(c3);
+        gameData._aiEconomyClock++;
+        wodUpdateConstruction(1);
+        if(sec%3===0){let n=gameData.constructionJobs.length;wodRunAiSpawnBurstForOwner('2',{2:[c2,c3]},{2:getOwnerIncome(2)},{2:up});bought+=Math.max(0,gameData.constructionJobs.length-n);}
+      }
+      let sustained={army:gameData.entities.filter(u=>u.owner===2&&u.type!=='convoy').length,bought,cash:gameData.aiMoneyByOwner[2],mp:gameData.aiManpowerByOwner[2]};
+      let h=gameData.hexes['5,0'];
+      gameData.forts=[{id:'existing-fort',owner:2,q:h.q,r:h.r,x:h.x,y:h.y,hp:100,maxHp:100}];
+      let near=gameData.hexes['6,0'],existingScore=wodAiScoreFortHex(near,2);
+      gameData.forts=[];gameData.constructionJobs=[{owner:2,mode:'fort',x:h.x,y:h.y,q:h.q,r:h.r,remaining:60,total:60}];
+      let pendingScore=wodAiScoreFortHex(near,2);
+      // Put ordinary infantry and marines in the same coastal pocket, separated from their town.
+      gameData.constructionJobs=[];gameData.entities=[];gameData.forts=[];
+      for(let h of gameData.hexList){h.owner=2;h.type='grass';h.cityId=null;}
+      for(let q=3;q<=7;q++)for(let r=3;r<=7;r++)gameData.hexes[`${q},${r}`].owner=1;
+      for(let r=3;r<=7;r++){let h=gameData.hexes[`8,${r}`];h.type='water';}
+      c1=city(-12,0,1,'Supplied town');c2=city(-18,0,2,'Enemy town');gameData.cities=[c1,c2];
+      let ph=gameData.hexes['5,5'];
+      let inf=createUnitAt('light',ph.x-3,ph.y,1,{startSpawn:true}),marine=createUnitAt('marine',ph.x+3,ph.y,1,{startSpawn:true});
+      gameData._encircWork=null;gameData.encirclementTimer=10;gameData._wodPlayerMovingN=0;
+      updateEncirclements(2);let safety=0;while(gameData._encircWork&&safety++<1000)wodEncirclementProcessChunk();
+      let coastal={infantry:!!wodGetUnitEncirclementState(inf,ph),marine:!!wodGetUnitEncirclementState(marine,ph),town:!!wodGetHexEncirclementState(gameData.hexes['-12,0']),water:wodMarineHasWaterSupply(marine,ph)};
+      let beforeInf=inf.hp,beforeMarine=marine.hp;gameData.aiMoneyByOwner[2]=0;
+      update(.25);
+      coastal.damageInf=beforeInf-inf.hp;coastal.damageMarine=beforeMarine-marine.hp;
+      for(let r=3;r<=7;r++)gameData.hexes[`8,${r}`].type='grass';
+      updateEncirclements(2);safety=0;while(gameData._encircWork&&safety++<1000)wodEncirclementProcessChunk();
+      let inlandMarine=!!wodGetUnitEncirclementState(marine,ph);
+      return {priority,firstCash,earlyFort,sustained,existingScore,pendingScore,coastal,inlandMarine};
+    });
+    assert.deepEqual(strategy.priority,['light','light'],'under-ten AI spends on units before buildings');
+    assert.equal(strategy.firstCash,99000,'AI pays for both recruits');
+    assert(!strategy.earlyFort,'small army cannot fortify instead of recruit');
+    assert(strategy.sustained.army>=12&&strategy.sustained.bought>=5&&strategy.sustained.cash>=0&&strategy.sustained.mp>=0,'sustained affordable AI recruitment');
+    assert(strategy.existingScore===-1e9&&strategy.pendingScore===-1e9,'AI rejects overlapping completed and queued forts');
+    assert(strategy.coastal.infantry&&!strategy.coastal.marine&&strategy.coastal.water&&!strategy.coastal.town,'water supplies only marines; towns supply land pockets');
+    assert(strategy.coastal.damageInf>0&&strategy.coastal.damageMarine===0,'coastal attrition applies only to ordinary infantry');
+    assert(strategy.inlandMarine,'inland marines still take encirclement damage');
+    console.log('opening economy, sustained AI recruitment, fort spacing and marine-only coastal supply passed',JSON.stringify({openingEconomy,strategy}));
+    // Decode the real generated assets and exercise the camera/mute mix independently of simulation.
+    const audioPage=await browser.newPage({viewport:{width:1000,height:700}});
+    audioPage.on('pageerror',e=>errors.push(e.stack));
+    audioPage.on('console',m=>{if(m.type()==='error')errors.push('audio: '+m.text());});
+    fs.writeFileSync(path.join(OUT,'audio-test.html'),`<!doctype html><base href="/"><button id="unlock">Enable sound</button>
+      <input class="wod-sfx-vol" type="range" min="0" max="100"><span class="wod-sfx-vol-label"></span><input class="wod-sfx-mute" type="checkbox">
+      <input class="wod-sfx-vol" type="range" min="0" max="100"><span class="wod-sfx-vol-label"></span><input class="wod-sfx-mute" type="checkbox">
+      <script src="battle-audio.js"></script>`);
+    await audioPage.goto(url+'/output/command-update/audio-test.html');await audioPage.locator('#unlock').click();
+    let eraResults=[];
+    for(let [index,era] of ['ancient','medieval','napoleonic','modern'].entries()) {
+      await audioPage.evaluate(era=>{
+        window.audioScene={enabled:true,era,zoom:1,cameraX:0,cameraY:0,width:1000,height:700,units:[{uid:era+'-1',x:500,y:350,activeCombatVisual:1,spawnFx:0}],jobs:[],completed:()=>true};
+        if(!window.audioPump)window.audioPump=setInterval(()=>wodBattleAudio.update(audioScene),120);
+        wodBattleAudio.update(audioScene);
+      },era);
+      await audioPage.waitForFunction(n=>wodBattleAudio.debug().loaded>=n,(index+1)*3,{timeout:15000});
+      await audioPage.waitForTimeout(150);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
+      await audioPage.waitForTimeout(400);
+      const state=await audioPage.evaluate(()=>wodBattleAudio.debug());
+      assert(state.playing&&state.gain>0&&state.era===era,'decoded '+era+' battle loop');eraResults.push(state);console.log('audio era decoded',era);
+    }
+    await audioPage.evaluate(()=>clearInterval(window.audioPump));
+    await audioPage.waitForTimeout(150);
+    const attenuation=await audioPage.evaluate(()=>{
+      const center=wodBattleAudio.spatial({x:500,y:350}),edge=wodBattleAudio.spatial({x:5,y:5});
+      audioScene.units[0].x=2000;wodBattleAudio.update(audioScene);
+      return {center,edge,offscreen:wodBattleAudio.debug().playing};
+    });
+    assert(attenuation.center.gain>attenuation.edge.gain&&!attenuation.offscreen,'camera attenuates and stops offscreen combat');
+    await audioPage.waitForTimeout(150);
+    await audioPage.evaluate(()=>{audioScene.units[0].x=500;audioScene.zoom=.3;wodBattleAudio.update(audioScene);});
+    assert(!await audioPage.evaluate(()=>wodBattleAudio.debug().playing),'zoomed-out battles silent');
+    await audioPage.waitForTimeout(150);
+    await audioPage.evaluate(()=>{audioScene.zoom=1;audioScene.units[0].spawnFx=1;audioScene.jobs=[{key:'work',mode:'factory',x:500,y:350}];wodBattleAudio.update(audioScene);});
+    await audioPage.waitForTimeout(200);
+    await audioPage.evaluate(()=>{audioScene.jobs=[];wodBattleAudio.update(audioScene);});
+    await audioPage.waitForFunction(()=>wodBattleAudio.debug().plays.mobilize>0&&wodBattleAudio.debug().plays.construction>0);
+    await audioPage.locator('.wod-sfx-vol').first().evaluate(e=>{e.value='35';e.dispatchEvent(new Event('input',{bubbles:true}));});
+    await audioPage.locator('.wod-sfx-mute').first().check();
+    await audioPage.waitForTimeout(150);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
+    const audio=await audioPage.evaluate(()=>({debug:wodBattleAudio.debug(),volumes:[...document.querySelectorAll('.wod-sfx-vol')].map(e=>e.value),mutes:[...document.querySelectorAll('.wod-sfx-mute')].map(e=>e.checked)}));
+    assert(audio.debug.muted&&!audio.debug.playing&&audio.debug.volume===.35&&audio.volumes.every(v=>v==='35')&&audio.mutes.every(Boolean),'saved synchronized independent sound controls');
+    await audioPage.close();
+    fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,audio},null,2));
+    console.log('all 12 generated clips decode; era playback, camera attenuation, arrival/construction cues and sound controls passed');
     if(errors.length) throw new Error(errors.join('\n'));
-    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
+    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,strategy,audio,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {
       const client=path.join(ROOT,'output','web-game-client.mjs');
       const skill=process.env.WEB_GAME_SKILL_DIR || path.join(require('os').homedir(),'.codex','skills','develop-web-game');

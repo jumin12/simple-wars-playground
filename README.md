@@ -4,9 +4,15 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
 ## Run locally
 
-Opening forces are halved, with about 20% near the front and 80% around towns. Armor always starts in the rear. All starting towns have no buildings. Structures take 30 seconds; infantry, marines, armor and ships take 10, 15, 20 and 25 seconds respectively. Each town handles one order at a time. Pausing stops production, and siege pauses town production.
+Opening forces are halved, with about 20% near the front and 80% around towns. Armor always starts in the rear. All starting towns have no buildings. All buildings (including forts and bridges) take 60 seconds; every unit and reserve reinforcement mobilizes in 30 seconds. A small circular countdown marks each production site, followed by the unit arrival animation. Each town handles one order at a time. Pausing stops production, and siege pauses town production.
 
 Use **Ctrl + 0–9** to save selected units to a group; press its number or click the HUD group to recall it. Campaign troops can be dragged to reorder or dismissed with an undo option. The first half deploys at battle start. Unit buttons call the remaining reserves as timed reinforcements without charging resources again; names, wounds and experience persist. Undeployed reserves remain safe between battles.
+
+Town, building, land and convoy cash income is doubled. Command funding adds $12/s while a faction owns a town; manpower growth supports repeat recruitment. AI factions share these rates, prioritize recruits below ten field units, budget for future upkeep, and build farms, factories, harbors and spaced forts according to need. Infantry support groups secure ground behind attack groups.
+
+Only marines receive ocean/river supply in cut-off coastal pockets. Other land units there still suffer encirclement attrition. A land connection to an owned town supplies all unit types; forts only reduce pocket attrition.
+
+Nearby visible battles have quiet, era-specific effects (ancient, medieval, Napoleonic and modern), plus mobilization and construction sounds. Zoom in to hear them; distant, offscreen and fog-hidden battles remain silent. Effects have independent saved volume/mute controls in Settings. Shipped audio is local: no API key or network generation is needed to play. To regenerate assets, set `ELEVENLABS_API_KEY` in your shell and run `node scripts/generate-battle-audio.js`; prompts and provenance are in `sounds/sfx/manifest.json`.
 
 1. **Game (static):** open `index.html` in a modern browser (double-click, or serve the folder with any static server).
 
