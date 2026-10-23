@@ -67,6 +67,39 @@ const server = http.createServer((req, res) => {
     await page.keyboard.press('1');
     assert.equal(await page.evaluate(()=>gameData.selection.length),3,'recall group');
     await page.locator('[data-control-group="1"]').click();
+    await page.waitForFunction(()=>wodBattleAudio.debug().loaded>=10,null,{timeout:15000});
+    await page.waitForTimeout(220);
+    const selectionClick=await page.evaluate(()=>{
+      const oldCamera={...gameData.camera},u=gameData.entities.find(u=>u.owner===1&&u.type==='light');
+      deselectAllSelection();gameData._cityUnitStackTap=null;
+      gameData.camera.x=u.x*gameData.camera.zoom-canvas.clientWidth/2;
+      gameData.camera.y=u.y*gameData.camera.zoom-canvas.clientHeight/2;draw();
+      let rect=canvas.getBoundingClientRect();
+      return{oldCamera,x:rect.x+canvas.clientWidth/2,y:rect.y+canvas.clientHeight/2,before:wodBattleAudio.debug().plays.selection};
+    });
+    await page.mouse.click(selectionClick.x,selectionClick.y);
+    await page.waitForFunction(n=>wodBattleAudio.debug().plays.selection===n+1,selectionClick.before,{timeout:5000});
+    assert.equal(await page.evaluate(()=>gameData.selection.filter(u=>u.uid).length),1,'unit click selects one unit with one sound while paused');
+    await page.waitForTimeout(220);
+    const batchSound=await page.evaluate(()=>{
+      let before=wodBattleAudio.debug().plays.selection;deselectAllSelection();
+      wodApplyMapSelectionBatch(gameData.entities.filter(u=>u.owner===1).slice(0,3));
+      return before;
+    });
+    await page.waitForFunction(n=>wodBattleAudio.debug().plays.selection===n+1,batchSound,{timeout:5000});
+    await page.waitForTimeout(220);
+    const silentSelection=await page.evaluate(()=>{
+      let before=wodBattleAudio.debug().plays.selection;
+      wodReplaceMapSelection(gameData.cities.find(c=>c.owner===1));
+      wodReplaceMapSelection(gameData.entities.find(u=>u.owner===2));
+      return before;
+    });
+    await page.waitForTimeout(220);
+    assert.equal(await page.evaluate(()=>wodBattleAudio.debug().plays.selection),silentSelection,'cities and inspected enemies do not acknowledge player commands');
+    await page.keyboard.press('1');
+    await page.waitForFunction(n=>wodBattleAudio.debug().plays.selection===n+1,silentSelection,{timeout:5000});
+    await page.evaluate(camera=>{gameData.camera=camera;draw();},selectionClick.oldCamera);
+    console.log('unit click, group/batch selection, paused selection and silent city/enemy inspection passed');
     const production = await page.evaluate(() => {
       let g=gameData, c=g.cities.find(c=>c.owner===1); g.money=100000; g.manpower=100000;
       let money=g.money, ok=wodApplyBuildAtCityForOwner(c,'factory',1);
@@ -426,7 +459,7 @@ const server = http.createServer((req, res) => {
         if(!window.audioPump)window.audioPump=setInterval(()=>wodBattleAudio.update(audioScene),120);
         wodBattleAudio.update(audioScene);
       },era);
-      await audioPage.waitForFunction(n=>wodBattleAudio.debug().loaded>=n,(index+1)*5,{timeout:15000});
+      await audioPage.waitForFunction(n=>wodBattleAudio.debug().loaded>=n,(index+1)*10,{timeout:15000});
       await audioPage.waitForTimeout(150);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
       await audioPage.waitForTimeout(400);
       const state=await audioPage.evaluate(()=>wodBattleAudio.debug());
@@ -457,6 +490,35 @@ const server = http.createServer((req, res) => {
     const crossfade=await audioPage.evaluate(()=>wodBattleAudio.debug());
     assert(crossfade.plays.battle>overview.sound.plays.battle,'long combat variations overlap for a seamless crossfade');
     await audioPage.evaluate(()=>clearInterval(window.audioPump));
+    const selectionEras=[];
+    for(let era of ['ancient','medieval','napoleonic','modern']){
+      await audioPage.evaluate(era=>{audioScene.era=era;audioScene.selectionEnabled=true;wodBattleAudio.update(audioScene);},era);
+      await audioPage.waitForTimeout(80);
+      assert((await audioPage.evaluate(()=>wodBattleAudio.debug().audibleEras)).every(e=>e===era),'era switch stops old combat and one-shot tails');
+      const played=[];
+      for(let type of ['light','light','marine','heavy','ship']){
+        await audioPage.waitForTimeout(200);
+        assert(await audioPage.evaluate(({era,type})=>wodBattleAudio.selectUnits(era,[{type}]),{era,type}),'selection '+era+' '+type);
+        played.push(await audioPage.evaluate(()=>wodBattleAudio.debug().recentPlays.at(-1)));
+      }
+      assert(played.every(p=>p.era===era&&p.kind.startsWith('select-')),'selection assets belong to the active era');
+      assert.notEqual(played[0].kind,played[1].kind,'infantry acknowledgements alternate');
+      selectionEras.push({era,played});
+    }
+    await audioPage.waitForTimeout(200);
+    const rapid=await audioPage.evaluate(async()=>{
+      let before=wodBattleAudio.debug().plays.selection;
+      let results=await Promise.all([wodBattleAudio.selectUnits('modern',[{type:'light'},{type:'heavy'}]),wodBattleAudio.selectUnits('modern',[{type:'ship'}])]);
+      return{results,count:wodBattleAudio.debug().plays.selection-before};
+    });
+    assert(rapid.count===1&&rapid.results.filter(Boolean).length===1,'one acknowledgement per rapid/group selection action');
+    await audioPage.evaluate(()=>{audioScene.era='unknown-era';wodBattleAudio.update(audioScene);});
+    await audioPage.waitForTimeout(80);
+    assert.equal(await audioPage.evaluate(()=>wodBattleAudio.debug().audibleEras.length),0,'unknown eras fail silent without modern combat fallback');
+    await audioPage.evaluate(()=>{audioScene.era='ancient';audioScene.enabled=false;audioScene.selectionEnabled=true;wodBattleAudio.update(audioScene);});
+    assert(await audioPage.evaluate(()=>wodBattleAudio.selectUnits('ancient',[{type:'light'}])),'paused selection still acknowledges');
+    await audioPage.waitForTimeout(100);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
+    assert((await audioPage.evaluate(()=>wodBattleAudio.debug().audibleEras)).every(e=>e==='ancient'),'paused ancient selection cannot inherit modern audio');
     await audioPage.locator('.wod-sfx-vol').first().evaluate(e=>{e.value='35';e.dispatchEvent(new Event('input',{bubbles:true}));});
     await audioPage.locator('.wod-sfx-mute').first().check();
     await audioPage.waitForTimeout(150);await audioPage.evaluate(()=>wodBattleAudio.update(audioScene));
@@ -464,8 +526,8 @@ const server = http.createServer((req, res) => {
     assert(await audioPage.evaluate(()=>wodMusic.getMixState().target===1&&wodMusic.getVolume()===1),'muting effects restores the music mix without changing saved volume');
     assert(audio.debug.muted&&!audio.debug.playing&&audio.debug.volume===.35&&audio.volumes.every(v=>v==='35')&&audio.mutes.every(Boolean),'saved synchronized independent sound controls');
     await audioPage.close();
-    fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,overview,crossfade,audio},null,2));
-    console.log('all 20 v3 clips decode; overview combat with music, spatial mix, work/completion cues and controls passed');
+    fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,overview,crossfade,selectionEras,rapid,audio},null,2));
+    console.log('all 40 v3 clips decode; overview combat with music, spatial mix, work/completion cues and controls passed');
     if(errors.length) throw new Error(errors.join('\n'));
     fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,strategy,audio,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {

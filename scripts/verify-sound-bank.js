@@ -1,7 +1,13 @@
 const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{spawnSync}=require('child_process');
 const ROOT=path.resolve(__dirname,'..'),ffmpeg=require('ffmpeg-static');
 const manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'sounds/sfx/manifest.json'),'utf8'));
-assert.equal(manifest.model,'eleven_text_to_sound_v3');assert.equal(manifest.assets.length,20);
+assert.equal(manifest.model,'eleven_text_to_sound_v3');assert.equal(manifest.assets.length,40);
+for(let era of ['ancient','medieval','napoleonic','modern']){
+ let assets=manifest.assets.filter(a=>a.era===era);
+ assert.equal(assets.length,10,era+' complete isolated bank');
+ for(let kind of ['battle','battle-alt','select-light','select-light-alt','select-marine','select-heavy','select-ship'])assert(assets.some(a=>a.kind===kind),era+' '+kind);
+ for(let a of assets){assert(a.file.startsWith(era+'-'));if(['ancient','medieval'].includes(era)&&a.kind.startsWith('battle'))assert(a.prompt.includes('No firearms, gunpowder, explosions, engines or electronics.'),'explicit pre-gunpowder restrictions');}
+}
 let rows=[];
 for(let a of manifest.assets){
  const result=spawnSync(ffmpeg,['-hide_banner','-i',path.join(ROOT,'sounds/sfx',a.file),'-af','loudnorm=I=-23:TP=-3:LRA=8:print_format=json','-f','null','NUL'],{encoding:'utf8',windowsHide:true});
@@ -17,4 +23,4 @@ for(let a of manifest.assets){
 }
 fs.mkdirSync(path.join(ROOT,'output/sound-design-v2'),{recursive:true});
 fs.writeFileSync(path.join(ROOT,'output/sound-design-v2/quality-report.json'),JSON.stringify(rows,null,2));
-console.table(rows);console.log('20 v3 effects: decoded, consistent loudness, no clipping, expected durations.');
+console.table(rows);console.log('40 v3 effects: decoded, consistent loudness, no clipping, expected durations.');

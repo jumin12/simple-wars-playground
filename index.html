@@ -11996,12 +11996,12 @@
                         <span>Mute</span>
                     </label>
                     <label style="display:flex;align-items:center;gap:10px;margin-top:12px;max-width:420px;">
-                        <span style="min-width:70px;">Battle SFX</span>
-                        <input type="range" class="wod-sfx-vol" min="0" max="100" value="65" style="flex:1;" aria-label="Battle effects volume" />
+                        <span style="min-width:70px;">Game SFX</span>
+                        <input type="range" class="wod-sfx-vol" min="0" max="100" value="65" style="flex:1;" aria-label="Game effects volume" />
                         <span class="wod-sfx-vol-label">65</span>%
                     </label>
                     <label style="display:flex;align-items:center;gap:10px;margin-top:8px;cursor:pointer;">
-                        <input type="checkbox" class="wod-sfx-mute" aria-label="Mute battle effects" /><span>Mute battle effects</span>
+                        <input type="checkbox" class="wod-sfx-mute" aria-label="Mute game effects" /><span>Mute combat, selection and construction</span>
                     </label>
                     <div class="wod-music-now-row">Now playing: <span class="wod-music-now">—</span></div>
                     <label style="display:block;margin-top:10px;max-width:520px;">
@@ -12573,12 +12573,12 @@
                             <span>Mute</span>
                         </label>
                     <label style="display:flex;align-items:center;gap:10px;margin-top:12px;max-width:420px;">
-                        <span style="min-width:70px;">Battle SFX</span>
-                        <input type="range" class="wod-sfx-vol" min="0" max="100" value="65" style="flex:1;" aria-label="Battle effects volume" />
+                        <span style="min-width:70px;">Game SFX</span>
+                        <input type="range" class="wod-sfx-vol" min="0" max="100" value="65" style="flex:1;" aria-label="Game effects volume" />
                         <span class="wod-sfx-vol-label">65</span>%
                     </label>
                     <label style="display:flex;align-items:center;gap:10px;margin-top:8px;cursor:pointer;">
-                        <input type="checkbox" class="wod-sfx-mute" aria-label="Mute battle effects" /><span>Mute battle effects</span>
+                        <input type="checkbox" class="wod-sfx-mute" aria-label="Mute game effects" /><span>Mute combat, selection and construction</span>
                     </label>
                         <div class="wod-music-now-row">Now playing: <span class="wod-music-now">—</span></div>
                         <label style="display:block;margin-top:10px;max-width:520px;">
@@ -12630,8 +12630,8 @@
     </script>
     <script src="multiplayer-client.js"></script>
     <script src="ancient-civ-emblems.js"></script>
-    <script src="music-player.js?v=field-v3-2"></script>
-    <script src="battle-audio.js?v=field-v3-2"></script>
+    <script src="music-player.js?v=era-selection-v1"></script>
+    <script src="battle-audio.js?v=era-selection-v1"></script>
     <script>
         // --- Core UI & State ---
         const UI = {
@@ -12649,6 +12649,16 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-23T02:10:00-04:00',
+                title: 'Unit acknowledgements and strict era audio',
+                items: [
+                    'Added twenty short unit-selection cues across all four eras, distinguishing infantry, marines, heavy units and ships, with alternating infantry variations.',
+                    'Click, touch selection, drag selection and control-group recall share one restrained acknowledgement per action. Paused selection works; rapid clicks do not pile up sounds.',
+                    'Ancient and medieval combat beds were regenerated with explicit pre-gunpowder restrictions. Selection cues use bronze/wood, horses, oars and rigging where appropriate; mechanical armor cues belong to the modern era.',
+                    'Switching eras now stops the previous bank immediately, including lingering effects and delayed loads. Unknown eras stay silent instead of falling back to modern combat.'
+                ]
+            },
             {
                 at: '2026-10-23T01:43:00-04:00',
                 title: 'Distant combat sound design and stronger defense',
@@ -50010,6 +50020,7 @@
             let viewH = canvas.clientHeight || UI.wrapper.clientHeight || wodCanvasAllocSize.h || 1;
 
             if(window.wodBattleAudio) window.wodBattleAudio.update({
+                selectionEnabled:gameState==='PLAYING'&&!gameData.menuAttractMode&&UI.escMenu.classList.contains('hidden'),
                 enabled: gameState === 'PLAYING' && gameData.speed > 0 && !gameData.menuAttractMode && UI.escMenu.classList.contains('hidden'),
                 era:wodGetMatchPeriod(),zoom:gameData.camera.zoom,cameraX:gameData.camera.x,cameraY:gameData.camera.y,width:viewW,height:viewH,
                 units:gameData.entities.filter(wodFogCanSeeUnit),
@@ -50863,11 +50874,18 @@
             if(typeof wodSyncViewportAndCanvas === 'function') wodSyncViewportAndCanvas();
         }
 
+        function wodPlayUnitSelectionSound(items) {
+            if(gameState!=='PLAYING'||gameData.menuAttractMode||!UI.escMenu.classList.contains('hidden'))return;
+            let own=(items||[]).filter(u=>u&&u.uid&&u.owner===wodLocalPlayerOwner()&&u.hp>0&&['light','marine','heavy','ship'].includes(u.type));
+            if(own.length)window.wodBattleAudio?.selectUnits(wodGetMatchPeriod(),own);
+        }
+
         function wodApplyMapSelection(item) {
             if(!item) return false;
             wodCloseHudMenusForSelection();
             item.selected = true;
             gameData.selection.push(item);
+            wodPlayUnitSelectionSound([item]);
             _infoCardUiThrottle.s = null;
             syncInfoCardPanel();
             return true;
@@ -50882,6 +50900,7 @@
                 item.selected = true;
                 gameData.selection.push(item);
             }
+            wodPlayUnitSelectionSound(items);
             _infoCardUiThrottle.s = null;
             syncInfoCardPanel();
             return true;
@@ -52051,6 +52070,7 @@
             for(let e of gameData.selection) e.selected = false;
             gameData.selection = gameData.entities.filter(u => u.hp > 0 && u.owner === wodLocalPlayerOwner() && ids.has(u.uid));
             for(let u of gameData.selection) u.selected = true;
+            wodPlayUnitSelectionSound(gameData.selection);
             syncInfoCardPanel(); wodRefreshCommandHud(true);
         }
         function wodRefreshCommandHud(force) {

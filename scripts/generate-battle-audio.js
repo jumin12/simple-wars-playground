@@ -11,32 +11,43 @@ const eras={
  napoleonic:{battle:'A Napoleonic battlefield recorded from 250 meters behind the fighting. Irregular groups of dry flintlock musket reports roll across the field, with an occasional deeper muffled black-powder cannon boom and a natural long outdoor echo. Clear separation between musket cracks and distant cannon tails, continuous scattered firing.', 'battle-alt':'Distant 1815 infantry combat heard across open farmland. Uneven flintlock musket volleys crackle in small waves, occasional low black-powder artillery reports bloom and decay in the open air. Spacious natural perspective, the weapons all far away.',construction:'An early nineteenth century field workshop heard across a small yard. Unhurried uneven hand hammer knocks on timber, a short hand saw stroke, a wooden cart creaking under load. Restrained dry practical construction foley.',mobilize:'A small Napoleonic infantry squad steps off on a dirt road. Several bootsteps, subtle leather cartridge-box and wooden musket equipment rattle. Brief natural military movement foley without instruments or signals.',complete:'A wooden workshop door settles shut with a restrained solid latch and one small metallic tool being set down. A short grounded completion sound.'},
  modern:{battle:'Real modern infantry firefight recorded outdoors from 300 meters away. Irregular short automatic rifle bursts and scattered individual rifle cracks, occasional soft low artillery thumps with long natural outdoor decay. Recognizable dry gunfire transients muffled by distance, open-air perspective, continuous scattered combat.', 'battle-alt':'A modern battlefield heard from a distant observation hill. Several separated positions exchange short machine-gun bursts and sporadic rifle shots, an occasional far-off low explosion rumbles and fades. Spacious realistic distant weapons recording, no nearby impacts.',construction:'A small modern field construction site heard from across a yard. A brief restrained cordless drill driver, several measured hammer taps on timber, one muted steel fitting clank and a little material handling. Ordinary believable worksite foley, brief gaps between actions.',mobilize:'A small modern infantry squad starts walking away on gravel. Several bootsteps, soft fabric webbing and equipment movement. Brief realistic military movement foley, naturally receding, no radio beeps.',complete:'A steel workshop latch closes with a compact muted clunk, followed by a light tool being set down. Short restrained practical completion foley.'}
 };
+const selections={
+ ancient:{light:'A hoplite tightens his grip on a wooden shield: a short leather creak and one small bronze fitting clink.', 'light-alt':'One grounded sandal step with a brief wooden shield movement and a small bronze equipment tick.',marine:'A wooden oar grip shifts, with a short wet leather creak and a tiny water drip.',heavy:'A horse harness shifts beside a wooden chariot: one restrained leather creak and a small wooden wheel knock.',ship:'A wooden trireme oar settles in its leather oarlock, with a restrained rope creak and small water lap.'},
+ medieval:{light:'A gauntleted hand grips a wooden shield: a short leather creak and compact steel fitting clink.', 'light-alt':'One boot settles on earth with a brief soft chainmail rustle.',marine:'A sea raider shifts a wooden shield: a brief wet leather creak and muted iron buckle tick.',heavy:'A mounted knight shifts in his saddle: a short saddle leather creak and restrained chainmail rustle.',ship:'A wooden galley rope draws taut through a wooden block with a small hull creak.'},
+ napoleonic:{light:'A soldier adjusts a wooden flintlock musket in his hands: a brief wood knock and leather sling creak. No firing.', 'light-alt':'A boot shifts on packed earth with a brief leather cartridge-box buckle rattle.',marine:'A naval infantryman settles his wooden musket sling: a short leather creak and brass buckle tick. No firing.',heavy:'A cavalry saddle shifts: brief dry saddle leather creak and a small steel stirrup tick.',ship:'A sailing ship rope tightens through a wooden pulley: a brief rope creak and compact timber knock.'},
+ modern:{light:'A modern infantryman adjusts a rifle sling: a brief nylon webbing tug and small restrained equipment click. No firing.', 'light-alt':'A boot settles on gravel with a short nylon webbing rustle and a small buckle tick.',marine:'A marine adjusts wet nylon webbing: a brief fabric tug and a small metal clasp click.',heavy:'An armored vehicle hatch latch is gripped and seated: a short muted steel clunk with a tiny low diesel idle tail.',ship:'A naval vessel steel hatch latch is secured: one compact restrained metallic clunk with a brief soft deck vibration.'}
+};
+for(const[era,kinds]of Object.entries(selections))for(const[type,text]of Object.entries(kinds))eras[era]['select-'+type]=text;
+
 async function main(){
  const dryRun=process.argv.includes('--dry-run'),masterOnly=process.argv.includes('--master-only');
  if(!dryRun&&!masterOnly&&!process.env.ELEVENLABS_API_KEY)throw Error('Set ELEVENLABS_API_KEY before regeneration.');
  fs.mkdirSync(out,{recursive:true});fs.mkdirSync(raw,{recursive:true});
- const manifest={provider:'ElevenLabs',model:'eleven_text_to_sound_v3',revision,generated:new Date().toISOString().slice(0,10),mastering:{battleLufs:-23,foleyLufs:-24,truePeakDb:-3,crossfadeSeconds:2},assets:[]};
+ const manifest={provider:'ElevenLabs',model:'eleven_text_to_sound_v3',revision,generated:new Date().toISOString().slice(0,10),mastering:{battleLufs:-23,foleyLufs:-24,truePeakDb:-3,crossfadeSeconds:2,selectionLufs:-22},eraRules:{ancient:'Bronze/wood melee, shields, chariots and oared ships. No firearms, explosions, engines or electronics.',medieval:'Steel/wood melee, bows, horses and galleys. No firearms, explosions, engines or electronics.',napoleonic:'Flintlock muskets, black-powder cannons, horses and sailing ships. No automatic firearms or modern engines.',modern:'Modern infantry weapons, armored vehicles and naval vessels.'},assets:[]};
  for(const [era,kinds] of Object.entries(eras))for(const [kind,text] of Object.entries(kinds)){
-  const file=era+'-'+kind+'.mp3',duration=kind.startsWith('battle')?24:kind==='construction'?6:kind==='mobilize'?2.5:1.5;
-  const prompt=text+common,dest=path.join(out,file),original=path.join(raw,file),stamp=original+'.revision';
+  const selection=kind.startsWith('select-'),strictBattle=['ancient','medieval'].includes(era)&&kind.startsWith('battle');
+  const assetRevision=selection?'era-selection-v1':strictBattle?'strict-pre-gunpowder-v1':revision;
+  const file=era+'-'+kind+'.mp3',duration=selection?1.1:kind.startsWith('battle')?24:kind==='construction'?6:kind==='mobilize'?2.5:1.5;
+  const exclusions=strictBattle?' No firearms, gunpowder, explosions, engines or electronics.':'';
+  const prompt=text+(selection?' Clean, short natural RTS selection foley. No music, voices or combat.':common)+exclusions,dest=path.join(out,file),original=path.join(raw,file),stamp=original+'.revision';
   if(prompt.length>450)throw Error(file+' prompt exceeds 450 characters');
   if(dryRun){console.log(file+': '+duration+'s, '+prompt.length+' characters');continue;}
-  if(!fs.existsSync(original)||!fs.existsSync(stamp)||fs.readFileSync(stamp,'utf8')!==revision){
+  if(!fs.existsSync(original)||!fs.existsSync(stamp)||fs.readFileSync(stamp,'utf8')!==assetRevision){
    if(masterOnly)throw Error('Missing cached v3 source: '+file);
    const response=await fetch('https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128',{method:'POST',signal:AbortSignal.timeout(120000),headers:{'xi-api-key':process.env.ELEVENLABS_API_KEY,'Content-Type':'application/json',Accept:'audio/mpeg'},body:JSON.stringify({text:prompt,duration_seconds:duration,loop:false,prompt_influence:.75,model_id:manifest.model})});
    if(!response.ok){const e=await response.json().catch(()=>({}));throw Error('ElevenLabs HTTP '+response.status+': '+JSON.stringify(e.detail||{}).replaceAll(process.env.ELEVENLABS_API_KEY,'[redacted]').slice(0,500));}
    const bytes=Buffer.from(await response.arrayBuffer());if(bytes.length<1000)throw Error('Incomplete sound response');
-   fs.writeFileSync(original,bytes);fs.writeFileSync(stamp,revision);console.log('Generated '+file);
+   fs.writeFileSync(original,bytes);fs.writeFileSync(stamp,assetRevision);console.log('Generated '+file);
   }
-  const battle=kind.startsWith('battle'),target=battle?-23:-24;
-  const pre=`highpass=f=${battle?85:110},lowpass=f=${battle?6500:7200},acompressor=threshold=0.125:ratio=2.5:attack=5:release=180,afade=t=in:d=0.015,afade=t=out:st=${duration-.04}:d=0.04`;
+  const battle=kind.startsWith('battle'),target=selection?-22:battle?-23:-24;
+  const pre=`highpass=f=${battle?85:110},lowpass=f=${battle?6500:7200},acompressor=threshold=${selection?0.032:0.125}:ratio=${selection?4:2.5}:attack=${selection?0.5:5}:release=${selection?80:180},afade=t=in:d=0.015,afade=t=out:st=${duration-.04}:d=0.04`;
   const measurement=spawnSync(ffmpeg,['-hide_banner','-i',original,'-af',pre+`,loudnorm=I=${target}:TP=-3:LRA=8:print_format=json`,'-f','null','NUL'],{encoding:'utf8',windowsHide:true});
   const match=measurement.stderr.match(/\{\s*"input_i"[\s\S]*?\}/);if(measurement.status!==0||!match)throw Error('Could not measure '+file);
   const m=JSON.parse(match[0]);
   const filters=pre+`,volume=${target-Number(m.input_i)}dB,alimiter=limit=0.7079:attack=3:release=100:level=false`;
   const result=spawnSync(ffmpeg,['-y','-hide_banner','-loglevel','error','-i',original,'-af',filters,'-ar','44100','-ac','2','-codec:a','libmp3lame','-b:a','160k',dest],{encoding:'utf8',windowsHide:true});
   if(result.status!==0)throw Error('Mastering failed: '+result.stderr);
-  manifest.assets.push({file,era,kind,prompt,duration,loop:false,integratedLufs:target});
+  manifest.assets.push({file,era,kind,prompt,duration,revision:assetRevision,loop:false,integratedLufs:target});
  }
  if(dryRun)return;
  fs.writeFileSync(path.join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');console.log('Mastered '+manifest.assets.length+' effects.');

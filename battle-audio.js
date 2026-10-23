@@ -2,12 +2,14 @@
 (() => {
   'use strict';
   const ERAS=['modern','napoleonic','medieval','ancient'];
-  const KINDS=['battle','battle-alt','construction','mobilize','complete'];
-  const REVISION='field-v3-2';
+  const KINDS=['battle','battle-alt','construction','mobilize','complete','select-light','select-light-alt','select-marine','select-heavy','select-ship'];
+  const REVISION='era-selection-v1';
   let context,master,scene,battle,lastTick=0,lastWork=-10000,lastCue=-10000,generation=0;
   const buffers=new Map(),loading=new Map(),seen=new Set(),shots=new Set();
-  let oldJobs=new Map();
-  const plays={battle:0,mobilize:0,construction:0,complete:0};
+  let oldJobs=new Map(),activeEra=null,selectionToken=0,lastSelection=-10000,selectionVoice=null;
+  const buses=new Set(),selectionVariants={},recentPlays=[];
+  const plays={battle:0,mobilize:0,construction:0,complete:0,selection:0};
+  function record(era,kind){recentPlays.push({era,kind});if(recentPlays.length>40)recentPlays.shift();}
   let volume=.65,muted=false;
   try{volume=Math.max(0,Math.min(1,Number(localStorage.getItem('wodSfxVolume')??.65)));muted=localStorage.getItem('wodSfxMuted')==='1';}catch(_){}
   if(!Number.isFinite(volume))volume=.65;
@@ -27,10 +29,12 @@
         master.connect(limiter);limiter.connect(context.destination);syncUi();
       }
       await context.resume();
+      if(scene&&ERAS.includes(scene.era))for(let kind of KINDS)load(scene.era,kind);
     }catch(_){}
   }
   document.addEventListener('pointerdown',unlock,{passive:true});document.addEventListener('keydown',unlock,{passive:true});
   function load(era,kind){
+    if(!ERAS.includes(era)||!KINDS.includes(kind))return Promise.resolve(null);
     const key=era+'/'+kind;
     if(buffers.has(key))return Promise.resolve(buffers.get(key));
     if(!loading.has(key)){
@@ -52,21 +56,55 @@
     return{gain:(.68+.32*proximity)*(1-.72*distance),pan:Math.max(-.8,Math.min(.8,(x-s.width/2)/(s.width*.65))),cutoff:1800+3400*proximity};
   }
   function duck(presence){window.wodMusic?.setBattlePresence?.(muted?0:presence*volume/.65);}
-  function stopBattle(){
+  function retireBus(bus,immediate){
+    bus.amp.gain.cancelScheduledValues(context.currentTime);
+    if(immediate)bus.amp.gain.setValueAtTime(0,context.currentTime);
+    else bus.amp.gain.setTargetAtTime(0,context.currentTime,.22);
+    for(let voice of bus.voices)try{voice.stop(context.currentTime+(immediate ? .015 : 1));}catch(_){}
+  }
+  function stopBattle(immediate=false){
     duck(0);
+    if(immediate){for(let bus of buses)retireBus(bus,true);battle=null;return;}
     if(!battle)return;
-    const old=battle;battle=null;
-    old.amp.gain.cancelScheduledValues(context.currentTime);
-    old.amp.gain.setTargetAtTime(0,context.currentTime,.22);
-    for(let voice of old.voices)try{voice.stop(context.currentTime+1);}catch(_){}
+    const old=battle;battle=null;retireBus(old,false);
+  }
+  function setEra(era){
+    let valid=ERAS.includes(era),next=valid?era:null;
+    if(next!==activeEra){
+      generation++;selectionToken++;activeEra=next;stopBattle(true);
+      for(let shot of shots)try{shot.stop();}catch(_){}
+      selectionVoice=null;oldJobs.clear();seen.clear();lastSelection=-10000;
+    }
+    return valid;
+  }
+  async function selectUnits(era,units){
+    if(!setEra(era)||scene?.selectionEnabled===false||document.hidden||muted||volume===0)return false;
+    let counts={};
+    for(let unit of units||[])if(['light','marine','heavy','ship'].includes(unit.type))counts[unit.type]=(counts[unit.type]||0)+1;
+    let type=Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
+    if(!type||performance.now()-lastSelection<180)return false;
+    lastSelection=performance.now();let request=++selectionToken,token=generation;
+    let variant=type==='light'?((selectionVariants[era]||0)%2):0;
+    let kind='select-'+type+(variant?'-alt':'');
+    await unlock();
+    if(!context||context.state!=='running')return false;
+    let buffer=await load(era,kind);
+    if(!buffer||request!==selectionToken||token!==generation||activeEra!==era||muted||volume===0||document.hidden)return false;
+    selectionVariants[era]=(selectionVariants[era]||0)+(type==='light'?1:0);
+    if(selectionVoice)try{selectionVoice.stop();}catch(_){}
+    let src=context.createBufferSource(),amp=context.createGain();src.buffer=buffer;src._wodEra=era;src._wodSelection=true;
+    amp.gain.setValueAtTime(0,context.currentTime);amp.gain.linearRampToValueAtTime(.6,context.currentTime+.012);
+    amp.gain.setValueAtTime(.6,context.currentTime+Math.max(.02,buffer.duration-.04));amp.gain.linearRampToValueAtTime(0,context.currentTime+buffer.duration);
+    src.connect(amp);amp.connect(master);shots.add(src);selectionVoice=src;plays.selection++;record(era,kind);
+    src.onended=()=>{shots.delete(src);if(selectionVoice===src)selectionVoice=null;src.disconnect();amp.disconnect();};src.start();return true;
   }
   function scheduleBed(bus,buffer,start){
     let src=context.createBufferSource(),fade=context.createGain(),duration=buffer.duration;
     src.buffer=buffer;fade.gain.setValueAtTime(0,start);fade.gain.linearRampToValueAtTime(1,start+Math.min(2,duration/4));
     fade.gain.setValueAtTime(1,start+duration-2);fade.gain.linearRampToValueAtTime(0,start+duration);
     src.connect(fade);fade.connect(bus.amp);bus.voices.add(src);src.start(start);
-    src.onended=()=>{src.disconnect();fade.disconnect();bus.voices.delete(src);if(bus!==battle&&!bus.voices.size){bus.amp.disconnect();bus.filter.disconnect();bus.pan.disconnect();}};
-    bus.nextAt=start+duration-2;bus.variant=1-bus.variant;plays.battle++;
+    src.onended=()=>{src.disconnect();fade.disconnect();bus.voices.delete(src);if(bus!==battle&&!bus.voices.size){bus.amp.disconnect();bus.filter.disconnect();bus.pan.disconnect();buses.delete(bus);}};
+    bus.nextAt=start+duration-2;bus.variant=1-bus.variant;plays.battle++;record(bus.era,'battle');
   }
   function startBattle(era){
     let buffer=buffers.get(era+'/battle');if(!buffer)return;
@@ -74,7 +112,7 @@
     amp.gain.value=0;filter.type='lowpass';filter.Q.value=.5;filter.frequency.value=2200;
     amp.connect(filter);filter.connect(pan);pan.connect(master);
     battle={era,amp,filter,pan,voices:new Set(),variant:0,nextAt:0,lastHeard:performance.now(),lastUid:null,targetGain:0};
-    scheduleBed(battle,buffer,context.currentTime);
+    buses.add(battle);scheduleBed(battle,buffer,context.currentTime);
   }
   async function oneShot(kind,point){
     if(!context||context.state!=='running'||muted||volume===0||!scene?.enabled||shots.size>=3)return;
@@ -84,16 +122,16 @@
     if(!buffer||token!==generation||!scene.enabled||scene.era!==era||muted||shots.size>=3)return;
     pos=spatial(point);if(pos.gain<=0)return;
     let src=context.createBufferSource(),amp=context.createGain(),filter=context.createBiquadFilter(),pan=context.createStereoPanner();
-    src.buffer=buffer;filter.type='lowpass';filter.frequency.value=pos.cutoff+1000;filter.Q.value=.5;
+    src.buffer=buffer;src._wodEra=era;filter.type='lowpass';filter.frequency.value=pos.cutoff+1000;filter.Q.value=.5;
     amp.gain.value=pos.gain*({construction:.32,mobilize:.38,complete:.48}[kind]||.3);pan.pan.value=pos.pan;
-    src.connect(amp);amp.connect(filter);filter.connect(pan);pan.connect(master);shots.add(src);plays[kind]++;
+    src.connect(amp);amp.connect(filter);filter.connect(pan);pan.connect(master);shots.add(src);plays[kind]++;record(era,kind);
     src.onended=()=>{shots.delete(src);src.disconnect();amp.disconnect();filter.disconnect();pan.disconnect();};src.start();
   }
   function update(s){
-    scene=s;if(!ERAS.includes(s.era))s.era='modern';
-    if(!s.enabled||document.hidden){stopBattle();for(let shot of shots)try{shot.stop();}catch(_){}return;}
-    let now=performance.now();if(now-lastTick<100)return;lastTick=now;
+    scene=s;if(!setEra(s.era)){stopBattle(true);return;}
     if(context?.state==='running')for(let kind of KINDS)load(s.era,kind);
+    if(!s.enabled||document.hidden){stopBattle();for(let shot of shots)if(!shot._wodSelection||!s.selectionEnabled||document.hidden)try{shot.stop();}catch(_){}return;}
+    let now=performance.now();if(now-lastTick<100)return;lastTick=now;
     let strongest={gain:0,pan:0,cutoff:1800},heard=null;
     for(let unit of s.units){
       let pos=spatial(unit);
@@ -128,12 +166,12 @@
     if(work&&spatial(work).gain>0&&now-lastWork>9000){lastWork=now;oneShot('construction',work);}
     oldJobs=jobs;
   }
-  function reset(){generation++;seen.clear();oldJobs.clear();lastCue=-10000;lastWork=-10000;stopBattle();for(let shot of shots)try{shot.stop();}catch(_){}}
+  function reset(){generation++;selectionToken++;lastSelection=-10000;seen.clear();oldJobs.clear();lastCue=-10000;lastWork=-10000;stopBattle(true);for(let shot of shots)try{shot.stop();}catch(_){}}
   function bind(){
     document.querySelectorAll('.wod-sfx-vol').forEach(e=>e.addEventListener('input',()=>{volume=Number(e.value)/100;try{localStorage.setItem('wodSfxVolume',volume);}catch(_){}syncUi();}));
     document.querySelectorAll('.wod-sfx-mute').forEach(e=>e.addEventListener('change',()=>{muted=e.checked;try{localStorage.setItem('wodSfxMuted',muted?'1':'0');}catch(_){}syncUi();}));syncUi();
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden)reset();});
-  window.wodBattleAudio={update,reset,spatial,debug:()=>({unlocked:context?.state==='running',era:scene?.era,playing:!!battle,volume,muted,loaded:buffers.size,plays:{...plays},gain:battle?.amp.gain.value||0,targetGain:battle?.targetGain||0,voices:battle?.voices.size||0,cutoff:battle?.filter.frequency.value||0})};
+  window.wodBattleAudio={update,reset,spatial,selectUnits,debug:()=>({unlocked:context?.state==='running',era:scene?.era,playing:!!battle,volume,muted,loaded:buffers.size,plays:{...plays},recentPlays:recentPlays.slice(),audibleEras:[...new Set([...buses].filter(b=>b.amp.gain.value>0).map(b=>b.era).concat([...shots].map(v=>v._wodEra)))],gain:battle?.amp.gain.value||0,targetGain:battle?.targetGain||0,voices:battle?.voices.size||0,cutoff:battle?.filter.frequency.value||0})};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind);else bind();
 })();
