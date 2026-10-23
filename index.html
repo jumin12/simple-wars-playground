@@ -12622,6 +12622,16 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-23T05:20:00-04:00',
+                title: 'Supply corridor defense and protected forts',
+                items: [
+                    'AI assesses supply across its whole territory, including large encirclements. It protects threatened narrow corridors and coordinates trapped formations with outside relief troops at opposite ends of a shared breach.',
+                    'Territory incursions now draw a limited response force even far from towns. Emergency assignments interrupt stale orders, preserve fort garrisons, and release troops back to their existing missions when the threat clears.',
+                    'Defenders use the actual combat terrain bonuses: infantry seek forest, hills and urban cover, while armor avoids unfavorable rough ground. Defensive positions must connect over friendly walking routes.',
+                    'AI forts require nearby land troops, space from other forts, and at least two clear tiles behind hostile territory. Exposed or enemy-contested construction sites are rejected. Both construction sites and completed forts receive standing guards.'
+                ]
+            },
+            {
                 at: '2026-10-23T04:45:00-04:00',
                 title: 'Committed assaults, coastal raids and movement audio',
                 items: [
@@ -37270,6 +37280,7 @@
             gameData.constructionJobs = [];
             window.wodBattleAudio?.reset();
             gameData._aiEconomyClock = 0;
+            gameData._aiDefenseByOwner = {};
             gameData.marineWaterSupplyHexes = new Set();
             gameData._aiEconomyPlans = {};
             gameData.aiTaskForces = {};
@@ -37924,7 +37935,7 @@
             for(let i = 0; i < ents.length; i++) {
                 let u = ents[i];
                 if(!u || u.owner !== ownerId || !u.aiFortGuard) continue;
-                if(hot.has(u.aiFortGuard)) continue;
+                if(hot.has(u.aiFortGuard) || forts.some(f=>f.owner===ownerId&&f.id===u.aiFortGuard)) continue;
                 u.aiFortGuard = null;
             }
         }
@@ -38081,71 +38092,34 @@
             return best;
         }
 
-        /** Hostile tile next to our cut-off troops — taking it opens the pocket. */
+        /** Shared breach selected by the faction-wide supply assessment. */
         function wodAiFindReliefGap(owner) {
-            let trapped = null;
-            let ents = gameData.entities;
-            for(let i = 0; i < ents.length; i++) {
-                let u = ents[i];
-                if(!u || u.owner !== owner || u.hp <= 0 || u.type === 'convoy' || u.type === 'ship') continue;
-                let h = getNearestHexToPoint(u.x, u.y);
-                if(h && wodHexKeyIsEncircled(getHexKey(h))) { trapped = h; break; }
-            }
-            if(!trapped) return null;
-            let fake = { type: 'light', owner: owner };
-            let best = null, bestD = Infinity;
-            let seen = new Set();
-            let queue = [trapped];
-            seen.add(getHexKey(trapped));
-            let guard = 0;
-            while(queue.length && guard < 24) {
-                let hex = queue.shift();
-                guard++;
-                for(let di = 0; di < cardinalHexDirections.length; di++) {
-                    let dir = cardinalHexDirections[di];
-                    let nHex = gameData.hexes[(hex.q + dir.q) + ',' + (hex.r + dir.r)];
-                    if(!nHex) continue;
-                    let nk = getHexKey(nHex);
-                    if(seen.has(nk)) continue;
-                    seen.add(nk);
-                    if(wodHexKeyIsEncircled(nk)) { queue.push(nHex); continue; }
-                    if(!isClaimableLand(nHex) || nHex.type === 'mountain' || !canUnitEnterHex(fake, nHex)) continue;
-                    if(nHex.owner === owner) continue;
-                    let opens = getNeighborHexes(nHex).some(n => n && n.owner === owner && !wodHexKeyIsEncircled(getHexKey(n)));
-                    let d = (opens ? 0 : 100000) + guard;
-                    if(d < bestD) { bestD = d; best = nHex; }
-                }
-            }
-            return best;
+            return wodAiReadDefense(owner,gameData.entities.filter(u=>u.owner===owner)).pockets[0]?.holdHex||null;
         }
 
-        /** Stand on the friendly tile between a city or fort and the nearest hostile unit. */
-        function wodAiDefendStandHex(owner, target) {
-            if(!target) return null;
-            let stand = gameData.hexes[target.q + ',' + target.r] || target;
-            if(!stand || stand.x == null) return stand;
-            let hr = gameData.hexRadius || 20;
-            let reach2 = hr * 12 * hr * 12;
-            let enemy = null, enemyD = Infinity;
-            let ents = gameData.entities;
-            for(let i = 0; i < ents.length; i++) {
-                let u = ents[i];
-                if(!u || u.hp <= 0 || u.owner === owner || u.type === 'convoy' || u.type === 'ship') continue;
-                if(wodIsFriendlyOwner(u.owner, owner)) continue;
-                let d = wodAiDist2(u.x, u.y, stand.x, stand.y);
-                if(d <= reach2 && d < enemyD) { enemyD = d; enemy = u; }
+        /** Choose reachable cover using the same terrain multipliers as combat. */
+        function wodAiDefendStandHex(owner, target, unit) {
+            if(!target)return null;
+            const anchor=gameData.hexes[`${target.q},${target.r}`]||target, hr=gameData.hexRadius||20;
+            if(anchor.x==null)return anchor;
+            const defender=unit||{type:'light',owner}, near=gameData.entities.filter(u=>u.hp>0&&u.type!=='convoy'&&wodIsHostileOwner(u.owner,owner)&&wodAiDist2(u.x,u.y,anchor.x,anchor.y)<Math.pow(hr*12,2));
+            near.sort((a,b)=>wodAiDist2(a.x,a.y,anchor.x,anchor.y)-wodAiDist2(b.x,b.y,anchor.x,anchor.y));
+            const enemy=near[0], candidates=[anchor], seen=new Set([getHexKey(anchor)]);
+            // Expand over friendly walking edges only, so cover across a river or mountain is not selected.
+            for(let i=0;i<candidates.length;i++)for(const d of cardinalHexDirections) {
+                const h=candidates[i], n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                if(!n||seen.has(getHexKey(n))||Math.max(Math.abs(n.q-anchor.q),Math.abs(n.r-anchor.r))>2||
+                    n.owner!==owner||isWaterHex(n)||n.type==='mountain'||!canUnitEnterHex(defender,n))continue;
+                seen.add(getHexKey(n));candidates.push(n);
             }
-            if(!enemy) return stand;
-            let fake = { type: 'light', owner: owner };
-            let best = stand;
-            let bestS = enemyD;
-            let nbrs = getNeighborHexes(stand);
-            for(let i = 0; i < nbrs.length; i++) {
-                let n = nbrs[i];
-                if(!n || !canUnitEnterHex(fake, n) || isWaterHex(n)) continue;
-                if(n.owner !== owner && n.owner !== 0) continue;
-                let d = wodAiDist2(n.x, n.y, enemy.x, enemy.y);
-                if(d < bestS) { bestS = d; best = n; }
+            let best=anchor, score=-Infinity;
+            for(const h of candidates) {
+                if(h.owner!==owner||isWaterHex(h)||h.type==='mountain')continue;
+                let value=(1-getTerrainDefenseModifier(defender,h))*22+(getTerrainAttackModifier(defender,h)-1)*8-
+                    wodAiDist2(h.x,h.y,anchor.x,anchor.y)/(hr*hr)*1.15;
+                if(enemy)value-=Math.abs(Math.sqrt(wodAiDist2(h.x,h.y,enemy.x,enemy.y))-Math.max(hr*2,(defender.range||hr*3)*.8))/hr*1.3;
+                if(gameData.forts.some(f=>f.owner===owner&&wodAiDist2(h.x,h.y,f.x,f.y)<=wodFortPlacementRingRadiusSq()))value+=6;
+                if(value>score){score=value;best=h;}
             }
             return best;
         }
@@ -38252,9 +38226,7 @@
             if(!fort || fort.owner !== ownerId) return 0;
             let hr = gameData.hexRadius || 20;
             let enemies = countNearbyUnits(ownerId, fort.x, fort.y, Math.max(300, hr * 13), true);
-            if(enemies <= 0) return 0;
-            let guards = wodAiCountFortGuards(fort, ownerId);
-            return Math.max(1, Math.min(4, enemies + 1 - Math.min(guards, enemies + 1)));
+            return Math.max(1,Math.min(4,enemies+1));
         }
 
         function wodAiEnsureFortGuard(ownerId, fortHex) {
@@ -38399,6 +38371,8 @@
             unit.aiOrderIssuedAt = now;
             unit.aiOrderUntil = now + ttl;
             unit.aiOrderKind = unit.aiTfKind || '';
+            const response=wodAiGetUnitTaskJob(unit);
+            unit.aiOrderResponseId=response?.response?response.id:null;
             unit.aiFormationSerial = gameData.aiStrategySerial || 0;
             if(holdHex) unit.aiSectorKey = getHexKey(holdHex);
         }
@@ -38519,6 +38493,7 @@
             // A new job (flank, relief, counterattack) outranks the march already underway.
             if(unit.aiOrderKind && unit.aiTfKind && unit.aiOrderKind !== unit.aiTfKind) return false;
             const job=wodAiGetUnitTaskJob(unit),phase=job?.operation?.phase||job?.phase;
+            if((unit.aiOrderResponseId||null)!==(job?.response?job.id:null))return false;
             if(phase && unit.aiOrderPhase!==phase)return false;
             if(!unit.target && !unit.orderTarget) return false;
             let hr = gameData.hexRadius || 20;
@@ -38824,11 +38799,171 @@
                     wodAiDist2(b.x,b.y,marines[0].x,marines[0].y)-wodAiDist2(b.x,b.y,lead.x,lead.y))[0]||best.beach;
             return {objectiveCity:best.town,beachHex:best.beach,rallyHex:rally,phase:'assemble',phaseAt:wodAiOperationTime()};
         }
+        /** Faction-wide, cardinal supply graph: pocket size is never limited by local vision. */
+        function wodAiReadDefense(owner, units, force=false) {
+            const now=wodAiOperationTime(), hr=gameData.hexRadius||20;
+            gameData._aiDefenseByOwner ||= {};
+            const old=gameData._aiDefenseByOwner[owner];
+            if(!force && old && old.hexes===gameData.hexes && old.cities===gameData.cities && now>=old.at && now-old.at<6000)return old;
+            const walk=h=>h && h.type!=='mountain' && (!isWaterHex(h)||isBridgeHex(h));
+            const friendly=h=>walk(h)&&wodIsFriendlyOwner(h.owner,owner);
+            const tiles=gameData.hexList.filter(friendly), index=new Map(tiles.map((h,i)=>[getHexKey(h),i]));
+            const edges=tiles.map(h=>cardinalHexDirections.map(d=>index.get(`${h.q+d.q},${h.r+d.r}`)).filter(i=>i!==undefined));
+            const roots=[...new Set(gameData.cities.filter(c=>c.owner===owner).map(c=>index.get(`${c.q},${c.r}`)).filter(i=>i!==undefined))];
+            const supplied=new Set(roots), queue=roots.slice();
+            for(let qi=0;qi<queue.length;qi++)for(const j of edges[queue[qi]])if(!supplied.has(j)){supplied.add(j);queue.push(j);}
+            const army=units.filter(u=>u.hp>0&&!['convoy','ship'].includes(u.type));
+            army.forEach(ensureUnitId);
+            const positions=new Map(army.map(u=>[u.uid,index.get(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))]));
+            const weights=new Int32Array(tiles.length);
+            for(const u of army)if(u.type!=='marine'&&positions.get(u.uid)!==undefined)weights[positions.get(u.uid)]++;
+            const enemies=gameData.entities.filter(u=>u.hp>0&&!['convoy','ship'].includes(u.type)&&wodIsHostileOwner(u.owner,owner));
+            const closeEnemies=h=>enemies.filter(e=>wodAiDist2(e.x,e.y,h.x,h.y)<Math.pow(hr*8,2)).length;
+            const threats=[], pockets=[], seen=new Set(supplied);
+            // Each disconnected component gets a shortest land breach to the supplied army.
+            // Search the whole map, including large pockets; mountains/water are never shortcuts.
+            for(let i=0;i<tiles.length;i++) {
+                if(seen.has(i))continue;
+                const component=[i];seen.add(i);
+                for(let ci=0;ci<component.length;ci++)for(const j of edges[component[ci]])if(!seen.has(j)){seen.add(j);component.push(j);}
+                const keys=new Set(component.map(j=>getHexKey(tiles[j])));
+                const waterAccess=component.some(j=>cardinalHexDirections.some(d=>isWaterHex(gameData.hexes[`${tiles[j].q+d.q},${tiles[j].r+d.r}`])));
+                const trapped=army.filter(u=>keys.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
+                    !(u.type==='marine'&&waterAccess));
+                if(!trapped.length||!roots.length)continue;
+                const search=component.map(j=>tiles[j]), visited=new Set(keys), parent=new Map();let end=null;
+                for(let qi=0;qi<search.length&&!end;qi++) {
+                    const h=search[qi];
+                    for(const d of cardinalHexDirections) {
+                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`], k=n&&getHexKey(n);
+                        if(!walk(n)||visited.has(k))continue;
+                        visited.add(k);parent.set(k,h);search.push(n);
+                        if(supplied.has(index.get(k))){end=n;break;}
+                    }
+                }
+                if(!end)continue; // Disconnected islands require a naval operation, not a land march into water.
+                const path=[end];while(parent.has(getHexKey(path[path.length-1])))path.push(parent.get(getHexKey(path[path.length-1])));
+                path.reverse();
+                const hostile=path.filter(h=>!friendly(h));
+                if(!hostile.length)continue;
+                const rec={id:'relief-'+getHexKey(hostile[0]),kind:'relief',role:'relief',holdHex:hostile[hostile.length-1],
+                    innerHex:hostile[0],pocketKeys:keys,trapped:trapped.map(u=>u.uid),path,area:component.length,score:1000+trapped.length*30};
+                pockets.push(rec);threats.push(rec);
+            }
+            // Iterative low-link traversal, rooted at ALL owned towns through a virtual node.
+            // A threatened articulation point can cut off a whole army, even when it is far away.
+            const n=tiles.length, root=n, adj=edges.concat([roots]);
+            for(const i of roots)adj[i]=adj[i].concat(root);
+            const disc=new Int32Array(n+1), low=new Int32Array(n+1), area=new Int32Array(n+1), troops=new Int32Array(n+1);
+            const parents=new Int32Array(n+1).fill(-1);let tick=1;
+            disc[root]=low[root]=tick;const stack=[{i:root,next:0}];
+            const cuts=new Map();
+            while(stack.length) {
+                const frame=stack[stack.length-1], v=frame.i;
+                if(frame.next<adj[v].length) {
+                    const w=adj[v][frame.next++];
+                    if(!disc[w]){parents[w]=v;disc[w]=low[w]=++tick;area[w]=1;troops[w]=weights[w]||0;stack.push({i:w,next:0});}
+                    else if(w!==parents[v])low[v]=Math.min(low[v],disc[w]);
+                } else {
+                    stack.pop();const p=parents[v];if(p<0)continue;
+                    low[p]=Math.min(low[p],low[v]);area[p]+=area[v];troops[p]+=troops[v];
+                    if(p!==root&&low[v]>=disc[p]&&troops[v]>=2) {
+                        const prior=cuts.get(p)||{troops:0,area:0};prior.troops+=troops[v];prior.area+=area[v];cuts.set(p,prior);
+                    }
+                }
+            }
+            // Check exposed adjacent pairs too: a two-tile neck is not an articulation point.
+            // Bound these secondary floods; the main scan above stays linear in map size.
+            const pairs=[], pairSeen=new Set();
+            for(let i=0;i<n;i++) {
+                if(!supplied.has(i)||tiles[i].owner!==owner||!closeEnemies(tiles[i]))continue;
+                const exposed=h=>cardinalHexDirections.some(d=>{const x=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];return walk(x)&&wodIsHostileOwner(x.owner,owner);});
+                if(!exposed(tiles[i]))continue;
+                for(const j of edges[i])if(j>i&&supplied.has(j)&&exposed(tiles[j])) {
+                    const key=i+','+j;if(pairSeen.has(key))continue;pairSeen.add(key);
+                    const d=Math.min(...enemies.map(e=>wodAiDist2(e.x,e.y,tiles[i].x,tiles[i].y)));
+                    pairs.push({i,j,d});
+                }
+            }
+            pairs.sort((a,b)=>a.d-b.d);
+            for(const {i,j} of pairs.slice(0,12)) {
+                if(cuts.has(i)||cuts.has(j))continue;
+                const reached=new Set(roots.filter(r=>r!==i&&r!==j)), flood=[...reached];
+                for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(k!==i&&k!==j&&!reached.has(k)){reached.add(k);flood.push(k);}
+                let count=0, size=0;
+                for(const k of supplied)if(k!==i&&k!==j&&!reached.has(k)){count+=weights[k];size++;}
+                if(count>=2)cuts.set(i,{troops:count,area:size});
+            }
+            for(const [i,cut] of cuts) {
+                const h=tiles[i], pressure=closeEnemies(h);
+                if(h.owner!==owner||!pressure)continue;
+                threats.push({id:'corridor-'+getHexKey(h),kind:'corridor',role:'fix',holdHex:h,area:cut.area,atRisk:cut.troops,
+                    enemies:pressure,score:350+cut.troops*18+Math.min(80,cut.area)});
+            }
+            // Wide pincers and attacks away from towns: defend contested territory, not just assets.
+            // Cluster the invading force so one battle cannot request a garrison on every tile.
+            const incursions=[];
+            for(const e of enemies) {
+                const h=getNearestHexToPoint(e.x,e.y);if(!h)continue;
+                const near=getHexesInRadius(h.q,h.r,2).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(t=>t&&t.owner===owner&&friendly(t));
+                if(near.length<2)continue;
+                let cluster=incursions.find(t=>wodAiDist2(t.x,t.y,e.x,e.y)<Math.pow(hr*7,2));
+                if(!cluster){cluster={x:e.x,y:e.y,count:0,near};incursions.push(cluster);}cluster.count++;
+            }
+            for(const t of incursions) {
+                const h=t.near.sort((a,b)=>wodAiDist2(a.x,a.y,t.x,t.y)-wodAiDist2(b.x,b.y,t.x,t.y))[0];
+                threats.push({id:'territory-'+getHexKey(h),kind:'territory',role:'fix',holdHex:h,enemies:t.count,score:100+t.count*12});
+            }
+            threats.sort((a,b)=>b.score-a.score);
+            const selected=[];
+            for(const t of threats)if(t.kind==='relief'||!selected.some(s=>s.kind!=='relief'&&wodAiDist2(s.holdHex.x,s.holdHex.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*7,2)))selected.push(t);
+            const trappedIds=new Set(pockets.flatMap(p=>p.trapped));
+            const unitJob={}, jobs=[], available=army.filter(u=>!u.moraleBroken&&(trappedIds.has(u.uid)||!u.retreating&&u.hp/u.maxHp>.34)), plan=gameData.aiTaskForces?.[owner];
+            let budget=Math.max(2,Math.ceil(available.length*(pockets.length?.55:.38)));
+            const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);};
+            for(const t of selected.slice(0,12)) {
+                const job={...t,members:[],response:true};
+                // Trapped units break outward while a limited relief force attacks the same cut from outside.
+                for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
+                let want=Math.min(t.kind==='relief'?4:6,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
+                const candidates=available.filter(u=>!unitJob[u.uid]&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
+                    u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
+                    wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*(t.kind==='relief'?60:24),2));
+                const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
+                const cost=u=>wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y)+
+                    (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main'].includes(base(u)?.kind)?hr*hr*100:0)+
+                    (old?.unitJob[u.uid]===t.id?-hr*hr*70:0);
+                candidates.sort((a,b)=>cost(a)-cost(b));
+                for(const u of candidates) {
+                    if(want<=0||budget<=0)break;
+                    // Keep the sole fort garrison in place. Its line and relief troops can reinforce it.
+                    if(base(u)?.fort)continue;
+                    add(job,u);want--;budget--;
+                }
+                if(job.members.length)jobs.push(job);
+            }
+            const rec={at:now,hexes:gameData.hexes,cities:gameData.cities,jobs,unitJob,pockets,
+                corridors:selected.filter(t=>t.kind==='corridor'),incursions:incursions.length,suppliedHexes:supplied.size};
+            gameData._aiDefenseByOwner[owner]=rec;return rec;
+        }
+
+        function wodAiIssueDefenseResponse(unit,job) {
+            const h=getNearestHexToPoint(unit.x,unit.y), trapped=job.pocketKeys?.has(h&&getHexKey(h));
+            const anchor=trapped?job.innerHex:job.holdHex;
+            const target=job.kind==='relief'?anchor:wodAiDefendStandHex(unit.owner,anchor,unit);
+            if(!target)return false;
+            const holding=job.kind!=='relief'&&wodAiDist2(unit.x,unit.y,target.x,target.y)<Math.pow((gameData.hexRadius||20)*2.4,2);
+            const moved=wodAiMoveUnitTowardHex(unit,target,holding,job.kind==='relief'?.16:.12);
+            if(moved){unit.aiHoldStartAt=0;wodAiStampOrder(unit,holding,target,5000);}
+            return moved;
+        }
+
         function wodAiEnsureTaskForcePlan(owner, units) {
             if(!gameData.aiTaskForces)gameData.aiTaskForces={};
             const ready=units.filter(u=>u&&u.hp>u.maxHp*.34&&!u.moraleBroken&&!u.retreating&&u.type!=='convoy');
             ready.forEach(ensureUnitId);
-            const assets=[...gameData.cities,...(gameData.forts||[])].filter(c=>c.owner===owner);
+            const fortSites=(gameData.constructionJobs||[]).filter(j=>j.owner===owner&&j.mode==='fort').map(j=>({...j,id:'fort-site-'+j.q+','+j.r}));
+            const assets=[...gameData.cities,...(gameData.forts||[]),...fortSites].filter(c=>c.owner===owner);
             const assetSignature=assets.map(c=>c.id).sort().join('|'), now=performance.now(), prev=gameData.aiTaskForces[owner];
             // Reinforcements join the existing push. A roster change must not recall
             // healthy attackers or replace their target with a rear-area guard order.
@@ -38846,7 +38981,7 @@
                     job.members.push(u.uid);job.quota++;prev.unitJob[u.uid]=job.id;
                     u.aiTfJobId=job.id;u.aiTfKind=job.kind;u.aiTfRole=job.role;u.aiFortGuard=null;
                 }
-                if(compatible){prev.readyN=ready.length;return prev;}
+                if(compatible){prev.readyN=ready.length;wodAiReadDefense(owner,units);return prev;}
             }
             const sectors=buildAiFrontlineSectors(owner,Math.min(24,Math.max(6,Math.ceil(ready.length/2))));
             const attackSectors=sectors.slice().sort((a,b)=>wodAiAttackSectorScore(owner,a)-wodAiAttackSectorScore(owner,b));
@@ -38869,8 +39004,8 @@
             };
             const infantry=ready.filter(u=>!['heavy','marine','ship'].includes(u.type));
             const attacking=u=>['main','armor','raid','marine'].includes(prev?.jobs.find(j=>j.id===prev.unitJob[u.uid])?.kind);
-            const guards=assets.length?Math.min(Math.max(0,infantry.length-3),Math.max(1,Math.round(infantry.length*.16))):0;
-            const guardAssets=assets.slice().sort((a,b)=>countNearbyUnits(owner,b.x,b.y,320,true)-countNearbyUnits(owner,a.x,a.y,320,true));
+            const guards=assets.length?Math.min(Math.max(0,infantry.length-3),Math.max(1,Math.round(infantry.length*.16),assets.filter(a=>!gameData.cities.includes(a)).length)):0;
+            const guardAssets=assets.slice().sort((a,b)=>(!gameData.cities.includes(b)?1:0)-(!gameData.cities.includes(a)?1:0)||countNearbyUnits(owner,b.x,b.y,320,true)-countNearbyUnits(owner,a.x,a.y,320,true));
             for(let i=0;i<guards;i++) {
                 const asset=guardAssets[i%guardAssets.length];
                 infantry.sort((a,b)=>(attacking(a)?1e9:0)+wodAiDist2(a.x,a.y,asset.x,asset.y)-(attacking(b)?1e9:0)-wodAiDist2(b.x,b.y,asset.x,asset.y));
@@ -38902,7 +39037,7 @@
             }
             for(let i=0;i<ships.length;i+=3)add('naval',ships.slice(i,i+3),attackSectors[0]);
             const plan={owner,assetSignature,jobs,unitJob,sectors,operations,readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+45000};
-            gameData.aiTaskForces[owner]=plan;return plan;
+            gameData.aiTaskForces[owner]=plan;wodAiReadDefense(owner,units,true);return plan;
         }
 
         function wodAiIssueCoordinatedAssault(unit,job) {
@@ -38954,6 +39089,9 @@
             let plan = gameData.aiTaskForces[unit.owner];
             if(!plan || !plan.jobs) return null;
             ensureUnitId(unit);
+            const defense=gameData._aiDefenseByOwner?.[unit.owner];
+            const response=defense?.jobs.find(j=>j.id===defense.unitJob[unit.uid]);
+            if(response)return response;
             let jid = plan.unitJob[unit.uid] || unit.aiTfJobId;
             if(!jid) return null;
             for(let i = 0; i < plan.jobs.length; i++) {
@@ -38969,6 +39107,7 @@
             unit.aiTfKind = job.kind;
             unit.aiTfRole = job.role;
             let hr = gameData.hexRadius || 20;
+            if(job.response)return wodAiIssueDefenseResponse(unit,job);
             if(job.operation)return wodAiIssueCoastalOperation(unit,job);
             if(job.objectiveCity && ['main','armor'].includes(job.kind))return wodAiIssueCoordinatedAssault(unit,job);
 
@@ -39048,7 +39187,7 @@
 
             if(job.kind === 'defend' && (job.city || job.fort)) {
                 let t = job.city || job.fort;
-                let stand = wodAiDefendStandHex(unit.owner, t) || gameData.hexes[`${t.q},${t.r}`];
+                let stand = wodAiDefendStandHex(unit.owner, t, unit) || gameData.hexes[`${t.q},${t.r}`];
                 if(!stand) stand = { x: t.x, y: t.y, q: t.q, r: t.r };
                 if(job.fort) unit.aiFortGuard = job.fort.id;
                 let near = wodAiDist2(unit.x, unit.y, stand.x, stand.y) < Math.pow(hr * 2.4, 2);
@@ -39096,16 +39235,10 @@
             if(job.kind === 'hold') {
                 let canCounter = false;
                 if(!canCounter) {
-                    let dx = assignment.attackHex.x - assignment.holdHex.x;
-                    let dy = assignment.attackHex.y - assignment.holdHex.y;
-                    let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-                    let slot = wodAiUnitSlotOffset(unit, assignment.holdHex, 0.85);
-                    let moved = wodAiMoveUnitToward(unit,
-                        assignment.holdHex.x + (dx / len) * hr * 0.15 + slot.ox,
-                        assignment.holdHex.y + (dy / len) * hr * 0.15 + slot.oy * 0.5,
-                        true);
-                    if(moved) wodAiStampOrder(unit, true, assignment.holdHex);
-                    return moved;
+                    const cover=wodAiDefendStandHex(unit.owner,assignment.holdHex,unit)||assignment.holdHex;
+                    const covered=wodAiMoveUnitTowardHex(unit,cover,true,.12);
+                    if(covered)wodAiStampOrder(unit,true,cover);
+                    return covered;
                 }
             }
 
@@ -39230,7 +39363,7 @@
             if(!hex || !ownerId) return false;
             let hr = gameData.hexRadius || 20;
             let tilePx = hr * 1.35;
-            let guardR2 = Math.pow(tilePx * 8.5, 2);
+            let guardR2 = Math.pow(tilePx * 4, 2);
             return nearestFriendlyLandArmyDistSq(hex.x, hex.y, ownerId) <= guardR2;
         }
 
@@ -39285,7 +39418,7 @@
             }
             for(let h of wodCachedFrontlineHexes(ownerId)) {
                 addHex(h);
-                for(let n of getNeighborHexes(h)) addHex(n);
+                for(const p of getHexesInRadius(h.q,h.r,4))addHex(gameData.hexes[`${p.q},${p.r}`]);
             }
             for(let city of gameData.cities) {
                 if(city.owner !== ownerId || !wodAiCityNeedsFortGuard(city, ownerId)) continue;
@@ -39305,13 +39438,20 @@
             let spacingSq = Math.pow((gameData.hexRadius || 10) * WOD_FORT_DEFENSE_TILES * 2.05, 2);
             let sites = [...(gameData.forts || []), ...(gameData.constructionJobs || []).filter(j=>j.mode==='fort')];
             if(sites.some(f=>f.owner===ownerId && wodAiDist2(hex.x,hex.y,f.x,f.y)<spacingSq)) return -1e9;
-            if(isFrontlineHex(hex, ownerId) && !wodAiFortHasNearbyDefenders(hex, ownerId)) return -1e9;
+            if(!wodAiFortHasNearbyDefenders(hex,ownerId)||wodHexKeyIsEncircled(getHexKey(hex)))return -1e9;
+            for(const p of getHexesInRadius(hex.q,hex.r,2)) {
+                const h=gameData.hexes[`${p.q},${p.r}`];
+                if(h&&isClaimableLand(h)&&wodIsHostileOwner(h.owner,ownerId))return -1e9;
+            }
+            if(nearestForeignCombatUnitDistSq(hex.x,hex.y,ownerId)<Math.pow((gameData.hexRadius||20)*7,2))return -1e9;
             let score = 0;
             let hr = gameData.hexRadius || 10;
             let tilePx = hr * 1.35;
             let fortR2 = wodFortPlacementRingRadiusSq();
 
-            if(isFrontlineHex(hex, ownerId)) score += 118;
+            const frontDist=nearestHexDistanceSq(hex.x,hex.y,wodCachedFrontlineHexes(ownerId));
+            if(frontDist<=Math.pow(tilePx*6,2))score+=90;
+            else if(frontDist<=Math.pow(tilePx*10,2))score+=45;
 
             let enemyDistSq = nearestForeignCombatUnitDistSq(hex.x, hex.y, ownerId);
             if(enemyDistSq < Math.pow(tilePx * 5.5, 2)) score += 72;
@@ -39786,6 +39926,12 @@
                         continue;
                     }
 
+                    const relief=wodAiGetUnitTaskJob(unit);
+                    if(relief?.response&&relief.kind==='relief'&&relief.pocketKeys.has(getHexKey(getNearestHexToPoint(unit.x,unit.y)))) {
+                        unit.retreating=false;
+                        if(!wodAiShouldKeepCurrentOrder(unit))wodAiIssueTaskForceOrder(unit,relief,hpRatio);
+                        continue;
+                    }
                     if(hpRatio < 0.3) {
                         let retreatPoint = findRetreatPoint(unit);
                         if(retreatPoint) {

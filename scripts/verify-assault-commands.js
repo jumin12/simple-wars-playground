@@ -44,7 +44,7 @@ const server=http.createServer((req,res)=>{
   await page.waitForTimeout(180);
   const group=await page.evaluate(()=>{
    const us=gameData.entities.filter(u=>u.owner===1).slice(0,5);wodReplaceMapSelection(us[0]);gameData.selection=us;
-   const h=gameData.hexList.find(h=>h.owner===1&&h.type==='grass');const before=wodBattleAudio.debug().plays.move;
+   const h=gameData.hexList.find(h=>h.owner===1&&!isWaterHex(h)&&h.type!=='mountain');const before=wodBattleAudio.debug().plays.move;
    issueMoveOrder({x:h.x,y:h.y});return before;
   });
   await page.waitForFunction(n=>wodBattleAudio.debug().plays.move===n+1,group);
