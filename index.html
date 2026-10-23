@@ -12633,6 +12633,11 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-22T23:15:00-04:00',
+                title: 'Even frontline deployment',
+                items: ['Starting frontline troops now spread evenly along the full land border, including bends and separate fronts. The 80/20 split and rear-only armor are unchanged.']
+            },
+            {
                 at: '2026-10-22T22:30:00-04:00',
                 title: 'Deployment, construction and command groups',
                 items: [
@@ -31980,6 +31985,37 @@
             }
         }
 
+        function wodStartingFrontAnchors(owner, count, land) {
+            if(!count) return [];
+            let spacing = gameData.hexRadius * 1.35;
+            let midpoints = new Map(), corners = new Map(), frontHexes = new Map();
+            // Use the same border geometry as the renderer, limited to this owner's
+            // walkable land frontage. Sampling by edge length also handles bent fronts.
+            for(let h of land) {
+                for(let dir of cardinalHexDirections) {
+                    let n = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                    if(!n || !isClaimableLand(n) || isWaterHex(n) || n.type === 'mountain') continue;
+                    if(n.owner !== 0 && !wodIsHostileOwner(n.owner, owner)) continue;
+                    let key = hexPairBorderKey(h, n);
+                    let x = (h.x + n.x) / 2, y = (h.y + n.y) / 2;
+                    midpoints.set(key, {x, y}); frontHexes.set(key, h);
+                    registerBorderCornersForPair(corners, h, n, dir, key, x, y, spacing);
+                }
+            }
+            let chains = walkBorderEdgeChains(linkBorderEdgesAroundCorners(corners), midpoints);
+            let ordered = [], seen = new Set();
+            for(let chain of chains) {
+                for(let key of chain.keys) {
+                    if(!seen.has(key)) { seen.add(key); ordered.push(frontHexes.get(key)); }
+                }
+            }
+            // Include isolated short border segments, which have no graph neighbor.
+            for(let [key, h] of frontHexes) if(!seen.has(key)) ordered.push(h);
+            if(!ordered.length) return [];
+            return Array.from({length:count}, (_, i) => ordered[Math.min(ordered.length-1,
+                Math.floor((i+0.5) * ordered.length / count))]);
+        }
+
         function wodDeployStartingArmy(ownerIds) {
             gameData._enemyDistField = null;
             for(let owner of ownerIds) {
@@ -31992,6 +32028,7 @@
                 let spacing = Math.pow(gameData.hexRadius * 2.1, 2);
                 let used = [];
                 let frontCount = Math.min(land.filter(u => u.type !== 'heavy').length, Math.round(land.length * 0.2));
+                let frontAnchors = wodStartingFrontAnchors(owner, frontCount, pool);
                 // Armor goes last so the infantry frontage quota can never include armor.
                 land.sort((a, b) => (a.type === 'heavy') - (b.type === 'heavy'));
                 for(let i = 0; i < land.length; i++) {
@@ -32000,7 +32037,9 @@
                     let candidates = front ? safe : safe.filter(h => wodMinDistSqToEnemyTerritory(h.x, h.y, owner) >= Math.pow(gameData.hexRadius * 4, 2));
                     if(!candidates.length) candidates = safe;
                     candidates = candidates.slice().sort((a, b) => {
-                        const score = h => front ? wodMinDistSqToEnemyTerritory(h.x, h.y, owner)
+                        const score = h => front ? (frontAnchors[i]
+                            ? (h.x-frontAnchors[i].x)**2 + (h.y-frontAnchors[i].y)**2
+                            : wodMinDistSqToEnemyTerritory(h.x, h.y, owner))
                             : (town ? (h.x-town.x)**2 + (h.y-town.y)**2 : -wodMinDistSqToEnemyTerritory(h.x, h.y, owner));
                         return score(a) - score(b);
                     });

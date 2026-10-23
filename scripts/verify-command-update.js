@@ -269,8 +269,66 @@ const server = http.createServer((req, res) => {
       return {once,twice:gameData.entities.length,empty:gameData.cities.every(c=>!c.hasFactory&&!c.hasHarbor&&!c.hasFarm),armorSafe:gameData.entities.filter(u=>u.type==='heavy').every(u=>u._startDeployment==='town'&&!isFrontlineHex(getNearestHexToPoint(u.x,u.y),1))};
     });
     assert(authored.once===4&&authored.twice===4&&authored.empty&&authored.armorSafe,'authored and committed lobby starts are halved once with safe armor');
+    const frontline=await page.evaluate(()=>{
+      const run=(shape)=>{
+        WOD.makeBlankMap(40);
+        let g=gameData, span=Math.min(...['q','r'].map(k=>Math.max(...g.hexList.map(h=>h[k]))));
+        g.hexList=g.hexList.filter(h=>Math.abs(h.q)<=span&&Math.abs(h.r)<=span);
+        g.hexes=Object.fromEntries(g.hexList.map(h=>[`${h.q},${h.r}`,h]));
+        for(let h of g.hexList) {
+          h.owner=(shape==='bend' ? h.q<0||h.r<0 : h.q<0) ? 1 : 2;
+          if(shape==='separate'&&Math.abs(h.r)<=3) { h.type='water';h.baseColor=getTerrainColor('water'); }
+        }
+        g.cities=[1,2].map(owner=>{
+          let q=(owner===1?-1:1)*Math.floor(span*.6),r=Math.floor(span*.6),h=g.hexes[`${q},${r}`];
+          return {id:'front-test-'+owner,name:'Town '+owner,owner,q,r,x:h.x,y:h.y,hp:1000,maxHp:1000};
+        });
+        for(let c of g.cities){
+          for(let i=0;i<19;i++)createUnitAt('light',c.x,c.y,c.owner,{startSpawn:true});
+          createUnitAt('heavy',c.x,c.y,c.owner,{startSpawn:true});
+        }
+        wodDeployStartingArmy([1,2]);
+        let spacing=g.hexRadius*1.35;
+        return [1,2].map(owner=>{
+          let front=g.entities.filter(u=>u.owner===owner&&u._startDeployment==='front');
+          return {owner,span,front:front.map(u=>({q:u.x/spacing,r:u.y/spacing})),
+            army:g.entities.filter(u=>u.owner===owner).length,
+            armorSafe:g.entities.filter(u=>u.owner===owner&&u.type==='heavy').every(u=>u._startDeployment==='town'&&!isFrontlineHex(getNearestHexToPoint(u.x,u.y),owner))};
+        });
+      };
+      let straight=run('straight'),separate=run('separate'),bend=run('bend');
+      document.getElementById('mapEditorApp').style.display='none';
+      UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.classList.remove('hidden');
+      canvas.style.display='block';WOD.setEditorSuppressTerrainBake(false);wodSyncViewportAndCanvas();
+      gameData._matchReadyForEndChecks=false;gameData.fogOfWar=false;
+      gameData.layers.units=true;gameData.layers.diplomacy=true;gameData.layers.terrain=true;
+      let extent=Math.max(...gameData.hexList.map(h=>Math.max(Math.abs(h.x),Math.abs(h.y))));
+      gameData.camera.zoom=Math.min(canvas.clientWidth,canvas.clientHeight)/(extent*2.5);
+      gameData.camera.x=-canvas.clientWidth/2;gameData.camera.y=-canvas.clientHeight/2;
+      wodMarkTerrainFullDirty();updateTerrainCache();draw();
+      return {straight,separate,bend};
+    });
+    for(const army of frontline.straight){
+      assert.equal(army.front.length,4,'20% frontage allocation');
+      assert.equal(army.army,20,'deployment preserves army size');
+      assert(army.armorSafe,'armor stays behind the border');
+      const rows=army.front.map(p=>p.r).sort((a,b)=>a-b), interval=(army.span*2+1)/4;
+      for(let i=0;i<4;i++)assert(Math.abs(rows[i]-(-army.span-.5+(i+.5)*interval))<=2,'front troops occupy evenly spaced quarter slots');
+    }
+    for(const army of frontline.bend){
+      assert.equal(army.front.length,4);assert(army.armorSafe);
+      assert.equal(army.front.filter(p=>p.r>3&&Math.abs(p.q)<4).length,2,'vertical arm covered evenly');
+      assert.equal(army.front.filter(p=>p.q>3&&Math.abs(p.r)<4).length,2,'horizontal arm covered evenly');
+    }
+    for(const army of frontline.separate){
+      assert.equal(army.front.filter(p=>p.r>3).length,2,'upper disconnected front covered');
+      assert.equal(army.front.filter(p=>p.r< -3).length,2,'lower disconnected front covered');
+      assert(army.armorSafe);
+    }
+    await page.screenshot({path:path.join(OUT,'06-even-border-deployment.png')});
+    console.log('even straight, bent and disconnected border deployment passed');
     if(errors.length) throw new Error(errors.join('\n'));
-    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,errors},null,2));
+    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {
       const client=path.join(ROOT,'output','web-game-client.mjs');
       const skill=process.env.WEB_GAME_SKILL_DIR || path.join(require('os').homedir(),'.codex','skills','develop-web-game');
