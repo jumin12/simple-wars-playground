@@ -3,11 +3,11 @@
   'use strict';
   const ERAS=['modern','napoleonic','medieval','ancient'];
   const KINDS=['battle','battle-alt','construction','mobilize','complete','select-light','select-light-alt','select-marine','select-heavy','select-ship'];
-  const REVISION='era-selection-v1';
-  let context,master,scene,battle,lastTick=0,lastWork=-10000,lastCue=-10000,generation=0;
+  const REVISION='individual-engagements-v1';
+  let context,master,scene,lastTick=0,lastWork=-10000,lastCue=-10000,generation=0;
   const buffers=new Map(),loading=new Map(),seen=new Set(),shots=new Set();
   let oldJobs=new Map(),activeEra=null,selectionToken=0,lastSelection=-10000,selectionVoice=null;
-  const buses=new Set(),selectionVariants={},recentPlays=[];
+  const buses=new Set(),battles=new Map(),selectionVariants={},recentPlays=[];
   const plays={battle:0,mobilize:0,construction:0,complete:0,selection:0};
   function record(era,kind){recentPlays.push({era,kind});if(recentPlays.length>40)recentPlays.shift();}
   let volume=.65,muted=false;
@@ -64,9 +64,20 @@
   }
   function stopBattle(immediate=false){
     duck(0);
-    if(immediate){for(let bus of buses)retireBus(bus,true);battle=null;return;}
-    if(!battle)return;
-    const old=battle;battle=null;retireBus(old,false);
+    if(immediate)for(let bus of buses)retireBus(bus,true);
+    else for(let bus of battles.values())retireBus(bus,false);
+    battles.clear();
+  }
+  // Reciprocal fire shares one channel; two different opponent pairs always have separate channels.
+  function collectEngagements(units){
+    let alive=new Map((units||[]).filter(u=>u.uid&&u.hp!==0).map(u=>[u.uid,u])),pairs=new Map();
+    for(let unit of alive.values()){
+      let target=alive.get(unit.combatTargetUid);
+      if(!target||target.uid===unit.uid||target.owner===unit.owner)continue;
+      let ids=[unit.uid,target.uid].sort(),key=ids.join('|');
+      if(!pairs.has(key))pairs.set(key,{key,participants:ids,x:(unit.x+target.x)/2,y:(unit.y+target.y)/2});
+    }
+    return [...pairs.values()];
   }
   function setEra(era){
     let valid=ERAS.includes(era),next=valid?era:null;
@@ -98,21 +109,25 @@
     src.connect(amp);amp.connect(master);shots.add(src);selectionVoice=src;plays.selection++;record(era,kind);
     src.onended=()=>{shots.delete(src);if(selectionVoice===src)selectionVoice=null;src.disconnect();amp.disconnect();};src.start();return true;
   }
-  function scheduleBed(bus,buffer,start){
-    let src=context.createBufferSource(),fade=context.createGain(),duration=buffer.duration;
+  function scheduleBed(bus,buffer,start,offset=0){
+    let src=context.createBufferSource(),fade=context.createGain(),duration=buffer.duration-offset;
     src.buffer=buffer;fade.gain.setValueAtTime(0,start);fade.gain.linearRampToValueAtTime(1,start+Math.min(2,duration/4));
     fade.gain.setValueAtTime(1,start+duration-2);fade.gain.linearRampToValueAtTime(0,start+duration);
-    src.connect(fade);fade.connect(bus.amp);bus.voices.add(src);src.start(start);
-    src.onended=()=>{src.disconnect();fade.disconnect();bus.voices.delete(src);if(bus!==battle&&!bus.voices.size){bus.amp.disconnect();bus.filter.disconnect();bus.pan.disconnect();buses.delete(bus);}};
+    src.connect(fade);fade.connect(bus.amp);bus.voices.add(src);src.start(start,offset);
+    src.onended=()=>{src.disconnect();fade.disconnect();bus.voices.delete(src);if(battles.get(bus.key)!==bus&&!bus.voices.size){bus.amp.disconnect();bus.filter.disconnect();bus.pan.disconnect();buses.delete(bus);}};
     bus.nextAt=start+duration-2;bus.variant=1-bus.variant;plays.battle++;record(bus.era,'battle');
   }
-  function startBattle(era){
-    let buffer=buffers.get(era+'/battle');if(!buffer)return;
+  function startBattle(era,pair){
+    let hash=0;for(let c of pair.key)hash=((hash*31)+c.charCodeAt(0))>>>0;
+    let variant=hash%2,buffer=buffers.get(era+'/'+(variant?'battle-alt':'battle'))||buffers.get(era+'/battle');
+    if(!buffer)return null;
     let amp=context.createGain(),filter=context.createBiquadFilter(),pan=context.createStereoPanner();
     amp.gain.value=0;filter.type='lowpass';filter.Q.value=.5;filter.frequency.value=2200;
     amp.connect(filter);filter.connect(pan);pan.connect(master);
-    battle={era,amp,filter,pan,voices:new Set(),variant:0,nextAt:0,lastHeard:performance.now(),lastUid:null,targetGain:0};
-    buses.add(battle);scheduleBed(battle,buffer,context.currentTime);
+    let offset=((hash>>>1)%8000)/1000;
+    offset=Math.min(offset,Math.max(0,buffer.duration-6));
+    let bus={key:pair.key,participants:pair.participants,era,amp,filter,pan,voices:new Set(),variant,nextAt:0,targetGain:0,offset};
+    battles.set(pair.key,bus);buses.add(bus);scheduleBed(bus,buffer,context.currentTime,offset);return bus;
   }
   async function oneShot(kind,point){
     if(!context||context.state!=='running'||muted||volume===0||!scene?.enabled||shots.size>=3)return;
@@ -132,33 +147,30 @@
     if(context?.state==='running')for(let kind of KINDS)load(s.era,kind);
     if(!s.enabled||document.hidden){stopBattle();for(let shot of shots)if(!shot._wodSelection||!s.selectionEnabled||document.hidden)try{shot.stop();}catch(_){}return;}
     let now=performance.now();if(now-lastTick<100)return;lastTick=now;
-    let strongest={gain:0,pan:0,cutoff:1800},heard=null;
     for(let unit of s.units){
       let pos=spatial(unit);
-      if(unit.activeCombatVisual>0&&pos.gain>strongest.gain){strongest=pos;heard=unit;}
       if(unit.spawnFx>0&&!seen.has(unit.uid)){
         seen.add(unit.uid);
         if(now-lastCue>450&&pos.gain>0){lastCue=now;oneShot('mobilize',unit);}
       }
     }
-    if(battle&&battle.era!==s.era)stopBattle();
-    // Bridge short gaps between volleys without carrying sound through the fog or out of view.
-    if(!heard&&battle&&now-battle.lastHeard<1400){
-      let unit=s.units.find(u=>u.uid===battle.lastUid);
-      if(unit){strongest=spatial(unit);strongest.gain*=.7;}
-    }
-    if(strongest.gain>0&&context?.state==='running'&&!muted&&volume>0){
-      if(!battle)startBattle(s.era);
-      if(battle){
-        if(heard){battle.lastHeard=now;battle.lastUid=heard.uid;}
-        let density=Math.min(1,s.units.filter(u=>u.activeCombatVisual>0&&spatial(u).gain>0).length/10);
-        battle.targetGain=strongest.gain*(.8+.1*density);
-        battle.amp.gain.setTargetAtTime(battle.targetGain,context.currentTime,.45);
-        battle.pan.pan.setTargetAtTime(strongest.pan,context.currentTime,.7);
-        battle.filter.frequency.setTargetAtTime(strongest.cutoff,context.currentTime,.6);
-        if(context.currentTime>=battle.nextAt-1){let b=buffers.get(s.era+'/'+(battle.variant?'battle-alt':'battle'))||buffers.get(s.era+'/battle');if(b)scheduleBed(battle,b,Math.max(context.currentTime,battle.nextAt));}
-        duck(Math.min(1,strongest.gain));
+    const pairs=collectEngagements(s.units).map(pair=>({...pair,pos:spatial(pair)})).filter(pair=>pair.pos.gain>0);
+    const desired=new Set(pairs.map(pair=>pair.key));
+    for(let[key,bus]of battles)if(!desired.has(key)){battles.delete(key);retireBus(bus,false);}
+    let presence=0;
+    // Power normalization keeps each fight independent without an increasingly deafening sum.
+    let densityGain=1/Math.sqrt(Math.max(1,pairs.length));
+    if(context?.state==='running'&&!muted&&volume>0){
+      for(let pair of pairs){
+        let bus=battles.get(pair.key)||startBattle(s.era,pair);if(!bus)continue;
+        bus.targetGain=pair.pos.gain*.84*densityGain;
+        bus.amp.gain.setTargetAtTime(bus.targetGain,context.currentTime,.25);
+        bus.pan.pan.setTargetAtTime(pair.pos.pan,context.currentTime,.25);
+        bus.filter.frequency.setTargetAtTime(pair.pos.cutoff,context.currentTime,.4);
+        if(context.currentTime>=bus.nextAt-1){let buffer=buffers.get(s.era+'/'+(bus.variant?'battle-alt':'battle'))||buffers.get(s.era+'/battle');if(buffer)scheduleBed(bus,buffer,Math.max(context.currentTime,bus.nextAt));}
+        presence=Math.max(presence,pair.pos.gain);
       }
+      duck(presence);
     }else stopBattle();
     let jobs=new Map(s.jobs.map(j=>[j.key,j]));
     for(let[key,j]of oldJobs)if(!jobs.has(key)&&s.completed(j)&&now-lastCue>450){lastCue=now;oneShot('complete',j);}
@@ -172,6 +184,14 @@
     document.querySelectorAll('.wod-sfx-mute').forEach(e=>e.addEventListener('change',()=>{muted=e.checked;try{localStorage.setItem('wodSfxMuted',muted?'1':'0');}catch(_){}syncUi();}));syncUi();
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden)reset();});
-  window.wodBattleAudio={update,reset,spatial,selectUnits,debug:()=>({unlocked:context?.state==='running',era:scene?.era,playing:!!battle,volume,muted,loaded:buffers.size,plays:{...plays},recentPlays:recentPlays.slice(),audibleEras:[...new Set([...buses].filter(b=>b.amp.gain.value>0).map(b=>b.era).concat([...shots].map(v=>v._wodEra)))],gain:battle?.amp.gain.value||0,targetGain:battle?.targetGain||0,voices:battle?.voices.size||0,cutoff:battle?.filter.frequency.value||0})};
+  window.wodBattleAudio={update,reset,spatial,selectUnits,collectEngagements,debug:()=>({
+    unlocked:context?.state==='running',era:scene?.era,playing:battles.size>0,volume,muted,loaded:buffers.size,plays:{...plays},recentPlays:recentPlays.slice(),
+    audibleEras:[...new Set([...buses].filter(bus=>bus.amp.gain.value>0).map(bus=>bus.era).concat([...shots].map(voice=>voice._wodEra)))],
+    gain:Math.max(0,...[...battles.values()].map(bus=>bus.amp.gain.value)),
+    targetGain:Math.max(0,...[...battles.values()].map(bus=>bus.targetGain)),
+    voices:[...battles.values()].reduce((sum,bus)=>sum+bus.voices.size,0),
+    cutoff:Math.max(0,...[...battles.values()].map(bus=>bus.filter.frequency.value)),
+    engagements:[...battles.values()].map(bus=>({key:bus.key,participants:bus.participants,gain:bus.amp.gain.value,targetGain:bus.targetGain,pan:bus.pan.pan.value,offset:bus.offset,voices:bus.voices.size}))
+  })};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind);else bind();
 })();

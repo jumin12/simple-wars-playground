@@ -100,6 +100,24 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(n=>wodBattleAudio.debug().plays.selection===n+1,silentSelection,{timeout:5000});
     await page.evaluate(camera=>{gameData.camera=camera;draw();},selectionClick.oldCamera);
     console.log('unit click, group/batch selection, paused selection and silent city/enemy inspection passed');
+    const purchaseBalance=await page.evaluate(()=>({
+      units:Object.fromEntries(['light','marine','heavy','ship'].map(type=>[type,getUnitCost(type)])),
+      buildings:{factory:WOD_PRICE_FACTORY,harbor:WOD_PRICE_HARBOR,farm:WOD_PRICE_FARM,fort:WOD_PRICE_FORT,bridge:WOD_PRICE_BRIDGE},
+      times:WOD_PRODUCTION_SECONDS,campaign:WOD_ROGUE_UNIT_COSTS,
+      researchDoubled:wodRogueResearchNextCost({research:{treasury:0}},'treasury')===WOD_ROGUE_RESEARCH.treasury.costs[0]*2,
+      gates:['light','marine','heavy','ship'].map(type=>{
+        let cost=getUnitCost(type),money=gameData.money,mp=gameData.manpower;
+        gameData.money=cost.money-1;gameData.manpower=cost.manpower;let moneyGate=!canAffordUnit(1,type);
+        gameData.money=cost.money;gameData.manpower=cost.manpower-1;let mpGate=!canAffordUnit(1,type);
+        gameData.manpower=cost.manpower;let paid=spendForUnit(1,type),zero=gameData.money===0&&gameData.manpower===0;
+        gameData.money=money;gameData.manpower=mp;return{type,moneyGate,mpGate,paid,zero};
+      })
+    }));
+    assert.deepEqual(purchaseBalance.units,{light:{money:1000,manpower:2000},marine:{money:1000,manpower:2000},heavy:{money:8000,manpower:2000},ship:{money:7600,manpower:10000}},'all money and manpower purchase costs doubled');
+    assert.deepEqual(purchaseBalance.buildings,{factory:4000,harbor:2000,farm:2400,fort:3000,bridge:4000},'all structure costs doubled');
+    assert.deepEqual(purchaseBalance.times,{factory:60,harbor:60,farm:60,fort:60,bridge:60,light:15,marine:20,heavy:25,ship:30},'distinct unit timers with thirty-second maximum');
+    assert.deepEqual(purchaseBalance.campaign,{light:400,marine:520,heavy:960,ship:840},'campaign requisition costs doubled');
+    assert(purchaseBalance.researchDoubled&&purchaseBalance.gates.every(g=>g.moneyGate&&g.mpGate&&g.paid&&g.zero),'prices enforced in resource gates and deductions');
     const production = await page.evaluate(() => {
       let g=gameData, c=g.cities.find(c=>c.owner===1); g.money=100000; g.manpower=100000;
       let money=g.money, ok=wodApplyBuildAtCityForOwner(c,'factory',1);
@@ -107,13 +125,13 @@ const server = http.createServer((req, res) => {
       wodUpdateConstruction(59); let at29=c.hasFactory;
       wodUpdateConstruction(1); let at30=c.hasFactory;
       let count=g.entities.length, trained=wodApplyBuildAtCityForOwner(c,'heavy',1);
-      wodUpdateConstruction(29); let beforeTrain=g.entities.length;
+      wodUpdateConstruction(24); let beforeTrain=g.entities.length;
       wodUpdateConstruction(1);
       return {before,at29,at30,trained,count,beforeTrain,afterTrain:g.entities.length,paid:money-g.money};
     });
     assert(production.before.ok&&!production.before.has&&!production.before.duplicate);
     assert(!production.at29&&production.at30,'factory finishes at 60s');
-    assert(production.trained&&production.beforeTrain===production.count&&production.afterTrain===production.count+1,'armor waits 30s');
+    assert(production.trained&&production.beforeTrain===production.count&&production.afterTrain===production.count+1,'armor waits 25s');
     await page.evaluate(()=>{let c=gameData.cities.find(c=>c.owner===1&&!wodCityProductionJob(c));wodApplyBuildAtCityForOwner(c,'farm',1);draw();});
     await page.screenshot({path:path.join(OUT,'02-groups-production.png')});
     console.log('opening, groups and production passed');
@@ -159,7 +177,7 @@ const server = http.createServer((req, res) => {
     const aiDefenders=ai.groups.filter(g=>g.kind==='defend'||g.kind==='hold').reduce((n,g)=>n+g.members.length,0);
     assert(aiDefenders>=Math.floor(aiInfantry*.48),'AI dedicates slightly more infantry to town/front defense');
     assert(ai.groups.filter(g=>g.kind==='main').length>1&&ai.assigned===ai.total&&ai.orders>3,'multiple coordinated AI groups');
-    assert(ai.building&&!ai.instant&&ai.finished&&ai.paid===2000,'AI obeys production costs and times');
+    assert(ai.building&&!ai.instant&&ai.finished&&ai.paid===4000,'AI obeys production costs and times');
     console.log('forts, capture and AI formations passed');
     const multiplayer = await page.evaluate(() => {
       let oldMp=gameData.mp, oldConnected=WodMultiplayer.api.connected, oldSend=WodMultiplayer.hostSendSnap;
@@ -290,7 +308,7 @@ const server = http.createServer((req, res) => {
       let c={id:'test-harbor',name:'Test harbor',owner:1,q:h.q,r:h.r,x:h.x,y:h.y,hp:1000,maxHp:1000,hasFactory:false,hasHarbor:false};gameData.cities=[c];
       let harbor=wodApplyBuildAtCityForOwner(c,'harbor',1);wodUpdateConstruction(59);let earlyHarbor=c.hasHarbor;wodUpdateConstruction(1);
       let result={harbor,earlyHarbor,readyHarbor:c.hasHarbor};
-      for(let [type,seconds] of [['ship',30],['marine',30],['light',30]]){
+      for(let [type,seconds] of [['ship',30],['marine',20],['light',15]]){
         let count=gameData.entities.length,ok=wodApplyBuildAtCityForOwner(c,type,1);
         wodUpdateConstruction(seconds-1);let early=gameData.entities.length>count;
         wodUpdateConstruction(1);result[type]={ok,early,arrived:gameData.entities.length===count+1};
@@ -433,15 +451,31 @@ const server = http.createServer((req, res) => {
       return {priority,firstCash,earlyFort,sustained,strongScore,weakScore,pushScores,existingScore,pendingScore,coastal,inlandMarine};
     });
     assert.deepEqual(strategy.priority,['light','light'],'under-ten AI spends on units before buildings');
-    assert.equal(strategy.firstCash,99000,'AI pays for both recruits');
+    assert.equal(strategy.firstCash,98000,'AI pays for both recruits');
     assert(!strategy.earlyFort,'small army cannot fortify instead of recruit');
-    assert(strategy.sustained.army>=12&&strategy.sustained.bought>=5&&strategy.sustained.cash>=0&&strategy.sustained.mp>=0,'sustained affordable AI recruitment');
+    assert(strategy.sustained.army>=11&&strategy.sustained.bought>=4&&strategy.sustained.cash>=0&&strategy.sustained.mp>=0,'sustained affordable AI recruitment');
     assert(strategy.strongScore>strategy.weakScore+20&&strategy.pushScores.length&&strategy.pushScores.every(s=>s<strategy.strongScore),'AI pushes through uncovered sectors instead of the defended concentration');
     assert(strategy.existingScore===-1e9&&strategy.pendingScore===-1e9,'AI rejects overlapping completed and queued forts');
     assert(strategy.coastal.infantry&&!strategy.coastal.marine&&strategy.coastal.water&&!strategy.coastal.town,'water supplies only marines; towns supply land pockets');
     assert(strategy.coastal.damageInf>0&&strategy.coastal.damageMarine===0,'coastal attrition applies only to ordinary infantry');
     assert(strategy.inlandMarine,'inland marines still take encirclement damage');
     console.log('opening economy, sustained AI recruitment, fort spacing and marine-only coastal supply passed',JSON.stringify({openingEconomy,strategy}));
+    const engineCombats=await page.evaluate(()=>{
+      WOD.makeBlankMap(20);gameState='PLAYING';gameData.mp={enabled:false};gameData._campaignRun=null;
+      gameData.entities=[];gameData.money=100000;gameData.manpower=100000;gameData.aiMoneyByOwner={2:100000};gameData.aiManpowerByOwner={2:100000};
+      gameData.encircledHexes=new Set();gameData._encircWork=null;gameData.marineWaterSupplyHexes=new Set();
+      for(let h of gameData.hexList){h.type='grass';h.owner=h.q<0?1:2;}
+      for(let r of [-10,10]){
+        let h=gameData.hexes['0,'+r];
+        let a=createUnitAt('light',h.x-5,h.y,1,{startSpawn:true}),b=createUnitAt('light',h.x+5,h.y,2,{startSpawn:true});
+        a.x=h.x-5;a.y=h.y;b.x=h.x+5;b.y=h.y;a.target=null;b.target=null;
+      }
+      gameData.unitSpatialGrid=buildUnitSpatialGrid(200);gameData._wodSimTick=(gameData._wodSimTick||0)+1;update(.05);
+      let pairs=wodBattleAudio.collectEngagements(gameData.entities);
+      let u=gameData.entities.find(u=>u.combatTargetUid),net=u?wodStripEntityForNet(u):null;
+      return{pairs,targetCount:gameData.entities.filter(u=>u.combatTargetUid).length,netPreserved:!!net&&wodEntityFromNet(net).combatTargetUid===u.combatTargetUid};
+    });
+    assert(engineCombats.pairs.length===2&&engineCombats.targetCount===4&&engineCombats.netPreserved,'two real fights produce two reciprocal-deduplicated pairs and preserve partners in snapshots');
     // Decode the real generated assets and exercise the camera/mute mix independently of simulation.
     const audioPage=await browser.newPage({viewport:{width:1000,height:700}});
     audioPage.on('pageerror',e=>errors.push(e.stack));
@@ -455,7 +489,7 @@ const server = http.createServer((req, res) => {
     let eraResults=[];
     for(let [index,era] of ['ancient','medieval','napoleonic','modern'].entries()) {
       await audioPage.evaluate(era=>{
-        window.audioScene={enabled:true,era,zoom:1,cameraX:0,cameraY:0,width:1000,height:700,units:[{uid:era+'-1',x:500,y:350,activeCombatVisual:1,spawnFx:0}],jobs:[],completed:()=>true};
+        window.audioScene={enabled:true,era,zoom:1,cameraX:0,cameraY:0,width:1000,height:700,units:[{uid:era+'-1',owner:1,hp:100,x:490,y:350,combatTargetUid:era+'-2',activeCombatVisual:1,spawnFx:0},{uid:era+'-2',owner:2,hp:100,x:510,y:350,combatTargetUid:era+'-1',activeCombatVisual:1,spawnFx:0}],jobs:[],completed:()=>true};
         if(!window.audioPump)window.audioPump=setInterval(()=>wodBattleAudio.update(audioScene),120);
         wodBattleAudio.update(audioScene);
       },era);
@@ -490,6 +524,34 @@ const server = http.createServer((req, res) => {
     const crossfade=await audioPage.evaluate(()=>wodBattleAudio.debug());
     assert(crossfade.plays.battle>overview.sound.plays.battle,'long combat variations overlap for a seamless crossfade');
     await audioPage.evaluate(()=>clearInterval(window.audioPump));
+    const zoomCombats=[];
+    for(let zoom of [.1,.25,.5,1,2,5,25]){
+      await audioPage.waitForTimeout(160);
+      await audioPage.evaluate(zoom=>{
+        audioScene.zoom=zoom;audioScene.cameraX=0;audioScene.cameraY=0;
+        audioScene.units=[];
+        for(let[side,x]of [['left',250],['right',750]])for(let owner of [1,2])audioScene.units.push({uid:side+'-'+owner,owner,hp:100,x:x/zoom,y:350/zoom,combatTargetUid:side+'-'+(3-owner),activeCombatVisual:1});
+        wodBattleAudio.update(audioScene);
+      },zoom);
+      await audioPage.waitForTimeout(150);
+      const state=await audioPage.evaluate(()=>wodBattleAudio.debug());
+      assert.equal(state.engagements.length,2,'separate fights at zoom '+zoom);
+      assert(state.engagements.every(e=>e.targetGain>0&&e.voices>=1),'both fights audible at zoom '+zoom);
+      assert.notEqual(state.engagements[0].offset,state.engagements[1].offset,'independent playback phase');
+      zoomCombats.push({zoom,engagements:state.engagements});
+    }
+    await audioPage.waitForTimeout(160);
+    await audioPage.evaluate(()=>{audioScene.units.find(u=>u.uid==='left-2').hp=0;wodBattleAudio.update(audioScene);});
+    const survivor=await audioPage.evaluate(()=>wodBattleAudio.debug());
+    assert(survivor.engagements.length===1&&survivor.engagements[0].key.startsWith('right-'),'ending one fight leaves the other audible');
+    await audioPage.waitForTimeout(160);
+    const crowd=await audioPage.evaluate(()=>{
+      audioScene.zoom=1;audioScene.units=[];
+      for(let i=0;i<20;i++)for(let owner of [1,2])audioScene.units.push({uid:'crowd-'+i+'-'+owner,owner,hp:100,x:100+(i%5)*180,y:100+Math.floor(i/5)*150,combatTargetUid:'crowd-'+i+'-'+(3-owner)});
+      wodBattleAudio.update(audioScene);let debug=wodBattleAudio.debug();
+      return{count:debug.engagements.length,power:debug.engagements.reduce((sum,e)=>sum+e.targetGain**2,0)};
+    });
+    assert(crowd.count===20&&crowd.power<.84**2,'every engagement keeps a channel with controlled total sound power');
     const selectionEras=[];
     for(let era of ['ancient','medieval','napoleonic','modern']){
       await audioPage.evaluate(era=>{audioScene.era=era;audioScene.selectionEnabled=true;wodBattleAudio.update(audioScene);},era);
@@ -526,10 +588,10 @@ const server = http.createServer((req, res) => {
     assert(await audioPage.evaluate(()=>wodMusic.getMixState().target===1&&wodMusic.getVolume()===1),'muting effects restores the music mix without changing saved volume');
     assert(audio.debug.muted&&!audio.debug.playing&&audio.debug.volume===.35&&audio.volumes.every(v=>v==='35')&&audio.mutes.every(Boolean),'saved synchronized independent sound controls');
     await audioPage.close();
-    fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,overview,crossfade,selectionEras,rapid,audio},null,2));
+    fs.writeFileSync(path.join(OUT,'audio-results.json'),JSON.stringify({eraResults,attenuation,overview,crossfade,engineCombats,zoomCombats,crowd,selectionEras,rapid,audio},null,2));
     console.log('all 40 v3 clips decode; overview combat with music, spatial mix, work/completion cues and controls passed');
     if(errors.length) throw new Error(errors.join('\n'));
-    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,strategy,audio,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
+    fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,purchaseBalance,strategy,audio,groups:true,production,structures,ai,multiplayer,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {
       const client=path.join(ROOT,'output','web-game-client.mjs');
       const skill=process.env.WEB_GAME_SKILL_DIR || path.join(require('os').homedir(),'.codex','skills','develop-web-game');
