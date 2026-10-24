@@ -12622,6 +12622,16 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-24T17:00:00-04:00',
+                title: 'Scenario editor fixes and faster movement',
+                items: [
+                    'Map and mission imports, exports and saved-library maps preserve the era, grid scale, units, roads, bridges, forts, alliances, starting resources and scripted events. Scenarios without events retain their title and victory conditions; zero-second events work correctly.',
+                    'Loading a scenario refreshes editor controls without overwriting imported events. Invalid files leave the current map intact, and saved snapshots remain independent of later edits. Authored eras and starting resources carry into play.',
+                    'Selected editor units show a small delete button beside them. Deletion supports undo, redo, Delete and Backspace; typing in fields does not delete units.',
+                    'All unit types move 20% faster. Cities and territory layers are enabled by default for new matches and in the map editor.'
+                ]
+            },
+            {
                 at: '2026-10-24T14:05:00-04:00',
                 title: 'Equal siege rules, water attrition and separated towns',
                 items: [
@@ -14103,7 +14113,8 @@
             setGameSpeed(launchingCampaign ? 0 : 1, true);
             wodResetMobileHud();
             if(!gameData.layers) gameData.layers = {};
-            gameData.layers.territory = false;
+            gameData.layers.territory = true;
+            gameData.layers.cities = true;
             void (async function() {
                 try {
                     // If the boot splash or menu battlefield is still generating, let them finish first —
@@ -14635,7 +14646,7 @@
             loadedCustomMap: false,
             alliances: [],
             mission: null,
-            layers: { terrain: true, diplomacy: true, territory: false, cities: false, cityNames: true, structures: true, units: true },
+            layers: { terrain: true, diplomacy: true, territory: true, cities: true, cityNames: true, structures: true, units: true },
             aiCount: 1,
             victoryMode: 'domination',
             fogOfWar: false,
@@ -18486,14 +18497,14 @@
             gameData._fogExplored = new Set();
             gameData._fogVisible = null;
         }
-        function wodMpEnsureDefaultMatchLayers() {
+        function wodMpEnsureDefaultMatchLayers(reset=false) {
             if(!gameData.layers) gameData.layers = {};
             let defaults = {
-                terrain: true, diplomacy: true, territory: false, cities: false,
+                terrain: true, diplomacy: true, territory: true, cities: true,
                 cityNames: true, structures: true, units: true
             };
             for(let k of Object.keys(defaults)) {
-                if(gameData.layers[k] === undefined) gameData.layers[k] = defaults[k];
+                if(reset || gameData.layers[k] === undefined) gameData.layers[k] = defaults[k];
             }
             if(gameData.layers.terrain !== false) gameData.terrainViewMode = 'natural';
         }
@@ -22299,7 +22310,7 @@
                     wodMpInitSyncState(occ);
                     pauseMenuBackgroundBattle();
                     wodPrepareForNewMatch({ keepMp: true });
-                    wodMpEnsureDefaultMatchLayers();
+                    wodMpEnsureDefaultMatchLayers(true);
                     let launchPayload = null;
                     try {
                         launchPayload = await wodMpPrepareHostLaunchPayload(meta);
@@ -22721,7 +22732,7 @@
                     }
                     wodSetMpMatchUiFlag(true);
                     wodResetMobileHud();
-                    wodMpEnsureDefaultMatchLayers();
+                    wodMpEnsureDefaultMatchLayers(true);
                     gameData.selection = [];
                     setGameSpeed(0, true);
                     wodMpRefreshSyncOverlay();
@@ -23895,7 +23906,7 @@
         ];
 
         // Overall pacing — deliberate marches and combat cadence.
-        const WOD_MOVE_SPEED_FACTOR = 0.36;
+        const WOD_MOVE_SPEED_FACTOR = 0.432;
         const WOD_ATTACK_INTERVAL_MULT = 2.65;
         const WOD_MORALE_MAX = 100;
         const WOD_UNIT_SPAWN_FX_DUR = 2.0;
@@ -35654,13 +35665,15 @@
             gameData.fogOfWar = !!(fogEl && fogEl.checked);
 
             let startMoney = document.getElementById('setupMoney');
-            if(startMoney) gameData.money = parseInt(startMoney.value, 10) || 10000;
+            if(startMoney && !(gameData.loadedCustomMap&&gameData._mapExportHadStartEconomy))
+                gameData.money = parseInt(startMoney.value, 10) || 10000;
             let shapeInput = document.getElementById('setupMapShape');
             let requestedShape = shapeInput ? shapeInput.value : 'island';
 
             let periodEl = document.getElementById('setupGamePeriod');
-            gameData._matchPeriod = periodEl ? periodEl.value : (gameData.gamePeriod || 'modern');
-            if(!wodIsPeriodUnlocked(gameData._matchPeriod)) gameData._matchPeriod = 'modern';
+            const authoredPeriod=!launchingCampaign&&gameData.loadedCustomMap&&gameData._loadedMapGamePeriod;
+            gameData._matchPeriod = authoredPeriod || (periodEl ? periodEl.value : (gameData.gamePeriod || 'modern'));
+            if(!authoredPeriod&&!wodIsPeriodUnlocked(gameData._matchPeriod)) gameData._matchPeriod = 'modern';
             gameData.gamePeriod = gameData._matchPeriod;
             wodApplyPeriodUiLabels();
 
@@ -38305,7 +38318,7 @@
             gameData.aiCount = 1;
             await generateMap();
             remapAttractBattleFromPlayerSlotsToAis();
-            gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: false, cityNames: true, structures: true, units: true };
+            gameData.layers = { terrain: true, diplomacy: true, territory: true, cities: true, cityNames: true, structures: true, units: true };
             syncInGameLayerToolbar();
             gameData.camera.zoom = 0.655;
             menuDemoSeeded = true;
@@ -45952,7 +45965,7 @@
         function wodMissionDataLooksValid(data) {
             if(!data || !Array.isArray(data.hexList) || !data.hexList.length) return false;
             let mission = typeof wodNormalizeMission === 'function' ? wodNormalizeMission(data.mission) : data.mission;
-            return !!(mission && Array.isArray(mission.events) && mission.events.length);
+            return !!(mission && Array.isArray(mission.events));
         }
 
         function wodSyncSetupControlsFromLoadedMap() {
@@ -46217,8 +46230,8 @@
                 let aiEl = document.getElementById('setupAI');
                 if(aiEl) aiEl.value = String(aiN);
             }
-            if(!wodMissionHasEvents()) {
-                console.warn('wodApplyMissionEntry: mission events missing after load');
+            if(!gameData.mission) {
+                console.warn('wodApplyMissionEntry: mission definition missing after load');
                 return false;
             }
             return true;
@@ -53363,7 +53376,7 @@
                 let type = ['timer', 'time_survived', 'troops_killed'].includes(trig.type) ? trig.type : 'timer';
                 let trigger = { type };
                 if(type === 'troops_killed') trigger.count = Math.max(1, parseInt(trig.count, 10) || 100);
-                else trigger.seconds = Math.max(0, parseFloat(trig.seconds) || 60);
+                else trigger.seconds = Number.isFinite(parseFloat(trig.seconds)) ? Math.max(0,parseFloat(trig.seconds)) : 60;
                 let popup = evt.popup && typeof evt.popup === 'object' ? evt.popup : {};
                 let reps = Array.isArray(evt.reinforcements) ? evt.reinforcements.map(r => {
                     if(!r || typeof r !== 'object') return null;
@@ -53402,7 +53415,6 @@
                     pathOrders
                 };
             }).filter(Boolean) : [];
-            if(!events.length) return null;
             return {
                 version: 1,
                 title: String(raw.title || '').slice(0, 80),
@@ -55271,6 +55283,11 @@
                 gameData.hexes = {}; gameData.hexList = []; gameData.cities = []; gameData.roads = []; gameData.entities = []; gameData.forts = []; gameData.bridges = [];
                 gameData.loadedCustomMap = false;
                 gameData.alliances = [];
+                gameData.mission=null;gameData._missionRuntime=null;
+                delete gameData._loadedMapGamePeriod;
+                gameData.selection=[];gameData.constructionJobs=[];
+                gameData.money=10000;gameData.manpower=5000;
+                gameData.aiMoneyByOwner={};gameData.aiManpowerByOwner={};
                 delete gameData._mapExportHadStartEconomy;
                 let p = wodApplyMapSizePreset(size);
                 let spacing = p.hexRadius * 1.35;
@@ -55287,6 +55304,25 @@
                 updateTerrainKey();
             },
             loadMapData(mapData) {
+                // Validate and detach before changing the current scenario. A bad
+                // import must leave the editor and saved-library payload intact.
+                if(!mapData||!Array.isArray(mapData.hexList)||!mapData.hexList.length)
+                    throw new Error('The file has no map cells.');
+                const keys=new Set();
+                for(const h of mapData.hexList) {
+                    if(!h||!Number.isInteger(h.q)||!Number.isInteger(h.r))throw new Error('Map cells need integer grid coordinates.');
+                    const key=`${h.q},${h.r}`;
+                    if(keys.has(key))throw new Error('The file contains duplicate map cells.');
+                    keys.add(key);
+                }
+                for(const key of ['cities','roads','entities','forts','bridges'])
+                    if(mapData[key]!=null&&!Array.isArray(mapData[key]))throw new Error('Invalid '+key+' list.');
+                for(const c of mapData.cities||[])
+                    if(!c||!Number.isInteger(c.q)||!Number.isInteger(c.r)||!keys.has(`${c.q},${c.r}`))throw new Error('A town is outside the map.');
+                for(const u of mapData.entities||[])
+                    if(!u||!['light','marine','heavy','ship','convoy'].includes(u.type)||!Number.isFinite(u.x)||!Number.isFinite(u.y))throw new Error('Invalid unit placement.');
+                mapData=JSON.parse(JSON.stringify(mapData,(key,value)=>key.startsWith('_')?undefined:value));
+                gameData.selection=[];gameData.constructionJobs=[];gameData._missionRuntime=null;
                 wodApplyMapSizePreset(mapData.mapSize || mapData.mapRadius || gameData.mapRadius || 60);
                 gameData.mapShape = mapData.mapShape || gameData.mapShape || 'island';
                 gameData.hexList = mapData.hexList || [];
@@ -55294,11 +55330,12 @@
                 gameData.roads = mapData.roads || [];
                 gameData.entities = mapData.entities || [];
                 gameData.forts = (mapData.forts || []).map(f => Object.assign({}, f));
-                gameData.bridges = (mapData.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
-                for(let br of gameData.bridges) wodSyncBridgeWorldCoords(br);
-                wodRebuildBridgeHexIndex();
+                gameData.bridges = (mapData.bridges || []).map(b => Object.assign({},b));
                 gameData.hexes = {};
+                const savedRadius=Number.isFinite(mapData.hexRadius)&&mapData.hexRadius>0?mapData.hexRadius:gameData.hexRadius;
                 for(let hex of gameData.hexList) {
+                    if(!Number.isFinite(hex.x))hex.x=hex.q*savedRadius*1.35;
+                    if(!Number.isFinite(hex.y))hex.y=hex.r*savedRadius*1.35;
                     hex.baseColor = getTerrainColor(hex.type);
                     hex.renderColor = hex.baseColor;
                     if(hex.owner === undefined || hex.owner === null) hex.owner = 0;
@@ -55309,7 +55346,7 @@
                 // hexRadius 18 but the file was built at hexRadius 20) skews every pixel→hex
                 // lookup — pathfinding, terrain clamps, walkability — so units marched into
                 // mountains and got stuck on the smaller mission maps.
-                gameData._loadedMapHexRadius = null;
+                gameData._loadedMapHexRadius = Number.isFinite(mapData.hexRadius)&&mapData.hexRadius>0?mapData.hexRadius:null;
                 for(let hex of gameData.hexList) {
                     let nb = gameData.hexes[`${hex.q + 1},${hex.r}`];
                     if(nb) {
@@ -55319,7 +55356,22 @@
                     }
                 }
                 if(gameData._loadedMapHexRadius) gameData.hexRadius = gameData._loadedMapHexRadius;
+                gameData.bridges=gameData.bridges.map(wodNormalizeBridgeRecord).filter(Boolean);
+                for(const br of gameData.bridges)wodSyncBridgeWorldCoords(br);
+                wodRebuildBridgeHexIndex();
+                for(const u of gameData.entities) {
+                    const n=/^unit_(\d+)$/.exec(u.uid||'');
+                    if(n)gameData.nextUnitId=Math.max(gameData.nextUnitId||0,Number(n[1]));
+                }
+                const ids=new Set();
+                for(const u of gameData.entities) {
+                    if(ids.has(u.uid))delete u.uid;
+                    ensureUnitId(u);ids.add(u.uid);u.selected=false;
+                }
                 gameData.loadedCustomMap = true;
+                gameData._loadedMapGamePeriod=WOD_PERIOD_IDS.includes(mapData.gamePeriod)?mapData.gamePeriod:null;
+                if(gameData._loadedMapGamePeriod)
+                    wodApplyGamePeriod(mapData.gamePeriod,{saveProfile:false,allowAnyPeriod:true});
                 if(mapData.factionColors && mapData.factionColors.length) {
                     for(let i = 0; i < Math.min(mapData.factionColors.length, factionColors.length); i++)
                         factionColors[i] = mapData.factionColors[i];
@@ -55341,7 +55393,10 @@
             },
             exportMapData() {
                 let out = {
+                    format: 'simple-wars-map',version:1,
                     mapSize: gameData.mapRadius,
+                    hexRadius: gameData.hexRadius,
+                    gamePeriod: gameData.gamePeriod||'modern',
                     mapShape: gameData.mapShape || 'island',
                     hexList: gameData.hexList,
                     cities: gameData.cities,
@@ -55357,9 +55412,10 @@
                     aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner || {}),
                     alliances: wodNormalizeAlliances(gameData.alliances),
                 };
-                if(gameData.mission && Array.isArray(gameData.mission.events) && gameData.mission.events.length)
-                    out.mission = JSON.parse(JSON.stringify(gameData.mission));
-                return out;
+                if(gameData.mission)out.mission=wodNormalizeMission(gameData.mission);
+                // Snapshots and saved maps must never retain live arrays or private
+                // pathfinding/UI caches from the editor or an active match.
+                return JSON.parse(JSON.stringify(out,(key,value)=>key.startsWith('_')?undefined:value));
             },
             rebuildEditorTradeRoutes() { rebuildEditorTradeRoutesFromCities(); },
             snapEditorRoadRefsToCities() { snapEditorRoadRefsToCities(); },
@@ -55473,6 +55529,6 @@
             wodRunInitialBootToMenu();
         }
     </script>
-    <script src="map-editor.js"></script>
+    <script src="map-editor.js?v=scenario-roundtrip-v1"></script>
 </body>
 </html>

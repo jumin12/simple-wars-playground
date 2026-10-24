@@ -260,6 +260,7 @@
     syncEditorOwnerSwatch();
     rebuildTerritoryOwnerSelect();
     rebuildEconomyFactionSelect(false);
+    pullFactionEconomyInputsFromGame();
   }
 
   function rebuildTerritoryOwnerSelect() {
@@ -638,6 +639,7 @@
     if (!window.WOD || !WOD.gameData) return;
     if (!WOD.gameData.layers) WOD.gameData.layers = {};
     WOD.gameData.layers.territory = true;
+    WOD.gameData.layers.cities = true;
     markEditorMapChanged();
     refreshEditorGameplayLayerButtons();
   }
@@ -881,6 +883,7 @@
     }
     const doSavePayload = () => {
       if (!window.WOD || typeof WOD.exportMapData !== "function") return null;
+      commitScenarioForm();
       const mapData = WOD.exportMapData();
       let thumb;
       try {
@@ -953,8 +956,8 @@
     if (!evt || !evt.trigger) return "Timer";
     const t = evt.trigger.type || "timer";
     if (t === "troops_killed") return "Kill " + (evt.trigger.count || "?") + " troops";
-    if (t === "time_survived") return "Survive " + (evt.trigger.seconds || "?") + "s";
-    return "After " + (evt.trigger.seconds || "?") + "s";
+    if (t === "time_survived") return "Survive " + (evt.trigger.seconds ?? "?") + "s";
+    return "After " + (evt.trigger.seconds ?? "?") + "s";
   }
 
   function missionEventChipLabel(evt, index) {
@@ -1165,7 +1168,8 @@
     if (trigType === "troops_killed") {
       evt.trigger.count = Math.max(1, parseInt(killEl && killEl.value, 10) || 100);
     } else {
-      evt.trigger.seconds = Math.max(0, parseFloat(secEl && secEl.value) || 60);
+      const seconds=parseFloat(secEl&&secEl.value);
+      evt.trigger.seconds=Number.isFinite(seconds)?Math.max(0,seconds):60;
     }
     evt.popup = evt.popup || {};
     evt.popup.style = styleEl ? styleEl.value : "briefing";
@@ -1421,9 +1425,8 @@
     const titleMission = root.querySelector("#editorMissionTitle");
     if (titleMission && document.activeElement !== titleMission) titleMission.value = m.title || "";
     fillMissionVictoryForm(m);
-    const prev = state.missionEventIndex | 0;
-    if (m.events.length && prev < m.events.length) readMissionEventFromForm();
-    readMissionVictoryFromForm();
+    // Rendering a loaded/undone scenario must never write the previous form
+    // values into its events. Editing handlers and export/save commit explicitly.
     const form = root.querySelector("#editorMissionEventForm");
     if (!m.events.length) {
       state.missionEventIndex = 0;
@@ -1572,17 +1575,22 @@
     app.querySelectorAll(".mission-marker-chip[data-mission-marker]:not([data-reinf-index]):not([data-path-index])").forEach(wireMissionMarkerChip);
   }
 
-  function exportMissionJson() {
-    if (!window.WOD || typeof WOD.exportMapData !== "function") return;
-    const m = ensureGameMission();
-    if (m.events.length) {
+  function commitScenarioForm() {
+    const m=ensureGameMission();
+    const title=document.getElementById('editorMissionTitle');
+    if(title)m.title=String(title.value||'').trim().slice(0,80);
+    readMissionVictoryFromForm();
+    if(m.events[state.missionEventIndex]) {
       readMissionEventFromForm();
       readMissionReinforcementsFromDom(m.events[state.missionEventIndex]);
       readMissionPathOrdersFromDom(m.events[state.missionEventIndex]);
-      const titleMission = document.getElementById("editorMissionTitle");
-      if (titleMission) m.title = String(titleMission.value || "").trim().slice(0, 80);
-      readMissionVictoryFromForm();
     }
+    return m;
+  }
+
+  function exportMissionJson() {
+    if (!window.WOD || typeof WOD.exportMapData !== "function") return;
+    const m=commitScenarioForm();
     const data = WOD.exportMapData();
     data.format = "simple-wars-mission";
     data.version = 1;
@@ -1638,15 +1646,7 @@
     if (ex) {
       ex.addEventListener("click", () => {
         if (!window.WOD || typeof WOD.exportMapData !== "function") return;
-        const m = ensureGameMission();
-        if (m.events.length) {
-          readMissionEventFromForm();
-          readMissionReinforcementsFromDom(m.events[state.missionEventIndex]);
-          readMissionPathOrdersFromDom(m.events[state.missionEventIndex]);
-          const titleMission = document.getElementById("editorMissionTitle");
-          if (titleMission) m.title = String(titleMission.value || "").trim().slice(0, 80);
-          readMissionVictoryFromForm();
-        }
+        commitScenarioForm();
         const data = WOD.exportMapData();
         data.format = "simple-wars-map";
         data.version = 1;
@@ -2128,6 +2128,9 @@
       #editorCanvasWrap { position:relative; overflow:hidden; background:#154360;display:flex;
         flex-direction:column;min-height:0;border-left:1px solid rgba(0,0,0,.35);border-right:1px solid rgba(0,0,0,.35); }
       #editorCanvas { width:100%; height:100%; display:block; cursor:crosshair; flex:1; touch-action:none; }
+      #editorDeleteUnit { position:absolute;z-index:4;width:26px;height:26px;padding:0;border-radius:50%;border:1px solid #ffb4ac;background:#a72e32;color:#fff;font:bold 22px/22px system-ui;cursor:pointer;box-shadow:0 2px 6px #0008;touch-action:manipulation; }
+      #editorDeleteUnit[hidden] { display:none; }
+      #editorDeleteUnit:hover,#editorDeleteUnit:focus-visible { background:#d34042;outline:2px solid #ffe6bd; }
       .editor-drop-overlay-hint{
         pointer-events:none;position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
         background:rgba(10,22,34,.82);border:1px solid rgba(201,162,39,.55);padding:8px 14px;border-radius:8px;font-size:12px;color:#dbe8f5;
@@ -2344,6 +2347,7 @@
       </div>
       <div id="editorCanvasWrap">
         <canvas id="editorCanvas"></canvas>
+        <button type="button" id="editorDeleteUnit" aria-label="Delete selected unit" title="Delete selected unit" hidden>×</button>
         <div class="editor-drop-overlay-hint editor-overlay-hint-desktop">Drop unit chips · wheel = zoom · middle-drag = pan</div>
         <div class="editor-drop-overlay-hint editor-overlay-hint-touch">Drop unit chips · 2 fingers = pan / zoom</div>
       </div>
@@ -2559,6 +2563,7 @@
 
     app.querySelector("#editorBlank").addEventListener("click", () => {
       WOD.makeBlankMap(parseInt(app.querySelector("#editorSize").value, 10));
+      state.missionEventIndex=0;clearMissionMapPick();renderMissionPanel();
       syncEditorTerritoryOverlayDefault();
       syncMaxFactionSlotsFromGameData();
       rebuildOwnerSelect();
@@ -2639,6 +2644,9 @@
     });
     app.querySelector("#editorExitBtn").addEventListener("click", closeMapEditor);
 
+    const deleteUnit=app.querySelector('#editorDeleteUnit');
+    deleteUnit.addEventListener('pointerdown',e=>e.stopPropagation());
+    deleteUnit.addEventListener('click',e=>{e.stopPropagation();deleteSelectedEditorUnits();});
     const canvas = app.querySelector("#editorCanvas");
     const wrap = app.querySelector("#editorCanvasWrap");
     canvas.addEventListener("pointerdown", editorPointerDown);
@@ -2720,6 +2728,7 @@
       });
     }
     WOD.makeBlankMap(parseInt(document.getElementById("editorSize").value, 10));
+    state.missionEventIndex=0;clearMissionMapPick();
     syncEditorTerritoryOverlayDefault();
     syncMaxFactionSlotsFromGameData();
     state.selected = null;
@@ -2745,6 +2754,9 @@
         if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable))
           return;
         const k = ev.key;
+        if((k==='Delete'||k==='Backspace')&&['unit','units'].includes(state.selected?.type)) {
+          ev.preventDefault();deleteSelectedEditorUnits();return;
+        }
         if (ev.ctrlKey && !ev.shiftKey && (k === "z" || k === "Z")) {
           ev.preventDefault();
           editorUndo();
@@ -3667,6 +3679,7 @@
       }
       ctx.restore();
     }
+    updateUnitDeleteControl(toCanvas);
     drawMissionEventMarkers(ctx, toCanvas);
 
     if (!state.dragging) renderFactionBalanceChart();
@@ -3706,9 +3719,40 @@
     });
   }
 
+  function deleteSelectedEditorUnits() {
+    const selection=state.selected;
+    if(!state.open||!selection||!['unit','units'].includes(selection.type))return;
+    const removed=new Set(selection.type==='units'?selection.values:[selection.value]);
+    WOD.gameData.entities=WOD.gameData.entities.filter(u=>!removed.has(u));
+    WOD.gameData.selection=(WOD.gameData.selection||[]).filter(u=>!removed.has(u));
+    state.selected=null;state.dragging=false;state.editorMarquee=null;
+    markEditorMapChanged();rebuildUnitPalette();renderSelection();scheduleEditorRender();
+    editorPushSnapshot();state.editorGestureMutatedMap=false;
+  }
+
+  function updateUnitDeleteControl(toCanvas) {
+    const button=document.getElementById('editorDeleteUnit'),canvas=document.getElementById('editorCanvas');
+    if(!button||!canvas)return;
+    const u=state.selected?.type==='unit'?state.selected.value:null;
+    const show=state.open&&u&&WOD.gameData.entities.includes(u)&&WOD.gameData.layers.units!==false;
+    button.hidden=!show;
+    if(!show||!toCanvas)return;
+    const p=toCanvas(u.x,u.y),rect=canvas.getBoundingClientRect(),wrap=canvas.parentElement.getBoundingClientRect();
+    const x=p.x*rect.width/canvas.width,y=p.y*rect.height/canvas.height;
+    const radius=Math.max(8,(u.radius||10)*p.scale)*rect.width/canvas.width;
+    if(x<0||y<0||x>rect.width||y>rect.height){button.hidden=true;return;}
+    button.style.left=(rect.left-wrap.left+Math.min(rect.width-28,Math.max(2,x+radius+4)))+'px';
+    button.style.top=(rect.top-wrap.top+Math.min(rect.height-28,Math.max(2,y-radius-24)))+'px';
+  }
+
+  function editorEscapeAttribute(value) {
+    return String(value??'').replace(/[&"<>]/g,c=>({'&':'&amp;','"':'&quot;','<':'&lt;','>':'&gt;'}[c]));
+  }
+
   function renderSelection() {
     const panel = document.getElementById("editorSelection");
     if (!panel) return;
+    updateUnitDeleteControl();
     if (!state.selected) {
       panel.innerHTML = "Nothing selected. Use <strong>Select</strong> for a town/unit, <strong>drag a box</strong> on empty map (Select or Move) to grab several units, or <strong>Move</strong> to reposition.";
       panel.classList.add("editor-hint");
@@ -3744,20 +3788,7 @@
         editorPushSnapshot();
         state.editorGestureMutatedMap = false;
       };
-      document.getElementById("bulkDeleteUnits").onclick = () => {
-        const ents = WOD.gameData.entities;
-        for (const u of [...vals]) {
-          const ix = ents.indexOf(u);
-          if (ix >= 0) ents.splice(ix, 1);
-        }
-        state.selected = null;
-        markEditorMapChanged();
-        rebuildUnitPalette();
-        renderSelection();
-        scheduleEditorRender();
-        editorPushSnapshot();
-        state.editorGestureMutatedMap = false;
-      };
+      document.getElementById("bulkDeleteUnits").onclick=deleteSelectedEditorUnits;
       return;
     }
     const obj = state.selected.value;
@@ -3770,7 +3801,7 @@
         </div>`;
     if (state.selected.type === "city") {
       panel.innerHTML = `
-        <div class="editor-row"><label>Name</label><input id="selName" value="${obj.name || ""}"></div>
+        <div class="editor-row"><label>Name</label><input id="selName" value="${editorEscapeAttribute(obj.name)}"></div>
         ${factionRow}
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 1000}"></div>
         <div class="editor-row"><label>Income bonus</label><input id="selIncome" type="number" value="${obj.incomeBonus || 0}"></div>
@@ -3794,7 +3825,7 @@
       };
     } else {
       panel.innerHTML = `
-        <div class="editor-row"><label>Name</label><input id="selName" value="${obj.name || ""}"></div>
+        <div class="editor-row"><label>Name</label><input id="selName" value="${editorEscapeAttribute(obj.name)}"></div>
         ${factionRow}
         <div class="editor-row"><label>Type</label><select id="selType"><option value="light">Infantry</option><option value="marine">Marines</option><option value="heavy">Armor</option><option value="ship">Ship</option></select></div>
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 100}"></div>
@@ -3970,6 +4001,10 @@
 
   window.wodEditorAfterLoadMapData = function () {
     if (!state.open) return;
+    state.selected=null;clearMissionMapPick();renderSelection();
+    const size=document.getElementById('editorSize');if(size)size.value=String(WOD.gameData.mapRadius);
+    const period=document.getElementById('editorMapPeriod');if(period)period.value=WOD.gameData.gamePeriod||'modern';
+    syncEditorTerritoryOverlayDefault();scheduleEditorRender();
     syncMaxFactionSlotsFromGameData();
     rebuildOwnerSelect();
     rebuildUnitPalette();
