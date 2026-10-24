@@ -96,8 +96,9 @@ const server=http.createServer((req,res)=>{
     const counts=wodCountBalancedLandByOwner(Array.from({length:c.players},(_,i)=>i+1));
     // Exercise lobby preview rendering against the identical world too.
     const lobby=document.createElement('canvas');lobby.width=600;lobby.height=300;wodPaintMapPreviewPolitical(lobby.getContext('2d'),gameData.hexList,gameData.cities,null,300,150,.15,gameData.hexRadius,gameData.hexes);
-    return {...c,...audit,counts,unchanged:before===JSON.stringify(gameData.hexList.map(h=>[h.type,h.owner]))};
+    return {...c,...audit,counts,validation:gameData._mapGenValidation,unchanged:before===JSON.stringify(gameData.hexList.map(h=>[h.type,h.owner]))};
    },c);
+   console.log(JSON.stringify({shape:c.shape,players:c.players,size:c.size,validation:row.validation}));
    results.generated.push(row);await page.locator('#mapPreview').screenshot({path:path.join(OUT,`${c.shape}-${c.players}-${c.size}-${c.seed}.png`)});
   }
   // Real Generate New interaction, followed by the production gameplay renderer.
@@ -114,6 +115,7 @@ const server=http.createServer((req,res)=>{
   assert(results.fixtures.find(r=>r.kind==='lakeMask').inland&&results.fixtures.find(r=>r.kind==='openChannel').opened&&results.fixtures.find(r=>r.kind==='openChannel').reusedForOwnership&&results.fixtures.find(r=>r.kind==='closeChannel').inland,'terrain edits refresh ocean topology while ownership changes reuse it');
   assert([...results.fixtures,...results.generated].filter(r=>r.unchanged!==undefined).every(r=>r.unchanged),'rendering never changes ownership or terrain');
   assert(results.generated.every(r=>Math.max(...Object.values(r.counts))-Math.min(...Object.values(r.counts))<=1));
+  assert(results.generated.every(r=>r.validation?.quality.ok),'every preview passed the strict border acceptance gate');
   assert([...results.generated,results.regenerate].every(r=>r.unsupportedLandPockets===0),'generation never leaves empty surrounded mountain or land remnants');
   const repaired=results.balanceFixtures.find(r=>r.mode==='orphanPeak'),blocked=results.balanceFixtures.find(r=>r.mode==='protectedFront');
   assert(repaired.before===1&&repaired.after===0&&repaired.peakOwner===1&&Math.abs(repaired.counts[1]-repaired.counts[2])<=1,'orphan mountain ownership is repaired and area quotas remain even');

@@ -12622,6 +12622,15 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-24T13:40:00-04:00',
+                title: 'Reject malformed starting maps and regenerate',
+                items: [
+                    'Generated maps must pass a final border-quality check before previews or armies appear. Disconnected mainland claims, enclosed ownership pockets, long one-cell tendrils, excessive frontier winding and unsupplied inhabited land are rejected.',
+                    'Removed the retry-limit fallback that could accept malformed starts. Generation continues with fresh deterministic seeds until both border quality and equal land/town checks pass, while yielding to keep the loading UI responsive. Campaign, skirmish and multiplayer generation share the checks.',
+                    'Corrected terrain-density limits for rectangle, mountain, forest, desert and archipelago maps so healthy terrain reaches validation promptly. Genuine separate islands remain supported; neutral-territory editor generation keeps its normal workflow.'
+                ]
+            },
+            {
                 at: '2026-10-24T13:17:00-04:00',
                 title: 'Clean coastal previews and no stray mountain pockets',
                 items: [
@@ -15247,9 +15256,15 @@
                 maxF = p.landFracMax;
             if(wodMapShapeUsesRectanglePipeline(mapShape)) {
                 minF += 0.1;
-                maxF += 0.14;
+                // Rectangle presets intentionally fill most of the grid inside
+                // their water rim (about 72–87%). The old island-sized ceiling
+                // rejected virtually every healthy rectangle/mountain map.
+                maxF = Math.max(maxF + 0.14, 0.88);
             } else if(mapShape === 'archipelago') {
-                minF = Math.max(0.12, minF - 0.14);
+                // Scattered islands naturally occupy less of the enclosing sea
+                // grid. Town capacity and connected-region checks below enforce
+                // playability; an island-density floor discarded healthy chains.
+                minF = 0.11;
                 maxF = Math.min(0.36, maxF - 0.08);
             } else if(mapShape === 'ring') {
                 minF = Math.max(0.18, minF - 0.08);
@@ -15257,7 +15272,7 @@
             }
             // Slightly wider band so setup doesn't burn many full terrain regenerations.
             minF = Math.max(0.08, minF - 0.03);
-            maxF = Math.min(0.72, maxF + 0.04);
+            maxF = Math.min(wodMapShapeUsesRectanglePipeline(mapShape)?0.94:0.72, maxF + 0.04);
             return frac >= minF && frac <= maxF;
         }
 
@@ -18182,6 +18197,78 @@
                 if(pool.length<12||!pool.some(h=>!isFrontlineHex(h,owner)))return false;
             }
             return true;
+        }
+
+        /** Count only shared dry-land edges: coast complexity is not political complexity. */
+        function wodStartingFrontierLength() {
+            let edges=0;
+            for(const h of gameData.hexList) {
+                if(isWaterHex(h))continue;
+                for(const [dq,dr] of [[1,0],[0,1]]) {
+                    const nb=gameData.hexes[`${h.q+dq},${h.r+dr}`];
+                    if(nb&&!isWaterHex(nb)&&nb.owner!==h.owner)edges++;
+                }
+            }
+            return edges;
+        }
+        /** Acceptance gate, not a repair pass. Never publish a badly distorted split.
+         * Real offshore islands are independent; mountains count as political land. */
+        function wodValidateStartingBorders(ownerIds, referenceFrontier=null) {
+            const graph=wodStartingLandGraph(true), seen=new Set(), valid=new Set(ownerIds);
+            const report={ok:true,reason:'clean',frontier:wodStartingFrontierLength(),referenceFrontier,
+                land:graph.nodes.size,largestThinRun:0};
+            const reject=reason=>({...report,ok:false,reason});
+            for(const start of graph.nodes.values()) {
+                if(seen.has(start))continue;
+                const component=[start];seen.add(start);
+                for(let i=0;i<component.length;i++)for(const nb of component[i].neighbors)
+                    if(!seen.has(nb)){seen.add(nb);component.push(nb);}
+                const regions=new Set(),visited=new Set();
+                for(const node of component) {
+                    if(!valid.has(node.hex.owner))return reject('unclaimed-land');
+                    if(visited.has(node))continue;
+                    const owner=node.hex.owner;
+                    if(regions.has(owner))return reject('disconnected-claim');
+                    regions.add(owner);
+                    const region=[node];visited.add(node);let shore=false;
+                    for(let i=0;i<region.length;i++) {
+                        const n=region[i];shore ||= n.neighbors.length<4;
+                        for(const nb of n.neighbors)if(nb.hex.owner===owner&&!visited.has(nb)) {
+                            visited.add(nb);region.push(nb);
+                        }
+                    }
+                    if(!shore&&region.length<component.length)return reject('enclosed-claim');
+                }
+            }
+            // A one-cell-wide political thread between hostile banks is not a
+            // mountain pass or coastline. Reject sustained threads and their tips.
+            const thin=new Set();
+            for(const node of graph.nodes.values()) {
+                if(node.neighbors.length!==4)continue;
+                const same=node.neighbors.filter(n=>n.hex.owner===node.hex.owner);
+                if(same.length<=1 || same.length===2&&
+                    same[0].hex.q+same[1].hex.q===node.hex.q*2&&
+                    same[0].hex.r+same[1].hex.r===node.hex.r*2)thin.add(node);
+            }
+            const thinSeen=new Set();
+            for(const node of thin) {
+                if(thinSeen.has(node))continue;
+                const run=[node];thinSeen.add(node);
+                for(let i=0;i<run.length;i++)for(const nb of run[i].neighbors)
+                    if(nb.hex.owner===node.hex.owner&&thin.has(nb)&&!thinSeen.has(nb)) {
+                        thinSeen.add(nb);run.push(nb);
+                    }
+                report.largestThinRun=Math.max(report.largestThinRun,run.length);
+            }
+            if(report.largestThinRun>=4)return reject('border-tendril');
+            if(referenceFrontier!==null&&report.frontier>referenceFrontier*1.35+8)
+                return reject('distorted-frontier');
+            if(report.frontier>Math.sqrt(report.land*ownerIds.length)*2.25+8)
+                return reject('winding-frontier');
+            const walkGraph=wodStartingLandGraph(),supplied=wodStartingTownSupply(walkGraph);
+            for(const node of walkGraph.inhabited)
+                if(!supplied.get(node.hex.owner)?.has(getHexKey(node.hex)))return reject('unsupplied-land');
+            return report;
         }
 
         /** New-match rule for every town, including neutral and authored-map towns. */
@@ -35906,6 +35993,7 @@
             await ensureOwnersReachableByLand(ownersSorted);
             await smoothStartingTerritory(ownersSorted, 4, 4);
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 18 : 28);
+            const referenceFrontier=wodStartingFrontierLength();
             // Keep the solved region intact while placing its towns.
             // Fill political water ownership after the land split settles.
             wodAssignAllWaterFromNearestLand(true);
@@ -36212,7 +36300,12 @@
             wodAssignAllWaterFromNearestLand(true);
             wodNormalizeStartingCityEconomy(ownersSorted);
 
-            if(!wodVerifyFairFactionStart(ownersSorted)) return false;
+            gameData._startingBorderQuality=wodValidateStartingBorders(ownersSorted,referenceFrontier);
+            if(!gameData._startingBorderQuality.ok)return false;
+            if(!wodVerifyFairFactionStart(ownersSorted)) {
+                gameData._startingBorderQuality={...gameData._startingBorderQuality,ok:false,reason:'unbalanced-start'};
+                return false;
+            }
 
             gameData._wodProcgenBorderFirstApplied = true;
             return true;
@@ -36687,57 +36780,36 @@
             wodApplyMapSizePreset(sizeVal);
             let mapR = gameData.mapRadius;
             let hr = gameData.hexRadius;
-            let wodFingerReuseMapSeed = !!(ownsInnerRng && gameData._wodReuseMapGenSeed) || !!_wodSavedMathRandom || !!(gameData._wodReuseMapGenSeed && (gameData._mapGenSeed >>> 0));
             let lobbyPreviewGen = !!gameData._wodLobbyPreviewGen;
-            if(lobbyPreviewGen) wodFingerReuseMapSeed = true;
-            const PROCMAP_ACCEPT_TRIES_MAX = lobbyPreviewGen
-                ? Math.min(14, Math.max(8, 8 + Math.floor(mapR / 30)))
-                : (wodFingerReuseMapSeed ? 1 : Math.min(12, Math.max(6, 8 + Math.floor(mapR / 30))));
             let procSucceeded = false;
-
             let mog = gameData._mapGenOptions;
             let wantCities = !mog || mog.cities !== false;
             let wantTerritory = !mog || mog.territory !== false;
             let wantUnits = !mog || mog.units !== false;
-
             let shapePre = document.getElementById('setupMapShape');
             let mapShapePre = (mog && wodIsProcGenMapShape(mog.mapShape)) ? mog.mapShape : (shapePre ? shapePre.value : 'island');
-            let procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
-            if(lobbyPreviewGen) procMapAcceptTriesMax = PROCMAP_ACCEPT_TRIES_MAX;
-            else if(wodFingerReuseMapSeed && !gameData._campaignRun) procMapAcceptTriesMax = 1;
-            if(gameData._campaignRun && !lobbyPreviewGen) procMapAcceptTriesMax = Math.max(procMapAcceptTriesMax, 10);
-            if(wodMapShapeUsesRectanglePipeline(mapShapePre)) procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, lobbyPreviewGen ? 10 : (wodFingerReuseMapSeed ? 1 : 10));
-            if(mapShapePre === 'archipelago') procMapAcceptTriesMax = lobbyPreviewGen ? Math.max(procMapAcceptTriesMax, 10) : (wodFingerReuseMapSeed ? 1 : Math.max(procMapAcceptTriesMax, 12));
-            if(!wantCities || !wantTerritory) procMapAcceptTriesMax = 1;
-            // 3+ factions: terrain retries are expensive; politics is retried on the same island instead.
-            let factionCountPre = Math.max(2, wodGetDesiredFactionCountForMapGen() | 0);
-            if(!lobbyPreviewGen && !wodFingerReuseMapSeed && factionCountPre >= 3) {
-                procMapAcceptTriesMax = Math.min(procMapAcceptTriesMax, 4);
-            }
-
-            // Hoisted out of the accept loop: the post-loop fallback paths below use these
-            // (a previous version declared them inside the loop, so exhausting all accept
-            // tries crashed generateMap with a ReferenceError and left a broken map).
             let seedOffset = 0;
             let mapShape = mapShapePre;
             let cols = 0, rows = 0;
             let factionSlots = 1;
             let landForCities = [];
             let landNC = 1;
-            // A reused preview seed still needs deterministic safety retries. One
-            // rejected tiny island must not fall through to an unvalidated match.
-            if(wodFingerReuseMapSeed&&!lobbyPreviewGen)procMapAcceptTriesMax=Math.max(8,procMapAcceptTriesMax);
-            let procSeedBase=(gameData._mapGenSeed>>>0)||1;
+            // Full matches have no relaxed/legacy acceptance path. Continue with
+            // fresh seeded terrain until the same strict checks pass, yielding
+            // between attempts so the loading indicator remains responsive.
+            const validation=gameData._mapGenValidation={terrainAttempts:0,politicsAttempts:0,rejections:{}};
+            const recordRejection=reason=>validation.rejections[reason]=(validation.rejections[reason]||0)+1;
+            let procSeedBase=((lobbyPreviewGen?gameData._mapGenSeedBase:0)>>>0)||(gameData._mapGenSeed>>>0)||1;
 
-            outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
+            outerProcTerrain: for(let procAttempt = 0; ; procAttempt++) {
+                validation.terrainAttempts=procAttempt+1;
                 if(procAttempt > 0 || wodMapGenCooperativeMode()) await wodYieldToMainThread();
                 if(lobbyPreviewGen) {
-                    let base = (gameData._mapGenSeedBase >>> 0) || (gameData._mapGenSeed >>> 0) || 1;
                     if(_wodSavedMathRandom) wodPopRandom();
-                    gameData._mapGenSeed = (base ^ Math.imul(procAttempt, 0x9e3779b9)) >>> 0;
+                    gameData._mapGenSeed = (procSeedBase ^ Math.imul(procAttempt, 0x9e3779b9)) >>> 0;
                     if(!gameData._mapGenSeed) gameData._mapGenSeed = 0x6a09e667;
                     wodPushSeededRandom(gameData._mapGenSeed);
-                } else if(ownsInnerRng) {
+                } else if(ownsInnerRng || procAttempt>0) {
                     if(procAttempt > 0) wodPopRandom();
                     if(procAttempt === 0) {
                         if(gameData._wodReuseMapGenSeed) {
@@ -37040,6 +37112,7 @@
             wodCaptureTerrainPoliticsBase();
 
             if(!wodMapLandFractionAcceptable(mapShape)) {
+                recordRejection('land-fraction');
                 if(ownsInnerRng) wodPopRandom();
                 continue outerProcTerrain;
             }
@@ -37058,6 +37131,7 @@
                 let gridN = Math.max(1, gameData.hexList.length);
                 let minPass = Math.max(factionSlots * 100, 160, Math.floor(gridN * 0.016));
                 if(passLand < minPass) {
+                    recordRejection('sparse-islands');
                     if(ownsInnerRng) wodPopRandom();
                     continue outerProcTerrain;
                 }
@@ -37082,12 +37156,17 @@
                                 Math.imul(procAttempt + 1, 0xc2b2ae35)
                             ) * Math.PI * 2;
                     }
+                    validation.politicsAttempts++;
+                    gameData._startingBorderQuality=null;
                     procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
                     if(procOk) break;
+                    recordRejection(gameData._startingBorderQuality?.reason||'town-placement');
                     await wodMapGenYieldSlice();
                 }
                 if(procOk) {
                     procSucceeded = true;
+                    validation.acceptedSeed=gameData._mapGenSeed>>>0;
+                    validation.quality=gameData._startingBorderQuality;
                     break outerProcTerrain;
                 }
                 continue outerProcTerrain;
@@ -37097,15 +37176,9 @@
             }
             }
 
-            if(!procSucceeded && wantCities && wantTerritory) {
-                // Rejected terrain attempts may have restored the ambient RNG.
-                // Keep the safety path reproducible for a committed preview seed.
-                if(ownsInnerRng&&!_wodSavedMathRandom)wodPushSeededRandom((gameData._mapGenSeed^0x85ebca6b)>>>0);
-                let relaxedProc = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
-                if(relaxedProc) procSucceeded = true;
-            }
-
-            if(!procSucceeded && wantCities) {
+            // Neutral-city editor requests do not partition the map. Full
+            // matches can only reach this point through validated acceptance.
+            if(wantCities && !wantTerritory) {
                 for(let hx of gameData.hexList) setHexOwner(hx, 0);
                 gameData.cities = [];
 
@@ -37215,6 +37288,8 @@
             }
 
             if(wantTerritory && wantCities) {
+                if(!procSucceeded || !gameData._startingBorderQuality?.ok)
+                    throw new Error('Cannot deploy an unvalidated procedural map');
                 await assignStartingCities();
             } else if(wantCities && !wantTerritory) {
                 for(let hx of gameData.hexList) setHexOwner(hx, 0);
