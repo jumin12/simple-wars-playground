@@ -97,7 +97,9 @@ const server=http.createServer((req,res)=>{
     if(type==='city'){h.type='urban';h.cityId='Protected town';gameData.cities=[{id:h.cityId,owner:2,q:0,r:0,x:h.x,y:h.y}];}
     if(type==='fort')gameData.forts=[{id:'Fort',owner:2,q:0,r:0,x:h.x,y:h.y}];
     if(type==='site')gameData.constructionJobs=[{mode:'fort',owner:2,q:0,r:0,x:h.x,y:h.y}];
-    gameData._territoryCleanupKeys.add('0,0');wodCleanupTinyTerritoryPockets(100);rows.push({type,owner:h.owner,pair:gameData.hexes['1,0'].owner});
+    gameData._territoryCleanupKeys.add('0,0');wodCleanupTinyTerritoryPockets(100);
+    if(type==='water'){gameData._waterPoliticsWork=null;gameData._waterPoliticsDirty=true;for(let i=0;i<1000&&(gameData._waterPoliticsWork||gameData._waterPoliticsDirty);i++)wodUpdateWaterPolitics();}
+    rows.push({type,owner:h.owner,pair:gameData.hexes['1,0'].owner});
    }
    for(const mode of ['queued','guest','pregame']) {
     WOD.makeBlankMap(20);gameState='PLAYING';gameData._campaignRun=null;gameData.entities=[];gameData.cities=[];gameData.forts=[];gameData.bridges=[];gameData.constructionJobs=[];gameData.alliances=[];gameData._territoryCleanupKeys=new Set();

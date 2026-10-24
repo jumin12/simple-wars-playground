@@ -12622,6 +12622,17 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-23T22:15:00-04:00',
+                title: 'Smooth borders, coastal ownership and standing town guards',
+                items: [
+                    'Frontlines now smooth across several tile edges while keeping real junctions and bounded curves. The exact boundary graph remains intact, without stitching unrelated ends together.',
+                    'Empty coastal cutoffs transfer across shoreline and mountain remnants. Lakes, rivers and seas inherit political ownership from their nearest current land banks, removing stale enemy-water rings as armies advance. Water keeps its naval terrain and marine-only supply behavior.',
+                    'The menu battlefield and terrain buffers stay cached during matches. While final stats are open, the menu world is prepared incrementally for a quick return without regenerating or copying its terrain. Final battle statistics remain unchanged.',
+                    'AI reserves one infantry for each town before forming assault groups, refills lost garrisons, recruits for vacant towns before investing in buildings, and commits slightly more remaining infantry to the front defense. Town guards hold their town centers and are protected from routine relief assignments.',
+                    'AI infantry start in their towns, and columns no longer stop early at narrow pass exits when nearby friendlies trigger group-arrival rules.'
+                ]
+            },
+            {
                 at: '2026-10-23T21:45:00-04:00',
                 title: 'Visible groups, narrow passes and clean frontlines',
                 items: [
@@ -13215,6 +13226,8 @@
         let menuBattleLive = null;
         let menuBattleHexListRef = null;
         let menuTerrainSnap = null;
+        let menuBattlePrepared = null;
+        let menuPrewarmGeneration = 0;
         let menuDemoAnimId = 0;
         let menuDemoLastTime = 0;
         let menuDemoPausedByVisibility = false;
@@ -26317,6 +26330,7 @@
                 teamTableSection;
 
             overlay.classList.remove('hidden');
+            wodPrewarmMenuBattleForSummary();
         }
 
         function triggerCampaignVictory(message, countAsBattleWon) {
@@ -31869,7 +31883,6 @@
 
         function wodEncirclementApplyPocket(region, owner, w) {
             if(!region || !region.length || !w) return;
-            if(region.every(hex=>hex.type==='mountain')) return;
             let regionKeys = new Set();
             for(let ri = 0, rl = region.length; ri < rl; ri++) regionKeys.add(getHexKey(region[ri]));
             let hasOwnerCity = wodRegionHasOwnerCity(regionKeys, owner);
@@ -32470,6 +32483,12 @@
                     if(!h) h = candidates.find(h => used.every(p => (p.x-h.x)**2 + (p.y-h.y)**2 >= spacing * 0.25));
                     // Never put armor on a border, even on an unusually narrow authored map.
                     if(!h) h = candidates[i % Math.max(1, candidates.length)];
+                    // Start one ordinary infantry in each AI town before distributing
+                    // the remaining rear army. Frontage and armor quotas stay intact.
+                    if(!front && u.type==='light' && i-frontCount<towns.length && owner>1 && !wodMpIsHumanOwner(owner)) {
+                        const townHex=town&&gameData.hexes[`${town.q},${town.r}`];
+                        if(townHex&&pool.includes(townHex))h=townHex;
+                    }
                     if(!h) { gameData.entities = gameData.entities.filter(e => e !== u); continue; }
                     u.x = h.x; u.y = h.y; u._drawX = h.x; u._drawY = h.y;
                     u.target = null; u.path = null; u.orderTarget = null;
@@ -33503,7 +33522,7 @@
                                 !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
                             );
                             let landAhead = wodUnitHasLandWaypointAhead(unit);
-                            if(!onDeck && !landAhead) {
+                            if(!onDeck && !landAhead && !wodUnitNearNarrowLandLane(unit)) {
                                 let hrA = gameData.hexRadius || 20;
                                 let adx = unit.orderTarget.x - unit.x, ady = unit.orderTarget.y - unit.y;
                                 let arriveR = hrA * 1.35 * 5.5;
@@ -33536,10 +33555,10 @@
                             wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
                             !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
                         );
-                        if(!onDeck) {
+                        if(!onDeck && !wodUnitNearNarrowLandLane(unit)) {
                             let hrA = gameData.hexRadius || 20;
                             let adx = ftA.x - unit.x, ady = ftA.y - unit.y;
-                            let arriveR = hrA * 1.35 * 5;
+                            let arriveR = wodAiGetUnitTaskJob(unit)?.city ? hrA*.6 : hrA * 1.35 * 5;
                             if(adx * adx + ady * ady < arriveR * arriveR) {
                                 wodUnitArrivedAtTarget(unit);
                                 return;
@@ -33707,8 +33726,8 @@
             for(const d of hexDirections)keys.add(`${hex.q+d.q},${hex.r+d.r}`);
         }
 
-        /** Absorb only empty 1–2 cell components completely surrounded by one hostile faction.
-         * Mountains can leave political crumbs even though armies cannot step onto them. */
+        /** Absorb empty inland crumbs and small coastal cutoffs. The sea neither
+         * connects a land pocket to its old owner nor supplies it with a town. */
         function wodCleanupTinyTerritoryPockets(maxChecks=96) {
             if(gameData.mp?.enabled&&!gameData.mp.isHost)return;
             const keys=gameData._territoryCleanupKeys;if(!keys?.size)return;
@@ -33728,24 +33747,63 @@
                 const key=keys.values().next().value;keys.delete(key);
                 if(checked.has(key))continue;
                 const first=gameData.hexes[key];if(!first||first.owner<=0)continue;
+                // Water is a political extension of its banks, never a land supply route.
+                if(isWaterHex(first))continue;
                 const owner=first.owner,component=[first],seen=new Set([key]);
-                let captor=0,valid=true;
+                let captor=0,valid=true,coastal=false;
                 for(let i=0;i<component.length&&valid;i++) {
                     const h=component[i],k=getHexKey(h);checked.add(k);
                     if(protectedKeys.has(k)){valid=false;break;}
                     for(const d of cardinalHexDirections) {
                         const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
-                        if(!n||n.owner<=0){valid=false;break;}
+                        if(!n||isWaterHex(n)){coastal=true;continue;}
+                        if(n.owner<=0){valid=false;break;}
                         if(n.owner===owner) {
-                            if(!seen.has(getHexKey(n))){seen.add(getHexKey(n));component.push(n);if(component.length>2){valid=false;break;}}
+                            if(!seen.has(getHexKey(n))){seen.add(getHexKey(n));component.push(n);if(component.length>32){valid=false;break;}}
                         } else {
                             if(!wodIsHostileOwner(n.owner,owner)||captor&&captor!==n.owner){valid=false;break;}
                             captor=n.owner;
                         }
                     }
                 }
-                if(!valid||!captor)continue;
+                if(!valid||!captor||component.length>2&&!coastal)continue;
                 for(const h of component)setHexOwner(h,captor);
+            }
+        }
+
+        // Repaint lakes and seas from the nearest current land bank. Chunk the flood
+        // across frames; finish one generation before starting another during a push.
+        function wodUpdateWaterPolitics() {
+            if(gameData.mp?.enabled&&!gameData.mp.isHost)return;
+            let w=gameData._waterPoliticsWork;
+            if(!w) {
+                if(!gameData._waterPoliticsDirty)return;
+                gameData._waterPoliticsDirty=false;
+                w=gameData._waterPoliticsWork={list:gameData.hexList,scan:0,queue:[],head:0,seen:new Set(),phase:'seed'};
+            }
+            if(w.list!==gameData.hexList){gameData._waterPoliticsWork=null;return;}
+            const start=performance.now();let steps=0;
+            while(performance.now()-start<1.5&&steps++<1200) {
+                if(w.phase==='seed') {
+                    if(w.scan>=w.list.length){w.phase='flood';continue;}
+                    const h=w.list[w.scan++];if(!h.owner||isWaterHex(h))continue;
+                    for(const d of cardinalHexDirections) {
+                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                        if(n&&isWaterHex(n)&&!w.seen.has(getHexKey(n))) {
+                            w.seen.add(getHexKey(n));w.queue.push({hex:n,owner:h.owner});
+                        }
+                    }
+                } else {
+                    if(w.head>=w.queue.length){gameData._waterPoliticsWork=null;return;}
+                    const {hex,owner}=w.queue[w.head++];
+                    setHexOwner(hex,owner);
+                    for(const d of cardinalHexDirections) {
+                        const n=gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`];
+                        if(n&&isWaterHex(n)&&!w.seen.has(getHexKey(n))) {
+                            w.seen.add(getHexKey(n));w.queue.push({hex:n,owner});
+                        }
+                    }
+                }
             }
         }
 
@@ -33919,18 +33977,20 @@
         function setHexOwner(hex, owner) {
             if (hex.owner === owner) return;
             let prev = hex.owner;
-            if(gameData._landIncomeCache && !gameData._landIncomeCacheDirty &&
-                typeof wodHexCountsTowardLandPoliticsBalance === 'function' &&
+            if(!isWaterHex(hex) && gameData._landIncomeCache && !gameData._landIncomeCacheDirty &&
                 wodHexCountsTowardLandPoliticsBalance(hex)) {
                 if(prev > 0) gameData._landIncomeCache[prev] = (gameData._landIncomeCache[prev] || 0) - 1;
                 if(owner > 0) gameData._landIncomeCache[owner] = (gameData._landIncomeCache[owner] || 0) + 1;
-            } else {
+            } else if(!isWaterHex(hex)) {
                 gameData._landIncomeCacheDirty = true;
             }
             hex.owner = owner;
-            if(gameState==='PLAYING'&&(gameData._matchReadyForEndChecks||gameData._campaignRun?.battleLive)&&
+            if(!isWaterHex(hex)&&gameState==='PLAYING'&&(gameData._matchReadyForEndChecks||gameData._campaignRun?.battleLive)&&
                 (!gameData.mp?.enabled||gameData.mp.isHost))wodQueueTerritoryRemnantCheck(hex);
-            if(!isWaterHex(hex))gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;
+            if(!isWaterHex(hex)) {
+                gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;
+                if(cardinalHexDirections.some(d=>isWaterHex(gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`])))gameData._waterPoliticsDirty=true;
+            }
             hex.renderColor = hex.baseColor;
             if (batchHexOwner) batchHexOwnerDirty = true;
             else wodMarkTerrainPoliticalDirty();
@@ -37458,6 +37518,8 @@
         function wodPrepareForNewMatch(opts) {
             gameData.controlGroups = {};
             gameData._territoryCleanupKeys = new Set();
+            gameData._waterPoliticsWork = null;
+            gameData._waterPoliticsDirty = true;
             gameData.constructionJobs = [];
             window.wodBattleAudio?.reset();
             gameData._aiEconomyClock = 0;
@@ -37469,7 +37531,8 @@
             gameData.aiTaskForces = {};
             wodRefreshCommandHud(true);
             opts = opts || {};
-            wodClearMenuBattleMemory();
+            menuBattlePrepared = null;
+            menuPrewarmGeneration++;
             gameData.menuAttractMode = false;
             menuDemoPausedByVisibility = false;
             if(menuDemoAnimId) {
@@ -37565,11 +37628,15 @@
 
         function wodRestoreMenuTerrain() {
             if(!menuTerrainSnap || !menuTerrainSnap.base || !menuTerrainSnap.composite) return false;
-            wodBlitCanvas(menuTerrainSnap.base, terrainBaseCanvas);
-            wodBlitCanvas(menuTerrainSnap.composite, terrainCanvas);
-            if(menuTerrainSnap.overlay && territoryOverlayCanvas) wodBlitCanvas(menuTerrainSnap.overlay, territoryOverlayCanvas);
-            if(menuTerrainSnap.borders && wodBorderLayerCanvas) wodBlitCanvas(menuTerrainSnap.borders, wodBorderLayerCanvas);
-            terrainBounds = menuTerrainSnap.bounds;
+            // Adopt preloaded buffers instead of copying/rebaking several large
+            // terrain textures in the frame where the summary closes.
+            terrainBaseCanvas=menuTerrainSnap.base;terrainBaseCtx=terrainBaseCanvas.getContext('2d');
+            terrainCanvas=menuTerrainSnap.composite;terrainCtx=terrainCanvas.getContext('2d');
+            territoryOverlayCanvas=menuTerrainSnap.overlay;
+            wodBorderLayerCanvas=menuTerrainSnap.borders;
+            wodBorderLayerCtx=wodBorderLayerCanvas?.getContext('2d')||null;
+            terrainBounds = {...menuTerrainSnap.bounds};
+            menuTerrainSnap=null;
             wodTerrainNeedFullRebuild = false;
             wodTerrainPoliticalDirty = false;
             terrainNeedsUpdate = false;
@@ -37578,7 +37645,28 @@
             return true;
         }
 
+        function wodPrewarmMenuBattleForSummary() {
+            const source=menuBattleLive,token=++menuPrewarmGeneration;
+            if(!source||!menuTerrainSnap)return;
+            const prepared={...source,hexList:[],hexes:{}};let i=0;
+            const schedule=fn=>window.requestIdleCallback?requestIdleCallback(fn,{timeout:150}):setTimeout(fn,16);
+            schedule(function prepare() {
+                if(token!==menuPrewarmGeneration||!gameData._campaignEnded)return;
+                const start=performance.now();
+                while(i<source.hexList.length&&performance.now()-start<2) {
+                    const h={...source.hexList[i++]};prepared.hexList.push(h);prepared.hexes[`${h.q},${h.r}`]=h;
+                }
+                if(i<source.hexList.length){schedule(prepare);return;}
+                prepared.cities=source.cities.map(c=>({...c}));
+                prepared.roads=source.roads.map(r=>({...r}));
+                prepared.entities=source.entities.map(e=>({...e,target:e.target?{...e.target}:null,path:e.path?.map(p=>({...p}))}));
+                menuBattlePrepared=prepared;
+            });
+        }
+
         function wodClearMenuBattleMemory() {
+            menuPrewarmGeneration++;
+            menuBattlePrepared = null;
             menuBattleLive = null;
             menuBattleHexListRef = null;
             menuTerrainSnap = null;
@@ -37587,12 +37675,17 @@
 
         function applyMenuBattleState(s) {
             if(!s || !s.hexList || !s.hexList.length) return false;
-            gameData.hexes = {};
-            gameData.hexList = s.hexList.map(h => Object.assign({}, h));
-            for(let h of gameData.hexList) gameData.hexes[`${h.q},${h.r}`] = h;
-            gameData.cities = s.cities.map(c => Object.assign({}, c));
-            gameData.roads = s.roads.map(r => Object.assign({}, r));
-            gameData.entities = s.entities.map(e => Object.assign({}, e, e.target ? { target: Object.assign({}, e.target) } : {}));
+            const prepared=menuBattlePrepared;
+            menuPrewarmGeneration++;
+            menuBattlePrepared=null;
+            gameData.hexes = prepared?.hexes || {};
+            gameData.hexList = prepared?.hexList || s.hexList.map(h => Object.assign({}, h));
+            if(!prepared)for(let h of gameData.hexList) gameData.hexes[`${h.q},${h.r}`] = h;
+            gameData.cities = prepared?.cities || s.cities.map(c => Object.assign({}, c));
+            gameData.roads = prepared?.roads || s.roads.map(r => Object.assign({}, r));
+            gameData.entities = prepared?.entities || s.entities.map(e => Object.assign({}, e, e.target ? { target: Object.assign({}, e.target) } : {}));
+            gameData._waterPoliticsWork=null;gameData._waterPoliticsDirty=true;
+            gameData._territoryCleanupKeys=new Set();
             gameData.constructionJobs = JSON.parse(JSON.stringify(s.constructionJobs || []));
             gameData.forts = (s.forts || []).map(f => Object.assign({}, f));
             gameData.bridges = (s.bridges || []).map(b => wodNormalizeBridgeRecord(b)).filter(Boolean);
@@ -38893,8 +38986,7 @@
             if(job.kind === 'defend' && (job.city || job.fort)) {
                 let t = job.city || job.fort;
                 if(!t || t.owner !== owner) return false;
-                let hr = gameData.hexRadius || 20;
-                return countNearbyUnits(owner, t.x, t.y, Math.max(320, hr * 14), true) > 0;
+                return true; // Standing garrisons remain assigned during quiet periods.
             }
             if(job.kind === 'encircle' || (job.kind === 'raid' && job.strikeHex) || (job.kind === 'strike' && job.strikeHex)) {
                 let h = job.strikeHex || job.attackHex || job.holdHex;
@@ -39120,7 +39212,7 @@
                 for(const u of candidates) {
                     if(want<=0||budget<=0)break;
                     // Keep the sole fort garrison in place. Its line and relief troops can reinforce it.
-                    if(base(u)?.fort)continue;
+                    if(base(u)?.fort||base(u)?.city)continue;
                     add(job,u);want--;budget--;
                 }
                 if(job.members.length)jobs.push(job);
@@ -39141,6 +39233,27 @@
             return moved;
         }
 
+        function wodAiMaintainTownGarrisons(owner,plan,ready) {
+            for(const city of gameData.cities.filter(c=>c.owner===owner)) {
+                let job=plan.jobs.find(j=>j.kind==='defend'&&j.city?.id===city.id);
+                if(job&&ready.some(u=>u.type==='light'&&plan.unitJob[u.uid]===job.id))continue;
+                const candidates=ready.filter(u=>u.type==='light'&&!plan.jobs.some(j=>j.id===plan.unitJob[u.uid]&&j.kind==='defend'));
+                candidates.sort((a,b)=>wodAiDist2(a.x,a.y,city.x,city.y)-wodAiDist2(b.x,b.y,city.x,city.y));
+                const u=candidates[0];if(!u)continue;
+                if(!job){job={id:owner+'-town-'+city.id,kind:'defend',role:'defend',city,quota:1,members:[]};plan.jobs.push(job);}
+                const old=plan.jobs.find(j=>j.id===plan.unitJob[u.uid]);
+                if(old){old.members=old.members.filter(id=>id!==u.uid);old.quota=old.members.length;}
+                for(const uid of job.members) {
+                    delete plan.unitJob[uid];
+                    const previous=gameData.entities.find(member=>member.uid===uid);
+                    if(previous){previous.aiTfJobId=null;previous.aiTfKind=null;previous.aiTfRole=null;}
+                }
+                job.members=[u.uid];job.quota=1;plan.unitJob[u.uid]=job.id;
+                u.aiTfJobId=job.id;u.aiTfKind='defend';u.aiTfRole='defend';u.aiOrderUntil=0;u.aiHoldUntil=0;
+                if(gameData._aiDefenseByOwner)delete gameData._aiDefenseByOwner[owner];
+            }
+        }
+
         function wodAiEnsureTaskForcePlan(owner, units) {
             if(!gameData.aiTaskForces)gameData.aiTaskForces={};
             const ready=units.filter(u=>u&&u.hp>u.maxHp*.34&&!u.moraleBroken&&!u.retreating&&u.type!=='convoy');
@@ -39154,6 +39267,7 @@
                 wodIsHostileOwner((j.objectiveCity||j.operation?.objectiveCity)?.owner,owner)&&
                 ready.filter(u=>prev.unitJob[u.uid]===j.id).length>=Math.max(1,Math.ceil(j.quota*.5)));
             if(prev&&prev.assetSignature===assetSignature&&(now<prev.expireAt||activeMission)) {
+                wodAiMaintainTownGarrisons(owner,prev,ready);
                 const newcomers=ready.filter(u=>!prev.unitJob[u.uid]);
                 let compatible=true;
                 for(const u of newcomers) {
@@ -39187,14 +39301,15 @@
             };
             const infantry=ready.filter(u=>!['heavy','marine','ship'].includes(u.type));
             const attacking=u=>['main','armor','raid','marine'].includes(prev?.jobs.find(j=>j.id===prev.unitJob[u.uid])?.kind);
-            const guards=assets.length?Math.min(Math.max(0,infantry.length-3),Math.max(1,Math.round(infantry.length*.16),assets.filter(a=>!gameData.cities.includes(a)).length)):0;
-            const guardAssets=assets.slice().sort((a,b)=>(!gameData.cities.includes(b)?1:0)-(!gameData.cities.includes(a)?1:0)||countNearbyUnits(owner,b.x,b.y,320,true)-countNearbyUnits(owner,a.x,a.y,320,true));
-            for(let i=0;i<guards;i++) {
-                const asset=guardAssets[i%guardAssets.length];
+            const towns=assets.filter(a=>gameData.cities.includes(a));
+            const guardAssets=[...towns,...assets.filter(a=>!gameData.cities.includes(a))];
+            for(const asset of guardAssets) {
+                if(!infantry.length)break;
+                // A town's last infantry is never budgeted away into an attack group.
                 infantry.sort((a,b)=>(attacking(a)?1e9:0)+wodAiDist2(a.x,a.y,asset.x,asset.y)-(attacking(b)?1e9:0)-wodAiDist2(b.x,b.y,asset.x,asset.y));
                 add('defend',infantry.splice(0,1),null,asset);
             }
-            const lineN=infantry.length>4?Math.max(1,Math.round(infantry.length*.2)):0;
+            const lineN=infantry.length>4?Math.max(1,Math.round(infantry.length*.24)):0;
             for(let i=0;i<lineN;i+=3)add('hold',infantry.splice(0,Math.min(3,lineN-i)),sectors[Math.floor(i/3)%Math.max(1,sectors.length)]);
             for(const tank of ready.filter(u=>u.type==='heavy')) {
                 infantry.sort((a,b)=>wodAiDist2(a.x,a.y,tank.x,tank.y)-wodAiDist2(b.x,b.y,tank.x,tank.y));
@@ -39370,11 +39485,12 @@
 
             if(job.kind === 'defend' && (job.city || job.fort)) {
                 let t = job.city || job.fort;
-                let stand = wodAiDefendStandHex(unit.owner, t, unit) || gameData.hexes[`${t.q},${t.r}`];
+                let stand = job.city ? gameData.hexes[`${t.q},${t.r}`] : wodAiDefendStandHex(unit.owner,t,unit);
+                stand = stand || gameData.hexes[`${t.q},${t.r}`];
                 if(!stand) stand = { x: t.x, y: t.y, q: t.q, r: t.r };
                 if(job.fort) unit.aiFortGuard = job.fort.id;
                 let near = wodAiDist2(unit.x, unit.y, stand.x, stand.y) < Math.pow(hr * 2.4, 2);
-                let moved = wodAiMoveUnitTowardHex(unit, stand, near, near ? 0.28 : 0.45);
+                let moved = wodAiMoveUnitTowardHex(unit, stand, near, job.city ? 0 : near ? 0.28 : 0.45);
                 if(moved) wodAiStampOrder(unit, near, stand);
                 return moved;
             }
@@ -39974,6 +40090,11 @@
             let free = cities.filter(c => !wodCityProductionJob(c) && !isCitySiegeBlockedForProduction(c));
             let focus = gameData.aiFrontFocus?.[owner];
             if(focus) free.sort((a,b) => wodAiDist2(a.x,a.y,focus.x,focus.y)-wodAiDist2(b.x,b.y,focus.x,focus.y));
+            const townPlan=gameData.aiTaskForces?.[owner];
+            const guarded=c=>townPlan?.jobs.some(j=>j.city?.id===c.id&&army.some(u=>u.type==='light'&&townPlan.unitJob[u.uid]===j.id));
+            const missingGuards=cities.filter(c=>!guarded(c));
+            free.sort((a,b)=>Number(!guarded(b))-Number(!guarded(a)));
+            const needGuards=missingGuards.length>recruits.filter(j=>j.mode==='light').length;
             let count = type => army.filter(u => u.type === type).length + recruits.filter(j => j.mode === type).length;
             let cash = () => gameData.aiMoneyByOwner[ownerKey] || 0;
             let manpower = () => gameData.aiManpowerByOwner[ownerKey] || 0;
@@ -39986,7 +40107,7 @@
             let total = army.length + recruits.length;
             let limit = Math.min(gameData.menuAttractMode ? 60 : 100, Math.max(12,cities.length*10));
             // Keep a recruitment town free when investing; one-town owners invest after their current recruit arrives.
-            let canInvest = army.length >= 10 && clock-plan.lastBuilding >= 65 &&
+            let canInvest = !needGuards && army.length >= 10 && clock-plan.lastBuilding >= 65 &&
                 !pending.some(j => !['light','marine','heavy','ship'].includes(j.mode)) &&
                 free.length >= Math.min(2,cities.length) && cash() >= WOD_PRICE_FACTORY + WOD_PRICE_LIGHT*3;
             if(canInvest) {
@@ -40006,7 +40127,7 @@
             for(let city of free) {
                 if(bought >= 2 || total >= limit) break;
                 let types = ['light'];
-                if(army.length >= 10) {
+                if(army.length >= 10 && !needGuards) {
                     if(seaFront && (enemyShips || count('marine')>=2) && count('ship') < Math.max(1,Math.floor(total/10))) types.unshift('ship');
                     if(count('heavy') < Math.max(1,Math.floor(total/7)) && cash() >= WOD_PRICE_HEAVY+WOD_PRICE_LIGHT*2) types.unshift('heavy');
                     if(seaFront && count('marine') < Math.max(1,Math.floor(total/5))) types.unshift('marine');
@@ -40021,7 +40142,7 @@
                 }
             }
             // Fortify a threatened corridor only after funding the army; never stack auras.
-            if(army.length >= 10 && clock-plan.lastFort >= 90 && clock-plan.lastBuilding >= 30 &&
+            if(!needGuards && army.length >= 10 && clock-plan.lastFort >= 90 && clock-plan.lastBuilding >= 30 &&
                 cash() >= WOD_PRICE_FORT+WOD_PRICE_LIGHT*4 && manpower() >= getUnitCost('light').manpower && income-upkeep > 4 &&
                 wodAiTryFortForOwner(owner,ownerKey)) { plan.lastFort=clock; plan.lastBuilding=clock; }
             if(army.length >= 12 && !bought && clock-plan.lastBuilding >= 90 &&
@@ -40754,6 +40875,7 @@
 
             wodApplyTerritoryClaimBatch();
             wodCleanupTinyTerritoryPockets();
+            wodUpdateWaterPolitics();
             gameData._cityCapTimer = (gameData._cityCapTimer || 0) + dt;
             if(gameData._cityCapTimer >= WOD_CITY_CAPTURE_EVAL_INTERVAL) {
                 gameData._cityCapTimer = 0;
@@ -42521,6 +42643,22 @@
             return components;
         }
 
+        function wodSmoothDiplomacyBorderPoints(points,spacing,closed) {
+            if(points.length<8)return points;
+            let smooth=points;
+            for(let pass=0;pass<2;pass++)smooth=smooth.map((p,i)=>{
+                if(!closed&&(i===0||i===points.length-1))return points[i];
+                let x=0,y=0;
+                for(let k=-2;k<=2;k++) {
+                    const j=closed?(i+k+points.length)%points.length:Math.max(0,Math.min(points.length-1,i+k));
+                    const weight=[1,4,6,4,1][k+2];x+=smooth[j].x*weight/16;y+=smooth[j].y*weight/16;
+                }
+                const origin=points[i],dx=x-origin.x,dy=y-origin.y,d=Math.hypot(dx,dy),t=d>spacing*.42?spacing*.42/d:1;
+                return {x:origin.x+dx*t,y:origin.y+dy*t};
+            });
+            return smooth;
+        }
+
         function drawPaintStroke(ctx, points, spacing, opts) {
             if(!points || points.length === 0) return;
             let closedLoop = opts && opts.closedLoop;
@@ -42535,8 +42673,10 @@
                 return;
             }
 
-            // Rounded lattice corners stay inside their original adjacent segments.
+            // Broad, bounded smoothing removes the tile staircase. Exact endpoints
+            // retain real junctions; no proximity bridges or invented loops are added.
             if(opts && opts.hybridBorder) {
+                points=wodSmoothDiplomacyBorderPoints(points,spacing,closedLoop);
                 ctx.lineJoin='round';ctx.beginPath();
                 const count=points.length, radius=spacing*.44;
                 const toward=(p,q)=>{const d=Math.hypot(q.x-p.x,q.y-p.y)||1,t=Math.min(.45,radius/d);return {x:p.x+(q.x-p.x)*t,y:p.y+(q.y-p.y)*t};};
