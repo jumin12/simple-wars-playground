@@ -12622,6 +12622,16 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-23T21:45:00-04:00',
+                title: 'Visible groups, narrow passes and clean frontlines',
+                items: [
+                    'Group controls stay above the production UI when structures or units are expanded. Their position follows dock animation, resizing and the scaled mobile viewport.',
+                    'Movement keeps terrain-critical turns and recenters units nudged against pass walls. Friendly regiments file closer through one-cell passages and advance shared corner waypoints when the next segment is clear; hostile units and solid terrain remain blocking.',
+                    'Empty one- and two-cell enemy remnants are absorbed when fully surrounded by one hostile faction, including inaccessible mountain cells. Towns, troops, forts, construction sites, larger pockets and allied territory are protected. Cleanup runs only during live authoritative gameplay.',
+                    'Frontlines now trace the exact shared edges of territory. Nearby unrelated ends are never stitched together, junctions meet at real corners, and bounded corner rounding closes loops without spurs, crossings or teardrop glitches. Setup and lobby previews share the same border geometry.'
+                ]
+            },
+            {
                 at: '2026-10-23T17:01:00-04:00',
                 title: 'Captured towns supply surrounded armies',
                 items: [
@@ -14392,6 +14402,7 @@
             for(let j = 0, jl = idx.length; j < jl; j++) {
                 let u = gameData.entities[idx[j]];
                 if(!u || u.hp <= 0 || u.uid !== uids[j]) continue;
+                if(wodUnitNearNarrowLandLane(u))continue;
                 // Apply the worker's separation as a RELATIVE push from the position we sent it,
                 // not an absolute snap — units kept simulating while the worker ran, and snapping
                 // back to a stale absolute position caused a visible pop/stutter during movement.
@@ -14483,7 +14494,8 @@
                     let dx = u2.x - u1.x;
                     let dy = u2.y - u1.y;
                     let dist = Math.sqrt(dx * dx + dy * dy);
-                    let minDist = (u1.radius || 10) + (u2.radius || 10) + 6;
+                    const narrow=wodIsFriendlyOwner(u1.owner,u2.owner)&&(wodUnitNearNarrowLandLane(u1)||wodUnitNearNarrowLandLane(u2));
+                    let minDist = narrow?Math.min(((u1.radius||10)+(u2.radius||10))*.48,(gameData.hexRadius||20)*1.35*.5):(u1.radius || 10) + (u2.radius || 10) + 6;
                     if(dist < minDist && dist > 0) {
                         let overlap = minDist - dist;
                         let pushStrength = u1.owner === u2.owner ? 0.48 : 0.52;
@@ -16762,12 +16774,20 @@
                     out[out.length - 1] = { x: exactEnd.x, y: exactEnd.y };
                 }
             }
+            // A* starts at a tile center. A follower pushed toward its edge must first
+            // recenter if its actual position cannot see the first turn around the wall.
+            const start=hexPath[0];
+            if(out.length&&unit&&start&&!isBridgeHex(start)&&
+                getHexKey(getNearestHexToPoint(unit.x,unit.y))===getHexKey(start)&&
+                !wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,out[0].x,out[0].y)&&
+                wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,start.x,start.y))
+                out.unshift({x:start.x,y:start.y});
             // Keep dense bridge deck points for movement — arrow display cleans separately.
             return out;
         }
 
         /** Drop reverse kinks from a world polyline (approach→deck stitch / join overshoot). */
-        function wodStripReversePathKinks(pts) {
+        function wodStripReversePathKinks(pts, unit) {
             if(!pts || pts.length < 3) return pts || [];
             let hr = gameData.hexRadius || 20;
             let min2 = Math.pow(hr * 0.28, 2);
@@ -16778,7 +16798,7 @@
                 let q = out[out.length - 1];
                 let dx = p.x - q.x,
                     dy = p.y - q.y;
-                if(dx * dx + dy * dy < min2) continue;
+                if(dx * dx + dy * dy < min2 && (!unit||wodSegmentClearsTerrainForUnit(unit,q.x,q.y,p.x,p.y))) continue;
                 if(out.length >= 2) {
                     let a = out[out.length - 2];
                     let abx = q.x - a.x,
@@ -16789,12 +16809,12 @@
                     let bp2 = bpx * bpx + bpy * bpy;
                     if(ab2 > 1 && bp2 > 1) {
                         let dot = (abx * bpx + aby * bpy) / Math.sqrt(ab2 * bp2);
-                        if(dot < -0.2) {
+                        if(dot < -0.2 && (!unit||wodSegmentClearsTerrainForUnit(unit,a.x,a.y,p.x,p.y))) {
                             out.pop();
                             q = out[out.length - 1];
                             dx = p.x - q.x;
                             dy = p.y - q.y;
-                            if(dx * dx + dy * dy < min2) continue;
+                            if(dx * dx + dy * dy < min2 && (!unit||wodSegmentClearsTerrainForUnit(unit,q.x,q.y,p.x,p.y))) continue;
                         }
                     }
                 }
@@ -27700,7 +27720,7 @@
             let len = Math.sqrt(dx * dx + dy * dy);
             if(len < 0.5) return true;
             let hr = gameData.hexRadius || 20;
-            let n = Math.max(3, Math.min(30, Math.ceil(len / (hr * 0.45))));
+            let n = Math.max(3, Math.min(2048, Math.ceil(len / (hr * 0.4))));
             for(let s = 1; s <= n; s++) {
                 let t = s / n;
                 if(!wodSamplePosOnWalkableTerrain(unit, ax + dx * t, ay + dy * t)) return false;
@@ -27980,6 +28000,23 @@
             return {x: ox + (nx - ox) * t, y: oy + (ny - oy) * t};
         }
 
+        /** Regiments file closer together in a one-cell pass; hostile bodies remain solid. */
+        function wodUnitNearNarrowLandLane(unit) {
+            if(!unit||['ship','convoy'].includes(unit.type)||unit._wodOrderIntoWater)return false;
+            const h=getNearestHexToPoint(unit.x,unit.y);if(!h)return false;
+            const key=getHexKey(h),version=gameData._wodPfVer||0;
+            if(unit._wodLaneMap===gameData.hexes&&unit._wodLaneKey===key&&unit._wodLaneVersion===version)return unit._wodLaneNarrow;
+            const pass=p=>{
+                if(!p||isWaterHex(p)||p.type==='mountain')return false;
+                let open=0,closed=0;
+                for(const d of cardinalHexDirections){const n=gameData.hexes[`${p.q+d.q},${p.r+d.r}`];if(n&&n.type!=='mountain'&&(!isWaterHex(n)||isBridgeHex(n)))open++;else closed++;}
+                return open>=1&&closed>=2;
+            };
+            const narrow=pass(h)||cardinalHexDirections.some(d=>pass(gameData.hexes[`${h.q+d.q},${h.r+d.r}`]));
+            unit._wodLaneMap=gameData.hexes;unit._wodLaneKey=key;unit._wodLaneVersion=version;unit._wodLaneNarrow=narrow;
+            return narrow;
+        }
+
         function isWorldPositionBlockedByUnits(mover, wx, wy, gapExtra = 5) {
             let mr = mover.radius || 10;
             let found = false;
@@ -27993,7 +28030,12 @@
                 let dx = u.x - wx;
                 let dy = u.y - wy;
                 let dist2 = dx * dx + dy * dy;
-                // Hard body overlap is always blocked for player and AI alike.
+                if(wodIsFriendlyOwner(u.owner,mover.owner)&&(wodUnitNearNarrowLandLane(mover)||wodUnitNearNarrowLandLane(u))) {
+                    const laneGap=Math.min((mr+ur)*.48,(gameData.hexRadius||20)*1.35*.5);
+                    if(dist2<laneGap*laneGap)found=true;
+                    return;
+                }
+                // Hard body overlap is always blocked away from friendly narrow columns.
                 let hardMin = (mr + ur) * 0.92;
                 if(dist2 < hardMin * hardMin) {
                     found = true;
@@ -30126,7 +30168,7 @@
                 if(!last || Math.abs(last.x - farPt.x) > 1 || Math.abs(last.y - farPt.y) > 1)
                     corridor.push({ x: farPt.x, y: farPt.y });
             }
-            corridor = wodStripReversePathKinks(dedupeNearOrderPathPoints(corridor));
+            corridor = wodStripReversePathKinks(dedupeNearOrderPathPoints(corridor), unit);
             if(corridor.length < 2) return false;
             if(wodCorridorHasBlockedChord(unit, corridor)) return false;
             // Only snap exact-end when the destination is off the deck — otherwise
@@ -30586,7 +30628,7 @@
             corridor[0] = { x: unit.x, y: unit.y };
             if(corridor.length < 2) return false;
             wodApplyCorridorExactEnd(corridor, endPt, unit);
-            corridor = wodStripReversePathKinks(corridor);
+            corridor = wodStripReversePathKinks(corridor, unit);
             // Amphibious corridors need the into-water flag so movement clamps, stuck logic
             // and terrain-safety checks treat the water legs as legal.
             if(wodPathCrossesOpenWater(fullHex)) unit._wodOrderIntoWater = true;
@@ -33241,10 +33283,40 @@
             }
         }
 
+        /** Rejoin a legal tile-center route after separation nudges a marcher against a wall. */
+        function wodRepairTerrainMarch(unit) {
+            if(!unit.target||unit.type==='ship'||unit.type==='convoy'||unit._wodOrderIntoWater||
+                unit._wodRouteUsesBridge||(unit._wodTerrainRepairCooldown||0)>0||!wodCanSpendPf())return false;
+            const start=getNearestHexToPoint(unit.x,unit.y),goal=getNearestHexToPoint(unit.target.x,unit.target.y);
+            if(!start||!goal||isWaterHex(start)||isWaterHex(goal)||start.type==='mountain'||goal.type==='mountain')return false;
+            unit._wodTerrainRepairCooldown=.65;
+            const path=findPathAroundTerrain(unit,goal,start,true,'land',false);
+            if(path.length<2)return false;
+            const points=[{x:unit.x,y:unit.y},...path.map(h=>({x:h.x,y:h.y,pathPrepared:true}))];
+            if(wodCorridorHasBlockedChord(unit,points))return false;
+            const tail=unit.path||[];
+            unit.path=points.slice(1).concat(tail);
+            if(!wodTakeNextPathTarget(unit))return false;
+            unit._wodTerrainStallT=0;unit.blockedTimer=0;unit.stuckTimer=0;
+            invalidateUnitOrderArrowCache(unit);return true;
+        }
+
         function moveUnitTowardTarget(unit, dt) {
             if(!unit.target) return;
+            unit._wodTerrainRepairCooldown=Math.max(0,(unit._wodTerrainRepairCooldown||0)-dt);
             preparePathTarget(unit);
             if(!unit.target) return;
+            // A column need not occupy the exact same corner point to advance. Keep
+            // the turn only while it is needed to clear terrain, so friends cannot
+            // deadlock on opposite sides of a one-cell entrance waypoint.
+            if(wodUnitNearNarrowLandLane(unit)) {
+                let turns=0;
+                while(unit.target&&unit.path?.length&&turns++<4) {
+                    const next=unit.path[0],near=Math.hypot(unit.target.x-unit.x,unit.target.y-unit.y)<(gameData.hexRadius||20)*1.35*.42;
+                    if(!near||!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,next.x,next.y))break;
+                    if(!wodTakeNextPathTarget(unit))break;
+                }
+            }
             let playerMarch = wodIsPlayerMarchOrder(unit);
             let combatSlow = getCombatMovementSlowdownFactor(unit, gameData.unitSpatialGrid);
             let fortZoneSlow = wodFortEnemyMovementSlowdownMultiplier(unit);
@@ -33293,6 +33365,7 @@
             if(!terrainClamp)
                 terrainClamp = wodTrySidestepClamp(unit, unit.x, unit.y, nx, ny);
             if(!terrainClamp) {
+                if(wodRepairTerrainMarch(unit))return;
                 if(playerMarch) {
                     unit.blockedTimer = (unit.blockedTimer || 0) + dt;
                     // Wedged on a mountain hex (edge-riding let the unit slip on): every
@@ -33405,6 +33478,11 @@
                 }
                 return;
             }
+            const actualStep=Math.hypot(terrainClamp.x-unit.x,terrainClamp.y-unit.y);
+            if(actualStep<stepLeft*.2) {
+                unit._wodTerrainStallT=(unit._wodTerrainStallT||0)+dt;
+                if(unit._wodTerrainStallT>.25&&wodRepairTerrainMarch(unit))return;
+            } else unit._wodTerrainStallT=0;
             nx = terrainClamp.x;
             ny = terrainClamp.y;
             if(unit.type !== 'convoy' && isWorldPositionBlockedByUnits(unit, nx, ny)) {
@@ -33622,6 +33700,55 @@
             if(owner !== cur.owner) cur.contested = true;
         }
 
+        function wodQueueTerritoryRemnantCheck(hex) {
+            if(!hex)return;
+            const keys=gameData._territoryCleanupKeys||(gameData._territoryCleanupKeys=new Set());
+            keys.add(getHexKey(hex));
+            for(const d of hexDirections)keys.add(`${hex.q+d.q},${hex.r+d.r}`);
+        }
+
+        /** Absorb only empty 1–2 cell components completely surrounded by one hostile faction.
+         * Mountains can leave political crumbs even though armies cannot step onto them. */
+        function wodCleanupTinyTerritoryPockets(maxChecks=96) {
+            if(gameData.mp?.enabled&&!gameData.mp.isHost)return;
+            const keys=gameData._territoryCleanupKeys;if(!keys?.size)return;
+            const protectedKeys=new Set();
+            for(const c of gameData.cities) {
+                protectedKeys.add(`${c.q},${c.r}`);
+                for(const h of getCityUrbanTerrainHexes(c))protectedKeys.add(getHexKey(h));
+            }
+            for(const u of gameData.entities)if(u.hp>0&&u.type!=='convoy')protectedKeys.add(getHexKey(getNearestHexToPoint(u.x,u.y)));
+            for(const site of [...(gameData.forts||[]),...(gameData.bridges||[]),...(gameData.constructionJobs||[])]) {
+                protectedKeys.add(`${site.q},${site.r}`);
+                for(const key of site.hexKeys||[])protectedKeys.add(key);
+            }
+            const checked=new Set(), start=performance.now();let count=0;
+            while(keys.size&&count++<maxChecks) {
+                if(performance.now()-start>2)break;
+                const key=keys.values().next().value;keys.delete(key);
+                if(checked.has(key))continue;
+                const first=gameData.hexes[key];if(!first||first.owner<=0)continue;
+                const owner=first.owner,component=[first],seen=new Set([key]);
+                let captor=0,valid=true;
+                for(let i=0;i<component.length&&valid;i++) {
+                    const h=component[i],k=getHexKey(h);checked.add(k);
+                    if(protectedKeys.has(k)){valid=false;break;}
+                    for(const d of cardinalHexDirections) {
+                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                        if(!n||n.owner<=0){valid=false;break;}
+                        if(n.owner===owner) {
+                            if(!seen.has(getHexKey(n))){seen.add(getHexKey(n));component.push(n);if(component.length>2){valid=false;break;}}
+                        } else {
+                            if(!wodIsHostileOwner(n.owner,owner)||captor&&captor!==n.owner){valid=false;break;}
+                            captor=n.owner;
+                        }
+                    }
+                }
+                if(!valid||!captor)continue;
+                for(const h of component)setHexOwner(h,captor);
+            }
+        }
+
         function wodApplyTerritoryClaimBatch() {
             let batch = gameData._wodClaimBatch;
             if(!batch || batch.size === 0) {
@@ -33801,6 +33928,8 @@
                 gameData._landIncomeCacheDirty = true;
             }
             hex.owner = owner;
+            if(gameState==='PLAYING'&&(gameData._matchReadyForEndChecks||gameData._campaignRun?.battleLive)&&
+                (!gameData.mp?.enabled||gameData.mp.isHost))wodQueueTerritoryRemnantCheck(hex);
             if(!isWaterHex(hex))gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;
             hex.renderColor = hex.baseColor;
             if (batchHexOwner) batchHexOwnerDirty = true;
@@ -37328,6 +37457,7 @@
         }
         function wodPrepareForNewMatch(opts) {
             gameData.controlGroups = {};
+            gameData._territoryCleanupKeys = new Set();
             gameData.constructionJobs = [];
             window.wodBattleAudio?.reset();
             gameData._aiEconomyClock = 0;
@@ -40623,6 +40753,7 @@
             wodRebuildHexCombatOccupancy();
 
             wodApplyTerritoryClaimBatch();
+            wodCleanupTinyTerritoryPockets();
             gameData._cityCapTimer = (gameData._cityCapTimer || 0) + dt;
             if(gameData._cityCapTimer >= WOD_CITY_CAPTURE_EVAL_INTERVAL) {
                 gameData._cityCapTimer = 0;
@@ -41915,43 +42046,39 @@
          * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
-            // One unified edge graph across ALL owner pairs so 3+ faction meetings form a
-            // single continuous frontline (per-pair graphs left gaps at every triple point).
-            let midpointByEdge = new Map();
-            let cornerMap = new Map();
-            let edgeMeta = new Map();
-
-            for(let hex of hexList) {
-                if(hex.owner === 0) continue;
-                for(let dir of cardinalHexDirections) {
-                    let nHex = hexLookup[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(!nHex || nHex.owner === 0 || nHex.owner === hex.owner) continue;
-                    let ek = hexPairBorderKey(hex, nHex);
-                    if(edgeMeta.has(ek)) continue;
-                    let mx = (hex.x + nHex.x) / 2 + offsetX;
-                    let my = (hex.y + nHex.y) / 2 + offsetY;
-                    edgeMeta.set(ek, { x: mx, y: my, hex, nHex, dir });
-                    midpointByEdge.set(ek, { x: mx, y: my });
-                    registerBorderCornersForPair(cornerMap, hex, nHex, dir, ek, mx, my, spacing);
+            const nodes=new Map(), edges=[], seen=new Set();
+            const node=(q,r)=>{
+                const key=q+','+r;
+                if(!nodes.has(key))nodes.set(key,{key,x:q*spacing/2+offsetX,y:r*spacing/2+offsetY,edges:[]});
+                return nodes.get(key);
+            };
+            const directions=[{q:1,r:0},{q:0,r:1}];
+            for(const h of hexList) {
+                if(!h.owner)continue;
+                for(const d of directions) {
+                    const n=hexLookup[`${h.q+d.q},${h.r+d.r}`];
+                    if(!n||!n.owner||h.owner===n.owner)continue;
+                    const key=hexPairBorderKey(h,n);if(seen.has(key))continue;seen.add(key);
+                    const a=d.q?node(2*h.q+1,2*h.r-1):node(2*h.q-1,2*h.r+1);
+                    const b=d.q?node(2*h.q+1,2*h.r+1):node(2*h.q+1,2*h.r+1);
+                    const edge={a,b,used:false};a.edges.push(edge);b.edges.push(edge);edges.push(edge);
                 }
             }
-
-            let adj = linkBorderEdgesAroundCorners(cornerMap);
-            bridgeBorderChainGaps(adj, midpointByEdge, spacing);
-            let chains = walkBorderEdgeChains(adj, midpointByEdge);
-            // Soft filter only — multi-faction maps have many short legitimate segments.
-            chains = filterArtifactDiplomacyChains(chains, midpointByEdge, spacing);
-
-            let out = [];
-            for(let { keys, closed } of chains) {
-                let pts = keys.map(k => midpointByEdge.get(k)).filter(Boolean);
-                if(pts.length < 2) continue;
-                out.push({ closed, pts });
-            }
-            // Safety net for any remaining open tips near each other / the rim.
-            wodStitchMultiFactionBorderEnds(out, spacing);
-            wodExtendBorderEndsToMapEdge(out, hexList, offsetX, offsetY, spacing);
-            return out;
+            const chains=[];
+            const walk=(start,first)=>{
+                const pts=[{x:start.x,y:start.y}];let current=start,edge=first,closed=false;
+                while(edge&&!edge.used) {
+                    edge.used=true;const next=edge.a===current?edge.b:edge.a;
+                    if(next===start){closed=true;break;}
+                    pts.push({x:next.x,y:next.y});
+                    if(next.edges.length!==2)break; // All branches meet at this exact junction.
+                    current=next;edge=next.edges.find(e=>!e.used);
+                }
+                if(pts.length>=2)chains.push({closed,pts});
+            };
+            for(const n of nodes.values())if(n.edges.length!==2)for(const e of n.edges)if(!e.used)walk(n,e);
+            for(const e of edges)if(!e.used)walk(e.a,e);
+            return chains;
         }
 
         /** Cluster nearby open frontline ends and pull them to a shared junction (2- and 3-way). */
@@ -42408,69 +42535,27 @@
                 return;
             }
 
-            // Territory frontlines: keep walker chain order (no reorder — avoids zigzag glitches),
-            // light averaging preserves bulges better than old smoothBin, quadratic stroke brings back rounded joins.
+            // Rounded lattice corners stay inside their original adjacent segments.
             if(opts && opts.hybridBorder) {
-                let hybridBin = spacing * 0.62;
-                ctx.lineJoin = 'round';
-                if(closedLoop && points.length >= 3) {
-                    let smooth = points.length <= 9 ? points : averagePaintStrokePoints(points, hybridBin);
-                    if(smooth.length < 3) smooth = points;
-                    ctx.beginPath();
-                    ctx.moveTo(smooth[0].x, smooth[0].y);
-                    for(let i = 1; i < smooth.length; i++) {
-                        let cur = smooth[i];
-                        let next = smooth[(i + 1) % smooth.length];
-                        let midX = (cur.x + next.x) / 2;
-                        let midY = (cur.y + next.y) / 2;
-                        ctx.quadraticCurveTo(cur.x, cur.y, midX, midY);
+                ctx.lineJoin='round';ctx.beginPath();
+                const count=points.length, radius=spacing*.44;
+                const toward=(p,q)=>{const d=Math.hypot(q.x-p.x,q.y-p.y)||1,t=Math.min(.45,radius/d);return {x:p.x+(q.x-p.x)*t,y:p.y+(q.y-p.y)*t};};
+                if(closedLoop&&count>=3) {
+                    const first=toward(points[0],points[count-1]);ctx.moveTo(first.x,first.y);
+                    for(let i=0;i<count;i++) {
+                        const p=points[i],before=toward(p,points[(i+count-1)%count]),after=toward(p,points[(i+1)%count]);
+                        ctx.lineTo(before.x,before.y);ctx.quadraticCurveTo(p.x,p.y,after.x,after.y);
                     }
                     ctx.closePath();
-                    ctx.lineCap = 'round';
-                    ctx.stroke();
-                    ctx.lineCap = capRestore;
-                    return;
-                }
-                let maxDist2 = Math.pow(spacing * 1.5, 2);
-                let run = [points[0]];
-                function flushHybridOpen() {
-                    if(run.length === 1) {
-                        if(!suppressDegenerate) {
-                            ctx.beginPath();
-                            ctx.arc(run[0].x, run[0].y, 3.8, 0, Math.PI * 2);
-                            ctx.fill();
-                        }
-                        return;
+                } else {
+                    ctx.moveTo(points[0].x,points[0].y);
+                    for(let i=1;i<count-1;i++) {
+                        const p=points[i],before=toward(p,points[i-1]),after=toward(p,points[i+1]);
+                        ctx.lineTo(before.x,before.y);ctx.quadraticCurveTo(p.x,p.y,after.x,after.y);
                     }
-                    let smooth = run.length <= 4 ? run : averagePaintStrokePoints(run, hybridBin);
-                    if(smooth.length < 2) smooth = run;
-                    ctx.beginPath();
-                    ctx.moveTo(smooth[0].x, smooth[0].y);
-                    for(let i = 1; i < smooth.length - 1; i++) {
-                        let midX = (smooth[i].x + smooth[i + 1].x) / 2;
-                        let midY = (smooth[i].y + smooth[i + 1].y) / 2;
-                        ctx.quadraticCurveTo(smooth[i].x, smooth[i].y, midX, midY);
-                    }
-                    let lastPt = smooth[smooth.length - 1];
-                    ctx.lineTo(lastPt.x, lastPt.y);
-                    ctx.lineCap = (opts && opts.openLineCap) ? opts.openLineCap : 'round';
-                    ctx.stroke();
-                    ctx.lineCap = capRestore;
+                    ctx.lineTo(points[count-1].x,points[count-1].y);
                 }
-                for(let i = 1; i < points.length; i++) {
-                    let prev = points[i - 1];
-                    let p = points[i];
-                    let dx = p.x - prev.x;
-                    let dy = p.y - prev.y;
-                    if(dx * dx + dy * dy > maxDist2) {
-                        flushHybridOpen();
-                        run = [p];
-                    } else {
-                        run.push(p);
-                    }
-                }
-                flushHybridOpen();
-                return;
+                ctx.lineCap='round';ctx.stroke();ctx.lineCap=capRestore;return;
             }
 
             // Use a tighter bin for small/closed loops so we don't lose detail.
@@ -52643,19 +52728,37 @@
             wodPlayUnitSelectionSound(gameData.selection);
             syncInfoCardPanel(); wodRefreshCommandHud(true);
         }
+        function wodPositionCommandHud() {
+            const hud=document.getElementById('wodCommandHud');if(!hud||hud.hidden)return;
+            const ui=UI.inGameUI.getBoundingClientRect();
+            const scale=ui.height/(UI.inGameUI.offsetHeight||ui.height)||1;let top=ui.bottom-60;
+            for(const panel of UI.inGameUI.querySelectorAll('#wodPcProdRoot,.wod-m-sheet--units,.wod-m-sheet--build,#wodDockPack')) {
+                const r=panel.getBoundingClientRect(),style=getComputedStyle(panel);
+                if(r.width>0&&r.height>0&&style.display!=='none'&&style.visibility!=='hidden')top=Math.min(top,r.top);
+            }
+            hud.style.bottom=Math.max(10,(ui.bottom-top+10)/scale)+'px';
+            hud.style.maxHeight=Math.max(48,(top-ui.top-100)/scale)+'px';
+        }
         function wodRefreshCommandHud(force) {
             if(!UI.inGameUI || (!force && performance.now() - (wodRefreshCommandHud.last || 0) < 250)) return;
             wodRefreshCommandHud.last = performance.now();
             let hud = document.getElementById('wodCommandHud');
             if(!hud) {
                 hud = document.createElement('div'); hud.id = 'wodCommandHud';
-                hud.style.cssText = 'position:absolute;left:12px;bottom:70px;max-width:min(410px,70vw);pointer-events:auto;z-index:25;font-size:12px;color:white;background:#142333e8;border-radius:8px;padding:8px';
+                hud.style.cssText = 'position:absolute;left:12px;bottom:70px;max-width:min(410px,70vw);overflow:auto;pointer-events:auto;z-index:25;font-size:12px;color:white;background:#142333e8;border-radius:8px;padding:8px';
                 hud.innerHTML = '<div style="color:#b4c5d6">Groups · Ctrl + number to save · number to select</div><div data-group-buttons></div><div data-reserve-count></div><div data-production-countdown style="margin-top:5px"></div>';
                 hud.addEventListener('click', e => {
                     let b = e.target.closest('[data-control-group]');
                     if(b) wodSelectControlGroup(b.dataset.controlGroup);
                 });
                 UI.inGameUI.appendChild(hud);
+                if(typeof ResizeObserver!=='undefined') {
+                    const observer=new ResizeObserver(wodPositionCommandHud);
+                    UI.inGameUI.querySelectorAll('#wodPcProdRoot,.wod-m-sheet--units,.wod-m-sheet--build,#wodDockPack').forEach(p=>observer.observe(p));
+                    hud._dockObserver=observer;
+                }
+                window.addEventListener('resize',wodPositionCommandHud);
+                window.visualViewport?.addEventListener('resize',wodPositionCommandHud);
             }
             let lo = wodLocalPlayerOwner(), alive = new Set(gameData.entities.filter(u => u.hp > 0 && u.owner === lo).map(u => u.uid));
             let groups = gameData.controlGroups || (gameData.controlGroups = {});
@@ -52684,13 +52787,7 @@
                     btn.disabled = !count || !gameData._campaignRun.battleLive;
                 });
             }
-            let production = document.getElementById('wodPcProdRoot');
-            let lift = 70;
-            if(production?.offsetParent && !production.classList.contains('wod-pc-collapsed'))
-                lift = Math.max(lift, window.innerHeight - production.getBoundingClientRect().top + 10);
-            for(let mobileSheet of UI.inGameUI.querySelectorAll('.wod-m-sheet--units, .wod-m-sheet--build'))
-                if(mobileSheet.offsetParent) lift = Math.max(lift, window.innerHeight - mobileSheet.getBoundingClientRect().top + 10);
-            hud.style.bottom = lift + 'px';
+            wodPositionCommandHud();
         }
         let keys = {};
         window.addEventListener('keydown', e => {
