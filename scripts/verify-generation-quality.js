@@ -35,6 +35,32 @@ const server=http.createServer((req,res)=>{
   assert(results.fixtures.find(r=>r.kind==='clean').ok);
   assert(results.fixtures.find(r=>r.kind==='offshore').ok,'real separate islands remain valid');
   for(const kind of ['enclave','enclosed','thread','comb','unsupplied'])assert(!results.fixtures.find(r=>r.kind===kind).ok,kind+' must be rejected');
+  results.coastalFixtures=await page.evaluate(()=>{
+   const rows=[];
+   for(const kind of ['coastalSliver','smallSplitIsland','lakePocket','foldedCoast']) {
+    WOD.makeBlankMap(20);gameData.entities=[];gameData.cities=[];
+    gameData.hexList=gameData.hexList.filter(h=>Math.abs(h.q)<=20&&Math.abs(h.r)<=16);gameData.hexes=Object.fromEntries(gameData.hexList.map(h=>[getHexKey(h),h]));
+    for(const h of gameData.hexList){h.type=Math.abs(h.q)<=15&&Math.abs(h.r)<=12?'grass':'water';h.owner=h.q<0?1:2;h.cityId=null;}
+    for(const [owner,q] of [[1,-12],[2,12]])for(const r of [-7,7]){const h=gameData.hexes[`${q},${r}`];gameData.cities.push({id:`${owner}-${r}`,owner,q,r,x:h.x,y:h.y});}
+    if(kind==='coastalSliver')for(const h of gameData.hexList)if(!isWaterHex(h))h.owner=h.q>=14?2:1;
+    if(kind==='smallSplitIsland')for(const h of gameData.hexList)if(h.q>=18&&Math.abs(h.r)<=4){h.type='grass';h.owner=h.r<0?1:2;}
+    if(kind==='lakePocket')for(const h of gameData.hexList)if(Math.abs(h.q+7)<=2&&Math.abs(h.r)<=2){h.type='water';h.owner=2;}
+    if(kind==='foldedCoast')for(const h of gameData.hexList)if(!isWaterHex(h))h.owner=h.q<(h.r>=-3&&h.r<=3?10:-3)?1:2;
+    rows.push({kind,...wodValidateStartingBorders([1,2])});
+   }
+   return rows;
+  });
+  console.log('coastalFixtures',JSON.stringify(results.coastalFixtures));
+  assert(results.coastalFixtures.every(r=>!r.ok),'coastal slivers, tiny split islands, lake pockets and folded coastlines reject');
+  results.offshoreRepair=await page.evaluate(async()=>{
+   WOD.makeBlankMap(20);gameData.entities=[];gameData.cities=[];
+   for(const h of gameData.hexList){h.type=Math.abs(h.q)<=12&&Math.abs(h.r)<=12?'grass':'water';h.owner=h.q<0?1:2;h.cityId=null;}
+   const island=[];for(const h of gameData.hexList)if(h.q>=16&&h.q<=19&&Math.abs(h.r)<=3){h.type='grass';h.owner=h.r<0?1:2;island.push(h);}
+   for(const [owner,q] of [[1,-9],[2,9]])for(const r of [-7,7]){const h=gameData.hexes[`${q},${r}`];gameData.cities.push({id:`${owner}-${r}`,owner,q,r,x:h.x,y:h.y});}
+   await wodExactEqualizePoliticalLandCounts([1,2],gameData.cities,700);
+   const counts=wodCountBalancedLandByOwner([1,2]);return{owners:[...new Set(island.map(h=>h.owner))],counts,reason:gameData._startingLandBalance.reason};
+  });
+  assert(results.offshoreRepair.owners.length===1&&Math.abs(results.offshoreRepair.counts[1]-results.offshoreRepair.counts[2])<=1,'offshore island stays whole while mainland supplies exact quotas');
   // Reject more candidates than the former retry cap, including valid-looking
   // layouts. No army assignment/preview publication may run before acceptance.
   results.retries=[];
@@ -85,6 +111,14 @@ const server=http.createServer((req,res)=>{
    finally{wodValidateStartingBorders=validate;}
   });
   assert(results.editor.calls===0&&results.editor.cities>0&&results.editor.units===0&&results.editor.owners.every(o=>o===0));
+  await page.evaluate(()=>showPanel('credits'));
+  const testers=page.locator('#playtesterCredits');await testers.scrollIntoViewIfNeeded();
+  assert((await testers.innerText()).includes('Chris Meehan')&&(await testers.innerText()).includes('Bailey Carpenter'));
+  assert(await testers.evaluate(e=>e.previousElementSibling.textContent.includes('Andrew Meehan')));
+  await page.locator('#creditsPanel').screenshot({path:path.join(OUT,'playtester-credits.png')});
+  await page.setViewportSize({width:390,height:844});await testers.scrollIntoViewIfNeeded();
+  assert(await testers.evaluate(e=>e.scrollWidth<=e.clientWidth));
+  await page.screenshot({path:path.join(OUT,'playtester-credits-mobile.png')});
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));assert.equal(errors.length,0,errors.join('\n'));
  }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

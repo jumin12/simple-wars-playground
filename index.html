@@ -5531,6 +5531,8 @@
             font-weight: 600;
         }
 
+        .credit-thanks { color: rgba(220,230,238,.9); font-size: 14px; line-height: 1.6; margin: 12px 0 0; }
+
         .credit-name.credit-music-body {
             font-size: 13px;
             font-weight: 500;
@@ -12042,6 +12044,11 @@
                         <div class="credit-role">Development &amp; QA</div>
                         <div class="credit-name">Andrew Meehan</div>
                     </div>
+                    <div class="credit-card" id="playtesterCredits">
+                        <div class="credit-role">Playtesters</div>
+                        <div class="credit-name">Chris Meehan &amp; Bailey Carpenter</div>
+                        <p class="credit-thanks">Thank you for helping shape Simple Wars. Your thoughtful suggestions contributed to the game’s design, and your time spent testing, finding bugs and sharing feedback helped make every battle better.</p>
+                    </div>
                     <div class="credit-card">
                         <div class="credit-role">Music soundtrack</div>
                         <div class="credit-name credit-music-body">
@@ -12621,6 +12628,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-24T17:14:00-04:00',
+                title: 'Cleaner island borders and playtester credits',
+                items: [
+                    'Townless offshore islands keep a single owner. Exact land balancing adjusts the mainland instead of carving small islands into coastal fragments, while keeping equal land totals and supplied starting armies.',
+                    'Generated starts reject tiny coastal claims, split small islands, enclosed lake/frontline loops, folded borders and local hairpins. Validation checks the same visible border graph used by previews and gameplay; malformed candidates regenerate before appearing.',
+                    'Added playtesters Chris Meehan and Bailey Carpenter beneath the developer in Credits, with thanks for their design suggestions, bug discoveries and feedback.'
+                ]
+            },
             {
                 at: '2026-10-24T17:00:00-04:00',
                 title: 'Scenario editor fixes and faster movement',
@@ -17739,15 +17755,37 @@
             }
             wodMarkTerrainPoliticalDirty();
         }
+        /** Keep townless offshore islands intact instead of using their coast cells
+         * as loose change for mainland area quotas. The shared mainland absorbs
+         * the exact balance; generation retries if that cannot be done cleanly. */
+        function wodConsolidateStartingOffshoreIslands(ownerIds) {
+            const graph=wodStartingLandGraph(true),seen=new Set(),locked=new Set(),valid=new Set(ownerIds);
+            for(const start of graph.nodes.values()) {
+                if(seen.has(start))continue;
+                const component=[start];seen.add(start);const votes=new Map();let inhabited=false;
+                for(let i=0;i<component.length;i++) {
+                    const n=component[i];inhabited ||= graph.inhabited.has(n);
+                    if(valid.has(n.hex.owner))votes.set(n.hex.owner,(votes.get(n.hex.owner)||0)+1);
+                    for(const nb of n.neighbors)if(!seen.has(nb)){seen.add(nb);component.push(nb);}
+                }
+                if(inhabited)continue;
+                const owner=[...votes].sort((a,b)=>b[1]-a[1]||a[0]-b[0])[0]?.[0];
+                if(!owner)continue;
+                for(const n of component){n.hex.owner=owner;if(component.length>1)locked.add(getHexKey(n.hex));}
+            }
+            return locked;
+        }
         /** Final area balancing may move a frontier, but cannot cut a land supply link. */
         async function wodExactEqualizePoliticalLandCounts(ownerIds, protectedCities, maxMovesOpt) {
             if(!ownerIds || ownerIds.length < 2) return;
             // Clear unsupported political remnants, including isolated mountain cells,
             // before balancing. Empty physical islands retain their claims.
             wodRepairStartingLandSupply(ownerIds,true);
+            const offshoreIslandKeys=wodConsolidateStartingOffshoreIslands(ownerIds);
             const sorted = [...ownerIds].sort((a,b)=>a-b), valid = new Set(sorted);
             const target = wodBuildLandBalanceTargets(sorted), counts = wodCountBalancedLandByOwner(sorted);
             const protectedKeys = wodProtectedLandBalanceKeys([...(protectedCities || []), ...gameData.cities]);
+            for(const key of offshoreIslandKeys)protectedKeys.add(key);
             const graph = wodStartingLandGraph(),politicalGraph=wodStartingLandGraph(true);
             // Reject articulation points: every remaining neighbor must still connect
             // without this tile. This also protects a town's narrow peninsula/bridgehead.
@@ -18277,6 +18315,10 @@
                         }
                     }
                     if(!shore&&region.length<component.length)return reject('enclosed-claim');
+                    if(region.length<component.length) {
+                        if(component.length<96)return reject('split-small-island');
+                        if(region.length<Math.max(16,component.length*.08))return reject('coastal-sliver');
+                    }
                 }
             }
             // A one-cell-wide political thread between hostile banks is not a
@@ -18300,6 +18342,28 @@
                 report.largestThinRun=Math.max(report.largestThinRun,run.length);
             }
             if(report.largestThinRun>=4)return reject('border-tendril');
+            // Audit the actual visible graph, including inland water. Dry-land
+            // connectivity alone misses coastal hooks, loops and lake pockets.
+            const spacing=gameData.hexRadius*1.35;
+            const chains=wodCollectDiplomacyBorderChains(gameData.hexList,gameData.hexes,0,0,spacing);
+            report.maxBorderDetour=1;report.closedBorders=0;
+            for(const chain of chains) {
+                if(chain.closed){report.closedBorders++;return reject('closed-frontier');}
+                let length=0;const points=chain.pts;
+                for(let i=1;i<points.length;i++)length+=Math.hypot(points[i].x-points[i-1].x,points[i].y-points[i-1].y);
+                const first=points[0],last=points[points.length-1];
+                const chord=Math.hypot(last.x-first.x,last.y-first.y);
+                const detour=length/Math.max(spacing,chord);
+                report.maxBorderDetour=Math.max(report.maxBorderDetour,detour);
+                if(length>=spacing*8&&detour>1.8)return reject('folded-frontier');
+                // A long internal hook can hide in an otherwise straight chain.
+                // Every local span must also make useful progress across the map.
+                for(let start=0;start+8<points.length;start+=2)for(const span of [8,16,32]) {
+                    const end=start+span;if(end>=points.length)continue;
+                    const direct=Math.hypot(points[end].x-points[start].x,points[end].y-points[start].y);
+                    if(direct<spacing*span*.48)return reject('frontier-hairpin');
+                }
+            }
             if(referenceFrontier!==null&&report.frontier>referenceFrontier*1.35+8)
                 return reject('distorted-frontier');
             if(report.frontier>Math.sqrt(report.land*ownerIds.length)*2.25+8)

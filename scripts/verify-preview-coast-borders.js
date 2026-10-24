@@ -40,7 +40,17 @@ const server=http.createServer((req,res)=>{
      }
      if(enclosed&&!protectedSite)unsupportedLandPockets++;
     }
-    return {chains:chains.length,closed:chains.filter(c=>c.closed).length,expected:expected.size,drawn:got.size,missing:[...expected].filter(k=>!got.has(k)).length,duplicates:[...got.values()].filter(n=>n!==1).length,forbidden,rawOceanEdges,unsupportedLandPockets};
+    const physicalSeen=new Set();let splitTownlessIslands=0;
+    for(const h of g.hexList) {
+     const hk=`${h.q},${h.r}`;if(water(h)||physicalSeen.has(hk))continue;
+     const island=[h],owners=new Set();let town=false;physicalSeen.add(hk);
+     for(let i=0;i<island.length;i++) {
+      const cell=island[i];owners.add(cell.owner);town||=g.cities.some(c=>c.q===cell.q&&c.r===cell.r);
+      for(const [q,r] of dirs){const n=g.hexes[`${cell.q+q},${cell.r+r}`],key=n&&`${n.q},${n.r}`;if(n&&!water(n)&&!physicalSeen.has(key)){physicalSeen.add(key);island.push(n);}}
+     }
+     if(!town&&owners.size>1)splitTownlessIslands++;
+    }
+    return {splitTownlessIslands,chains:chains.length,closed:chains.filter(c=>c.closed).length,expected:expected.size,drawn:got.size,missing:[...expected].filter(k=>!got.has(k)).length,duplicates:[...got.values()].filter(n=>n!==1).length,forbidden,rawOceanEdges,unsupportedLandPockets};
    };
   });
   results.fixtures=await page.evaluate(()=>{
@@ -86,6 +96,7 @@ const server=http.createServer((req,res)=>{
   const cases=['island','ring','archipelago','mountain'].flatMap((shape,i)=>[2,4].map(players=>({shape,players,seed:130026+i*200+players,size:40})));
   cases.push({shape:'island',players:2,seed:130044,size:60},{shape:'island',players:4,seed:130026,size:80});
   for(let i=0;i<18;i++)cases.push({shape:'island',players:2+i%3,seed:240024+i*137,size:40});
+  for(let i=0;i<16;i++)cases.push({shape:i%2?'island':'archipelago',players:2+i%3,seed:24170824+i*997,size:i%4===3?60:40});
   await page.evaluate(()=>{gameState='MENU';pauseMenuBackgroundBattle();UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='none';UI.panels.forEach(p=>p.classList.add('hidden'));document.getElementById('setupPanel').classList.remove('hidden');});
   for(const c of cases) {
    const row=await page.evaluate(async c=>{
@@ -115,7 +126,9 @@ const server=http.createServer((req,res)=>{
   assert(results.fixtures.find(r=>r.kind==='lakeMask').inland&&results.fixtures.find(r=>r.kind==='openChannel').opened&&results.fixtures.find(r=>r.kind==='openChannel').reusedForOwnership&&results.fixtures.find(r=>r.kind==='closeChannel').inland,'terrain edits refresh ocean topology while ownership changes reuse it');
   assert([...results.fixtures,...results.generated].filter(r=>r.unchanged!==undefined).every(r=>r.unchanged),'rendering never changes ownership or terrain');
   assert(results.generated.every(r=>Math.max(...Object.values(r.counts))-Math.min(...Object.values(r.counts))<=1));
+  assert(results.generated.every(r=>r.splitTownlessIslands===0),'every townless physical island has one owner');
   assert(results.generated.every(r=>r.validation?.quality.ok),'every preview passed the strict border acceptance gate');
+  assert(results.generated.every(r=>!r.closed&&r.validation.quality.maxBorderDetour<=1.8),'starting frontlines have no visible loops or folded detours');
   assert([...results.generated,results.regenerate].every(r=>r.unsupportedLandPockets===0),'generation never leaves empty surrounded mountain or land remnants');
   const repaired=results.balanceFixtures.find(r=>r.mode==='orphanPeak'),blocked=results.balanceFixtures.find(r=>r.mode==='protectedFront');
   assert(repaired.before===1&&repaired.after===0&&repaired.peakOwner===1&&Math.abs(repaired.counts[1]-repaired.counts[2])<=1,'orphan mountain ownership is repaired and area quotas remain even');
