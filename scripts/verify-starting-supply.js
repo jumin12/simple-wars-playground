@@ -61,6 +61,8 @@ const server = http.createServer((req,res)=>{
         for(const u of g.entities)if(u.hp>0){units[u.owner]=(units[u.owner]||0)+1;if(u._startDeployment==='front')front[u.owner]=(front[u.owner]||0)+1;}
         return {counts,cities,units,front,orphanUnits,
           strandedLand:g.hexList.filter(h=>walk(h)&&h.owner>0&&inhabited.has(getHexKey(h))&&!keys.has(getHexKey(h))).map(h=>({q:h.q,r:h.r,owner:h.owner})),
+          minTownSpacing:Math.min(...g.cities.flatMap((a,i)=>g.cities.slice(i+1).map(b=>Math.max(Math.abs(a.q-b.q),Math.abs(a.r-b.r))))),
+          touchingTowns:g.hexList.filter(h=>h.cityId&&h.type==='urban'&&getNeighborHexes(h).some(n=>n.type==='urban'&&n.cityId&&n.cityId!==h.cityId)).length,
           foreignTowns:g.cities.filter(c=>g.hexes[`${c.q},${c.r}`]?.owner!==c.owner).length,
           borderArmor:g.entities.filter(u=>u.type==='heavy'&&isFrontlineHex(getNearestHexToPoint(u.x,u.y),u.owner)).length};
       };
@@ -164,6 +166,7 @@ const server = http.createServer((req,res)=>{
       assert(result.encirclementComplete&&result.encircledUnits===0,'simulation agrees that starting units have supply');
       assert.equal(result.strandedLand.length,0,'no artificial populated-island enclaves '+JSON.stringify(c));
       assert.equal(result.foreignTowns,0);
+      assert(result.minTownSpacing>=8&&result.touchingTowns===0,'towns have separated centers and no touching urban footprints');
       assert.equal(result.borderArmor,0);
       assert.equal(Object.keys(result.cities).length,c.players);
       assert.equal(new Set(Object.values(result.cities)).size,1,'equal town counts');

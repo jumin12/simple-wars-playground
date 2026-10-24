@@ -11449,12 +11449,12 @@
 
                 <div class="esc-help-block">
                     <h4>Terrain, movement & combat tilt</h4>
-                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Infantry</strong> and <strong>armor</strong> path on land in all eight hex directions (no corner-cutting through peaks), cross <strong>constructed bridges</strong> as land, and avoid ocean unless you order them in, no land route exists, or a short water shortcut saves a long detour. Ordering them across water to a land objective embarks them automatically: while actively marching under orders they cross at reduced speed with light attrition (about <strong>−0.6%</strong> max HP per second). <strong>Marines</strong> thrive on ocean hexes while amphibious; land regiments <em>stranded</em> in deep ocean without orders suffer far harsher drowning upkeep (about <strong>−2%</strong> max HP per second) and severe march slowdown plus morale linkage. <strong>Ships</strong> fight only from water.</p>
+                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Infantry</strong> and <strong>armor</strong> use land routes in all eight directions without cutting corners through peaks, and cross <strong>completed bridges</strong> as land. Units avoid water unless directly ordered there, no land route exists, or a crossing saves a very large detour. The AI favors dry detours and useful bridges near its army. <strong>All units in water except ships and marines are out of supply:</strong> they lose <strong>3.5% max HP per second</strong>, cannot heal, and move slowly, even under orders or beside a friendly town. Forts do not reduce water attrition. <strong>Marines</strong> move amphibiously without water attrition; <strong>ships</strong> fight from water.</p>
                     <p class="esc-help-prose"><strong>Attack %</strong> scales outgoing strikes vs the same regiment on baseline <strong>grass</strong>; <strong>Dmg taken %</strong> scales how hostile hits resolve on you (<strong>below 100%</strong> absorbs better; above 100% means more exposed).</p>
                     <p class="esc-help-prose esc-help-matrix-footnote"><strong>Ocean headers:</strong> <em>Ocean M/S</em> = marines &amp; ships on ocean (amphib for marines); <em>Ocean drown ΔI</em> / <em>ΔA</em> = infantry vs armor caught drowning in ocean—same wording as unit cards (<strong>Atk</strong> + <strong>Dmg taken</strong> rows).</p>
                     <div class="wod-help-terrain-combat-mount"></div>
                     <p class="esc-help-prose esc-help-matrix-footnote"><strong>Trade convoys</strong> are civilians—no terrain combat multipliers.</p>
-                    <p class="esc-help-prose esc-help-matrix-footnote">Values mirror <code>getTerrainAttackModifier</code> / <code>getTerrainDefenseModifier</code>. Fort (<strong>Dmg taken 80%</strong>), morale, unpaid upkeep (<strong>−2.5%</strong> max HP/s), encirclement, and drowning combine separately—in play each shows as pills using the same short stat style.</p>
+                    <p class="esc-help-prose esc-help-matrix-footnote">Values mirror <code>getTerrainAttackModifier</code> / <code>getTerrainDefenseModifier</code>. Fort (<strong>Dmg taken 80%</strong>), morale, unpaid upkeep (<strong>−2.5%</strong> max HP/s), and out-of-supply attrition are separate effects. Water uses the supply attrition rate once; it does not add a second drowning charge.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -11465,7 +11465,7 @@
 
                 <div class="esc-help-block">
                     <h4>Construction and reinforcements</h4>
-                    <p class="esc-help-prose">All towns start empty. Buildings, forts and bridges take <strong>60 seconds</strong>; mobilization takes <strong>15 seconds for infantry</strong>, <strong>20 for marines</strong>, <strong>25 for heavy units</strong>, and <strong>30 for ships</strong>, including campaign reinforcements. A small circle beside the city counts down to completion, then the arriving unit plays its deployment animation. Each town handles one order at a time. Pausing stops progress; siege pauses town production. In campaigns, the unit buttons call existing <strong>reserve reinforcements</strong> without charging money or manpower again. Undeployed reserves stay safe between battles.</p>
+                    <p class="esc-help-prose">All towns start empty. Generated towns have at least one non-urban cell between their footprints. Buildings, forts and bridges take <strong>60 seconds</strong>; mobilization takes <strong>15 seconds for infantry</strong>, <strong>20 for marines</strong>, <strong>25 for heavy units</strong>, and <strong>30 for ships</strong>, including campaign reinforcements. A small circle beside the city counts down to completion, then the arriving unit plays its deployment animation. Each town handles one order at a time. Pausing stops progress. <strong>Player and AI towns cannot recruit or complete production while under attack:</strong> combat, hostile troops on any town cell, or hostile control of part of the town pauses the queue until the threat clears. Paid progress is preserved. In campaigns, unit buttons call existing <strong>reserve reinforcements</strong> without charging money or manpower again. Undeployed reserves stay safe between battles.</p>
                 </div>
                 <div class="esc-help-block">
                     <h4>Encirclement and marine water supply</h4>
@@ -12621,6 +12621,17 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-24T14:05:00-04:00',
+                title: 'Equal siege rules, water attrition and separated towns',
+                items: [
+                    'Player and AI towns use the same production lock. Combat, hostile occupation or contested urban cells block recruiting and pause paid construction/reinforcement queues; progress resumes when the threat clears.',
+                    'Every unit in open water except ships and marines is out of supply, loses 3.5% maximum HP per second and cannot heal. Orders, nearby friendly towns and forts do not exempt water crossings. Completed bridge decks count as land, and water damage is applied only once.',
+                    'Land armies prefer dry detours and completed bridges. Nearby water no longer counts as permission to enter it; automatic shortcuts require a much larger distance saving with water exposure factored in. Shore entry and exit waypoints survive smoothing, and shared incremental land connectivity avoids repeated timed-out searches.',
+                    'AI bridge searches include troops waiting at internal rivers, support one-cell rivers, prioritize nearby army crossings and preserve recruitment funds. Construction still takes 60 seconds, with caps and a guard against duplicate pending bridges.',
+                    'Generated town centers remain at least eight cells apart, with no touching urban footprints. Removed the close-town fallback; constrained layouts regenerate instead. Campaign, skirmish and multiplayer share the rule.'
+                ]
+            },
             {
                 at: '2026-10-24T13:40:00-04:00',
                 title: 'Reject malformed starting maps and regenerate',
@@ -18214,6 +18225,23 @@
         /** Acceptance gate, not a repair pass. Never publish a badly distorted split.
          * Real offshore islands are independent; mountains count as political land. */
         function wodValidateStartingBorders(ownerIds, referenceFrontier=null) {
+            const towns=gameData.cities||[];
+            for(let i=0;i<towns.length;i++)for(let j=i+1;j<towns.length;j++)
+                if(Math.max(Math.abs(towns[i].q-towns[j].q),Math.abs(towns[i].r-towns[j].r))<8)
+                    return {ok:false,reason:'town-spacing'};
+            const urbanTown=new Map();
+            for(const town of towns)for(const h of getCityUrbanTerrainHexes(town)) {
+                const key=getHexKey(h);
+                if(urbanTown.has(key)&&urbanTown.get(key)!==town)return {ok:false,reason:'town-spacing'};
+                urbanTown.set(key,town);
+            }
+            for(const [key,town] of urbanTown) {
+                const h=gameData.hexes[key];
+                for(const d of hexDirections) {
+                    const other=urbanTown.get(`${h.q+d.q},${h.r+d.r}`);
+                    if(other&&other!==town)return {ok:false,reason:'town-spacing'};
+                }
+            }
             const graph=wodStartingLandGraph(true), seen=new Set(), valid=new Set(ownerIds);
             const report={ok:true,reason:'clean',frontier:wodStartingFrontierLength(),referenceFrontier,
                 land:graph.nodes.size,largestThinRun:0};
@@ -24922,7 +24950,10 @@
                 return false;
             if(targetHex && isBridgeHex(targetHex)) return false;
             if(unit._wodOrderIntoWater || (unit.orderTarget && unit.orderTarget.intoWater)) return true;
-            return !!(targetHex && isWaterHex(targetHex) && !isBridgeHex(targetHex));
+            // Testing a water candidate is not permission to enter it. Only the
+            // actual issued destination/approved crossing grants that permission.
+            const goal=unit.orderTarget&&getNearestHexToPoint(unit.orderTarget.x,unit.orderTarget.y);
+            return !!(goal&&wodIsOpenWaterHex(goal)&&targetHex&&wodHexKeysEqual(goal,targetHex));
         }
 
         /** True when a land army is physically standing on open water (embarked / stranded). */
@@ -27080,8 +27111,14 @@
         function isCitySiegeBlockedForProduction(city) {
             if(!city || !city.id) return false;
             if(isCityEncircledForProduction(city)) return true;
-            if(!gameData.cityCombatBlockForProd) return false;
-            return gameData.cityCombatBlockForProd.has(`${city.q},${city.r}`);
+            const key=`${city.q},${city.r}`;
+            if(gameData.cityCombatBlockForProd?.has(key)||gameData._cityCombatStagingKeys?.has(key))return true;
+            if(gameData.mp?.enabled&&!gameData.mp.isHost&&gameData._mpSyncCityWarKeys?.has(key))return true;
+            const urban=getCityUrbanTerrainHexes(city),keys=new Set(urban.map(getHexKey));
+            // Occupation/capture is an attack even when no defender is firing.
+            if(urban.some(h=>wodIsHostileOwner(h.owner,city.owner)))return true;
+            return gameData.entities.some(u=>u.hp>0&&u.type!=='convoy'&&wodIsHostileOwner(u.owner,city.owner)&&
+                keys.has(getHexKey(getNearestHexToPoint(u.x,u.y))));
         }
 
         function citySiegeShowsCombatIndicator(city) {
@@ -27091,7 +27128,7 @@
             let staged = !!(gameData._cityCombatStagingKeys && gameData._cityCombatStagingKeys.has(k));
             let blocked = !!(gameData.cityCombatBlockForProd && gameData.cityCombatBlockForProd.has(k));
             let mpWar = !!(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost && gameData._mpSyncCityWarKeys && gameData._mpSyncCityWarKeys.has(k));
-            return staged || blocked || mpWar;
+            return staged || blocked || mpWar || isCitySiegeBlockedForProduction(city);
         }
 
         function wodStagingMarkCombatOnCityUrbanTile(u, v) {
@@ -27841,6 +27878,9 @@
                 return;
             }
             if(wodIsPlayerMarchOrder(unit)) return;
+            // A stranded regiment must actually march ashore, never teleport out
+            // of the water and skip its supply attrition during idle correction.
+            if(wodUnitStandingOnOpenWater(unit))return;
             if(wodBridgeHexAtPoint(unit, unit.x, unit.y) || wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.2)) return;
             if(wodUnitRouteUsesBridge(unit)) return;
             let ring = ringMax != null ? ringMax : 12;
@@ -28919,6 +28959,41 @@
             if(!startHex || !targetHex) return true;
             // Same tile (or already there) is reachable without a bridge.
             if(wodHexKeysEqual(startHex, targetHex)) return false;
+            if(isLandArmyUnit(unit)&&!isWaterHex(startHex)&&!isWaterHex(targetHex)) {
+                // Share an incremental dry-land connectivity proof. Restarting
+                // a timed-out flood on every AI retry could leave a regiment
+                // unable to prove either a detour or a necessary crossing.
+                const version=gameData._wodPfVer||0;
+                let cache=gameData._wodDryLandConnectivity;
+                if(!cache||cache.hexes!==gameData.hexes||cache.version!==version)
+                    cache=gameData._wodDryLandConnectivity={hexes:gameData.hexes,version,labels:new Map(),complete:new Set(),next:1,work:null};
+                const sk=getHexKey(startHex),tk=getHexKey(targetHex);
+                const known=()=>{
+                    const a=cache.labels.get(sk),b=cache.labels.get(tk);
+                    if(a&&b)return a!==b;
+                    if(a&&cache.complete.has(a)||b&&cache.complete.has(b))return true;
+                    return null;
+                };
+                let result=known();if(result!==null)return result;
+                if(!cache.work) {
+                    const id=cache.next++;cache.labels.set(sk,id);
+                    cache.work={id,queue:[startHex],head:0};
+                }
+                const work=cache.work,deadline=performance.now()+4;let visited=0;
+                while(work.head<work.queue.length&&visited++<2048) {
+                    if((visited&127)===0&&performance.now()>deadline)break;
+                    const h=work.queue[work.head++];
+                    // Every legal diagonal has dry side cells, so cardinal
+                    // connectivity proves the same land reach without corner cuts.
+                    for(const d of cardinalHexDirections) {
+                        const key=`${h.q+d.q},${h.r+d.r}`,n=gameData.hexes[key];
+                        if(!n||cache.labels.has(key)||n.type==='mountain'||isWaterHex(n)&&!isBridgeHex(n))continue;
+                        cache.labels.set(key,work.id);work.queue.push(n);
+                    }
+                }
+                if(work.head===work.queue.length){cache.complete.add(work.id);cache.work=null;}
+                return known()===true;
+            }
             let meta = {};
             let path = wodLandBfsPath(unit, startHex, targetHex, 8000, false, meta);
             if(path.length > 1) return false;
@@ -29348,7 +29423,7 @@
             if(unit._wodArrowPathBuild && !wodOrderIntoWater(unit, targetHex) && !wodIsOpenWaterHex(startHex)) return false;
             if(wodOrderIntoWater(unit, targetHex)) return true;
             if(wodHexPathLength(bridgePath) > 1) return false;
-            let bestLand = wodHexPathLength(landPath);
+            let bestLand = wodPathWorldLength(landPath)/Math.max(1,gameData.hexRadius*1.35);
             if(bestLand <= 1) {
                 // Only embark when land is proven disconnected (complete BFS miss) — never on
                 // a timed-out land search that merely looks empty.
@@ -29358,9 +29433,9 @@
             }
             let est = wodEstimateAmphibiousShortcutSteps(unit, startHex, targetHex);
             if(!isFinite(est) || est < 2) return false;
-            // Require a clearly shorter ocean hop; 0.78 let coastal columns dip into water
-            // whenever the land path hugged mountains a bit longer.
-            return est <= Math.floor(bestLand * 0.48);
+            // Unprotected crossings must save a very large detour. Use real
+            // distance, not the number of waypoints left after path smoothing.
+            return bestLand>=24 && est<=bestLand*(wodMpIsHumanOwner(unit.owner)?0.25:0.20);
         }
 
         function wodBridgeUsefulForMarch(unit, startHex, targetHex) {
@@ -29482,7 +29557,13 @@
             if(bridgeOk) return bridgePath;
             if(wodShouldUseWaterMarch(unit, startHex, targetHex, landPath, bridgePath) && !wodBridgeUsefulForMarch(unit, startHex, targetHex)) {
                 let waterPath = findAmphibiousMarchPath(unit, startHex, targetHex);
-                if(wodHexPathLength(waterPath) > 1) return waterPath;
+                if(wodHexPathLength(waterPath)>1&&wodPathReachesTarget(waterPath,targetHex)) {
+                    const landDistance=wodPathWorldLength(landPath),waterDistance=wodPathWorldLength(waterPath);
+                    let exposed=0;
+                    for(let i=1;i<waterPath.length;i++)if(wodIsOpenWaterHex(waterPath[i])||wodIsOpenWaterHex(waterPath[i-1]))
+                        exposed+=Math.hypot(waterPath[i].x-waterPath[i-1].x,waterPath[i].y-waterPath[i-1].y);
+                    if(!landOk || waterDistance<=landDistance*0.30 && waterDistance+exposed*7<=landDistance*0.5)return waterPath;
+                }
             }
             let ampFallback = wodTryAmphibiousMarchFallback(unit, startHex, targetHex);
             if(ampFallback.length) return ampFallback;
@@ -29972,12 +30053,16 @@
                 let prev = path[i - 1];
                 let current = path[i];
                 let dir = {q: Math.sign(current.q - prev.q), r: Math.sign(current.r - prev.r)};
-                if(lastDir && (dir.q !== lastDir.q || dir.r !== lastDir.r)) {
-                    smoothed.push(prev);
+                const shoreTransition=isWaterHex(prev)!==isWaterHex(current);
+                if(shoreTransition || lastDir && (dir.q !== lastDir.q || dir.r !== lastDir.r)) {
+                    if(smoothed[smoothed.length-1]!==prev)smoothed.push(prev);
                 }
+                // Keep shore entry/exit and a water sample even on a perfectly
+                // straight crossing, so approval and exposure checks see it.
+                if(shoreTransition&&smoothed[smoothed.length-1]!==current)smoothed.push(current);
                 lastDir = dir;
             }
-            smoothed.push(path[path.length - 1]);
+            if(smoothed[smoothed.length-1]!==path[path.length-1])smoothed.push(path[path.length-1]);
             return smoothed;
         }
 
@@ -31315,6 +31400,7 @@
             if(path.length > 1) {
                 unit._wodPathGiveUpUntil = 0;
                 if(wodPathCrossesBridge(path)) unit._wodRouteUsesBridge = true;
+                if(wodPathCrossesOpenWater(path))unit._wodOrderIntoWater=true;
                 let endNode = {x: desired.x, y: desired.y};
                 if(desired.isCity) endNode.isCity = true;
                 unit.path = wodHexPathToWorldWaypoints(unit, path, endNode);
@@ -31497,18 +31583,19 @@
             }
         }
 
+        function wodUnitInUnsuppliedWater(unit,hex) {
+            return !!(unit&&hex&&unit.type!=='ship'&&unit.type!=='marine'&&isWaterHex(hex)&&
+                !isBridgeHex(hex)&&!wodUnitOnBridgeDeck(unit));
+        }
         function applyTerrainUnitEffects(unit, dt) {
             let hex = getNearestHexToPoint(unit.x, unit.y);
             let onBridge = wodUnitOnBridgeDeck(unit);
-            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && unit.type !== 'ship' && !(unit.type === 'convoy' && unit.convoySeaRoute));
+            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && unit.type !== 'ship');
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             unit.inWater = !!(sea && unit.type !== 'marine');
             if(unit.inWater) {
-                // Ordered crossings (active march with a destination) drown far slower than
-                // stranded units — otherwise any island-to-island order was a death sentence
-                // and cross-water attacks never worked in practice.
-                let embarked = !!(unit.target && (unit._wodOrderIntoWater || unit.orderTarget));
-                applyDamage(unit, unit.maxHp * (embarked ? 0.006 : 0.02) * dt, 0);
+                // Damage is applied once by the shared supply-attrition pass.
+                // Orders, coastal ownership and nearby forts do not supply water.
                 unit.waterFlash = 0.35;
             } else if(unit.waterFlash) {
                 unit.waterFlash = Math.max(0, unit.waterFlash - dt);
@@ -31658,7 +31745,7 @@
             { id: 'fighting', title: 'Fighting', overhead: 'combat', drawType: 'light', note: 'Burst icon while the unit is actively trading fire.', effect: { label: 'Fighting', stats: 'Active combat stance · Applies terrain/armor morale effects above while firing', detail: 'Engaged and trading fire.' } },
             { id: 'fort', title: 'Fortified', overhead: 'fort', drawType: 'heavy', note: 'Shield icon inside a friendly fort combat aura.', effect: { label: 'Fortified', render: 'fortDmg', fortDmgPct: 80, block: true, detail: 'Incoming combat damage resolves at about 80% of normal.' } },
             { id: 'encircled', title: 'Encircled', overhead: 'encircled', drawType: 'light', note: 'Red exclamation when the hex is cut off behind enemy lines.', effect: { label: 'Encircled', stats: '−3.5% max HP/s · No heal until pocket breaks', block: true, warn: true, detail: 'Hex is cut off behind enemy lines.' } },
-            { id: 'deepwater', title: 'Deep water', overhead: 'water', drawType: 'light', note: 'Blue tilde when a land unit is stranded in ocean tiles.', effect: { label: 'Deep water', stats: '−2% max HP/s', block: true, warn: true, detail: 'Land units stranded in deep ocean tiles.' } },
+            { id: 'deepwater', title: 'Deep water', overhead: 'water', drawType: 'light', note: 'Blue tilde when a land unit is stranded in ocean tiles.', effect: { label: 'Deep water', stats: '−3.5% max HP/s · No healing', block: true, warn: true, detail: 'Land units stranded in deep ocean tiles.' } },
             { id: 'unpaid', title: 'Unpaid upkeep', overhead: 'unpaid', drawType: 'light', note: 'Gold dollar sign when treasury cannot cover upkeep.', effect: { label: '$ Unpaid', stats: '−2.5% max HP/s', block: true, warn: true, detail: 'Treasury cannot cover upkeep.' } },
             { id: 'healing', title: 'Healing', overhead: 'heal', drawType: 'light', note: 'Green plus while regenerating on safe friendly ground.', effect: { label: '+ Healing', stats: '+3.5% max HP/s', detail: 'Regenerating on safe friendly territory.' } },
             { id: 'forest', title: 'Forest cover', overhead: null, drawType: 'light', note: 'Terrain tilt on the unit sheet — no overhead icon for tile cover alone.', effect: { label: 'Forest', render: 'terrainCombat', atkPct: 85, defPct: 90, block: true, terrain: true, detail: 'Example: infantry in forest — weaker attacks, softer incoming hits.' } },
@@ -31666,7 +31753,7 @@
             { id: 'march', title: 'Slow march', overhead: null, drawType: 'heavy', note: 'Morale, rough ground, or a hostile fort zone is slowing orders.', effect: { label: 'March', stats: '×70%', detail: 'Morale, rough ground, or a hostile fort zone is slowing orders.' } },
             { id: 'routed', title: 'Routed', overhead: null, drawType: 'light', note: 'Morale broken — cannot attack until rallied on safe ground.', effect: { label: 'Routed', stats: 'Cannot attack until rallied · Recover while healing off contact', block: true, warn: true, detail: 'Morale broken — fleeing.' } },
             { id: 'shaken', title: 'Shaken', overhead: null, drawType: 'light', note: 'Below-peak morale throttles effective attack output.', effect: { label: 'Shaken', stats: '~Below-peak morale throttles effective attack output', detail: 'Morale below peak — reduced combat power.' } },
-            { id: 'convoyhazard', title: 'Convoy · deep water', overhead: 'water', drawType: 'convoy', drawExtra: { convoySeaRoute: true, target: { x: 20, y: -6 }, x: 0, y: 0 }, note: 'Gold sea convoy with deep-water hazard icon if stranded.', effect: { label: 'Deep water hazard', stats: '−2% max HP/s', block: true, warn: true, detail: 'Trade convoy stranded in deep water.' } }
+            { id: 'convoyhazard', title: 'Convoy · deep water', overhead: 'water', drawType: 'convoy', drawExtra: { convoySeaRoute: true, target: { x: 20, y: -6 }, x: 0, y: 0 }, note: 'Gold sea convoy with deep-water hazard icon if stranded.', effect: { label: 'Deep water hazard', stats: '−3.5% max HP/s · No healing', block: true, warn: true, detail: 'Trade convoy stranded in deep water.' } }
         ];
 
         function wodHelpEquippedSkin() {
@@ -31813,26 +31900,20 @@
                 if(terrCombat) effects.push(terrCombat);
                 let fortFx = getFortDefenseEffect(unit);
                 if(fortFx) effects.push(fortFx);
-                if(wodGetUnitEncirclementState(unit, hex)) {
-                    let relief = wodGetUnitEncirclementState(unit,hex).relief;
+                const supplyState=wodGetUnitEncirclementState(unit,hex);
+                if(supplyState) {
+                    let relief = supplyState.relief;
                     let ratePct = relief ? '1.75' : '3.5';
                     effects.push({
-                        label: 'Encircled',
-                        detail: relief
+                        label: supplyState.water?'Water: out of supply':'Encircled',
+                        detail: supplyState.water
+                            ? 'Infantry, armor and other unprotected units in water have no supply, lose 3.5% max HP per second and cannot heal. Reach dry land or a completed bridge. Only ships and marines are exempt.'
+                            : relief
                             ? 'This pocket is cut off but a friendly fort still offers limited supply. Attrition is halved until territory reconnects.'
                             : 'This hex is cut off behind enemy lines. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
-                        stats: `−${ratePct}% max HP/s · No heal until pocket breaks`,
+                        stats: `−${ratePct}% max HP/s · No healing`,
                         block: true,
                         warn: !relief
-                    });
-                }
-                if(!unit.amphibInWater && !wodUnitOnBridgeDeck(unit) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
-                    effects.push({
-                        label: 'Deep water',
-                        detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
-                        stats: '−2% max HP/s',
-                        block: true,
-                        warn: true
                     });
                 }
                 let spd = getUnitSpeedMultiplier(unit);
@@ -31877,8 +31958,8 @@
             else if(hex && unit.type === 'convoy' && !wodUnitOnBridgeDeck(unit) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
                 effects.push({
                     label: 'Deep water hazard',
-                    detail: 'Standing in deep water drains about 2% max HP per second and heavily reduces march speed.',
-                    stats: '−2% max HP/s',
+                    detail: 'Unprotected units in water are out of supply, lose 3.5% max HP per second, cannot heal and move slowly.',
+                    stats: '−3.5% max HP/s · No healing',
                     block: true,
                     warn: true
                 });
@@ -32228,7 +32309,8 @@
             return isWaterHex(hex)||wodCurrentSupplyComponent(hex).water;
         }
         function wodGetUnitEncirclementState(unit, hex) {
-            if(!unit||!hex||unit.type==='ship'||isWaterHex(hex))return null;
+            if(!unit||!hex||unit.type==='ship')return null;
+            if(isWaterHex(hex))return wodUnitInUnsuppliedWater(unit,hex)?{relief:false,water:true}:null;
             if(!wodIsFriendlyOwner(hex.owner,unit.owner)) {
                 const supply=wodCurrentSupplyComponent(hex,unit.owner);
                 if(supply.city||unit.type==='marine'&&supply.water)return null;
@@ -36167,10 +36249,10 @@
 
             let winnerPlan = null;
             let kpf = 0;
-            let sepLo = mapShape === 'archipelago' ? 4 : (f >= 3 ? 4 : 6);
+            const sepLo=8;
             // Prefer workable spacing quickly — old 14→sepLo × every k rebuilt candidate sorts and hung 3+ AI.
             outerFind: for(let kk = 2; kk <= kUpper; kk++) {
-                for(let sepTry = (f >= 3 ? 8 : 10); sepTry >= sepLo; sepTry -= 2) {
+                for(let sepTry = 10; sepTry >= sepLo; sepTry -= 2) {
                     await wodMapGenYieldSlice();
                     anchorChebSep = sepTry;
                     let plan = await tryPlan(kk);
@@ -36191,57 +36273,8 @@
                 }
             }
 
-            if(!winnerPlan || kpf < 2) {
-                // Always-succeed fallback: 2 deepest owned tiles per faction (no urban-footprint gate).
-                winnerPlan = {};
-                kpf = 2;
-                let placed = [];
-                for(let ow of ownersSorted) {
-                    let pool = [];
-                    for(let h of landForCities) {
-                        if(h && h.owner === ow) pool.push(h);
-                    }
-                    pool.sort((a, b) => {
-                        let da = interiorDepthMap.get(getHexKey(a)) ?? 0;
-                        let db = interiorDepthMap.get(getHexKey(b)) ?? 0;
-                        if(da !== db) return db - da;
-                        if(a.q !== b.q) return a.q - b.q;
-                        return a.r - b.r;
-                    });
-                    let sites = [];
-                    for(let relax = 3; relax >= 1 && sites.length < 2; relax--) {
-                        for(let hi = 0; hi < pool.length && sites.length < 2; hi++) {
-                            let h = pool[hi];
-                            let tooNear = false;
-                            for(let s of sites) {
-                                if(Math.max(Math.abs(h.q - s.q), Math.abs(h.r - s.r)) < relax) {
-                                    tooNear = true;
-                                    break;
-                                }
-                            }
-                            if(tooNear) continue;
-                            for(let s of placed) {
-                                if(Math.max(Math.abs(h.q - s.q), Math.abs(h.r - s.r)) < relax) {
-                                    tooNear = true;
-                                    break;
-                                }
-                            }
-                            if(tooNear) continue;
-                            sites.push({ q: h.q, r: h.r });
-                        }
-                    }
-                    if(sites.length < 2) {
-                        for(let hi = 0; hi < pool.length && sites.length < 2; hi++) {
-                            let h = pool[hi];
-                            if(sites.some(s => s.q === h.q && s.r === h.r)) continue;
-                            sites.push({ q: h.q, r: h.r });
-                        }
-                    }
-                    if(sites.length < 2) return false;
-                    winnerPlan[String(ow)] = sites.slice(0, 2);
-                    for(let s of winnerPlan[String(ow)]) placed.push(s);
-                }
-            }
+            // Retry the map instead of relaxing spacing to adjacent towns.
+            if(!winnerPlan || kpf<2)return false;
 
             for(let ow of ownersSorted)
                 if(!winnerPlan[String(ow)] || winnerPlan[String(ow)].length !== kpf) return false;
@@ -40094,32 +40127,22 @@
             return true;
         }
 
-        /** True when the segment a→b is mostly open water (a river/channel to bridge). */
+        /** One uninterrupted water crossing, allowing the land banks at both ends. */
         function wodAiWaterSeparatesShores(a, b) {
             if(!a || !b) return false;
-            let samples = 9;
-            let water = 0,
-                landMid = 0,
-                blocked = 0;
-            // Skip the first/last samples — those sit on the shore tiles themselves.
-            for(let si = 2; si <= samples - 2; si++) {
+            const samples=12;let water=0,leftWater=false;
+            for(let si=1;si<samples;si++) {
                 let t = si / samples;
                 let px = a.x + (b.x - a.x) * t;
                 let py = a.y + (b.y - a.y) * t;
                 let h = getNearestHexToPoint(px, py);
-                if(!h) {
-                    blocked++;
-                    continue;
-                }
-                if(isBridgeHex(h)) {
-                    blocked++;
-                    continue;
-                }
-                if(isWaterHex(h)) water++;
-                else if(h.type === 'mountain' || h.type === 'urban') blocked++;
-                else landMid++;
+                if(!h||isBridgeHex(h)||h.type==='mountain'||h.type==='urban')return false;
+                if(isWaterHex(h)) {
+                    if(leftWater)return false;
+                    water++;
+                } else if(water)leftWater=true;
             }
-            return water >= 2 && blocked === 0 && landMid === 0;
+            return water>=2;
         }
         function wodAiWaterSeparatesOwnedShores(a, b, ownerId) {
             return !!(a && b && ownerId && a.owner === ownerId && b.owner === ownerId && wodAiWaterSeparatesShores(a, b));
@@ -40142,7 +40165,7 @@
         function wodAiCollectBridgeCandidateSites(ownerId) {
             let hr = gameData.hexRadius || 20;
             let spacing = hr * 1.35;
-            let minDist2 = Math.pow(spacing * 2.2, 2);
+            let minDist2 = Math.pow(spacing * 1.8, 2);
             let maxDist2 = Math.pow(spacing * 5.4, 2);
             let ownCoast = [];
             let farCoast = [];
@@ -40197,6 +40220,18 @@
                 for(let pt of getHexesInRadius(city.q, city.r, 4))
                     addOwnCoast(gameData.hexes[`${pt.q},${pt.r}`]);
             }
+            // Armies can wait at internal rivers far from a town or political
+            // frontier. Include those shores and prioritize useful nearby sites.
+            const waiting=gameData.entities.filter(u=>u.owner===ownerId&&u.hp>0&&isLandArmyUnit(u))
+                .sort((a,b)=>Number(!!b.target)-Number(!!a.target)).slice(0,32);
+            for(const unit of waiting) {
+                const h=getNearestHexToPoint(unit.x,unit.y);
+                if(h)for(const pt of getHexesInRadius(h.q,h.r,5))
+                    addOwnCoast(gameData.hexes[`${pt.q},${pt.r}`]);
+            }
+            const proximity=new Map();
+            const distance=h=>{if(!proximity.has(h))proximity.set(h,nearestFriendlyLandArmyDistSq(h.x,h.y,ownerId));return proximity.get(h);};
+            ownCoast.sort((a,b)=>distance(a)-distance(b));
             // Also keep own-to-own river links (internal channels).
             let ownLinkCoast = ownCoast.slice();
             if(ownCoast.length > 48) ownCoast.length = 48;
@@ -40289,7 +40324,8 @@
         function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey) {
             if(!gameData.hexList || !gameData.hexList.length) return false;
             // Keep a cash cushion so bridges don't starve unit production.
-            if(wodPlayerTreasury(ownerId) < WOD_PRICE_BRIDGE * 2.4) return false;
+            if(wodPlayerTreasury(ownerId) < WOD_PRICE_BRIDGE + WOD_PRICE_LIGHT*4) return false;
+            if((gameData.constructionJobs||[]).some(j=>j.owner===ownerId&&j.mode==='bridge'))return false;
             let aiCities = gameData.cities.filter(c => c && c.owner === ownerId).length;
             let aiBridges = (gameData.bridges || []).filter(b => b && b.owner === ownerId).length;
             // Tight cap — bridges are situational, not a spam build.
@@ -40297,10 +40333,10 @@
             if(aiBridges >= bridgeCap) return false;
             let now = performance.now();
             if(!gameData._aiBridgeCooldown) gameData._aiBridgeCooldown = {};
-            // ~95s between bridge attempts per faction.
-            if(now - (gameData._aiBridgeCooldown[ownerId] || 0) < 95000) return false;
+            // First useful crossing can start immediately; later attempts are spaced.
+            if(gameData._aiBridgeCooldown[ownerId]&&now-gameData._aiBridgeCooldown[ownerId]<65000)return false;
             // Cheap gate before the site search (still rare, but more often when useful).
-            if(Math.random() > 0.28) return false;
+            if(Math.random() > 0.55) return false;
             let sites = wodAiCollectBridgeCandidateSites(ownerId);
             if(!sites.length) return false;
             let best = null,
@@ -40404,8 +40440,9 @@
             if(!needGuards && army.length >= 10 && clock-plan.lastFort >= 90 && clock-plan.lastBuilding >= 30 &&
                 cash() >= WOD_PRICE_FORT+WOD_PRICE_LIGHT*4 && manpower() >= getUnitCost('light').manpower && income-upkeep > 4 &&
                 wodAiTryFortForOwner(owner,ownerKey)) { plan.lastFort=clock; plan.lastBuilding=clock; }
-            if(army.length >= 12 && !bought && clock-plan.lastBuilding >= 90 &&
-                cash() >= WOD_PRICE_BRIDGE+WOD_PRICE_LIGHT*6 && wodAiTryBridgeForOwner(owner,ownerKey)) plan.lastBuilding=clock;
+            if(!needGuards && army.length>=10 && clock-plan.lastBuilding>=65 &&
+                cash()>=WOD_PRICE_BRIDGE+WOD_PRICE_LIGHT*4 && income-upkeep>4 &&
+                wodAiTryBridgeForOwner(owner,ownerKey))plan.lastBuilding=clock;
             return true;
         }
 
@@ -40691,9 +40728,9 @@
 
         function update(dt) {
             gameData._aiEconomyClock = (gameData._aiEconomyClock || 0) + dt;
-            wodUpdateConstruction(dt);
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
+            wodUpdateConstruction(dt);
             wodBeginSimPfBudget(gameData.entities.length);
             wodRefreshCombatCamBounds();
             let movingN = 0;
@@ -55216,7 +55253,11 @@
                 drawTerritoryOverlay(terrainCtx, -terrainBounds.minX, -terrainBounds.minY);
                 wodEditorOverlayDirty = false;
             },
-            invalidateTerrain() { wodMarkTerrainFullDirty(); },
+            invalidateTerrain() {
+                gameData._wodPfVer=(gameData._wodPfVer||0)+1;
+                gameData._wodPfCache?.clear();
+                wodMarkTerrainFullDirty();
+            },
             setEditorSuppressTerrainBake(on) { wodSuppressTerrainBake = !!on; },
             patchEditorPaint(hexes, opts) { wodPatchEditorTerrain(hexes, opts || {}); },
             resizeCanvas,
