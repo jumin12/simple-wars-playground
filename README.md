@@ -4,6 +4,8 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
 ## Run locally
 
+Lifetime stats save immediately at the end of every played match, including surrenders, scenario/campaign defeats and mid-match menu exits. Match results show completed matches, wins, losses and surrenders separately from faction eliminations. Combat, production and peak totals retain their actual battle era; multiplayer snapshots credit each human seat and preserve delta watermarks across reconnects. Frequent combat cannot postpone the periodic save indefinitely, and browser close events flush pending progress. Opening armies and menu demo battles are excluded from trained-unit/combat totals.
+
 All unit types move 20% faster. Cities and territory layers start enabled in new matches and the map editor.
 
 The editor imports and exports map/scenario JSON and saves scenarios to its library, preserving the era, grid scale, units, roads, bridges, forts, alliances, faction resources, victory conditions and events. Event-free scenarios and zero-second events are supported. Loading validates the file before replacing the current map, and exported/library snapshots remain independent of later edits. Authored eras and starting resources carry into play. Select a unit and click its small **×** to delete it, or use Delete/Backspace; undo and redo restore deletions.

@@ -12046,7 +12046,7 @@
                     </div>
                     <div class="credit-card" id="playtesterCredits">
                         <div class="credit-role">Playtesters</div>
-                        <div class="credit-name">Chris Meehan &amp; Bailey Carpenter</div>
+                        <div class="credit-name">Chris Meehan<br>Bailey Carpenter</div>
                         <p class="credit-thanks">Thank you for helping shape Simple Wars. Your thoughtful suggestions contributed to the game’s design, and your time spent testing, finding bugs and sharing feedback helped make every battle better.</p>
                     </div>
                     <div class="credit-card">
@@ -12628,6 +12628,16 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-24T17:50:00-04:00',
+                title: 'Reliable lifetime stats and playtester layout',
+                items: [
+                    'Lifetime stats record completed matches, wins, losses and surrenders. Domination, annihilation, scenario/campaign results and mid-match exits save immediately; duplicate result callbacks cannot count a match twice.',
+                    'Combat updates no longer postpone saves indefinitely. Match endings, menu exits and browser close events flush progress. Stats follow the actual battle era, and era filters include authored scenario periods.',
+                    'Multiplayer snapshots carry typed combat and production totals for each faction. Every player receives their own stats, with delta tracking preserved across reconnects. Opening armies and the menu battle do not count as trained units or combat progress.',
+                    'Chris Meehan and Bailey Carpenter now appear on separate lines in Credits.'
+                ]
+            },
             {
                 at: '2026-10-24T17:14:00-04:00',
                 title: 'Cleaner island borders and playtester credits',
@@ -14029,6 +14039,8 @@
             }).then(ok => {
                 if(!ok) return;
                 toggleEscMenu(false);
+                gameData._lifetimeEndReason='surrender';
+                wodFinishLifetimeMatch('defeat','surrender');
                 // Multiplayer leave still exits immediately (no shared end-summary path here).
                 if(gameData.mp && gameData.mp.enabled) {
                     returnToMenu();
@@ -14046,6 +14058,7 @@
                 return;
             }
             if(wodEscMenuOpen()) toggleEscMenu(false);
+            gameData._lifetimeEndReason='surrender';
             gameData._campaignEnded = true;
             setGameSpeed(0, true);
             wodResetEndCountdowns();
@@ -14145,6 +14158,7 @@
                     gameData._campaignEnded = false;
                     hideCampaignSummaryOverlay();
                     wodResetEndCountdowns();
+                    wodBeginLifetimeMatch();
                     if(gameData._campaignRun) {
                         wodCampaignOnBattleStart();
                         // End checks stay off until Begin battle; speed remains 0 for deploy.
@@ -14163,6 +14177,8 @@
         }
 
         function returnToMenu() {
+            if(gameState==='PLAYING'&&!gameData.menuAttractMode)wodFinishLifetimeMatch('defeat','quit');
+            wodFlushLifetimeProgress();
             hideCampaignSummaryOverlay();
             wodHideMissionPopup();
             let deployBanner = document.getElementById('wodDeployBanner');
@@ -15152,6 +15168,9 @@
         }
         function wodMpLeaveActiveMatch() {
             if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING') return false;
+            if(gameData._lifetimeMatch&&!gameData._lifetimeMatch.mpOutcomeRecorded) {
+                gameData._lifetimeMatch.mpOutcomeRecorded=true;wodMpRecordLocalMultiplayerOutcome('lost');
+            }
             wodMpFlushStatsToServer();
             if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.leaveLobby)
                 WodMultiplayer.leaveLobby();
@@ -18879,6 +18898,7 @@
         function wodMpFinalizeMatchStart() {
             if(!gameData.mp || !gameData.mp.enabled) return;
             gameData.mp.allReady = true;
+            wodBeginLifetimeMatch();
             wodMpFreezeSeatPlayerMap();
             wodMpRefreshSyncOverlay();
             setGameSpeed(1, true);
@@ -18950,10 +18970,8 @@
                 m.gamesPlayed = (m.gamesPlayed || 0) + 1;
                 if(oc === 'won') m.wins = (m.wins || 0) + 1;
                 else if(oc === 'lost') m.losses = (m.losses || 0) + 1;
-                scheduleSaveWodProgress();
-            } else {
-                scheduleCloudSyncProgress();
             }
+            wodFlushLifetimeProgress();
             wodMpRefreshLocalMpStatsReadout();
             wodMpRegisterWithServer();
             if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.code)
@@ -18972,7 +18990,10 @@
             let mpActive = !!(gameData.mp && gameData.mp.enabled);
             if(oc === 'won') triggerCampaignVictory(me.message || 'Victory', !mpActive && me.countAsBattleWon === true);
             else if(oc === 'lost') triggerCampaignDefeat(me.message || 'Defeat');
-            wodMpRecordLocalMultiplayerOutcome(oc);
+            if(!gameData._lifetimeMatch?.mpOutcomeRecorded) {
+                if(gameData._lifetimeMatch)gameData._lifetimeMatch.mpOutcomeRecorded=true;
+                wodMpRecordLocalMultiplayerOutcome(oc);
+            }
         }
 
         function wodMpIsSlotEliminated(slot) {
@@ -19250,6 +19271,8 @@
                 gameData.mp.connectedSlots = s.connectedSlots.slice();
                 wodMpEnsureLocalSlotConnected();
             }
+            if(s.lifetimeStatsByOwner){gameData._lifetimeStatsByOwner=s.lifetimeStatsByOwner;wodSyncLocalMatchLifetime();}
+            wodTrackLifetimeMatchPeaks();
             if(s.matchEnd) wodMpClientApplyMatchEnd(s.matchEnd);
             if(s.allReady && gameData.mp && gameData.mp.enabled && !gameData.mp.allReady)
                 wodMpFinalizeMatchStart();
@@ -19330,6 +19353,7 @@
                 shipKillsByOwner: Object.assign({}, gameData.shipKillsByOwner || {}),
                 sessionIncomeByOwner: Object.assign({}, (gameData._sessionIncomeAcc && gameData._sessionIncomeAcc.byOwner) || {}),
                 sessionCitiesCapturedByOwner: Object.assign({}, gameData.sessionCitiesCapturedByOwner || {}),
+                lifetimeStatsByOwner: JSON.parse(JSON.stringify(gameData._lifetimeStatsByOwner||{})),
                 constructionJobs: gameData.constructionJobs || [],
                 entities: gameData.entities.filter(e => e.hp > 0).map(wodStripEntityForNet),
                 hexOwners: owners,
@@ -22599,7 +22623,7 @@
                     hidePanels();
                     gameState = 'PLAYING';
                     pauseMenuBackgroundBattle();
-                    wodPrepareForNewMatch({ keepMp: true });
+                    wodPrepareForNewMatch({ keepMp: true, keepLifetimeMatch: true });
                     wodClearLiveMapForNewMatch();
                     UI.mainMenu.classList.add('hidden');
                     UI.panels.forEach(p => p.classList.add('hidden'));
@@ -22625,6 +22649,7 @@
                         gameState = 'MENU';
                         return;
                     }
+                    wodBeginLifetimeMatch();
                     if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
                     wodMpEnsureLocalSlotConnected();
                     if(!gameData.hexList || !gameData.hexList.length) {
@@ -24031,6 +24056,7 @@
                     unitsBuiltShip: 0,
                     unitsBuiltMarine: 0,
                     gamesStarted: 0,
+                    matchesCompleted: 0, matchesWon: 0, matchesLost: 0, matchesSurrendered: 0,
                     missionsCompleted: 0,
                     campaignsWon: 0,
                     campaignBattlesWon: 0
@@ -24337,7 +24363,7 @@
         function scheduleCloudSyncProgress() {
             if(!wodCloudCanSync()) return;
             wodEnsurePlayerId();
-            if(_wodCloudSyncTimer) clearTimeout(_wodCloudSyncTimer);
+            if(_wodCloudSyncTimer) return;
             _wodCloudSyncTimer = setTimeout(() => {
                 _wodCloudSyncTimer = null;
                 WodMultiplayer.syncProgress(wodProgress.profile.playerId, wodBuildCloudSyncPayload());
@@ -24377,12 +24403,66 @@
             });
         }
         function scheduleSaveWodProgress() {
-            if(wodSaveTimer) clearTimeout(wodSaveTimer);
+            if(wodSaveTimer) return;
             wodSaveTimer = setTimeout(() => {
                 wodSaveTimer = null;
                 persistWodProgressNow();
                 scheduleCloudSyncProgress();
             }, 320);
+        }
+
+        function wodFlushLifetimeProgress() {
+            if(wodSaveTimer){clearTimeout(wodSaveTimer);wodSaveTimer=null;}
+            persistWodProgressNow();scheduleCloudSyncProgress();
+        }
+        function wodBeginLifetimeMatch() {
+            if(!wodProgress||gameState!=='PLAYING'||gameData.menuAttractMode||gameData._lifetimeMatch)return;
+            const era=gameData._matchPeriod||gameData.gamePeriod||'modern';
+            gameData._lifetimeMatch={period:WOD_PERIOD_IDS.includes(era)?era:'modern',finished:false,applied:{}};
+            if(!gameData.mp?.enabled)wodBumpLifetime('gamesStarted',1);
+            wodSyncLocalMatchLifetime();wodTrackLifetimeMatchPeaks();wodFlushLifetimeProgress();
+        }
+        // Host totals travel with snapshots; each human seat applies its own typed
+        // combat/production deltas exactly once, including after reconnects.
+        function wodRecordOwnerLifetime(owner,field,amount) {
+            if(!amount||!wodProgress||gameState!=='PLAYING'||gameData.menuAttractMode)return;
+            if(gameData.mp?.enabled) {
+                if(!gameData.mp.isHost)return;
+                const totals=gameData._lifetimeStatsByOwner||(gameData._lifetimeStatsByOwner={});
+                const row=totals[owner]||(totals[owner]={});row[field]=(row[field]||0)+amount;
+                wodSyncLocalMatchLifetime();
+            } else if(owner===1&&!gameData._lifetimeMatch?.finished) {wodBumpLifetime(field,amount);checkWodAchievements();scheduleSaveWodProgress();}
+        }
+        function wodSyncLocalMatchLifetime() {
+            const match=gameData._lifetimeMatch;
+            if(!match||match.finished||!gameData.mp?.enabled||gameData.menuAttractMode)return;
+            const row=gameData._lifetimeStatsByOwner?.[wodLocalPlayerOwner()]||{};
+            for(const [field,value] of Object.entries(row)) {
+                if(!Object.hasOwn(wodDefaultLifetimeStats(),field))continue;
+                const total=Number(value)||0,delta=total-(match.applied[field]||0);
+                if(delta>0){wodBumpLifetime(field,delta);match.applied[field]=total;scheduleSaveWodProgress();}
+            }
+        }
+        function wodTrackLifetimeMatchPeaks() {
+            if(!gameData._lifetimeMatch||gameData._lifetimeMatch.finished||gameData.menuAttractMode)return;
+            const bucket=wodLifetimeBucket(),army=getOwnerTroopManpower(wodLocalPlayerOwner()),cash=Math.floor(wodHudMoney());
+            let dirty=false;
+            if(army>(bucket?.peakFieldManpower||0)){wodBumpLifetimeMax('peakFieldManpower',army);dirty=true;}
+            if(cash>(bucket?.peakMoneyHeld||0)){wodBumpLifetimeMax('peakMoneyHeld',cash);dirty=true;}
+            if(dirty)scheduleSaveWodProgress();
+        }
+        function wodFinishLifetimeMatch(outcome,reason) {
+            const match=gameData._lifetimeMatch;
+            if(!match||match.finished||!wodProgress||gameData.menuAttractMode)return false;
+            wodSyncLocalMatchLifetime();
+            wodBumpLifetimeMax('peakFieldManpower',getOwnerTroopManpower(wodLocalPlayerOwner()));
+            wodBumpLifetimeMax('peakMoneyHeld',Math.floor(wodHudMoney()));
+            match.finished=true;match.outcome=outcome;match.reason=reason||'';
+            wodBumpLifetime('matchesCompleted',1);
+            wodBumpLifetime(outcome==='victory'?'matchesWon':'matchesLost',1);
+            if(reason==='surrender')wodBumpLifetime('matchesSurrendered',1);
+            if(outcome!=='victory'&&!gameData.mp?.enabled)wodBumpLifetime('campaignLosses',1);
+            checkWodAchievements();wodFlushLifetimeProgress();return true;
         }
 
         function formatLifetimeBig(n) {
@@ -24571,9 +24651,9 @@
                 return `<div class="stat-cell"><div class="stat-label">${lab}</div><div class="stat-value">${val}</div></div>`;
             }
             let periodBar = '';
-            if(wodHasAnyEraSkinUnlocked()) {
+            if(wodHasAnyEraSkinUnlocked() || Object.keys(wodProgress.lifetimeByPeriod||{}).some(p=>p!=='modern')) {
                 let periodOpts = '<option value="all"' + (_achStatsPeriodFilter === 'all' ? ' selected' : '') + '>All periods (combined)</option>';
-                for(let pid of wodListUnlockedPeriodIds()) {
+                for(let pid of WOD_PERIOD_IDS) {
                     periodOpts += '<option value="' + pid + '"' + (_achStatsPeriodFilter === pid ? ' selected' : '') + '>' + wodPeriodLabel(pid) + '</option>';
                 }
                 periodBar = `<div class="stats-period-bar setup-row" style="margin-bottom:14px;max-width:360px">
@@ -24583,6 +24663,15 @@
             }
             stats.innerHTML = `${periodBar}
             <div class="stats-layout">
+                <section class="stats-section">
+                    <h3 class="stats-section-title">Match results</h3>
+                    <div class="stats-grid">
+                        ${sc('Matches completed',formatLifetimeBig(statsL.matchesCompleted))}
+                        ${sc('Matches won',formatLifetimeBig(statsL.matchesWon))}
+                        ${sc('Matches lost',formatLifetimeBig(statsL.matchesLost))}
+                        ${sc('Surrenders',formatLifetimeBig(statsL.matchesSurrendered))}
+                    </div>
+                </section>
                 <section class="stats-section">
                     <h3 class="stats-section-title">Combat</h3>
                     <div class="stats-combat-split">
@@ -24607,14 +24696,14 @@
                     </div>
                 </section>
                 <section class="stats-section">
-                    <h3 class="stats-section-title">Campaign map</h3>
+                    <h3 class="stats-section-title">Battlefield totals</h3>
                     <div class="stats-grid">
                         ${sc('Peak army (fielded)', formatLifetimeBig(statsL.peakFieldManpower))}
                         ${sc('Enemy factions eliminated', formatLifetimeBig(statsL.battlesWon))}
-                        ${sc('Defeats (lost all cities)', formatLifetimeBig(statsL.campaignLosses))}
+                        ${sc('Solo defeats (including surrender)', formatLifetimeBig(statsL.campaignLosses))}
                         ${sc('Cities captured', formatLifetimeBig(statsL.citiesCaptured))}
                         ${sc('Convoys seized', formatLifetimeBig(statsL.convoysCaptured))}
-                        ${sc('Campaigns started', formatLifetimeBig(statsL.gamesStarted))}
+                        ${sc('Solo battles started', formatLifetimeBig(statsL.gamesStarted))}
                     </div>
                 </section>
                 <section class="stats-section">
@@ -24628,7 +24717,7 @@
                 <section class="stats-section">
                     <h3 class="stats-section-title">Economy &amp; infrastructure</h3>
                     <div class="stats-grid">
-                        ${sc('Peak $ held (one campaign)', formatLifetimeBig(statsL.peakMoneyHeld))}
+                        ${sc('Peak $ held (one battle)', formatLifetimeBig(statsL.peakMoneyHeld))}
                         ${sc(sf.statFactories, formatLifetimeBig(statsL.factoriesBuilt))}
                         ${sc(sf.statHarbors, formatLifetimeBig(statsL.harborsBuilt))}
                         ${sc(sf.statForts, formatLifetimeBig(statsL.fortsBuilt))}
@@ -26353,6 +26442,7 @@
         }
 
         function openCampaignBattleSummary(outcomeKind, headline, reasonLine) {
+            wodFinishLifetimeMatch(outcomeKind,gameData._lifetimeEndReason);
             let overlay = document.getElementById('campaignSummaryOverlay');
             let panel = document.getElementById('campaignSummaryPanel');
             let titleEl = document.getElementById('campaignSummaryTitle');
@@ -26638,6 +26728,7 @@
                 checkWodAchievements();
                 scheduleSaveWodProgress();
             }
+            wodFlushLifetimeProgress();
         }
 
         /** Marks the active mission as completed in persistent progress (unlocks the next one). */
@@ -26867,11 +26958,6 @@
                 return;
             }
             if(wodTickEndCountdown('annLoss', playerMil === 0 && enemyMil > 0, accDt, 'Your army is destroyed! Defeat in', true)) {
-                if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                    wodBumpLifetime('campaignLosses', 1);
-                    checkWodAchievements();
-                    scheduleSaveWodProgress();
-                }
                 triggerCampaignDefeat('Defeat — annihilation: all your combat forces were destroyed.');
             }
         }
@@ -26880,6 +26966,7 @@
         function handleWodTownCaptureAndElimination(prevOwner, newOwner) {
             if(gameState !== 'PLAYING' || gameData.menuAttractMode) return;
             if(prevOwner === newOwner) return;
+            if(newOwner>0&&prevOwner>0)wodRecordOwnerLifetime(newOwner,'citiesCaptured',1);
             if(gameData.mp && gameData.mp.enabled) {
                 if(gameData.mp.isHost && newOwner > 0 && prevOwner > 0 && prevOwner !== newOwner) {
                     if(!gameData.sessionCitiesCapturedByOwner) gameData.sessionCitiesCapturedByOwner = {};
@@ -26889,7 +26976,6 @@
             }
             if(!wodProgress) return;
             if(newOwner === 1 && prevOwner > 1) {
-                wodBumpLifetime('citiesCaptured', 1);
                 gameData.sessionCitiesCaptured = (gameData.sessionCitiesCaptured || 0) + 1;
             }
             if(prevOwner <= 0) {
@@ -26902,9 +26988,7 @@
                 scheduleSaveWodProgress();
                 return;
             }
-            if(prevOwner === 1) {
-                wodBumpLifetime('campaignLosses', 1);
-            } else if(newOwner === 1 && prevOwner > 1) {
+            if(newOwner === 1 && prevOwner > 1) {
                 wodBumpLifetime('battlesWon', 1);
             }
             checkWodAchievements();
@@ -27498,18 +27582,10 @@
             }
             if(owner === 1) gameData.casualties = (gameData.casualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerKills = (gameData.playerKills || 0) + amount;
-            if(wodProgress) {
-                let killField = unitType === 'marine' ? 'enemyMarineKills' : 'enemyTroopKills';
-                let lossField = unitType === 'marine' ? 'ownMarineLosses' : 'ownTroopLosses';
-                if(sourceOwner === 1 && owner !== 1) {
-                    wodBumpLifetime(killField, amount);
-                    checkWodAchievements();
-                    scheduleSaveWodProgress();
-                } else if(owner === 1 && sourceOwner !== 1) {
-                    wodBumpLifetime(lossField, amount);
-                    scheduleSaveWodProgress();
-                }
-            }
+            const killField=unitType==='marine'?'enemyMarineKills':'enemyTroopKills';
+            const lossField=unitType==='marine'?'ownMarineLosses':'ownTroopLosses';
+            wodRecordOwnerLifetime(owner,lossField,amount);
+            if(sourceOwner>0&&sourceOwner!==owner)wodRecordOwnerLifetime(sourceOwner,killField,amount);
         }
 
         function addTankCasualties(owner, amount, sourceOwner = 0) {
@@ -27523,15 +27599,8 @@
             }
             if(owner === 1) gameData.tankCasualties = (gameData.tankCasualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerTankKills = (gameData.playerTankKills || 0) + amount;
-            if(wodProgress) {
-                if(sourceOwner === 1 && owner !== 1) {
-                    wodBumpLifetime('enemyTankKills', amount);
-                    scheduleSaveWodProgress();
-                } else if(owner === 1 && sourceOwner !== 1) {
-                    wodBumpLifetime('ownTankLosses', amount);
-                    scheduleSaveWodProgress();
-                }
-            }
+            wodRecordOwnerLifetime(owner,'ownTankLosses',amount);
+            if(sourceOwner>0&&sourceOwner!==owner)wodRecordOwnerLifetime(sourceOwner,'enemyTankKills',amount);
         }
 
         function getOwnerShipCasualties(owner) {
@@ -27552,14 +27621,8 @@
             }
             if(owner === 1) gameData.shipCasualties = (gameData.shipCasualties || 0) + amount;
             if(sourceOwner === 1 && owner !== 1) gameData.playerShipKills = (gameData.playerShipKills || 0) + amount;
-            if(wodProgress && sourceOwner === 1 && owner !== 1) {
-                wodBumpLifetime('enemyShipKills', amount);
-                checkWodAchievements();
-                scheduleSaveWodProgress();
-            } else if(wodProgress && owner === 1 && sourceOwner !== 1) {
-                wodBumpLifetime('ownShipLosses', amount);
-                scheduleSaveWodProgress();
-            }
+            wodRecordOwnerLifetime(owner,'ownShipLosses',amount);
+            if(sourceOwner>0&&sourceOwner!==owner)wodRecordOwnerLifetime(sourceOwner,'enemyShipKills',amount);
         }
 
         function applyDamage(unit, amount, source) {
@@ -34630,6 +34693,7 @@
         if(typeof window !== 'undefined') {
             window.addEventListener('beforeunload', function() {
                 try {
+                    wodSyncLocalMatchLifetime();wodFlushLifetimeProgress();
                     if(gameState === 'PLAYING' && gameData.mp && gameData.mp.enabled && typeof wodMpFlushStatsToServer === 'function')
                         wodMpFlushStatsToServer();
                     void wodFlushSavedMapsToDisk();
@@ -34637,6 +34701,7 @@
             });
             window.addEventListener('pagehide', function() {
                 try {
+                    wodSyncLocalMatchLifetime();wodFlushLifetimeProgress();
                     void wodFlushSavedMapsToDisk();
                 } catch(e) {}
             });
@@ -35683,11 +35748,6 @@
             gameData._fogCanvasDirty = true;
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
 
-            if(wodProgress) {
-                wodBumpLifetime('gamesStarted', 1);
-                scheduleSaveWodProgress();
-            }
-
             wodSyncViewportAndCanvas();
 
             if(gameData.mp && gameData.mp.enabled) {
@@ -36458,6 +36518,7 @@
             wodInitMissionRuntime();
             gameData.sessionCitiesCaptured = 0;
             gameData.sessionCitiesCapturedByOwner = {};
+            gameData._lifetimeStatsByOwner={};
             gameData._annihilationCheckAcc = 0;
             gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
             gameData._landIncomeCacheDirty = true;
@@ -37863,6 +37924,7 @@
             wodMpClearTerrainCachesForNewMatch();
         }
         function wodPrepareForNewMatch(opts) {
+            if(!opts?.keepLifetimeMatch){gameData._lifetimeMatch=null;gameData._lifetimeStatsByOwner={};gameData._lifetimeEndReason=null;}
             gameData.controlGroups = {};
             gameData._territoryCleanupKeys = new Set();
             gameData._waterPoliticsWork = null;
@@ -40864,12 +40926,12 @@
             if(wodProgress && !gameData.menuAttractMode && gameState === 'PLAYING') {
                 let dirty = false;
                 let fielded = gameData._uiTroopCache;
-                if(fielded === undefined) fielded = getOwnerTroopManpower(1);
+                if(fielded === undefined || wodLocalPlayerOwner()!==1) fielded = getOwnerTroopManpower(wodLocalPlayerOwner());
                 if(fielded > (wodProgress.lifetime.peakFieldManpower || 0)) {
                     wodBumpLifetimeMax('peakFieldManpower', fielded);
                     dirty = true;
                 }
-                let cash = Math.floor(gameData.money || 0);
+                let cash = Math.floor(wodHudMoney());
                 if(cash > (wodProgress.lifetime.peakMoneyHeld || 0)) {
                     wodBumpLifetimeMax('peakMoneyHeld', cash);
                     dirty = true;
@@ -41113,11 +41175,7 @@
                             let prevConvOwner = unit.owner;
                             unit.owner = captor.owner;
                             unit.name = "Captured " + generateUnitName('convoy', !!unit.convoySeaRoute, unit.owner);
-                            if(wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode && captor.owner === 1 && prevConvOwner > 1) {
-                                wodBumpLifetime('convoysCaptured', 1);
-                                checkWodAchievements();
-                                scheduleSaveWodProgress();
-                            }
+                            if(prevConvOwner>0&&prevConvOwner!==captor.owner)wodRecordOwnerLifetime(captor.owner,'convoysCaptured',1);
                             let ownedCities = gameData.cities.filter(city => city.owner === unit.owner);
                             let staging = null;
                             let best = Infinity;
@@ -44407,6 +44465,7 @@
                 peakFieldManpower: 0, battlesWon: 0, campaignLosses: 0,
                 citiesCaptured: 0, convoysCaptured: 0, factoriesBuilt: 0, harborsBuilt: 0, farmsBuilt: 0, fortsBuilt: 0, peakMoneyHeld: 0,
                 unitsBuiltLight: 0, unitsBuiltHeavy: 0, unitsBuiltShip: 0, unitsBuiltMarine: 0, gamesStarted: 0,
+                matchesCompleted: 0, matchesWon: 0, matchesLost: 0, matchesSurrendered: 0,
                 missionsCompleted: 0, campaignsWon: 0, campaignBattlesWon: 0
             };
         }
@@ -44414,7 +44473,7 @@
         function wodLifetimeBucket(period) {
             if(!wodProgress) return null;
             if(!wodProgress.lifetimeByPeriod) wodProgress.lifetimeByPeriod = {};
-            let id = period || wodGetMatchPeriod();
+            let id = period || gameData._lifetimeMatch?.period || wodGetMatchPeriod();
             if(!wodProgress.lifetimeByPeriod[id])
                 wodProgress.lifetimeByPeriod[id] = Object.assign({}, wodDefaultLifetimeStats());
             return wodProgress.lifetimeByPeriod[id];
@@ -54320,7 +54379,7 @@
                     showNotification('+20% defense aura for allied troops surrounding this fort.');
             }
             if(!opts.editor && wodProgress && gameState === 'PLAYING' && !gameData.menuAttractMode) {
-                wodBumpLifetime('fortsBuilt', 1);
+                wodRecordOwnerLifetime(owner,'fortsBuilt',1);
                 scheduleSaveWodProgress();
             }
             return true;
@@ -54632,10 +54691,7 @@
                 else if(j.mode === 'bridge') done = placeBridgeAt(j.owner, j.x, j.y, j.angle, j.w, j.h, { prepaid: true, suppressNotes: true });
                 else if(['factory', 'harbor', 'farm'].includes(j.mode)) {
                     city[{ factory: 'hasFactory', harbor: 'hasHarbor', farm: 'hasFarm' }[j.mode]] = true;
-                    if(j.owner === wodLocalPlayerOwner() && wodProgress && !gameData.menuAttractMode) {
-                        wodBumpLifetime({ factory: 'factoriesBuilt', harbor: 'harborsBuilt', farm: 'farmsBuilt' }[j.mode], 1);
-                        checkWodAchievements(); scheduleSaveWodProgress();
-                    }
+                    wodRecordOwnerLifetime(j.owner,{factory:'factoriesBuilt',harbor:'harborsBuilt',farm:'farmsBuilt'}[j.mode],1);
                 } else if(j.rosterId) {
                     let run = gameData._campaignRun, r = wodRogueLoad()?.roster.find(r => r.id === j.rosterId);
                     if(!run || !r || run.deployedRosterIds.includes(r.id)) { jobs.splice(i,1); continue; }
@@ -54825,12 +54881,9 @@
                 if(opts.startSpawn) ensureStartUnitOnLandHex(unit, null);
                 else ensureUnitPixelOnWalkableHex(unit, 14);
             }
-            if(gameState === 'PLAYING' && owner === 1 && wodProgress) {
-                if(type === 'light') wodBumpLifetime('unitsBuiltLight', 1);
-                else if(type === 'marine') wodBumpLifetime('unitsBuiltMarine', 1);
-                else if(type === 'heavy') wodBumpLifetime('unitsBuiltHeavy', 1);
-                else if(type === 'ship') wodBumpLifetime('unitsBuiltShip', 1);
-                scheduleSaveWodProgress();
+            if(!opts.startSpawn) {
+                const field={light:'unitsBuiltLight',marine:'unitsBuiltMarine',heavy:'unitsBuiltHeavy',ship:'unitsBuiltShip'}[type];
+                if(field)wodRecordOwnerLifetime(owner,field,1);
             }
             return unit;
         }

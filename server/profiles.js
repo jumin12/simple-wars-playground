@@ -46,6 +46,7 @@ const LIFETIME_KEYS = [
   'factoriesBuilt', 'harborsBuilt', 'farmsBuilt', 'fortsBuilt', 'peakMoneyHeld',
   'unitsBuiltLight', 'unitsBuiltHeavy', 'unitsBuiltShip', 'unitsBuiltMarine', 'gamesStarted',
   'missionsCompleted', 'campaignsWon', 'campaignBattlesWon',
+  'matchesCompleted', 'matchesWon', 'matchesLost', 'matchesSurrendered',
 ];
 
 const LIFETIME_MAX_JUMP = {
@@ -56,6 +57,7 @@ const LIFETIME_MAX_JUMP = {
   peakFieldManpower: 100000, peakMoneyHeld: 500000,
   unitsBuiltLight: 200, unitsBuiltHeavy: 80, unitsBuiltShip: 40, unitsBuiltMarine: 80,
   gamesStarted: 5,
+  matchesCompleted: 10, matchesWon: 10, matchesLost: 10, matchesSurrendered: 10,
   missionsCompleted: 10, campaignsWon: 3, campaignBattlesWon: 30,
 };
 
