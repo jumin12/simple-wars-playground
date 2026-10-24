@@ -73,7 +73,7 @@ const server=http.createServer((req,res)=>{
     const spacing=gameData.hexRadius*1.35,chains=wodCollectDiplomacyBorderChains(gameData.hexList,gameData.hexes,0,0,spacing);
     const key=(a,b)=>[`${Math.round(a.x/spacing*2)},${Math.round(a.y/spacing*2)}`,`${Math.round(b.x/spacing*2)},${Math.round(b.y/spacing*2)}`].sort().join('|');
     const expected=new Set(),got=new Map();let invalid=0,repeats=0;
-    for(const h of gameData.hexList)for(const d of [{q:1,r:0},{q:0,r:1}]){const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||!h.owner||!n.owner||h.owner===n.owner)continue;const x=(h.x+n.x)/2,y=(h.y+n.y)/2;expected.add(key({x:x-(d.r?spacing/2:0),y:y-(d.q?spacing/2:0)},{x:x+(d.r?spacing/2:0),y:y+(d.q?spacing/2:0)}));}
+    for(const h of gameData.hexList)for(const d of [{q:1,r:0},{q:0,r:1}]){const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||!h.owner||!n.owner||h.owner===n.owner||pattern==='coast'&&(h.r>0||n.r>0))continue;const x=(h.x+n.x)/2,y=(h.y+n.y)/2;expected.add(key({x:x-(d.r?spacing/2:0),y:y-(d.q?spacing/2:0)},{x:x+(d.r?spacing/2:0),y:y+(d.q?spacing/2:0)}));}
     for(const c of chains){const seen=new Set();for(const p of c.pts){const k=p.x+','+p.y;if(seen.has(k))repeats++;seen.add(k);}for(let i=0;i<c.pts.length-(c.closed?0:1);i++){const a=c.pts[i],b=c.pts[(i+1)%c.pts.length],k=key(a,b);if(!expected.has(k))invalid++;got.set(k,(got.get(k)||0)+1);}}
     cases.push({pattern,chains:chains.length,expected:expected.size,got:got.size,invalid,repeats,missing:[...expected].filter(k=>!got.has(k)).length,duplicates:[...got.values()].filter(n=>n!==1).length});
    }

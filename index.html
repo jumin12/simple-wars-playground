@@ -12622,6 +12622,15 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-24T13:17:00-04:00',
+                title: 'Clean coastal previews and no stray mountain pockets',
+                items: [
+                    'Frontlines stop at the open-ocean shoreline in setup previews, lobbies and gameplay. Offshore ownership hooks, loops and isolated sea lines are no longer drawn; enclosed lakes and real land pockets retain their borders.',
+                    'Starting land cleanup includes political mountain connectivity. Mountains on inhabited landmasses are no longer treated as empty offshore holdings, and balancing preserves both political continuity and walkable town supply using cardinal neighbors.',
+                    'Unsupported mountain remnants are repaired before exact area balancing. Fully protected frontiers reject invalid transfers instead of creating inland ownership islands. Factions keep equal land totals and supplied opening armies.'
+                ]
+            },
+            {
                 at: '2026-10-24T12:35:00-04:00',
                 title: 'Even map regions, cleaner movement and complete town assaults',
                 items: [
@@ -17594,10 +17603,11 @@
         }
         // Starting supply uses real, cardinal, walkable land routes. Sea ownership and
         // diagonal corners must never make an isolated island a valid army spawn.
-        function wodStartingLandGraph() {
+        // includeMountains is only for political continuity, never unit supply.
+        function wodStartingLandGraph(includeMountains=false) {
             const nodes = new Map(), roots = new Map(), inhabited = new Set();
             for(const hex of gameData.hexList) {
-                if(!isWaterHex(hex) && hex.type !== 'mountain')
+                if(!isWaterHex(hex) && (includeMountains||hex.type !== 'mountain'))
                     nodes.set(getHexKey(hex), {hex, neighbors: []});
             }
             for(const node of nodes.values()) {
@@ -17679,8 +17689,8 @@
 
         /** Repair artificial enclaves on inhabited islands after the LAST Voronoi pass.
          * Empty offshore holdings keep their area/ownership; deployment excludes them. */
-        function wodRepairStartingLandSupply(ownerIds) {
-            const graph = wodStartingLandGraph(), supplied = wodStartingTownSupply(graph);
+        function wodRepairStartingLandSupply(ownerIds,includeMountains=false) {
+            const graph = wodStartingLandGraph(includeMountains), supplied = wodStartingTownSupply(graph);
             const valid = new Set(ownerIds), reached = new Set(), queue = [];
             for(const [owner, keys] of supplied) if(valid.has(owner)) for(const key of keys) {
                 const n = graph.nodes.get(key); reached.add(n); queue.push(n);
@@ -17695,18 +17705,29 @@
         /** Final area balancing may move a frontier, but cannot cut a land supply link. */
         async function wodExactEqualizePoliticalLandCounts(ownerIds, protectedCities, maxMovesOpt) {
             if(!ownerIds || ownerIds.length < 2) return;
+            // Clear unsupported political remnants, including isolated mountain cells,
+            // before balancing. Empty physical islands retain their claims.
+            wodRepairStartingLandSupply(ownerIds,true);
             const sorted = [...ownerIds].sort((a,b)=>a-b), valid = new Set(sorted);
             const target = wodBuildLandBalanceTargets(sorted), counts = wodCountBalancedLandByOwner(sorted);
             const protectedKeys = wodProtectedLandBalanceKeys([...(protectedCities || []), ...gameData.cities]);
-            const graph = wodStartingLandGraph();
+            const graph = wodStartingLandGraph(),politicalGraph=wodStartingLandGraph(true);
             // Reject articulation points: every remaining neighbor must still connect
             // without this tile. This also protects a town's narrow peninsula/bridgehead.
-            function safeToRemove(hex) {
-                const node = graph.nodes.get(getHexKey(hex));
-                if(!node) return true; // Mountains never carry starting supply.
-                if(!graph.inhabited.has(node)) return true; // No troops deploy on townless islands.
+            function safeToRemoveInGraph(hex,checkGraph) {
+                const node = checkGraph.nodes.get(getHexKey(hex));
+                if(!node) return true; // This cell carries no connectivity in this graph.
+                if(!checkGraph.inhabited.has(node)) return true; // No troops deploy on townless islands.
                 const neighbors = node.neighbors.filter(n=>n.hex.owner===hex.owner);
                 if(neighbors.length < 2) return true;
+                // Most frontier cells have a simple connected local ring. Prove
+                // that cheaply before searching a large owned region.
+                const localSeen=new Set([node,neighbors[0]]),localQueue=[neighbors[0]],localPending=new Set(neighbors.slice(1));
+                for(let i=0;i<localQueue.length&&localPending.size;i++)for(const nb of localQueue[i].neighbors) {
+                    if(nb.hex.owner!==hex.owner||localSeen.has(nb)||Math.abs(nb.hex.q-hex.q)>1||Math.abs(nb.hex.r-hex.r)>1)continue;
+                    localSeen.add(nb);localPending.delete(nb);localQueue.push(nb);
+                }
+                if(!localPending.size)return true;
                 const pending = new Set(neighbors.slice(1)), seen = new Set([node,neighbors[0]]), queue = [neighbors[0]];
                 for(let i=0; i<queue.length && pending.size; i++) for(const nb of queue[i].neighbors) {
                     if(nb.hex.owner!==hex.owner || seen.has(nb)) continue;
@@ -17715,7 +17736,7 @@
                 if(pending.size===0) return true;
                 // Splitting two town-supplied regions is safe when BOTH sides retain
                 // their own town. A single-town peninsula still cannot be severed.
-                const roots = graph.roots.get(hex.owner) || [];
+                const roots = checkGraph.roots.get(hex.owner) || [];
                 if(roots.length<2) return false;
                 const supplied = new Set([node]), townQueue = roots.slice(), needed = new Set(neighbors);
                 for(const root of roots) { supplied.add(root); needed.delete(root); }
@@ -17725,9 +17746,12 @@
                 }
                 return needed.size===0;
             }
+            function safeToRemove(hex) {
+                return safeToRemoveInGraph(hex,politicalGraph)&&safeToRemoveInGraph(hex,graph);
+            }
             const neighborsFor = hex => {
                 const node = graph.nodes.get(getHexKey(hex));
-                return node ? node.neighbors.map(n=>n.hex) : getNeighborHexes(hex).filter(h=>h && !isWaterHex(h));
+                return (node||politicalGraph.nodes.get(getHexKey(hex)))?.neighbors.map(n=>n.hex)||[];
             };
             const frontier = new Set();
             function refreshFrontier(hex) {
@@ -17738,8 +17762,10 @@
             for(const hex of gameData.hexList) refreshFrontier(hex);
             const offshore = gameData.hexList.filter(hex=> {
                 if(isWaterHex(hex) || !valid.has(hex.owner) || protectedKeys.has(getHexKey(hex))) return false;
-                const node=graph.nodes.get(getHexKey(hex));
-                return !node || !graph.inhabited.has(node);
+                const node=politicalGraph.nodes.get(getHexKey(hex));
+                // Peaks on inhabited continents are not offshore holdings. Only
+                // actual townless shores may be reassigned without a land border.
+                return node&&!politicalGraph.inhabited.has(node)&&cardinalHexDirections.some(d=>isWaterHex(gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`]));
             });
             const excess = sorted.reduce((n,o)=>n+Math.max(0,counts[o]-target[o]),0);
             // Scan the frontier, not the full map, per move. Routing through several
@@ -35881,7 +35907,7 @@
             await smoothStartingTerritory(ownersSorted, 4, 4);
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 18 : 28);
             // Keep the solved region intact while placing its towns.
-            // Final sea paint once borders are settled (borders need full-map water ownership).
+            // Fill political water ownership after the land split settles.
             wodAssignAllWaterFromNearestLand(true);
 
             let perTile = {};
@@ -36260,7 +36286,7 @@
 
                 wodNormalizeStartingCityEconomy(ownersList);
                 gameData._landIncomeCacheDirty = true;
-                // Guarantee full-map water ownership so skirmish diplomacy strokes match campaign.
+                // Keep water claimed for naval play; visible frontlines stop at the open sea.
                 wodAssignAllWaterFromNearestLand(true);
                 if(!(gameData._mapGenOptions && gameData._mapGenOptions.units === false) && !gameData._wodMpLaunchFromCommitted) {
                     gameData.entities = [];
@@ -42321,12 +42347,37 @@
             return out.length ? out : chains;
         }
 
+        let wodDiplomacyOceanCache = new WeakMap();
+        /** Open sea ownership is useful to the simulation, but is not a land
+         * frontline. Enclosed lakes retain their ordinary political boundaries. */
+        function wodOpenOceanHexKeys(hexList,hexLookup) {
+            let hash=2166136261,waterCount=0;
+            for(const h of hexList)if(isWaterHex(h)) {
+                waterCount++;hash=Math.imul(hash^h.q,16777619);hash=Math.imul(hash^h.r,16777619);
+            }
+            const cached=wodDiplomacyOceanCache.get(hexList);
+            if(cached&&cached.hash===hash&&cached.waterCount===waterCount&&cached.length===hexList.length)return cached.keys;
+            const keys=new Set(),queue=[];
+            for(const h of hexList)if(isWaterHex(h)&&cardinalHexDirections.some(d=>!hexLookup[`${h.q+d.q},${h.r+d.r}`])) {
+                keys.add(getHexKey(h));queue.push(h);
+            }
+            for(let i=0;i<queue.length;i++)for(const d of cardinalHexDirections) {
+                const n=hexLookup[`${queue[i].q+d.q},${queue[i].r+d.r}`];
+                if(!n||!isWaterHex(n)||keys.has(getHexKey(n)))continue;
+                keys.add(getHexKey(n));queue.push(n);
+            }
+            wodDiplomacyOceanCache.set(hexList,{hash,waterCount,length:hexList.length,keys});
+            return keys;
+        }
+
         /**
-         * World-space midpoints of faction–faction diplomacy edges (shared by main map renderer and lobby/setup previews).
+         * Exact shared edges on land and inland lakes, ending at the open sea.
+         * Shared by the live map and every lobby/setup preview.
          * @returns {Array<{closed:boolean, pts:Array<{x:number,y:number}>}>}
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
             const nodes=new Map(), edges=[], seen=new Set();
+            const ocean=wodOpenOceanHexKeys(hexList,hexLookup);
             const node=(q,r)=>{
                 const key=q+','+r;
                 if(!nodes.has(key))nodes.set(key,{key,x:q*spacing/2+offsetX,y:r*spacing/2+offsetY,edges:[]});
@@ -42334,10 +42385,10 @@
             };
             const directions=[{q:1,r:0},{q:0,r:1}];
             for(const h of hexList) {
-                if(!h.owner)continue;
+                if(!h.owner||ocean.has(getHexKey(h)))continue;
                 for(const d of directions) {
                     const n=hexLookup[`${h.q+d.q},${h.r+d.r}`];
-                    if(!n||!n.owner||h.owner===n.owner)continue;
+                    if(!n||!n.owner||h.owner===n.owner||ocean.has(getHexKey(n)))continue;
                     const key=hexPairBorderKey(h,n);if(seen.has(key))continue;seen.add(key);
                     const a=d.q?node(2*h.q+1,2*h.r-1):node(2*h.q-1,2*h.r+1);
                     const b=d.q?node(2*h.q+1,2*h.r+1):node(2*h.q+1,2*h.r+1);
