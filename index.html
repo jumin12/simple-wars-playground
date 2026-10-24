@@ -11470,7 +11470,7 @@
                 <div class="esc-help-block">
                     <h4>Encirclement and marine water supply</h4>
                     <p class="esc-help-prose">Starting armies deploy on friendly land connected to an owned town. About 20% cover the supplied border evenly and 80% start near towns, with armor in the rear. Empty offshore holdings count toward balanced land ownership but receive no starting land troops.</p>
-                    <p class="esc-help-prose">Every <strong>friendly town supplies its connected friendly land</strong>, including a captured enemy town. A surrounded pocket containing a friendly town remains supplied: its units take no encirclement damage and can recover when safe. Units lose land supply only when they have no cardinal land connection to any friendly town. Such pockets are marked <strong>encircled</strong>; units take about <strong>3.5% max HP attrition per second</strong> and cannot heal. Map edges and neutral borders do not supply a townless pocket. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though it had a town connection. Infantry and armor in the same coastal pocket still need a friendly town. Forts only halve unsupplied attrition. Active fighting at a town can pause production even while it supplies its territory.</p>
+                    <p class="esc-help-prose">Every <strong>friendly town supplies its connected friendly land</strong>, including a captured enemy town. A surrounded pocket containing a friendly town remains supplied: its units take no encirclement damage and can recover when safe. Units lose land supply only when they have no cardinal land connection to any friendly town. These supply, warning and attrition rules apply equally to player and enemy armies, including when hostile territory is captured underneath a unit. Such pockets are marked <strong>encircled</strong>; units take about <strong>3.5% max HP attrition per second</strong> and cannot heal. Map edges and neutral borders do not supply a townless pocket. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though it had a town connection. Infantry and armor in the same coastal pocket still need a friendly town. Forts only halve unsupplied attrition. Active fighting at a town can pause production even while it supplies its territory.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -12621,6 +12621,18 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-24T12:35:00-04:00',
+                title: 'Even map regions, cleaner movement and complete town assaults',
+                items: [
+                    'Starting territories use gently warped distance fields and solve area quotas directly, preventing terrain-driven ownership rings and winding splits. Every faction gets equal land and town totals within the generated match, with supplied opening armies and safe rear deployment. Constrained seeds retry deterministically, and town footprints use their own seeded random stream.',
+                    'Primary towns are planned on the shared landmass before final balancing. Procedural layouts retry instead of moving capitals through other regions and carving long colony corridors. The same input seed reproduces terrain, ownership, towns and deployment.',
+                    'Narrow mountain passes connect starting land inside each faction before supply repair, preserving compact borders instead of redrawing territory around mountain ridges.',
+                    'Friendly units steer around crowds and can move apart after overlapping. Clear terrain routes are pulled straight while retaining necessary terrain corners and bridge deck waypoints; hostile units and impassable terrain remain blocking.',
+                    "Player and enemy armies use the same encirclement warnings and attrition. Hostile ground cannot give a unit the hostile town's supply, and heavy marching loads no longer starve supply scans. Friendly town supply and the marine-only water exception are preserved.",
+                    'Infantry, armor, flank groups and landed marines spread town assaults across remaining hostile urban cells. Groups retarget as cells fall, capture every town cell before the town changes hands, and keep normal town garrisons.'
+                ]
+            },
             {
                 at: '2026-10-23T22:15:00-04:00',
                 title: 'Smooth borders, coastal ownership and standing town guards',
@@ -16795,8 +16807,35 @@
                 !wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,out[0].x,out[0].y)&&
                 wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,start.x,start.y))
                 out.unshift({x:start.x,y:start.y});
-            // Keep dense bridge deck points for movement — arrow display cleans separately.
-            return out;
+            // Keep bridge deck/portal geometry intact. Ordinary routes can follow
+            // straight visible chords instead of every A* stair step and reverse kink.
+            return hexPath.some(isBridgeHex)?out:wodPullMarchPathTaut(unit,out);
+        }
+
+        function wodStraightMarchSegmentClear(unit,a,b) {
+            if(!wodSegmentClearsTerrainForUnit(unit,a.x,a.y,b.x,b.y))return false;
+            const steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/((gameData.hexRadius||20)*.3)));
+            let previous=getNearestHexToPoint(a.x,a.y);
+            for(let i=1;i<=steps;i++) {
+                const h=getNearestHexToPoint(a.x+(b.x-a.x)*i/steps,a.y+(b.y-a.y)*i/steps);
+                if(!h||isBridgeHex(h))return false;
+                if(previous&&h!==previous&&!wodCanStepBetweenHexes(unit,previous,h,wodUnitPrefersLandOnlyPath(unit)))return false;
+                previous=h;
+            }
+            return true;
+        }
+        function wodPullMarchPathTaut(unit,points) {
+            if(!unit||!points.length)return points;
+            const result=[];let anchor={x:unit.x,y:unit.y},i=0;
+            if(wodStraightMarchSegmentClear(unit,anchor,points[points.length-1]))return [points[points.length-1]];
+            while(i<points.length) {
+                let next=i;
+                for(let j=Math.min(points.length-1,i+48);j>i;j--) {
+                    if(wodStraightMarchSegmentClear(unit,anchor,points[j])){next=j;break;}
+                }
+                result.push(points[next]);anchor=points[next];i=next+1;
+            }
+            return result;
         }
 
         /** Drop reverse kinks from a world polyline (approach→deck stitch / join overshoot). */
@@ -17421,6 +17460,15 @@
             let hash = ((Math.imul(h.q * 374761393 + h.r * 668265263, seed | 1) >>> 0) / 4294967296) - 0.5;
             return 1 + w * 0.11 + hash * 0.05;
         }
+        // A shared gentle coordinate warp keeps borders organic without multiplying
+        // faction scores by terrain/noise, which created disconnected contour rings.
+        function wodStartingPoliticalPoint(h) {
+            const seed=(gameData._mapGenSeed>>>0)||1, sp=gameData.hexRadius*1.35;
+            if(h._politicalWarp?.seed===seed&&h._politicalWarp.sx===h.x&&h._politicalWarp.sy===h.y&&h._politicalWarp.sp===sp)return h._politicalWarp;
+            const phase=wodDeterministicCitySplitPhase01(seed)*Math.PI*2;
+            return h._politicalWarp={seed,sx:h.x,sy:h.y,sp,x:h.x+sp*.8*Math.sin(h.y/(sp*12)+phase),
+                y:h.y+sp*.8*Math.sin(h.x/(sp*13)-phase)};
+        }
         async function wodAssignClaimableLandWeightedVoronoiFromSeeds(ownerIds, seedsByOwner, biasByOwner, opts) {
             if(!ownerIds || ownerIds.length === 0) return;
             let landOnly = !!(opts && opts.landOnly);
@@ -17434,7 +17482,7 @@
             let seedArr = [];
             for(let o of ownerIds) {
                 let s = seedsByOwner[o];
-                if(s && valid.has(o)) seedArr.push({ o, s, idx: ownerIdxByO[o], b: bias[o] || 0 });
+                if(s && valid.has(o)) seedArr.push({ o, s:wodStartingPoliticalPoint(s), b: bias[o] || 0 });
             }
             let savedBatch = batchHexOwner;
             batchHexOwner = true;
@@ -17443,11 +17491,11 @@
                 for(let h of gameData.hexList) {
                     if(landOnly && isWaterHex(h)) continue;
                     let bestO = 0, bestScore = Infinity;
-                    let geo = wodTerrainPoliticalDistanceWeight(h);
+                    const point=wodStartingPoliticalPoint(h);
                     for(let si = 0, sn = seedArr.length; si < sn; si++) {
                         let ent = seedArr[si];
-                        let dx = h.x - ent.s.x, dy = h.y - ent.s.y;
-                        let score = (dx * dx + dy * dy) * geo * wodStartSplitNoiseMult(h, ent.idx) - ent.b;
+                        let dx = point.x - ent.s.x, dy = point.y - ent.s.y;
+                        let score = dx*dx+dy*dy-ent.b;
                         if(score < bestScore) {
                             bestScore = score;
                             bestO = ent.o;
@@ -17479,60 +17527,37 @@
         }
         /** Iteratively adjust biased Voronoi so dry land totals (mountains counted) split evenly when possible (±1 if indivisible). */
         async function wodEqualizePoliticsBiasedVoronoi(ownerIds, capitalCities, iterations) {
-            if(!ownerIds || ownerIds.length < 2) return;
-            let valid = new Set(ownerIds);
-            let sorted = [...ownerIds].sort((a, b) => a - b);
-            let seedsByO = {};
-            for(let cap of capitalCities) {
-                if(cap && valid.has(cap.owner)) seedsByO[cap.owner] = cap;
-            }
-            if(sorted.some(o => !seedsByO[o])) return;
-            let bias = {};
-            for(let o of sorted) bias[o] = 0;
-            let stepScale = Math.max((gameData.hexRadius || 10) ** 2 * 0.055, 24);
-            let mpBoost = !!(gameData.mp && gameData.mp.enabled);
-            let fCount = sorted.length;
-            let multiFaction = fCount >= 3;
-            // Keep equalize short — land-only Voronoi + one final sea paint. Old 60–90 iter
-            // loops (especially post-city for 3+ AI) made setup hang for minutes.
-            let effIter = Math.min(
-                multiFaction ? 28 : 48,
-                Math.max(10, iterations) + (mpBoost ? Math.min(8, Math.round(iterations * 0.2)) : 0)
-            );
-            let minRelaxIter = multiFaction ? 8 : (fCount === 2 ? 12 : 10);
-            wodClearPoliticalDistanceWeightCache();
-            for(let it = 0; it < effIter; it++) {
-                await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias, { landOnly: true });
-                let cts = {};
-                let total = 0;
-                for(let o of sorted) cts[o] = 0;
-                for(let h of gameData.hexList) {
-                    if(!wodHexCountsTowardLandPoliticsBalance(h)) continue;
-                    if(valid.has(h.owner)) {
-                        cts[h.owner]++;
-                        total++;
+            if(!ownerIds||ownerIds.length<2)return;
+            const owners=[...ownerIds].sort((a,b)=>a-b), seeds=owners.map(o=>capitalCities.find(c=>c.owner===o));
+            if(seeds.some(c=>!c))return;
+            const land=gameData.hexList.filter(wodHexCountsTowardLandPoliticsBalance), n=land.length;
+            if(!n)return;
+            const target=wodBuildLandBalanceTargets(owners), bias=owners.map(()=>0);
+            const sites=seeds.map(wodStartingPoliticalPoint);
+            const scores=sites.map(site=>Float64Array.from(land,h=>{
+                const p=wodStartingPoliticalPoint(h);return (p.x-site.x)**2+(p.y-site.y)**2;
+            }));
+            const margins=new Float64Array(n);
+            // Solve area quotas in the distance field, rather than carving hundreds
+            // of arbitrary tiles out of the final frontier to repair a poor split.
+            for(let pass=0;pass<(owners.length===2?1:28);pass++) {
+                for(let o=0;o<(owners.length===2?1:owners.length);o++) {
+                    for(let i=0;i<n;i++) {
+                        let other=Infinity;
+                        for(let j=0;j<owners.length;j++)if(j!==o)other=Math.min(other,scores[j][i]-bias[j]);
+                        margins[i]=scores[o][i]-other;
                     }
+                    margins.sort();const k=target[owners[o]];
+                    bias[o]=k===0?margins[0]-1:k>=n?margins[n-1]+1:(margins[k-1]+margins[k])/2;
+                    await wodMapGenYieldSlice();
                 }
-                if(total === 0) return;
-                let f = sorted.length;
-                let base = Math.floor(total / f);
-                let rem = total % f;
-                let tgt = {};
-                for(let i = 0; i < f; i++) tgt[sorted[i]] = base + (i < rem ? 1 : 0);
-                let err = 0;
-                for(let o of sorted) err = Math.max(err, Math.abs(cts[o] - tgt[o]));
-                let exactDivide = total % f === 0;
-                let gainBump = multiFaction ? 0.02 : (fCount === 2 ? 0.012 : 0.01);
-                let gain = 0.14 + gainBump + Math.min(0.9, it * 0.055);
-                for(let o of sorted) bias[o] += gain * stepScale * (tgt[o] - cts[o]);
-                let acceptErr = exactDivide ? 0 : 1;
-                // 3+ factions: accept ±2 early; exact trim finishes the job cheaply.
-                if(multiFaction && err <= 2 && it >= minRelaxIter) break;
-                if(err <= acceptErr && it > minRelaxIter + (exactDivide ? 2 : 0)) break;
-                if((it & 3) === 0) await wodMapGenYieldSlice();
+                const counts=owners.map(()=>0);
+                for(let i=0;i<n;i++) {
+                    let best=0;for(let o=1;o<owners.length;o++)if(scores[o][i]-bias[o]<scores[best][i]-bias[best])best=o;
+                    land[i].owner=owners[best];counts[best]++;
+                }
+                if(counts.every((c,i)=>Math.abs(c-target[owners[i]])<=1))break;
             }
-            await wodAssignClaimableLandWeightedVoronoiFromSeeds(sorted, seedsByO, bias, { landOnly: true });
-            // One sea paint after land wedges settle (not every iter).
             wodAssignAllWaterFromNearestLand();
         }
         function wodBuildLandBalanceTargets(ownerIds) {
@@ -17615,6 +17640,43 @@
             }
             return supplied;
         }
+        /** Open minimum-cost mountain passes inside an existing political region.
+         * Supply repair should not redraw a compact border around every ridge. */
+        async function wodCarveStartingFactionPasses(ownerIds) {
+            const graph=wodStartingLandGraph();let work=0,changed=false;
+            for(const owner of ownerIds) {
+                const roots=gameData.cities.filter(c=>c.owner===owner).map(c=>gameData.hexes[`${c.q},${c.r}`]).filter(h=>h&&h.owner===owner);
+                const distance=new Map(),previous=new Map(),deque=new Map();let head=0,tail=0;
+                for(const h of roots){const k=getHexKey(h);distance.set(k,0);deque.set(tail++,h);}
+                while(head<tail) {
+                    const h=deque.get(head);deque.delete(head++);const hk=getHexKey(h),cost=distance.get(hk);
+                    for(const d of cardinalHexDirections) {
+                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                        if(!n||n.owner!==owner||isWaterHex(n))continue;
+                        const nk=getHexKey(n),step=n.type==='mountain'?1:0,next=cost+step;
+                        if(next>=(distance.get(nk)??Infinity))continue;
+                        distance.set(nk,next);previous.set(nk,hk);
+                        if(step)deque.set(tail++,n);else deque.set(--head,n);
+                    }
+                    if((++work&2047)===0)await wodMapGenYieldSlice();
+                }
+                const connected=new Set(roots.map(getHexKey));
+                for(const node of graph.nodes.values()) {
+                    const h=node.hex,k=getHexKey(h);
+                    if(h.owner!==owner||!distance.has(k))continue;
+                    let cursor=k;
+                    while(cursor&&!connected.has(cursor)) {
+                        connected.add(cursor);const tile=gameData.hexes[cursor];
+                        if(tile.type==='mountain') {
+                            tile.type='hill';tile.baseColor=getTerrainColor('hill');tile.renderColor=tile.baseColor;changed=true;
+                        }
+                        cursor=previous.get(cursor);
+                    }
+                }
+            }
+            if(changed){gameData._wodPfVer=(gameData._wodPfVer||0)+1;wodMarkTerrainFullDirty();}
+        }
+
         /** Repair artificial enclaves on inhabited islands after the LAST Voronoi pass.
          * Empty offshore holdings keep their area/ownership; deployment excludes them. */
         function wodRepairStartingLandSupply(ownerIds) {
@@ -18088,6 +18150,11 @@
                 if((counts[o] || 0) !== target[o]) return false;
             }
             if(sorted.length === 2 && !wodVerifyCityPlacementSymmetry(sorted)) return false;
+            const supplied=wodStartingTownSupply();
+            for(const owner of sorted) {
+                const pool=gameData.hexList.filter(h=>h.owner===owner&&supplied.get(owner)?.has(getHexKey(h)));
+                if(pool.length<12||!pool.some(h=>!isFrontlineHex(h,owner)))return false;
+            }
             return true;
         }
 
@@ -27049,8 +27116,9 @@
             city.r = centerHex.r;
             city.x = centerHex.x;
             city.y = centerHex.y;
-            city.urbanStyle = city.urbanStyle != null ? city.urbanStyle : Math.floor(Math.random() * 4);
-            let shapeType = Math.floor(Math.random() * 4);
+            const random=wodMulberry32(((gameData._mapGenSeed>>>0)^Math.imul(centerHex.q,374761393)^Math.imul(centerHex.r,668265263)^Math.imul(owner,73856093))>>>0);
+            city.urbanStyle = city.urbanStyle != null ? city.urbanStyle : Math.floor(random() * 4);
+            let shapeType = Math.floor(random() * 4);
             let R = 2;
             let urbanCoords = [];
             for(let dq = -3; dq <= 3; dq++) {
@@ -27061,8 +27129,8 @@
                     else if(shapeType === 1) add = Math.abs(dq) <= 1 && Math.abs(dr) <= 1;
                     else if(shapeType === 2) add = Math.abs(dq) <= 2 && Math.abs(dr) <= 1;
                     else add = Math.abs(dq) <= 1 && Math.abs(dr) <= 2;
-                    if(add && Math.random() > 0.15) urbanCoords.push({ q: centerHex.q + dq, r: centerHex.r + dr });
-                    else if(!add && distSq <= (R + 1) * (R + 1) && Math.random() > 0.85)
+                    if(add && random() > 0.15) urbanCoords.push({ q: centerHex.q + dq, r: centerHex.r + dr });
+                    else if(!add && distSq <= (R + 1) * (R + 1) && random() > 0.85)
                         urbanCoords.push({ q: centerHex.q + dq, r: centerHex.r + dr });
                 }
             }
@@ -27074,7 +27142,7 @@
                 if(targetH.owner !== owner) continue;
                 targetH.type = 'urban';
                 targetH.cityId = cid;
-                targetH.urbanVariant = Math.floor(Math.random() * 5);
+                targetH.urbanVariant = Math.floor(random() * 5);
                 targetH.baseColor = getUrbanTerrainColor(wodGetGamePeriod());
                 targetH.renderColor = targetH.baseColor;
             }
@@ -28044,6 +28112,11 @@
                 let dx = u.x - wx;
                 let dy = u.y - wy;
                 let dist2 = dx * dx + dy * dy;
+                if(wodIsFriendlyOwner(u.owner,mover.owner)) {
+                    const old2=(u.x-mover.x)**2+(u.y-mover.y)**2;
+                    // Allow an already-overlapping friendly pair to separate gradually.
+                    if(old2<(mr+ur+gapExtra)**2&&dist2>old2+.01)return;
+                }
                 if(wodIsFriendlyOwner(u.owner,mover.owner)&&(wodUnitNearNarrowLandLane(mover)||wodUnitNearNarrowLandLane(u))) {
                     const laneGap=Math.min((mr+ur)*.48,(gameData.hexRadius||20)*1.35*.5);
                     if(dist2<laneGap*laneGap)found=true;
@@ -28065,6 +28138,23 @@
                 if(dist2 < minD * minD) found = true;
             });
             return found;
+        }
+
+        function wodSteerAroundFriendlyUnits(unit,nx,ny) {
+            let friends=0,hostiles=0;
+            forEachNearbyUnit(gameData.unitSpatialGrid,nx,ny,(unit.radius||10)+50,u=>{
+                if(u===unit||u.hp<=0||u.type==='convoy')return;
+                if(Math.hypot(u.x-nx,u.y-ny)>(unit.radius||10)+(u.radius||10)+6)return;
+                if(wodIsFriendlyOwner(u.owner,unit.owner))friends++;else hostiles++;
+            });
+            if(!friends||hostiles)return null;
+            const dx=nx-unit.x,dy=ny-unit.y,sign=(String(ensureUnitId(unit)).split('').reduce((n,c)=>n+c.charCodeAt(0),0)%2)?1:-1;
+            for(const angle of [.38,-.38,.75,-.75,1.12,-1.12,1.5,-1.5]) {
+                const a=angle*sign,c=Math.cos(a),s=Math.sin(a),x=unit.x+dx*c-dy*s,y=unit.y+dx*s+dy*c;
+                if(!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,x,y)||isWorldPositionBlockedByUnits(unit,x,y))continue;
+                return {x,y};
+            }
+            return null;
         }
 
         function worldPositionClearOfUnits(x, y, minSep, ignoreUnit) {
@@ -31611,7 +31701,7 @@
                 let fortFx = getFortDefenseEffect(unit);
                 if(fortFx) effects.push(fortFx);
                 if(wodGetUnitEncirclementState(unit, hex)) {
-                    let relief = wodHexKeyEncirclementRelief(getHexKey(hex));
+                    let relief = wodGetUnitEncirclementState(unit,hex).relief;
                     let ratePct = relief ? '1.75' : '3.5';
                     effects.push({
                         label: 'Encircled',
@@ -31787,8 +31877,8 @@
 
         /** Revalidate stale pocket flags against current cities and cardinal land ownership.
          * Cache the whole component so a large trapped army shares one search per topology change. */
-        function wodCurrentSupplyComponent(hex) {
-            if(!hex||hex.owner<=0||isWaterHex(hex))return {city:false,water:false};
+        function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
+            if(!hex||owner<=0||isWaterHex(hex))return {city:false,water:false};
             const citySig=gameData.cities.map(c=>c.owner+':'+c.q+','+c.r).join('|');
             const allySig=JSON.stringify(gameData.alliances||[]), version=gameData._supplyTopologyVersion||0;
             let cache=gameData._citySupplyCache;
@@ -31803,7 +31893,19 @@
                 }
                 cache=gameData._citySupplyCache={hexes:gameData.hexes,version,citySig,allySig,sources,owners:new Map()};
             }
-            const owner=hex.owner;
+            if(!wodIsFriendlyOwner(hex.owner,owner)) {
+                // Hostile ground cannot grant the occupier the hostile town's supply.
+                // An adjacent friendly land route can still supply a front-line unit.
+                const result={city:false,water:false};
+                for(const d of cardinalHexDirections) {
+                    const n=gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`];
+                    if(isWaterHex(n)){result.water=true;continue;}
+                    if(n&&wodIsFriendlyOwner(n.owner,owner)) {
+                        const c=wodCurrentSupplyComponent(n,owner);result.city||=c.city;result.water||=c.water;
+                    }
+                }
+                return result;
+            }
             if(!cache.owners.has(owner))cache.owners.set(owner,new Map());
             const known=cache.owners.get(owner), start=getHexKey(hex);
             if(known.has(start))return known.get(start);
@@ -31844,8 +31946,8 @@
                 wodEncirclementProcessChunk();
                 return;
             }
-            if(!wodDeferHeavySimDuringMarch())
-                gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
+            // Moving armies must not starve the supply scan indefinitely.
+            gameData.encirclementTimer = (gameData.encirclementTimer || 0) + dt;
             let interval = 0.55 + Math.min(1.0, (gameData.hexList.length || 0) / 50000);
             if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.35, 1.8);
             if(gameData.encirclementTimer < interval) return;
@@ -32013,6 +32115,14 @@
             return isWaterHex(hex)||wodCurrentSupplyComponent(hex).water;
         }
         function wodGetUnitEncirclementState(unit, hex) {
+            if(!unit||!hex||unit.type==='ship'||isWaterHex(hex))return null;
+            if(!wodIsFriendlyOwner(hex.owner,unit.owner)) {
+                const supply=wodCurrentSupplyComponent(hex,unit.owner);
+                if(supply.city||unit.type==='marine'&&supply.water)return null;
+                const relief=(gameData.forts||[]).some(f=>wodIsFriendlyOwner(f.owner,unit.owner)&&
+                    Math.hypot(f.x-unit.x,f.y-unit.y)<(gameData.hexRadius||20)*3);
+                return {relief};
+            }
             const state=wodGetHexEncirclementState(hex);
             if(!state||wodMarineHasWaterSupply(unit,hex))return null;
             return state;
@@ -33504,6 +33614,10 @@
             } else unit._wodTerrainStallT=0;
             nx = terrainClamp.x;
             ny = terrainClamp.y;
+            if(unit.type!=='convoy'&&isWorldPositionBlockedByUnits(unit,nx,ny)) {
+                const steer=wodSteerAroundFriendlyUnits(unit,nx,ny);
+                if(steer){nx=steer.x;ny=steer.y;}
+            }
             if(unit.type !== 'convoy' && isWorldPositionBlockedByUnits(unit, nx, ny)) {
                 if(playerMarch) {
                     // Blocked by a friendly. If the column has already massed around the
@@ -33558,7 +33672,7 @@
                         if(!onDeck && !wodUnitNearNarrowLandLane(unit)) {
                             let hrA = gameData.hexRadius || 20;
                             let adx = ftA.x - unit.x, ady = ftA.y - unit.y;
-                            let arriveR = wodAiGetUnitTaskJob(unit)?.city ? hrA*.6 : hrA * 1.35 * 5;
+                            let arriveR = unit.aiCaptureHexKey||wodAiGetUnitTaskJob(unit)?.city ? hrA*.6 : hrA * 1.35 * 5;
                             if(adx * adx + ady * ady < arriveR * arriveR) {
                                 wodUnitArrivedAtTarget(unit);
                                 return;
@@ -35723,13 +35837,23 @@
             let valid = new Set(ownersSorted);
             let landForCities = gameData.hexList.filter(h => !isWaterHex(h) && h.type !== 'mountain');
             let lcm = wodLandCentroidMaxRadius(landForCities);
+            const terrainGraph=wodStartingLandGraph(),terrainSeen=new Set();let mainLand=[];
+            for(const node of terrainGraph.nodes.values()) {
+                if(terrainSeen.has(node))continue;
+                const component=[node];terrainSeen.add(node);
+                for(let i=0;i<component.length;i++)for(const nb of component[i].neighbors)
+                    if(!terrainSeen.has(nb)){terrainSeen.add(nb);component.push(nb);}
+                if(component.length>mainLand.length)mainLand=component;
+            }
+            const mainKeys=new Set(mainLand.map(n=>getHexKey(n.hex)));
+            const seedLand=mainLand.map(n=>n.hex);
             let phase = typeof gameData._wodCitySplitAnglePhase === 'number' ? gameData._wodCitySplitAnglePhase : 0;
             let f = ownersSorted.length;
 
             gameData.cities = [];
             for(let h of gameData.hexList) setHexOwner(h, 0);
 
-            let seedHexByOwner = wodTerrainSeedsForVoronoiOwners(ownersSorted, landForCities, lcm, phase, mapShape);
+            let seedHexByOwner = wodTerrainSeedsForVoronoiOwners(ownersSorted, seedLand, wodLandCentroidMaxRadius(seedLand), phase, mapShape);
             let seedsByOwner = {};
             let seedObjs = [];
             for(let ow of ownersSorted) {
@@ -35756,7 +35880,7 @@
             await ensureOwnersReachableByLand(ownersSorted);
             await smoothStartingTerritory(ownersSorted, 4, 4);
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 18 : 28);
-            await smoothStartingTerritory(ownersSorted, 5, 2);
+            // Keep the solved region intact while placing its towns.
             // Final sea paint once borders are settled (borders need full-map water ownership).
             wodAssignAllWaterFromNearestLand(true);
 
@@ -35781,6 +35905,9 @@
             function buildCandidateList(owner, level) {
                 let cent = wodFactionPoliticalCentroid(owner);
                 let pool = wodTerritoryCandidatesForFaction(owner, mapShape, lcm, cols, rows, factionTerritoryGeom);
+                // Put a supply root for every faction on the shared mainland before
+                // adding secondary settlements, so balancing never needs long colonies.
+                if(level===0)pool=pool.filter(h=>mainKeys.has(getHexKey(h)));
                 let minDepth = mapShape === 'archipelago' ? 1 : 3;
                 for(let relax = 0; relax < 4; relax++, minDepth--) {
                     let filt = pool.filter(h => (interiorDepthMap.get(getHexKey(h)) ?? 999) >= minDepth);
@@ -35828,7 +35955,7 @@
                 let seen = new Set();
                 if(wodMapShapeIsRadialForTownPolicy(mapShape) && level === 0 && cent) {
                     let pch = wodBestCoastalTerrainHexAmongOwned(owner, cent);
-                    if(pch && (interiorDepthMap.get(getHexKey(pch)) ?? 0) >= 2) {
+                    if(pch && mainKeys.has(getHexKey(pch)) && (interiorDepthMap.get(getHexKey(pch)) ?? 0) >= 2) {
                         seen.add(`${pch.q},${pch.r}`);
                         list.push(pch);
                     }
@@ -36047,13 +36174,15 @@
             // Short rebalance after cities — old Math.max(64,f*13) + n*3 exact moves hung 2+ AI setups.
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 12 : 18);
             wodSyncUrbanFootprintOwners();
+            await wodCarveStartingFactionPasses(ownersSorted);
             wodRepairStartingLandSupply(ownersSorted);
             await wodExactEqualizePoliticalLandCounts(
                 ownersSorted,
                 gameData.cities,
                 ownersSorted.length >= 3 ? Math.min(360, gameData.hexList.length) : Math.min(600, gameData.hexList.length)
             );
-            await wodBalanceStartingIslandTowns(ownersSorted);
+            // Retry a constrained layout instead of moving its capitals into
+            // another faction's region and carving long protected corridors.
             wodAssignAllWaterFromNearestLand(true);
             wodNormalizeStartingCityEconomy(ownersSorted);
 
@@ -36366,6 +36495,7 @@
 
             await smoothStartingTerritory(ownersList, 6, 1);
             wodSyncUrbanFootprintOwners();
+            await wodCarveStartingFactionPasses(ownersList);
             wodRepairStartingLandSupply(ownersList);
             await wodExactEqualizePoliticalLandCounts(
                 ownersList,
@@ -36568,6 +36698,10 @@
             let factionSlots = 1;
             let landForCities = [];
             let landNC = 1;
+            // A reused preview seed still needs deterministic safety retries. One
+            // rejected tiny island must not fall through to an unvalidated match.
+            if(wodFingerReuseMapSeed&&!lobbyPreviewGen)procMapAcceptTriesMax=Math.max(8,procMapAcceptTriesMax);
+            let procSeedBase=(gameData._mapGenSeed>>>0)||1;
 
             outerProcTerrain: for(let procAttempt = 0; procAttempt < procMapAcceptTriesMax; procAttempt++) {
                 if(procAttempt > 0 || wodMapGenCooperativeMode()) await wodYieldToMainThread();
@@ -36588,10 +36722,9 @@
                             gameData._mapGenSeed = ss >>> 0;
                         }
                     } else {
-                        let ss = (Math.floor(Math.random() * 4294967296) >>> 0) || 0;
-                        if(!ss) ss = 0xbada55e;
-                        gameData._mapGenSeed = (ss ^ (procAttempt * 0x9e3779b9)) >>> 0;
+                        gameData._mapGenSeed = (procSeedBase ^ Math.imul(procAttempt,0x9e3779b9)) >>> 0;
                     }
+                    if(procAttempt===0)procSeedBase=gameData._mapGenSeed;
                     wodPushSeededRandom(gameData._mapGenSeed);
                 }
 
@@ -36939,6 +37072,9 @@
             }
 
             if(!procSucceeded && wantCities && wantTerritory) {
+                // Rejected terrain attempts may have restored the ambient RNG.
+                // Keep the safety path reproducible for a committed preview seed.
+                if(ownsInnerRng&&!_wodSavedMathRandom)wodPushSeededRandom((gameData._mapGenSeed^0x85ebca6b)>>>0);
                 let relaxedProc = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
                 if(relaxedProc) procSucceeded = true;
             }
@@ -38769,6 +38905,7 @@
             // A new job (flank, relief, counterattack) outranks the march already underway.
             if(unit.aiOrderKind && unit.aiTfKind && unit.aiOrderKind !== unit.aiTfKind) return false;
             const job=wodAiGetUnitTaskJob(unit),phase=job?.operation?.phase||job?.phase;
+            if(unit.aiCaptureHexKey&&wodIsFriendlyOwner(gameData.hexes[unit.aiCaptureHexKey]?.owner,unit.owner))return false;
             if((unit.aiOrderResponseId||null)!==(job?.response?job.id:null))return false;
             if(phase && unit.aiOrderPhase!==phase)return false;
             if(!unit.target && !unit.orderTarget) return false;
@@ -39321,7 +39458,7 @@
             if(flank.length) {
                 const job=add('raid',flank,attackSectors[1%Math.max(1,attackSectors.length)]);
                 const objective=wodAiAssaultObjective(owner,flank,attackSectors,taken);
-                if(objective)job.strikeHex=objective.attackHex;
+                if(objective){Object.assign(job,objective);job.phase='assault';job.strikeHex=objective.attackHex;}
             }
             if(escorts.length){const job=add('support',escorts,sectors[0]);job.escortJobId=jobs.find(j=>j.kind==='armor'||j.kind==='main')?.id;}
             const marines=ready.filter(u=>u.type==='marine'),ships=ready.filter(u=>u.type==='ship');
@@ -39338,6 +39475,22 @@
             gameData.aiTaskForces[owner]=plan;wodAiReadDefense(owner,units,true);return plan;
         }
 
+        function wodAiTownAssaultHex(unit,city,members) {
+            if(!city)return null;
+            const urban=getCityUrbanTerrainHexes(city),remaining=urban.filter(h=>wodIsHostileOwner(h.owner,unit.owner)||h.owner===0);
+            if(!remaining.length)return gameData.hexes[`${city.q},${city.r}`];
+            const counts=new Map();
+            const ordered=members.slice().sort((a,b)=>String(a.uid).localeCompare(String(b.uid)));
+            for(const member of ordered) {
+                const target=remaining.slice().sort((a,b)=>
+                    (counts.get(getHexKey(a))||0)-(counts.get(getHexKey(b))||0)||
+                    wodAiDist2(member.x,member.y,a.x,a.y)-wodAiDist2(member.x,member.y,b.x,b.y))[0];
+                counts.set(getHexKey(target),(counts.get(getHexKey(target))||0)+1);
+                if(member===unit)return target;
+            }
+            return remaining[0];
+        }
+
         function wodAiIssueCoordinatedAssault(unit,job) {
             const hr=gameData.hexRadius||20,now=wodAiOperationTime(),plan=gameData.aiTaskForces[unit.owner];
             const members=gameData.entities.filter(u=>u.hp>0&&!u.retreating&&!u.moraleBroken&&plan.unitJob[u.uid]===job.id);
@@ -39352,7 +39505,8 @@
                 const ready=gathered.length>=Math.ceil(members.length*.65)&&(!combined||gathered.some(u=>u.type==='heavy')&&gathered.some(u=>u.type==='light'));
                 if(ready||now-job.phaseAt>45000){job.phase='assault';job.phaseAt=now;}
             }
-            const target=job.phase==='assemble'?job.holdHex:gameData.hexes[`${job.objectiveCity.q},${job.objectiveCity.r}`];
+            const target=job.phase==='assemble'?job.holdHex:wodAiTownAssaultHex(unit,job.objectiveCity,members);
+            unit.aiCaptureHexKey=job.phase==='assemble'?null:target&&getHexKey(target);
             if(!target)return false;
             // Infantry screen the tank with compact slots rather than chasing separate objectives.
             const moved=wodAiMoveUnitTowardHex(unit,target,job.phase==='assemble',job.phase==='assemble'?.7:unit.type==='heavy'?.35:.95);
@@ -39370,7 +39524,10 @@
             }
             if(op.phase==='crossing'&&members.some(u=>u.type==='marine'&&wodAiDist2(u.x,u.y,op.beachHex.x,op.beachHex.y)<Math.pow(hr*4,2))) {op.phase='landing';op.phaseAt=now;}
             let target=op.phase==='assemble'?op.rallyHex:op.beachHex;
-            if(op.phase==='landing'&&unit.type==='marine')target=gameData.hexes[`${op.objectiveCity.q},${op.objectiveCity.r}`];
+            if(op.phase==='landing'&&unit.type==='marine') {
+                target=wodAiTownAssaultHex(unit,op.objectiveCity,members.filter(u=>u.type==='marine'));
+                unit.aiCaptureHexKey=target&&getHexKey(target);
+            } else unit.aiCaptureHexKey=null;
             if(unit.type==='ship'&&op.phase!=='assemble') {
                 const threats=gameData.entities.filter(u=>u.hp>0&&wodIsHostileOwner(u.owner,unit.owner)&&wodAiDist2(u.x,u.y,op.beachHex.x,op.beachHex.y)<Math.pow(hr*10,2));
                 const water=getHexesInRadius(op.beachHex.q,op.beachHex.r,3).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(h=>h&&isWaterHex(h));
@@ -39404,10 +39561,11 @@
             unit.aiTfJobId = job.id;
             unit.aiTfKind = job.kind;
             unit.aiTfRole = job.role;
+            unit.aiCaptureHexKey = null;
             let hr = gameData.hexRadius || 20;
             if(job.response)return wodAiIssueDefenseResponse(unit,job);
             if(job.operation)return wodAiIssueCoastalOperation(unit,job);
-            if(job.objectiveCity && ['main','armor'].includes(job.kind))return wodAiIssueCoordinatedAssault(unit,job);
+            if(job.objectiveCity && ['main','armor','raid'].includes(job.kind))return wodAiIssueCoordinatedAssault(unit,job);
 
             if(job.kind === 'support') {
                 let plan = gameData.aiTaskForces?.[unit.owner];
