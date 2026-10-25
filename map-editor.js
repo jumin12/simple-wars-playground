@@ -638,8 +638,8 @@
   function syncEditorTerritoryOverlayDefault() {
     if (!window.WOD || !WOD.gameData) return;
     if (!WOD.gameData.layers) WOD.gameData.layers = {};
-    WOD.gameData.layers.territory = true;
-    WOD.gameData.layers.cities = true;
+    WOD.gameData.layers.territory = false;
+    WOD.gameData.layers.cities = false;
     markEditorMapChanged();
     refreshEditorGameplayLayerButtons();
   }

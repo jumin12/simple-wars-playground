@@ -6,7 +6,11 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
 Lifetime stats save immediately at the end of every played match, including surrenders, scenario/campaign defeats and mid-match menu exits. Match results show completed matches, wins, losses and surrenders separately from faction eliminations. Combat, production and peak totals retain their actual battle era; multiplayer snapshots credit each human seat and preserve delta watermarks across reconnects. Frequent combat cannot postpone the periodic save indefinitely, and browser close events flush pending progress. Opening armies and menu demo battles are excluded from trained-unit/combat totals.
 
-All unit types move 20% faster. Cities and territory layers start enabled in new matches and the map editor.
+All unit types move 20% faster. Cities and territory layers start disabled in new matches and the map editor; players can enable either layer manually.
+
+Territory capture uses a fixed footprint per unit type for both armies: one tile ring for infantry/marines and ships, two for armor. Empty ground grants no extra ring; enemy occupation and defended adjacent cells still block claims.
+
+The Shop has seven historical missions: the updated D-Day, Kursk and Midway scenarios (200g each), plus Thermopylae, Hastings, Austerlitz and El Alamein (150g each). Larger mission cards show terrain/naval formations, dates, eras, difficulty and objectives. Owned missions launch from Missions → Store and remain retryable until a victory consumes their one-shot entitlement. Historical missions supply their own era visuals/audio without unlocking cosmetic skins. Geography, unit roles and timing are adapted for RTS play; historical references and design notes are in [custom-maps/HISTORICAL-NOTES.md](custom-maps/HISTORICAL-NOTES.md). Regenerate the catalog with `npm run missions:store`; the generator validates empty towns, minimum spacing, non-overlapping units and supplied ordinary land formations before writing files.
 
 The editor imports and exports map/scenario JSON and saves scenarios to its library, preserving the era, grid scale, units, roads, bridges, forts, alliances, faction resources, victory conditions and events. Event-free scenarios and zero-second events are supported. Loading validates the file before replacing the current map, and exported/library snapshots remain independent of later edits. Authored eras and starting resources carry into play. Select a unit and click its small **×** to delete it, or use Delete/Backspace; undo and redo restore deletions.
 

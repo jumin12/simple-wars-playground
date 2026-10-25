@@ -11,7 +11,7 @@ const server=http.createServer((req,res)=>{
  const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000},acceptDownloads:true}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
  try{
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
-  results.defaults=await page.evaluate(()=>{setGameSpeed(0,true);wodDismissChangelogPopup();return{cities:gameData.layers.cities,territory:gameData.layers.territory};});assert(results.defaults.cities&&results.defaults.territory);
+  results.defaults=await page.evaluate(()=>{setGameSpeed(0,true);wodDismissChangelogPopup();return{cities:gameData.layers.cities,territory:gameData.layers.territory};});assert(!results.defaults.cities&&!results.defaults.territory);
   results.movement=await page.evaluate(()=>{
    const rows=[];gameState='MENU';pauseMenuBackgroundBattle();gameData.mp={enabled:false};gameData._campaignRun=null;gameData._matchReadyForEndChecks=false;
    for(const type of ['light','marine','heavy','ship','convoy']) {
@@ -49,7 +49,7 @@ const server=http.createServer((req,res)=>{
   assert(results.loaded.money===4321&&results.loaded.mp===9876&&results.loaded.aiMoney===12345&&results.loaded.aiMp===56789);
   assert.equal(await page.locator('#editorEconomyCash').inputValue(),'4321');
   assert.equal(await page.locator('#editorEconomyMp').inputValue(),'9876');
-  assert(results.loaded.mission.events[0].trigger.seconds===0&&results.loaded.mission.victoryMode==='annihilation'&&results.loaded.units.length===4&&results.loaded.layers.cities&&results.loaded.layers.territory);
+  assert(results.loaded.mission.events[0].trigger.seconds===0&&results.loaded.mission.victoryMode==='annihilation'&&results.loaded.units.length===4&&!results.loaded.layers.cities&&!results.loaded.layers.territory);
   const exportFile=async(selector,name)=>{const waiting=page.waitForEvent('download');await page.locator(selector).click();const dl=await waiting,file=path.join(OUT,name);await dl.saveAs(file);return JSON.parse(fs.readFileSync(file,'utf8'));};
   const exported=await exportFile('#editorExportMission','scenario.json');assert.equal(exported.format,'simple-wars-mission');assert.deepEqual(exported.mission,results.loaded.mission);assert.equal(exported.gamePeriod,'ancient');
   // Live edits after a load cannot alter the source library/import object.

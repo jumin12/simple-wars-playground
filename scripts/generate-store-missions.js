@@ -39,6 +39,7 @@ function loadToolkit() {
 }
 
 const { MapBuilder, ev } = loadToolkit();
+const {buildHistoricalMissions,polishStoreMission}=require('./store-mission-design');
 if (!MapBuilder || !ev) throw new Error('Could not load MapBuilder/ev from generate-missions.js');
 
 /**
@@ -423,6 +424,8 @@ function buildNormandyDDay() {
   // Keep Carentan marsh wet.
   b.blob(-24, 8, 3.5, 'swamp', { noise: 0.25 });
   b.blob(-22, 12, 2.8, 'swamp', { noise: 0.22 });
+
+  b.landCorridor(-30,-23,28,-23,3); // continuous staging coast between the English ports
 
   // Cities — England on the thin strip; Brittany towns on the west.
   b.city(-10, -22, 1, 'Portsmouth', { factory: true, harbor: true, incomeBonus: 50 });
@@ -905,12 +908,12 @@ function buildKurskCitadel() {
 
   b.city(6, -36, 2, 'Orel', { factory: true, incomeBonus: 40 });
   b.city(6, -20, 1, 'Ponyri', { factory: false });
-  b.city(4, -24, 1, 'Olkhovatka', { factory: false });
+  b.city(-6, -18, 1, 'Olkhovatka', { factory: false });
   b.city(4, -10, 1, 'Fatezh', { factory: false });
   b.city(8, 0, 1, 'Kursk', { factory: true, incomeBonus: 50 });
   b.city(8, 16, 1, 'Oboyan', { factory: false });
   b.city(20, 22, 1, 'Prokhorovka', { factory: false });
-  b.city(8, 30, 3, 'Tomarovka', { factory: false });
+  b.city(-2, 30, 3, 'Tomarovka', { factory: false });
   b.city(10, 34, 3, 'Belgorod', { factory: true, incomeBonus: 20 });
   b.city(8, 44, 3, 'Kharkov', { factory: true, incomeBonus: 40 });
   b.city(-12, 2, 1, 'Lgov', { factory: false });
@@ -1190,18 +1193,18 @@ function buildMidway() {
   // Midway: thin reef + two solid islands on the south rim (not doughnut land).
   // Sand Island (larger, west) and Eastern Island (smaller, ESE). Ocean distances
   // are compressed; relative bearings match 4 June: US NE, Kido Butai closer NW.
-  paintReef(18, 4, 5.4, 3.8);
-  b.blob(15, 5, 2.3, 'grass', { noise: 0.16 });
+  paintReef(20, 4, 11.4, 6.8);
+  b.blob(14, 6, 4.0, 'grass', { noise: 0.16 });
   b.blob(14, 4, 1.7, 'sand', { noise: 0.14 });
-  b.blob(21, 6, 1.5, 'grass', { noise: 0.14 });
-  b.blob(22, 5, 1.2, 'sand', { noise: 0.12 });
+  b.blob(28, 6, 3.3, 'grass', { noise: 0.14 });
+  b.blob(29, 5, 2.5, 'sand', { noise: 0.12 });
   b.blob(18, 3, 1.8, 'water', { noise: 0.12 });
   // Kure Atoll ~WNW — empty reef, no extra land stamps.
   paintReef(-14, 0, 2.8, 2.0);
   b.blob(-14, 1, 0.8, 'sand', { noise: 0.08 });
 
-  b.city(15, 5, 1, 'Sand Island', { factory: false, harbor: true, incomeBonus: 20 });
-  b.city(21, 6, 1, 'Eastern Island', { factory: true, harbor: false, incomeBonus: 10 });
+  b.city(14, 6, 1, 'Sand Island', { factory: false, harbor: true, incomeBonus: 20 });
+  b.city(28, 6, 1, 'Eastern Island', { factory: true, harbor: false, incomeBonus: 10 });
 
   b.each((h) => {
     if (h.type === 'urban') return;
@@ -1225,8 +1228,8 @@ function buildMidway() {
   // Midway garrison — snap onto existing island hexes only (no ensureLand specks).
   b.unit('light', 1, 14, 5, '6th Marine Defense Bn.');
   b.unit('marine', 1, 16, 4, 'VMF-221');
-  b.unit('marine', 1, 20, 6, 'VMSB-241');
-  b.unit('light', 1, 22, 5, '7th AAF (B-17s)');
+  b.unit('marine', 1, 28, 7, 'VMSB-241');
+  b.unit('light', 1, 29, 6, '7th AAF (B-17s)');
 
   // TF 16 (Spruance) — Point Luck, farther northeast.
   b.unit('ship', 1, 44, -22, 'USS Enterprise');
@@ -1388,20 +1391,22 @@ function validateMission(m) {
   if (!data.mission || !Array.isArray(data.mission.events) || !data.mission.events.length) {
     throw new Error(m.file + ': missing mission events');
   }
-  const byKey = new Map();
-  for (const h of data.hexList) byKey.set(h.q + ',' + h.r, h);
-  for (const u of data.entities) {
-    const q = Math.round(u.x / 27);
-    const r = Math.round(u.y / 27);
-    // Soft check — unit() already snapped; just ensure entities exist.
-    if (!u.type || !u.owner) throw new Error(m.file + ': bad unit');
+  const byKey = new Map(data.hexList.map(h=>[h.q+','+h.r,h]));
+  if(!['modern','ancient','medieval','napoleonic'].includes(data.gamePeriod))throw Error(m.file+': missing era');
+  if(data.cities.length<2||data.cities.some(c=>c.hasFactory||c.hasHarbor||c.hasFarm))throw Error(m.file+': invalid starting towns');
+  for(const a of data.cities)for(const b of data.cities)if(a!==b&&Math.max(Math.abs(a.q-b.q),Math.abs(a.r-b.r))<8)throw Error(m.file+': overlapping towns');
+  const supply=new Map(),dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+  for(const c of data.cities){if(!supply.has(c.owner))supply.set(c.owner,new Set());const seen=supply.get(c.owner),queue=[byKey.get(`${c.q},${c.r}`)];for(const h of queue)seen.add(`${h.q},${h.r}`);
+    for(let i=0;i<queue.length;i++)for(const [q,r]of dirs){const n=byKey.get(`${queue[i].q+q},${queue[i].r+r}`),k=n&&`${n.q},${n.r}`;if(n&&n.owner===c.owner&&!['water','mountain'].includes(n.type)&&!seen.has(k)){seen.add(k);queue.push(n);}}
   }
-  if (!data.cities || data.cities.length < 2) throw new Error(m.file + ': too few cities');
+  const occupied=new Set();for(const u of data.entities){const key=`${Math.round(u.x/27)},${Math.round(u.y/27)}`,h=byKey.get(key);if(!h||occupied.has(key))throw Error(m.file+': invalid/overlapping unit');occupied.add(key);
+    if(u.type==='ship'&&h.type!=='water'||!['ship','marine'].includes(u.type)&&!supply.get(u.owner)?.has(key))throw Error(m.file+': unsupplied unit '+u.name);
+  }
 }
 
 function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
-  const missions = [buildNormandyDDay(), buildKurskCitadel(), buildMidway()];
+  const missions = [buildNormandyDDay(), buildKurskCitadel(), buildMidway(), ...buildHistoricalMissions({MapBuilder,ev})].map(polishStoreMission);
   const keep = new Set(missions.map((m) => m.entry.id));
   const manifest = { maps: [], missions: [] };
   // Preserve any legacy skirmish maps key for older clients.
@@ -1419,16 +1424,7 @@ function main() {
     fs.writeFileSync(path.join(OUT_DIR, m.file), JSON.stringify(m.data));
     manifest.missions.push(m.entry);
     // Also list under maps for backward-compatible shop loaders that only read maps[].
-    manifest.maps.push({
-      id: m.entry.id,
-      name: m.entry.name,
-      description: m.entry.description,
-      price: m.entry.price,
-      file: m.entry.file,
-      aiCount: m.entry.aiCount,
-      packType: m.entry.packType || 'oneshot',
-      kind: 'mission',
-    });
+    manifest.maps.push({...m.entry,kind:'mission'});
     console.log(
       'wrote',
       m.file,

@@ -10526,6 +10526,14 @@
             font-size: 11px;
             font-weight: 700;
         }
+        #shopMapOptions.shop-codex { grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr)); grid-auto-rows:auto; gap:18px; }
+        #shopMapOptions .shop-mission-card { width:100%;height:auto;min-height:275px;display:flex;flex-direction:column;border-radius:12px;background:#102333; }
+        #shopMapOptions .shop-mission-card .shop-codex-art { position:relative;inset:auto;display:block;width:100%;height:160px;border-bottom:1px solid rgba(212,175,55,.3); }
+        #shopMapOptions .shop-mission-card canvas { object-fit:contain; background:#154360; }
+        #shopMapOptions .shop-mission-card .shop-codex-name { position:static;background:none;display:block;padding:12px 14px 0;font-size:16px;line-height:1.3; }
+        #shopMapOptions .shop-mission-meta { display:block;padding:6px 14px 0;color:#dfc57e;font-size:11px;line-height:1.4; }
+        #shopMapOptions .shop-mission-description { display:block;padding:8px 14px 14px;color:#c5d5df;font-size:12px;line-height:1.5; }
+        #shopMapOptions .shop-mission-card:focus-visible { outline:3px solid #f1c40f;outline-offset:3px; }
         .shop-codex-unknown {
             box-sizing: border-box;
             width: 148px;
@@ -11432,6 +11440,7 @@
                 <div class="esc-help-block">
                     <h4>Core loop and victory</h4>
                     <p class="esc-help-prose">Your top-bar Income number is total $ per second after all controlled sources are counted. It includes <strong>$12/s command funding</strong> while you control a town, city income, and the separate Land stat shown beside it, so the Land value is a breakdown, not extra money outside the total.</p>
+                    <p class="esc-help-prose">Territory capture has a fixed footprint for each unit type: infantry and marines claim one tile ring, armor two, and ships one on water. The footprint is the same for players and AI and does not expand on empty ground. Enemy-occupied tiles and defended neighboring cells still block claims.</p>
                     <p class="esc-help-prose">Every owned non-water territory tile contributes a small amount of $. Capturing more ground therefore matters even before you take another town, while the map’s starting split is balanced so players begin with matching territory income.</p>
                     <p class="esc-help-prose"><strong>Domination</strong> ends the match once you have captured <strong>every enemy city</strong> — straggler armies no longer matter if they have nowhere left to drill or recruit. <strong>Annihilation</strong> ignores the scoreboard of towns: you must destroy every hostile <em>combat</em> unit, while unarmed trade convoys never count toward that tally.</p>
                 </div>
@@ -12628,6 +12637,17 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-25T11:06:00-04:00',
+                title: 'Consistent capture and new historical missions',
+                items: [
+                    'Cities and territory layers are off by default again in new solo/multiplayer matches and the map editor. Both remain available from the layer controls.',
+                    'Removed the extra capture ring on uncontested ground. Players and AI use the same fixed footprint per unit type, with occupied/defended cells still protected.',
+                    'Added four 150g shop missions: Thermopylae, Hastings, Austerlitz and El Alamein, with authored terrain, battle briefings and reinforcement events. Each uses era-appropriate visuals and audio without requiring a separate skin purchase.',
+                    'Improved D-Day, Kursk and Midway: fewer crowded Normandy objectives, spaced batteries, a connected English staging coast, separated town footprints, larger playable atoll islands and supplied dry-land starts for ordinary formations. Existing purchases and completion records keep their IDs.',
+                    'Shop mission cards now include larger previews, dates, eras, difficulty and objectives. Naval previews include fleets, and preview grid scale follows the authored map. Historical reference notes are included with the scenarios.'
+                ]
+            },
             {
                 at: '2026-10-24T17:50:00-04:00',
                 title: 'Reliable lifetime stats and playtester layout',
@@ -14142,8 +14162,8 @@
             setGameSpeed(launchingCampaign ? 0 : 1, true);
             wodResetMobileHud();
             if(!gameData.layers) gameData.layers = {};
-            gameData.layers.territory = true;
-            gameData.layers.cities = true;
+            gameData.layers.territory = false;
+            gameData.layers.cities = false;
             void (async function() {
                 try {
                     // If the boot splash or menu battlefield is still generating, let them finish first —
@@ -14678,7 +14698,7 @@
             loadedCustomMap: false,
             alliances: [],
             mission: null,
-            layers: { terrain: true, diplomacy: true, territory: true, cities: true, cityNames: true, structures: true, units: true },
+            layers: { terrain: true, diplomacy: true, territory: false, cities: false, cityNames: true, structures: true, units: true },
             aiCount: 1,
             victoryMode: 'domination',
             fogOfWar: false,
@@ -18583,7 +18603,7 @@
         function wodMpEnsureDefaultMatchLayers(reset=false) {
             if(!gameData.layers) gameData.layers = {};
             let defaults = {
-                terrain: true, diplomacy: true, territory: true, cities: true,
+                terrain: true, diplomacy: true, territory: false, cities: false,
                 cityNames: true, structures: true, units: true
             };
             for(let k of Object.keys(defaults)) {
@@ -34341,18 +34361,6 @@
             return 1;
         }
 
-        function wodUnitHasNearbyEnemyCombat(unit, radiusPx) {
-            if(!unit || !gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return false;
-            let r = radiusPx != null ? radiusPx : (gameData.hexRadius || 20) * 3.6;
-            let found = false;
-            forEachNearbyUnit(gameData.unitSpatialGrid, unit.x, unit.y, r, (u) => {
-                if(!u || u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, unit.owner)) return;
-                found = true;
-                return true;
-            });
-            return found;
-        }
-
         function claimTerritoryAroundUnit(unit, atX, atY, hexOverride) {
             if(unit.type === 'convoy') return;
             let px = atX != null ? atX : unit.x;
@@ -34362,10 +34370,7 @@
                 : getNearestHexToPoint(px, py);
             if(!standingHex) return;
             let uHex = {q: standingHex.q, r: standingHex.r};
-            let claimRadius = unit.type === 'heavy' ? 2 : 1;
-            // Land units claiming uncontested ground take +1 cell of territory.
-            if(unit.type !== 'ship' && !wodUnitHasNearbyEnemyCombat(unit))
-                claimRadius += 1;
+            const claimRadius = unit.type === 'heavy' ? 2 : 1;
             let claimH = getHexesInHexRadius(uHex.q, uHex.r, claimRadius);
 
             if(wodCanClaimTerritoryHex(unit, standingHex, standingHex) && !wodHexOccupiedByEnemyCombat(standingHex, unit.owner))
@@ -34927,11 +34932,17 @@
                 }
             }
             if(!hasLand) return;
-            let landW = maxX - minX, landH = maxY - minY;
+            for(const unit of mapData.entities||[])if(unit.hp>0&&Number.isFinite(unit.x)&&Number.isFinite(unit.y)) {
+                minX=Math.min(minX,unit.x);maxX=Math.max(maxX,unit.x);minY=Math.min(minY,unit.y);maxY=Math.max(maxY,unit.y);
+            }
+            let landW = Math.max(27,maxX - minX), landH = Math.max(27,maxY - minY);
             let scale = Math.min((w - 16) / landW, (h - 16) / landH);
             let cx = w / 2 - ((minX + maxX) / 2) * scale;
             let cy = h / 2 - ((minY + maxY) / 2) * scale;
-            let hr = gameData.hexRadius || 10;
+            const lk=Object.fromEntries(hexList.map(h=>[`${h.q},${h.r}`,h]));
+            const first=hexList.find(h=>lk[`${h.q+1},${h.r}`]);
+            const neighbor=first&&lk[`${first.q+1},${first.r}`];
+            let hr = mapData.hexRadius || (neighbor?Math.abs(neighbor.x-first.x)/1.35:20);
             for(let hex of hexList) {
                 if(!isWaterHex(hex)) {
                     pCtx.fillStyle = getTerrainColor(hex.type);
@@ -34940,8 +34951,6 @@
                 }
             }
             let smooth = null;
-            let lk = {};
-            for(let h of hexList) lk[`${h.q},${h.r}`] = h;
             wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, smooth, cx, cy, scale, hr, lk);
             wodPaintMapPreviewEntities(pCtx, mapData.entities || [], cx, cy, scale, hr);
         }
@@ -38444,7 +38453,7 @@
             gameData.aiCount = 1;
             await generateMap();
             remapAttractBattleFromPlayerSlotsToAis();
-            gameData.layers = { terrain: true, diplomacy: true, territory: true, cities: true, cityNames: true, structures: true, units: true };
+            gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: false, cityNames: true, structures: true, units: true };
             syncInGameLayerToolbar();
             gameData.camera.zoom = 0.655;
             menuDemoSeeded = true;
@@ -44104,13 +44113,13 @@
 
         function wodGetGamePeriod() {
             let p = gameData.gamePeriod || 'modern';
-            if(!wodIsPeriodUnlocked(p)) p = 'modern';
+            if(!wodIsPeriodUnlocked(p)&&!(gameData.loadedCustomMap&&gameData._loadedMapGamePeriod===p)) p = 'modern';
             return p;
         }
 
         function wodGetMatchPeriod() {
             let p = gameData._matchPeriod || gameData.gamePeriod || 'modern';
-            if(!wodIsPeriodUnlocked(p)) p = 'modern';
+            if(!wodIsPeriodUnlocked(p)&&!(gameData.loadedCustomMap&&gameData._loadedMapGamePeriod===p)) p = 'modern';
             return p;
         }
 
@@ -45222,6 +45231,7 @@
                 if(fromOv === 'default') fromOv = 'nato';
                 return fromOv;
             }
+            if(gameData.loadedCustomMap&&gameData._selectedMissionEntry?.storeMission&&WOD_PERIOD_SKIN_IDS.includes(gameData._loadedMapGamePeriod))return gameData._loadedMapGamePeriod;
             let skin = unit.owner === 1 ? gameData.unitSkin : (gameData.aiUnitSkin || 'nato');
             if(!skin || skin === 'default') skin = 'nato';
             return skin;
@@ -49742,6 +49752,7 @@
             }
             if(!host) return;
             host.querySelectorAll('.shop-codex-unknown').forEach(n => n.remove());
+            if(host.id==='shopMapOptions')return;
             let cards = host.querySelectorAll(cardSelector);
             if(!cards.length) return;
             let width = host.clientWidth;
@@ -49778,16 +49789,19 @@
                 let oneshot = wodIsStoreMissionOneShot(entry);
                 let card = document.createElement('button');
                 card.type = 'button';
-                card.className = 'shop-codex-card' + (owned ? '' : ' shop-visual-locked') + (spent ? ' shop-mission-spent' : '');
+                card.dataset.missionId=entry.id;
+                card.className = 'shop-codex-card shop-mission-card' + (owned ? '' : ' shop-visual-locked') + (spent ? ' shop-mission-spent' : '');
                 card.title = entry.description || entry.name || entry.id;
                 let badge;
                 if(!owned) badge = price + 'g';
                 else if(spent && oneshot) badge = 'Done';
                 else badge = 'Owned';
                 card.innerHTML =
-                    '<span class="shop-codex-art"><canvas width="148" height="148" aria-hidden="true"></canvas></span>' +
+                    '<span class="shop-codex-art"><canvas width="560" height="300" aria-hidden="true"></canvas></span>' +
                     '<span class="shop-codex-tag">' + badge + '</span>' +
-                    '<span class="shop-codex-name">' + (entry.name || entry.id) + '</span>';
+                    '<span class="shop-codex-name">' + wodEscapeHtml(entry.name || entry.id) + '</span>' +
+                    '<span class="shop-mission-meta">' + wodEscapeHtml([entry.date,wodPeriodLabel(entry.gamePeriod||'modern'),entry.difficulty,'One-shot'].filter(Boolean).join(' · ')) + '</span>' +
+                    '<span class="shop-mission-description">' + wodEscapeHtml(entry.objective||entry.description||'') + '</span>';
                 card.addEventListener('click', () => {
                     if(owned) {
                         showNotification(spent && oneshot
@@ -55646,6 +55660,6 @@
             wodRunInitialBootToMenu();
         }
     </script>
-    <script src="map-editor.js?v=scenario-roundtrip-v1"></script>
+    <script src="map-editor.js?v=historical-missions-v2"></script>
 </body>
 </html>
