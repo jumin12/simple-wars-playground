@@ -121,7 +121,8 @@ const server=http.createServer((req,res)=>{
    assert(results.movement.filter(r=>r.shape!=='closed').every(r=>r.arrived!==null&&r.invalid===0),'infantry and armor cross narrow straight, bent and shore passages');
    assert(results.movement.find(r=>r.shape==='closed').arrived===null&&results.movement.find(r=>r.shape==='closed').invalid===0,'a solid mountain wall remains impassable');
    assert(results.borders.every(r=>r.invalid===0&&r.missing===0&&r.duplicates===0&&r.repeats===0),'every real territory boundary is drawn exactly once without synthetic crossings');
-   assert(results.cleanup?.filter(r=>['mountain','grass','water','pair'].includes(r.type)).every(r=>r.owner===1&&r.pair===1),'empty tiny remnants are absorbed');
+   assert(results.cleanup?.filter(r=>['mountain','grass','pair'].includes(r.type)).every(r=>r.owner===1&&r.pair===1),'empty tiny remnants are absorbed');
+   assert.equal(results.cleanup.find(r=>r.type==='water').owner,0,'water remains neutral');
    assert(results.cleanup?.filter(r=>['unit','city','fort','site','large','allied'].includes(r.type)).every(r=>r.owner===2),'defended, inhabited, large and allied pockets remain');
    assert(results.cleanup.find(r=>r.type==='queued').owner===1&&results.cleanup.find(r=>r.type==='queued').queued>0,'live territory changes queue and clear nearby remnants');
    assert(results.cleanup.filter(r=>['guest','pregame'].includes(r.type)).every(r=>r.owner===2&&r.queued===0),'guests and map generation do not perform remnant captures');

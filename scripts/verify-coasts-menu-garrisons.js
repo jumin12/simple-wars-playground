@@ -61,7 +61,7 @@ const server=http.createServer((req,res)=>{
     wodQueueTerritoryRemnantCheck(h);for(let i=0;i<30&&gameData._territoryCleanupKeys.size;i++)wodCleanupTinyTerritoryPockets(96);
     rows.push({type,owner:h.owner,remaining:gameData.hexList.filter(h=>!isWaterHex(h)&&h.owner===2).length});
    }
-   // Ownership follows an actual bank capture, without altering water movement.
+   // Water remains neutral after a bank capture, without altering water movement.
    reset();for(const h of gameData.hexList)if(Math.abs(h.q)<=2&&Math.abs(h.r)<=2){h.type='water';h.owner=2;}
    const bank=gameData.hexes['-3,0'];bank.owner=2;gameData._matchReadyForEndChecks=true;setHexOwner(bank,1);const queued=gameData._waterPoliticsDirty;drain();
    rows.push({type:'bankCapture',queued,enemyWater:gameData.hexList.filter(h=>isWaterHex(h)&&h.owner===2).length});
@@ -91,7 +91,7 @@ const server=http.createServer((req,res)=>{
   assert(results.menu.cachePreserved&&results.menu.finalBattlePreserved&&results.menu.statsUnchanged&&results.menu.preparedTiles>0);
   assert.equal(results.menu.generatedOnReturn,0);assert(results.menu.warmCanvasAdopted&&results.menu.menuRunning&&results.menu.summaryHidden&&results.menu.secondMenuRunning&&results.menu.fastExitStable);
   for(const type of ['lake','river','ocean','bankCapture'])assert.equal(results.territory.find(r=>r.type===type).enemyWater,0,type);
-  const split=results.territory.find(r=>r.type==='splitLake');assert(split.left===1&&split.right===2&&split.enemyWater>0&&split.enemyWater<split.water);
+  const split=results.territory.find(r=>r.type==='splitLake');assert(split.left===0&&split.right===0&&split.enemyWater===0);
   assert(results.territory.filter(r=>r.water).every(r=>r.terrainIntact));assert.equal(results.territory.find(r=>r.type==='guest').enemyWater,49);
   assert(results.territory.filter(r=>['coastal','mountainCoast'].includes(r.type)).every(r=>r.owner===1&&r.remaining===0));
   assert(results.territory.filter(r=>['unit','town','allied','island'].includes(r.type)).every(r=>r.owner===2));

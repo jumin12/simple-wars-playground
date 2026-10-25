@@ -4752,6 +4752,10 @@
             background: linear-gradient(135deg, #2c3e50 0%, #3d566e 48%, #4a6b85 100%);
             border: 1px solid rgba(93, 173, 226, 0.22);
         }
+        .map-skin-preview-hd {
+            background: repeating-linear-gradient(153deg,transparent 0 12px,#d5ccb514 13px 14px,transparent 15px 28px),radial-gradient(ellipse at 74% 34%,#c3c1a7 0,#7c8067 13%,transparent 31%),radial-gradient(ellipse at 35% 60%,#304e38 0,#5e7352 29%,transparent 46%),linear-gradient(125deg,#284959 0 23%,#72958d 24%,#b1aa88 27%,#7c855b 40%,#555f47 72%,#a19e81);
+            box-shadow:inset 0 0 18px #091d2466;
+        }
         .map-skin-preview-default {
             background: linear-gradient(135deg, #2d6a4f 0%, #40916c 40%, #74c69d 70%, #1b4332 100%);
         }
@@ -11460,7 +11464,7 @@
 
                 <div class="esc-help-block">
                     <h4>Terrain, movement & combat tilt</h4>
-                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Infantry</strong> and <strong>armor</strong> use land routes in all eight directions without cutting corners through peaks, and cross <strong>completed bridges</strong> as land. Units avoid water unless directly ordered there, no land route exists, or a crossing saves a very large detour. The AI favors dry detours and useful bridges near its army. <strong>All units in water except ships and marines are out of supply:</strong> they lose <strong>3.5% max HP per second</strong>, cannot heal, and move slowly, even under orders or beside a friendly town. Forts do not reduce water attrition. <strong>Marines</strong> move amphibiously without water attrition; <strong>ships</strong> fight from water.</p>
+                    <p class="esc-help-prose"><strong>Mountains</strong> block normal land movement. <strong>Infantry</strong> and <strong>armor</strong> use land routes in all eight directions without cutting corners through peaks, and cross <strong>completed bridges</strong> as land. Units avoid water unless directly ordered there, no land route exists, or a crossing saves a very large detour. The AI favors dry detours and useful bridges near its army. <strong>All units in water except ships and marines are out of supply:</strong> after <strong>five full uninterrupted seconds in water</strong>, they lose <strong>3.5% max HP per second</strong>, cannot heal, and move slowly, even under orders or beside a friendly town. Forts do not reduce water attrition. <strong>Marines</strong> move amphibiously without water attrition; <strong>ships</strong> fight from water and are the only units that can heal there. Marines cannot heal while afloat. These rules apply equally to players and AI. Oceans, rivers and lakes are neutral water: they never count as territory or land income.</p>
                     <p class="esc-help-prose"><strong>Attack %</strong> scales outgoing strikes vs the same regiment on baseline <strong>grass</strong>; <strong>Dmg taken %</strong> scales how hostile hits resolve on you (<strong>below 100%</strong> absorbs better; above 100% means more exposed).</p>
                     <p class="esc-help-prose esc-help-matrix-footnote"><strong>Ocean headers:</strong> <em>Ocean M/S</em> = marines &amp; ships on ocean (amphib for marines); <em>Ocean drown ΔI</em> / <em>ΔA</em> = infantry vs armor caught drowning in ocean—same wording as unit cards (<strong>Atk</strong> + <strong>Dmg taken</strong> rows).</p>
                     <div class="wod-help-terrain-combat-mount"></div>
@@ -11833,12 +11837,17 @@
                 </div>
 
                 <div id="shopTabMapSkins" class="shop-tab-pane" data-shop-pane="mapSkins" role="tabpanel" hidden>
-                    <p class="shop-tab-lead">Visual style for the battlefield terrain.</p>
+                    <p class="shop-tab-lead">Visual style for the battlefield terrain and units. Atlas HD follows the same rounded cells.</p>
                     <div class="shop-option-grid" id="shopMapSkinOptions">
                         <button type="button" class="shop-option-card active" data-map-skin="default" onclick="setShopMapSkin('default')">
                             <span class="shop-option-preview map-skin-preview-default" aria-hidden="true"></span>
                             <span class="shop-option-title">Default</span>
                             <span class="shop-option-badge">Equipped</span>
+                        </button>
+                        <button type="button" class="shop-option-card" data-map-skin="atlas_hd" onclick="setShopMapSkin('atlas_hd')">
+                            <span class="shop-option-preview map-skin-preview-hd" aria-hidden="true"></span>
+                            <span class="shop-option-title">Atlas HD</span>
+                            <span class="shop-option-badge">Free · Aerial terrain &amp; realistic units</span>
                         </button>
                     </div>
                 </div>
@@ -12530,7 +12539,7 @@
                     <button class="menu-btn" onclick="toggleEscMenu(false)">Back to game</button>
                     <button class="menu-btn" onclick="showEscSection('helpSection')">Help</button>
                     <button class="menu-btn" onclick="showEscSection('settingsSection')">Settings</button>
-                    <button class="menu-btn danger-btn" onclick="showEscSection('surrenderSection')">Surrender</button>
+                    <button class="menu-btn danger-btn" onclick="confirmSurrender()">Surrender</button>
                 </div>
                 <div id="helpSection" class="esc-section esc-help-panel">
                     <div id="escFullHelpGuide" class="esc-full-help-guide"></div>
@@ -12585,12 +12594,7 @@
                     </div>
                     <p style="margin-top:12px;font-size:0.88rem;color:#bdc3c7;">Progress reset and other options are under <strong>Main menu → Settings</strong>.</p>
                 </div>
-                <div id="surrenderSection" class="esc-section surrender-box">
-                    <h3>Surrender Game?</h3>
-                    <p>This will abandon the current war and return to the main menu.</p>
-                    <button class="menu-btn danger-btn" onclick="confirmSurrender()">Surrender</button>
-                    <button class="menu-btn" onclick="toggleEscMenu(false)">Back to game</button>
-                </div>
+
             </div>
         </div>
     </div>
@@ -12637,6 +12641,18 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-25T14:54:00-04:00',
+                title: 'Rounded Atlas HD terrain, reliable pockets and neutral water',
+                items: [
+                    'Added the free Atlas HD skin in Shop → Map skins: procedural aerial terrain, shaded rock relief, forest canopies, fields, coastal shallows, settlement roofs and era-aware infantry, armor, cavalry, cannon, ships and supply wagons. All art is drawn in code, following the same rounded cell shapes as the default skin.',
+                    'Terrain now covers every cell and the space between cell centers. Removed oversized overlapping discs and fake diagonal land bridges. Generated checkerboard coast corners are resolved in the terrain data before faction balancing; invalid repairs regenerate. Tiny real land borders remain visible, and political overlays use the same complete, rounded land footprint.',
+                    'Empty encircled mountain ranges now transfer to their surrounding enemy just like other land. Mountains remain impassable; occupied pockets, supplied towns and separate unoccupied islands retain their existing rules.',
+                    'Oceans, rivers and lakes stay neutral: water is not captured, counted as territory or land income, or outlined as a political border. Scenario imports, editor painting and multiplayer terrain normalize old water claims. Naval patrols target hostile shores instead of owned sea tiles.',
+                    'Ordinary troops receive five full uninterrupted simulation seconds in open water before 3.5% maximum HP/s attrition begins. Dry land and completed bridges reset the timer; pausing does not advance it. Ships and marines alone avoid water attrition. Only ships can heal afloat; marines cannot. These rules apply equally to players and AI, and the unit tooltip shows the grace countdown.',
+                    'Removed surrender confirmations. Surrender immediately opens the battle result or leaves multiplayer, while preserving lifetime statistics. Surrendering a campaign save clears it directly.'
+                ]
+            },
             {
                 at: '2026-10-25T11:06:00-04:00',
                 title: 'Consistent capture and new historical missions',
@@ -14029,8 +14045,7 @@
         }
 
         function openSurrenderMenu() {
-            toggleEscMenu(true, { skipDefaultSection: true });
-            showEscSection('surrenderSection');
+            confirmSurrender();
         }
 
         function openMenuFromGame() {
@@ -14050,24 +14065,12 @@
         window.showEscSection = showEscSection;
 
         function confirmSurrender() {
-            wodShowConfirmDialog({
-                title: 'Surrender this war?',
-                body: 'This counts as a defeat and opens the battle summary. Campaign battles return to the war map afterward.',
-                confirmLabel: 'Surrender',
-                cancelLabel: 'Keep fighting',
-                danger: true
-            }).then(ok => {
-                if(!ok) return;
-                toggleEscMenu(false);
-                gameData._lifetimeEndReason='surrender';
-                wodFinishLifetimeMatch('defeat','surrender');
-                // Multiplayer leave still exits immediately (no shared end-summary path here).
-                if(gameData.mp && gameData.mp.enabled) {
-                    returnToMenu();
-                    return;
-                }
-                triggerSurrenderDefeat();
-            });
+            if(gameState !== 'PLAYING' || gameData.menuAttractMode || gameData._campaignEnded) return;
+            toggleEscMenu(false);
+            gameData._lifetimeEndReason='surrender';
+            wodFinishLifetimeMatch('defeat','surrender');
+            if(gameData.mp && gameData.mp.enabled) { returnToMenu(); return; }
+            triggerSurrenderDefeat();
         }
 
         /** Explicit surrender: always show the defeat summary (bypasses natural end-check gates). */
@@ -14791,7 +14794,7 @@
             if(u.commandArrowColor === 'silver') u.commandArrowColor = 'black';
             if(!['gold', 'black', 'white', 'red', 'blue'].includes(u.frontlineColor)) u.frontlineColor = 'black';
             if(!['gold', 'black', 'white', 'red', 'blue'].includes(u.commandArrowColor)) u.commandArrowColor = 'black';
-            if(!u.mapSkin) u.mapSkin = 'default';
+            if(!['default','atlas_hd'].includes(u.mapSkin)) u.mapSkin = 'default';
         }
 
         const WOD_STEAM_APP_ID = 5043620;
@@ -17428,22 +17431,24 @@
                 if((++hi2 & wodMapGenLoopYieldMask(1023)) === 0) await wodMapGenYieldSlice();
             }
         }
-        /** Fill unowned water / mountains from neighboring ownership so coast frontlines have no owner-0 gaps. */
+        /** Fill unowned dry cells from neighboring land; water always stays neutral. */
         function wodFillUnownedPoliticalHexes(passes) {
             let maxPass = Math.max(1, passes || 4);
             let changed = false;
             for(let pass = 0; pass < maxPass; pass++) {
                 let updates = [];
                 for(let h of gameData.hexList) {
-                    if(!h || h.owner > 0) continue;
+                    if(!h)continue;
+                    if(isWaterHex(h)){if(h.owner){h.owner=0;changed=true;}continue;}
+                    if(h.owner>0)continue;
                     let votes = {};
-                    // Prefer cardinal shore neighbors so coastal water inherits the abutting land faction.
+                    // Prefer real shared land edges over diagonal contacts.
                     for(let dir of cardinalHexDirections) {
                         let nb = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
-                        if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 2;
+                        if(nb && !isWaterHex(nb) && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 2;
                     }
                     for(let nb of getNeighborHexes(h)) {
-                        if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
+                        if(nb && !isWaterHex(nb) && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
                     }
                     let bo = 0, bv = 0;
                     for(let ok in votes) {
@@ -17467,44 +17472,25 @@
         }
 
         /**
-         * Full-map water/mountain ownership: multi-source BFS from owned land so every sea cell
-         * belongs to a faction (campaign + skirmish parity with Voronoi water wedges).
+         * Finalize mountain ownership from dry land and clear all sea/lake claims.
+         * Water is neutral in campaign, skirmish, editor and multiplayer.
          * Call once after politics settle — never inside the equalize loop (that made 3+ gen crawl).
          */
         function wodAssignAllWaterFromNearestLand(preserveLandOwners = false) {
-            if(!gameData || !gameData.hexList || !gameData.hexList.length) return false;
-            let queue = [];
-            let bestDist = new Map();
-            for(let h of gameData.hexList) {
-                if(!h || h.owner <= 0) continue;
-                if(isWaterHex(h) || h.type === 'mountain') continue;
-                let k = getHexKey(h);
-                bestDist.set(k, 0);
-                queue.push(h);
+            if(!gameData || !gameData.hexList?.length)return false;
+            let changed=false;const queue=[],seen=new Set();
+            for(const h of gameData.hexList) {
+                if(isWaterHex(h)){if(h.owner){h.owner=0;changed=true;}continue;}
+                if(h.owner>0&&h.type!=='mountain'){queue.push(h);seen.add(getHexKey(h));}
             }
-            if(!queue.length) return false;
-            let qi = 0;
-            let changed = false;
-            while(qi < queue.length) {
-                let cur = queue[qi++];
-                let cd = bestDist.get(getHexKey(cur)) | 0;
-                for(let di = 0; di < cardinalHexDirections.length; di++) {
-                    let dir = cardinalHexDirections[di];
-                    let nb = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
-                    if(!nb) continue;
-                    if(!isWaterHex(nb) && nb.type !== 'mountain') continue;
-                    let nk = getHexKey(nb);
-                    // Unweighted multi-source BFS: first visit is shortest — never requeue.
-                    if(bestDist.has(nk)) continue;
-                    bestDist.set(nk, cd + 1);
-                    if(nb.owner !== cur.owner && (!preserveLandOwners || isWaterHex(nb) || nb.owner <= 0)) {
-                        nb.owner = cur.owner;
-                        changed = true;
-                    }
-                    queue.push(nb);
-                }
+            for(let i=0;i<queue.length;i++)for(const d of cardinalHexDirections) {
+                const n=gameData.hexes[`${queue[i].q+d.q},${queue[i].r+d.r}`];
+                if(!n||n.type!=='mountain'||seen.has(getHexKey(n)))continue;
+                seen.add(getHexKey(n));
+                if((!preserveLandOwners||n.owner<=0)&&n.owner!==queue[i].owner){n.owner=queue[i].owner;changed=true;}
+                queue.push(n);
             }
-            if(wodFillUnownedPoliticalHexes(4)) changed = true;
+            if(wodFillUnownedPoliticalHexes(4))changed=true;
             return changed;
         }
         /** Light water/mountain neighbor vote used during mapgen equalize (fast). */
@@ -17512,16 +17498,17 @@
             let hi = 0;
             for(let h of gameData.hexList) {
                 if(!h) continue;
+                if(isWaterHex(h)){setHexOwner(h,0);continue;}
                 if(!isWaterHex(h) && h.type !== 'mountain') continue;
                 let votes = {};
                 for(let dir of cardinalHexDirections) {
                     let nb = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
-                    if(!nb || nb.owner <= 0) continue;
-                    // Prefer abutting land owners for coastal water inheritance.
+                    if(!nb || isWaterHex(nb) || nb.owner <= 0) continue;
+                    // Prefer abutting land owners when assigning unowned peaks.
                     votes[nb.owner] = (votes[nb.owner] || 0) + (!isWaterHex(nb) ? 3 : 1);
                 }
                 for(let nb of getNeighborHexes(h)) {
-                    if(nb && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
+                    if(nb && !isWaterHex(nb) && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 1;
                 }
                 let bo = 0, bv = 0;
                 for(let ok in votes) {
@@ -18559,7 +18546,7 @@
                 xp: u.xp || 0, kills: u.kills || 0, losses: u.losses || 0, veteran: !!u.veteran,
                 convoySeaRoute: !!u.convoySeaRoute, tradeValue: u.tradeValue, shake: u.shake || 0,
                 combatTargetUid:u.combatTargetUid||null, spawnFx: u.spawnFx || 0, activeCombatVisual: u.activeCombatVisual || 0, encircledFlash: u.encircledFlash || 0,
-                healingFlash: u.healingFlash || 0, waterFlash: u.waterFlash || 0, unpaidFlash: u.unpaidFlash || 0,
+                healingFlash: u.healingFlash || 0, waterFlash: u.waterFlash || 0, waterExposureSeconds:u.waterExposureSeconds||0, unpaidFlash: u.unpaidFlash || 0,
                 target: tgt, orderTarget: ot, path: pth, fullMarchWaypoints: fmw, marchWpCursor: u.marchWpCursor || 0
             };
         }
@@ -18578,6 +18565,7 @@
             for(let i = 0; i < list.length; i++) {
                 let h = list[i];
                 if(!h || !h.type) continue;
+                if(isWaterHex(h))h.owner=0;
                 if(!h.baseColor) h.baseColor = getTerrainColor(h.type);
                 if(!h.renderColor) h.renderColor = h.baseColor;
             }
@@ -19213,6 +19201,7 @@
                         ex.encircledFlash = ed.encircledFlash != null ? ed.encircledFlash : ex.encircledFlash;
                         ex.healingFlash = ed.healingFlash != null ? ed.healingFlash : ex.healingFlash;
                         ex.waterFlash = ed.waterFlash != null ? ed.waterFlash : ex.waterFlash;
+                        ex.waterExposureSeconds=ed.waterExposureSeconds!=null?ed.waterExposureSeconds:(ex.waterExposureSeconds||0);
                         ex.unpaidFlash = ed.unpaidFlash != null ? ed.unpaidFlash : ex.unpaidFlash;
                         if(ed.target) ex.target = Object.assign({}, ed.target);
                         else ex.target = null;
@@ -23581,6 +23570,7 @@
         ];
 
         function getTerrainColor(type) {
+            if(wodHdMapActive() && WOD_HD_PALETTE[type])return WOD_HD_PALETTE[type];
             if(type === 'deep_water') return '#0f4f8c';
             if(type === 'water') return '#1563a8';
             if(type === 'sand') return '#c9923a';
@@ -23599,6 +23589,7 @@
             if(!gameData.hexList) return;
             let changed = false;
             for(let hex of gameData.hexList) {
+                if(isWaterHex(hex))hex.owner=0;
                 if(hex.type === 'deep_water') {
                     hex.type = 'water';
                     hex.baseColor = getTerrainColor('water');
@@ -31703,7 +31694,10 @@
             if(unit.manpower == null) unit.manpower = Math.round((unit.hp / unit.maxHp) * mpCap);
             if(unit.hp >= unit.maxHp && unit.manpower >= mpCap) return false;
             let hex = getNearestHexToPoint(unit.x, unit.y);
-            if(!hex || !wodIsFriendlyOwner(hex.owner, unit.owner)) return false;
+            if(!hex)return false;
+            const afloat=isWaterHex(hex)&&!isBridgeHex(hex)&&!wodUnitOnBridgeDeck(unit);
+            if(afloat&&unit.type!=='ship')return false;
+            if(!afloat&&!wodIsFriendlyOwner(hex.owner,unit.owner))return false;
             if(wodGetUnitEncirclementState(unit, hex)) return false;
             return countNearbyUnits(unit.owner, unit.x, unit.y, 115, true) === 0;
         }
@@ -31745,11 +31739,24 @@
             return !!(unit&&hex&&unit.type!=='ship'&&unit.type!=='marine'&&isWaterHex(hex)&&
                 !isBridgeHex(hex)&&!wodUnitOnBridgeDeck(unit));
         }
+        // Count uninterrupted simulation time, not wall-clock time (pause is free).
+        function wodAdvanceWaterExposure(unit, dt, hex) {
+            if(!wodUnitInUnsuppliedWater(unit,hex)) { unit.waterExposureSeconds=0; return 0; }
+            const before=Math.max(0,Number(unit.waterExposureSeconds)||0);
+            const after=before+Math.max(0,dt);
+            unit.waterExposureSeconds=after;
+            return Math.max(0,after-5)-Math.max(0,before-5);
+        }
+        function wodWaterAttritionStats(unit) {
+            const remaining=Math.max(0,5-(unit.waterExposureSeconds||0));
+            return remaining>0 ? `Attrition in ${remaining.toFixed(1)}s · No healing` : '−3.5% max HP/s · No healing';
+        }
         function applyTerrainUnitEffects(unit, dt) {
             let hex = getNearestHexToPoint(unit.x, unit.y);
             let onBridge = wodUnitOnBridgeDeck(unit);
             let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && unit.type !== 'ship');
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
+            if(sea)unit.healingFlash=0;
             unit.inWater = !!(sea && unit.type !== 'marine');
             if(unit.inWater) {
                 // Damage is applied once by the shared supply-attrition pass.
@@ -31903,7 +31910,7 @@
             { id: 'fighting', title: 'Fighting', overhead: 'combat', drawType: 'light', note: 'Burst icon while the unit is actively trading fire.', effect: { label: 'Fighting', stats: 'Active combat stance · Applies terrain/armor morale effects above while firing', detail: 'Engaged and trading fire.' } },
             { id: 'fort', title: 'Fortified', overhead: 'fort', drawType: 'heavy', note: 'Shield icon inside a friendly fort combat aura.', effect: { label: 'Fortified', render: 'fortDmg', fortDmgPct: 80, block: true, detail: 'Incoming combat damage resolves at about 80% of normal.' } },
             { id: 'encircled', title: 'Encircled', overhead: 'encircled', drawType: 'light', note: 'Red exclamation when the hex is cut off behind enemy lines.', effect: { label: 'Encircled', stats: '−3.5% max HP/s · No heal until pocket breaks', block: true, warn: true, detail: 'Hex is cut off behind enemy lines.' } },
-            { id: 'deepwater', title: 'Deep water', overhead: 'water', drawType: 'light', note: 'Blue tilde when a land unit is stranded in ocean tiles.', effect: { label: 'Deep water', stats: '−3.5% max HP/s · No healing', block: true, warn: true, detail: 'Land units stranded in deep ocean tiles.' } },
+            { id: 'deepwater', title: 'Deep water', overhead: 'water', drawType: 'light', note: 'Blue tilde when a land unit is stranded in ocean tiles.', effect: { label: 'Deep water', stats: '−3.5% max HP/s · No healing', block: true, warn: true, detail: 'Ordinary land units lose 3.5% HP/s after five full seconds in water. Only ships can heal afloat; ships and marines are exempt from water attrition.' } },
             { id: 'unpaid', title: 'Unpaid upkeep', overhead: 'unpaid', drawType: 'light', note: 'Gold dollar sign when treasury cannot cover upkeep.', effect: { label: '$ Unpaid', stats: '−2.5% max HP/s', block: true, warn: true, detail: 'Treasury cannot cover upkeep.' } },
             { id: 'healing', title: 'Healing', overhead: 'heal', drawType: 'light', note: 'Green plus while regenerating on safe friendly ground.', effect: { label: '+ Healing', stats: '+3.5% max HP/s', detail: 'Regenerating on safe friendly territory.' } },
             { id: 'forest', title: 'Forest cover', overhead: null, drawType: 'light', note: 'Terrain tilt on the unit sheet — no overhead icon for tile cover alone.', effect: { label: 'Forest', render: 'terrainCombat', atkPct: 85, defPct: 90, block: true, terrain: true, detail: 'Example: infantry in forest — weaker attacks, softer incoming hits.' } },
@@ -32065,11 +32072,11 @@
                     effects.push({
                         label: supplyState.water?'Water: out of supply':'Encircled',
                         detail: supplyState.water
-                            ? 'Infantry, armor and other unprotected units in water have no supply, lose 3.5% max HP per second and cannot heal. Reach dry land or a completed bridge. Only ships and marines are exempt.'
+                            ? 'Infantry, armor and other unprotected units in water have no supply and cannot heal; after five uninterrupted seconds in water they lose 3.5% max HP per second. Reach dry land or a completed bridge. Only ships and marines are exempt.'
                             : relief
                             ? 'This pocket is cut off but a friendly fort still offers limited supply. Attrition is halved until territory reconnects.'
                             : 'This hex is cut off behind enemy lines. You lose about 3.5% max HP per second while standing here and you cannot regenerate until friendly territory reconnects.',
-                        stats: `−${ratePct}% max HP/s · No healing`,
+                        stats: supplyState.water?wodWaterAttritionStats(unit):`−${ratePct}% max HP/s · No healing`,
                         block: true,
                         warn: !relief
                     });
@@ -32111,13 +32118,13 @@
             if(unit.amphibInWater) effects.push({
                 label: '∿ Amphib',
                 stats: 'March ×62%',
-                detail: 'Marines: no drowning damage while embarked in deep water'
+                detail: 'Marines: no water attrition; cannot heal while afloat'
             });
             else if(hex && unit.type === 'convoy' && !wodUnitOnBridgeDeck(unit) && (unit.inWater || (unit.waterFlash && unit.waterFlash > 0))) {
                 effects.push({
                     label: 'Deep water hazard',
-                    detail: 'Unprotected units in water are out of supply, lose 3.5% max HP per second, cannot heal and move slowly.',
-                    stats: '−3.5% max HP/s · No healing',
+                    detail: 'Unprotected units in water are out of supply, cannot heal and move slowly; after five uninterrupted seconds in water they lose 3.5% max HP per second.',
+                    stats: wodWaterAttritionStats(unit),
                     block: true,
                     warn: true
                 });
@@ -32322,11 +32329,11 @@
             if(!w.occupiedLandKeys) {
                 const keys=new Set(), queue=[];
                 const seed=hex=>{
-                    if(!hex || isWaterHex(hex) || hex.type==='mountain' || keys.has(getHexKey(hex))) return;
+                    if(!hex || isWaterHex(hex) || keys.has(getHexKey(hex))) return;
                     keys.add(getHexKey(hex));queue.push(hex);
                 };
                 for(const city of gameData.cities) if(city.owner>0) seed(gameData.hexes[`${city.q},${city.r}`]);
-                for(const fort of gameData.forts || []) if(fort.hp>0) seed(gameData.hexes[`${fort.q},${fort.r}`]);
+                for(const fort of gameData.forts || []) if(fort.hp==null || fort.hp>0) seed(gameData.hexes[`${fort.q},${fort.r}`]);
                 for(const unit of gameData.entities) if(unit.owner>0 && unit.hp>0 && unit.type!=='convoy' && unit.type!=='ship') seed(getNearestHexToPoint(unit.x,unit.y));
                 for(let i=0; i<queue.length; i++) for(const d of cardinalHexDirections)
                     seed(gameData.hexes[`${queue[i].q+d.q},${queue[i].r+d.r}`]);
@@ -34238,40 +34245,16 @@
             }
         }
 
-        // Repaint lakes and seas from the nearest current land bank. Chunk the flood
-        // across frames; finish one generation before starting another during a push.
+        // Water carries no political ownership, including inland lakes. This bounded
+        // migration pass also clears water claims received from older saved maps.
         function wodUpdateWaterPolitics() {
             if(gameData.mp?.enabled&&!gameData.mp.isHost)return;
             let w=gameData._waterPoliticsWork;
-            if(!w) {
-                if(!gameData._waterPoliticsDirty)return;
-                gameData._waterPoliticsDirty=false;
-                w=gameData._waterPoliticsWork={list:gameData.hexList,scan:0,queue:[],head:0,seen:new Set(),phase:'seed'};
-            }
+            if(!w){if(!gameData._waterPoliticsDirty)return;gameData._waterPoliticsDirty=false;w=gameData._waterPoliticsWork={list:gameData.hexList,scan:0};}
             if(w.list!==gameData.hexList){gameData._waterPoliticsWork=null;return;}
-            const start=performance.now();let steps=0;
-            while(performance.now()-start<1.5&&steps++<1200) {
-                if(w.phase==='seed') {
-                    if(w.scan>=w.list.length){w.phase='flood';continue;}
-                    const h=w.list[w.scan++];if(!h.owner||isWaterHex(h))continue;
-                    for(const d of cardinalHexDirections) {
-                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
-                        if(n&&isWaterHex(n)&&!w.seen.has(getHexKey(n))) {
-                            w.seen.add(getHexKey(n));w.queue.push({hex:n,owner:h.owner});
-                        }
-                    }
-                } else {
-                    if(w.head>=w.queue.length){gameData._waterPoliticsWork=null;return;}
-                    const {hex,owner}=w.queue[w.head++];
-                    setHexOwner(hex,owner);
-                    for(const d of cardinalHexDirections) {
-                        const n=gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`];
-                        if(n&&isWaterHex(n)&&!w.seen.has(getHexKey(n))) {
-                            w.seen.add(getHexKey(n));w.queue.push({hex:n,owner});
-                        }
-                    }
-                }
-            }
+            const end=Math.min(w.list.length,w.scan+1200);
+            for(;w.scan<end;w.scan++){const h=w.list[w.scan];if(isWaterHex(h)&&h.owner)setHexOwner(h,0);}
+            if(w.scan>=w.list.length)gameData._waterPoliticsWork=null;
         }
 
         function wodApplyTerritoryClaimBatch() {
@@ -34291,7 +34274,7 @@
             gameData._wodClaimBatch = null;
             if(changed) {
                 wodSyncFortCapturesAfterTerritory();
-                // Keep coastal water painted so frontlines don't break on owner-0 shore cells.
+                // Fill any remaining unowned land; water stays neutral.
                 if(((gameData._wodSimTick | 0) % 8) === 0) wodFillUnownedPoliticalHexes(2);
             }
         }
@@ -34344,7 +34327,7 @@
         }
 
         function wodCanClaimTerritoryHex(unit, hex, standingHex) {
-            if(!hex || !unit || !canUnitEnterHex(unit, hex)) return false;
+            if(!hex || !unit || isWaterHex(hex) || !canUnitEnterHex(unit, hex)) return false;
             if(hex.owner === unit.owner) return false;
             if(wodAreAllies(hex.owner, unit.owner)) return false;
             let onTile = standingHex && hex.q === standingHex.q && hex.r === standingHex.r;
@@ -34427,6 +34410,7 @@
         let batchHexOwnerDirty = false;
 
         function setHexOwner(hex, owner) {
+            if(isWaterHex(hex))owner=0;
             if (hex.owner === owner) return;
             let prev = hex.owner;
             if(!isWaterHex(hex) && gameData._landIncomeCache && !gameData._landIncomeCacheDirty &&
@@ -36223,7 +36207,7 @@
             await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 18 : 28);
             const referenceFrontier=wodStartingFrontierLength();
             // Keep the solved region intact while placing its towns.
-            // Fill political water ownership after the land split settles.
+            // Finalize mountain ownership and clear water claims after the land split settles.
             wodAssignAllWaterFromNearestLand(true);
 
             let perTile = {};
@@ -36919,6 +36903,31 @@
             return true;
         }
 
+        async function wodResolveGeneratedTerrainCorners() {
+            // A diagonal pair has no traversable shared edge. Resolve it in terrain
+            // data before assigning countries/towns, rather than painting a fake neck.
+            let changed=0;
+            for(let pass=0;pass<32;pass++) {
+                let edits=0;
+                for(const h of gameData.hexList) {
+                    const a=gameData.hexes[`${h.q+1},${h.r}`],b=gameData.hexes[`${h.q},${h.r+1}`],c=gameData.hexes[`${h.q+1},${h.r+1}`];
+                    if(!a||!b||!c||isWaterHex(h)!==isWaterHex(c)||isWaterHex(a)!==isWaterHex(b)||isWaterHex(h)===isWaterHex(a))continue;
+                    const cells=[h,a,b,c],dry=cells.filter(x=>!isWaterHex(x)),wet=cells.filter(isWaterHex);
+                    const count=x=>cardinalHexDirections.reduce((n,d)=>n+!!(gameData.hexes[`${x.q+d.q},${x.r+d.r}`]&&!isWaterHex(gameData.hexes[`${x.q+d.q},${x.r+d.r}`])),0);
+                    dry.sort((x,y)=>count(x)-count(y)||x.q-y.q||x.r-y.r);
+                    wet.sort((x,y)=>count(y)-count(x)||x.q-y.q||x.r-y.r);
+                    // Each edit decreases coastline length, or removes a land tip at
+                    // equal length. That prevents alternating corner repairs.
+                    if(count(wet[0])>=3)wodSetGeneratedTerrainType(wet[0],'sand');
+                    else wodSetGeneratedTerrainType(dry[0],'water');
+                    edits++;changed++;
+                }
+                if(!edits)return {ok:true,changed};
+                await wodMapGenYieldSlice();
+            }
+            return {ok:false,changed};
+        }
+
         async function generateMap() {
             if(gameData._mapGenInProgress) return;
             let ownsInnerRng = !_wodSavedMathRandom;
@@ -37289,6 +37298,8 @@
             // Re-run last: speckle coalescing / rivers / biome blends can re-add land at the
             // boundary, and island maps must never touch the map edge.
             await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
+            const cornerRepair=await wodResolveGeneratedTerrainCorners();
+            if(!cornerRepair.ok) { recordRejection('terrain-corners'); if(ownsInnerRng)wodPopRandom(); continue outerProcTerrain; }
             wodCaptureTerrainPoliticsBase();
 
             if(!wodMapLandFractionAcceptable(mapShape)) {
@@ -39904,7 +39915,7 @@
                             let stride = Math.max(1, Math.floor(gameData.hexList.length/180));
                             for(let i=0; i<gameData.hexList.length; i+=stride) {
                                 let h = gameData.hexList[i];
-                                if(isWaterHex(h) && wodIsHostileOwner(h.owner,unit.owner)) waters.push(h);
+                                if(isWaterHex(h) && getNeighborHexes(h).some(n=>!isWaterHex(n)&&wodIsHostileOwner(n.owner,unit.owner))) waters.push(h);
                             }
                         }
                         waters.sort((a,b) => wodAiDist2(unit.x,unit.y,a.x,a.y)-wodAiDist2(unit.x,unit.y,b.x,b.y));
@@ -41151,6 +41162,7 @@
                     continue;
                 }
                 
+                const startedInWater=wodUnitInUnsuppliedWater(unit,getNearestHexToPoint(unit.x,unit.y));
                 // Decrease combat visuals
                 unit.activeCombatVisual = Math.max(0, (unit.activeCombatVisual || 0) - dt);
                 if(unit.spawnFx > 0) unit.spawnFx = Math.max(0, unit.spawnFx - dt);
@@ -41276,11 +41288,12 @@
                 applyTerrainUnitEffects(unit, dt);
 
                 let currentHex = getNearestHexToPoint(unit.x, unit.y);
+                const waterDamageDt=wodAdvanceWaterExposure(unit,startedInWater?dt:0,currentHex);
                 let encState = wodGetUnitEncirclementState(unit, currentHex);
                 if(encState) {
                     let encRate = 0.035;
                     if(encState.relief) encRate *= 0.5;
-                    applyDamage(unit, unit.maxHp * encRate * dt, 0);
+                    applyDamage(unit, unit.maxHp * encRate * (encState.water?waterDamageDt:dt), 0);
                     unit.encircledFlash = 0.35;
                 } else if(unit.encircledFlash) {
                     unit.encircledFlash = Math.max(0, unit.encircledFlash - dt);
@@ -41420,23 +41433,10 @@
                 let owner = hex.owner;
                 if(owner <= 0 || isWaterHex(hex)) continue;
                 overlayCtx.fillStyle = factionColors[owner];
-                overlayCtx.strokeStyle = factionColors[owner];
-                overlayCtx.lineWidth = spacing * 1.32;
-                overlayCtx.lineCap = 'round';
-                overlayCtx.lineJoin = 'round';
-                for(let dir of hexDirections) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(!nHex || nHex.owner !== owner || isWaterHex(nHex)) continue;
-                    overlayCtx.beginPath();
-                    overlayCtx.moveTo(hex.x + ox, hex.y + oy);
-                    overlayCtx.lineTo(nHex.x + ox, nHex.y + oy);
-                    overlayCtx.stroke();
-                }
-                overlayCtx.beginPath();
-                overlayCtx.arc(hex.x + ox, hex.y + oy, discR, 0, Math.PI * 2);
-                overlayCtx.fill();
+                wodFillCellSquare(overlayCtx,hex,ox,oy,spacing);
             }
             w.hi = end;
+            if(w.hi>=list.length)wodMaskTerritoryWaterCorners(overlayCtx,ox,oy);
             return w.hi >= list.length;
         }
 
@@ -41478,7 +41478,7 @@
             function strokeOne(lineWidth, dash, offsetPx, chain, col) {
                 ctx.strokeStyle = col || strokeCol;
                 ctx.fillStyle = col || fillCol;
-                ctx.lineWidth = lineWidth;
+                ctx.lineWidth = wodHdMapActive()?Math.min(lineWidth,2.4):lineWidth;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 ctx.setLineDash(dash || []);
@@ -41640,6 +41640,8 @@
 
                 if(gameData.terrainViewMode === 'schematic') {
                     drawTerrainSchematicMap(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
+                } else if(wodHdMapActive()) {
+                    wodDrawHdTerrain(terrainBaseCtx,-terrainBounds.minX,-terrainBounds.minY);
                 } else {
                     let paintOrder = ['water', 'sand', 'grass', 'forest', 'swamp', 'hill', 'mountain', 'urban'];
                     for(let type of paintOrder) {
@@ -41650,6 +41652,7 @@
                     drawMountainRockDecorations(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                     drawTerrainWaterRipples(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
                     drawUrbanTerrainDetails(terrainBaseCtx, -terrainBounds.minX, -terrainBounds.minY);
+                    wodRoundTerrainCorners(terrainBaseCtx,-terrainBounds.minX,-terrainBounds.minY);
                 }
                 wodTerrainBaseBuilt = true;
                 wodTerrainNeedFullRebuild = false;
@@ -41671,30 +41674,193 @@
             wodTerrainLastBakeCostMs = performance.now() - bakeStartMs;
         }
 
+        function wodHdMapActive() { return !!(gameData.uiSettings && gameData.uiSettings.mapSkin==='atlas_hd'); }
+        const WOD_HD_PALETTE={water:'#284d60',deep_water:'#203e50',sand:'#b4aa86',grass:'#747f53',forest:'#344c35',swamp:'#4a6655',hill:'#8c896d',mountain:'#79796f',urban:'#9c9787',bridge:'#827763'};
+        let wodHdTextureCache=null;
+        function wodHdHash(x,y) { const n=Math.sin(x*127.1+y*311.7)*43758.5453123;return n-Math.floor(n); }
+        function wodHdNoise(x,y,period) {
+            const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy,u=fx*fx*(3-2*fx),v=fy*fy*(3-2*fy);
+            const hash=(a,b)=>wodHdHash(((a%period)+period)%period,((b%period)+period)%period);
+            return (hash(ix,iy)*(1-u)+hash(ix+1,iy)*u)*(1-v)+(hash(ix,iy+1)*(1-u)+hash(ix+1,iy+1)*u)*v;
+        }
+        function wodHdTextures(ctx) {
+            if(!wodHdTextureCache) {
+                wodHdTextureCache={};
+                // Seamless world-anchored textures, created entirely with math and Canvas.
+                // Shared across all map bakes, with no downloads or generated art assets.
+                for(const [type,color] of Object.entries(WOD_HD_PALETTE)) {
+                    const c=document.createElement('canvas');c.width=c.height=256;
+                    const cc=c.getContext('2d'),im=cc.createImageData(256,256),base=[1,3,5].map(i=>parseInt(color.slice(i,i+2),16));
+                    const height=(x,y)=>{
+                        let f=wodHdNoise(x/64,y/64,4)*.50+wodHdNoise(x/32,y/32,8)*.24+wodHdNoise(x/8,y/8,32)*.17+wodHdNoise(x/2,y/2,128)*.09;
+                        if(type==='mountain'||type==='hill') {
+                            const warp=wodHdNoise(x/64+2,y/64+3,4)*26;
+                            const ridge=1-Math.abs(2*wodHdNoise((x+warp)/32,(y+warp*.6)/32,8)-1);
+                            f=ridge*ridge*.65+f*.35;
+                        }
+                        return f;
+                    };
+                    for(let y=0;y<256;y++)for(let x=0;x<256;x++) {
+                        const n=height(x,y),grain=wodHdHash(x+19,y+7)-.5;
+                        const relief=(height(x-1,y-1)-height(x+1,y+1))*(type==='mountain'?380:type==='hill'?175:30);
+                        let shade=(n-.5)*(type==='mountain'?94:type==='forest'?65:43)+relief+grain*13;
+                        if(type==='water'||type==='deep_water')shade=(n-.5)*21+Math.sin(y*.58+n*4)*1.8+grain*2;
+                        const i=(y*256+x)*4;
+                        for(let k=0;k<3;k++)im.data[i+k]=Math.max(0,Math.min(255,base[k]+shade*(k===2?.85:1)));
+                        im.data[i+3]=255;
+                    }
+                    cc.putImageData(im,0,0);
+                    if(type==='forest'||type==='swamp') {
+                        for(let i=0;i<1900;i++) {
+                            const x=wodHdHash(i,2)*256,y=wodHdHash(i,3)*256,r=1+wodHdHash(i,4)*2.4;
+                            cc.fillStyle='rgba(12,25,16,.20)';cc.beginPath();cc.ellipse(x+1.1,y+1.7,r*1.15,r*.85,0,0,Math.PI*2);cc.fill();
+                            const l=25+Math.floor(wodHdHash(i,5)*20);cc.fillStyle=`hsl(${91+wodHdHash(i,6)*22} 22% ${l}%)`;
+                            cc.beginPath();cc.arc(x,y,r,0,Math.PI*2);cc.fill();
+                            cc.fillStyle='rgba(174,182,116,.16)';cc.beginPath();cc.arc(x-r*.25,y-r*.3,r*.48,0,Math.PI*2);cc.fill();
+                        }
+                    }
+                    if(type==='grass') {
+                        // Agricultural field strips and sparse windbreaks at aerial scale.
+                        for(let i=0;i<38;i++) {
+                            const x=wodHdHash(i,41)*256,y=wodHdHash(i,42)*256,w=8+wodHdHash(i,43)*28,h=4+wodHdHash(i,44)*14;
+                            cc.fillStyle=i%2?'rgba(173,160,100,.11)':'rgba(39,63,39,.10)';cc.fillRect(x,y,w,h);
+                            cc.strokeStyle='rgba(40,53,29,.14)';cc.lineWidth=.5;cc.strokeRect(x,y,w,h);
+                        }
+                    }
+                    wodHdTextureCache[type]=c;
+                }
+            }
+            const patterns={};for(const [type,c] of Object.entries(wodHdTextureCache))patterns[type]=ctx.createPattern(c,'repeat');return patterns;
+        }
+        function wodDrawHdTerrain(ctx,ox,oy) {
+            const sp=gameData.hexRadius*1.35,patterns=wodHdTextures(ctx);
+            ctx.save();ctx.translate(ox,oy);
+            for(const h of gameData.hexList) {
+                if(wodDrawHexSet&&!wodDrawHexSet.has(getHexKey(h)))continue;
+                ctx.fillStyle=patterns[h.type]||patterns.grass;
+                const x=Math.round(h.x+ox-sp/2)-ox,y=Math.round(h.y+oy-sp/2)-oy;
+                ctx.fillRect(x,y,Math.round(h.x+ox+sp/2)-ox-x,Math.round(h.y+oy+sp/2)-oy-y);
+            }
+            for(const h of gameData.hexList) {
+                if(wodDrawHexSet&&!wodDrawHexSet.has(getHexKey(h)))continue;
+                if(isWaterHex(h)) {
+                    // Shore-facing shallows stay inside actual water cells.
+                    for(const d of cardinalHexDirections) {
+                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||isWaterHex(n))continue;
+                        const x=h.x+d.q*sp/2,y=h.y+d.r*sp/2,g=ctx.createLinearGradient(x,y,x-d.q*sp*.55,y-d.r*sp*.55);
+                        g.addColorStop(0,'rgba(123,164,153,.52)');g.addColorStop(.45,'rgba(62,131,135,.30)');g.addColorStop(1,'rgba(50,94,107,0)');
+                        ctx.fillStyle=g;ctx.fillRect(h.x-sp/2,h.y-sp/2,sp,sp);
+                        ctx.strokeStyle='rgba(209,220,191,.43)';ctx.lineWidth=.65;ctx.beginPath();ctx.moveTo(x-d.r*sp*.35,y-d.q*sp*.35);ctx.lineTo(x+d.r*sp*.35,y+d.q*sp*.35);ctx.stroke();
+                    }
+                } else {
+                    if(h.type!=='urban')for(const d of cardinalHexDirections) {
+                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||isWaterHex(n)||n.type===h.type||n.type==='urban')continue;
+                        const x=h.x+d.q*sp/2,y=h.y+d.r*sp/2,g=ctx.createLinearGradient(x,y,x-d.q*sp*.45,y-d.r*sp*.45);
+                        g.addColorStop(0,(WOD_HD_PALETTE[n.type]||'#747f53')+'72');g.addColorStop(1,(WOD_HD_PALETTE[n.type]||'#747f53')+'00');ctx.fillStyle=g;ctx.fillRect(h.x-sp/2,h.y-sp/2,sp,sp);
+                    }
+                }
+                if(h.type==='urban') {
+                    // Narrow streets, cast roof shadows and sunlit roof planes.
+                    const seed=h.q*113+h.r*29;
+                    ctx.strokeStyle='rgba(203,195,168,.8)';ctx.lineWidth=sp*.10;
+                    ctx.beginPath();ctx.moveTo(h.x-sp/2,h.y);ctx.lineTo(h.x+sp/2,h.y);ctx.moveTo(h.x,h.y-sp/2);ctx.lineTo(h.x,h.y+sp/2);ctx.stroke();
+                    for(let i=0;i<7;i++) {
+                        const x=h.x+(wodHdHash(seed,i)-.5)*sp*.80,y=h.y+(wodHdHash(seed+9,i)-.5)*sp*.80,w=sp*(.10+wodHdHash(seed+4,i)*.13),hh=sp*.13;
+                        ctx.fillStyle='rgba(24,29,27,.44)';ctx.fillRect(x+1.3,y+1.7,w,hh);
+                        ctx.fillStyle=i%3?'#c0b49a':'#7c7970';ctx.fillRect(x,y,w,hh);ctx.fillStyle='rgba(237,219,178,.47)';ctx.fillRect(x,y,w,.6);
+                    }
+                } else if(h.type==='mountain') {
+                    const n=gameData.hexes[`${h.q+1},${h.r}`];
+                    if(n&&n.type==='mountain') {
+                        const y=h.y+(wodHdHash(h.q,h.r)-.5)*sp*.45;
+                        ctx.strokeStyle='rgba(226,219,195,.20)';ctx.lineWidth=.7;ctx.beginPath();ctx.moveTo(h.x-sp*.4,y);ctx.bezierCurveTo(h.x,y-sp*.25,h.x+sp*.5,y+sp*.15,n.x,y);ctx.stroke();
+                    }
+                }
+            }
+            wodRoundTerrainCorners(ctx,0,0,type=>patterns[type]||patterns.grass);
+            ctx.restore();
+        }
+        function wodDrawHdUnit(ctx,u,r,color) {
+            const era=typeof wodGetRenderPeriod==='function'?wodGetRenderPeriod():'modern',old=era==='ancient'||era==='medieval',early=old||era==='napoleonic';
+            ctx.save();ctx.scale(r/12,r/12);
+            ctx.fillStyle='rgba(8,16,18,.28)';ctx.beginPath();ctx.ellipse(1,3,15,10,0,0,Math.PI*2);ctx.fill();
+            ctx.strokeStyle=color;ctx.lineWidth=1.4;ctx.globalAlpha=.9;ctx.beginPath();ctx.ellipse(0,0,16,12,0,0,Math.PI*2);ctx.stroke();ctx.globalAlpha=1;
+            ctx.rotate(typeof getUnitFacingAngle==='function'?getUnitFacingAngle(u):0);
+            const metal=(a,b)=>{const g=ctx.createLinearGradient(-9,-9,8,9);g.addColorStop(0,a);g.addColorStop(.48,b);g.addColorStop(1,'#30362d');return g;};
+            if(u.type==='ship'||u.type==='convoy'&&u.convoySeaRoute) {
+                ctx.fillStyle=metal(early?'#b7a17a':'#b3bfc0',early?'#70523a':'#68777a');ctx.strokeStyle='#26343a';ctx.lineWidth=1;
+                ctx.beginPath();ctx.moveTo(18,0);ctx.bezierCurveTo(8,-8,-9,-7,-16,-4);ctx.lineTo(-16,4);ctx.bezierCurveTo(-9,7,8,8,18,0);ctx.fill();ctx.stroke();
+                ctx.fillStyle=early?'#a18559':'#858f8b';ctx.fillRect(-10,-3,20,6);
+                if(early){ctx.strokeStyle='#52442c';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(0,9);ctx.stroke();ctx.fillStyle='#e5ddc0';ctx.beginPath();ctx.moveTo(1,-9);ctx.lineTo(9,1);ctx.lineTo(1,6);ctx.fill();}
+                else {ctx.fillStyle='#c2c8bd';ctx.fillRect(-3,-3.5,8,7);ctx.fillStyle='#343e3b';ctx.fillRect(-8,-2,3,4);for(const x of [-11,9]){ctx.fillStyle='#8e9997';ctx.beginPath();ctx.arc(x,0,2.2,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#bac4bc';ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x+5,0);ctx.stroke();}}
+            } else if(u.type==='heavy'&&!early) {
+                ctx.fillStyle='#252c28';ctx.fillRect(-12,-9,23,5);ctx.fillRect(-12,4,23,5);
+                ctx.strokeStyle='#899184';ctx.lineWidth=.65;for(let x=-11;x<11;x+=2.5){ctx.beginPath();ctx.moveTo(x,-9);ctx.lineTo(x,-4);ctx.moveTo(x,4);ctx.lineTo(x,9);ctx.stroke();}
+                ctx.fillStyle=metal('#a1aa87','#687751');ctx.fillRect(-11,-5,23,10);ctx.strokeStyle='#c0c3a1';ctx.lineWidth=.7;ctx.strokeRect(-10,-4,21,8);
+                ctx.fillStyle=metal('#b6baa0','#788361');ctx.beginPath();ctx.ellipse(1,0,7,4.5,0,0,Math.PI*2);ctx.fill();
+                ctx.strokeStyle='#273026';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(4,0);ctx.lineTo(20,0);ctx.stroke();ctx.strokeStyle='#9ca78d';ctx.lineWidth=1.4;ctx.stroke();
+                ctx.fillStyle='#30382d';ctx.beginPath();ctx.arc(-1,-1,1.8,0,Math.PI*2);ctx.fill();ctx.fillStyle=color;ctx.fillRect(-9,-3,3,2);
+            } else if(u.type==='heavy'&&era==='napoleonic') {
+                ctx.fillStyle='#735c3b';ctx.fillRect(-8,-4,15,8);ctx.strokeStyle='#302d25';ctx.lineWidth=2.5;ctx.beginPath();ctx.moveTo(-6,-8);ctx.lineTo(-6,8);ctx.stroke();
+                for(const y of [-7,7]){ctx.strokeStyle='#b5a17b';ctx.lineWidth=1.5;ctx.beginPath();ctx.ellipse(-6,y,4,2.5,0,0,Math.PI*2);ctx.stroke();}
+                ctx.strokeStyle='#454b3e';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-5,0);ctx.lineTo(14,0);ctx.stroke();ctx.strokeStyle='#b4b59c';ctx.lineWidth=1.8;ctx.stroke();
+            } else if(u.type==='convoy'&&early) {
+                ctx.fillStyle='#322f25';for(const y of [-6,6])for(const x of [-10,0]){ctx.beginPath();ctx.ellipse(x,y,3,1.6,0,0,Math.PI*2);ctx.fill();}
+                ctx.fillStyle='#9d8d66';ctx.fillRect(-12,-5,16,10);ctx.fillStyle=metal('#d0c3a4','#a5997b');ctx.beginPath();ctx.ellipse(-4,0,8,5,0,0,Math.PI*2);ctx.fill();
+                ctx.strokeStyle='#756344';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(3,-3);ctx.lineTo(12,-3);ctx.moveTo(3,3);ctx.lineTo(12,3);ctx.stroke();ctx.fillStyle='#63503a';ctx.beginPath();ctx.ellipse(12,0,6,2.7,0,0,Math.PI*2);ctx.fill();ctx.fillRect(15,-3,3,3);
+            } else if(u.type==='convoy') {
+                ctx.fillStyle='#272d29';for(const x of [-8,8])for(const y of [-6,6])ctx.fillRect(x-2,y-2,4,4);
+                ctx.fillStyle=metal('#aba68a','#706f51');ctx.fillRect(-13,-5,19,10);ctx.fillStyle='#bbb89a';ctx.fillRect(-11,-4,16,8);
+                ctx.fillStyle='#7d8869';ctx.fillRect(7,-5,6,10);ctx.fillStyle='#303f41';ctx.fillRect(10,-3,2,6);
+            } else {
+                const count=u.type==='heavy'&&old?3:6;
+                for(let i=0;i<count;i++) {
+                    const x=(i%3-1)*9,y=(Math.floor(i/3)-.5)*12;
+                    ctx.save();ctx.translate(x,y);
+                    if(u.type==='heavy'&&old){ctx.fillStyle='#604a34';ctx.beginPath();ctx.ellipse(0,2,7,3.4,0,0,Math.PI*2);ctx.fill();ctx.fillRect(4,-2,3,4);ctx.strokeStyle='#332d24';ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(-4,4);ctx.lineTo(-6,6);ctx.moveTo(3,4);ctx.lineTo(4,6);ctx.stroke();}
+                    ctx.strokeStyle='#2b3027';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-2,1);ctx.lineTo(-4,3);ctx.moveTo(-2,-1);ctx.lineTo(-4,-3);ctx.stroke();
+                    ctx.fillStyle=old?'#8b7153':u.type==='marine'?'#63755c':'#858666';ctx.beginPath();ctx.ellipse(0,0,3,2.3,0,0,Math.PI*2);ctx.fill();
+                    ctx.strokeStyle=old?'#bdb8a1':'#383d35';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(1,2);ctx.lineTo(old?11:7,2);ctx.stroke();
+                    ctx.fillStyle=era==='napoleonic'?'#333a36':old?'#a9a18b':'#a0a385';ctx.beginPath();ctx.arc(1,0,1.7,0,Math.PI*2);ctx.fill();ctx.fillStyle='rgba(224,223,184,.55)';ctx.beginPath();ctx.arc(1,-.5,.75,0,Math.PI*2);ctx.fill();
+                    if(old){ctx.fillStyle=color;ctx.beginPath();ctx.ellipse(-.5,-2.1,2.6,1.1,0,0,Math.PI*2);ctx.fill();}
+                    ctx.restore();
+                }
+            }
+            ctx.restore();
+        }
+
+        function wodFillCellSquare(ctx,hex,ox,oy,sp) {
+            const x=Math.round(hex.x+ox-sp/2),y=Math.round(hex.y+oy-sp/2);
+            ctx.fillRect(x,y,Math.round(hex.x+ox+sp/2)-x,Math.round(hex.y+oy+sp/2)-y);
+        }
         function drawTerrainCell(ctx, hex, offsetX, offsetY) {
-            let px = hex.x + offsetX;
-            let py = hex.y + offsetY;
-            let spacing = gameData.hexRadius * 1.35;
-            let color = hex.baseColor;
-            ctx.fillStyle = color;
-            if(!gameData.layers || gameData.terrainViewMode === 'schematic') return;
-            /* Map cells use a square lattice; water as circles leaves rhombus gaps (darker base).
-               Tile water with slightly oversized squares so channels read as solid fill. */
-            if(isWaterHex(hex)) {
-                let wsq = spacing * 1.12;
-                ctx.fillRect(px - wsq / 2, py - wsq / 2, wsq, wsq);
-                return;
+            const sp=gameData.hexRadius*1.35;
+            ctx.fillStyle=getTerrainColor(hex.type);
+            wodFillCellSquare(ctx,hex,offsetX,offsetY,sp);
+        }
+
+        // Round only a minority corner in a 3:1 junction. Checkerboard corners never
+        // grow phantom diagonal land bridges. Every pixel starts as a real cell.
+        function wodRoundTerrainCorners(ctx, ox, oy, paint, filter, list) {
+            const sp=gameData.hexRadius*1.35, radius=sp*.5;
+            for(const h of list||gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(getHexKey(h))) continue;
+                for(const sx of [-1,1]) for(const sy of [-1,1]) {
+                    const a=gameData.hexes[`${h.q+sx},${h.r}`],b=gameData.hexes[`${h.q},${h.r+sy}`],c=gameData.hexes[`${h.q+sx},${h.r+sy}`];
+                    if(!a||!b||!c||a.type===h.type||a.type!==b.type||a.type!==c.type)continue;
+                    if(filter&&!filter(h,a))continue;
+                    const x=h.x+ox+sx*sp/2,y=h.y+oy+sy*sp/2;
+                    ctx.fillStyle=paint?paint(a.type):getTerrainColor(a.type);
+                    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-sx*radius,y);
+                    ctx.bezierCurveTo(x-sx*radius*.447715,y,x,y-sy*radius*.447715,x,y-sy*radius);ctx.closePath();ctx.fill();
+                }
             }
-            /* Seal coast: land next to water uses a slightly larger disc so no ring gaps show. */
-            let coast = false;
-            for(let dir of hexDirections) {
-                let n = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                if(n && isWaterHex(n)) { coast = true; break; }
-            }
-            let discR = spacing * (coast ? 0.7 : 0.72);
-            ctx.beginPath();
-            ctx.arc(px, py, discR, 0, Math.PI * 2);
-            ctx.fill();
+        }
+
+        function wodMaskTerritoryWaterCorners(ctx,ox,oy,list) {
+            ctx.save();ctx.globalCompositeOperation='destination-out';
+            wodRoundTerrainCorners(ctx,ox,oy,()=>'#000',(h,a)=>!isWaterHex(h)&&isWaterHex(a),list);
+            ctx.restore();
         }
 
         function neighborWorldPoint(hex, dir, spacing) {
@@ -41702,28 +41868,13 @@
         }
 
         function drawTerrainSchematicMap(ctx, offsetX, offsetY) {
-            let spacing = gameData.hexRadius * 1.35;
-            let wsqW = spacing * 1.08;
-            let discRL = spacing * 0.74;
-            ctx.fillStyle = '#1d5b96';
-            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-            for(let hex of gameData.hexList) {
-                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
-                if(!isWaterHex(hex)) continue;
-                let px = hex.x + offsetX, py = hex.y + offsetY;
-                ctx.fillStyle = getTerrainColor('water');
-                ctx.fillRect(px - wsqW / 2, py - wsqW / 2, wsqW, wsqW);
+            const sp=gameData.hexRadius*1.35;
+            for(const h of gameData.hexList) {
+                if(wodDrawHexSet&&!wodDrawHexSet.has(getHexKey(h)))continue;
+                ctx.fillStyle=isWaterHex(h)?getTerrainColor('water'):'#f7f9fc';
+                wodFillCellSquare(ctx,h,offsetX,offsetY,sp);
             }
-            for(let hex of gameData.hexList) {
-                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
-                if(isWaterHex(hex)) continue;
-                let px = hex.x + offsetX, py = hex.y + offsetY;
-                ctx.beginPath();
-                ctx.arc(px, py, discRL, 0, Math.PI * 2);
-                ctx.fillStyle = '#f7f9fc';
-                ctx.fill();
-            }
-            drawAccurateCoastOutline(ctx, offsetX, offsetY, spacing);
+            wodRoundTerrainCorners(ctx,offsetX,offsetY,type=>type==='water'||type==='deep_water'?getTerrainColor('water'):'#f7f9fc');
         }
 
         function drawAccurateCoastOutline(ctx, offsetX, offsetY, spacing) {
@@ -41768,30 +41919,12 @@
             let overlayCtx = territoryOverlayCanvas.getContext('2d');
             overlayCtx.setTransform(1, 0, 0, 1, 0, 0);
             overlayCtx.clearRect(0, 0, w, h);
-            for(let owner = 1; owner < factionColors.length; owner++) {
-                overlayCtx.fillStyle = factionColors[owner];
-                overlayCtx.strokeStyle = factionColors[owner];
-                overlayCtx.lineWidth = spacing * 1.32;
-                overlayCtx.lineCap = 'round';
-                overlayCtx.lineJoin = 'round';
-                for(let hex of gameData.hexList) {
-                    if(hex.owner !== owner || isWaterHex(hex)) continue;
-                    for(let dir of hexDirections) {
-                        let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                        if(!nHex || nHex.owner !== owner || isWaterHex(nHex)) continue;
-                        overlayCtx.beginPath();
-                        overlayCtx.moveTo(hex.x + offsetX, hex.y + offsetY);
-                        overlayCtx.lineTo(nHex.x + offsetX, nHex.y + offsetY);
-                        overlayCtx.stroke();
-                    }
-                }
-                for(let hex of gameData.hexList) {
-                    if(hex.owner !== owner || isWaterHex(hex)) continue;
-                    overlayCtx.beginPath();
-                    overlayCtx.arc(hex.x + offsetX, hex.y + offsetY, discR, 0, Math.PI * 2);
-                    overlayCtx.fill();
-                }
+            for(const hex of gameData.hexList) {
+                if(hex.owner<=0||isWaterHex(hex))continue;
+                overlayCtx.fillStyle=factionColors[hex.owner];
+                wodFillCellSquare(overlayCtx,hex,offsetX,offsetY,spacing);
             }
+            wodMaskTerritoryWaterCorners(overlayCtx,offsetX,offsetY);
             ctx.save();
             ctx.globalAlpha = 0.32;
             ctx.drawImage(territoryOverlayCanvas, 0, 0);
@@ -42140,33 +42273,11 @@
         }
 
         function drawTerrainBlobLayer(ctx, type, offsetX, offsetY) {
-            let spacing = gameData.hexRadius * 1.35;
-            let color = getTerrainColor(type);
-            let sameTerrainDirs = hexDirections;
-
-            ctx.strokeStyle = color;
-            ctx.lineWidth = spacing * (type === 'water' ? 1.52 : 1.38);
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-
-            for(let hex of gameData.hexList) {
-                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
-                if(hex.type !== type) continue;
-                for(let dir of sameTerrainDirs) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
-                    if(!nHex || nHex.type !== type) continue;
-                    ctx.beginPath();
-                    ctx.moveTo(hex.x + offsetX, hex.y + offsetY);
-                    ctx.lineTo(nHex.x + offsetX, nHex.y + offsetY);
-                    ctx.stroke();
-                }
+            for(const hex of gameData.hexList) {
+                if(wodDrawHexSet && !wodDrawHexSet.has(getHexKey(hex)))continue;
+                if(hex.type===type)drawTerrainCell(ctx,hex,offsetX,offsetY);
             }
-
-            for(let hex of gameData.hexList) {
-                if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
-                if(hex.type !== type) continue;
-                drawTerrainCell(ctx, hex, offsetX, offsetY);
-            }
+            if(type==='urban')wodRoundTerrainCorners(ctx,offsetX,offsetY);
         }
 
         function drawUrbanTerrainDetails(ctx, offsetX, offsetY) {
@@ -42633,7 +42744,6 @@
          */
         function wodCollectDiplomacyBorderChains(hexList, hexLookup, offsetX, offsetY, spacing) {
             const nodes=new Map(), edges=[], seen=new Set();
-            const ocean=wodOpenOceanHexKeys(hexList,hexLookup);
             const node=(q,r)=>{
                 const key=q+','+r;
                 if(!nodes.has(key))nodes.set(key,{key,x:q*spacing/2+offsetX,y:r*spacing/2+offsetY,edges:[]});
@@ -42641,10 +42751,10 @@
             };
             const directions=[{q:1,r:0},{q:0,r:1}];
             for(const h of hexList) {
-                if(!h.owner||ocean.has(getHexKey(h)))continue;
+                if(!h.owner||isWaterHex(h))continue;
                 for(const d of directions) {
                     const n=hexLookup[`${h.q+d.q},${h.r+d.r}`];
-                    if(!n||!n.owner||h.owner===n.owner||ocean.has(getHexKey(n)))continue;
+                    if(!n||!n.owner||h.owner===n.owner||isWaterHex(n))continue;
                     const key=hexPairBorderKey(h,n);if(seen.has(key))continue;seen.add(key);
                     const a=d.q?node(2*h.q+1,2*h.r-1):node(2*h.q-1,2*h.r+1);
                     const b=d.q?node(2*h.q+1,2*h.r+1):node(2*h.q+1,2*h.r+1);
@@ -42821,7 +42931,7 @@
             function strokeChains(lineWidth, dash, offsetPx, col) {
                 ctx.strokeStyle = col || strokeCol;
                 ctx.fillStyle = col || fillCol;
-                ctx.lineWidth = lineWidth;
+                ctx.lineWidth = wodHdMapActive()?Math.min(lineWidth,2.4):lineWidth;
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 ctx.setLineDash(dash || []);
@@ -42909,33 +43019,12 @@
             overlayCtx.rect(x0, y0, w, h);
             overlayCtx.clip();
             overlayCtx.clearRect(x0, y0, w, h);
-            for(let owner = 1; owner < factionColors.length; owner++) {
-                overlayCtx.fillStyle = factionColors[owner];
-                overlayCtx.strokeStyle = factionColors[owner];
-                overlayCtx.lineWidth = spacing * 1.32;
-                overlayCtx.lineCap = 'round';
-                overlayCtx.lineJoin = 'round';
-                for(let i = 0; i < halo.length; i++) {
-                    let hex = halo[i];
-                    if(hex.owner !== owner || isWaterHex(hex)) continue;
-                    for(let d = 0; d < hexDirections.length; d++) {
-                        let dir = hexDirections[d];
-                        let nHex = gameData.hexes[hex.q + dir.q + ',' + (hex.r + dir.r)];
-                        if(!nHex || nHex.owner !== owner || isWaterHex(nHex)) continue;
-                        overlayCtx.beginPath();
-                        overlayCtx.moveTo(hex.x + ox, hex.y + oy);
-                        overlayCtx.lineTo(nHex.x + ox, nHex.y + oy);
-                        overlayCtx.stroke();
-                    }
-                }
-                for(let i = 0; i < halo.length; i++) {
-                    let hex = halo[i];
-                    if(hex.owner !== owner || isWaterHex(hex)) continue;
-                    overlayCtx.beginPath();
-                    overlayCtx.arc(hex.x + ox, hex.y + oy, discR, 0, Math.PI * 2);
-                    overlayCtx.fill();
-                }
+            for(const hex of halo) {
+                if(hex.owner<=0||isWaterHex(hex))continue;
+                overlayCtx.fillStyle=factionColors[hex.owner];
+                wodFillCellSquare(overlayCtx,hex,ox,oy,spacing);
             }
+            wodMaskTerritoryWaterCorners(overlayCtx,ox,oy,halo);
             overlayCtx.restore();
         }
 
@@ -43024,6 +43113,8 @@
                 try {
                     if(gameData.terrainViewMode === 'schematic') {
                         drawTerrainSchematicMap(pctx, offX, offY);
+                    } else if(wodHdMapActive()) {
+                        wodDrawHdTerrain(pctx,offX,offY);
                     } else {
                         let paintOrder = ['water', 'sand', 'grass', 'forest', 'swamp', 'hill', 'mountain', 'urban'];
                         for(let ti = 0; ti < paintOrder.length; ti++)
@@ -43033,6 +43124,7 @@
                         drawMountainRockDecorations(pctx, offX, offY);
                         drawTerrainWaterRipples(pctx, offX, offY);
                         drawUrbanTerrainDetails(pctx, offX, offY);
+                        wodRoundTerrainCorners(pctx,offX,offY);
                     }
                 } finally {
                     wodDrawHexSet = null;
@@ -43448,6 +43540,16 @@
         }
 
         function drawCitySkinMarker(ctx, city) {
+            if(wodHdMapActive()) {
+                ctx.save();ctx.translate(city.x,city.y);
+                ctx.fillStyle='rgba(20,27,23,.35)';ctx.fillRect(-16,-9,34,22);
+                ctx.fillStyle='#c4bba2';ctx.fillRect(-18,-11,32,19);
+                ctx.fillStyle='#767e6d';ctx.fillRect(-16,-9,28,15);
+                ctx.strokeStyle='#a7ac94';ctx.lineWidth=1;for(let x=-12;x<=8;x+=5){ctx.beginPath();ctx.moveTo(x,-9);ctx.lineTo(x,6);ctx.stroke();}
+                ctx.fillStyle='#d2ccb6';ctx.fillRect(-9,-5,14,7);ctx.fillStyle='#444e43';ctx.fillRect(-7,-3,10,3);
+                ctx.strokeStyle='#ddd4ba';ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(18,4);ctx.lineTo(18,-18);ctx.stroke();ctx.fillStyle=factionColors[city.owner]||'#b8b8a0';ctx.fillRect(18,-18,10,6);
+                ctx.restore();return;
+            }
             drawPeriodCityMarker(ctx, city, wodGetRenderPeriod());
         }
 
@@ -45437,6 +45539,7 @@
         }
 
         function wodDrawUnitBodyUncached(ctx, unit, radius, color, skin) {
+            if(wodHdMapActive()) { wodDrawHdUnit(ctx,unit,radius,color);return; }
             if(skin === 'goldenChip') {
                 drawGoldenChipUnit(ctx, unit, radius, color);
                 return;
@@ -45465,11 +45568,11 @@
             let rQ = Math.round((radius || 10) * 2) / 2;
             let type = unit.type || 'light';
             let faceQ = 0;
-            if(type === 'ship' && skin === 'goldenChip') {
+            if(wodHdMapActive() || (type === 'ship' && skin === 'goldenChip')) {
                 let ang = (typeof getUnitFacingAngle === 'function') ? getUnitFacingAngle(unit) : 0;
                 faceQ = Math.round(ang / (Math.PI / 16)) & 31;
             }
-            let key = skin + '|' + type + '|' + (color || '') + '|' + rQ + '|' + faceQ +
+            let key = (wodHdMapActive()?'atlas_hd:'+wodGetRenderPeriod()+':':'')+skin + '|' + type + '|' + (color || '') + '|' + rQ + '|' + faceQ +
                 (unit.convoySeaRoute ? '|s' : '');
             let cache = gameData._unitSpriteCache;
             if(!cache) cache = gameData._unitSpriteCache = new Map();
@@ -47681,21 +47784,9 @@
             if(reset) reset.addEventListener('click', () => {
                 let c = wodRogueLoad();
                 if(!c) return;
-                let msg = c.over
-                    ? 'Surrender this campaign and delete the save? You can start a new war afterward.'
-                    : 'Surrender this campaign? This deletes your save — your army and war progress are lost forever.';
-                wodShowConfirmDialog({
-                    title: 'Surrender campaign?',
-                    body: msg,
-                    confirmLabel: 'Surrender',
-                    cancelLabel: 'Keep fighting',
-                    danger: true
-                }).then(ok => {
-                    if(!ok) return;
-                    wodCloseCampResearchDlg();
-                    wodRogueDeleteSave();
-                    wodRefreshCampaignPanel();
-                });
+                wodCloseCampResearchDlg();
+                wodRogueDeleteSave();
+                wodRefreshCampaignPanel();
             });
             let researchBtn = document.getElementById('wodCampResearchBtn');
             if(researchBtn) researchBtn.addEventListener('click', () => wodOpenCampResearchDlg());
@@ -50109,7 +50200,9 @@
                 btn.classList.toggle('active', btn.getAttribute('data-command-style') === u.commandArrowStyle);
             });
             document.querySelectorAll('#shopMapSkinOptions .shop-option-card').forEach(btn => {
-                btn.classList.toggle('active', btn.getAttribute('data-map-skin') === u.mapSkin);
+                const equipped=btn.getAttribute('data-map-skin')===u.mapSkin;
+                btn.classList.toggle('active',equipped);
+                const badge=btn.querySelector('.shop-option-badge');if(badge)badge.textContent=(equipped?'Equipped':'Free')+(btn.getAttribute('data-map-skin')==='atlas_hd'?' · Aerial terrain & realistic units':'');
             });
             let changed = false;
             for(let id in WOD_FRONTLINE_STYLES) {
@@ -50129,11 +50222,15 @@
         }
 
         function setShopMapSkin(skinId) {
-            if(skinId !== 'default') return;
+            if(!['default','atlas_hd'].includes(skinId)) return;
             wodEnsureUiShopDefaults();
             gameData.uiSettings.mapSkin = skinId;
             saveUiSettings();
             syncShopVisualOptionsUi();
+            gameData._unitSpriteCache=new Map();
+            wodMarkTerrainFullDirty();
+            terrainNeedsUpdate=true;
+            if(gameData.hexList && gameData.hexList.length)updateTerrainCache();
         }
 
         function updateSkinShop() {
@@ -51593,7 +51690,7 @@
                         ctx.scale(spawnScale, spawnScale);
                     }
                     
-                    if(unit.type !== 'convoy' && drawUnitSkin(ctx, unit, ur, uColor)) {
+                    if((unit.type !== 'convoy'||wodHdMapActive()) && drawUnitSkin(ctx, unit, ur, uColor)) {
                         // Drawn by selected unit skin.
                     } else if(unit.type === 'ship') {
                         drawClassicUnitShape(ctx, 'ship', ur, uColor, unit);
@@ -55560,7 +55657,7 @@
                 let ur = Math.max(8, (unit.radius || 10) * pxPerWorld);
                 ctx.save();
                 ctx.translate(canvasX, canvasY);
-                let drawn = unit.type !== 'convoy' && drawUnitSkin(ctx, unit, ur, uColor);
+                let drawn = (unit.type !== 'convoy'||wodHdMapActive()) && drawUnitSkin(ctx, unit, ur, uColor);
                 if(!drawn) {
                     if(unit.type === 'convoy') {
                         drawClassicUnitShape(ctx, 'convoy', ur, uColor, unit);

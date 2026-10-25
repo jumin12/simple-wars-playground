@@ -51,7 +51,8 @@ const server=http.createServer((req,res)=>{
    return rows;
   });
   console.log('coastalFixtures',JSON.stringify(results.coastalFixtures));
-  assert(results.coastalFixtures.every(r=>!r.ok),'coastal slivers, tiny split islands, lake pockets and folded coastlines reject');
+  assert(results.coastalFixtures.filter(r=>r.kind!=='lakePocket').every(r=>!r.ok),'coastal slivers, tiny split islands and folded coastlines reject');
+  assert(results.coastalFixtures.find(r=>r.kind==='lakePocket').ok,'legacy water ownership does not create a political pocket');
   results.offshoreRepair=await page.evaluate(async()=>{
    WOD.makeBlankMap(20);gameData.entities=[];gameData.cities=[];
    for(const h of gameData.hexList){h.type=Math.abs(h.q)<=12&&Math.abs(h.r)<=12?'grass':'water';h.owner=h.q<0?1:2;h.cityId=null;}

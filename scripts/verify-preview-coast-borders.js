@@ -23,7 +23,7 @@ const server=http.createServer((req,res)=>{
     let rawOceanEdges=0;
     for(const h of g.hexList)for(const [q,r] of [[1,0],[0,1]]) {
      const n=g.hexes[`${h.q+q},${h.r+r}`];if(!n||!h.owner||!n.owner||h.owner===n.owner)continue;
-     if(ocean.has(`${h.q},${h.r}`)||ocean.has(`${n.q},${n.r}`)){rawOceanEdges++;continue;}
+     if(water(h)||water(n)){rawOceanEdges++;continue;}
      const x=(h.x+n.x)/2,y=(h.y+n.y)/2;expected.add(key({x:x-(r?spacing/2:0),y:y-(q?spacing/2:0)},{x:x+(r?spacing/2:0),y:y+(q?spacing/2:0)}));
     }
     const chains=wodCollectDiplomacyBorderChains(g.hexList,g.hexes,0,0,spacing);let forbidden=0;

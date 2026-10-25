@@ -22,8 +22,8 @@ await page.evaluate(()=>{
  addCasualties(2,125,1,'light');addCasualties(1,40,2,'marine');addTankCasualties(2,3,1);addShipCasualties(1,2,2);
  createUnitAt('marine',-100,100,1);wodRecordOwnerLifetime(1,'factoriesBuilt',1);
 });
-// Use the actual confirmation UI rather than directly editing match counters.
-await page.evaluate(()=>confirmSurrender());await page.locator('#wodConfirmDlgOk').click();await page.locator('#campaignSummaryOverlay').waitFor({state:'visible'});
+// Exercise the actual surrender action without editing match counters.
+await page.evaluate(()=>confirmSurrender());assert.equal(await page.locator('#wodConfirmDlg:visible').count(),0,'surrender has no confirmation popup');await page.locator('#campaignSummaryOverlay').waitFor({state:'visible'});
 results.surrender=await page.evaluate(()=>({live:{...wodProgress.lifetime},saved:savedStats(),period:gameData._lifetimeMatch.period}));
 assert.equal(results.surrender.saved.lifetime.matchesCompleted,1);assert.equal(results.surrender.saved.lifetime.matchesLost,1);assert.equal(results.surrender.saved.lifetime.matchesSurrendered,1);assert.equal(results.surrender.saved.lifetime.campaignLosses,1);assert.equal(results.surrender.saved.lifetime.enemyTroopKills,125);assert.equal(results.surrender.saved.lifetime.ownMarineLosses,40);assert.equal(results.surrender.saved.lifetime.unitsBuiltMarine,1);assert.equal(results.surrender.saved.lifetimeByPeriod.ancient.matchesLost,1);
 await page.evaluate(()=>{triggerSurrenderDefeat();returnToMenu();});assert.equal(await page.evaluate(()=>savedStats().lifetime.matchesCompleted),1,'summary plus menu exit does not double-count');

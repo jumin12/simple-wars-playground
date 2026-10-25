@@ -3231,6 +3231,8 @@
         if (!same) {
           any = true;
           h.type = next;
+          WOD.gameData._landIncomeCacheDirty=true;
+          if(WOD.isWaterHex(h)) WOD.setHexOwner(h,0);
           h.baseColor = WOD.getTerrainColor(next);
           if (next !== "urban") h.cityId = null;
           add(h);

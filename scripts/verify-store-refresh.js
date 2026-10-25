@@ -17,7 +17,7 @@ try{
    rows.push({owner,type,pressure,count:claimed.length,outside:claimed.filter(h=>!allowed.has(`${h.q},${h.r}`)).length,keys:claimed.map(h=>`${h.q},${h.r}`).sort()});
   }
   return rows;
- });assert(results.capture.every(r=>r.count>0&&r.outside===0));for(const r of results.capture){const mirror=results.capture.find(n=>n.owner!==r.owner&&n.type===r.type&&n.pressure===r.pressure);assert.deepEqual(r.keys,mirror.keys,'player and AI capture the identical footprint');}
+ });assert(results.capture.every(r=>(r.type==='ship'?r.count===0:r.count>0)&&r.outside===0));for(const r of results.capture){const mirror=results.capture.find(n=>n.owner!==r.owner&&n.type===r.type&&n.pressure===r.pressure);assert.deepEqual(r.keys,mirror.keys,'player and AI capture the identical footprint');}
  await page.evaluate(async()=>{gameData.mp=null;gameState='MENU';pauseMenuBackgroundBattle();bootstrapMenuBackgroundBattle=async()=>{};wodPrewarmMenuBattleForSummary=()=>{};wodCloudCanSync=()=>false;gameData.gold=2000;flushGameProfileToWod();showPanel('shop');switchShopTab('missions');await renderShopMapsTab();});
  await page.locator('#shopMapOptions .shop-mission-card').first().waitFor({state:'visible'});await page.waitForFunction(()=>Object.keys(wodShopMapDataCache).length===7);await page.waitForTimeout(250);
  await page.screenshot({path:path.join(OUT,'shop-desktop.png')});
