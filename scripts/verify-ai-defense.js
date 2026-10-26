@@ -18,6 +18,7 @@ const server=http.createServer((req,res)=>{
   const results=await page.evaluate(()=>{
    const reset=(radius=30)=>{
     WOD.makeBlankMap(radius);gameState='PLAYING';gameData.mp={enabled:false};gameData._campaignRun=null;
+    gameData.aiMoneyByOwner={2:100000};gameData.aiManpowerByOwner={2:100000};gameData.fogOfWar=false;
     gameData.entities=[];gameData.cities=[];gameData.forts=[];gameData.bridges=[];gameData.constructionJobs=[];gameData.aiTaskForces={};gameData._aiDefenseByOwner={};gameData._aiEconomyClock=0;
     gameData._aiStratWork=null;gameData._aiFormChunk=null;gameData.aiStrategyTimer=0;gameData.aiFocusTimer=0;
     gameData.encircledHexes=new Set();gameData._encircWork=null;gameData.marineWaterSupplyHexes=new Set();gameData._matchReadyForEndChecks=false;

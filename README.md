@@ -4,6 +4,12 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
 ## Run locally
 
+**Battle report** has responsive Economy, Forces, Combat and Players tabs. Faction cards show controlled land tiles and land share (excluding all water), composition and personnel, economy and infrastructure, supply/readiness, production queues, spending, combat damage, recovery, casualties, and territory gained/lost. Finished-match reports include all faction comparisons. Authoritative multiplayer snapshots preserve match counters for each seat. Mobilized-unit counts exclude opening armies and editor placements.
+
+**Fog of war** uses independent faction knowledge with shared allied sight. Friendly territory reveals two tiles beyond its edge; infantry/marines see five tiles, armor four, warships six, transports five and convoys three. Towns see five tiles and forts four. Moving and rear-area units reveal ground continuously, with explored terrain retained. AI scouts explore unknown frontiers and coasts, and all threat/target/assault/fort decisions use visible troops and discovered, last-seen towns. Live enemy reports hide reserves, money, production and losses under fog; land totals remain public. Full reports unlock at match end.
+
+Atlas HD uses 512px procedural mountain/hill relief with densely branched ridges, directional lighting, erosion grain, rounded biome junctions and radial boundary blending. Its terrain remains aligned with the same rounded cell topology and narrow-passage rules as the classic map.
+
 Lifetime stats save immediately at the end of every played match, including surrenders, scenario/campaign defeats and mid-match menu exits. Match results show completed matches, wins, losses and surrenders separately from faction eliminations. Combat, production and peak totals retain their actual battle era; multiplayer snapshots credit each human seat and preserve delta watermarks across reconnects. Frequent combat cannot postpone the periodic save indefinitely, and browser close events flush pending progress. Opening armies and menu demo battles are excluded from trained-unit/combat totals.
 
 Warships now have 300 HP, matching armor; marines take normal combat damage afloat and show the blue embarkment badge while remaining exempt from water attrition. Land and naval units exchange fire within weapon range. Healing indicators show only actual recovery and disappear at full strength.
