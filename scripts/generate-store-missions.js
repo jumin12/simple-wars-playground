@@ -40,6 +40,8 @@ function loadToolkit() {
 
 const { MapBuilder, ev } = loadToolkit();
 const {buildHistoricalMissions,polishStoreMission}=require('./store-mission-design');
+const {buildHistoricalCampaigns}=require('./historical-campaigns');
+const {refineHistoricalMission}=require('./refine-historical-missions');
 if (!MapBuilder || !ev) throw new Error('Could not load MapBuilder/ev from generate-missions.js');
 
 /**
@@ -1400,14 +1402,17 @@ function validateMission(m) {
     for(let i=0;i<queue.length;i++)for(const [q,r]of dirs){const n=byKey.get(`${queue[i].q+q},${queue[i].r+r}`),k=n&&`${n.q},${n.r}`;if(n&&n.owner===c.owner&&!['water','mountain'].includes(n.type)&&!seen.has(k)){seen.add(k);queue.push(n);}}
   }
   const occupied=new Set();for(const u of data.entities){const key=`${Math.round(u.x/27)},${Math.round(u.y/27)}`,h=byKey.get(key);if(!h||occupied.has(key))throw Error(m.file+': invalid/overlapping unit');occupied.add(key);
-    if(u.type==='ship'&&h.type!=='water'||!['ship','marine'].includes(u.type)&&!supply.get(u.owner)?.has(key))throw Error(m.file+': unsupplied unit '+u.name);
+    if(['ship','transport'].includes(u.type)&&h.type!=='water'||!['ship','transport','marine'].includes(u.type)&&!supply.get(u.owner)?.has(key))throw Error(m.file+': unsupplied unit '+u.name);
   }
 }
 
 function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
-  const missions = [buildNormandyDDay(), buildKurskCitadel(), buildMidway(), ...buildHistoricalMissions({MapBuilder,ev})].map(polishStoreMission);
-  const keep = new Set(missions.map((m) => m.entry.id));
+  const campaign=buildHistoricalCampaigns({MapBuilder,ev});
+  const singles = [buildNormandyDDay(), buildKurskCitadel(), buildMidway(), ...buildHistoricalMissions({MapBuilder,ev})].map(polishStoreMission).map(m=>refineHistoricalMission(m,ev));
+  const missions=[...singles,...campaign.missions.map(polishStoreMission)];
+  const catalog=[...singles.map(m=>m.entry),...campaign.packs];
+  const keep = new Set(catalog.map(m=>m.id));
   const manifest = { maps: [], missions: [] };
   // Preserve any legacy skirmish maps key for older clients.
   const existingPath = path.join(OUT_DIR, 'manifest.json');
@@ -1422,9 +1427,6 @@ function main() {
   for (const m of missions) {
     validateMission(m);
     fs.writeFileSync(path.join(OUT_DIR, m.file), JSON.stringify(m.data));
-    manifest.missions.push(m.entry);
-    // Also list under maps for backward-compatible shop loaders that only read maps[].
-    manifest.maps.push({...m.entry,kind:'mission'});
     console.log(
       'wrote',
       m.file,
@@ -1437,6 +1439,8 @@ function main() {
       m.data.mission.events.length
     );
   }
+  manifest.missions=catalog;
+  manifest.maps.push(...catalog.map(entry=>({...entry,kind:'mission'})));
   fs.writeFileSync(existingPath, JSON.stringify(manifest, null, 2) + '\n');
   console.log('manifest written with', manifest.missions.length, 'store mission(s)');
 }

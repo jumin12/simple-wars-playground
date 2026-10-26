@@ -10564,6 +10564,13 @@
             border-color: #2ecc71;
             box-shadow: 0 0 0 1px rgba(46, 204, 113, 0.7);
         }
+        #wodMissionList.wod-mission-codex {grid-auto-rows:auto;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));}
+        #wodMissionList .wod-mission-codex-card {width:100%;height:160px;border-radius:9px;}
+        #wodMissionList .wod-mission-codex-card.locked {filter:saturate(.35);opacity:.65;}
+        .wod-store-pack-heading {grid-column:1/-1;display:flex;flex-direction:column;gap:6px;padding:16px 2px 3px;color:#f2d890;line-height:1.4;}
+        .wod-store-pack-heading span {font-size:12px;color:#b9cbd8;}
+        #wodMissionMeta {overflow-wrap:anywhere;}
+        #wodMissionMeta a {color:#b8dfff;}
         #missionsPanel .wod-map-lib-layout {
             flex: 1 1 auto;
             min-height: 0;
@@ -10688,6 +10695,16 @@
             }
         }
 
+
+        #missionsPanel.wod-store-codex .wod-map-lib-list-column {flex:0 0 36%;max-width:480px;}
+        #missionsPanel .wod-map-lib-detail {overflow-y:auto;padding-right:5px;}
+        #missionsPanel #wodMissionPreview {max-height:min(36vh,340px);object-fit:contain;}
+        @media(max-width:900px) {
+            #missionsPanel .panel .wod-map-lib-layout {display:block;justify-content:flex-start;overflow-y:auto;flex:1 1 auto;min-height:0;}
+            #missionsPanel .panel .wod-map-lib-list-column {width:100%;max-width:none;height:min(280px,38dvh);max-height:280px;flex:none;}
+            #missionsPanel .panel .wod-map-lib-detail {display:block;overflow:visible;width:100%;padding:14px 0;flex:none;}
+            #missionsPanel .panel #wodMissionPreview {max-height:220px;}
+        }
 
         /* Battle report: fixed summary/tabs with independently scrolling details. */
         #statsMenu .stats-menu-panel {width:min(1140px,96vw);max-width:1140px;height:min(940px,94dvh);max-height:94dvh;padding:24px;display:flex;flex-direction:column;overflow:hidden;border:1px solid #68808b;border-radius:18px;background:#101e28;box-shadow:0 22px 100px #0009;text-align:left;font-family:"Segoe UI",Arial,sans-serif;color:#e9f1f5;box-sizing:border-box;}
@@ -11933,7 +11950,7 @@
                 </div>
 
                 <div id="shopTabMaps" class="shop-tab-pane" data-shop-pane="missions" role="tabpanel" hidden>
-                    <p class="shop-tab-lead">Buy historical and special missions with gold. Owned missions appear under <strong>Missions → Store</strong>. One-shot missions can be played once; mini-campaign packs stay replayable.</p>
+                    <p class="shop-tab-lead">Buy historical missions and campaign packs with gold, then play under <strong>Missions → Store</strong>. Win campaign stages in order to unlock the next; progress saves and unlocked stages stay replayable. Defeats and surrenders allow retries. Standalone missions are consumed only on victory.</p>
                     <div id="shopMapOptions" class="shop-codex"></div>
                 </div>
 
@@ -12659,6 +12676,7 @@
             <p id="campaignSummarySub" class="campaign-summary-sub"></p>
             <div id="campaignSummaryStats" class="cs-stats-root"></div>
             <div class="campaign-summary-actions">
+                <button type="button" id="wodNextPackStage" class="menu-btn hidden" onclick="wodContinueHistoricalPack()">Next campaign stage</button>
                 <button type="button" class="menu-btn" onclick="dismissCampaignSummaryToMenu()">Return to main menu</button>
             </div>
         </div>
@@ -12695,6 +12713,17 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-26T04:15:00-04:00',
+                title: 'Historical campaign packs and ancient emblem previews',
+                items: [
+                    'Fixed ancient civilization shop previews caching blank counters before their SVG emblems loaded. All eleven emblem variants now use bundled art, repaint when ready and refresh cached unit sprites.',
+                    'Added seventeen connected missions in three gold campaign packs: Berlin 1945 (seven stages, 350g), Normandy: D-Day to Cherbourg (five stages, 300g), and Market Garden: Bridges and Withdrawal (five stages, 300g). Win stages in order, save progress, replay unlocked stages and open the next briefing from the victory report. Losses and surrenders allow retries.',
+                    'Added complete-sector capture, timed defense, naval and evacuation objectives with live objective progress. Market Garden ends with an Oosterbeek ferry evacuation; tactical success is distinguished from the historical operation’s unsuccessful outcome.',
+                    'Refined the seven existing missions with corrected dates, historical context, source links and bounded objectives. Thermopylae and Kursk are defensive stands, Midway uses a naval objective, and the Normandy beachhead mission no longer requires later captures such as Caen on D-Day. Existing purchases and completion records remain valid.',
+                    'Authored distinct terrain, waterways, crossings and town sectors in code. Historical starts retain authored positions and halve each unit class, preserving landing waves and evacuation ferries. Campaign previews show stage locks and pack progress with improved desktop/mobile scrolling. Fixed mission timers scaling twice at accelerated speeds and preserved custom objectives through editor import/export.'
+                ]
+            },
             {
                 at: '2026-10-26T03:17:00-04:00',
                 title: 'Clean coastlines, local island capture and a clearer battle report',
@@ -13482,6 +13511,14 @@
                 showPanel('campaign');
             }
         }
+        async function wodContinueHistoricalPack() {
+            const id=document.getElementById('wodNextPackStage')?.dataset.missionId;
+            if(!id)return;
+            dismissCampaignSummaryToMenu();_wodMissionListTab='store';showPanel('missions');
+            await wodRefreshMissionsPanel();
+            const entry=wodFindMissionEntryById(id);
+            if(entry){wodSelectMissionEntry(entry);document.querySelector('#wodMissionList [data-mission-id="'+id+'"]')?.scrollIntoView({block:'nearest'});}
+        }
 
         function syncSetupPlayerColorRow() {
             let row = document.getElementById('setupPlayerColorRow');
@@ -13778,7 +13815,8 @@
         function syncHudObjectiveDisplay() {
             if(gameState !== 'PLAYING') return;
             let key = gameData.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
-            let pack = WOD_VICTORY_MODE_HUD[key];
+            const goal=gameData.mission?.objective;
+            let pack = goal?{mode:({capture:'Sector assault',hold:'Hold the line',evacuate:'Evacuation',fleet:'Naval objective'})[goal.type],rule:goal.label+(gameData._missionRuntime?.progressText?' · '+gameData._missionRuntime.progressText:'')}:WOD_VICTORY_MODE_HUD[key];
             if(!pack) return;
             setUiText('hudObjectiveModeDesktop', pack.mode);
             setUiText('hudObjectiveRuleDesktop', pack.rule);
@@ -26568,6 +26606,9 @@
             panel.classList.toggle('campaign-summary--mp-wide', isMp || soloOppOwners.length >= 2 || hasAlliedTeam);
             titleEl.textContent = outcomeKind === 'victory' ? 'Victory' : 'Defeat';
             subEl.textContent = reasonLine || headline || '';
+            const nextBtn=document.getElementById('wodNextPackStage'),entry=gameData._selectedMissionEntry;
+            const next=outcomeKind==='victory'&&entry?.packId?wodShopMissionStages().find(s=>s.packId===entry.packId&&s.stageIndex===entry.stageIndex+1&&wodStoreMissionPlayable(s)):null;
+            if(nextBtn){nextBtn.classList.toggle('hidden',!next);nextBtn.dataset.missionId=next?.id||'';nextBtn.textContent=next?'Next: '+next.name:'Next campaign stage';}
 
             let elapsedSec = (performance.now() - (gameData.gameSessionStartedPerfMs || performance.now())) / 1000;
             let campMeta = gameData._lastCampaignBattleMeta || null;
@@ -26581,6 +26622,7 @@
                 : ((campRun && campRun.holdSec)
                     ? ('Capture all enemy cities within ' + wodFormatHoldClock(campRun.holdSec) + '.')
                     : (WOD_VICTORY_MODE_DETAIL_TEXT[modeKey] || ''));
+            if(gameData.mission?.objective){victoryLabel='Mission objective';victoryRule=gameData.mission.objective.label;}
 
             let plyCities, enCities, enArmies, plyArmies, plyIncomeAcc, aiIncomeAcc;
             let plyMpLoss, aiMpLoss, plyTkLoss, aiTkLoss, plyShLoss, aiShLoss;
@@ -26850,12 +26892,16 @@
                 if(!wodProgress.storeMissions.spent) wodProgress.storeMissions.spent = {};
                 if(wodProgress.storeMissions.completed[entry.id]) return;
                 wodProgress.storeMissions.completed[entry.id] = true;
+                if(entry.packId) {
+                    const pack=wodShopMapCatalog.find(p=>p.id===entry.packId);
+                    if(pack?.stages?.every(s=>wodIsStoreMissionCompleted(s.id)))wodProgress.storeMissions.completed[pack.id]=true;
+                }
                 // One-shot store missions are consumed on victory (mini-campaigns stay replayable).
                 if(wodIsStoreMissionOneShot(entry)) {
                     wodProgress.storeMissions.spent[entry.id] = true;
                     showNotification('Store mission complete — one-shot cleared.');
                 } else {
-                    showNotification('Store mission complete!');
+                    showNotification(entry.packId?(wodIsStoreMissionCompleted(entry.packId)?'Campaign pack complete!':'Stage complete — next stage unlocked!'):'Store mission complete!');
                 }
                 wodBumpLifetime('missionsCompleted', 1);
                 persistWodProgressNow();
@@ -26892,7 +26938,11 @@
 
         function wodStoreMissionPlayable(entry) {
             if(!entry || !entry.id) return false;
-            if(!wodOwnsShopVisual(wodShopMapShopId(entry.id))) return false;
+            if(!wodOwnsShopVisual(wodShopMapShopId(entry.packId||entry.id))) return false;
+            if(entry.packId) {
+                const pack=wodShopMapCatalog.find(p=>p.id===entry.packId),index=pack?.stages?.findIndex(s=>s.id===entry.id);
+                if(!pack||index==null||index<0||!pack.stages.slice(0,index).every(s=>wodIsStoreMissionCompleted(s.id)))return false;
+            }
             if(wodIsStoreMissionOneShot(entry) && wodIsStoreMissionSpent(entry.id)) return false;
             return true;
         }
@@ -27002,6 +27052,7 @@
             }
             // dt is already sim-speed-scaled by the main loop.
             let simDt = dt || 0;
+            if(gameData.mission?.objective&&gameData._missionRuntime) {wodCheckScriptedMissionEnd(simDt);return;}
             if(wodTickEndCountdown('cityLoss', !playerControlsAnyCity(), simDt, 'All cities lost! Defeat in', true)) {
                 triggerCampaignDefeat('Defeat — all cities lost.');
                 return;
@@ -33058,8 +33109,8 @@
             const supplied = wodStartingTownSupply();
             for(let owner of ownerIds) {
                 let army = gameData.entities.filter(u => u.owner === owner && u.hp > 0 && u.type !== 'convoy');
-                for(let u of army) if(u.type === 'ship') u._startDeployment = 'town';
-                let land = army.filter(u => u.type !== 'ship');
+                for(let u of army) if(wodIsNavalUnit(u)) u._startDeployment = 'town';
+                let land = army.filter(u => !wodIsNavalUnit(u));
                 let towns = gameData.cities.filter(c => c.owner === owner);
                 let pool = gameData.hexList.filter(h => h.owner === owner && supplied.get(owner)?.has(getHexKey(h)));
                 let safe = pool.filter(h => !isFrontlineHex(h, owner));
@@ -33101,13 +33152,18 @@
         }
 
         function wodReduceAuthoredStartingArmy(ownerIds) {
+            const historical=!!gameData._selectedMissionEntry?.storeMission;
             for(let owner of ownerIds) {
                 let army = gameData.entities.filter(u => u.owner === owner && u.type !== 'convoy');
                 if(army.some(u => u._startDeployment)) continue;
-                let keep = new Set(army.filter((u, i) => i % 2 === 0));
+                const byType=Object.create(null);
+                let keep = new Set(army.filter((u, i) => historical?((byType[u.type]=(byType[u.type]||0)+1)%2===1):i%2===0));
                 gameData.entities = gameData.entities.filter(u => u.owner !== owner || u.type === 'convoy' || keep.has(u));
+                if(historical)for(const u of keep)u._startDeployment='authored';
             }
-            wodDeployStartingArmy(ownerIds);
+            // Historical landing waves, bridgeheads and evacuation boats are
+            // part of the scenario. Generic border deployment would erase them.
+            if(!historical)wodDeployStartingArmy(ownerIds);
         }
 
         function spawnInitialFrontlineUnits(ownerIds) {
@@ -45903,7 +45959,7 @@
                 let ang = (typeof getUnitFacingAngle === 'function') ? getUnitFacingAngle(unit) : 0;
                 faceQ = Math.round(ang / (Math.PI / 16)) & 31;
             }
-            let key = (skin==='atlasUnits'?wodGetRenderPeriod()+':':'')+skin + '|' + type + '|' + (color || '') + '|' + rQ + '|' + faceQ +
+            let key = (WOD_ANCIENT_CIV_SKIN_IDS.includes(skin)?'emblem'+(globalThis.WOD_ANCIENT_CIV_ART_REVISION||0)+':':'')+(skin==='atlasUnits'?wodGetRenderPeriod()+':':'')+skin + '|' + type + '|' + (color || '') + '|' + rQ + '|' + faceQ +
                 (unit.convoySeaRoute ? '|s' : '')+(unit.cargo?'|cargo:'+unit.cargo.type:'|empty');
             let cache = gameData._unitSpriteCache;
             if(!cache) cache = gameData._unitSpriteCache = new Map();
@@ -46496,7 +46552,7 @@
 
         function wodGetActiveMissionCatalog() {
             if(_wodMissionListTab === 'store') {
-                return (wodShopMapCatalog || []).filter(m => m && m.id && m.file).map(m => Object.assign({}, m, {
+                return wodShopMissionStages().map(m => Object.assign({}, m, {
                     storeMission: true,
                     packType: m.packType || m.pack || 'oneshot'
                 }));
@@ -46508,7 +46564,7 @@
             if(!id) return null;
             let camp = wodMissionCatalog.find(m => m.id === id);
             if(camp) return Object.assign({}, camp, { storeMission: false });
-            let store = (wodShopMapCatalog || []).find(m => m.id === id);
+            let store = wodShopMissionStages().find(m => m.id === id);
             if(store) return Object.assign({}, store, { storeMission: true, packType: store.packType || store.pack || 'oneshot' });
             return null;
         }
@@ -46608,7 +46664,7 @@
         function wodSelectMissionEntry(entry) {
             _wodSelectedMissionId = entry && entry.id ? entry.id : null;
             let startBtn = document.getElementById('wodMissionStartBtn');
-            if(startBtn) startBtn.disabled = !_wodSelectedMissionId;
+            if(startBtn) startBtn.disabled = !_wodSelectedMissionId || !!(entry?.storeMission&&!wodStoreMissionPlayable(entry));
             let list = document.getElementById('wodMissionList');
             if(list) {
                 list.querySelectorAll('.wod-mission-row, .wod-mission-codex-card').forEach(btn => {
@@ -46637,15 +46693,20 @@
                 let evtN = (data.mission && data.mission.events) ? data.mission.events.length : 0;
                 let trig = wodMissionTriggerSummary(data);
                 let html = '<p><strong>' + (entry.name || data.mission.title || entry.id) + '</strong></p>';
-                if(entry.description) html += '<p>' + entry.description + '</p>';
-                let vic = (data.mission && data.mission.victoryMode === 'annihilation') ? 'Annihilation' : 'Domination';
+                if(entry.date)html+='<p class="wod-map-lib-meta-sub">'+wodEscapeHtml(entry.date)+' · '+wodEscapeHtml(wodPeriodLabel(entry.gamePeriod||'modern'))+'</p>';
+                if(entry.description&&entry.description!==entry.history) html += '<p>' + wodEscapeHtml(entry.description) + '</p>';
+                let vic = data.mission?.objective?.label || ((data.mission && data.mission.victoryMode === 'annihilation') ? 'Annihilation' : 'Domination');
                 html += '<p class="wod-map-lib-meta-sub">Victory: ' + vic + ' · ' + evtN + ' battle event' + (evtN === 1 ? '' : 's');
                 if(trig) html += ' · ' + trig;
                 html += '</p>';
                 if(entry.storeMission) {
                     let oneshot = wodIsStoreMissionOneShot(entry);
-                    html += '<p class="wod-map-lib-meta-sub">' + (oneshot ? 'One-shot store mission — cleared after a win.' : 'Mini-campaign pack — replayable.') + '</p>';
+                    html += '<p class="wod-map-lib-meta-sub">' + (entry.packId?wodEscapeHtml(entry.packName)+' · Stage '+(entry.stageIndex+1)+' / '+entry.stageCount+' · Complete stages in order. Unlocked stages are replayable.':oneshot?'One-shot store mission — cleared after a win.':'Replayable mission.') + '</p>';
+                    if(entry.packId&&!wodStoreMissionPlayable(entry))html+='<p class="wod-map-lib-meta-sub">Locked — complete all preceding stages first.</p>';
                     if(wodIsStoreMissionSpent(entry.id)) html += '<p class="wod-map-lib-meta-sub" style="color:#e67e22">Already completed (one-shot spent).</p>';
+                    if(entry.history)html+='<p><strong>Historical context:</strong> '+wodEscapeHtml(entry.history)+'</p>';
+                    if(entry.adaptation)html+='<p class="wod-map-lib-meta-sub">'+wodEscapeHtml(entry.adaptation)+'</p>';
+                    if(entry.sources?.length)html+='<p class="wod-map-lib-meta-sub">Sources: '+entry.sources.map((url,i)=>'<a href="'+wodEscapeHtml(url)+'" target="_blank" rel="noopener">Historical reference '+(i+1)+'</a>').join(' · ')+'</p>';
                 }
                 if(meta) meta.innerHTML = html;
                 if(cv) {
@@ -46684,13 +46745,13 @@
             let storeTab = _wodMissionListTab === 'store';
             if(sub) {
                 sub.textContent = storeTab
-                    ? 'Missions unlocked from the Shop. One-shot missions disappear after a victory; mini-campaign packs stay available.'
+                    ? 'Purchased missions and historical campaigns. Win each campaign stage to unlock the next; unlocked stages remain replayable.'
                     : 'Ten linked battles across land and sea. Win each mission to unlock the next.';
             }
 
             let catalog = wodGetActiveMissionCatalog();
             if(storeTab) {
-                catalog = catalog.filter(e => wodOwnsShopVisual(wodShopMapShopId(e.id)));
+                catalog = catalog.filter(e => wodOwnsShopVisual(wodShopMapShopId(e.packId||e.id)));
             }
 
             if(!catalog.length) {
@@ -46707,12 +46768,19 @@
                 return;
             }
             if(empty) empty.classList.add('hidden');
-            if(layout) layout.style.display = 'flex';
+            if(layout) layout.style.display = '';
             list.classList.toggle('wod-mission-codex', storeTab);
             let missionPanel = document.getElementById('missionsPanel');
             if(missionPanel) missionPanel.classList.toggle('wod-store-codex', storeTab);
 
+            let previousPack=null;
             for(let entry of catalog) {
+                if(storeTab&&entry.packId&&entry.packId!==previousPack) {
+                    const heading=document.createElement('header');heading.className='wod-store-pack-heading';
+                    const pack=wodShopMapCatalog.find(p=>p.id===entry.packId),done=pack.stages.filter(s=>wodIsStoreMissionCompleted(s.id)).length;
+                    heading.innerHTML='<strong>'+wodEscapeHtml(entry.packName)+'</strong><span>'+done+' / '+pack.stages.length+' stages complete · play in order</span>';list.appendChild(heading);
+                }
+                previousPack=entry.packId||null;
                 let btn = document.createElement('button');
                 btn.type = 'button';
                 btn.dataset.missionId = entry.id;
@@ -46721,12 +46789,12 @@
                     let done = wodIsStoreMissionCompleted(entry.id);
                     let playable = wodStoreMissionPlayable(entry);
                     btn.className = 'wod-mission-codex-card' + (playable ? '' : ' locked') + (spent ? ' spent' : '');
-                    let tag = spent ? 'Spent' : (done ? 'Done' : (wodIsStoreMissionOneShot(entry) ? 'Once' : 'Pack'));
+                    let tag = entry.packId?(done?'Complete':playable?'Ready':'Locked'):(spent?'Spent':done?'Done':wodIsStoreMissionOneShot(entry)?'Once':'Replay');
                     btn.title = entry.description || entry.name || entry.id;
                     btn.innerHTML =
                         '<span class="shop-codex-art"><canvas width="148" height="148" aria-hidden="true"></canvas></span>' +
                         '<span class="shop-codex-tag">' + tag + '</span>' +
-                        '<span class="shop-codex-name">' + (entry.name || entry.id) + '</span>';
+                        '<span class="shop-codex-name">' + (entry.packId?(entry.stageIndex+1)+'. ':'') + wodEscapeHtml(entry.name || entry.id) + '</span>';
                     void wodFetchMissionData(entry).then(data => {
                         if(!btn.isConnected || !data) return;
                         let cv = btn.querySelector('canvas');
@@ -46734,8 +46802,9 @@
                             try { wodPaintMapDataOnCanvas(cv, data); } catch(_) {}
                         }
                     });
-                    if(playable) btn.addEventListener('click', () => wodSelectMissionEntry(entry));
-                    else btn.addEventListener('click', () => showNotification('This one-shot store mission was already completed.'));
+                    btn.dataset.locked=playable?'false':'true';
+                    btn.setAttribute('aria-label',(playable?'Preview ':'Preview locked stage: ')+(entry.name||entry.id));
+                    btn.addEventListener('click',()=>wodSelectMissionEntry(entry));
                 } else {
                     let idx = wodMissionCatalog.indexOf(entry);
                     let unlocked = wodIsMissionUnlocked(idx, wodMissionCatalog);
@@ -46752,18 +46821,13 @@
                 }
                 list.appendChild(btn);
             }
-            if(storeTab) {
-                requestAnimationFrame(() => {
-                    if(token !== wodMissionRenderToken) return;
-                    wodFillCodexRow(list, '.wod-mission-codex-card', 148, 12);
-                });
-            }
 
             let auto = null;
             if(storeTab) {
                 for(let e of catalog) {
-                    if(wodStoreMissionPlayable(e)) { auto = e; break; }
+                    if(wodStoreMissionPlayable(e)&&!wodIsStoreMissionCompleted(e.id)) { auto = e; break; }
                 }
+                if(!auto)auto=catalog.find(wodStoreMissionPlayable);
             } else {
                 for(let i = 0; i < wodMissionCatalog.length; i++) {
                     if(!wodIsMissionUnlocked(i, wodMissionCatalog)) break;
@@ -46776,6 +46840,7 @@
 
         async function wodApplyMissionEntry(entry) {
             if(!entry || !entry.id) return false;
+            if(entry.storeMission&&!wodStoreMissionPlayable(entry)){showNotification('Locked — own the pack and complete the preceding stages first.');return false;}
             let data = await wodFetchMissionData(entry, { force: true });
             if(!data) return false;
             if(window.WOD && typeof WOD.loadMapData === 'function') WOD.loadMapData(data);
@@ -49942,6 +50007,10 @@
         function wodShopMapShopId(mapId) {
             return 'shop_map_' + mapId;
         }
+        function wodShopMissionStages() {
+            return (wodShopMapCatalog||[]).flatMap(entry=>Array.isArray(entry.stages)&&entry.stages.length?
+                entry.stages.map((s,i)=>({...s,storeMission:true,packType:'campaign',packId:entry.id,packName:entry.name,stageIndex:i,stageCount:entry.stages.length})):[entry]);
+        }
 
         function wodNormalizeShopMissionEntry(raw) {
             if(!raw || !raw.id || !raw.file) return null;
@@ -50172,9 +50241,6 @@
                 window.addEventListener('resize', () => {
                     let shop = document.getElementById('shopMapOptions');
                     if(shop && shop.querySelector('.shop-codex-card')) wodFillCodexRow(shop, '.shop-codex-card', 148, 12);
-                    let missions = document.getElementById('wodMissionList');
-                    if(missions && missions.classList.contains('wod-mission-codex'))
-                        wodFillCodexRow(missions, '.wod-mission-codex-card', 148, 12);
                 });
             }
             if(!host) return;
@@ -50222,13 +50288,13 @@
                 let badge;
                 if(!owned) badge = price + 'g';
                 else if(spent && oneshot) badge = 'Done';
-                else badge = 'Owned';
+                else badge = entry.stages?entry.stages.filter(s=>wodIsStoreMissionCompleted(s.id)).length+' / '+entry.stages.length+' complete':'Owned';
                 card.innerHTML =
                     '<span class="shop-codex-art"><canvas width="560" height="300" aria-hidden="true"></canvas></span>' +
                     '<span class="shop-codex-tag">' + badge + '</span>' +
                     '<span class="shop-codex-name">' + wodEscapeHtml(entry.name || entry.id) + '</span>' +
-                    '<span class="shop-mission-meta">' + wodEscapeHtml([entry.date,wodPeriodLabel(entry.gamePeriod||'modern'),entry.difficulty,'One-shot'].filter(Boolean).join(' · ')) + '</span>' +
-                    '<span class="shop-mission-description">' + wodEscapeHtml(entry.objective||entry.description||'') + '</span>';
+                    '<span class="shop-mission-meta">' + wodEscapeHtml([entry.date,wodPeriodLabel(entry.gamePeriod||'modern'),entry.difficulty,entry.stages?.length?entry.stages.length+'-stage campaign':oneshot?'One-shot':'Replayable'].filter(Boolean).join(' · ')) + '</span>' +
+                    '<span class="shop-mission-description">' + wodEscapeHtml(entry.stages?entry.description:entry.objective||entry.description||'') + '</span>';
                 card.addEventListener('click', () => {
                     if(owned) {
                         showNotification(spent && oneshot
@@ -50237,6 +50303,11 @@
                         if(!spent || !oneshot) {
                             _wodMissionListTab = 'store';
                             showPanel('missions');
+                            void wodRefreshMissionsPanel().then(()=>{
+                                const stages=wodShopMissionStages().filter(s=>s.packId===entry.id||s.id===entry.id);
+                                const next=stages.find(s=>wodStoreMissionPlayable(s)&&!wodIsStoreMissionCompleted(s.id))||stages.find(wodStoreMissionPlayable);
+                                if(next){wodSelectMissionEntry(next);document.querySelector('#wodMissionList [data-mission-id="'+next.id+'"]')?.scrollIntoView({block:'nearest'});}
+                            });
                         }
                         return;
                     }
@@ -54030,15 +54101,46 @@
                     pathOrders
                 };
             }).filter(Boolean) : [];
-            return {
-                version: 1,
-                title: String(raw.title || '').slice(0, 80),
-                victoryMode: raw.victoryMode === 'annihilation' ? 'annihilation' : 'domination',
-                events
-            };
+            const goal=raw.objective,objective=goal&&['capture','hold','evacuate','fleet'].includes(goal.type)?{
+                type:goal.type,label:String(goal.label||'Complete the mission objective.').slice(0,180),
+                cityIds:Array.isArray(goal.cityIds)?goal.cityIds.slice(0,32).map(id=>String(id).slice(0,64)):[],
+                duration:Math.max(0,Math.min(7200,Number(goal.duration)||0)),minUnits:Math.max(1,Math.min(48,Number(goal.minUnits)||1)),
+                unitPrefix:String(goal.unitPrefix||'').slice(0,64),owner:Math.max(1,Math.min(8,Number(goal.owner)||2)),
+                zone:goal.zone&&Number.isFinite(goal.zone.x)&&Number.isFinite(goal.zone.y)?{x:goal.zone.x,y:goal.zone.y,radius:Math.max(1,Math.min(2000,Number(goal.zone.radius)||100))}:null
+            }:null;
+            return {version:1,title:String(raw.title||'').slice(0,80),victoryMode:raw.victoryMode==='annihilation'?'annihilation':'domination',...(objective?{objective}:{}),events};
         }
         function wodMissionHasEvents() {
             return !!(gameData.mission && Array.isArray(gameData.mission.events) && gameData.mission.events.length);
+        }
+        function wodCheckScriptedMissionEnd(dt) {
+            const goal=gameData.mission?.objective,rt=gameData._missionRuntime,lo=wodLocalPlayerOwner();if(!goal||!rt)return;
+            const friendly=gameData.entities.filter(u=>u.owner===lo&&u.hp>0&&u.type!=='convoy');
+            if(wodTickEndCountdown('missionArmyLost',friendly.length===0,dt,'Your army is destroyed! Defeat in',true)){triggerCampaignDefeat('Defeat — your field force was lost.');return;}
+            const cities=goal.cityIds.map(id=>gameData.cities.find(c=>c.id===id));
+            const held=cities.length>0&&cities.every(c=>c&&wodIsFriendlyOwner(c.owner,lo));
+            let success=false,progress='';
+            if(goal.type==='capture'){
+                const complete=cities.filter(c=>c&&wodIsFriendlyOwner(c.owner,lo)&&getCityUrbanTerrainHexes(c).every(h=>wodIsFriendlyOwner(h.owner,lo))).length;
+                success=held&&complete===cities.length;progress=complete+' / '+cities.length+' sectors secure';
+            }
+            if(goal.type==='hold') {
+                if(wodTickEndCountdown('missionPositionLost',!held,dt,'The protected position is lost! Defeat in',true)){triggerCampaignDefeat('Defeat — the protected position was lost.');return;}
+                success=held&&rt.elapsed>=goal.duration;
+                progress=wodFormatHoldClock(Math.max(0,goal.duration-rt.elapsed))+' remaining';
+            }
+            if(goal.type==='evacuate'&&goal.zone) {
+                const original=u=>u&&u.hp>0&&(rt.evacueeUids?rt.evacueeUids.has(u.uid):!goal.unitPrefix||String(u.name||'').startsWith(goal.unitPrefix));
+                const survivors=friendly.reduce((n,u)=>n+(original(u)?1:0)+(original(u.cargo)?1:0),0);
+                if(wodTickEndCountdown('missionEvacueesLost',survivors<goal.minUnits,dt,'Too few evacuees survive! Defeat in',true)){triggerCampaignDefeat('Defeat — too few original formations survive to evacuate.');return;}
+                const evacuated=friendly.filter(u=>!wodIsNavalUnit(u)&&original(u)&&
+                    !isWaterHex(getNearestHexToPoint(u.x,u.y))&&Math.hypot(u.x-goal.zone.x,u.y-goal.zone.y)<=goal.zone.radius);
+                success=rt.elapsed>=goal.duration&&evacuated.length>=goal.minUnits;
+                progress=evacuated.length+' / '+goal.minUnits+' evacuated'+(rt.elapsed<goal.duration?' · nightfall in '+wodFormatHoldClock(goal.duration-rt.elapsed):'');
+            }
+            if(goal.type==='fleet'){const left=gameData.entities.filter(u=>u.owner===goal.owner&&u.hp>0&&wodIsNavalUnit(u)).length;success=left===0;progress=left+' enemy naval formations remaining';}
+            if(rt.progressText!==progress){rt.progressText=progress;syncHudObjectiveDisplay();}
+            if(success&&friendly.length)triggerCampaignVictory('Mission complete — '+goal.label,true);
         }
         function wodInitMissionRuntime() {
             gameData._missionRuntime = null;
@@ -54047,6 +54149,7 @@
             let lo = wodLocalPlayerOwner();
             gameData._missionRuntime = {
                 elapsed: 0,
+                ...(gameData.mission.objective?.type==='evacuate'?{evacueeUids:new Set(gameData.entities.filter(u=>u.owner===lo&&!wodIsNavalUnit(u)&&(!gameData.mission.objective.unitPrefix||String(u.name||'').startsWith(gameData.mission.objective.unitPrefix))).map(u=>u.uid))}:{}),
                 fired: new Set(),
                 killsBaseline: (getOwnerTroopKills(lo) | 0) + (getOwnerTankKills(lo) | 0) + (getOwnerShipKills(lo) | 0),
                 popupOpen: false,
@@ -54206,7 +54309,7 @@
             if(!wodMissionHasEvents() || !gameData._missionRuntime) return;
             let rt = gameData._missionRuntime;
             if(rt.popupOpen) return;
-            if(gameData.speed > 0) rt.elapsed += dt * gameData.speed;
+            if(gameData.speed > 0) rt.elapsed += dt;
             for(let evt of gameData.mission.events) {
                 if(!evt || !evt.id) continue;
                 if(evt.once !== false && rt.fired.has(evt.id)) continue;
@@ -55593,6 +55696,7 @@
                 fog:{enabled:wodFogActive(),visible:gameData._fogVisible?.size||0,explored:gameData._fogExplored?.size||0},
                 battleTime:wodBattleLedger().seconds,
                 controlGroups: gameData.controlGroups || {},
+                mission:gameData.mission?{title:gameData.mission.title,packId:gameData._selectedMissionEntry?.packId||null,stage:gameData._selectedMissionEntry?.stageIndex!=null?gameData._selectedMissionEntry.stageIndex+1:null,objective:gameData.mission.objective||null,elapsed:Math.floor(gameData._missionRuntime?.elapsed||0),progress:gameData._missionRuntime?.progressText||'',briefing:!!gameData._missionRuntime?.popupOpen}:null,
                 audio: window.wodBattleAudio?.debug(),
                 cities: gameData.cities.filter(wodFogCanSeeCity).map(c => ({id: c.id, owner: c.owner, factory: !!c.hasFactory, harbor: !!c.hasHarbor, farm: !!c.hasFarm})),
                 units: gameData.entities.filter(wodFogCanSeeUnit).map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp, group: e.aiTfJobId, role: e.aiTfKind, combatTarget:e.combatTargetUid||null, deployment: e._startDeployment})),

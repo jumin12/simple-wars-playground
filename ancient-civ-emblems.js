@@ -128,6 +128,8 @@
     const _svgRaw = Object.create(null);
     const _imgCache = Object.create(null);
     const _pendingKeys = new Set();
+    const _svgLoading = Object.create(null);
+    global.WOD_ANCIENT_CIV_ART_REVISION = 0;
     let _repaintScheduled = false;
 
     function wodHexBlend(a, b, t) {
@@ -233,10 +235,13 @@
         if (_svgRaw[skinId]) return;
         let art = WOD_ANCIENT_CIV_ART[skinId];
         if (!art) return;
-        try {
-            let resp = await fetch(art.file);
-            if (resp.ok) _svgRaw[skinId] = await resp.text();
-        } catch (e) { /* offline / file:// */ }
+        const bundled=global.WOD_ANCIENT_CIV_SVG_BUNDLE?.[art.file];
+        if(bundled){_svgRaw[skinId]=bundled;return;}
+        if(!_svgLoading[skinId])_svgLoading[skinId]=(async()=>{
+            try {let resp=await fetch(art.file);if(resp.ok)_svgRaw[skinId]=await resp.text();}
+            catch(e){/* A missing asset must not start an infinite retry loop. */}
+        })();
+        await _svgLoading[skinId];
     }
 
     async function wodPreloadAncientCivArt() {
@@ -249,7 +254,7 @@
         if (_imgCache[key] || _pendingKeys.has(key)) return;
         let raw = _svgRaw[skinId];
         if (!raw) {
-            wodLoadAncientCivSvg(skinId).then(() => wodEnsureAncientCivEmblemImage(skinId, tint));
+            wodLoadAncientCivSvg(skinId).then(() => {if(_svgRaw[skinId])wodEnsureAncientCivEmblemImage(skinId,tint);});
             return;
         }
         _pendingKeys.add(key);
@@ -259,6 +264,7 @@
         let img = new Image();
         img.onload = () => {
             _imgCache[key] = img;
+            global.WOD_ANCIENT_CIV_ART_REVISION++;
             _pendingKeys.delete(key);
             URL.revokeObjectURL(url);
             wodScheduleAncientCivRepaint();

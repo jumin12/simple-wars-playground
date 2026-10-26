@@ -33,7 +33,7 @@ const server=http.createServer((req,res)=>{
    const fort=gameData.hexes['-6,5'];placeFortAtHex(fort,1,{editor:true,suppressNotes:true});WOD.addAlliance(1,2);
    gameData.money=4321;gameData.manpower=9876;gameData.aiMoneyByOwner={2:12345};gameData.aiManpowerByOwner={2:56789};
    wodApplyGamePeriod('ancient',{allowAnyPeriod:true,saveProfile:false});
-   gameData.mission={version:1,title:'Crossing scenario',victoryMode:'annihilation',events:[
+   gameData.mission={version:1,title:'Crossing scenario',victoryMode:'annihilation',objective:{type:'capture',label:'Capture the eastern crossing',cityIds:['East']},events:[
     {id:'intro',name:'Start',once:true,trigger:{type:'timer',seconds:0},popup:{title:'At once',body:'Scenario round trip',style:'briefing',kicker:'Orders'},reinforcements:[],pathOrders:[]},
     {id:'reserve',name:'Reserves',once:true,trigger:{type:'time_survived',seconds:25},popup:{title:'Reserve',body:'Incoming',style:'alert'},reinforcements:[{owner:2,type:'marine',count:3,anchor:'coords',x:200,y:200}],pathOrders:[{owner:2,scope:'reinforcements',x:-200,y:200}]},
     {id:'kills',name:'Pressure',once:false,trigger:{type:'troops_killed',count:9},popup:{title:'Advance',body:'Press on',style:'victory'},reinforcements:[],pathOrders:[{owner:2,scope:'all',x:-200,y:0}]}]};
@@ -50,6 +50,7 @@ const server=http.createServer((req,res)=>{
   assert.equal(await page.locator('#editorEconomyCash').inputValue(),'4321');
   assert.equal(await page.locator('#editorEconomyMp').inputValue(),'9876');
   assert(results.loaded.mission.events[0].trigger.seconds===0&&results.loaded.mission.victoryMode==='annihilation'&&results.loaded.units.length===4&&!results.loaded.layers.cities&&!results.loaded.layers.territory);
+  assert(results.loaded.mission.objective.type==='capture'&&results.loaded.mission.objective.cityIds[0]==='East','custom objectives survive editor import');
   const exportFile=async(selector,name)=>{const waiting=page.waitForEvent('download');await page.locator(selector).click();const dl=await waiting,file=path.join(OUT,name);await dl.saveAs(file);return JSON.parse(fs.readFileSync(file,'utf8'));};
   const exported=await exportFile('#editorExportMission','scenario.json');assert.equal(exported.format,'simple-wars-mission');assert.deepEqual(exported.mission,results.loaded.mission);assert.equal(exported.gamePeriod,'ancient');
   // Live edits after a load cannot alter the source library/import object.

@@ -3,13 +3,13 @@
 // custom-maps/HISTORICAL-NOTES.md; these are RTS adaptations, not reconstructions.
 const SP=27,DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
 const notes={
- 'thermopylae-480':{gamePeriod:'ancient',date:'480 BCE',difficulty:'Hard',objective:'Hold the coastal gate, watch the mountain trail, then take the Persian camps.',sources:['https://www.livius.org/sources/content/herodotus/herodotus-on-thermopylae/']},
+ 'thermopylae-480':{gamePeriod:'ancient',date:'480 BCE',difficulty:'Hard',objective:'Hold the Hot Gates for 4:00 and watch the mountain trail.',sources:['https://www.livius.org/sources/content/herodotus/herodotus-on-thermopylae/']},
  'hastings-1066':{gamePeriod:'medieval',date:'14 October 1066',difficulty:'Standard',objective:'Break the shield wall on Senlac Ridge and secure the English rear.',sources:['https://www.english-heritage.org.uk/visit/places/1066-battle-of-hastings-abbey-and-battlefield/history-and-stories/what-happened-battle-hastings/']},
  'austerlitz-1805':{gamePeriod:'napoleonic',date:'2 December 1805',difficulty:'Hard',objective:'Cross the Goldbach, seize the Pratzen Heights and split the allied armies.',sources:['https://www.defense.gouv.fr/terre/mieux-nous-connaitre/histoire-larmee-terre/larmee-terre-travers-ses-batailles/2-decembre-1805-bataille','https://www.napoleon.org/en/history-of-the-two-empires/articles/the-battle-of-austerlitz-and-the-principles-of-war/']},
- 'el-alamein-1942':{gamePeriod:'modern',date:'23 October 1942',difficulty:'Standard',objective:'Open the northern corridor, break the defensive belts and capture El Daba.',sources:['https://www.nam.ac.uk/explore/battle-alamein']},
- 'normandy-dday':{gamePeriod:'modern',date:'6 June 1944',difficulty:'Hard',objective:'Land the marine assault waves, capture a Normandy town and break inland.'},
- 'kursk-citadel':{gamePeriod:'modern',date:'5 July 1943',difficulty:'Hard',objective:'Defend both shoulders of the salient, then defeat the allied German armies.'},
- 'midway-1942':{gamePeriod:'modern',date:'4 June 1942',difficulty:'Standard',objective:'Keep the atoll supplied and defeat the approaching Japanese fleet.'}
+ 'el-alamein-1942':{gamePeriod:'modern',date:'23 October–4 November 1942',difficulty:'Standard',objective:'Break the northern defensive belt and secure the Axis rear position.',sources:['https://www.nam.ac.uk/explore/battle-alamein']},
+ 'normandy-dday':{gamePeriod:'modern',date:'6–12 June 1944',difficulty:'Hard',objective:'Link the beachheads through Sainte-Mère-Église, Carentan, Isigny, Bayeux and Ouistreham.',sources:['https://www.nam.ac.uk/explore/d-day','https://carentanlesmarais.fr/decouvrir/dday/']},
+ 'kursk-citadel':{gamePeriod:'modern',date:'5–12 July 1943',difficulty:'Hard',objective:'Hold Kursk and the Oboyan sector for 5:00.',sources:['https://tankmuseum.org/article/background-battle-kursk']},
+ 'midway-1942':{gamePeriod:'modern',date:'4–7 June 1942',difficulty:'Standard',objective:'Defeat the approaching Japanese naval force.',sources:['https://www.history.navy.mil/browse-by-topic/wars-conflicts-and-operations/world-war-ii/1942/midway.html']}
 };
 function terrainNoise(q,r,seed=1) {
  const hash=(x,y)=>{const v=Math.sin(x*127.1+y*311.7+seed*.017)*43758.5453123;return v-Math.floor(v);};
@@ -93,14 +93,13 @@ function buildHistoricalMissions({MapBuilder,ev}) {
  return result;
 }
 function polishStoreMission(m) {
- const d=m.data,meta=notes[m.entry.id];Object.assign(m.entry,meta);d.gamePeriod=meta.gamePeriod;d.hexRadius=20;
+ const d=m.data,meta=notes[m.entry.id]||m.entry;Object.assign(m.entry,meta);d.gamePeriod=meta.gamePeriod;d.hexRadius=20;
  const cells=new Map(d.hexList.map(h=>[`${h.q},${h.r}`,h])),wet=h=>h?.type==='water'||h?.type==='deep_water';
  // Reduce the Normandy objective clutter: beach batteries remain represented by
  // forts, while distinct inland towns are the actual capture objectives.
  if(m.entry.id==='normandy-dday'){
   const removed=new Set(d.cities.filter(c=>['Valognes','Arromanches','Courseulles-sur-Mer','Longues-sur-Mer','Vierville-sur-Mer'].includes(c.name)).map(c=>c.id));
   d.cities=d.cities.filter(c=>!removed.has(c.id));for(const h of d.hexList)if(removed.has(h.cityId)){h.type='grass';delete h.cityId;delete h.urbanVariant;}
-  d.mission.events[0].popup.body='6 June 1944. Lead the amphibious assault across the Channel and capture the Normandy towns. Assault infantry uses marine rules to model landing craft; armor stages on dry allied ground. Only marines and ships can wait safely in open water. Secure an inland town for land supply before committing ordinary infantry.\n\nTerrain and unit roles are adapted for Simple Wars. Beach batteries are forts; distinct inland towns are the capture objectives.';
  }
  // Restore a continuous-looking coast/steppe without damaging cities, islands,
  // bridges or deliberate strategic water barriers.
@@ -122,7 +121,7 @@ function polishStoreMission(m) {
  const occupied=new Set();
  for(const u of d.entities){let h=cells.get(`${Math.round(u.x/SP)},${Math.round(u.y/SP)}`);
   if(m.entry.id==='normandy-dday'&&u.owner===1&&u.type==='light'&&wet(h))u.type='marine';
-  const usable=n=>u.type==='ship'?wet(n):u.type==='marine'&&wet(h)?wet(n):!wet(n)&&n.type!=='mountain'&&supply.get(u.owner)?.has(`${n.q},${n.r}`);
+  const usable=n=>['ship','transport'].includes(u.type)?wet(n):u.type==='marine'&&wet(h)?wet(n):!wet(n)&&n.type!=='mountain'&&supply.get(u.owner)?.has(`${n.q},${n.r}`);
   if(!h||!usable(h)||occupied.has(`${h.q},${h.r}`)){
    let best=null,score=Infinity;for(const n of d.hexList)if(usable(n)&&!occupied.has(`${n.q},${n.r}`)){const dist=(n.x-u.x)**2+(n.y-u.y)**2;if(dist<score){score=dist;best=n;}}
    if(!best)throw Error(m.file+': no supplied spawn for '+u.name);h=best;
@@ -133,4 +132,4 @@ function polishStoreMission(m) {
  const byId=new Map(d.cities.map(c=>[c.id,c]));d.roads=(d.roads||[]).filter(r=>byId.has(r.from?.id)&&byId.has(r.to?.id));
  return m;
 }
-module.exports={buildHistoricalMissions,polishStoreMission};
+module.exports={buildHistoricalMissions,polishStoreMission,terrainNoise};
