@@ -47,7 +47,7 @@ const server=http.createServer((req,res)=>{
     const u=createUnitAt(type,h.x,h.y,owner);u.x=h.x;u.y=h.y;u.range=0;u.hp=u.maxHp*.75;u.manpower=(u.maxManpower||1000)*.75;
     if(type==='convoy')u.convoySeaRoute=true;
     if(ordered){u.orderTarget={x:h.x,y:h.y,intoWater:true};u._wodOrderIntoWater=true;u.target={x:h.x,y:h.y,pathPrepared:true};}
-    u.waterExposureSeconds=5;const before=u.hp,unsupplied=!!wodGetUnitEncirclementState(u,h),heals=canHealUnit(u);update(.5);
+    u.waterExposureSeconds=10;u.outOfSupplySeconds=10;const before=u.hp,unsupplied=!!wodGetUnitEncirclementState(u,h),heals=canHealUnit(u);update(.5);
     rows.push({owner,type,ordered,unsupplied,heals,loss:(before-u.hp)/u.maxHp,stillInWater:isWaterHex(getNearestHexToPoint(u.x,u.y))});
    }
    return rows;
@@ -61,16 +61,16 @@ const server=http.createServer((req,res)=>{
    for(const owner of [1,2])for(const type of ['light','heavy','convoy']) {
     resetWaterTest(owner);testTown(-8,0,owner,'Supply town');const h=gameData.hexes['0,0'];h.type='water';h.owner=0;
     const u=createUnitAt(type,h.x,h.y,owner);u.x=h.x;u.y=h.y;u.hp=u.maxHp*.75;u.range=0;
-    const hp=u.hp;for(let i=0;i<49;i++)update(.1);const at49=u.hp;
+    const hp=u.hp;for(let i=0;i<99;i++)update(.1);const at49=u.hp;
     update(.1);const at5=u.hp;update(.25);const after=u.hp;
     const synced=wodEntityFromNet(wodStripEntityForNet(u)).waterExposureSeconds;
     h.type='grass';update(.1);const reset=u.waterExposureSeconds;h.type='water';const fresh=u.hp;update(2);const reentry=u.hp;
-    const dt=wodAdvanceWaterExposure(u,4,h); // 2 + 4 crosses the threshold by exactly 1 second.
+    const dt=wodAdvanceWaterExposure(u,9,h); // 2 + 9 crosses the threshold by exactly 1 second.
     rows.push({owner,type,hp,at49,at5,loss:(at5-after)/u.maxHp,synced,reset,fresh,reentry,dt});
    }
    return rows;
   });
-  for(const r of results.grace){assert(Math.abs(r.at49-r.hp)<1e-7&&Math.abs(r.at5-r.hp)<1e-7,'five full seconds without damage '+JSON.stringify(r));assert(Math.abs(r.loss-.00875)<1e-7,'only time after threshold damages '+JSON.stringify(r));assert(Math.abs(r.synced-5.25)<1e-7&&r.reset===0&&r.fresh===r.reentry&&Math.abs(r.dt-1)<1e-7,'replicated timer, reset, fresh crossing and partial tick '+JSON.stringify(r));}
+  for(const r of results.grace){assert(Math.abs(r.at49-r.hp)<1e-7&&Math.abs(r.at5-r.hp)<1e-7,'ten full seconds without damage '+JSON.stringify(r));assert(Math.abs(r.loss-.00875)<1e-7,'only time after threshold damages '+JSON.stringify(r));assert(Math.abs(r.synced-10.25)<1e-7&&r.reset===0&&r.fresh===r.reentry&&Math.abs(r.dt-1)<1e-7,'replicated timer, reset, fresh crossing and partial tick '+JSON.stringify(r));}
   results.routes=await page.evaluate(async()=>{
    const rows=[];
    for(const owner of [1,2])for(const kind of ['detour','necessary','explicit']) {

@@ -468,7 +468,7 @@ const server = http.createServer((req, res) => {
       gameData._encircWork=null;gameData.encirclementTimer=10;gameData._wodPlayerMovingN=0;
       updateEncirclements(2);let safety=0;while(gameData._encircWork&&safety++<1000)wodEncirclementProcessChunk();
       let coastal={infantry:!!wodGetUnitEncirclementState(inf,ph),marine:!!wodGetUnitEncirclementState(marine,ph),town:!!wodGetHexEncirclementState(gameData.hexes['-12,0']),water:wodMarineHasWaterSupply(marine,ph)};
-      let beforeInf=inf.hp,beforeMarine=marine.hp;gameData.aiMoneyByOwner[2]=0;
+      inf.outOfSupplySeconds=10;let beforeInf=inf.hp,beforeMarine=marine.hp;gameData.aiMoneyByOwner[2]=0;
       update(.25);
       coastal.damageInf=beforeInf-inf.hp;coastal.damageMarine=beforeMarine-marine.hp;
       for(let r=3;r<=7;r++)gameData.hexes[`8,${r}`].type='grass';

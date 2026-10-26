@@ -41,7 +41,7 @@ const server=http.createServer((req,res)=>{
    resetWaterTest(owner);for(const h of gameData.hexList){h.type=h.q>=0?'water':'grass';h.owner=h.q>=0?0:owner;}
    const s=createUnitAt('supply',27,0,owner);s.x=27;s.y=0;const u=createUnitAt('heavy',-54,0,owner);u.x=-54;u.y=0;
    const supplied=!wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y));s.x=300;const cut=!!wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y));s.x=27;
-   const wet=createUnitAt('light',-100,150,owner);wet.x=27;wet.y=54;const swimmer=!!wodGetUnitEncirclementState(wet,getNearestHexToPoint(wet.x,wet.y))?.water;const grace=wodAdvanceWaterExposure(wet,5,getNearestHexToPoint(wet.x,wet.y));const attrition=wodAdvanceWaterExposure(wet,1,getNearestHexToPoint(wet.x,wet.y));
+   const wet=createUnitAt('light',-100,150,owner);wet.x=27;wet.y=54;const swimmer=!!wodGetUnitEncirclementState(wet,getNearestHexToPoint(wet.x,wet.y))?.water;const grace=wodAdvanceWaterExposure(wet,10,getNearestHexToPoint(wet.x,wet.y));const attrition=wodAdvanceWaterExposure(wet,1,getNearestHexToPoint(wet.x,wet.y));
    const m=createUnitAt('marine',54,-54,owner);m.x=54;m.y=-54;m.hp=50;m.manpower=500;const marine=!wodGetUnitEncirclementState(m,getNearestHexToPoint(m.x,m.y))&&!canHealUnit(m);
    const other=createUnitAt('supply',27,0,3-owner);other.x=27;other.y=0;s.hp=0;const enemyDoesNotSupply=!!wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y));
    return{owner,supplied,cut,swimmer,grace,attrition,marine,enemyDoesNotSupply,radius:wodFortCombatAuraRadiusPx()};
