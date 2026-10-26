@@ -54,14 +54,15 @@ const server=http.createServer((req,res)=>{
      const g=gameData.hexes[`${10+Math.floor(i/3)*2},${(shape==='bend'?3:0)+(i%3-1)*2}`];
      wodBeginSimPfBudget(n);assignUnitMoveAlongWaypoints(u,[{x:g.x,y:g.y}]);
     }
-    let invalid=0, arrived=null;
+    let invalid=0, arrived=null;const badPoints=[];
     for(let step=0;step<3000;step++) {
      gameData._wodSimTick=(gameData._wodSimTick||0)+1;wodBeginSimPfBudget(n);gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRebuildHexCombatOccupancy();
-     for(const u of units) {moveUnitTowardTarget(u,.1);if(!wodSamplePosOnWalkableTerrain(u,u.x,u.y))invalid++;}
+     for(const u of units) {const before=[u.x,u.y];moveUnitTowardTarget(u,.1);if(!wodSamplePosOnWalkableTerrain(u,u.x,u.y)){invalid++;if(badPoints.length<8)badPoints.push({stage:'move',before,x:u.x,y:u.y,hex:(h=>h?{q:h.q,r:h.r,type:h.type}:null)(getNearestHexToPoint(u.x,u.y)),target:u.target,path:u.path?.slice(0,2),type:u.type});}}
      gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRunUnitSeparationSync(40,96);
+     for(const u of units)if(!wodSamplePosOnWalkableTerrain(u,u.x,u.y)&&badPoints.length<8)badPoints.push({stage:'sep',x:u.x,y:u.y,hex:(h=>h?{q:h.q,r:h.r,type:h.type}:null)(getNearestHexToPoint(u.x,u.y)),target:u.target,type:u.type});
      if(units.every(u=>getNearestHexToPoint(u.x,u.y)?.q>4)){arrived=(step+1)/10;break;}
     }
-    cases.push({shape,arrived,invalid,positions:units.map(u=>({type:u.type,x:u.x,y:u.y,q:getNearestHexToPoint(u.x,u.y)?.q,r:getNearestHexToPoint(u.x,u.y)?.r,target:u.target,path:u.target?u.path?.slice(0,4):null,order:u.orderTarget}))});
+    cases.push({shape,arrived,invalid,badPoints,positions:units.map(u=>({type:u.type,x:u.x,y:u.y,q:getNearestHexToPoint(u.x,u.y)?.q,r:getNearestHexToPoint(u.x,u.y)?.r,target:u.target,path:u.target?u.path?.slice(0,4):null,order:u.orderTarget}))});
    }
    return cases;
   });

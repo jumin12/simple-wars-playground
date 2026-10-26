@@ -102,11 +102,11 @@ const server = http.createServer((req, res) => {
     await page.evaluate(camera=>{gameData.camera=camera;draw();},selectionClick.oldCamera);
     console.log('unit click, group/batch selection, paused selection and silent city/enemy inspection passed');
     const purchaseBalance=await page.evaluate(()=>({
-      units:Object.fromEntries(['light','marine','heavy','ship'].map(type=>[type,getUnitCost(type)])),
+      units:Object.fromEntries(['light','marine','heavy','ship','transport'].map(type=>[type,getUnitCost(type)])),
       buildings:{factory:WOD_PRICE_FACTORY,harbor:WOD_PRICE_HARBOR,farm:WOD_PRICE_FARM,fort:WOD_PRICE_FORT,bridge:WOD_PRICE_BRIDGE},
       times:WOD_PRODUCTION_SECONDS,campaign:WOD_ROGUE_UNIT_COSTS,
       researchDoubled:wodRogueResearchNextCost({research:{treasury:0}},'treasury')===WOD_ROGUE_RESEARCH.treasury.costs[0]*2,
-      gates:['light','marine','heavy','ship'].map(type=>{
+      gates:['light','marine','heavy','ship','transport'].map(type=>{
         let cost=getUnitCost(type),money=gameData.money,mp=gameData.manpower;
         gameData.money=cost.money-1;gameData.manpower=cost.manpower;let moneyGate=!canAffordUnit(1,type);
         gameData.money=cost.money;gameData.manpower=cost.manpower-1;let mpGate=!canAffordUnit(1,type);
@@ -114,10 +114,10 @@ const server = http.createServer((req, res) => {
         gameData.money=money;gameData.manpower=mp;return{type,moneyGate,mpGate,paid,zero};
       })
     }));
-    assert.deepEqual(purchaseBalance.units,{light:{money:1000,manpower:2000},marine:{money:1000,manpower:2000},heavy:{money:8000,manpower:2000},ship:{money:7600,manpower:10000}},'all money and manpower purchase costs doubled');
+    assert.deepEqual(purchaseBalance.units,{light:{money:1000,manpower:2000},marine:{money:1000,manpower:2000},heavy:{money:8000,manpower:2000},ship:{money:7600,manpower:10000},transport:{money:2000,manpower:1000}},'all money and manpower purchase costs doubled');
     assert.deepEqual(purchaseBalance.buildings,{factory:4000,harbor:2000,farm:2400,fort:3000,bridge:4000},'all structure costs doubled');
-    assert.deepEqual(purchaseBalance.times,{factory:60,harbor:60,farm:60,fort:60,bridge:60,light:15,marine:20,heavy:25,ship:30},'distinct unit timers with thirty-second maximum');
-    assert.deepEqual(purchaseBalance.campaign,{light:400,marine:520,heavy:960,ship:840},'campaign requisition costs doubled');
+    assert.deepEqual(purchaseBalance.times,{factory:60,harbor:60,farm:60,fort:60,bridge:60,light:15,marine:20,heavy:25,ship:30,transport:18},'distinct unit timers with thirty-second maximum');
+    assert.deepEqual(purchaseBalance.campaign,{light:400,marine:520,heavy:960,ship:840,transport:300},'campaign requisition costs doubled');
     assert(purchaseBalance.researchDoubled&&purchaseBalance.gates.every(g=>g.moneyGate&&g.mpGate&&g.paid&&g.zero),'prices enforced in resource gates and deductions');
     const production = await page.evaluate(() => {
       let g=gameData, c=g.cities.find(c=>c.owner===1); g.money=100000; g.manpower=100000;

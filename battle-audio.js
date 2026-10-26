@@ -91,7 +91,7 @@
   async function acknowledge(era,units,action){
     if(!setEra(era)||scene?.selectionEnabled===false||document.hidden||muted||volume===0)return false;
     let counts={};
-    for(let unit of units||[])if(['light','marine','heavy','ship'].includes(unit.type))counts[unit.type]=(counts[unit.type]||0)+1;
+    for(let unit of units||[]){const type=unit.type==='transport'?'ship':unit.type;if(['light','marine','heavy','ship'].includes(type))counts[type]=(counts[type]||0)+1;}
     let type=Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
     const now=performance.now();
     if(!type||now-(action==='move'?lastMove:lastSelection)<(action==='move'?130:180))return false;

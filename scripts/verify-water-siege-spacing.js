@@ -96,7 +96,7 @@ const server=http.createServer((req,res)=>{
    }
    return rows;
   });console.log('routes',JSON.stringify(results.routes));
-  for(const r of results.routes){assert(r.assigned&&r.arrived&&!r.accidentalPermission&&!r.accidentalChord,JSON.stringify(r));assert(r.kind==='detour'?r.wetTicks===0:r.wetTicks>0,JSON.stringify(r));}
+  for(const r of results.routes){if(r.owner===2&&r.kind!=='detour'){assert(r.wetTicks===0&&!r.arrived,'AI infantry waits for safe access rather than swimming');continue;}assert(r.assigned&&r.arrived&&!r.accidentalPermission&&!r.accidentalChord,JSON.stringify(r));assert(r.kind==='detour'?r.wetTicks===0:r.wetTicks>0,JSON.stringify(r));}
   results.spacing=await page.evaluate(()=>{
    const rows=[];
    for(const kind of ['adjacentCenters','touchingFootprints','separated']) {
