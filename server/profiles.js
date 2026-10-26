@@ -25,13 +25,14 @@ const ANCIENT_CIV_PACK_IDS = Object.keys(ANCIENT_CIV_PACKS);
 const ANCIENT_CIV_VARIANT_IDS = ANCIENT_CIV_PACK_IDS.flatMap((id) => ANCIENT_CIV_PACKS[id].variants);
 
 const PURCHASABLE_SKINS = new Set([
-  'napoleonic', 'medieval', 'ancient',
+  'napoleonic', 'medieval', 'ancient', 'atlasUnits',
   'civRome', 'civCarthage', 'civGaul', 'civEgypt', 'civMacedon', 'civSparta',
   'usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china',
   'ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina',
 ]);
 
 const SHOP_VISUAL_IDS = new Set([
+  'map_atlas_hd',
   'viz_frontline_dotted', 'viz_frontline_double', 'viz_frontline_dashed', 'viz_frontline_dashdot',
   'viz_frontline_thick', 'viz_frontline_glow',
   'viz_arrow_dotted', 'viz_arrow_line', 'viz_arrow_dashed', 'viz_arrow_chevron',
@@ -586,7 +587,7 @@ function shopPurchase(playerId, req) {
   } else if (kind === 'skin_bulk') {
     const section = String(req.section || '').trim();
     const sections = {
-      standard: ['napoleonic', 'medieval', 'ancient'],
+      standard: ['napoleonic', 'medieval', 'ancient', 'atlasUnits'],
       ancientCiv: ANCIENT_CIV_PACK_IDS.slice(),
       countryballs: ['usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china'],
       ruse: ['ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina'],

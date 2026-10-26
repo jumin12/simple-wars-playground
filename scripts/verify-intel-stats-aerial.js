@@ -8,7 +8,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+(req
  try {
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
   await page.evaluate(()=>{
-   setGameSpeed(0,true);wodDismissChangelogPopup();
+   setGameSpeed(0,true);wodDismissChangelogPopup();gameData.ownedShopVisuals={...gameData.ownedShopVisuals,map_atlas_hd:true};
    window.intelFixture=()=>{
     WOD.makeBlankMap(30);gameState='PLAYING';gameData.menuAttractMode=false;gameData.mp={enabled:false};gameData._campaignRun=null;gameData.entities=[];gameData.cities=[];gameData.forts=[];gameData.bridges=[];gameData.constructionJobs=[];gameData._factionIntel=null;gameData._fogVisible=null;gameData._fogExplored=null;gameData._fogCanvasDirty=true;gameData._battleLedger=null;gameData._matchReadyForEndChecks=false;gameData.aiTaskForces={};gameData._aiDefenseByOwner={};gameData._aiContactByOwner={};gameData.alliances=[];gameData.aiStrategySerial=1;
     for(const h of gameData.hexList){h.type='grass';h.cityId=null;h.owner=h.q<0?1:2;}
