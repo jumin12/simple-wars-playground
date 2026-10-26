@@ -6218,7 +6218,11 @@
             top: 100px;
             left: 50%;
             transform: translateX(-50%);
-            background-color: rgba(231, 76, 60, 0.9);
+            width: max-content;
+            max-width: min(620px, calc(100vw - 28px));
+            box-sizing: border-box;
+            text-align: center;
+            background-color: rgba(180, 55, 42, 0.96);
             color: white;
             padding: 10px 20px;
             border-radius: 5px;
@@ -6226,6 +6230,8 @@
             z-index: 70;
             pointer-events: none;
         }
+        .wod-toast-note[data-tone="success"] { background: #205642f5; border: 1px solid #6ac69b; }
+        .wod-toast-note[data-tone="info"] { background: #183747f5; border: 1px solid #79a7bc; }
         #escMenu:not(.hidden) ~ .wod-toast-note,
         body.wod-esc-open .wod-toast-note,
         body.wod-esc-open #wodEndCountdownBanner,
@@ -11593,7 +11599,8 @@
                     <p class="esc-help-prose">All towns start empty. Generated towns have at least one non-urban cell between their footprints. Buildings, forts and bridges take <strong>60 seconds</strong>; mobilization takes <strong>15 seconds for infantry</strong>, <strong>20 for marines</strong>, <strong>25 for heavy units</strong>, and <strong>30 for ships</strong>, including campaign reinforcements. A small circle beside the city counts down to completion, then the arriving unit plays its deployment animation. Each town handles one order at a time. Pausing stops progress. <strong>Player and AI towns cannot recruit or complete production while under attack:</strong> combat, hostile troops on any town cell, or hostile control of part of the town pauses the queue until the threat clears. Paid progress is preserved. In campaigns, unit buttons call existing <strong>reserve reinforcements</strong> without charging money or manpower again. Undeployed reserves stay safe between battles.</p>
                 </div>
                 <div class="esc-help-block">
-                    <h4>Encirclement and marine water supply</h4>
+                    <h4>Supply and the 10-second attrition timer</h4>
+                    <p class="esc-help-prose"><strong>10-second grace period:</strong> a unit must remain out of supply for ten full seconds of game time before supply attrition damages it. A yellow countdown appears above the unit; its effects page shows the remaining time. Restoring supply or boarding a transport resets the clock. Pausing stops the timer; 2× and 3× advance game time faster. Healing is blocked while out of supply, including during the countdown. This rule is identical for your troops and the AI. Ships and marines are exempt from water attrition; ordinary troops swimming without a transport are not protected by supply ships.</p>
                     <p class="esc-help-prose">Starting armies deploy on friendly land connected to an owned town. About 20% cover the supplied border evenly and 80% start near towns, with armor in the rear. Empty offshore holdings count toward balanced land ownership but receive no starting land troops.</p>
                     <p class="esc-help-prose">Every <strong>friendly town supplies its connected friendly land</strong>, including a captured enemy town. A surrounded pocket containing a friendly town remains supplied: its units take no encirclement damage and can recover when safe. Units lose land supply only when they have no cardinal land connection to any friendly town. These supply, warning and attrition rules apply equally to player and enemy armies, including when hostile territory is captured underneath a unit. Such pockets are marked <strong>encircled</strong>. Units receive <strong>ten uninterrupted simulation seconds out of supply</strong> before taking <strong>3.5% max HP attrition per second</strong>; they cannot heal during this grace period. Regaining city or supply-ship supply, or boarding a transport, resets the countdown. Moving between unsupplied land and water does not reset it. The warning above each unit and its effects page show the time remaining. Map edges and neutral borders do not supply a townless pocket. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though it had a town connection. Infantry and armor in the same coastal pocket still need a friendly town. Forts only halve unsupplied attrition. Active fighting at a town can pause production even while it supplies its territory.</p>
                     <p class="esc-help-prose"><strong>Island landings:</strong> landing on an island without a town captures only the normal area around your units. Its remaining coastal territory does not surrender automatically or count as an encircled land pocket. Fully surrounded inland remnants can still transfer. Infantry and armor on a townless island still need a friendly town connection for supply; marines retain their water-supply exception.</p>
@@ -12724,6 +12731,17 @@
 
         const WOD_CHANGELOG = [
             {
+                at: '2026-10-26T15:40:00-04:00',
+                title: 'Smoother background work and accurate build notices',
+                items: [
+                    'Removed repeated island connectivity floods from naval planning. Physical coast and land-component caches refresh after terrain/bridge changes; ownership and fog knowledge remain current.',
+                    'Pathfinding shares a bounded CPU allowance across each rendered frame instead of multiplying work at faster speeds. AI movement requests coalesce per unit and apply across frames. Trade convoy route attempts run across frames without repeating city pairs and reuse validated paths. Bridge candidates receive cheap strategic ranking before footprint validation advances in short slices; validation no longer repeats for every candidate in one long economy pulse. Finishing a bridge preserves valid army routes and refreshes waiting units gradually. City-name drawing uses bounded cached sprites.',
+                    'Unfunded fort orders now report the required money and your balance. Fort placement shares one precise reason, and pending forts/bridges give duplicate-construction warnings. Town build messages distinguish unavailable resources, prerequisites, busy queues, existing structures and sieges.',
+                    'Queued town construction no longer claims the building is finished. Informational queue notices and green completion notices replace misleading red success messages. Notifications stay readable on phones and replace overlapping messages.',
+                    'Help now has a dedicated Supply and the 10-second attrition timer section, explaining game-time counting, pause and faster speeds, resupply/boarding resets, healing restrictions and the same rules for player and AI.'
+                ]
+            },
+            {
                 at: '2026-10-26T14:25:00-04:00',
                 title: 'Ocean invasions, steady camera panning and attrition reports',
                 items: [
@@ -13792,13 +13810,7 @@
                 }
                 return;
             }
-            if(wodApplyBuildAtCityForOwner(city, mode, lo)) {
-                showNotification(
-                    mode === 'factory' ? ('Factory built in ' + (city.name || 'town') + '.')
-                        : mode === 'farm' ? ('Farm built in ' + (city.name || 'town') + '.')
-                        : ('Harbor built in ' + (city.name || 'town') + '.')
-                );
-            }
+            if(!wodApplyBuildAtCityForOwner(city,mode,lo))showNotification(wodExplainBuildBlockReason(mode,lo,city));
             refreshWodCitiesPanel();
         }
         function wodInitCitiesPanelClicks() {
@@ -14195,7 +14207,7 @@
                 showEscSection(opts.defaultSection || 'helpSection');
         }
 
-        const WOD_ESC_HELP_VERSION = '7';
+        const WOD_ESC_HELP_VERSION = '8';
 
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
@@ -14817,7 +14829,7 @@
             gameData.unitSpatialGrid=buildUnitSpatialGrid(cs);
         }
         function wodBeginSimPfBudget(entCount) {
-            wodPfSpentMs = 0;
+            wodPfSpentMs = 0;gameData._wodBridgeSearchFrameDone=false;gameData._wodAiRouteFrameDone=false;gameData._wodTradeSpawnFrameDone=false;gameData._wodBridgeRouteFrameDone=false;
             let n = entCount | 0;
             let mapCells = (gameData && gameData.hexList) ? gameData.hexList.length : 0;
             // Larger maps need a bit more PF headroom so columns don't fall back to
@@ -14826,9 +14838,10 @@
             if(mapCells > 12000) wodPfBudgetMs *= 1.25;
             else if(mapCells > 7000) wodPfBudgetMs *= 1.12;
             if(wodUsesVisualViewportLayout()) wodPfBudgetMs *= 0.78;
-            if((gameData._wodPlayerMovingN || 0) > 0) wodPfBudgetMs *= 2.4;
-            let spd = gameData && gameData.speed > 0 ? gameData.speed : 1;
-            wodPfBudgetMs *= Math.min(3, spd);
+            if((gameData._wodPlayerMovingN || 0) > 0) wodPfBudgetMs *= 1.2;
+            // This is CPU time per rendered frame, not simulation time. Fast-forward
+            // must not triple the work or refresh this budget for each substep.
+            wodPfBudgetMs = Math.min(wodUsesVisualViewportLayout()?4:6.5,wodPfBudgetMs);
         }
         function wodCanSpendPf() {
             return wodPfSpentMs < wodPfBudgetMs;
@@ -33803,7 +33816,7 @@
             return false;
         }
 
-        function initConvoyRoute(convoy, destCity) {
+        function initConvoyRoute(convoy, destCity, validatedPath) {
             convoy.orderTarget = {x: destCity.x, y: destCity.y, isCity: true};
             let destHex = resolveTradeConvoyPathHex(convoy, destCity);
             let startHex = getNearestWalkableHexForUnit(convoy, convoy.x, convoy.y);
@@ -33812,7 +33825,7 @@
                 convoy.target = {x: destCity.x, y: destCity.y, isCity: true, pathPrepared: true};
                 return;
             }
-            let path = findPathAroundTerrain(convoy, destHex, startHex);
+            let path = validatedPath || findPathAroundTerrain(convoy, destHex, startHex);
             if(path.length <= 1 && !convoy.convoySeaRoute) {
                 let alt = wodTryPortalBridgeMarchPath(convoy, startHex, destHex);
                 if(alt.length > 1) path = alt;
@@ -33836,69 +33849,41 @@
             }
         }
 
-        function trySpawnLandTradeConvoysForOwner(owner) {
-            let cities = gameData.cities.filter(c => c.owner === owner);
-            if(cities.length < 2) return;
-            let sources = cities.filter(c => !cityCurrentlyHasOutboundConvoy(c, false));
-            if(sources.length === 0) return;
-            let attempts = owner === 1 ? 12 : 7;
-            while(attempts-- > 0) {
-                let from = sources[Math.floor(Math.random() * sources.length)];
-                let to = cities[Math.floor(Math.random() * cities.length)];
-                if(from === to) continue;
-                let probe = {
-                    type: 'convoy', owner: owner, convoySeaRoute: false, x: from.x, y: from.y
-                };
-                let destHex = gameData.hexes[`${to.q},${to.r}`] || getNearestHexToPoint(to.x, to.y);
-                let startHex = getNearestWalkableHexForUnit(probe, from.x, from.y);
-                if(startHex && destHex && findPathAroundTerrain(probe, destHex, startHex).length <= 1) continue;
-                let convoy = {
-                    type: 'convoy', owner: owner, convoySeaRoute: false, name: generateUnitName('convoy', false, owner),
-                    x: from.x, y: from.y, target: null, path: null, orderTarget: null,
-                    hp: 50, maxHp: 50, speed: 20, damage: 0, range: 0, attackCooldown: 10,
-                    selected: false, shake: 0, radius: 6, tradeValue: 300,
-                    convoyFromKey: convoyCityKey(from)
-                };
-                gameData.entities.push(convoy);
-                initConvoyRoute(convoy, to);
-                return;
+        function wodQueueTradeConvoySpawn(owner,sea) {
+            const cities=gameData.cities.filter(c=>c.owner===owner&&(!sea||c.hasHarbor));if(cities.length<2)return;
+            const work=gameData._tradeSpawnWork||(gameData._tradeSpawnWork=new Map()),key=owner+':'+Number(sea);if(work.has(key))return;
+            const sources=cities.filter(c=>!cityCurrentlyHasOutboundConvoy(c,sea));if(!sources.length)return;
+            const limit=owner===1?(sea?14:12):(sea?8:7),pairs=[],seen=new Set();
+            for(let i=0;i<limit*4&&pairs.length<limit;i++) {
+                const from=sources[Math.floor(Math.random()*sources.length)],to=cities[Math.floor(Math.random()*cities.length)];if(from===to)continue;
+                const pair=convoyCityKey(from)+'>'+convoyCityKey(to);if(seen.has(pair))continue;seen.add(pair);pairs.push({from,to});
             }
+            if(pairs.length)work.set(key,{owner,sea,hexes:gameData.hexes,pairs,index:0});
         }
-
-        function trySpawnSeaTradeConvoysForOwner(owner) {
-            let harbors = gameData.cities.filter(c => c.owner === owner && c.hasHarbor);
-            if(harbors.length < 2) return;
-            let sources = harbors.filter(c => !cityCurrentlyHasOutboundConvoy(c, true));
-            if(sources.length === 0) return;
-            let attempts = owner === 1 ? 14 : 8;
-            while(attempts-- > 0) {
-                let from = sources[Math.floor(Math.random() * sources.length)];
-                let to = harbors[Math.floor(Math.random() * harbors.length)];
-                if(from === to) continue;
-                let wFrom = findSpawnHex('ship', from, owner);
-                let wTo = findSpawnHex('ship', to, owner);
-                if(!wFrom || !wTo) continue;
-                let probe = {
-                    type: 'convoy', owner: owner, convoySeaRoute: true, x: wFrom.x, y: wFrom.y
-                };
-                let startHex = getNearestWalkableHexForUnit(probe, wFrom.x, wFrom.y);
-                if(!startHex || findPathAroundTerrain(probe, wTo, startHex).length <= 1) continue;
-                let convoy = {
-                    type: 'convoy', owner: owner, convoySeaRoute: true, name: generateUnitName('convoy', true, owner),
-                    x: wFrom.x, y: wFrom.y, target: null, path: null, orderTarget: null,
-                    hp: 50, maxHp: 50, speed: 20, damage: 0, range: 0, attackCooldown: 10,
-                    selected: false, shake: 0, radius: 6, tradeValue: 300,
-                    convoyFromKey: convoyCityKey(from)
-                };
-                gameData.entities.push(convoy);
-                initConvoyRoute(convoy, to);
-                return;
+        function trySpawnLandTradeConvoysForOwner(owner) {wodQueueTradeConvoySpawn(owner,false);}
+        function trySpawnSeaTradeConvoysForOwner(owner) {wodQueueTradeConvoySpawn(owner,true);}
+        function trySpawnTradeConvoysForOwner(owner) {trySpawnLandTradeConvoysForOwner(owner);trySpawnSeaTradeConvoysForOwner(owner);}
+        function wodStepTradeConvoySpawns() {
+            const work=gameData._tradeSpawnWork;
+            if(!work?.size||gameData._wodTradeSpawnFrameDone||!wodCanSpendPf())return;
+            gameData._wodTradeSpawnFrameDone=true;
+            const key=work.keys().next().value,job=work.get(key);work.delete(key);
+            if(job.hexes!==gameData.hexes)return;
+            const {owner,sea}=job,{from,to}=job.pairs[job.index++];
+            const valid=from.owner===owner&&to.owner===owner&&(!sea||from.hasHarbor&&to.hasHarbor)&&!cityCurrentlyHasOutboundConvoy(from,sea);
+            if(valid) {
+                const origin=sea?findSpawnHex('ship',from,owner):from,destination=sea?findSpawnHex('ship',to,owner):gameData.hexes[`${to.q},${to.r}`];
+                if(origin&&destination) {
+                    const probe={type:'convoy',owner,convoySeaRoute:sea,x:origin.x,y:origin.y},start=getNearestWalkableHexForUnit(probe,origin.x,origin.y);
+                    const path=start?findPathAroundTerrain(probe,destination,start):[];
+                    if(path.length>1&&wodPathReachesTarget(path,destination)) {
+                        const convoy={type:'convoy',owner,convoySeaRoute:sea,name:generateUnitName('convoy',sea,owner),x:origin.x,y:origin.y,target:null,path:null,orderTarget:null,
+                            hp:50,maxHp:50,speed:20,damage:0,range:0,attackCooldown:10,selected:false,shake:0,radius:6,tradeValue:300,convoyFromKey:convoyCityKey(from)};
+                        gameData.entities.push(convoy);initConvoyRoute(convoy,to,path);return;
+                    }
+                }
             }
-        }
-
-        function trySpawnTradeConvoysForOwner(owner) {
-            trySpawnLandTradeConvoysForOwner(owner);
-            trySpawnSeaTradeConvoysForOwner(owner);
+            if(job.index<job.pairs.length)work.set(key,job);
         }
 
         /** While exchanging fire at weapon range, move at one-third speed (orders are no longer halted). */
@@ -40735,10 +40720,10 @@
             return out;
         }
 
-        function wodAiScoreBridgeSite(site, ownerId) {
+        function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
             if(!site) return -1e9;
             let br = { x: site.x, y: site.y, angle: site.angle, w: site.w, h: site.h };
-            if(wodBridgePlacementError(br, ownerId)) return -1e9;
+            if(!rankOnly&&wodBridgePlacementError(br, ownerId)) return -1e9;
             let hr = gameData.hexRadius || 20;
             let tilePx = hr * 1.35;
             let score = 36;
@@ -40788,39 +40773,40 @@
             if(aiBridges >= bridgeCap) return false;
             let now = performance.now();
             if(!gameData._aiBridgeCooldown) gameData._aiBridgeCooldown = {};
+            if(gameData._aiBridgeSearches?.has(ownerId))return false;
             // First useful crossing can start immediately; later attempts are spaced.
             if(gameData._aiBridgeCooldown[ownerId]&&now-gameData._aiBridgeCooldown[ownerId]<65000)return false;
             // Cheap gate before the site search (still rare, but more often when useful).
             if(Math.random() > 0.55) return false;
             let sites = wodAiCollectBridgeCandidateSites(ownerId);
             if(!sites.length) return false;
-            let best = null,
-                bestScore = 0;
-            const MIN_SCORE = 96;
-            let limit = Math.min(sites.length, 36);
-            for(let si = 0; si < limit; si++) {
-                let sc = wodAiScoreBridgeSite(sites[si], ownerId);
-                if(sc > bestScore) {
-                    bestScore = sc;
-                    best = sites[si];
-                }
-            }
-            if(!best || bestScore < MIN_SCORE) return false;
-            // Try the best few sites — footprint validation can reject a high-scoring candidate.
-            let ranked = sites
-                .map(s => ({ s, sc: wodAiScoreBridgeSite(s, ownerId) }))
-                .filter(x => x.sc >= MIN_SCORE)
-                .sort((a, b) => b.sc - a.sc)
-                .slice(0, 3);
-            for(let ri = 0; ri < ranked.length; ri++) {
-                let site = ranked[ri].s;
-                if(placeBridgeAt(ownerId, site.x, site.y, site.angle, site.w, site.h, { suppressNotes: true })) {
-                    gameData._aiBridgeCooldown[ownerId] = now;
+            // Cheap strategic ranking first. Footprint checks used to run twice for
+            // every candidate in one economy pulse, freezing a frame for 80ms+.
+            const ranked=sites.map(site=>({site,score:wodAiScoreBridgeSite(site,ownerId,true)})).filter(v=>v.score>=96).sort((a,b)=>b.score-a.score);
+            if(!ranked.length){gameData._aiBridgeCooldown[ownerId]=now-60000;return false;}
+            const searches=gameData._aiBridgeSearches||(gameData._aiBridgeSearches=new Map());
+            searches.set(ownerId,{owner:ownerId,hexes:gameData.hexes,revision:gameData._wodPfVer||0,ranked,index:0});
+            return false;
+        }
+        function wodStepAiBridgeSearches() {
+            if(gameData._wodPfFrameActive&&gameData._wodBridgeSearchFrameDone)return false;
+            gameData._wodBridgeSearchFrameDone=true;
+            const searches=gameData._aiBridgeSearches;if(!searches?.size)return false;
+            const owner=searches.keys().next().value,work=searches.get(owner);
+            searches.delete(owner); // Rotate factions so one hard crossing cannot starve others.
+            if(work.hexes!==gameData.hexes||work.revision!==(gameData._wodPfVer||0)||wodPlayerTreasury(owner)<WOD_PRICE_BRIDGE+WOD_PRICE_LIGHT*4||
+                (gameData.constructionJobs||[]).some(j=>j.owner===owner&&j.mode==='bridge'))return false;
+            const start=performance.now(),budget=wodUsesVisualViewportLayout()?1.2:2;
+            do {
+                const site=work.ranked[work.index++]?.site;if(!site)break;
+                if(site.shoreA.owner===owner&&placeBridgeAt(owner,site.x,site.y,site.angle,site.w,site.h,{suppressNotes:true})) {
+                    gameData._aiBridgeCooldown[owner]=performance.now();
+                    const plan=gameData._aiEconomyPlans?.[owner];if(plan)plan.lastBuilding=gameData._aiEconomyClock||0;
                     return true;
                 }
-            }
-            // Still cool down briefly after a failed search so we don't thrash every pulse.
-            gameData._aiBridgeCooldown[ownerId] = now - 60000;
+            }while(work.index<work.ranked.length&&performance.now()-start<budget);
+            if(work.index<work.ranked.length)searches.set(owner,work);
+            else gameData._aiBridgeCooldown[owner]=performance.now()-60000;
             return false;
         }
 
@@ -41190,7 +41176,10 @@
             gameData.cityCombatBlockForProd = gameData._cityCombatStagingKeys instanceof Set ? gameData._cityCombatStagingKeys : new Set();
             gameData._cityCombatStagingKeys = new Set();
             wodUpdateConstruction(dt);
-            wodBeginSimPfBudget(gameData.entities.length);
+            if(!gameData._wodPfFrameActive)wodBeginSimPfBudget(gameData.entities.length);
+            wodDrainAiMoveQueue();
+            wodStepTradeConvoySpawns();
+            wodStepBridgeRouteRefresh();
             wodRefreshCombatCamBounds();
             let movingN = 0;
             let playerMovingN = 0;
@@ -41422,6 +41411,7 @@
 
             // Units
             wodUpdateTransports(dt);
+            wodStepAiBridgeSearches();
             updateAiStrategy(dt);
             if(!gameData.mp?.enabled||gameData.mp.isHost)wodAiSweepTownCells(dt);
             if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) updateEncirclements(dt);
@@ -51922,6 +51912,23 @@
             ctx.restore();
         }
 
+        const wodCityNameSpriteCache=new Map();
+        function wodDrawCityName(ctx,city,gfxLite) {
+            const text=city.name||'',color=city.owner===0?'#bdc3c7':factionColors[city.owner],font=gfxLite?'bold 12px Arial':'bold 16px Arial';
+            const scale=Math.min(4,Math.max(1,Math.ceil((window.devicePixelRatio||1)*(gameData.camera.zoom||1))));
+            const key=JSON.stringify([text,color,font,scale]);let sprite=wodCityNameSpriteCache.get(key);
+            if(!sprite){
+                const c=document.createElement('canvas'),g=c.getContext('2d');g.font=font;
+                const w=Math.ceil(g.measureText(text).width)+18,h=gfxLite?30:38;c.width=w*scale;c.height=h*scale;
+                g.scale(scale,scale);g.font=font;g.fillStyle=color;g.textAlign='center';g.textBaseline='middle';
+                if(!gfxLite){g.shadowColor='black';g.shadowBlur=4*scale;}
+                g.fillText(text,w/2,h/2);sprite={canvas:c,w,h};
+                if(wodCityNameSpriteCache.size>=192)wodCityNameSpriteCache.delete(wodCityNameSpriteCache.keys().next().value);
+                wodCityNameSpriteCache.set(key,sprite);
+            }
+            ctx.drawImage(sprite.canvas,city.x-sprite.w/2,city.y-10-sprite.h/2,sprite.w,sprite.h);
+        }
+
         function draw() {
             if(wodFogActive()&&performance.now()>(gameData._fogViewNextAt||0)) {
                 gameData._fogViewNextAt=performance.now()+220;wodRefreshFogVision(.23);
@@ -52070,16 +52077,7 @@
                     }
 
                     if(showCityNames) {
-                        ctx.font = gfxLite ? 'bold 12px Arial' : 'bold 16px Arial';
-                        ctx.fillStyle = city.owner === 0 ? '#bdc3c7' : factionColors[city.owner];
-                        ctx.textAlign = 'center';
-                        ctx.textBaseline = 'middle';
-                        if(!gfxLite) {
-                            ctx.shadowColor = "black";
-                            ctx.shadowBlur = 4;
-                        }
-                        ctx.fillText(city.name, city.x, city.y - 10);
-                        ctx.shadowBlur = 0;
+                        wodDrawCityName(ctx,city,gfxLite);
 
                         if(showCities && (city.hasFactory || city.hasHarbor || city.hasFarm)) drawWodCityStructureIcons(ctx, city, gfxLite);
                     } else if(showCities && !gfxLite) {
@@ -52586,6 +52584,8 @@
                     let lastUp = gameData._lastUpdateMs || 0;
                     // Heavy battles: one full-dt step instead of stacking updates (3x death spiral).
                     let forceOne = entNLoop > 260 || lastUp > 11;
+                    wodBeginSimPfBudget(entNLoop);gameData._wodPfFrameActive=true;
+                    try {
                     if(forceOne || simDt <= maxSingleStep) {
                         let t0 = performance.now();
                         wodDevMark('update');
@@ -52609,6 +52609,7 @@
                         }
                         gameData._lastUpdateMs = (performance.now() - t0) / Math.max(1, steps);
                     }
+                    } finally {gameData._wodPfFrameActive=false;}
                 } else {
                     gameData._frameSimDt = 0;
                     // UI overlays pause sim — don't accumulate a catch-up debt.
@@ -52977,8 +52978,13 @@
         }
 
         /** AI move orders: snap to walkable land/bridge and run full pathfinding (never raw water pixels). */
-        function wodAiMoveUnitToward(unit, x, y, holdingOpt) {
+        function wodAiMoveUnitToward(unit, x, y, holdingOpt,fromQueue=false) {
             if(!unit || unit.hp <= 0) return false;
+            if(gameData._wodPfFrameActive&&!fromQueue&&!wodMpIsHumanOwner(unit.owner)) {
+                const queue=gameData._aiMoveQueue||(gameData._aiMoveQueue=new Map());
+                queue.set(unit,{unit,owner:unit.owner,x,y,holding:holdingOpt,hexes:gameData.hexes});
+                return true;
+            }
             if(wodIsNavalUnit(unit)) {
                 // Always pathfind on open water — never straight-line across land.
                 let reach = findReachableOrderHex(unit, x, y);
@@ -53030,6 +53036,19 @@
             // left an orderless unit that the keep-order logic could park forever.
             unit.holding = ok ? !!holdingOpt : false;
             return ok;
+        }
+
+        function wodDrainAiMoveQueue() {
+            const queue=gameData._aiMoveQueue;if(!queue?.size||gameData._wodAiRouteFrameDone)return;
+            gameData._wodAiRouteFrameDone=true;
+            // Coalesce orders per unit and apply one complete route per frame. Units
+            // retain their current route while waiting instead of stopping or losing it.
+            for(const [unit,order] of queue) {
+                queue.delete(unit);
+                if(order.hexes!==gameData.hexes||unit.owner!==order.owner||unit.hp<=0||wodMpIsHumanOwner(unit.owner)||
+                    !gameData.entities.includes(unit)||unit.boardTransportUid||unit._navalAssaultUntil>wodAiOperationTime())continue;
+                wodAiMoveUnitToward(unit,order.x,order.y,order.holding,true);break;
+            }
         }
 
         function wodAiMoveUnitTowardHex(unit, hex, holdingOpt, jitterScale) {
@@ -54481,14 +54500,14 @@
             }
         }
 
-        function showNotification(msg) {
-            // Never flash red toasts over the pause menu (they read like a defeat popup).
-            if(wodEscMenuOpen() || wodMissionPopupOpen()) return;
-            let el = document.createElement('div');
-            el.className = 'wod-toast-note';
-            el.innerText = msg;
-            document.body.appendChild(el);
-            setTimeout(() => { if(el && el.parentNode) el.remove(); }, 2000);
+        let wodToastTimer=0;
+        function showNotification(msg,tone='warning') {
+            if(wodEscMenuOpen() || wodMissionPopupOpen() || !msg) return;
+            // Repeated errors used to stack directly on top of one another.
+            let el=document.querySelector('.wod-toast-note');
+            if(!el){el=document.createElement('div');el.className='wod-toast-note';document.body.appendChild(el);}
+            el.dataset.tone=tone;el.setAttribute('role',tone==='warning'?'alert':'status');el.textContent=msg;
+            clearTimeout(wodToastTimer);wodToastTimer=setTimeout(()=>el.remove(),3500);
         }
 
         function renameSelected() {
@@ -55099,25 +55118,24 @@
             let rad = spacing * tiles;
             return rad * rad;
         }
+        function wodFortPlacementError(hex,owner,opts={}) {
+            if(!hex||!owner)return 'Choose an owned land tile for the fort.';
+            if(hex.owner!==owner)return 'You can only fortify your own territory.';
+            if(!hexEligibleForFortTerrain(hex,owner))return 'Forts require open land outside water, mountains and town centers.';
+            if(fortAtHexKey(hex.q,hex.r))return 'There is already a fort here.';
+            if(!opts.editor&&!opts.prepaid) {
+                if((gameData.constructionJobs||[]).some(j=>j.mode==='fort'&&j.q===hex.q&&j.r===hex.r))return 'A fort is already under construction here.';
+                if(wodPlayerTreasury(owner)<WOD_PRICE_FORT)return wodExplainBuildBlockReason('fort',owner,null);
+            }
+            return null;
+        }
         function placeFortAtHex(hex, owner, opts) {
             opts = opts || {};
             if(!gameData.forts) gameData.forts = [];
             let noisy = !opts.suppressNotes;
-            if(!hex || !owner) return false;
-            if(!hexEligibleForFortTerrain(hex, owner)) {
-                if(noisy) showNotification('Forts belong on owned open ground (no mountains, oceans, or city cores).');
-                return false;
-            }
-            if(fortAtHexKey(hex.q, hex.r)) {
-                if(noisy) showNotification('There is already a fort on this hex.');
-                return false;
-            }
-            if(!opts.editor && !opts.prepaid) {
-                if((gameData.constructionJobs || []).some(j => j.mode === 'fort' && j.q === hex.q && j.r === hex.r)) return false;
-                if(!hexEligibleForFortPlacementForOwner(hex, owner)) {
-                    if(noisy) showNotification('Not enough $ for this fort.');
-                    return false;
-                }
+            const error=wodFortPlacementError(hex,owner,opts);
+            if(error){if(noisy)showNotification(error);return false;}
+            if(!opts.editor&&!opts.prepaid) {
                 wodDeductPlayerMoney(owner, WOD_PRICE_FORT);
                 return wodQueueProduction('fort', owner, { q: hex.q, r: hex.r, x: hex.x, y: hex.y });
             }
@@ -55161,6 +55179,7 @@
                 return true;
             }
             let lo = wodLocalPlayerOwner();
+            const error=wodFortPlacementError(hex,lo);if(error){showNotification(error);return true;}
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
                 if(wodMpSendCmd({ kind: 'build', mode: 'fort', hq: hex.q, hr: hex.r })) {
                     exitBuildPlacementMode();
@@ -55168,7 +55187,7 @@
                 }
             }
             if(attemptFortPlacementForOwner(hex, lo)) exitBuildPlacementMode();
-            else showNotification(hex.owner !== lo ? 'You can only fortify your own provinces.' : 'Cannot build that fort here.');
+
             return true;
         }
 
@@ -55197,7 +55216,7 @@
                 return false;
             }
             if(!opts.editor && !opts.prepaid) {
-                if((gameData.constructionJobs || []).some(j => j.mode === 'bridge' && Math.hypot(j.x - x, j.y - y) < Math.max(w, h))) return false;
+                if((gameData.constructionJobs || []).some(j => j.mode === 'bridge' && Math.hypot(j.x - x, j.y - y) < Math.max(w, h))){if(noisy)showNotification('A bridge is already under construction at this crossing.');return false;}
                 wodDeductPlayerMoney(owner, WOD_PRICE_BRIDGE);
                 return wodQueueProduction('bridge', owner, { x, y, angle, w, h });
             }
@@ -55209,18 +55228,23 @@
             gameData.bridges.push(br);wodBattleMetric(br.owner,'bridgesBuilt');
             wodRebuildBridgeHexIndex();
             if(!opts.editor) {
-                for(let ui = 0, el = gameData.entities.length; ui < el; ui++) {
-                    let u = gameData.entities[ui];
-                    if(!u || u.hp <= 0 || !wodUnitUsesLandBridges(u)) continue;
-                    if(u.path) u.path = null;
-                    if(u.target && u.target.pathPrepared) {
-                        u.target.pathPrepared = false;
-                        u._wodReplanLandUntil = performance.now() + 120;
-                    }
-                }
+                // Adding a crossing does not invalidate routes already in use. Clearing
+                // every army's path here caused a synchronized re-path spike at completion.
+                const refresh=gameData._bridgeRouteRefresh||(gameData._bridgeRouteRefresh=[]);
+                for(const u of gameData.entities)if(u&&u.hp>0&&wodUnitUsesLandBridges(u)&&u.orderTarget&&!u.path?.length&&
+                    (u._needsTransport||u.stuckTimer>.5||u.target?.landGreedy||u.target?.ampGreedy))refresh.push({unit:u,hexes:gameData.hexes});
             }
-            if(noisy) showNotification('Bridge built — troops cross it like open ground.');
+            if(noisy) showNotification('Bridge built — troops cross it like open ground.','success');
             return true;
+        }
+        function wodStepBridgeRouteRefresh() {
+            if(gameData._wodBridgeRouteFrameDone||!wodCanSpendPf())return;
+            const refresh=gameData._bridgeRouteRefresh;if(!refresh?.length)return;
+            gameData._wodBridgeRouteFrameDone=true;
+            while(refresh.length) {
+                const {unit,hexes}=refresh.shift();if(hexes!==gameData.hexes||unit.hp<=0||!unit.orderTarget||unit.boardTransportUid||!gameData.entities.includes(unit))continue;
+                replanUnitOrder(unit);break;
+            }
         }
         function tryApplyBridgeBuildAtWorld(worldPos) {
             let p = gameData.bridgePlacement;
@@ -55322,6 +55346,7 @@
         /** Human-readable reason a train/build action is blocked (money, MP, city requirements). */
         function wodExplainBuildBlockReason(mode, owner, city) {
             if(!mode) return 'That action is not available right now.';
+            if(city&&(!city.id||city.owner!==owner))return 'Choose one of your own towns.';
             if(city&&isCitySiegeBlockedForProduction(city))return 'This town is under attack — construction and mobilization pause until the siege clears.';
             if(city && wodCityProductionJob(city)) return 'This town is busy: ' + wodProductionLabel(wodCityProductionJob(city).mode) + ' · ' + Math.ceil(wodCityProductionJob(city).remaining) + 's remaining.';
             if(owner === 1 && gameData._campaignRun && ['light','marine','heavy','ship','transport','supply'].includes(mode)) {
@@ -55331,6 +55356,17 @@
             }
             let money = Math.floor(wodPlayerTreasury(owner) || 0);
             let mp = Math.floor(wodPlayerMpPool(owner) || 0);
+            if(!city&&['factory','farm','harbor'].includes(mode)) {
+                const towns=gameData.cities.filter(c=>c.id&&c.owner===owner),field={factory:'hasFactory',farm:'hasFarm',harbor:'hasHarbor'}[mode];
+                const price={factory:WOD_PRICE_FACTORY,farm:WOD_PRICE_FARM,harbor:WOD_PRICE_HARBOR}[mode],name=wodProductionLabel(mode).toLowerCase();
+                if(money<price)return 'Not enough money for a '+name+' — needs $'+price+' (you have $'+money+').';
+                if(!towns.length)return 'Capture a town before building a '+name+'.';
+                let available=towns.filter(c=>!c[field]);
+                if(!available.length)return 'All your towns already have a '+name+'.';
+                if(mode==='harbor') {available=available.filter(cityHasWaterNeighbor);if(!available.length)return 'Harbors require a coastal town with water next to it.';}
+                if(available.every(isCitySiegeBlockedForProduction))return 'All eligible towns are under attack. Construction resumes when the siege clears.';
+                if(available.filter(c=>!isCitySiegeBlockedForProduction(c)).every(c=>wodCityProductionJob(c)))return 'All eligible towns are busy. Wait for their current orders to finish.';
+            }
             if(mode === 'factory') {
                 if(city && city.hasFactory) return 'This town already has a factory.';
                 if(money < WOD_PRICE_FACTORY)
@@ -55350,11 +55386,13 @@
                 if(city && !cityHasWaterNeighbor(city)) return 'Harbors require water next to the town.';
                 return 'No coastal town can build a harbor right now.';
             }
-            if(mode === 'fort') return 'No usable ground for a fort right now.';
+            if(mode === 'fort') return money<WOD_PRICE_FORT
+                ? 'Not enough money for a fort — needs $'+WOD_PRICE_FORT+' (you have $'+money+').'
+                : 'No free owned land for a fort. Choose ground outside water, mountains and town centers.';
             if(mode === 'bridge') {
                 if(money < WOD_PRICE_BRIDGE)
                     return 'Not enough money for a bridge — needs $' + WOD_PRICE_BRIDGE + ' (you have $' + money + ').';
-                return 'Not enough money for a bridge.';
+                return 'Choose a clear water crossing with both bridge ends on land.';
             }
             let cost = getUnitCost(mode);
             let unitName = wodProductionLabel(mode).toLowerCase();
@@ -55392,15 +55430,17 @@
                 if(wodIsNavalType(mode) && c.hasHarbor) harborOk++;
                 if(mode === 'marine' && cityHasWaterNeighbor(c)) coastOk++;
                 let ut = mode;
-                if((mode !== 'heavy' || c.hasFactory) && (mode !== 'ship' || c.hasHarbor)
+                if((mode !== 'heavy' || c.hasFactory) && (!wodIsNavalType(mode) || c.hasHarbor)
                     && (mode !== 'marine' || cityHasWaterNeighbor(c)) && findSpawnHex(ut, c, owner))
                     clearOk++;
             }
+            const eligible=gameData.cities.filter(c=>c.id&&c.owner===owner&&(mode!=='heavy'||c.hasFactory)&&(!wodIsNavalType(mode)||c.hasHarbor)&&(mode!=='marine'||cityHasWaterNeighbor(c)));
+            if(eligible.length&&eligible.every(c=>wodCityProductionJob(c)))return 'All eligible towns are busy. Wait for their current orders to finish.';
             if(!owned) return 'You need a town before you can train ' + unitName + '.';
             if(mode === 'heavy' && !factoryOk) return 'Armor requires a factory — build one in a town first.';
             if(wodIsNavalType(mode) && !harborOk) return 'Ships require a harbor — build one at a coastal town first.';
             if(mode === 'marine' && !coastOk) return 'Marines need a coastal town (water adjacent).';
-            if(blocked && !clearOk) return 'All eligible towns are under combat or encircled — training is paused.';
+            if(blocked && !clearOk) return 'All eligible towns are under attack — mobilization resumes when the siege clears.';
             if(!clearOk) return 'No clear spawn area near your towns for ' + unitName + '.';
             return 'No towns can train ' + unitName + ' right now.';
         }
@@ -55420,7 +55460,7 @@
             let total = WOD_PRODUCTION_SECONDS[mode];
             if(!total) return false;
             gameData.constructionJobs.push(Object.assign({ mode, owner, remaining: total, total }, location));
-            if(owner === wodLocalPlayerOwner()) showNotification(wodProductionLabel(mode) + (location.rosterId ? ' reinforcements called · ' : ' queued · ') + total + 's');
+            if(owner === wodLocalPlayerOwner()) showNotification(wodProductionLabel(mode) + (location.rosterId ? ' reinforcements called · ' : ' queued · ') + total + 's','info');
             wodRefreshCommandHud(true);
             return true;
         }
@@ -55469,7 +55509,7 @@
                 // Training waits at zero for a free spawn slot rather than losing paid troops.
                 if(!done) continue;
                 jobs.splice(i, 1);
-                if(j.owner === wodLocalPlayerOwner() && done) showNotification(wodProductionLabel(j.mode) + (j.rosterId ? ' reinforcements ready' : ' ready'));
+                if(j.owner === wodLocalPlayerOwner() && done) showNotification(wodProductionLabel(j.mode) + (j.rosterId ? ' reinforcements ready' : ' ready'),'success');
             }
         }
 
@@ -55482,6 +55522,7 @@
             let lo = wodLocalPlayerOwner();
             let any = false;
             if(mode === 'fort') {
+                if(wodPlayerTreasury(lo)<WOD_PRICE_FORT){showNotification(wodExplainBuildBlockReason(mode,lo,null));return;}
                 if(!gameData.hexList || !gameData.hexList.length) {
                     showNotification('No usable map yet.');
                     return;
@@ -55515,7 +55556,7 @@
                 return;
             }
             gameData.buildMode = mode;
-            if(mode === 'bridge') showNotification('Place bridge over water with both ends on land. Mouse wheel or Q/E rotates · Esc cancels.');
+            if(mode === 'bridge') showNotification('Place bridge over water with both ends on land. Mouse wheel or Q/E rotates · Esc cancels.','info');
             if(UI.wrapper) UI.wrapper.style.cursor = 'crosshair';
             syncBuildPlacementMobileUi();
         }
@@ -55538,7 +55579,7 @@
                     return true;
                 }
             }
-            if(!wodApplyBuildAtCityForOwner(city, mode, lo)) return true;
+            if(!wodApplyBuildAtCityForOwner(city,mode,lo)){showNotification(wodExplainBuildBlockReason(mode,lo,city));return true;}
             exitBuildPlacementMode();
             return true;
         }
@@ -55659,12 +55700,17 @@
             u.target=null;u.path=null;u.orderTarget=null;u.fullMarchWaypoints=null;u.marchWpCursor=0;u.holding=false;u._wodOrderIntoWater=false;
         }
         function wodTransportLandingRegion(unit,goal) {
-            const root=goal&&getNearestHexToPoint(goal.x,goal.y);if(!root||wodIsOpenWaterHex(root))return null;
-            const key=getHexKey(root)+'|'+(gameData._wodPfVer||0),old=gameData._transportLandingRegion;
-            if(old?.hexes===gameData.hexes&&old.key===key)return old.keys;
-            const keys=new Set([getHexKey(root)]),queue=[root];
+            const root=goal&&getNearestHexToPoint(goal.x,goal.y);if(!root||wodIsOpenWaterHex(root)||root.type==='mountain')return null;
+            // Physical connectivity is independent of ownership. Reuse the same component
+            // for every town/coast on an island, invalidating on terrain/bridge edits.
+            const revision=(gameData.landGeometryRevision||0)+'|'+(gameData._wodPfVer||0),type=unit.type||'light';
+            let cache=gameData._transportLandComponents;
+            if(!cache||cache.hexes!==gameData.hexes||cache.revision!==revision)cache=gameData._transportLandComponents={hexes:gameData.hexes,revision,types:new Map()};
+            let components=cache.types.get(type);if(!components)cache.types.set(type,components=new Map());
+            const rootKey=getHexKey(root);if(components.has(rootKey))return components.get(rootKey);
+            const keys=new Set([rootKey]),queue=[root];
             for(let i=0;i<queue.length;i++)for(const d of hexDirections){const h=queue[i],n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||wodIsOpenWaterHex(n)||n.type==='mountain'||keys.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,true))continue;keys.add(getHexKey(n));queue.push(n);}
-            gameData._transportLandingRegion={hexes:gameData.hexes,key,keys};return keys;
+            for(const key of keys)components.set(key,keys);return keys;
         }
         function wodTransportShorePairs(unit,transport,goal,landing=false) {
             const rows=[],sp=gameData.hexRadius*1.35;
@@ -55739,8 +55785,15 @@
         function wodAiNavalAssaultTargets(owner) {
             const towns=wodAiKnownCities(owner).filter(c=>wodIsHostileOwner(c.owner,owner));
             const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null,sectors=new Map();
-            for(const h of gameData.hexList){
-                if(isWaterHex(h)||h.type==='mountain'||!wodIsHostileOwner(h.owner,owner)||explored&&!explored.has(getHexKey(h))||!getNeighborHexes(h).some(wodIsOpenWaterHex))continue;
+            const revision=(gameData.landGeometryRevision||0)+'|'+(gameData._wodPfVer||0);
+            let coast=gameData._navalCoastCells;
+            if(!coast||coast.hexes!==gameData.hexes||coast.revision!==revision) {
+                const cells=gameData.hexList.filter(h=>!isWaterHex(h)&&h.type!=='mountain'&&getNeighborHexes(h).some(wodIsOpenWaterHex));
+                coast=gameData._navalCoastCells={hexes:gameData.hexes,revision,cells};
+            }
+            // Ownership and fog knowledge stay live; only the physical coast is cached.
+            for(const h of coast.cells){
+                if(!wodIsHostileOwner(h.owner,owner)||explored&&!explored.has(getHexKey(h)))continue;
                 const key=h.owner+':'+Math.floor(h.q/12)+','+Math.floor(h.r/12);
                 if(!sectors.has(key))sectors.set(key,{id:'shore-'+getHexKey(h),x:h.x,y:h.y,owner:h.owner,shore:true});
             }

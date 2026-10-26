@@ -129,18 +129,19 @@ const server=http.createServer((req,res)=>{
    for(const h of gameData.hexList)if(h.q===0)h.type='water';
    for(let i=0;i<12;i++){const h=gameData.hexes[`-3,${i-6}`];createUnitAt('light',h.x,h.y,2);}
    const random=Math.random;Math.random=()=>0;
-   let built;try{built=wodAiTryBridgeForOwner(2,'2');}finally{Math.random=random;}
+   let built;try{wodAiTryBridgeForOwner(2,'2');for(let i=0;i<300&&!gameData.constructionJobs.some(j=>j.mode==='bridge');i++)wodStepAiBridgeSearches();built=gameData.constructionJobs.some(j=>j.mode==='bridge');}finally{Math.random=random;}
    const job=gameData.constructionJobs.find(j=>j.mode==='bridge'),duplicate=wodAiTryBridgeForOwner(2,'2');
    if(!job)return{built,duplicate,jobs:gameData.constructionJobs,sites:wodAiCollectBridgeCandidateSites(2).slice(0,5).map(s=>({score:wodAiScoreBridgeSite(s,2),error:wodBridgePlacementError(s,2),a:[s.shoreA.q,s.shoreA.r],b:[s.shoreB.q,s.shoreB.r]})),money:wodPlayerTreasury(2),cooldown:gameData._aiBridgeCooldown?.[2]};
-   const point={x:job.x,y:job.y};wodUpdateConstruction(59);const early=gameData.bridges.length;wodUpdateConstruction(1);
+   const moving=gameData.entities[1];assignUnitMoveAlongWaypoints(moving,[{x:-8*gameData.hexRadius*1.35,y:moving.y}]);const priorPath=moving.path,priorTarget=moving.target;
+   const point={x:job.x,y:job.y};wodUpdateConstruction(59);const early=gameData.bridges.length;wodUpdateConstruction(1);const preserved=moving.path===priorPath&&moving.target===priorTarget&&!!priorTarget;
    const u=gameData.entities[0];u.x=point.x;u.y=point.y;const h=getNearestHexToPoint(u.x,u.y);
    const deck=wodUnitOnBridgeDeck(u),unsupplied=!!wodGetUnitEncirclementState(u,h),sp=gameData.hexRadius*1.35;
    gameData.entities=[u];u.x=-4*sp;u.y=point.y;gameData.unitSpatialGrid=buildUnitSpatialGrid();wodBeginSimPfBudget(1);
    const goal={x:4*sp,y:point.y},assigned=assignUnitMoveAlongWaypoints(u,[goal]);let wetTicks=0;
    for(let i=0;i<1800&&Math.hypot(u.x-goal.x,u.y-goal.y)>4;i++){wodBeginSimPfBudget(1);moveUnitTowardTarget(u,.1);if(wodUnitInUnsuppliedWater(u,getNearestHexToPoint(u.x,u.y)))wetTicks++;}
-   return{built,duplicate,early,ready:gameData.bridges.length,total:job.total,deck,unsupplied,assigned,wetTicks,arrived:Math.hypot(u.x-goal.x,u.y-goal.y)<20};
+   return{built,duplicate,early,preserved,ready:gameData.bridges.length,total:job.total,deck,unsupplied,assigned,wetTicks,arrived:Math.hypot(u.x-goal.x,u.y-goal.y)<20};
   });console.log('bridge',JSON.stringify(results.bridge));
-  assert(results.bridge.built&&!results.bridge.duplicate&&!results.bridge.early&&results.bridge.ready===1&&results.bridge.total===60&&results.bridge.deck&&!results.bridge.unsupplied&&results.bridge.assigned&&results.bridge.arrived&&results.bridge.wetTicks===0);
+  assert(results.bridge.built&&results.bridge.preserved&&!results.bridge.duplicate&&!results.bridge.early&&results.bridge.ready===1&&results.bridge.total===60&&results.bridge.deck&&!results.bridge.unsupplied&&results.bridge.assigned&&results.bridge.arrived&&results.bridge.wetTicks===0);
   await page.evaluate(()=>{for(const h of gameData.hexList){h.baseColor=getTerrainColor(h.type);h.renderColor=h.baseColor;}gameData.fogOfWar=false;UI.mainMenu.classList.add('hidden');UI.panels.forEach(p=>p.classList.add('hidden'));UI.inGameUI.style.display='';gameState='PLAYING';gameData.camera.zoom=.75;gameData.camera.x=-canvas.clientWidth/2;gameData.camera.y=-canvas.clientHeight/2;wodMarkTerrainFullDirty();updateTerrainCache();draw();});
   await page.screenshot({path:path.join(OUT,'ai-bridge.png')});
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));assert.equal(errors.length,0,errors.join('\n'));
