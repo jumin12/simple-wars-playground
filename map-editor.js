@@ -700,7 +700,7 @@
       selected: false,
       shake: 0,
     };
-    if(type==="transport")return {...base,hp:50,maxHp:50,speed:22,damage:4,range:50,attackCooldown:2,manpower:500,maxManpower:500,tanks:0,maxTanks:0,radius:16};
+    if(type==="transport"||type==="supply")return {...base,hp:50,maxHp:50,speed:22,damage:4,range:50,attackCooldown:2,manpower:500,maxManpower:500,tanks:0,maxTanks:0,radius:16};
     if (type === "light") {
       return { ...base, hp: 100, maxHp: 100, speed: 15, damage: 8, range: 50, manpower: 1000, maxManpower: 1000, tanks: 0, maxTanks: 0, radius: 12 };
     }
@@ -740,6 +740,7 @@
       ["heavy", "Armor"],
       ["ship", "Ship"],
       ["transport", "Transport"],
+      ["supply", "Supply ship"],
     ];
     el.innerHTML = types.map(([t, lab]) => {
       const col = cols[owner] || "#fff";
@@ -1200,7 +1201,7 @@
             <option value="light"${rep.type === "light" ? " selected" : ""}>Infantry</option>
             <option value="marine"${rep.type === "marine" ? " selected" : ""}>Marines</option>
             <option value="heavy"${rep.type === "heavy" ? " selected" : ""}>Armor</option>
-            <option value="ship"${rep.type === "ship" ? " selected" : ""}>Ship</option><option value="transport"${rep.type === "transport" ? " selected" : ""}>Transport</option>
+            <option value="ship"${rep.type === "ship" ? " selected" : ""}>Ship</option><option value="transport"${rep.type === "transport" ? " selected" : ""}>Transport</option><option value="supply"${rep.type === "supply" ? " selected" : ""}>Supply ship</option>
           </select>
         </div>
         <div class="editor-row"><label>Count</label><input type="number" class="editor-mission-reinf-count" min="1" max="48" step="1" value="${rep.count || 1}" /></div>
@@ -2131,7 +2132,7 @@
         flex-direction:column;min-height:0;border-left:1px solid rgba(0,0,0,.35);border-right:1px solid rgba(0,0,0,.35); }
       #editorCanvas { width:100%; height:100%; display:block; cursor:crosshair; flex:1; touch-action:none; }
       #editorDeleteUnit { position:absolute;z-index:4;width:26px;height:26px;padding:0;border-radius:50%;border:1px solid #ffb4ac;background:#a72e32;color:#fff;font:bold 22px/22px system-ui;cursor:pointer;box-shadow:0 2px 6px #0008;touch-action:manipulation; }
-      #editorDeleteUnit[hidden] { display:none; }
+      #editorDeleteUnit[hidden] { display:none!important; }
       #editorDeleteUnit:hover,#editorDeleteUnit:focus-visible { background:#d34042;outline:2px solid #ffe6bd; }
       .editor-drop-overlay-hint{
         pointer-events:none;position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
@@ -2297,7 +2298,7 @@
                 <option value="light">Infantry</option>
                 <option value="marine">Marines</option>
                 <option value="heavy">Armor</option>
-                <option value="ship">Ship</option><option value="transport">Transport</option>
+                <option value="ship">Ship</option><option value="transport">Transport</option><option value="supply">Supply ship</option>
               </select>
             </div>
             <button type="button" class="editor-btn" data-tool="factory">Add factory</button>
@@ -2507,7 +2508,7 @@
       placeUnitSel.value = state.placeUnitType;
       placeUnitSel.addEventListener("change", () => {
         const v = placeUnitSel.value;
-        state.placeUnitType = v === "marine" || v === "heavy" || v === "ship" || v === "transport" ? v : "light";
+        state.placeUnitType = v === "marine" || v === "heavy" || v === "ship" || v === "transport" || v === "supply" ? v : "light";
       });
     }
     app.querySelectorAll("[data-gl]").forEach(btn => {
@@ -3138,7 +3139,7 @@
 
   function findSpawnHexForType(type, pos) {
     let h = nearestHex(pos);
-    if (["ship","transport"].includes(type)) {
+    if (["ship","transport","supply"].includes(type)) {
       if (h && WOD.isWaterHex(h)) return h;
       const coord = WOD.pixelToHex(pos.x, pos.y);
       for (let R = 1; R < 14; R++) {
@@ -3175,17 +3176,17 @@
       return;
     }
     const type = data.type;
-    if (!type || !["light", "marine", "heavy", "ship", "transport"].includes(type)) return;
+    if (!type || !["light", "marine", "heavy", "ship", "transport", "supply"].includes(type)) return;
     let faction = parseInt(data.owner, 10);
     if (!Number.isFinite(faction) || faction < 1) faction = 1;
     faction = Math.min(faction, state.maxFactionSlots);
     const pos = editorWorldPos(ev);
     const hex = findSpawnHexForType(type, pos);
     if (!hex) return;
-    if (["ship","transport"].includes(type) && !WOD.isWaterHex(hex)) return;
+    if (["ship","transport","supply"].includes(type) && !WOD.isWaterHex(hex)) return;
     touchEditorMutation();
     const unit = WOD.createUnitAt(type, hex.x, hex.y, faction);
-    state.selected = { type: "unit", value: unit };
+    state.selected = null;
     renderSelection();
     scheduleEditorRender();
     queueEditorSnapshot();
@@ -3280,13 +3281,13 @@
       const type = state.placeUnitType || "light";
       const uo = Math.max(1, state.owner || 1);
       let at = hex;
-      if (["ship","transport"].includes(type) && !(WOD.isWaterHex && WOD.isWaterHex(hex))) {
+      if (["ship","transport","supply"].includes(type) && !(WOD.isWaterHex && WOD.isWaterHex(hex))) {
         at = findSpawnHexForType("ship", pos);
         if (!at) return false;
       }
       touchEditorMutation();
       const unit = WOD.createUnitAt(type, at.x, at.y, uo);
-      state.selected = { type: "unit", value: unit };
+      state.selected = null;
       renderSelection();
       return true;
     }
@@ -3831,7 +3832,7 @@
       panel.innerHTML = `
         <div class="editor-row"><label>Name</label><input id="selName" value="${editorEscapeAttribute(obj.name)}"></div>
         ${factionRow}
-        <div class="editor-row"><label>Type</label><select id="selType"><option value="light">Infantry</option><option value="marine">Marines</option><option value="heavy">Armor</option><option value="ship">Ship</option><option value="transport">Transport</option></select></div>
+        <div class="editor-row"><label>Type</label><select id="selType"><option value="light">Infantry</option><option value="marine">Marines</option><option value="heavy">Armor</option><option value="ship">Ship</option><option value="transport">Transport</option><option value="supply">Supply ship</option></select></div>
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 100}"></div>
         <div class="editor-row"><label>Speed</label><input id="selSpeed" type="number" value="${obj.speed || 10}"></div>
         <div class="editor-row"><label>Damage</label><input id="selDamage" type="number" value="${obj.damage || 10}"></div>
