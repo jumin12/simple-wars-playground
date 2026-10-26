@@ -3610,11 +3610,12 @@
             display: none;
         }
 
-        #wodTransportControls .menu-btn {width:auto;min-height:38px;padding:8px 14px;font-size:13px;flex:0 0 auto;}
-        #wodTransportControls [data-transport-state] {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;}
-        @media(max-width:1024px) {
-            #inGameUI .info-card.wod-has-transport-controls {padding-bottom:48px !important;}
-        }
+        #wodTransportControls {display:contents;}
+        .info-card.wod-has-transport-controls .info-mobile-orders {display:flex;}
+        #wodTransportControls .info-order-btn {width:auto;min-height:40px;}
+        #wodTransportControls [hidden] {display:none!important;}
+        #wodTransportControls [data-transport-state] {position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);}
+        #wodTransportControls [data-transport-state]:empty {display:none;}
         .unit-emblem[data-unit-type="transport"]::before {
             left:22%;top:33%;width:56%;height:34%;border:0;background:#f3f5e9;clip-path:polygon(0 12%,100% 0,100% 100%,0 88%,10% 50%);
         }
@@ -10745,7 +10746,7 @@
         .report-two-sections .battle-stat-grid {grid-template-columns:repeat(3,minmax(0,1fr));}
         .battle-note {font-size:12px!important;line-height:1.6;color:#b5cbd5!important;margin:2px 0 12px!important;text-align:left;}
         .battle-factions {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;}
-        .battle-faction {border:1px solid #7893a14a;border-top:3px solid var(--side);border-radius:12px;padding:18px;background:#152833;min-width:0;}
+        .battle-faction {grid-column:1/-1;border:1px solid #7893a14a;border-top:3px solid var(--side);border-radius:12px;padding:18px;background:#152833;min-width:0;}
         .battle-faction--local {grid-column:1/-1;background:#19303a;}
         .battle-faction header {display:flex;align-items:center;gap:9px;margin:0 0 14px;}
         .battle-faction header i {width:10px;height:10px;border-radius:50%;background:var(--side);flex-shrink:0;}
@@ -11610,7 +11611,7 @@
 
                 <div class="esc-help-block">
                     <h4>Orders on desktop</h4>
-                    <p class="esc-help-prose">Click or box-select troops; hold <strong>Shift</strong> to add to the selection. Save selected troops with <strong>Ctrl + 0–9</strong>; press the number or click its HUD group to recall them. Issue moves with a <strong>right-click</strong>, chain <strong>Shift + right-click</strong> waypoints (the group keeps its current formation), <strong>Shift + right-drag</strong> a line to waypoint a new formation, or click-drag from a selected unit to paint a <strong>stroke</strong> of destinations across the map.</p>
+                    <p class="esc-help-prose">Click or box-select troops; <strong>Shift-click a friendly unit</strong> to add it to the selection. Save selected troops with <strong>Ctrl + 0–9</strong>; press the number or click its HUD group to recall them. Issue moves with a <strong>right-click</strong>. With troops selected, <strong>Shift + left-click or right-click on the map</strong> appends waypoints and keeps the group’s formation. Shift-drag a line to queue a new formation, or drag from a selected unit to paint a movement stroke.</p>
                     <figure class="esc-help-figure">
                         <canvas id="menuHelpCanvasMove" width="200" height="70" aria-hidden="true"></canvas>
                     </figure>
@@ -11618,7 +11619,7 @@
 
                 <div class="esc-help-block">
                     <h4>Touch controls</h4>
-                    <p class="esc-help-prose">On narrow screens the unit sheet surfaces <strong>Move</strong>, <strong>Waypoint</strong>, and <strong>Formation</strong> buttons. Pick a mode, then tap the map to issue that order class without a right mouse button. In <strong>Waypoint</strong> mode, taps keep the current formation and a drag draws a formation-line waypoint. Camera zoom and pan still use the usual pinch and drag gestures layered underneath.</p>
+                    <p class="esc-help-prose">The unit card has <strong>Move</strong>, <strong>Waypoint</strong>, and <strong>Formation</strong> buttons. Pick a mode, then click or tap the map. Waypoint mode keeps appending destinations; dragging places a formation-line waypoint. <strong>Board</strong> and <strong>Unload</strong> appear in the same order bar when transports are available. Camera zoom and pan retain their usual gestures.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -12713,6 +12714,17 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-26T05:40:00-04:00',
+                title: 'Working waypoints, fair sieges and individually authored battlefields',
+                items: [
+                    'Shift + left-click now appends movement waypoints, alongside Shift + right-click. Move, Waypoint and Formation buttons accept mouse clicks as well as touch. Shift-clicking friendly troops still adds them to the selection, and releasing a drag outside the map clears the gesture.',
+                    'AI faction reports now use the same full-width cards as the player. Board and Unload share the existing unit order bar, with matching icons and visible transport capacity. Group controls stay clear of the unit card and bottom menus.',
+                    'Player and AI towns share siege checks for every unit and town structure. Enemy troops in weapon range of urban cells block new orders and pause existing construction and mobilization until the attack clears.',
+                    'Replaced the seventeen campaign-stage templates with individual north-up maps: different river courses, tributaries, canals, lakes, coastlines, ridges, marshes, street districts, parks, crossings and road approaches. Removed artificial offshore depot islands from the beach stages. Refined standalone maps including inland Hastings, the Goldbach, Seim crossings and Midway’s islands.',
+                    'Rounded previews show the authored geography, with larger briefing previews, named landmarks and battlefield notes. Curved roads and geographic metadata survive editor and multiplayer map serialization. Ferry unloading favors short crossings to a shore connected by land to the destination.'
+                ]
+            },
             {
                 at: '2026-10-26T04:15:00-04:00',
                 title: 'Historical campaign packs and ancient emblem previews',
@@ -18770,7 +18782,7 @@
                 aiMoneyByOwner: Object.assign({}, gameData.aiMoneyByOwner),
                 aiManpowerByOwner: Object.assign({}, gameData.aiManpowerByOwner),
                 factionColors: factionColors.slice(),
-                roads: (gameData.roads || []).map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r })),
+                roads: (gameData.roads || []).map(r => ({ fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r,...wodRoadRouteFields(r) })),
                 forts: (gameData.forts || []).map(f => ({ id: f.id, owner: f.owner, q: f.q, r: f.r, x: f.x, y: f.y })),
                 bridges: (gameData.bridges || []).map(wodStripBridgeForNet).filter(Boolean),
                 mapGenSeed: (gameData._mapGenSeed >>> 0) || 0,
@@ -18896,7 +18908,7 @@
             gameData.roads = (p.roads || []).map(ro => {
                 let from = gameData.cities.find(c => c.q === ro.fq && c.r === ro.fr);
                 let to = gameData.cities.find(c => c.q === ro.tq && c.r === ro.tr);
-                return from && to ? { from, to } : null;
+                return from && to ? { from, to,...wodRoadRouteFields(ro) } : null;
             }).filter(Boolean);
             gameData.forts = (p.forts || []).map(f => {
                 let o = Object.assign({}, f);
@@ -20828,7 +20840,7 @@
                 hexes: Object.fromEntries(Object.keys(gameData.hexes || {}).map(k => [k, Object.assign({}, gameData.hexes[k])])),
                 cities: (gameData.cities || []).map(c => Object.assign({}, c)),
                 roads: (gameData.roads || []).map(r => ({
-                    fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r
+                    fq: r.from.q, fr: r.from.r, tq: r.to.q, tr: r.to.r,...wodRoadRouteFields(r)
                 })),
                 entities: (gameData.entities || []).map(u => Object.assign({}, u)),
                 forts: (gameData.forts || []).map(f => Object.assign({}, f)),
@@ -20859,7 +20871,7 @@
                 let tr = ro.tr != null ? ro.tr : (ro.to && ro.to.r);
                 let from = gameData.cities.find(c => c.q === fq && c.r === fr);
                 let to = gameData.cities.find(c => c.q === tq && c.r === tr);
-                return from && to ? { from, to } : null;
+                return from && to ? { from, to,...wodRoadRouteFields(ro) } : null;
             }).filter(Boolean);
             gameData.entities = (snap.entities || []).map(u => Object.assign({}, u));
             gameData.forts = (snap.forts || []).map(f => Object.assign({}, f));
@@ -27432,11 +27444,16 @@
             const key=`${city.q},${city.r}`;
             if(gameData.cityCombatBlockForProd?.has(key)||gameData._cityCombatStagingKeys?.has(key))return true;
             if(gameData.mp?.enabled&&!gameData.mp.isHost&&gameData._mpSyncCityWarKeys?.has(key))return true;
-            const urban=getCityUrbanTerrainHexes(city),keys=new Set(urban.map(getHexKey));
+            const urban=getCityUrbanTerrainHexes(city);
             // Occupation/capture is an attack even when no defender is firing.
             if(urban.some(h=>wodIsHostileOwner(h.owner,city.owner)))return true;
-            return gameData.entities.some(u=>u.hp>0&&u.type!=='convoy'&&wodIsHostileOwner(u.owner,city.owner)&&
-                keys.has(getHexKey(getNearestHexToPoint(u.x,u.y))));
+            let bounds=city._siegeUrbanBounds;
+            if(bounds?.urban!==urban){bounds={urban,minX:Infinity,minY:Infinity,maxX:-Infinity,maxY:-Infinity};for(const h of urban){bounds.minX=Math.min(bounds.minX,h.x);bounds.maxX=Math.max(bounds.maxX,h.x);bounds.minY=Math.min(bounds.minY,h.y);bounds.maxY=Math.max(bounds.maxY,h.y);}city._siegeUrbanBounds=bounds;}
+            return gameData.entities.some(u=>{
+                if(u.hp<=0||u.type==='convoy'||!wodIsHostileOwner(u.owner,city.owner))return false;
+                const reach=(u.range||50)+gameData.hexRadius*.5;
+                return u.x>=bounds.minX-reach&&u.x<=bounds.maxX+reach&&u.y>=bounds.minY-reach&&u.y<=bounds.maxY+reach&&urban.some(h=>(u.x-h.x)**2+(u.y-h.y)**2<=reach*reach);
+            });
         }
 
         function citySiegeShowsCombatIndicator(city) {
@@ -35091,6 +35108,7 @@
         function wodHexQuickWater(h) {
             return h && h.type === 'water';
         }
+        const wodAuthoredPreviewGeometry=new WeakMap();
         function wodPaintMapDataOnCanvas(cnv, mapData) {
             if(!cnv || !cnv.getContext || !mapData) return;
             let hexList = mapData.hexList || [];
@@ -35121,7 +35139,12 @@
             const first=hexList.find(h=>lk[`${h.q+1},${h.r}`]);
             const neighbor=first&&lk[`${first.q+1},${first.r}`];
             let hr = mapData.hexRadius || (neighbor?Math.abs(neighbor.x-first.x)/1.35:20);
-            for(let hex of hexList) {
+            if(mapData.mission?.battlefield) {
+                let geometry=wodAuthoredPreviewGeometry.get(mapData);
+                if(!geometry){const land=new Set(hexList.filter(h=>!isWaterHex(h)).map(getHexKey)),regions=new Map();for(const h of hexList)if(!isWaterHex(h)&&h.type!=='grass'){if(!regions.has(h.type))regions.set(h.type,new Set());regions.get(h.type).add(getHexKey(h));}geometry={land:wodCellRegionLoops(land),regions:[...regions].map(([type,keys])=>[type,wodCellRegionLoops(keys)])};wodAuthoredPreviewGeometry.set(mapData,geometry);}
+                pCtx.save();wodTraceCellRegion(pCtx,geometry.land,hr*1.35*scale,cx,cy);pCtx.fillStyle=getTerrainColor('grass');pCtx.fill();pCtx.clip();
+                for(const [type,loops]of geometry.regions){wodTraceCellRegion(pCtx,loops,hr*1.35*scale,cx,cy);pCtx.fillStyle=getTerrainColor(type);pCtx.fill();}pCtx.restore();
+            } else for(let hex of hexList) {
                 if(!isWaterHex(hex)) {
                     pCtx.fillStyle = getTerrainColor(hex.type);
                     let pSize = Math.max(1, hr * scale * 1.45);
@@ -35130,6 +35153,13 @@
             }
             let smooth = null;
             wodPaintMapPreviewPolitical(pCtx, hexList, mapData.cities, smooth, cx, cy, scale, hr, lk);
+            if(mapData.mission?.battlefield) {
+                pCtx.save();pCtx.lineWidth=Math.max(.6,w/1000);pCtx.strokeStyle='rgba(231,211,166,.7)';
+                for(const road of mapData.roads||[]){const ps=road.points||[road.from,road.to];if(ps.length<2)continue;pCtx.beginPath();ps.forEach((p,i)=>{const x=cx+p.x*scale,y=cy+p.y*scale;if(i)pCtx.lineTo(x,y);else pCtx.moveTo(x,y);});pCtx.stroke();}
+                if(cnv.clientWidth>=500){pCtx.font='600 '+Math.max(9,Math.min(20,w/cnv.clientWidth*11))+'px "Segoe UI",Arial';pCtx.textAlign='center';pCtx.textBaseline='middle';pCtx.lineJoin='round';
+                    for(const f of mapData.mission.battlefield.features||[]){const x=cx+f.x*scale,y=cy+f.y*scale;if(x<20||x>w-20||y<12||y>h-12)continue;pCtx.strokeStyle='#10202b';pCtx.lineWidth=3;pCtx.strokeText(f.name,x,y);pCtx.fillStyle=f.kind==='water'?'#b7ddf2':'#e2ddc7';pCtx.fillText(f.name,x,y);}
+                }pCtx.restore();
+            }
             wodPaintMapPreviewEntities(pCtx, mapData.entities || [], cx, cy, scale, hr);
         }
         function wodMapDataToThumbnailDataUrl(mapData, tw, th) {
@@ -46705,11 +46735,13 @@
                     if(entry.packId&&!wodStoreMissionPlayable(entry))html+='<p class="wod-map-lib-meta-sub">Locked — complete all preceding stages first.</p>';
                     if(wodIsStoreMissionSpent(entry.id)) html += '<p class="wod-map-lib-meta-sub" style="color:#e67e22">Already completed (one-shot spent).</p>';
                     if(entry.history)html+='<p><strong>Historical context:</strong> '+wodEscapeHtml(entry.history)+'</p>';
+                    if(data.mission?.battlefield?.note)html+='<p><strong>Battlefield:</strong> '+wodEscapeHtml(data.mission.battlefield.note)+'</p>';
                     if(entry.adaptation)html+='<p class="wod-map-lib-meta-sub">'+wodEscapeHtml(entry.adaptation)+'</p>';
                     if(entry.sources?.length)html+='<p class="wod-map-lib-meta-sub">Sources: '+entry.sources.map((url,i)=>'<a href="'+wodEscapeHtml(url)+'" target="_blank" rel="noopener">Historical reference '+(i+1)+'</a>').join(' · ')+'</p>';
                 }
                 if(meta) meta.innerHTML = html;
                 if(cv) {
+                    cv.width=960;cv.height=560;
                     try { wodPaintMapDataOnCanvas(cv, data); }
                     catch(e) {
                         console.warn('wodSelectMissionEntry preview', e);
@@ -51458,7 +51490,7 @@
                     els.name.innerText = sel.name || "Unit";
                     if(els.recordName) els.recordName.innerText = sel.name || "Unit";
                     let uf = wodPeriodFlavor(wodGetMatchPeriod());
-                    els.type.innerText = sel.type === 'transport'?wodTransportLabel():sel.type === 'ship' ? uf.ship
+                    els.type.innerText = sel.type === 'transport'?wodTransportLabel()+' · '+(sel.cargo?'1/1':'0/1'):sel.type === 'ship' ? uf.ship
                         : (sel.type === 'heavy' ? uf.heavy
                             : (sel.type === 'light' ? uf.light
                                 : (sel.type === 'marine' ? uf.marine
@@ -51853,6 +51885,14 @@
 
             // Draw Hexes
             drawHexes(ctx, gameData.hexList, camL, camR, camT, camB, true);
+            if(gameData.layers.cityNames&&gameData.mission?.battlefield) {
+                ctx.save();ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
+                ctx.font='600 '+Math.max(12,Math.min(24,11/camZ))+'px "Segoe UI",Arial';ctx.lineWidth=Math.max(2,2/camZ);ctx.strokeStyle='rgba(7,20,24,.8)';
+                for(const f of gameData.mission.battlefield.features){
+                    if(!wodInView(f.x,f.y,30)||wodFogActive()&&!wodFogHexExplored(getNearestHexToPoint(f.x,f.y))||gameData.cities.some(c=>Math.hypot(c.x-f.x,c.y-f.y)<gameData.hexRadius*4))continue;
+                    ctx.strokeText(f.name,f.x,f.y);ctx.fillStyle=f.kind==='water'?'#c2e5f5':'#e5e0c9';ctx.fillText(f.name,f.x,f.y);
+                }ctx.restore();
+            }
 
             // Draw Roads
             if(gameData.layers.cities) {
@@ -51866,7 +51906,8 @@
                     if(wodCull && !wodInView(mx, my, culPad)) continue;
                     ctx.beginPath();
                     ctx.moveTo(road.from.x, road.from.y);
-                    ctx.lineTo(road.to.x, road.to.y);
+                    if(Array.isArray(road.points)&&road.points.length>1)for(const p of road.points.slice(1))ctx.lineTo(p.x,p.y);
+                    else ctx.lineTo(road.to.x, road.to.y);
                     ctx.stroke();
                 }
                 ctx.setLineDash([]);
@@ -52499,6 +52540,7 @@
         let pathOrderStroke = {active: false, pts: [], moved: false};
         let pathStrokePreviewAt = 0;
         let shiftWaypointDrag = {active: false, startClient: {x: 0, y: 0}, startWorld: {x: 0, y: 0}};
+        let leftMapOrderDrag = {active:false,mode:null,startWorld:null};
         let mobileOrderMode = null;
         let touchCamGesture = null;
         let wodSuppressCanvasMouseUntil = 0;
@@ -53331,6 +53373,12 @@
             let cy = local.y;
             
             if (e.button === 0) { 
+                const movers=getMovableSelectedUnits(),picked=pickInspectableUnitAt(worldPos);
+                if(!gameData.buildMode&&movers.length&&(wodIsMobileOrderModeArmed()||(e.shiftKey&&(!picked||picked.owner!==wodLocalPlayerOwner())))) {
+                    leftMapOrderDrag={active:true,mode:e.shiftKey?'waypoint':mobileOrderMode,startWorld:{...worldPos}};
+                    formationDrag.active=true;formationDrag.startWorld={...worldPos};formationDrag.endWorld={...worldPos};
+                    e.preventDefault();return;
+                }
                 let strokeHit = null;
                 let lo = wodLocalPlayerOwner();
                 if(!e.shiftKey) {
@@ -53414,6 +53462,15 @@
                 e.preventDefault();
                 return;
             }
+            if(e.button===0&&leftMapOrderDrag.active) {
+                const order=leftMapOrderDrag,end=getMouseWorldPos(e),start=order.startWorld;
+                leftMapOrderDrag.active=false;formationDrag.active=false;
+                const line=getMovableSelectedUnits().length>1&&Math.hypot(end.x-start.x,end.y-start.y)>35;
+                if(order.mode==='waypoint') {if(line)wodCommitShiftFormationWaypoint(start,end);else wodCommitShiftWaypointAt(end);}
+                else if(order.mode==='formation'&&line)issueLineFormationOrder(start,end);
+                else issueMoveOrder(end);
+                e.preventDefault();return;
+            }
             if(e.button === 0 && pathOrderStroke.active) {
                 if(pathOrderStroke.moved && pathOrderStroke.pts.length >= 2)
                     issueStrokeMoveOrder(pathOrderStroke.pts);
@@ -53436,6 +53493,10 @@
                     if(gameData.buildMode) {
                         wodHandleProductionPlacementClick(worldPos);
                         return;
+                    }
+                    if(e.shiftKey) {
+                        const friendly=pickInspectableUnitAt(worldPos);
+                        if(friendly&&friendly.owner===wodLocalPlayerOwner()){wodApplyMapSelection(friendly);return;}
                     }
                     if(wodMovableSelectionHasActiveMarch() && getMovableSelectedUnits().length > 0) {
                         issueMoveOrder(worldPos);
@@ -53486,6 +53547,11 @@
 
         let gameTouchTrackId = null;
         let wodMobileOrderGesture = null;
+        window.addEventListener('mouseup',e=>{
+            if(e.target===canvas)return;
+            leftMapOrderDrag.active=false;shiftWaypointDrag.active=false;formationDrag.active=false;isDragging=false;isPanning=false;
+            pathOrderStroke.active=false;gameData.pathStrokePreview=null;if(UI.selectionBox)UI.selectionBox.style.display='none';
+        });
         let wodMobileNavTouch = null;
         function wodCancelMobileNavTouch() {
             if(wodMobileNavTouch && wodMobileNavTouch.timer) clearTimeout(wodMobileNavTouch.timer);
@@ -53892,8 +53958,9 @@
             const hud=document.getElementById('wodCommandHud');if(!hud||hud.hidden)return;
             const ui=UI.inGameUI.getBoundingClientRect();
             const scale=ui.height/(UI.inGameUI.offsetHeight||ui.height)||1;let top=ui.bottom-60;
-            for(const panel of UI.inGameUI.querySelectorAll('#wodPcProdRoot,.wod-m-sheet--units,.wod-m-sheet--build,#wodDockPack')) {
+            for(const panel of UI.inGameUI.querySelectorAll('#wodPcProdRoot,.wod-m-sheet--units,.wod-m-sheet--build,#wodDockPack,#infoCard')) {
                 const r=panel.getBoundingClientRect(),style=getComputedStyle(panel);
+                const hr=hud.getBoundingClientRect();if(panel.id==='infoCard'&&(r.left>=hr.right||r.right<=hr.left))continue;
                 if(r.width>0&&r.height>0&&style.display!=='none'&&style.visibility!=='hidden')top=Math.min(top,r.top);
             }
             hud.style.bottom=Math.max(10,(ui.bottom-top+10)/scale)+'px';
@@ -53914,7 +53981,7 @@
                 UI.inGameUI.appendChild(hud);
                 if(typeof ResizeObserver!=='undefined') {
                     const observer=new ResizeObserver(wodPositionCommandHud);
-                    UI.inGameUI.querySelectorAll('#wodPcProdRoot,.wod-m-sheet--units,.wod-m-sheet--build,#wodDockPack').forEach(p=>observer.observe(p));
+                    UI.inGameUI.querySelectorAll('#wodPcProdRoot,.wod-m-sheet--units,.wod-m-sheet--build,#wodDockPack,#infoCard').forEach(p=>observer.observe(p));
                     hud._dockObserver=observer;
                 }
                 window.addEventListener('resize',wodPositionCommandHud);
@@ -54108,7 +54175,8 @@
                 unitPrefix:String(goal.unitPrefix||'').slice(0,64),owner:Math.max(1,Math.min(8,Number(goal.owner)||2)),
                 zone:goal.zone&&Number.isFinite(goal.zone.x)&&Number.isFinite(goal.zone.y)?{x:goal.zone.x,y:goal.zone.y,radius:Math.max(1,Math.min(2000,Number(goal.zone.radius)||100))}:null
             }:null;
-            return {version:1,title:String(raw.title||'').slice(0,80),victoryMode:raw.victoryMode==='annihilation'?'annihilation':'domination',...(objective?{objective}:{}),events};
+            const battlefield=raw.battlefield&&typeof raw.battlefield==='object'?{version:1,northUp:raw.battlefield.northUp!==false,note:String(raw.battlefield.note||'').slice(0,600),features:(Array.isArray(raw.battlefield.features)?raw.battlefield.features:[]).filter(f=>f&&Number.isFinite(f.x)&&Number.isFinite(f.y)).slice(0,32).map(f=>({name:String(f.name||'').slice(0,80),x:f.x,y:f.y,kind:f.kind==='water'?'water':'land'}))}:null;
+            return {version:1,title:String(raw.title||'').slice(0,80),victoryMode:raw.victoryMode==='annihilation'?'annihilation':'domination',...(objective?{objective}:{}),...(battlefield?{battlefield}:{}),events};
         }
         function wodMissionHasEvents() {
             return !!(gameData.mission && Array.isArray(gameData.mission.events) && gameData.mission.events.length);
@@ -55118,6 +55186,7 @@
 
         function cityEligibleForBuildPlacementForOwner(city, mode, owner) {
             if(!city || city.owner !== owner || !city.id || !mode || wodCityProductionJob(city)) return false;
+            if(isCitySiegeBlockedForProduction(city))return false;
             if(owner === 1 && gameData._campaignRun && ['light','marine','heavy','ship','transport'].includes(mode)) {
                 return !!(gameData._campaignRun.battleLive && wodCampaignReserveUnits(mode).length &&
                     !isCitySiegeBlockedForProduction(city) && findSpawnHex(mode, city, owner));
@@ -55157,6 +55226,7 @@
         /** Human-readable reason a train/build action is blocked (money, MP, city requirements). */
         function wodExplainBuildBlockReason(mode, owner, city) {
             if(!mode) return 'That action is not available right now.';
+            if(city&&isCitySiegeBlockedForProduction(city))return 'This town is under attack — construction and mobilization pause until the siege clears.';
             if(city && wodCityProductionJob(city)) return 'This town is busy: ' + wodProductionLabel(wodCityProductionJob(city).mode) + ' · ' + Math.ceil(wodCityProductionJob(city).remaining) + 's remaining.';
             if(owner === 1 && gameData._campaignRun && ['light','marine','heavy','ship','transport'].includes(mode)) {
                 if(!gameData._campaignRun.battleLive) return 'Begin the battle before calling reinforcements.';
@@ -55454,14 +55524,25 @@
         function wodClearTransportMove(u) {
             u.target=null;u.path=null;u.orderTarget=null;u.fullMarchWaypoints=null;u.marchWpCursor=0;u.holding=false;u._wodOrderIntoWater=false;
         }
-        function wodTransportShorePairs(unit,transport,goal) {
+        function wodTransportLandingRegion(unit,goal) {
+            const root=goal&&getNearestHexToPoint(goal.x,goal.y);if(!root||isWaterHex(root))return null;
+            const key=getHexKey(root)+'|'+(gameData._wodPfVer||0),old=gameData._transportLandingRegion;
+            if(old?.hexes===gameData.hexes&&old.key===key)return old.keys;
+            const keys=new Set([getHexKey(root)]),queue=[root];
+            for(let i=0;i<queue.length;i++)for(const d of hexDirections){const h=queue[i],n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||isWaterHex(n)||n.type==='mountain'||keys.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,true))continue;keys.add(getHexKey(n));queue.push(n);}
+            gameData._transportLandingRegion={hexes:gameData.hexes,key,keys};return keys;
+        }
+        function wodTransportShorePairs(unit,transport,goal,landing=false) {
             const rows=[],sp=gameData.hexRadius*1.35;
+            const reachable=landing?wodTransportLandingRegion(unit,goal):null;
             for(const h of gameData.hexList) {
                 if(isWaterHex(h)||h.type==='mountain')continue;
+                if(reachable&&!reachable.has(getHexKey(h)))continue;
                 const gd=(h.x-goal.x)**2+(h.y-goal.y)**2;
                 for(const d of cardinalHexDirections) {
                     const w=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!w||!wodIsOpenWaterHex(w))continue;
-                    const score=gd+(w.x-transport.x)**2*.06+(w.y-transport.y)**2*.06;
+                    const sea=(w.x-transport.x)**2+(w.y-transport.y)**2;
+                    const score=landing?gd*.25+sea*2:gd+sea*.06;
                     rows.push({land:h,water:w,score});
                 }
             }
@@ -55493,7 +55574,7 @@
         function wodOrderUnloadTransport(transport,goal) {
             if(!transport?.cargo||transport.hp<=0)return false;
             const start=getNearestHexToPoint(transport.x,transport.y);
-            for(const p of wodTransportShorePairs(transport.cargo,transport,goal||transport)) {
+            for(const p of wodTransportShorePairs(transport.cargo,transport,goal||transport,true)) {
                 const path=wodWaterBfsPath(transport,start,p.water,22000);
                 if(!path.length||!wodHexKeysEqual(path[path.length-1],p.water))continue;
                 transport.unloadHexKey=getHexKey(p.land);transport.unloadGoal=goal?{x:goal.x,y:goal.y}:null;
@@ -55571,12 +55652,18 @@
         function wodSyncTransportControls() {
             const card=document.getElementById('infoCard');if(!card)return;
             let row=document.getElementById('wodTransportControls');
-            if(!row){row=document.createElement('div');row.id='wodTransportControls';row.style.cssText='display:flex;gap:6px;align-items:center;padding:6px 10px;flex-wrap:wrap';row.innerHTML='<span data-transport-state></span><button type="button" class="menu-btn" data-board-transport>Board transport</button><button type="button" class="menu-btn" data-unload-transport>Unload</button>';card.appendChild(row);row.querySelector('[data-board-transport]').onclick=wodTransportBoardSelected;row.querySelector('[data-unload-transport]').onclick=wodTransportUnloadSelected;}
+            if(!row){row=document.createElement('div');row.id='wodTransportControls';row.setAttribute('aria-label','Transport orders');row.innerHTML='<span data-transport-state></span><button type="button" class="info-order-btn" data-board-transport title="Board one land unit per transport"><span class="info-order-ico" aria-hidden="true"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 10h14l-2 4H4zm6-9h2v5h3L8 10 4 6h3z"/></svg></span>Board</button><button type="button" class="info-order-btn" data-unload-transport title="Unload at a clear shore"><span class="info-order-ico" aria-hidden="true"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 10h14l-2 4H4zM7 9V4H4l4-4 4 4H9v5z"/></svg></span>Unload</button>';(card.querySelector('#infoCardPage0')||card).appendChild(row);row.querySelector('[data-board-transport]').onclick=wodTransportBoardSelected;row.querySelector('[data-unload-transport]').onclick=wodTransportUnloadSelected;}
+            const orders=card.querySelector('.info-mobile-orders-row');if(orders&&row.parentNode!==orders)orders.appendChild(row);
             const units=gameData.selection.filter(u=>u.owner===wodLocalPlayerOwner()&&u.hp>0&&!u.id),ship=units.length===1&&units[0].type==='transport'?units[0]:null;
-            row.style.display=units.length?'flex':'none';row.querySelector('[data-board-transport]').hidden=!units.some(u=>!wodIsNavalUnit(u)&&u.type!=='convoy');row.querySelector('[data-unload-transport]').hidden=!units.some(u=>u.type==='transport'&&u.cargo);
+            const land=units.some(u=>!wodIsNavalUnit(u)&&u.type!=='convoy'),boats=gameData.entities.filter(t=>t.owner===wodLocalPlayerOwner()&&t.type==='transport'&&t.hp>0);
+            const board=row.querySelector('[data-board-transport]');board.hidden=!land||!boats.length;board.disabled=!boats.some(t=>!t.cargo&&!t.pickupUid);
+            row.style.display=units.length&&(ship||land&&boats.length||units.some(u=>u.type==='transport'&&u.cargo))?'contents':'none';row.querySelector('[data-unload-transport]').hidden=!units.some(u=>u.type==='transport'&&u.cargo);
             row.querySelector('[data-transport-state]').textContent=ship?(ship.cargo?'1 / 1 · '+(ship.cargo.name||ship.cargo.type):ship.pickupUid?'Boarding · 0 / 1':'Empty · 0 / 1'):'';
             if(!ship&&!units.some(u=>!wodIsNavalUnit(u)))row.style.display='none';
             card.classList.toggle('wod-has-transport-controls',row.style.display!=='none');
+            const count=row.style.display==='none'?0:[...row.querySelectorAll('button')].filter(b=>!b.hidden).length;
+            if(orders)orders.style.gridTemplateColumns=count?'repeat('+(5+count)+',minmax(0,1fr))':'';
+            wodPositionCommandHud();
         }
         function wodAiSweepTownCells(dt) {
             gameData._townSweepTimer=(gameData._townSweepTimer||0)+dt;if(gameData._townSweepTimer<.65)return;gameData._townSweepTimer=0;
@@ -56048,6 +56135,10 @@
             gameData._landIncomeCacheDirty = true;
         }
 
+        function wodRoadRouteFields(road) {
+            const points=(Array.isArray(road?.points)?road.points:[]).filter(p=>p&&Number.isFinite(p.x)&&Number.isFinite(p.y)&&Math.abs(p.x)<100000&&Math.abs(p.y)<100000).slice(0,128).map(p=>({x:p.x,y:p.y}));
+            return points.length>1?{points}:{};
+        }
         function snapEditorRoadRefsToCities() {
             let cities = gameData.cities || [];
             if(!cities.length) {
@@ -56066,10 +56157,10 @@
             for(let r of gameData.roads || []) {
                 let f = resolveEnd(r.from);
                 let t = resolveEnd(r.to);
-                if(f && t && f !== t) next.push({ from: f, to: t });
+                if(f && t && f !== t) next.push({ from: f, to: t,...wodRoadRouteFields(r) });
             }
             gameData.roads = next;
-            if(!gameData.roads.length && cities.length >= 2)
+            if(!gameData.roads.length && cities.length >= 2 && !gameData.mission?.battlefield)
                 rebuildEditorTradeRoutesFromCities();
         }
 

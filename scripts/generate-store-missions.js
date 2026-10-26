@@ -42,6 +42,7 @@ const { MapBuilder, ev } = loadToolkit();
 const {buildHistoricalMissions,polishStoreMission}=require('./store-mission-design');
 const {buildHistoricalCampaigns}=require('./historical-campaigns');
 const {refineHistoricalMission}=require('./refine-historical-missions');
+const {refineLegacyBattlefield}=require('./legacy-battlefield-details');
 if (!MapBuilder || !ev) throw new Error('Could not load MapBuilder/ev from generate-missions.js');
 
 /**
@@ -1409,7 +1410,7 @@ function validateMission(m) {
 function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   const campaign=buildHistoricalCampaigns({MapBuilder,ev});
-  const singles = [buildNormandyDDay(), buildKurskCitadel(), buildMidway(), ...buildHistoricalMissions({MapBuilder,ev})].map(polishStoreMission).map(m=>refineHistoricalMission(m,ev));
+  const singles = [buildNormandyDDay(), buildKurskCitadel(), buildMidway(), ...buildHistoricalMissions({MapBuilder,ev})].map(refineLegacyBattlefield).map(polishStoreMission).map(m=>refineHistoricalMission(m,ev));
   const missions=[...singles,...campaign.missions.map(polishStoreMission)];
   const catalog=[...singles.map(m=>m.entry),...campaign.packs];
   const keep = new Set(catalog.map(m=>m.id));

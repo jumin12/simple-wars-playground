@@ -141,3 +141,7 @@ If you already have a `.git` folder, add the new `origin` (or replace it) and pu
 - **Large maps:** the initial `match_start` payload can be big; very large maps may hit browser or proxy limits. Prefer moderate map sizes for multiplayer.  
 - **Commands:** move, line formation, and shift-waypoint march are relayed from guests to the host; other interactions may still be host-only until extended.  
 - **Fairness:** the host is authoritative; anti-cheat is not implemented—use with trusted players.
+
+Waypoint orders work with Shift + left-click, Shift + right-click, or the unit card's Waypoint button followed by mouse clicks or taps. Shift-click a friendly unit to add it to the selection. Board and Unload use the same order bar. AI and player faction reports share full-width layouts, and the same siege gate blocks all town recruitment and construction for both sides.
+
+Historical scenarios use individual battlefield plans, authored water courses, crossings, road bends and geographic landmarks. All seventeen campaign-stage waterways and town layouts are distinct. Battlefield labels accompany the previews; gameplay landmarks follow the city-name layer. Geographic notes explain each battlefield. Terrain and routes remain scaled tactical adaptations. Run `node scripts/verify-battlefield-geography.js` for structural map checks and `node scripts/verify-orders-siege-ui.js` for real mouse/touch commands and responsive UI/siege checks.

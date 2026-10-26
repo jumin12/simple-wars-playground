@@ -105,7 +105,7 @@ function polishStoreMission(m) {
  // bridges or deliberate strategic water barriers.
  const protectedKeys=new Set(d.cities.map(c=>`${c.q},${c.r}`));
  for(const u of d.entities)protectedKeys.add(`${Math.round(u.x/SP)},${Math.round(u.y/SP)}`);
- for(let pass=0;pass<2;pass++){
+ for(let pass=0;pass<(d.mission?.battlefield?0:2);pass++){
   const changes=[];for(const h of d.hexList){if(h.cityId||protectedKeys.has(`${h.q},${h.r}`))continue;const ns=DIRS.map(([q,r])=>cells.get(`${h.q+q},${h.r+r}`)).filter(Boolean);if(ns.length<4)continue;
    if(wet(h)&&ns.every(n=>!wet(n)&&n.type!=='mountain'))changes.push([h,ns[0].type]);
    else if(h.type!=='mountain'&&!wet(h)&&ns.every(wet))changes.push([h,'water']);

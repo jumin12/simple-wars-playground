@@ -53,3 +53,5 @@ node scripts/generate-store-missions.js
 ```
 
 Writes all 24 scenario JSONs and the shop manifest: seven standalone missions and seventeen stages in three campaign packs. Existing purchased IDs and prices are preserved. Generators validate era, empty buildings, town spacing, distinct unit placements and supplied ground starts. Historical sources and adaptations are documented in [HISTORICAL-NOTES.md](HISTORICAL-NOTES.md).
+
+Campaign battlefield plans live in `scripts/historical-battlefields.js`; standalone refinements live in `scripts/legacy-battlefield-details.js`. `mission.battlefield` preserves north-up orientation, a geographic note and named `{name,x,y,kind}` landmarks. Roads can include a finite `points: [{x,y}, ...]` route rather than a straight endpoint link. Both survive editor and map snapshot round-trips. Authored maps with no roads do not receive automatic routes across water.

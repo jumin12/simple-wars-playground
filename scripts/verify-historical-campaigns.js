@@ -44,10 +44,12 @@ try{
    const loaded=!!t.cargo,unload=loaded&&wodOrderUnloadTransport(t,zone);
    if(!loaded){rows.push({ordered,loaded,steps,u:{x:u.x,y:u.y,target:u.target,board:u.boardTransportUid,path:u.path?.length,holding:u.holding,retreating:u.retreating},t:{x:t.x,y:t.y,target:t.target,pickup:t.pickupUid,land:t.pickupLandKey,path:t.path?.length}});continue;}
    for(steps=0;steps<5000&&t.cargo;steps++){wodBeginSimPfBudget(3);for(const e of gameData.entities)moveUnitTowardTarget(e,.1);wodRunUnitSeparation(false,5,96);wodUpdateTransports(.1);}
-   const dry=!isWaterHex(getNearestHexToPoint(u.x,u.y));u.x=zone.x+(i-1)*35;u.y=zone.y;u.target=null;u.path=null;rows.push({ordered,loaded,unload,dry,unloaded:!t.cargo&&gameData.entities.includes(u)});
+   const dry=!isWaterHex(getNearestHexToPoint(u.x,u.y));if(t.cargo){rows.push({ordered,loaded,unload,dry,unloaded:false,t:{x:t.x,y:t.y,target:t.target,path:t.path?.length,unload:t.unloadHexKey},unit:{x:u.x,y:u.y}});continue;}
+   for(steps=0;steps<3000&&Math.hypot(u.x-zone.x,u.y-zone.y)>goal.zone.radius*.8;steps++){wodBeginSimPfBudget(3);for(const e of gameData.entities)moveUnitTowardTarget(e,.1);wodRunUnitSeparation(false,5,96);wodUpdateTransports(.1);}
+   const walked=Math.hypot(u.x-zone.x,u.y-zone.y)<=goal.zone.radius;wodClearTransportMove(u);rows.push({ordered,loaded,unload,dry,walked,unloaded:!t.cargo&&gameData.entities.includes(u)});
   }
   const oldWin=triggerCampaignVictory;let won=false;triggerCampaignVictory=()=>won=true;rt.elapsed=goal.duration;try{wodCheckScriptedMissionEnd(.1);}finally{triggerCampaignVictory=oldWin;}return{rows,won,originals:evacuees.length,ferries:boats.length};
- });assert(results.ferry.rows.every(r=>r.ordered&&r.loaded&&r.unload&&r.dry&&r.unloaded)&&results.ferry.won,JSON.stringify(results.ferry));
+ });assert(results.ferry.rows.every(r=>r.ordered&&r.loaded&&r.unload&&r.dry&&r.unloaded&&r.walked)&&results.ferry.won,JSON.stringify(results.ferry));
  // Objective boundaries: ownership of every town cell, timed defense, boats do
  // not count as evacuated infantry, living enemy ships prevent a naval win.
  results.objectives=await page.evaluate(()=>{document.getElementById('qaCampaignMap').remove();wodHideMissionPopup();gameData._campaignEnded=false;gameState='PLAYING';gameData.menuAttractMode=false;const oldWin=triggerCampaignVictory,oldLose=triggerCampaignDefeat;let wins=0,losses=0;triggerCampaignVictory=()=>wins++;triggerCampaignDefeat=()=>losses++;
