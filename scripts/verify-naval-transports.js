@@ -71,7 +71,7 @@ const server=http.createServer((req,res)=>{
   });assert.equal(results.aiAvoidsSwimming.wet,0,'ordinary AI waits for dry access, a bridge or transport');
   results.aiFerry=await page.evaluate(()=>{
    resetWaterTest(2);gameData._transportAiTimer=0;for(const h of gameData.hexList){h.type=h.q>=0&&h.q<8?'water':'grass';h.owner=isWaterHex(h)?0:h.q<0?2:1;}testTown(-8,0,2,'Own');testTown(11,0,1,'Enemy');
-   const u=createUnitAt('heavy',-108,0,2),t=createUnitAt('transport',27,0,2);u.x=-108;u.y=0;t.x=27;t.y=0;gameData.unitSpatialGrid=buildUnitSpatialGrid();wodBeginSimPfBudget(2);
+   const u=createUnitAt('heavy',-108,0,2),t=createUnitAt('transport',27,0,2);createUnitAt('supply',54,-81,2);u.x=-108;u.y=0;t.x=27;t.y=0;gameData.unitSpatialGrid=buildUnitSpatialGrid();wodBeginSimPfBudget(3);
    const request=wodAiMoveUnitToward(u,297,0,false);let loaded=false,landed=false;
    for(let i=0;i<3000;i++){wodBeginSimPfBudget(2);for(const e of gameData.entities)moveUnitTowardTarget(e,.1);wodRunUnitSeparation(false,5,96);wodUpdateTransports(.1);loaded||=!!t.cargo;if(loaded&&!t.cargo){landed=true;break;}}
    for(let i=0;i<50;i++)wodUpdateTransports(.1);
