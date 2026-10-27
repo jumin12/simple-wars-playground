@@ -93,7 +93,7 @@ const server=http.createServer((req,res)=>{
     if(kind==='stationary'){const u=createUnitAt('light',0,0,1,{startSpawn:true});u.x=0;u.y=0;}
     let invalid=0,elapsed=0;
     for(let step=0;step<3000;step++) {
-     gameData._wodSimTick++;wodBeginSimPfBudget(8);gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRebuildHexCombatOccupancy();
+     gameData._wodSimTick++;gameData._aiEconomyClock=(gameData._aiEconomyClock||0)+.1;wodBeginSimPfBudget(8);gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRebuildHexCombatOccupancy();
      for(const u of units){moveUnitTowardTarget(u,.1);if(!wodSamplePosOnWalkableTerrain(u,u.x,u.y))invalid++;}
      gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRunUnitSeparationSync(40,96);elapsed+=.1;
      if(units.every(u=>Math.abs(u.x-goals.get(u).x)<150))break;
@@ -111,7 +111,7 @@ const server=http.createServer((req,res)=>{
     const h=gameData.hexes['0,0'],u=createUnitAt('light',h.x,h.y,owner,{startSpawn:true});u.x=h.x;u.y=h.y;u.hp=90;
     gameData._wodPlayerMovingN=80;let ticks=0;
     for(;ticks<100;ticks++){gameData._wodSimTick=ticks*2;updateEncirclements(.1);if(!gameData._encircWork&&gameData.encircledHexes.size)break;}
-    const state=wodGetUnitEncirclementState(u,h),before=u.hp,old=updateAiStrategy;updateAiStrategy=()=>{};update(.2);updateAiStrategy=old;
+    u.outOfSupplySeconds=10;const state=wodGetUnitEncirclementState(u,h),before=u.hp,old=updateAiStrategy;updateAiStrategy=()=>{};update(.2);updateAiStrategy=old;
     rows.push({owner,ground,ticks,encircled:!!state,damage:before-u.hp,flash:u.encircledFlash,effect:getUnitEffects(u).some(e=>e.label==='Encircled')});
    }
    return rows;
