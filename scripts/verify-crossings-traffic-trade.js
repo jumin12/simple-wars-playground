@@ -94,4 +94,3 @@ const server=http.createServer((req,res)=>{
   }
  }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
-
