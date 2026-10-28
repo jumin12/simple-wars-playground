@@ -1775,10 +1775,7 @@
             #inGameUI .info-card.visible {
                 max-height: min(460px, calc(100vh - 120px));
             }
-            /* Match mobile: no stacked detail/stats overlapping the order sheet */
-            #inGameUI .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-detail-block,
-            #inGameUI .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-stats,
-            #inGameUI .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-stat-extra,
+            /* Keep details below orders; auxiliary pages open through the card controls. */
             #inGameUI .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-card-pager,
             #inGameUI .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-deselect-wrap {
                 display: none !important;
@@ -3763,21 +3760,9 @@
         }
 
         @media (hover: none) and (pointer: coarse), (max-width: 900px) {
-            .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-detail-block {
-                display: none;
-            }
-
             .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-card-pager,
             .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-deselect-wrap {
                 display: none;
-            }
-
-            .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-stats {
-                display: none;
-            }
-
-            .info-card.info-card--mobile-orders:not(.info-card--more-open) .info-stat-extra {
-                display: none !important;
             }
         }
 
@@ -3825,7 +3810,8 @@
             background-clip: padding-box;
         }
 
-        .info-effects-scroll .effect-pill-tip {
+        .info-effects-scroll .effect-pill-tip,
+        .info-terrain-active-effects .effect-pill-tip {
             display: none;
         }
 
@@ -11604,6 +11590,7 @@
                     <p class="esc-help-prose">Starting armies deploy on friendly land connected to an owned town. About 20% cover the supplied border evenly and 80% start near towns, with armor in the rear. Empty offshore holdings count toward balanced land ownership but receive no starting land troops.</p>
                     <p class="esc-help-prose">Every <strong>friendly town supplies its connected friendly land</strong>, including a captured enemy town. A surrounded pocket containing a friendly town remains supplied: its units take no encirclement damage and can recover when safe. Units lose land supply only when they have no cardinal land connection to any friendly town. These supply, warning and attrition rules apply equally to player and enemy armies, including when hostile territory is captured underneath a unit. Such pockets are marked <strong>encircled</strong>. Units receive <strong>ten uninterrupted simulation seconds out of supply</strong> before taking <strong>3.5% max HP attrition per second</strong>; they cannot heal during this grace period. Regaining city or supply-ship supply, or boarding a transport, resets the countdown. Moving between unsupplied land and water does not reset it. The warning above each unit and its effects page show the time remaining. Map edges and neutral borders do not supply a townless pocket. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though it had a town connection. Infantry and armor in the same coastal pocket still need a friendly town. Forts only halve unsupplied attrition. Active fighting at a town can pause production even while it supplies its territory.</p>
                     <p class="esc-help-prose"><strong>Bridge supply:</strong> completed bridges count as land for movement, supply and safe recovery. They connect friendly land on both banks to a friendly town, so an island without a town can be supplied across a bridge. Units on the supplied deck can recover when safe. Capturing a bank or removing the bridge can break this connection. Unfinished bridges and open water do not carry ordinary land supply.</p>
+                    <p class="esc-help-prose"><strong>Bridge construction:</strong> both ends must touch usable land and at least one bank must be in the builder’s own territory. The opposite bank may be hostile. Player and AI use the same rule. If both banks are lost before construction finishes, the job is cancelled and its money refunded.</p>
                     <p class="esc-help-prose"><strong>Island landings:</strong> troops capture only the normal area around them, even when an island is undefended or its town has been captured. Water is an open boundary: coastal territory never surrenders automatically as an encircled pocket. Fully surrounded inland remnants can still transfer. Infantry and armor on a townless island still need a friendly town connection for supply; marines retain their water-supply exception.</p>
                 </div>
 
@@ -12463,16 +12450,6 @@
                     </button>
                 </div>
                 </div>
-                <div class="info-stats">
-                    <span id="infoHP" class="info-stat-line"></span>
-                    <span id="infoMorale" class="info-stat-line"></span>
-                </div>
-                <div id="infoStatTanks" class="info-stat-line info-stat-extra" style="display:none" aria-hidden="true"></div>
-                <div class="info-detail-block">
-                <div class="info-effects-scroll" aria-label="Active combat and terrain effects">
-                    <div id="infoEffects" class="effect-list"></div>
-                </div>
-                </div>
                 <div class="info-mobile-orders" id="infoMobileOrders" aria-label="Touch map orders">
                     <span class="info-mobile-orders-label">Orders</span>
                     <div class="info-mobile-orders-row">
@@ -12497,6 +12474,16 @@
                             Retreat
                         </button>
                     </div>
+                </div>
+                <div class="info-stats">
+                    <span id="infoHP" class="info-stat-line"></span>
+                    <span id="infoMorale" class="info-stat-line"></span>
+                </div>
+                <div id="infoStatTanks" class="info-stat-line info-stat-extra" style="display:none" aria-hidden="true"></div>
+                <div class="info-detail-block">
+                <div class="info-effects-scroll" aria-label="Active combat and terrain effects">
+                    <div id="infoEffects" class="effect-list"></div>
+                </div>
                 </div>
                 </div>
                 <div class="info-card-page" id="infoCardPage1" data-page="1" hidden>
@@ -12731,6 +12718,17 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at: '2026-10-27T22:21:00-04:00',
+                title: 'Reliable crossings, trade routes and unit details',
+                items: [
+                    'Bridge construction requires at least one bank in the builder’s own territory for every faction. The other bank may be hostile. Losing both banks before completion cancels and refunds the job. Bridge routes now use actual clear approaches to each bank, preventing shortcuts through nearby mountains or open water.',
+                    'Friendly columns yield around intersecting paths and resume their saved destinations after traffic clears. Temporary blockers no longer count as arrival. Idle units clear expired retreat states and return fire normally; active retreats and morale routs retain their rules.',
+                    'Your unit’s manpower, morale and active terrain/combat effects appear directly below its order buttons on desktop and mobile. Effect tooltips preserve their hovered anchor through live countdown updates and scrolling, including on the terrain page.',
+                    'Trade caravans and merchant boats retain their real destination town and arrival marker, follow complete routes, pay once on delivery and reroute when a destination is captured. Boats use reachable harbor waters instead of chasing inland town centers, never turn into swimming infantry, and avoid disconnected lakes.',
+                    'AI troops held on a townless island request reachable naval supply or a ferry back to friendly city supply. Town guards stay on their own landmass. Secured islands retain support until resupplied or evacuated; supply ships cancel traffic sidesteps that become unsafe after a new landing.'
+                ]
+            },
             {
                 at: '2026-10-27T00:57:00-04:00',
                 title: 'Active naval invasions and accurate transport landings',
@@ -14229,7 +14227,7 @@
                 showEscSection(opts.defaultSection || 'helpSection');
         }
 
-        const WOD_ESC_HELP_VERSION = '10';
+        const WOD_ESC_HELP_VERSION = '11';
 
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
@@ -16551,7 +16549,7 @@
                 if(sign !== endSign) continue;
                 let dx = h.x - cap.x,
                     dy = h.y - cap.y;
-                if(dx * dx + dy * dy <= reach2) out.push(h);
+                if(dx * dx + dy * dy <= reach2&&wodBridgeApproachClear(br,h)) out.push(h);
             }
             return out;
         }
@@ -16668,7 +16666,7 @@
             for(let ki = 0; ki < br.hexKeys.length; ki++)
                 gameData._bridgeByHexKey[br.hexKeys[ki]] = br;
         }
-        const WOD_BRIDGE_INDEX_VERSION = 10;
+        const WOD_BRIDGE_INDEX_VERSION = 11;
         function wodEnsureBridgePathIndex() {
             if(!gameData.bridges || !gameData.bridges.length) {
                 gameData._bridgeByHexKey = {};
@@ -16735,10 +16733,23 @@
             return false;
         }
         function wodLinkBridgeLandHex(lk, bk) {
+            const land=gameData.hexes[lk],bridge=gameData._bridgeByHexKey?.[bk];
+            if(!land||!bridge||!wodBridgeApproachClear(bridge,land))return;
             if(!gameData._bridgeLandEntry[lk]) gameData._bridgeLandEntry[lk] = new Set();
             gameData._bridgeLandEntry[lk].add(bk);
             if(!gameData._bridgeExitLand[bk]) gameData._bridgeExitLand[bk] = new Set();
             gameData._bridgeExitLand[bk].add(lk);
+        }
+        function wodBridgeApproachClear(br,land) {
+            const angle=br.angle||0,side=(land.x-br.x)*Math.cos(angle)+(land.y-br.y)*Math.sin(angle)<0?-1:1,cap=wodBridgeCapPoint(br,side);
+            const distance=Math.hypot(land.x-cap.x,land.y-cap.y),hr=gameData.hexRadius||20;
+            if(distance>hr*2.4)return false;
+            const steps=Math.max(1,Math.ceil(distance/(hr*.25)));
+            for(let i=0;i<=steps;i++){
+                const x=land.x+(cap.x-land.x)*i/steps,y=land.y+(cap.y-land.y)*i/steps;
+                if(wodPointInBridgeRect(x,y,br,1.05))continue;
+                const h=getNearestHexToPoint(x,y);if(!h||isWaterHex(h)||h.type==='mountain')return false;
+            }return true;
         }
         /** Which cap side (-1/+1) a land hex sits on relative to the bridge axis. */
         function wodBridgeLandLinkSide(br, hex) {
@@ -17463,7 +17474,7 @@
             }
             return { neg, pos };
         }
-        function wodBridgeEndTouchesLand(br, endSign) {
+        function wodBridgeEndTouchesLand(br, endSign, owner) {
             if(!br || br.w == null) return false;
             let hw = br.w * 0.5;
             let ang = br.angle || 0;
@@ -17477,6 +17488,7 @@
             for(let hi = 0, hl = gameData.hexList.length; hi < hl; hi++) {
                 let h = gameData.hexList[hi];
                 if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
+                if(owner>0&&h.owner!==owner)continue;
                 let dx = h.x - ex,
                     dy = h.y - ey;
                 if(dx * dx + dy * dy <= reach2) return true;
@@ -17545,7 +17557,7 @@
             let hex = getNearestHexToPoint(unit.x, unit.y);
             return isBridgeHex(hex);
         }
-        function wodBridgePlacementError(br, owner) {
+        function wodBridgePlacementError(br, owner, skipCost=false) {
             if(!br) return 'Invalid bridge.';
             let probe = wodNormalizeBridgeRecord(Object.assign({}, br));
             if(!probe) return 'Invalid bridge.';
@@ -17562,8 +17574,9 @@
             if(wodBridgeOverlapsExisting(probe)) return 'Another bridge is in the way.';
             if(water < 1) return 'Bridges must cross water.';
             if(!wodBridgeBothEndsTouchLand(probe)) return 'Both bridge ends must touch land.';
+            if(owner>0&&!wodBridgeEndTouchesLand(probe,-1,owner)&&!wodBridgeEndTouchesLand(probe,1,owner))return 'At least one bridge bank must be in your territory.';
             if(blocked > 0) return 'Cannot build on mountains or city tiles.';
-            if(owner && wodPlayerTreasury(owner) < WOD_PRICE_BRIDGE) return 'Not enough money for a bridge.';
+            if(owner && !skipCost && wodPlayerTreasury(owner) < WOD_PRICE_BRIDGE) return 'Not enough money for a bridge.';
             return null;
         }
         async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
@@ -18735,7 +18748,7 @@
                 morale: u.morale, maxMorale: u.maxMorale, moraleBroken: !!u.moraleBroken, retreating: !!u.retreating,
                 manpower: u.manpower, maxManpower: u.maxManpower, tanks: u.tanks, maxTanks: u.maxTanks,
                 xp: u.xp || 0, kills: u.kills || 0, losses: u.losses || 0, veteran: !!u.veteran,
-                convoySeaRoute: !!u.convoySeaRoute, tradeValue: u.tradeValue, shake: u.shake || 0,
+                convoySeaRoute: !!u.convoySeaRoute, tradeValue: u.tradeValue, convoyFromKey:u.convoyFromKey||null,convoyToKey:u.convoyToKey||null,convoyDock:u.convoyDock||null,shake: u.shake || 0,
                 combatTargetUid:u.combatTargetUid||null, spawnFx: u.spawnFx || 0, activeCombatVisual: u.activeCombatVisual || 0, encircledFlash: u.encircledFlash || 0,
                 healingFlash: u.healingFlash || 0, waterFlash: u.waterFlash || 0, waterExposureSeconds:u.waterExposureSeconds||0,outOfSupplySeconds:u.outOfSupplySeconds||0,attritionLosses:u.attritionLosses||0,attritionTankLosses:u.attritionTankLosses||0,attritionHpLost:u.attritionHpLost||0, unpaidFlash: u.unpaidFlash || 0,
                 target: tgt, orderTarget: ot, path: pth, fullMarchWaypoints: fmw, marchWpCursor: u.marchWpCursor || 0
@@ -19399,6 +19412,7 @@
                         for(const key of ['outOfSupplySeconds','attritionLosses','attritionTankLosses','attritionHpLost'])if(Number.isFinite(ed[key]))ex[key]=ed[key];
                         ex.unpaidFlash = ed.unpaidFlash != null ? ed.unpaidFlash : ex.unpaidFlash;
                         ex.cargo=ed.cargo?wodEntityFromNet(ed.cargo):null;ex.pickupUid=ed.pickupUid||null;ex.pickupLandKey=ed.pickupLandKey||null;ex.boardTransportUid=ed.boardTransportUid||null;ex.unloadHexKey=ed.unloadHexKey||null;ex.unloadGoal=ed.unloadGoal||null;ex.ferryGoal=ed.ferryGoal||null;
+                        ex.convoyFromKey=ed.convoyFromKey||null;ex.convoyToKey=ed.convoyToKey||null;ex.convoyDock=ed.convoyDock||null;
                         if(ed.target) ex.target = Object.assign({}, ed.target);
                         else ex.target = null;
                         if(ed.orderTarget) ex.orderTarget = Object.assign({}, ed.orderTarget);
@@ -27259,8 +27273,8 @@
                 let fromCity = cityByKey[e.convoyFromKey];
                 let fromName = (fromCity && fromCity.name) ? fromCity.name : 'Town';
                 let destName = 'destination';
-                if(e.orderTarget && e.orderTarget.isCity) {
-                    let dest = findCityNearPointForOwner(e.orderTarget.x, e.orderTarget.y, owner);
+                if(e.convoyToKey||e.orderTarget && e.orderTarget.isCity) {
+                    let dest = cityByKey[e.convoyToKey]||(e.orderTarget&&findCityNearPointForOwner(e.orderTarget.x, e.orderTarget.y, owner));
                     if(dest) destName = dest.name || 'Town';
                 }
                 let val = e.tradeValue || 150;
@@ -27602,7 +27616,28 @@
             if(!destCity) return null;
             if(!convoy.convoySeaRoute)
                 return gameData.hexes[`${destCity.q},${destCity.r}`] || getNearestHexToPoint(destCity.x, destCity.y);
-            return findSpawnHex('ship', destCity, convoy.owner);
+            const start=getNearestHexToPoint(convoy.x,convoy.y),sea=wodNavalWaterRegionKeys(convoy,start),choices=[];
+            if(!sea)return null;
+            for(const p of getHexesInRadius(destCity.q,destCity.r,7)){
+                const h=gameData.hexes[`${p.q},${p.r}`];if(h&&wodIsOpenWaterHex(h)&&sea.has(getHexKey(h))&&
+                    getNeighborHexes(h).some(n=>n&&!isWaterHex(n)&&n.owner===destCity.owner))choices.push(h);
+            }
+            choices.sort((a,b)=>wodAiDist2(a.x,a.y,destCity.x,destCity.y)-wodAiDist2(b.x,b.y,destCity.x,destCity.y)||
+                wodAiDist2(a.x,a.y,convoy.x,convoy.y)-wodAiDist2(b.x,b.y,convoy.x,convoy.y));
+            return choices[0]||null;
+        }
+        function wodTradeSeaDockPair(from,to,owner) {
+            const origins=[];
+            for(const p of getHexesInRadius(from.q,from.r,7)){
+                const h=gameData.hexes[`${p.q},${p.r}`];if(h&&wodIsOpenWaterHex(h)&&getNeighborHexes(h).some(n=>n&&!isWaterHex(n)&&n.owner===owner))origins.push(h);
+            }
+            origins.sort((a,b)=>wodAiDist2(a.x,a.y,from.x,from.y)-wodAiDist2(b.x,b.y,from.x,from.y));
+            const tested=new Set();
+            for(const h of origins){
+                const probe={type:'convoy',convoySeaRoute:true,owner,x:h.x,y:h.y},region=wodNavalWaterRegionKeys(probe,h);
+                if(!region||tested.has(region))continue;tested.add(region);
+                const dest=resolveTradeConvoyPathHex(probe,to);if(dest)return{from:h,to:dest};
+            }return null;
         }
 
         function cityCurrentlyHasOutboundConvoy(city, seaRoute) {
@@ -27613,26 +27648,12 @@
 
         /** After capture/interception, resume trade toward another friendly city when possible. */
         function rerouteConvoyAfterOwnerChange(convoy, avoidCityKeyOpt) {
-            let pool = gameData.cities.filter(c => c.owner === convoy.owner);
-            if(convoy.convoySeaRoute) {
-                let harbors = pool.filter(c => c.hasHarbor);
-                let cand = harbors.filter(c => !avoidCityKeyOpt || convoyCityKey(c) !== avoidCityKeyOpt);
-                if(cand.length >= 2) {
-                    let dest = cand[Math.floor(Math.random() * cand.length)];
-                    if(dest) initConvoyRoute(convoy, dest);
-                    return;
-                }
-                convoy.convoySeaRoute = false;
-                let landHex = getNearestWalkableHexForUnit(convoy, convoy.x, convoy.y);
-                if(landHex) {
-                    convoy.x = landHex.x;
-                    convoy.y = landHex.y;
-                }
-                pool = gameData.cities.filter(c => c.owner === convoy.owner);
-            }
-            let cand = pool.filter(c => !avoidCityKeyOpt || convoyCityKey(c) !== avoidCityKeyOpt);
-            let dest = cand.length ? cand[Math.floor(Math.random() * cand.length)] : null;
-            if(dest) initConvoyRoute(convoy, dest);
+            const pool=gameData.cities.filter(c=>c.owner===convoy.owner&&(!convoy.convoySeaRoute||c.hasHarbor));
+            pool.sort((a,b)=>Number(convoyCityKey(a)===avoidCityKeyOpt)-Number(convoyCityKey(b)===avoidCityKeyOpt)||
+                wodAiDist2(a.x,a.y,convoy.x,convoy.y)-wodAiDist2(b.x,b.y,convoy.x,convoy.y));
+            for(const city of pool)if(initConvoyRoute(convoy,city))return true;
+            convoy.target=convoy.path=convoy.orderTarget=null;convoy.convoyToKey=null;
+            convoy._convoyRetryAt=(gameData._aiEconomyClock||0)+3;return false;
         }
 
         function stampUrbanTerrainAroundCity(centerHex, city, idxTag) {
@@ -28196,13 +28217,6 @@
                         for(let ei = 0; ei < entries.length; ei++) emit(gameData.hexes[entries[ei]]);
                     }
                 }
-                for(let di = 0; di < hexDirections.length; di++) {
-                    let d = hexDirections[di];
-                    let nb = gameData.hexes[`${hex.q + d.q},${hex.r + d.r}`];
-                    if(!nb || !isBridgeHex(nb)) continue;
-                    let linkNbs = wodBridgeLinkedHexes(nb);
-                    for(let li = 0; li < linkNbs.length; li++) emit(linkNbs[li]);
-                }
             }
             if(isBridgeHex(hex)) {
                 let linkNbs = wodBridgeLinkedHexes(hex);
@@ -28706,14 +28720,25 @@
         }
 
         function wodResumeTrafficYield(unit) {
-            const y=unit._trafficYield;if(!y||unit.target)return;
+            const y=unit._trafficYield;if(!y)return;
+            // A passenger may have landed after this sidestep was planned.
+            // Recheck coverage before continuing to yield away from the shore.
+            if(unit.type==='supply'&&unit.target&&!wodSupplyParkingSafe(unit,unit.orderTarget||unit.target)){
+                unit._trafficYield=null;wodClearTransportMove(unit);return;
+            }
+            if(unit.target)return;
             const leader=gameData.entities.find(u=>u.uid===y.leader&&u.hp>0);
-            const passed=!leader||(leader.x-y.x)*y.ax+(leader.y-y.y)*y.ay>0;
+            const passed=!leader||(leader.x-y.x)*y.ax+(leader.y-y.y)*y.ay>0||Math.hypot(leader.x-unit.x,leader.y-unit.y)>(gameData.hexRadius||20)*5;
             if(!passed&&(gameData._aiEconomyClock||0)<y.until)return;
             unit._trafficYield=null;
             if(y.idle&&unit._navalLanded)return;
             if(unit.type==='supply'&&y.points[0]&&!wodSupplyParkingSafe(unit,y.points[0]))return;
-            if(y.idle&&y.points[0]&&isWorldPositionBlockedByUnits(unit,y.points[0].x,y.points[0].y))return;
+            if(y.idle&&y.points[0]&&isWorldPositionBlockedByUnits(unit,y.points[0].x,y.points[0].y)){
+                // A passing column may still be crossing the saved position.
+                // Keep the return order until the moving obstruction has cleared.
+                if(gameData.entities.some(other=>other!==unit&&other.hp>0&&other.target&&Math.hypot(other.x-y.points[0].x,other.y-y.points[0].y)<(other.radius||12)+(unit.radius||12)+4))unit._trafficYield=y;
+                return;
+            }
             if(y.owner===unit.owner&&y.points.length)assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
         }
         function wodSupplyParkingSafe(ship,point) {
@@ -28730,10 +28755,11 @@
             let dx=target.x-mover.x,dy=target.y-mover.y,len=Math.hypot(dx,dy)||1;dx/=len;dy/=len;
             const nearby=gameData.entities.filter(u=>u!==mover&&u.hp>0&&u.type!=='convoy'&&wodIsFriendlyOwner(u.owner,mover.owner)&&!u.boardTransportUid&&!u.pickupUid&&
                 Math.hypot(u.x-mover.x,u.y-mover.y)<(u.radius||12)+(mover.radius||12)+12);
-            const blocker=nearby.find(u=>!u.target&&!u._trafficYield)||nearby.find(u=>u.target&&!u._trafficYield&&(u.target.x-u.x)*dx+(u.target.y-u.y)*dy<0);
+            const blocker=nearby.find(u=>!u.target&&!u._trafficYield)||nearby.find(u=>u.target&&!u._trafficYield&&
+                (u.target.x-u.x)*dx+(u.target.y-u.y)*dy<Math.hypot(u.target.x-u.x,u.target.y-u.y)*.65);
             if(!blocker)return false;
             const supplying=u=>u.type==='supply'&&!wodSupplyParkingSafe(u,{x:u.x+10000,y:u.y});
-            const loser=mover.retreating?blocker:blocker.retreating?mover:supplying(blocker)&&!supplying(mover)?mover:supplying(mover)&&!supplying(blocker)?blocker:blocker.target&&(String(ensureUnitId(mover))>String(ensureUnitId(blocker)))?mover:blocker,leader=loser===mover?blocker:mover;
+            const loser=mover.retreating?blocker:blocker.retreating?mover:blocker._combatEngaged&&!mover._combatEngaged?mover:supplying(blocker)&&!supplying(mover)?mover:supplying(mover)&&!supplying(blocker)?blocker:blocker.target&&(String(ensureUnitId(mover))>String(ensureUnitId(blocker)))?mover:blocker,leader=loser===mover?blocker:mover;
             if(loser._trafficYield||loser._combatEngaged||loser.moraleBroken||loser.retreating)return false;
             if(loser===mover){dx=-dx;dy=-dy;}
             const center=getNearestHexToPoint(loser.x,loser.y),spacing=(gameData.hexRadius||20)*1.35;if(!center)return false;
@@ -30795,8 +30821,7 @@
             }
 
             let onDeckNow = !!wodUnitOnBridgeDeck(unit) ||
-                wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
-                !!wodBridgeHexAtPoint(unit, unit.x, unit.y);
+                wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15);
 
             let startHex = getNearestWalkableHexForUnit(unit, unit.x, unit.y);
             // Prefer a land join hex — pathfinding onto the deck then truncating to joinPt
@@ -32053,7 +32078,7 @@
         }
 
         function wodUnitInUnsuppliedWater(unit,hex) {
-            return !!(unit&&hex&&!wodIsNavalUnit(unit)&&unit.type!=='marine'&&isWaterHex(hex)&&
+            return !!(unit&&hex&&!wodIsNavalUnit(unit)&&!(unit.type==='convoy'&&unit.convoySeaRoute)&&unit.type!=='marine'&&isWaterHex(hex)&&
                 !isBridgeHex(hex)&&!wodUnitOnBridgeDeck(unit));
         }
         const WOD_SUPPLY_GRACE_SECONDS=10;
@@ -32080,7 +32105,7 @@
         function applyTerrainUnitEffects(unit, dt) {
             let hex = getNearestHexToPoint(unit.x, unit.y);
             let onBridge = wodUnitOnBridgeDeck(unit);
-            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && !wodIsNavalUnit(unit));
+            let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && !wodIsNavalUnit(unit)&&!(unit.type==='convoy'&&unit.convoySeaRoute));
             unit.amphibInWater = !!(unit.type === 'marine' && sea);
             if(sea)unit.healingFlash=0;
             unit.inWater = !!(sea && unit.type !== 'marine');
@@ -32813,7 +32838,7 @@
             return isWaterHex(hex)||wodCurrentSupplyComponent(hex).water;
         }
         function wodGetUnitEncirclementState(unit, hex) {
-            if(!unit||!hex||wodIsNavalUnit(unit))return null;
+            if(!unit||!hex||wodIsNavalUnit(unit)||unit.type==='convoy'&&(!isWaterHex(hex)||unit.convoySeaRoute))return null;
             if(!wodUnitInUnsuppliedWater(unit,hex)&&wodSupplyShipForUnit(unit))return null;
             if(isWaterHex(hex)&&!isBridgeHex(hex)&&!wodUnitOnBridgeDeck(unit))return wodUnitInUnsuppliedWater(unit,hex)?{relief:false,water:true}:null;
             if(wodUnitOnBridgeDeck(unit)&&!isBridgeHex(hex)){const deck=wodBridgeHexAtPoint(unit,unit.x,unit.y);if(deck)hex=deck;}
@@ -33931,36 +33956,22 @@
         }
 
         function initConvoyRoute(convoy, destCity, validatedPath) {
-            convoy.orderTarget = {x: destCity.x, y: destCity.y, isCity: true};
-            let destHex = resolveTradeConvoyPathHex(convoy, destCity);
+            if(!destCity||destCity.owner!==convoy.owner||convoy.convoySeaRoute&&!destCity.hasHarbor)return false;
+            let destHex = validatedPath?.length>1?validatedPath[validatedPath.length-1]:resolveTradeConvoyPathHex(convoy, destCity);
             let startHex = getNearestWalkableHexForUnit(convoy, convoy.x, convoy.y);
-            if(!startHex || !destHex) {
-                convoy.path = null;
-                convoy.target = {x: destCity.x, y: destCity.y, isCity: true, pathPrepared: true};
-                return;
-            }
+            if(!startHex || !destHex)return false;
             let path = validatedPath || findPathAroundTerrain(convoy, destHex, startHex);
             if(path.length <= 1 && !convoy.convoySeaRoute) {
                 let alt = wodTryPortalBridgeMarchPath(convoy, startHex, destHex);
                 if(alt.length > 1) path = alt;
             }
-            if(path.length > 1) {
-                let endPt = {x: destHex.x, y: destHex.y, isCity: true};
-                convoy.path = wodHexPathToWorldWaypoints(convoy, path, endPt);
-                if(!wodTakeNextPathTarget(convoy)) {
-                    convoy.path = null;
-                    convoy.target = {x: destHex.x, y: destHex.y, isCity: true, pathPrepared: true};
-                }
-            } else {
-                let hop = convoy.convoySeaRoute ? findGreedyWaterStep(convoy, destHex) : findGreedyLandStep(convoy, destHex);
-                if(hop) {
-                    convoy.path = null;
-                    convoy.target = {x: hop.x, y: hop.y, pathPrepared: true, convoyGreedy: true};
-                } else {
-                    convoy.path = null;
-                    convoy.target = {x: destCity.x, y: destCity.y, isCity: true, pathPrepared: true};
-                }
-            }
+            if(!path.length||!wodPathReachesTarget(path,destHex)||!convoy.convoySeaRoute&&wodPathCrossesOpenWater(path))return false;
+            convoy.convoyToKey=convoyCityKey(destCity);convoy.convoyDock={x:destHex.x,y:destHex.y};
+            convoy.orderTarget={...convoy.convoyDock,isCity:true};convoy._convoyRetryAt=0;
+            convoy.path=wodHexPathToWorldWaypoints(convoy,path,convoy.convoyDock);
+            if(!convoy.path.length)convoy.path=[{...convoy.convoyDock}];
+            convoy.path[convoy.path.length-1].isCity=true;
+            wodTakeNextPathTarget(convoy);return true;
         }
 
         function wodQueueTradeConvoySpawn(owner,sea) {
@@ -33986,11 +33997,12 @@
             const {owner,sea}=job,{from,to}=job.pairs[job.index++];
             const valid=from.owner===owner&&to.owner===owner&&(!sea||from.hasHarbor&&to.hasHarbor)&&!cityCurrentlyHasOutboundConvoy(from,sea);
             if(valid) {
-                const origin=sea?findSpawnHex('ship',from,owner):from,destination=sea?findSpawnHex('ship',to,owner):gameData.hexes[`${to.q},${to.r}`];
+                const docks=sea?wodTradeSeaDockPair(from,to,owner):null;
+                const origin=sea?docks?.from:from,destination=sea?docks?.to:gameData.hexes[`${to.q},${to.r}`];
                 if(origin&&destination) {
                     const probe={type:'convoy',owner,convoySeaRoute:sea,x:origin.x,y:origin.y},start=getNearestWalkableHexForUnit(probe,origin.x,origin.y);
                     const path=start?findPathAroundTerrain(probe,destination,start):[];
-                    if(path.length>1&&wodPathReachesTarget(path,destination)) {
+                    if(path.length>1&&wodPathReachesTarget(path,destination)&&(sea||!wodPathCrossesOpenWater(path))) {
                         const convoy={type:'convoy',owner,convoySeaRoute:sea,name:generateUnitName('convoy',sea,owner),x:origin.x,y:origin.y,target:null,path:null,orderTarget:null,
                             hp:50,maxHp:50,speed:20,damage:0,range:0,attackCooldown:10,selected:false,shake:0,radius:6,tradeValue:300,convoyFromKey:convoyCityKey(from)};
                         gameData.entities.push(convoy);initConvoyRoute(convoy,to,path);return;
@@ -34045,10 +34057,15 @@
         }
 
         function wodUnitArrivedAtTarget(unit) {
-            if(unit.type === 'convoy' && unit.target && unit.target.isCity) {
+            if(unit.type === 'convoy' && (unit.convoyToKey||unit.target?.isCity||unit.orderTarget?.isCity)) {
+                const city=gameData.cities.find(c=>convoyCityKey(c)===unit.convoyToKey)||(!unit.convoyToKey&&unit.orderTarget&&findCityNearPointForOwner(unit.orderTarget.x,unit.orderTarget.y,unit.owner));
+                if(!city||city.owner!==unit.owner||unit.convoySeaRoute&&!city.hasHarbor){rerouteConvoyAfterOwnerChange(unit);return;}
                 let value = unit.tradeValue || 150;
-                if(unit.owner === 1) gameData.money += value;
-                else gameData.aiMoneyByOwner[unit.owner] = (gameData.aiMoneyByOwner[unit.owner] || 0) + value;
+                if(!unit._convoyDelivered){
+                    if(unit.owner === 1) gameData.money += value;
+                    else gameData.aiMoneyByOwner[unit.owner] = (gameData.aiMoneyByOwner[unit.owner] || 0) + value;
+                    unit._convoyDelivered=true;
+                }
                 unit.hp = 0;
             }
             unit.target = null;
@@ -34088,8 +34105,7 @@
                 // Still on the bridge with a far-shore order — keep marching; never arrive mid-deck.
                 let onDeck = unit._wodRouteUsesBridge && (
                     wodUnitOnBridgeDeck(unit) ||
-                    wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
-                    !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
+                    wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15)
                 );
                 if(onDeck && d2 > hr * hr * 0.25) {
                     unit.path = null;
@@ -34346,8 +34362,7 @@
                             // in a column would freeze mid-crossing when blocked by friendlies.
                             let onDeck = unit._wodRouteUsesBridge && (
                                 wodUnitOnBridgeDeck(unit) ||
-                                wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
-                                !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
+                                wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15)
                             );
                             let landAhead = wodUnitHasLandWaypointAhead(unit);
                             if(!onDeck && !landAhead && !wodUnitNearNarrowLandLane(unit)) {
@@ -34380,14 +34395,14 @@
                         // Never arrive mid-deck — same guard as player friend-block.
                         let onDeck = unit._wodRouteUsesBridge && (
                             wodUnitOnBridgeDeck(unit) ||
-                            wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15) ||
-                            !!wodBridgeHexAtPoint(unit, unit.x, unit.y)
+                            wodPointOnBridgeForUnit(unit, unit.x, unit.y, 1.15)
                         );
                         if(!onDeck && !wodUnitNearNarrowLandLane(unit)) {
                             let hrA = gameData.hexRadius || 20;
                             let adx = ftA.x - unit.x, ady = ftA.y - unit.y;
-                            let arriveR = unit.aiCaptureHexKey||wodAiGetUnitTaskJob(unit)?.city ? hrA*.6 : hrA * 1.35 * 5;
-                            if(adx * adx + ady * ady < arriveR * arriveR) {
+                            let arriveR = unit.aiCaptureHexKey||wodAiGetUnitTaskJob(unit)?.city ? hrA*.6 : Math.max(hrA*1.5,(unit.radius||12)*2+4);
+                            if(adx * adx + ady * ady < arriveR * arriveR&&gameData.entities.some(other=>other!==unit&&other.hp>0&&
+                                !other.target&&!other._trafficYield&&wodIsFriendlyOwner(other.owner,unit.owner)&&Math.hypot(other.x-ftA.x,other.y-ftA.y)<(other.radius||12)+4)) {
                                 wodUnitArrivedAtTarget(unit);
                                 return;
                             }
@@ -41599,6 +41614,11 @@
                 }
                 
                 wodResumeTrafficYield(unit);
+                if(unit.type==='convoy'){
+                    const destination=unit.convoyToKey&&gameData.cities.find(c=>convoyCityKey(c)===unit.convoyToKey);
+                    if(unit.convoyToKey&&(!destination||destination.owner!==unit.owner||unit.convoySeaRoute&&!destination.hasHarbor)||
+                        !unit.target&&(gameData._aiEconomyClock||0)>=(unit._convoyRetryAt||0))rerouteConvoyAfterOwnerChange(unit,unit.convoyFromKey);
+                }
                 const startHex=getNearestHexToPoint(unit.x,unit.y);
                 const startedInWater=wodUnitInUnsuppliedWater(unit,startHex),startedUnsupplied=!!wodGetUnitEncirclementState(unit,startHex);
                 // Decrease combat visuals
@@ -41612,6 +41632,7 @@
                 
                 // Movement
                 moveUnitTowardTarget(unit, dt);
+                if(unit.type==='convoy'&&unit.hp<=0)continue;
 
                 if(unit.type === 'convoy') {
                     if((unit.convoyCaptureCd || 0) > 0) unit.convoyCaptureCd = Math.max(0, unit.convoyCaptureCd - dt);
@@ -41665,6 +41686,7 @@
                 }
                 
                 // Combat — reuse proximity scan from movement slowdown when available.
+                if(unit.retreating&&!unit.moraleBroken&&!unit.target)wodClearRetreatOnArrival(unit);
                 if((unit._combatProxTick | 0) !== (gameData._wodSimTick | 0))
                     wodRefreshUnitCombatProximity(unit, gameData.unitSpatialGrid);
                 let enemy = unit._combatEnemy || null;
@@ -51508,8 +51530,9 @@
                 const note=blocked?'Cannot enter':water?(naval?'Can repair afloat · No water attrition':marine?'No water attrition · Cannot heal afloat':'10s grace, then −3.5% max HP/s · Cannot heal · Supply ships do not protect swimmers'):type==='bridge'?'Completed bridges count as land':'Supply from a connected friendly town or nearby supply ship';
                 return '<div class="info-terrain-entry" style="border-bottom:1px solid #60778755;padding:9px 0"><strong>'+wodEscapeEffectInner(terrainLabel(type))+'</strong><div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin:5px 0;color:#d9e5ec">'+(blocked?'Movement blocked':'<span>Attack '+pct(attack)+'</span><span>Damage taken '+pct(damage)+'</span><span>Speed '+(water&&!marine&&!naval?'46% ordered / 28% idle':pct(getUnitSpeedMultiplier(u)))+'</span>')+'</div><small style="color:#a9c1cc">'+note+'</small></div>';
             }).join('');
-            const html='<p><strong>'+wodEscapeEffectInner(wodProductionLabel(unit.type))+'</strong> · This unit’s terrain modifiers. 100% is normal; lower damage taken means better cover.</p><h4>Current effects</h4>'+getUnitEffects(unit).map(wodFmtInfoEffectMarkup).join('')+'<h4>Terrain by tile</h4>'+rows;
+            const html='<p><strong>'+wodEscapeEffectInner(wodProductionLabel(unit.type))+'</strong> · This unit’s terrain modifiers. 100% is normal; lower damage taken means better cover.</p><h4>Current effects</h4><div class="info-terrain-active-effects effect-list"></div><h4>Terrain by tile</h4>'+rows;
             if(root._html!==html){wodHideEffectTooltip();root.innerHTML=html;root._html=html;wodBindEffectTooltipDelegation(root);}
+            wodSetInfoEffectsHtml({effects:root.querySelector('.info-terrain-active-effects')},getUnitEffects(unit).map(wodFmtInfoEffectMarkup).join(''));
             const note=document.querySelector('.info-terrain-page-note');if(note)note.textContent='Terrain, movement, supply and active effects for this unit.';
         }
 
@@ -51566,6 +51589,13 @@
         function wodHideEffectTooltip() {
             const tip=document.getElementById('wodFxTip');if(tip){tip.hidden=true;tip._effectAnchor=null;}
         }
+        function wodRefreshEffectTooltipOnScroll() {
+            const tip=document.getElementById('wodFxTip'),anchor=tip?._effectAnchor;
+            if(anchor?.isConnected&&(anchor.matches(':hover')||anchor===document.activeElement)){
+                const box=anchor.getBoundingClientRect();if(box.bottom>0&&box.top<window.innerHeight){wodPositionFxTip(box,tip);return;}
+            }
+            wodHideEffectTooltip();
+        }
 
         function wodBindEffectTooltipDelegation(root) {
             if(!root || root._wodFxTipBound) return;
@@ -51588,15 +51618,13 @@
                 if(rel && pill.contains(rel)) return;
                 wodHideEffectTooltip();
             });
-            root.addEventListener('scroll', () => {
-                wodHideEffectTooltip();
-            }, { passive: true });
+            root.addEventListener('scroll',wodRefreshEffectTooltipOnScroll,{passive:true});
             root.addEventListener('pointerleave',wodHideEffectTooltip);
             if(!wodBindEffectTooltipDelegation._global){
                 wodBindEffectTooltipDelegation._global=true;
                 document.addEventListener('pointermove',e=>{const tip=document.getElementById('wodFxTip'),anchor=tip?._effectAnchor;if(anchor&&(!anchor.isConnected||!anchor.contains(e.target)))wodHideEffectTooltip();},{passive:true});
                 window.addEventListener('blur',wodHideEffectTooltip);window.addEventListener('resize',wodHideEffectTooltip);
-                document.addEventListener('scroll',wodHideEffectTooltip,{capture:true,passive:true});
+                document.addEventListener('scroll',wodRefreshEffectTooltipOnScroll,{capture:true,passive:true});
             }
         }
 
@@ -51624,7 +51652,7 @@
             let tipHtml = tipText
                 ? '<span class="effect-pill-tip" role="tooltip">' + wodEscapeEffectInner(tipText) + '</span>'
                 : '';
-            return '<span class="' + cls + '" tabindex="0">' + inner + tipHtml + '</span>';
+            return '<span class="' + cls + '" data-effect-key="'+encodeURIComponent(effect.label||'')+'" tabindex="0">' + inner + tipHtml + '</span>';
         }
 
         function wodSetInfoEffectsHtml(els, html) {
@@ -51635,8 +51663,19 @@
             let list = els.effects;
             let pageScroll = pages ? pages.scrollTop : 0;
             let listScroll = list.scrollTop || 0;
-            wodHideEffectTooltip();
-            els.effects.innerHTML = next;
+            // Keep hovered/focused pills alive as countdowns and stats update.
+            const template=document.createElement('template');template.innerHTML=next;
+            const old=new Map([...list.children].filter(n=>n.dataset.effectKey).map(n=>[n.dataset.effectKey,n])),keep=[];
+            for(const fresh of template.content.children){
+                const node=old.get(fresh.dataset.effectKey)||fresh;
+                if(node!==fresh){node.className=fresh.className;if(node.innerHTML!==fresh.innerHTML)node.innerHTML=fresh.innerHTML;}
+                keep.push(node);
+            }
+            for(let i=0;i<keep.length;i++)if(list.children[i]!==keep[i])list.insertBefore(keep[i],list.children[i]||null);
+            for(const node of [...list.children])if(!keep.includes(node))node.remove();
+            const tip=document.getElementById('wodFxTip'),anchor=tip?._effectAnchor;
+            if(anchor&&!anchor.isConnected)wodHideEffectTooltip();
+            else if(anchor&&list.contains(anchor)){tip.textContent=anchor.querySelector('.effect-pill-tip')?.textContent||'';wodPositionFxTip(anchor.getBoundingClientRect(),tip);}
             if(pages) pages.scrollTop = pageScroll;
             if(list) list.scrollTop = listScroll;
         }
@@ -55359,7 +55398,7 @@
             if(!gameData.bridges) gameData.bridges = [];
             let noisy = !opts.suppressNotes;
             let br = { x, y, angle: angle || 0, w, h, owner: owner || 0 };
-            let err = wodBridgePlacementError(br, (opts.editor || opts.prepaid) ? null : owner);
+            let err = wodBridgePlacementError(br, opts.editor ? null : owner, !!opts.prepaid);
             if(err) {
                 if(noisy) showNotification(err);
                 return false;
@@ -55632,6 +55671,12 @@
                 let j = jobs[i];
                 let city = j.cq != null ? gameData.cities.find(c => c.q === j.cq && c.r === j.cr) : null;
                 let hex = getNearestHexToPoint(j.x, j.y);
+                if(j.mode==='bridge'&&!wodBridgeEndTouchesLand(j,-1,j.owner)&&!wodBridgeEndTouchesLand(j,1,j.owner)){
+                    if(j.owner===1)gameData.money+=WOD_PRICE_BRIDGE;
+                    else{gameData.aiMoneyByOwner||={};gameData.aiMoneyByOwner[j.owner]=wodPlayerTreasury(j.owner)+WOD_PRICE_BRIDGE;}
+                    wodBattleMetric(j.owner,'moneySpent',-WOD_PRICE_BRIDGE);jobs.splice(i,1);
+                    if(j.owner===wodLocalPlayerOwner())showNotification('Bridge cancelled and refunded: neither bank is still yours.','info');continue;
+                }
                 if((j.cq != null && (!city || city.owner !== j.owner)) || (!city && j.mode!=='bridge' && (!hex || hex.owner !== j.owner))) {
                     jobs.splice(i, 1); continue;
                 }
@@ -55705,7 +55750,7 @@
                 return;
             }
             gameData.buildMode = mode;
-            if(mode === 'bridge') showNotification('Place bridge over water with both ends on land. Mouse wheel or Q/E rotates · Esc cancels.','info');
+            if(mode === 'bridge') showNotification('Cross water between two land banks; at least one bank must be yours. Mouse wheel or Q/E rotates · Esc cancels.','info');
             if(UI.wrapper) UI.wrapper.style.cursor = 'crosshair';
             syncBuildPlacementMobileUi();
         }
@@ -55917,6 +55962,7 @@
                 pairs.sort((a,b)=>Number(!covered(a))-Number(!covered(b))||a.score-b.score);}
             for(const p of pairs) {
                 if(!wodNavalDestinationClear(transport,p.water))continue;
+                if(transport.cargo._navalEvacuating&&!wodCurrentSupplyComponent(p.land,transport.owner).city)continue;
                 if(gameData.entities.some(u=>u!==transport&&u.hp>0&&Math.hypot(u.x-p.land.x,u.y-p.land.y)<(u.radius||12)+(transport.cargo.radius||12)+5))continue;
                 if(gameData.entities.some(t=>t!==transport&&t.type==='transport'&&t.hp>0&&t.cargo&&t.unloadHexKey&&Math.hypot((gameData.hexes[t.unloadHexKey]?.x??Infinity)-p.land.x,(gameData.hexes[t.unloadHexKey]?.y??Infinity)-p.land.y)<(t.cargo.radius||12)+(transport.cargo.radius||12)+8))continue;
                 const path=wodWaterBfsPath(transport,start,p.water,22000);
@@ -55938,7 +55984,7 @@
                 for(const offset of [sp*.27,0,-sp*.2]) {
                     const x=h.x+Math.cos(ang)*offset,y=h.y+Math.sin(ang)*offset;
                     if(getNearestHexToPoint(x,y)!==h||!gameData.entities.every(e=>e===cargo||e.hp<=0||e.type==='convoy'||Math.hypot(e.x-x,e.y-y)>=(cargo.radius||12)+(e.radius||12)+2))continue;
-                    const goal=t.unloadGoal;if(goal&&!wodMpIsHumanOwner(cargo.owner)){cargo._navalAssaultGoal={...goal};cargo._navalAssaultUntil=wodAiOperationTime()+60000;cargo._navalLanded=true;}t.cargo=null;t.unloadHexKey=null;t.unloadGoal=null;t.ferryGoal=null;wodClearTransportMove(cargo);cargo.boardTransportUid=null;cargo._wodBoardingNoWater=false;cargo._needsTransport=false;cargo.waterExposureSeconds=0;cargo.outOfSupplySeconds=0;cargo.waterFlash=0;cargo.encircledFlash=0;cargo.healingFlash=0;cargo.x=cargo._drawX=x;cargo.y=cargo._drawY=y;cargo.selected=false;
+                    const goal=t.unloadGoal;if(goal&&!wodMpIsHumanOwner(cargo.owner)){cargo._navalAssaultGoal={...goal};cargo._navalAssaultUntil=wodAiOperationTime()+60000;cargo._navalLanded=true;}cargo._navalEvacuating=false;t.cargo=null;t.unloadHexKey=null;t.unloadGoal=null;t.ferryGoal=null;wodClearTransportMove(cargo);cargo.boardTransportUid=null;cargo._wodBoardingNoWater=false;cargo._needsTransport=false;cargo.waterExposureSeconds=0;cargo.outOfSupplySeconds=0;cargo.waterFlash=0;cargo.encircledFlash=0;cargo.healingFlash=0;cargo.x=cargo._drawX=x;cargo.y=cargo._drawY=y;cargo.selected=false;
                     gameData.entities.push(cargo);gameData._unitSpriteCache?.clear();wodClearTransportMove(t);
                     if(!wodMpIsHumanOwner(t.owner)&&t._ferryHome)assignUnitMoveAlongWaypoints(t,[{...t._ferryHome}],{transportInternal:true});
                     // Human orders continue inland. AI beachheads wait for the
@@ -56005,7 +56051,9 @@
                 const target=targets.find(h=>covered(h)&&clear(h));
                 u._navalAdvanceGoal=null;
                 if(!targets.length&&(!explored||[...region].every(k=>explored.has(k)))){
-                    u._navalLanded=false;u._navalAssaultUntil=0;continue;
+                    // Securing the island does not create a city supply source.
+                    // Keep its support assignment until resupplied or evacuated.
+                    u._navalAdvanceGoal=null;
                 }
                 if(target){
                     reserved.add(getHexKey(target));
@@ -56048,22 +56096,47 @@
                 ship._navalScoutGoal={x:h.x,y:h.y};ship._navalEscortUntil=clock+8000;break;
             }
         }
+        function wodAiRescueIslandTroops(owner,supplyShips) {
+            const towns=gameData.cities.filter(c=>c.owner===owner),support=new Map(),clock=wodAiOperationTime();
+            const seaRegions=supplyShips.map(s=>wodNavalWaterRegionKeys(s,getNearestHexToPoint(s.x,s.y))).filter(Boolean);
+            for(const u of gameData.entities){
+                if(u.owner!==owner||u.hp<=0||!isLandArmyUnit(u)||u.boardTransportUid||u.moraleBroken)continue;
+                const here=getNearestHexToPoint(u.x,u.y);if(!here||isWaterHex(here)||!wodGetUnitEncirclementState(u,here))continue;
+                const region=wodTransportLandingRegion(u,here);if(!region||towns.some(c=>region.has(`${c.q},${c.r}`)))continue;
+                u.holding=false;
+                if(!support.has(region))support.set(region,[...region].some(k=>getNeighborHexes(gameData.hexes[k]).some(h=>wodIsOpenWaterHex(h)&&seaRegions.some(sea=>sea.has(getHexKey(h))))));
+                u._trafficYield=null;u._navalAssaultUntil=clock+8000;u.retreating=false;
+                if(support.get(region)){u._navalLanded=true;u._navalEvacuating=false;continue;}
+                // No support vessel can reach this island. Request a ferry home
+                // and meet it on a dry coast instead of renewing a fatal Hold.
+                const home=towns.slice().sort((a,b)=>wodAiDist2(a.x,a.y,u.x,u.y)-wodAiDist2(b.x,b.y,u.x,u.y))[0];
+                if(!home)continue;
+                u._navalLanded=false;u._navalEvacuating=true;u._needsTransport=true;u._navalAssaultGoal={x:home.x,y:home.y};
+                if(u.target)continue;
+                const shore=[...region].map(k=>gameData.hexes[k]).filter(h=>h&&!isWaterHex(h)&&getNeighborHexes(h).some(wodIsOpenWaterHex))
+                    .sort((a,b)=>wodAiDist2(a.x,a.y,home.x,home.y)+wodAiDist2(a.x,a.y,u.x,u.y)*.3-wodAiDist2(b.x,b.y,home.x,home.y)-wodAiDist2(b.x,b.y,u.x,u.y)*.3)[0];
+                if(shore)assignUnitMoveAlongWaypoints(u,[shore]);
+            }
+        }
         function wodAiPlanFerryAssaults(owner,transports) {
             const targets=wodAiNavalAssaultTargets(owner);
             const supplyShips=gameData.entities.filter(u=>u.owner===owner&&u.type==='supply'&&u.hp>0&&!u.retreating&&!u.moraleBroken);
+            wodAiRescueIslandTroops(owner,supplyShips);
             wodAiPlanBeachhead(owner,supplyShips);
-            const land=gameData.entities.filter(u=>u.owner===owner&&u.hp>u.maxHp*.5&&isLandArmyUnit(u)&&!u.retreating&&!u.moraleBroken&&!u.boardTransportUid);
+            const land=gameData.entities.filter(u=>u.owner===owner&&(u.hp>u.maxHp*.5||u.hp>0&&u._navalEvacuating)&&isLandArmyUnit(u)&&!u.retreating&&!u.moraleBroken&&!u.boardTransportUid);
             // Keep one infantry home at every town, even when the invasion is attractive.
             const guards=new Set();for(const city of gameData.cities.filter(c=>c.owner===owner)){
-                const guard=land.filter(u=>u.type==='light'&&!guards.has(u)).sort((a,b)=>wodAiDist2(a.x,a.y,city.x,city.y)-wodAiDist2(b.x,b.y,city.x,city.y))[0];if(guard)guards.add(guard);
+                const region=wodTransportLandingRegion({type:'light',owner},city);
+                const guard=land.filter(u=>u.type==='light'&&!guards.has(u)&&!u._navalEvacuating&&region?.has(getHexKey(getNearestHexToPoint(u.x,u.y)))).sort((a,b)=>wodAiDist2(a.x,a.y,city.x,city.y)-wodAiDist2(b.x,b.y,city.x,city.y))[0];if(guard)guards.add(guard);
             }
             for(const u of land)u._navalGarrison=guards.has(u);
             const regions=new Map();
             const regionFor=c=>{const h=getNearestHexToPoint(c.x,c.y),key=getHexKey(h);if(regions.has(key))return regions.get(key);const region=wodTransportLandingRegion({type:'light',owner},c);if(region)for(const k of region)regions.set(k,region);return region;};
-            const candidates=land.filter(u=>!guards.has(u)&&!['defend','hold'].includes(u.aiTfKind)&&!(u._navalAssaultUntil>wodAiOperationTime()));
+            const candidates=land.filter(u=>!guards.has(u)&&(u._navalEvacuating||!['defend','hold'].includes(u.aiTfKind)&&!(u._navalAssaultUntil>wodAiOperationTime())));
             // Water-separated targets create explicit ferry requests, even if a
             // normal land route never produced a movement target in the first place.
             for(const u of candidates){
+                if(u._navalEvacuating)continue;
                 const from=getNearestHexToPoint(u.x,u.y);if(!from||isWaterHex(from))continue;
                 let target=targets.slice().sort((a,b)=>wodAiDist2(u.x,u.y,a.x,a.y)*(a.shore?1:.25)-wodAiDist2(u.x,u.y,b.x,b.y)*(b.shore?1:.25)).find(c=>{const region=regionFor(c);return region&&!region.has(getHexKey(from));});
                 if(target?.shore){const region=regionFor(target),town=targets.filter(c=>!c.shore&&region.has(getHexKey(getNearestHexToPoint(c.x,c.y)))).sort((a,b)=>wodAiDist2(target.x,target.y,a.x,a.y)-wodAiDist2(target.x,target.y,b.x,b.y))[0];if(town)target=town;}

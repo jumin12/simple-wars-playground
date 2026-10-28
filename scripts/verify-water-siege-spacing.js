@@ -42,18 +42,19 @@ const server=http.createServer((req,res)=>{
   assert(results.sieges.every(r=>r.queued&&r.blocked&&r.spawnBlocked&&r.newOrderBlocked&&r.paused&&r.noAiQueue&&r.resumed));
   results.water=await page.evaluate(()=>{
    const rows=[];
-   for(const owner of [1,2])for(const type of ['light','heavy','convoy','marine','ship'])for(const ordered of [false,true]) {
+   for(const owner of [1,2])for(const kind of ['light','heavy','convoy','merchant','marine','ship'])for(const ordered of [false,true]) {
+    const type=kind==='merchant'?'convoy':kind;
     resetWaterTest(owner);testTown(-8,0,owner,'Supply town');const h=gameData.hexes['0,0'];h.type='water';h.owner=0;
     const u=createUnitAt(type,h.x,h.y,owner);u.x=h.x;u.y=h.y;u.range=0;u.hp=u.maxHp*.75;u.manpower=(u.maxManpower||1000)*.75;
-    if(type==='convoy')u.convoySeaRoute=true;
+    if(type==='convoy'){u.convoySeaRoute=kind==='merchant';u._convoyRetryAt=Infinity;}
     if(ordered){u.orderTarget={x:h.x,y:h.y,intoWater:true};u._wodOrderIntoWater=true;u.target={x:h.x,y:h.y,pathPrepared:true};}
     u.waterExposureSeconds=10;u.outOfSupplySeconds=10;const before=u.hp,unsupplied=!!wodGetUnitEncirclementState(u,h),heals=canHealUnit(u);update(.5);
-    rows.push({owner,type,ordered,unsupplied,heals,loss:(before-u.hp)/u.maxHp,stillInWater:isWaterHex(getNearestHexToPoint(u.x,u.y))});
+    rows.push({owner,type:kind,ordered,unsupplied,heals,loss:(before-u.hp)/u.maxHp,stillInWater:isWaterHex(getNearestHexToPoint(u.x,u.y))});
    }
    return rows;
   });console.log('water',JSON.stringify(results.water));
   for(const r of results.water) {
-   if(['marine','ship'].includes(r.type))assert(!r.unsupplied&&(r.type==='marine'?!r.heals&&r.loss===0:r.heals&&r.loss<0),'amphibious/naval exemption '+JSON.stringify(r));
+   if(['marine','merchant','ship'].includes(r.type))assert(!r.unsupplied&&(r.type!=='ship'?!r.heals&&r.loss===0:r.heals&&r.loss<0),'amphibious/naval exemption '+JSON.stringify(r));
    else assert(r.unsupplied&&!r.heals&&r.stillInWater&&Math.abs(r.loss-.0175)<.00001,'same water attrition for every owner/order '+JSON.stringify(r));
   }
   results.grace=await page.evaluate(()=>{
@@ -61,6 +62,7 @@ const server=http.createServer((req,res)=>{
    for(const owner of [1,2])for(const type of ['light','heavy','convoy']) {
     resetWaterTest(owner);testTown(-8,0,owner,'Supply town');const h=gameData.hexes['0,0'];h.type='water';h.owner=0;
     const u=createUnitAt(type,h.x,h.y,owner);u.x=h.x;u.y=h.y;u.hp=u.maxHp*.75;u.range=0;
+    if(type==='convoy'){u.convoySeaRoute=false;u._convoyRetryAt=Infinity;}
     const hp=u.hp;for(let i=0;i<99;i++)update(.1);const at49=u.hp;
     update(.1);const at5=u.hp;update(.25);const after=u.hp;
     const synced=wodEntityFromNet(wodStripEntityForNet(u)).waterExposureSeconds;
