@@ -45,7 +45,7 @@ const LIFETIME_KEYS = [
   'enemyTankKills', 'ownTankLosses', 'enemyShipKills', 'ownShipLosses',
   'peakFieldManpower', 'battlesWon', 'campaignLosses', 'citiesCaptured', 'convoysCaptured',
   'factoriesBuilt', 'harborsBuilt', 'farmsBuilt', 'fortsBuilt', 'peakMoneyHeld',
-  'unitsBuiltLight', 'unitsBuiltHeavy', 'unitsBuiltShip', 'unitsBuiltTransport', 'unitsBuiltSupply', 'unitsBuiltMarine', 'gamesStarted',
+  'unitsBuiltLight', 'unitsBuiltMotorized', 'unitsBuiltMountaineer', 'unitsBuiltHeavy', 'unitsBuiltShip', 'unitsBuiltTransport', 'unitsBuiltSupply', 'unitsBuiltMarine', 'gamesStarted',
   'missionsCompleted', 'campaignsWon', 'campaignBattlesWon',
   'matchesCompleted', 'matchesWon', 'matchesLost', 'matchesSurrendered',
 ];
@@ -56,7 +56,7 @@ const LIFETIME_MAX_JUMP = {
   battlesWon: 5, campaignLosses: 5, citiesCaptured: 40, convoysCaptured: 40,
   factoriesBuilt: 20, harborsBuilt: 20, farmsBuilt: 20, fortsBuilt: 20,
   peakFieldManpower: 100000, peakMoneyHeld: 500000,
-  unitsBuiltLight: 200, unitsBuiltHeavy: 80, unitsBuiltShip: 40, unitsBuiltTransport:100, unitsBuiltSupply:100, unitsBuiltMarine: 80,
+  unitsBuiltLight: 200, unitsBuiltMotorized:120,unitsBuiltMountaineer:160, unitsBuiltHeavy: 80, unitsBuiltShip: 40, unitsBuiltTransport:100, unitsBuiltSupply:100, unitsBuiltMarine: 80,
   gamesStarted: 5,
   matchesCompleted: 10, matchesWon: 10, matchesLost: 10, matchesSurrendered: 10,
   missionsCompleted: 10, campaignsWon: 3, campaignBattlesWon: 30,

@@ -91,7 +91,7 @@
   async function acknowledge(era,units,action){
     if(!setEra(era)||scene?.selectionEnabled===false||document.hidden||muted||volume===0)return false;
     let counts={};
-    for(let unit of units||[]){const type=['transport','supply'].includes(unit.type)?'ship':unit.type;if(['light','marine','heavy','ship'].includes(type))counts[type]=(counts[type]||0)+1;}
+    for(let unit of units||[]){const type=['transport','supply'].includes(unit.type)?'ship':['motorized','mountaineer'].includes(unit.type)?'light':unit.type;if(['light','marine','heavy','ship'].includes(type))counts[type]=(counts[type]||0)+1;}
     let type=Object.keys(counts).sort((a,b)=>counts[b]-counts[a])[0];
     const now=performance.now();
     if(!type||now-(action==='move'?lastMove:lastSelection)<(action==='move'?130:180))return false;
@@ -179,7 +179,7 @@
     }else stopBattle();
     let jobs=new Map(s.jobs.map(j=>[j.key,j]));
     for(let[key,j]of oldJobs)if(!jobs.has(key)&&s.completed(j)&&now-lastCue>450){lastCue=now;oneShot('complete',j);}
-    let work=s.jobs.filter(j=>!['light','marine','heavy','ship','transport','supply'].includes(j.mode)).sort((a,b)=>spatial(b).gain-spatial(a).gain)[0];
+    let work=s.jobs.filter(j=>!['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].includes(j.mode)).sort((a,b)=>spatial(b).gain-spatial(a).gain)[0];
     if(work&&spatial(work).gain>0&&now-lastWork>9000){lastWork=now;oneShot('construction',work);}
     oldJobs=jobs;
   }
