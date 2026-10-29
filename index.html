@@ -11015,6 +11015,20 @@
             #statsMenu .battle-overview .battle-stat strong {font-size:14px;white-space:nowrap;flex-shrink:0;}
             #statsMenu .battle-overview .battle-stat small {display:none;}
         }
+        .wod-gold-coin {--coin-size:20px;display:inline-grid;place-items:center;position:relative;flex:0 0 auto;width:var(--coin-size);height:var(--coin-size);box-sizing:border-box;border:1px solid #ffeab0;border-radius:50%;background:linear-gradient(140deg,#fff0a0 5%,#f3c451 40%,#c58a20 70%,#f3cb61);box-shadow:inset 0 0 0 2px #b87920,inset 0 0 0 3px #ffde80,0 2px 4px #0005;vertical-align:middle;}
+        .wod-gold-coin::after {content:'✦';font-size:calc(var(--coin-size)*.6);line-height:1;color:#96601a;text-shadow:0 1px #ffeab0;}
+        #shopPanel .shop-gold-wallet {display:flex;align-items:center;gap:7px;white-space:nowrap;}
+        .shop-gold-wallet .sr-only {position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0;}
+        #creditsPanel .company-card {display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:center;gap:6px 12px;text-align:left;}
+        .credits-coin-button {display:grid;place-items:center;width:44px;height:44px;min-width:44px;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+        .credits-coin-button .wod-gold-coin {--coin-size:28px;}
+        .credits-coin-button:focus-visible {outline:2px solid #ffeab0;outline-offset:3px;}
+        .credits-coin-button:hover .wod-gold-coin,.credits-coin-button.coin-found .wod-gold-coin {filter:drop-shadow(0 0 6px #f3c45177);}
+        .credits-coin-button.is-shaking .wod-gold-coin {animation:wodGoldCoinShake .48s ease-in-out;}
+        .credits-coin-status {grid-column:1/-1;text-align:right;font-size:12px;color:#ffe092;line-height:1.5;}
+        .credits-coin-status:empty {display:none;}
+        @keyframes wodGoldCoinShake {0%,100%{transform:rotate(0) translateX(0)}20%{transform:rotate(-18deg) translateX(-3px)}40%{transform:rotate(16deg) translateX(3px)}60%{transform:rotate(-12deg) translateX(-2px)}80%{transform:rotate(8deg) translateX(2px)}}
+        @media(prefers-reduced-motion:reduce) {.credits-coin-button.is-shaking .wod-gold-coin {animation:wodGoldCoinGlow .48s ease-in-out;}@keyframes wodGoldCoinGlow {50%{filter:brightness(1.4)}}}
     </style>
 </head>
 <body>
@@ -11930,7 +11944,7 @@
 
         <div id="shopPanel" class="overlay hidden">
             <div class="panel panel-wide">
-                <header class="shop-heading"><h2>Shop</h2><p>Gold: <strong id="shopGold">1000</strong></p></header>
+                <header class="shop-heading"><h2>Shop</h2><p class="shop-gold-wallet" title="Gold"><span class="wod-gold-coin" aria-hidden="true"></span><span class="sr-only">Gold: </span><strong id="shopGold">100</strong></p></header>
                 <div id="supporterPackCard" class="supporter-pack">
                     <h3>Supporter Pack — $5</h3>
                     <p id="supporterPackCopy">Simple Wars is free. The Supporter Pack is $5 on Steam and unlocks every item in this shop: troop skins, missions, map skins, frontlines, and command styles. The Steam store page is not public yet.</p>
@@ -12414,6 +12428,8 @@
                             <div class="credit-company">502coderiver</div>
                             <div class="credit-tagline">Studio &amp; publishing</div>
                         </div>
+                        <button type="button" class="credits-coin-button" id="creditsGoldCoin" onclick="wodShakeCreditsCoin()" aria-label="Gold coin" title="A curious little coin"><span class="wod-gold-coin" aria-hidden="true"></span></button>
+                        <span class="credits-coin-status" id="creditsCoinStatus" role="status" aria-live="polite"></span>
                     </div>
                     <div class="credit-card">
                         <div class="credit-role">Development &amp; QA</div>
@@ -12963,6 +12979,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:'2026-10-29T14:02:00-04:00',
+                title:'A little gold and a hidden treasure',
+                items:[
+                    'New profiles begin with 100 gold. The shop wallet now uses a small minted gold coin, and existing saved balances are preserved.',
+                    'A curious little coin has appeared in the credits. Its discovery and reward are saved with your profile, including cloud saves.'
+                ]
+            },
             {
                 at:'2026-10-29T13:38:00-04:00',
                 title:'Full army shop previews and redesigned mobile controls',
@@ -14317,6 +14341,7 @@
                 wodMpApplyFriendQueryFromUrl();
             }
             if(panelId === 'helpGuide') updateTerrainKey();
+            if(panelId === 'credits') wodSyncCreditsCoin();
             if(panelId === 'campaign') wodRefreshCampaignPanel();
             if(panelId === 'missions') {
                 wodMissionCatalogLoaded = false;
@@ -15186,7 +15211,7 @@
         }
 
         let gameData = {
-            money: 10000, income: 10, expenses: 0, manpower: 5000, manpowerIncome: 0, gold: 0, speed: 1,
+            money: 10000, income: 10, expenses: 0, manpower: 5000, manpowerIncome: 0, gold: 100, speed: 1,
             entities: [], cities: [], roads: [], forts: [], bridges: [],
             hexes: {}, hexList: [],
             camera: { x: 0, y: 0, zoom: 0.5 },
@@ -24719,7 +24744,8 @@
                     campaignsWon: 0,
                     campaignBattlesWon: 0
                 },
-                profile: { gold: 0, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, supporterPack: false, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
+                profile: { gold: 100, unitSkin: 'nato', aiUnitSkin: 'nato', ownedUnitSkins: { nato: true }, ownedShopVisuals: {}, supporterPack: false, gamePeriod: 'modern', mpDisplayName: '', playerId: '', friends: [], friendRequestsOut: [], friendRequestsIn: [] },
+                secrets: { creditsCoin: 0 },
                 multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
                 missions: { completed: {} },
                 storeMissions: { completed: {}, spent: {} },
@@ -24787,7 +24813,8 @@
                     completed: Object.assign({}, (base.storeMissions && base.storeMissions.completed) || {}, (o.storeMissions && o.storeMissions.completed) || {}),
                     spent: Object.assign({}, (base.storeMissions && base.storeMissions.spent) || {}, (o.storeMissions && o.storeMissions.spent) || {})
                 },
-                achievementGoldGranted: Object.assign({}, base.achievementGoldGranted, o.achievementGoldGranted || {})
+                achievementGoldGranted: Object.assign({}, base.achievementGoldGranted, o.achievementGoldGranted || {}),
+                secrets: { creditsCoin: Math.max(0,Math.min(3,Number(o.secrets?.creditsCoin)|0)) }
             };
         }
 
@@ -24841,6 +24868,7 @@
             if(!wodProgress || !wodProgress.profile) return;
             let p = wodProgress.profile;
             if(p.gold !== undefined) gameData.gold = p.gold;
+            wodSyncCreditsCoin();
             gameData._equippedShopMapId = p.equippedShopMapId || null;
             let us = (!p.unitSkin || p.unitSkin === 'default') ? 'nato' : p.unitSkin;
             let as = (!p.aiUnitSkin || p.aiUnitSkin === 'default') ? 'nato' : p.aiUnitSkin;
@@ -24937,6 +24965,7 @@
             mergedOwned.nato = true;
             let mergedVisuals = wodMergeBoolMap(local.profile.ownedShopVisuals, sp.ownedShopVisuals);
             wodProgress = wodMergeProgressObject({
+                secrets: {creditsCoin:Math.max(local.secrets?.creditsCoin||0,Number(profile.secrets?.creditsCoin)|0)},
                 achievements: wodMergeAchievementsMax(local.achievements, profile.achievements),
                 lifetime: wodMergeLifetimeMax(local.lifetime, profile.lifetime),
                 lifetimeByPeriod: wodMergeLifetimeByPeriodMax(local.lifetimeByPeriod, profile.lifetimeByPeriod),
@@ -24999,6 +25028,7 @@
                 lifetimeByPeriod: wodProgress.lifetimeByPeriod,
                 achievements: wodProgress.achievements,
                 achievementGoldGranted: wodProgress.achievementGoldGranted || {},
+                secrets: wodProgress.secrets || { creditsCoin: 0 },
                 missions: wodProgress.missions || { completed: {} },
                 storeMissions: wodProgress.storeMissions || { completed: {}, spent: {} },
                 multiplayer: wodProgress.multiplayer || { gamesPlayed: 0, wins: 0, losses: 0 },
@@ -25134,6 +25164,30 @@
 
         const WOD_GOLD_PER_VICTORY = 10;
         const WOD_GOLD_PER_ACHIEVEMENT = 10;
+
+        function wodSyncCreditsCoin() {
+            const coin=document.getElementById('creditsGoldCoin'),status=document.getElementById('creditsCoinStatus');
+            const found=(wodProgress?.secrets?.creditsCoin||0)>=3;
+            if(coin){coin.classList.toggle('coin-found',found);coin.title=found?'A little treasure, already found':'A curious little coin';}
+            if(status)status.textContent=found?'Treasure found':'';
+        }
+        function wodShakeCreditsCoin() {
+            const coin=document.getElementById('creditsGoldCoin');
+            if(!coin||!wodProgress||document.getElementById('creditsPanel').classList.contains('hidden')||coin.classList.contains('is-shaking'))return;
+            coin.classList.add('is-shaking');
+            setTimeout(()=>coin.classList.remove('is-shaking'),480);
+            const secrets=wodProgress.secrets||(wodProgress.secrets={creditsCoin:0});
+            if(secrets.creditsCoin>=3)return;
+            secrets.creditsCoin=Math.min(3,(secrets.creditsCoin||0)+1);
+            if(secrets.creditsCoin===3){
+                wodGrantGold(100);
+                showNotification('A little treasure — +100 gold','success');
+                wodSyncCreditsCoin();
+                document.getElementById('creditsCoinStatus').textContent='Treasure found · +100 gold!';
+            }
+            // Save the discovery and its reward together, even if the player exits immediately.
+            persistWodProgressNow();scheduleCloudSyncProgress();
+        }
 
         function wodGrantGold(amount, notifyMsg) {
             if(!amount || amount <= 0 || !wodProgress) return;

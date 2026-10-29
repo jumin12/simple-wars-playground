@@ -6,7 +6,7 @@ const path = require('path');
 
 const PROFILES_FILE = path.join(__dirname, 'player-profiles.json');
 const SAVE_DEBOUNCE_MS = 1500;
-const DEFAULT_GOLD = 0;
+const DEFAULT_GOLD = 100;
 const SHOP_SKIN_COST = 100;
 const SHOP_ANCIENT_CIV_GAUL_COST = 100;
 const SHOP_ANCIENT_CIV_PACK_COST = 200;
@@ -116,6 +116,7 @@ function defaultProfile(playerId) {
       periodMedieval: false,
     },
     achievementGoldGranted: {},
+    secrets: { creditsCoin: 0 },
     missions: { completed: {} },
     storeMissions: { completed: {}, spent: {} },
     lifetime: defaultLifetime(),
@@ -365,7 +366,7 @@ function hydrateProfile(playerId, row) {
   const base = defaultProfile(playerId);
   if (!row || typeof row !== 'object') return base;
   const p = row.profile && typeof row.profile === 'object' ? row.profile : {};
-  base.profile.gold = clampInt(p.gold, 0, 999999999);
+  base.profile.gold = p.gold == null ? DEFAULT_GOLD : clampInt(p.gold, 0, 999999999);
   base.profile.unitSkin = sanitizeSkin(p.unitSkin);
   base.profile.aiUnitSkin = sanitizeSkin(p.aiUnitSkin);
   base.profile.ownedUnitSkins = sanitizeOwnedMap(p.ownedUnitSkins);
@@ -379,6 +380,7 @@ function hydrateProfile(playerId, row) {
   base.profile.friendRequestsIn = sanitizeFriendRequests(p.friendRequestsIn);
   base.achievements = Object.assign(base.achievements, row.achievements || {});
   base.achievementGoldGranted = sanitizeBoolMap(row.achievementGoldGranted);
+  base.secrets = { creditsCoin: clampInt(row.secrets && row.secrets.creditsCoin, 0, 3) };
   base.missions = {
     completed: sanitizeBoolMap(row.missions && row.missions.completed),
   };
@@ -466,6 +468,10 @@ function syncProgress(playerId, payload) {
   }
   const profile = getProfile(id);
   const cur = profile.profile;
+
+  if (payload.secrets && typeof payload.secrets === 'object') {
+    profile.secrets = { creditsCoin: Math.max(profile.secrets?.creditsCoin || 0, clampInt(payload.secrets.creditsCoin, 0, 3)) };
+  }
 
   if (payload.lifetime && typeof payload.lifetime === 'object') {
     profile.lifetime = mergeLifetimeMonotonic(profile.lifetime, payload.lifetime);
