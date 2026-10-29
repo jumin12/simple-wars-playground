@@ -29,9 +29,9 @@ try{
  // A real era skin selection changes the names, and a cloud acknowledgement cannot reset it.
  await page.evaluate(()=>{gameState='MENU';gameData.mp=null;pauseMenuBackgroundBattle();gameData.ownedUnitSkins={nato:true,ancient:true,medieval:true,napoleonic:true};gameData.gold=1000;showPanel('shop');});results.eras=[];
  for(const era of['ancient','medieval','napoleonic','modern']){
-  if(era!=='modern'){await page.locator('#shopSkinTriggerPlayer').tap();await page.locator('#shopSkinMenuPlayer button').filter({hasText:new RegExp(era==='napoleonic'?'Napoleonic':era==='medieval'?'Medieval':'Ancient','i')}).first().tap();}else await page.locator('#shopGamePeriod').selectOption('modern');
-  const r=await page.evaluate(()=>{const era=gameData.gamePeriod,payload=wodBuildCloudSyncPayload();wodApplyServerProfile({...payload,profile:{...payload.profile,gamePeriod:'modern'}});return{era,after:gameData.gamePeriod,value:document.getElementById('shopGamePeriod').value,motor:document.querySelector('#shopPvMotorized+.shop-unit-cell-label').textContent,mountain:document.querySelector('#shopPvMountaineer+.shop-unit-cell-label').textContent};});
-  assert.equal(r.after,era);assert.equal(r.value,era);assert.equal(r.mountain,{ancient:'Skirmishers',medieval:'Rangers',napoleonic:'Chasseurs',modern:'Mountaineers'}[era]);results.eras.push(r);
+  await page.locator('#shopSkinTriggerPlayer').tap();await page.locator('#shopSkinMenuPlayer button').filter({hasText:new RegExp(era==='modern'?'NATO':era==='napoleonic'?'Napoleonic':era==='medieval'?'Medieval':'Ancient','i')}).first().tap();
+  const r=await page.evaluate(()=>{const era=gameData.gamePeriod,payload=wodBuildCloudSyncPayload();wodApplyServerProfile({...payload,profile:{...payload.profile,gamePeriod:'modern'}});return{era,after:gameData.gamePeriod,value:document.getElementById('shopSelectPlayer').value,motor:document.querySelector('#shopPvMotorized+.shop-unit-cell-label').textContent,mountain:document.querySelector('#shopPvMountaineer+.shop-unit-cell-label').textContent};});
+  assert.equal(r.after,era);assert.equal(r.value,era==='modern'?'nato':era);assert.equal(r.mountain,{ancient:'Skirmishers',medieval:'Rangers',napoleonic:'Chasseurs',modern:'Mountaineers'}[era]);results.eras.push(r);
  }
  await page.screenshot({path:path.join(OUT,'shop-mobile.png')});assert(await page.locator('#shopGold').evaluate(e=>parseFloat(getComputedStyle(e).fontSize)>=22));
  // Reset uses the actual styled dialog; cancellation/keyboard safety leave progress alone.

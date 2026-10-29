@@ -20,7 +20,7 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
   assert.deepEqual(await page.evaluate(()=>[gameData.unitSkin,gameData.aiUnitSkin]),['ancient','medieval']);
   results.eras=[];
   for(const era of ['ancient','medieval','napoleonic','modern']){
-   await page.locator('#shopGamePeriod').selectOption(era);await page.waitForTimeout(80);
+   await page.locator('#shopSkinTriggerPlayer').tap();await page.locator('#shopSkinMenuPlayer button').filter({hasText:new RegExp(era==='modern'?'NATO':era==='napoleonic'?'Napoleonic':era==='medieval'?'Medieval':'Ancient','i')}).first().tap();await page.waitForTimeout(80);
    const row=await page.evaluate(()=>wodShopUnitPreviewEntries().map(([id,type])=>{const c=document.getElementById(id),data=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let hash=0;for(let i=0;i<data.length;i+=4)hash=(Math.imul(hash,31)+data[i]*3+data[i+1]*5+data[i+2]*7)|0;return{id,type,label:c.nextElementSibling.textContent,hash,aria:c.getAttribute('aria-label')};}));
    assert.equal(row.length,16);assert.equal(new Set(row.map(r=>r.id)).size,16);
    const names={ancient:['Cavalry','Skirmishers'],medieval:['Mounted men-at-arms','Rangers'],napoleonic:['Dragoons','Chasseurs'],modern:['Motorized infantry','Mountaineers']}[era];

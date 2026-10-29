@@ -11978,13 +11978,6 @@
                 <div id="shopTabTroops" class="shop-tab-pane active" data-shop-pane="troops" role="tabpanel">
                 <p>Spend <strong>100 gold</strong> to permanently unlock troop styles. Equip below — <strong>Yours</strong> and <strong>AI</strong> use independent picks.</p>
 
-                <div class="shop-period-row setup-row hidden" id="shopGamePeriodRow" style="max-width:480px;margin:12px 0 16px">
-                    <label>Time period</label>
-                    <select id="shopGamePeriod" title="Themed unit names and buildings for your next battles" style="flex:1">
-                        <option value="modern" selected>Modern</option>
-                    </select>
-                </div>
-
                 <select id="shopSelectPlayer" class="shop-select-hidden" tabindex="-1" aria-hidden="true"></select>
                 <select id="shopSelectAi" class="shop-select-hidden" tabindex="-1" aria-hidden="true"></select>
 
@@ -12996,6 +12989,13 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:'2026-10-29T16:14:00-04:00',
+                title:'Simpler shop era selection',
+                items:[
+                    'Removed the extra Time period dropdown from the shop. The centered army style dropdowns change the era and preview names directly; selecting a modern style restores Modern. Your choice remains saved for the next battle.'
+                ]
+            },
             {
                 at:'2026-10-29T14:27:00-04:00',
                 title:'Match gold, falling treasure and clearer era previews',
@@ -14329,7 +14329,6 @@
                 sel._wodBound = true;
                 sel.addEventListener('change', () => wodApplyGamePeriod(sel.value, { saveProfile: true }));
             }
-            wodInitShopPeriodBinding();
             wodInitMissionPeriodBinding();
             wodInitCampaignPeriodBinding();
         }
@@ -14342,7 +14341,6 @@
             let pan = document.getElementById(panelId + 'Panel');
             if(pan) pan.classList.remove('hidden');
             if(panelId === 'shop') {
-                wodInitShopPeriodBinding();
             wodInitMissionPeriodBinding();
             wodInitCampaignPeriodBinding();
                 wodSyncAllPeriodSelects();
@@ -45794,12 +45792,12 @@
 
         function wodRefreshPeriodSelectorVisibility() {
             let show = wodHasAnyEraSkinUnlocked();
-            for(let id of ['setupGamePeriodRow', 'shopGamePeriodRow', 'settingsGamePeriodSection', 'mpCfgGamePeriodRow', 'wodCampGamePeriodRow', 'wodCampActiveGamePeriodRow', 'wodMissionGamePeriodRow']) {
+            for(let id of ['setupGamePeriodRow', 'settingsGamePeriodSection', 'mpCfgGamePeriodRow', 'wodCampGamePeriodRow', 'wodCampActiveGamePeriodRow', 'wodMissionGamePeriodRow']) {
                 let row = document.getElementById(id);
                 if(row) row.classList.toggle('hidden', !show);
             }
             if(show) {
-                for(let id of ['setupGamePeriod', 'settingsGamePeriod', 'mpCfgGamePeriod', 'shopGamePeriod', 'wodCampGamePeriod', 'wodCampActiveGamePeriod', 'wodMissionGamePeriod']) {
+                for(let id of ['setupGamePeriod', 'settingsGamePeriod', 'mpCfgGamePeriod', 'wodCampGamePeriod', 'wodCampActiveGamePeriod', 'wodMissionGamePeriod']) {
                     wodRebuildPeriodSelectEl(document.getElementById(id));
                 }
             }
@@ -45839,7 +45837,6 @@
             wodSyncPeriodSelectEl(document.getElementById('setupGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('settingsGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('mpCfgGamePeriod'), gameData.gamePeriod);
-            wodSyncPeriodSelectEl(document.getElementById('shopGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('wodCampGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('wodCampActiveGamePeriod'), gameData.gamePeriod);
             wodSyncPeriodSelectEl(document.getElementById('wodMissionGamePeriod'), gameData.gamePeriod);
@@ -45918,13 +45915,6 @@
             if(setupSel && setupSel.value && wodIsPeriodUnlocked(setupSel.value)) return setupSel.value;
             return wodGetGamePeriod();
         }
-        function wodInitShopPeriodBinding() {
-            let sel = document.getElementById('shopGamePeriod');
-            if(!sel || sel._wodBound) return;
-            sel._wodBound = true;
-            sel.addEventListener('change', () => wodApplyGamePeriod(sel.value, { saveProfile: true }));
-        }
-
         function wodApplyGamePeriod(period, opts) {
             opts = opts || {};
             if(!period || !WOD_PERIOD_IDS.includes(period)) period = 'modern';
@@ -47467,8 +47457,8 @@
             if(which === 'player') gameData.unitSkin = skinId;
             else gameData.aiUnitSkin = skinId;
             if(which === 'player') syncSetupPlayerColorRow();
-            if(WOD_PERIOD_SKIN_IDS.includes(skinId))wodApplyGamePeriod(skinId,{saveProfile:true});
-            else if(WOD_ANCIENT_CIV_SKIN_IDS.includes(skinId))wodApplyGamePeriod('ancient',{saveProfile:true});
+            const period = WOD_PERIOD_SKIN_IDS.includes(skinId) ? skinId : WOD_ANCIENT_CIV_SKIN_IDS.includes(skinId) ? 'ancient' : 'modern';
+            wodApplyGamePeriod(period, {saveProfile:true});
             syncShopSkinBar(which);
             closeShopSkinMenus();
             renderShopArmyCanvases();
@@ -58001,7 +57991,6 @@
 
         initSetupPanelBindings();
         wodInitPeriodSettingsBinding();
-        wodInitShopPeriodBinding();
         wodSyncAllPeriodSelects();
         wodApplyPeriodUiLabels();
         wireShowOrdersCheckbox();
