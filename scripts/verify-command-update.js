@@ -154,6 +154,7 @@ const server = http.createServer((req, res) => {
     assert(structures.queued&&!structures.duplicate&&structures.before===structures.n&&structures.at29===structures.n&&structures.after===structures.n+1,'fort timer and no duplicate charges');
     assert(structures.canceled&&!structures.capturedBuilt,'capture cancels construction');
     const ai = await page.evaluate(() => {
+      gameData.aiCommanderProfiles={2:'balanced'};gameData.aiTaskForces={}; // Stable role-coverage fixture; live matches choose hidden random profiles.
       let g=gameData,c=g.cities.find(c=>c.owner===2), water=g.hexList.find(h=>isWaterHex(h)&&getNeighborHexes(h).some(n=>!isWaterHex(n)&&n.owner===2))||g.hexList.find(isWaterHex);
       for(let i=0;i<32;i++)createUnitAt('light',c.x,c.y,2);
       for(let i=0;i<7;i++)createUnitAt('heavy',c.x,c.y,2);

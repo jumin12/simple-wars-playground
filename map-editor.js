@@ -737,7 +737,7 @@
     const owner = Math.max(1, Math.min(state.owner || 1, state.maxFactionSlots));
     const types = [
       ["light", "Infantry"],
-      ["motorized", "Motorized infantry"],["mountaineer", "Mountaineers"],
+      ["motorized", wodSpecialistLabel("motorized",WOD.gameData.gamePeriod)],["mountaineer", wodSpecialistLabel("mountaineer",WOD.gameData.gamePeriod)],
       ["marine", "Marines"],
       ["heavy", "Armor"],
       ["ship", "Ship"],
@@ -1201,7 +1201,7 @@
         <div class="editor-row"><label>Unit</label>
           <select class="editor-mission-reinf-type">
             <option value="light"${rep.type === "light" ? " selected" : ""}>Infantry</option>
-            <option value="motorized"${rep.type === "motorized" ? " selected" : ""}>Motorized infantry</option><option value="mountaineer"${rep.type === "mountaineer" ? " selected" : ""}>Mountaineers</option><option value="marine"${rep.type === "marine" ? " selected" : ""}>Marines</option>
+            <option value="motorized"${rep.type === "motorized" ? " selected" : ""}>${wodSpecialistLabel("motorized",WOD.gameData.gamePeriod)}</option><option value="mountaineer"${rep.type === "mountaineer" ? " selected" : ""}>${wodSpecialistLabel("mountaineer",WOD.gameData.gamePeriod)}</option><option value="marine"${rep.type === "marine" ? " selected" : ""}>Marines</option>
             <option value="heavy"${rep.type === "heavy" ? " selected" : ""}>Armor</option>
             <option value="ship"${rep.type === "ship" ? " selected" : ""}>Ship</option><option value="transport"${rep.type === "transport" ? " selected" : ""}>Transport</option><option value="supply"${rep.type === "supply" ? " selected" : ""}>Supply ship</option>
           </select>
@@ -2298,7 +2298,7 @@
               <button type="button" class="editor-btn" data-tool="unit">Place unit</button>
               <select id="editorPlaceUnitType" class="editor-territory-owner-select" aria-label="Unit to place">
                 <option value="light">Infantry</option>
-                <option value="motorized">Motorized infantry</option><option value="mountaineer">Mountaineers</option><option value="marine">Marines</option>
+                <option value="motorized">${wodSpecialistLabel("motorized",WOD.gameData.gamePeriod)}</option><option value="mountaineer">${wodSpecialistLabel("mountaineer",WOD.gameData.gamePeriod)}</option><option value="marine">Marines</option>
                 <option value="heavy">Armor</option>
                 <option value="ship">Ship</option><option value="transport">Transport</option><option value="supply">Supply ship</option>
               </select>
@@ -3834,7 +3834,7 @@
       panel.innerHTML = `
         <div class="editor-row"><label>Name</label><input id="selName" value="${editorEscapeAttribute(obj.name)}"></div>
         ${factionRow}
-        <div class="editor-row"><label>Type</label><select id="selType"><option value="light">Infantry</option><option value="motorized">Motorized infantry</option><option value="mountaineer">Mountaineers</option><option value="marine">Marines</option><option value="heavy">Armor</option><option value="ship">Ship</option><option value="transport">Transport</option><option value="supply">Supply ship</option></select></div>
+        <div class="editor-row"><label>Type</label><select id="selType"><option value="light">Infantry</option><option value="motorized">${wodSpecialistLabel("motorized",WOD.gameData.gamePeriod)}</option><option value="mountaineer">${wodSpecialistLabel("mountaineer",WOD.gameData.gamePeriod)}</option><option value="marine">Marines</option><option value="heavy">Armor</option><option value="ship">Ship</option><option value="transport">Transport</option><option value="supply">Supply ship</option></select></div>
         <div class="editor-row"><label>HP</label><input id="selHp" type="number" value="${obj.hp || 100}"></div>
         <div class="editor-row"><label>Speed</label><input id="selSpeed" type="number" value="${obj.speed || 10}"></div>
         <div class="editor-row"><label>Damage</label><input id="selDamage" type="number" value="${obj.damage || 10}"></div>
