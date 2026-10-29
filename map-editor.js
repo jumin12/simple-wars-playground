@@ -747,11 +747,11 @@
     el.innerHTML = types.map(([t, lab]) => {
       const col = cols[owner] || "#fff";
       return `
-      <div class="unit-chip" draggable="true" data-unit-type="${t}" data-unit-owner="${owner}"
+      <div class="unit-chip" draggable="true" role="button" tabindex="0" aria-label="Place ${lab}" data-unit-type="${t}" data-unit-owner="${owner}"
            style="--chip-faction:${col}">
         <span class="unit-chip-meta">
           <span class="unit-chip-title">${lab}</span>
-          <span class="unit-chip-sub">Drop on map</span>
+          <span class="unit-chip-sub">Tap or drag to place</span>
         </span>
       </div>`;
     }).join("");
@@ -760,6 +760,18 @@
       const t = chip.dataset.unitType;
       const o = parseInt(chip.dataset.unitOwner, 10);
       renderUnitChipCanvas(chip, t, o);
+      chip.addEventListener("click", () => {
+        state.placeUnitType = t;
+        state.tool = "unit";
+        const select = document.getElementById("editorPlaceUnitType");
+        if (select) select.value = t;
+        document.querySelectorAll("#mapEditorApp [data-tool]").forEach(b => b.classList.toggle("active", b.dataset.tool === "unit"));
+        syncTerritoryOwnerUi();
+        scheduleEditorRender();
+      });
+      chip.addEventListener("keydown", ev => {
+        if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); chip.click(); }
+      });
       chip.addEventListener("dragstart", ev => {
         const payload = JSON.stringify({ type: t, owner: o });
         ev.dataTransfer.setData("application/x-wod-unit", payload);
@@ -2199,6 +2211,15 @@
         .editor-right { border-left:none;border-top:1px solid rgba(201,162,39,.25); max-height:none; }
         #editorCanvasWrap { min-height:280px; }
       }
+      @media (max-width:900px), (pointer:coarse) {
+        #mapEditorApp .editor-btn, #mapEditorApp .editor-gen-tab, #mapEditorApp .editor-seg-btn { min-height:44px;font-size:13px;white-space:normal; }
+        #mapEditorApp input:not([type=checkbox]):not([type=range]):not([type=color]), #mapEditorApp select, #mapEditorApp textarea { font-size:16px;min-height:44px;max-width:100%;box-sizing:border-box; }
+        #mapEditorApp .editor-card { min-width:0; }
+        #mapEditorApp .editor-unit-palette { grid-template-columns:repeat(2,minmax(0,1fr)); }
+        #mapEditorApp .unit-chip { min-width:0;min-height:88px; }
+        #mapEditorApp .unit-chip-title { overflow-wrap:break-word;font-size:13px;line-height:1.4; }
+        #mapEditorApp .editor-toolbar-hint { flex-basis:100%;order:3;margin:0; }
+      }
     `;
     document.head.appendChild(style);
 
@@ -2208,7 +2229,7 @@
       <header class="editor-toolbar">
         <h1>Map editor</h1>
         <p class="editor-toolbar-hint editor-toolbar-hint-desktop">Paint terrain and ownership. <strong>Left-drag</strong> paints terrain. <strong>Click</strong> places a town, factory, harbor, or one unit. Use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Mouse wheel</strong> zooms. <strong>Middle-click drag</strong> pans the view. Drag unit chips from the palette onto the map (ships need water).</p>
-        <p class="editor-toolbar-hint editor-toolbar-hint-touch">Paint terrain and ownership, place towns and units. Drag unit chips onto the map — ships need water. Use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Two fingers</strong> on the canvas pan and pinch-zoom.</p>
+        <p class="editor-toolbar-hint editor-toolbar-hint-touch">Tap a unit in the palette, then tap the map to place it — ships need water. Use <strong>Select</strong> then <strong>Move</strong> to reposition. <strong>Two fingers</strong> on the canvas pan and pinch-zoom.</p>
         <button type="button" class="editor-btn editor-btn-main" id="editorExitBtn">← Main menu</button>
       </header>
       <div class="editor-gen-wrap">
@@ -2354,7 +2375,7 @@
         <canvas id="editorCanvas"></canvas>
         <button type="button" id="editorDeleteUnit" aria-label="Delete selected unit" title="Delete selected unit" hidden>×</button>
         <div class="editor-drop-overlay-hint editor-overlay-hint-desktop">Drop unit chips · wheel = zoom · middle-drag = pan</div>
-        <div class="editor-drop-overlay-hint editor-overlay-hint-touch">Drop unit chips · 2 fingers = pan / zoom</div>
+        <div class="editor-drop-overlay-hint editor-overlay-hint-touch">Tap palette, then map · 2 fingers = pan / zoom</div>
       </div>
       <div class="editor-panel editor-right">
         <section class="editor-card">
