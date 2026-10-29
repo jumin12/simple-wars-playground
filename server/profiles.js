@@ -41,6 +41,7 @@ const SHOP_VISUAL_IDS = new Set([
 ]);
 
 const LIFETIME_KEYS = [
+  'enemyMotorizedKills', 'ownMotorizedLosses', 'enemyMountaineerKills', 'ownMountaineerLosses', 'enemyTruckKills', 'ownTruckLosses', 'enemyHorseKills', 'ownHorseLosses',
   'enemyTroopKills', 'ownTroopLosses', 'enemyMarineKills', 'ownMarineLosses',
   'enemyTankKills', 'ownTankLosses', 'enemyShipKills', 'ownShipLosses',
   'peakFieldManpower', 'battlesWon', 'campaignLosses', 'citiesCaptured', 'convoysCaptured',
@@ -51,6 +52,7 @@ const LIFETIME_KEYS = [
 ];
 
 const LIFETIME_MAX_JUMP = {
+  enemyMotorizedKills: 800, ownMotorizedLosses: 800, enemyMountaineerKills: 800, ownMountaineerLosses: 800, enemyTruckKills: 400, ownTruckLosses: 400, enemyHorseKills: 800, ownHorseLosses: 800,
   enemyTroopKills: 800, enemyMarineKills: 400, enemyTankKills: 200, enemyShipKills: 80,
   ownTroopLosses: 800, ownMarineLosses: 400, ownTankLosses: 200, ownShipLosses: 80,
   battlesWon: 5, campaignLosses: 5, citiesCaptured: 40, convoysCaptured: 40,

@@ -11634,8 +11634,8 @@
                             <p>Your bread-and-butter land fighters: cheap to raise, flexible on most terrain, and ideal for skirmishing, capping urban tiles, and screening heavier columns. They pay normal combat penalties when attacking into rough ground or cities but are not as debuffed as heavies.</p>
                         </div>
                     </div>
-                    <div class="help-unit-card"><canvas id="menuHelpCanvasUnitMotorized" width="76" height="76" aria-hidden="true"></canvas><div class="help-unit-body"><h5 data-wod-specialist-name="motorized" data-suffix=" (factory)">Motorized infantry (factory)</h5><p>$3,000 / 2,400 MP · 23s · 180 HP. Cavalry in Ancient, mounted men-at-arms in Medieval, dragoons in Napoleonic and motorized infantry in Modern, each with its own era symbol. Strength sits between infantry and armor. Best on open ground; forests, hills, swamps and towns slow them and reduce their combat advantage. Cannot enter mountains.</p></div></div>
-                    <div class="help-unit-card"><canvas id="menuHelpCanvasUnitMountaineer" width="76" height="76" aria-hidden="true"></canvas><div class="help-unit-body"><h5 data-wod-specialist-name="mountaineer">Mountaineers</h5><p>$1,600 / 2,000 MP · 20s · 85 HP. Skirmishers in Ancient, rangers in Medieval, chasseurs in Napoleonic and mountaineers in Modern, each with its own era symbol. Weaker than ordinary infantry on other terrain, stronger in hills and mountains. Can cross mountain cells at reduced speed and fight from high ground. Need ordinary land or naval supply; no swimming exemption.</p></div></div>
+                    <div class="help-unit-card"><canvas id="menuHelpCanvasUnitMotorized" width="76" height="76" aria-hidden="true"></canvas><div class="help-unit-body"><h5 data-wod-specialist-name="motorized" data-suffix=" (factory)">Motorized infantry (factory)</h5><p>$3,000 / 2,400 MP · 23s · 180 HP. Cavalry in Ancient, mounted men-at-arms in Medieval, dragoons in Napoleonic and motorized infantry in Modern, each with its own era symbol. Strength sits between infantry and armor. Best on open ground; forests, hills, swamps and towns slow them and reduce their combat advantage. Cannot enter mountains. Full strength represents 1,000 horses in earlier eras or 100 trucks in Modern. Equipment in service follows regiment health. Battle reports and lifetime statistics record equipment losses; battle reports also separate attrition losses.</p></div></div>
+                    <div class="help-unit-card"><canvas id="menuHelpCanvasUnitMountaineer" width="76" height="76" aria-hidden="true"></canvas><div class="help-unit-body"><h5 data-wod-specialist-name="mountaineer">Mountaineers</h5><p>$1,600 / 2,000 MP · 20s · 85 HP. Skirmishers in Ancient, rangers in Medieval, chasseurs in Napoleonic and mountaineers in Modern, each with its own era symbol. Weaker than ordinary infantry on other terrain, stronger in hills and mountains. Can cross mountain cells at reduced speed and fight from high ground. Need ordinary land or naval supply; no swimming exemption. Battle and lifetime statistics track this class’s personnel and losses separately under its era name.</p></div></div>
                     <div class="help-unit-card">
                         <canvas id="menuHelpCanvasUnitHeavy" width="76" height="76" aria-hidden="true"></canvas>
                         <div class="help-unit-body">
@@ -12591,6 +12591,9 @@
                                 <div class="resource-chip report-metric">Manpower reserve <span class="chip-value" id="ui-manpower">0</span></div>
                                 <div class="resource-chip report-metric">Manpower income <span class="chip-value" id="ui-manpower-income">+0 MP/s</span></div>
                                 <div class="resource-chip report-metric">Field personnel <span class="chip-value" id="ui-troops">0</span></div>
+                                <div class="resource-chip report-metric"><span id="ui-motorized-equipment-label">Trucks in service</span><span class="chip-value" id="ui-motorized-equipment">0</span></div>
+                                <div class="resource-chip report-metric"><span id="ui-motorized-personnel-label">Motorized infantry personnel</span><span class="chip-value" id="ui-motorized-personnel">0</span></div>
+                                <div class="resource-chip report-metric"><span id="ui-mountaineer-personnel-label">Mountaineer personnel</span><span class="chip-value" id="ui-mountaineer-personnel">0</span></div>
                                 <div class="resource-chip report-metric">Armor vehicles <span class="chip-value" id="ui-tanks">0</span></div>
                                 <div class="resource-chip report-metric">Naval units <span class="chip-value" id="ui-ships">0</span></div>
                             </div></section>
@@ -12729,6 +12732,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:'2026-10-29T01:11:00-04:00',
+                title:'Specialist equipment records and reliable crowded orders',
+                items:[
+                    'Mounted and motorized infantry now report horses or trucks in service, plus equipment combat and attrition losses. A full regiment has 1,000 horses in earlier eras or 100 trucks in Modern; equipment strength follows the regiment’s health and recovery.',
+                    'Skirmishers, rangers, chasseurs and mountaineers have separate personnel and casualty records under their era names. Battle reports, end reports, unit cards and lifetime era filters include the new specialist and equipment statistics; multiplayer and cloud progress retain them.',
+                    'Crowded player units use a private sidestep route while keeping the issued destination, waypoint legs and visible arrow. Idle troops move aside and return without gaining a new player order. A fresh command immediately replaces the saved order, and blocked troops no longer abandon destinations several tiles away.'
+                ]
+            },
             {
                 at:'2026-10-28T22:40:00-04:00',
                 title:'Hidden commanders, purposeful crossings and smarter advances',
@@ -13619,6 +13631,12 @@
             modern:{motorized:'Motorized infantry',mountaineer:'Mountaineers',mobileMark:'wheels',mountainMark:'peak'}
         };
         function wodSpecialistLabel(type,period=wodGetRenderPeriod()){return WOD_SPECIALIST_ERAS[period]?.[type]||WOD_SPECIALIST_UNITS[type]?.label||type;}
+        function wodMotorizedEquipment(unit,period=wodGetMatchPeriod()) {
+            const modern=period==='modern',capacity=modern?100:1000;
+            return {label:modern?'Trucks':'Horses',kind:modern?'Truck':'Horse',capacity,
+                count:unit?.type==='motorized'?capacity*Math.max(0,Math.min(1,(unit.hp||0)/Math.max(1,unit.maxHp||180))):0};
+        }
+
         const WOD_PRICE_HEAVY = 8000;
         const WOD_PRICE_SHIP = 7600;
         const WOD_PRICE_TRANSPORT = 2000;
@@ -14277,7 +14295,7 @@
                 showEscSection(opts.defaultSection || 'helpSection');
         }
 
-        const WOD_ESC_HELP_VERSION = '13';
+        const WOD_ESC_HELP_VERSION = '14';
 
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
@@ -24433,6 +24451,7 @@
                 lifetime: {
                     enemyTroopKills: 0,
                     ownTroopLosses: 0,
+                    enemyMotorizedKills:0,ownMotorizedLosses:0,enemyMountaineerKills:0,ownMountaineerLosses:0,enemyTruckKills:0,ownTruckLosses:0,enemyHorseKills:0,ownHorseLosses:0,
                     enemyMarineKills: 0,
                     ownMarineLosses: 0,
                     enemyTankKills: 0,
@@ -25046,6 +25065,7 @@
                 statsPeriod = _achStatsPeriodFilter;
             }
             let sf = wodStatsFlavor(statsPeriod);
+            const specialistEra=statsPeriod==='all'?'modern':statsPeriod,specialistName=t=>statsPeriod==='all'?(t==='motorized'?'Mounted / motorized infantry':'Skirmishers / mountaineers'):wodSpecialistLabel(t,specialistEra);
             function sc(lab, val) {
                 return `<div class="stat-cell"><div class="stat-label">${lab}</div><div class="stat-value">${val}</div></div>`;
             }
@@ -25077,7 +25097,7 @@
                         <div>
                             <div class="stats-combat-sub">Your forces</div>
                             <div class="stats-grid stats-grid--combat-row">
-                                ${sc(sf.statOwnInfantry, formatLifetimeBig(statsL.ownTroopLosses))}
+                                ${sc('All personnel lost', formatLifetimeBig((statsL.ownTroopLosses||0)+(statsL.ownMarineLosses||0)))}
                                 ${sc(sf.statOwnMarine, formatLifetimeBig(statsL.ownMarineLosses))}
                                 ${sc(sf.statOwnHeavy, formatLifetimeBig(statsL.ownTankLosses))}
                                 ${sc(sf.statOwnShips, formatLifetimeBig(statsL.ownShipLosses))}
@@ -25086,12 +25106,21 @@
                         <div>
                             <div class="stats-combat-sub">Enemy</div>
                             <div class="stats-grid stats-grid--combat-row">
-                                ${sc(sf.statEnemyInfantry, formatLifetimeBig(statsL.enemyTroopKills))}
+                                ${sc('All personnel killed', formatLifetimeBig((statsL.enemyTroopKills||0)+(statsL.enemyMarineKills||0)))}
                                 ${sc(sf.statEnemyMarine, formatLifetimeBig(statsL.enemyMarineKills))}
                                 ${sc(sf.statEnemyHeavy, formatLifetimeBig(statsL.enemyTankKills))}
                                 ${sc(sf.statEnemyShips, formatLifetimeBig(statsL.enemyShipKills))}
                             </div>
                         </div>
+                    </div>
+                </section>
+                <section class="stats-section">
+                    <h3 class="stats-section-title">Specialists &amp; equipment</h3><p class="battle-note">Specialist personnel are included in the personnel totals above.</p>
+                    <div class="stats-grid">
+                        ${sc(specialistName('motorized')+' personnel lost',formatLifetimeBig(statsL.ownMotorizedLosses))}${sc(specialistName('motorized')+' personnel killed',formatLifetimeBig(statsL.enemyMotorizedKills))}
+                        ${sc(specialistName('mountaineer')+' lost',formatLifetimeBig(statsL.ownMountaineerLosses))}${sc(specialistName('mountaineer')+' killed',formatLifetimeBig(statsL.enemyMountaineerKills))}
+                        ${statsPeriod==='all'||specialistEra==='modern'?sc('Trucks lost',formatLifetimeBig(statsL.ownTruckLosses))+sc('Enemy trucks destroyed',formatLifetimeBig(statsL.enemyTruckKills)):''}
+                        ${statsPeriod==='all'||specialistEra!=='modern'?sc('Horses lost',formatLifetimeBig(statsL.ownHorseLosses))+sc('Enemy horses lost',formatLifetimeBig(statsL.enemyHorseKills)):''}
                     </div>
                 </section>
                 <section class="stats-section">
@@ -25130,7 +25159,7 @@
                         ${sc(sf.statTrainHeavy, formatLifetimeBig(statsL.unitsBuiltHeavy))}
                         ${sc(sf.statTrainShip, formatLifetimeBig(statsL.unitsBuiltShip))}
                         ${sc('Transports built',formatLifetimeBig(statsL.unitsBuiltTransport))}
-                        ${sc('Supply ships built',formatLifetimeBig(statsL.unitsBuiltSupply))}${sc('Motorized infantry built',formatLifetimeBig(statsL.unitsBuiltMotorized))}${sc('Mountaineers built',formatLifetimeBig(statsL.unitsBuiltMountaineer))}
+                        ${sc('Supply ships built',formatLifetimeBig(statsL.unitsBuiltSupply))}${sc(specialistName('motorized')+' trained',formatLifetimeBig(statsL.unitsBuiltMotorized))}${sc(specialistName('mountaineer')+' trained',formatLifetimeBig(statsL.unitsBuiltMountaineer))}
                     </div>
                 </section>
             </div>`;
@@ -28013,6 +28042,7 @@
             if(unit.type === 'transport') return mp * (WOD_PRICE_TRANSPORT / Math.max(1,unit.maxManpower||500));
             if(wodIsNavalUnit(unit)) return mp * (WOD_PRICE_SHIP / ms);
             if(unit.type === 'convoy') return 0;
+            if(WOD_SPECIALIST_UNITS[unit.type])return mp*WOD_SPECIALIST_UNITS[unit.type].money/Math.max(1,unit.maxManpower||1000);
             if(unit.type === 'marine') return mp * (WOD_PRICE_MARINE / mi);
             return mp * (WOD_PRICE_LIGHT / mi);
         }
@@ -28032,6 +28062,11 @@
             const lossField=unitType==='marine'?'ownMarineLosses':'ownTroopLosses';
             wodRecordOwnerLifetime(owner,lossField,amount);
             if(sourceOwner>0&&sourceOwner!==owner)wodRecordOwnerLifetime(sourceOwner,killField,amount);
+            if(WOD_SPECIALIST_UNITS[unitType]){
+                const cls=unitType==='motorized'?'Motorized':'Mountaineer';
+                wodRecordOwnerLifetime(owner,'own'+cls+'Losses',amount);
+                if(sourceOwner>0&&sourceOwner!==owner)wodRecordOwnerLifetime(sourceOwner,'enemy'+cls+'Kills',amount);
+            }
         }
 
         function addTankCasualties(owner, amount, sourceOwner = 0) {
@@ -28089,8 +28124,17 @@
             let casualties = unit.type === 'convoy' ? 0 : Math.min(prevManpower, hpLossRatio * (unit.maxManpower || 1000));
             if(unit.hp <= 0 && unit.type !== 'convoy') casualties = prevManpower;
             unit.manpower = Math.max(0, prevManpower - casualties);
-            addCasualties(unit.owner, casualties, source, unit.type === 'marine' ? 'marine' : 'light');
+            addCasualties(unit.owner, casualties, source, unit.type);
             if(attrition&&casualties>0){unit.attritionLosses=(unit.attritionLosses||0)+casualties;wodBattleMetric(unit.owner,'attritionPersonnelLost',casualties);}
+            if(unit.type==='motorized'){
+                const gear=wodMotorizedEquipment(unit),lost=hpLossRatio*gear.capacity;
+                if(lost>0){
+                    wodRecordOwnerLifetime(unit.owner,'own'+gear.kind+'Losses',lost);
+                    if(source>0&&source!==unit.owner)wodRecordOwnerLifetime(source,'enemy'+gear.kind+'Kills',lost);
+                    if(attrition)wodBattleMetric(unit.owner,'attrition'+gear.label+'Lost',lost);
+                }
+            }
+            if(attrition&&WOD_SPECIALIST_UNITS[unit.type])wodBattleMetric(unit.owner,unit.type==='motorized'?'attritionMotorizedPersonnelLost':'attritionMountaineerPersonnelLost',casualties);
             if(unit.type !== 'convoy') {
                 unit.morale = Math.max(0, (unit.morale != null ? unit.morale : WOD_MORALE_MAX) - (amount / unit.maxHp) * 52);
                 unit.losses = (unit.losses || 0) + casualties;
@@ -28888,14 +28932,43 @@
             return null;
         }
 
+        const WOD_TRAFFIC_ORDER_FIELDS = ['target','path','orderTarget','fullMarchWaypoints','marchWpCursor','holding',
+            '_wodOrderIntoWater','_wodRouteUsesBridge','_routeArrowBuildGen','_routeArrowSig','_routeArrowThrottleUntil',
+            '_routeArrowFrozenPts','_routeArrowMarchSig','_routeArrowProgressIdx','_routeArrowFrozenReady'];
+        function wodCaptureTrafficOrder(unit) {
+            return Object.fromEntries(WOD_TRAFFIC_ORDER_FIELDS.map(k=>[k,unit[k]]));
+        }
+        function wodPlanTrafficDetour(unit,points,record) {
+            // Autonomous logistics uses the active avoidance destination to coordinate
+            // escorts and landing lanes. Human commands are a separate, stable intent.
+            if(!wodMpIsHumanOwner(unit.owner)){
+                const ok=assignUnitMoveAlongWaypoints(unit,points,{retainRetreat:true,transportInternal:true});
+                if(ok)unit._trafficYield=record;
+                return ok;
+            }
+            const command=wodCaptureTrafficOrder(unit);
+            let ok=false;
+            try {
+                ok=assignUnitMoveAlongWaypoints(unit,points,{retainRetreat:true,transportInternal:true});
+                if(ok)record.route=wodCaptureTrafficOrder(unit);
+            } finally {Object.assign(unit,command);}
+            if(ok)unit._trafficYield=record;
+            return ok;
+        }
         function wodResumeTrafficYield(unit) {
             const y=unit._trafficYield;if(!y)return;
             // A passenger may have landed after this sidestep was planned.
             // Recheck coverage before continuing to yield away from the shore.
-            if(unit.type==='supply'&&unit.target&&!wodSupplyParkingSafe(unit,unit.orderTarget||unit.target)){
-                unit._trafficYield=null;wodClearTransportMove(unit);return;
+            const avoidanceGoal=y.route?(y.route.orderTarget||y.route.target):(unit.orderTarget||unit.target);
+            if(unit.type==='supply'&&avoidanceGoal&&!wodSupplyParkingSafe(unit,avoidanceGoal)){
+                unit._trafficYield=null;
+                if(!wodMpIsHumanOwner(unit.owner))wodClearTransportMove(unit);
+                else if(unit.orderTarget)replanUnitOrder(unit);
+                return;
             }
-            if(unit.target)return;
+            if(y.owner!==unit.owner){unit._trafficYield=null;return;}
+            if(y.route?y.route.target:unit.target)return;
+            if(y.returning){unit._trafficYield=null;return;}
             const leader=gameData.entities.find(u=>u.uid===y.leader&&u.hp>0);
             const passed=!leader||(leader.x-y.x)*y.ax+(leader.y-y.y)*y.ay>0||Math.hypot(leader.x-unit.x,leader.y-unit.y)>(gameData.hexRadius||20)*5;
             if(!passed&&(gameData._aiEconomyClock||0)<y.until)return;
@@ -28908,7 +28981,11 @@
                 if(gameData.entities.some(other=>other!==unit&&other.hp>0&&other.target&&Math.hypot(other.x-y.points[0].x,other.y-y.points[0].y)<(other.radius||12)+(unit.radius||12)+4))unit._trafficYield=y;
                 return;
             }
-            if(y.owner===unit.owner&&y.points.length)assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
+            if(y.owner===unit.owner&&y.points.length){
+                if(y.idle&&wodMpIsHumanOwner(unit.owner)){y.returning=true;wodPlanTrafficDetour(unit,y.points,y);}
+                else if(unit.fullMarchWaypoints?.length)assignUnitMoveAlongWaypoints(unit,unit.fullMarchWaypoints,{fromLegAdvance:true,retainRetreat:true,transportInternal:!!y.internal});
+                else assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
+            }
         }
         function wodSupplyParkingSafe(ship,point) {
             if(ship.type!=='supply')return true;
@@ -28948,10 +29025,8 @@
             for(const {h} of sites.slice(0,4)) {
                 const points=wodUnitRemainingMarchPoints(loser).map(p=>({x:p.x,y:p.y})),idle=!points.length;
                 if(idle)points.push({x:loser.x,y:loser.y});
-                if(assignUnitMoveAlongWaypoints(loser,[{x:h.x,y:h.y}],{retainRetreat:true,transportInternal:wodIsNavalUnit(loser)})) {
-                    if(points.length)loser._trafficYield={points,idle,internal:wodIsNavalUnit(loser),owner:loser.owner,leader:ensureUnitId(leader),x:h.x,y:h.y,ax:dx,ay:dy,until:(gameData._aiEconomyClock||0)+25};
-                    return true;
-                }
+                const record={points,idle,internal:wodIsNavalUnit(loser),owner:loser.owner,leader:ensureUnitId(leader),x:h.x,y:h.y,ax:dx,ay:dy,until:(gameData._aiEconomyClock||0)+25};
+                if(wodPlanTrafficDetour(loser,[{x:h.x,y:h.y}],record))return true;
             }
             return false;
         }
@@ -31633,7 +31708,7 @@
         }
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
-            if(unit)unit._trafficYield=null;
+            if(unit&&!unit._trafficMoving)unit._trafficYield=null;
             if(unit&&(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute))ensureUnitPixelOnWalkableHex(unit,18);
             if(!opt?.fromLegAdvance&&!opt?.transportInternal) {
                 if(unit.boardTransportUid){const t=gameData.entities.find(t=>t.uid===unit.boardTransportUid);if(t)t.pickupUid=null;unit.boardTransportUid=null;unit._wodBoardingNoWater=false;}
@@ -34348,9 +34423,20 @@
             invalidateUnitOrderArrowCache(unit);return true;
         }
 
-        function moveUnitTowardTarget(unit, dt) {
-            if(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute)ensureUnitPixelOnWalkableHex(unit,18);
+        function moveUnitTowardTarget(unit,dt) {
             wodResumeTrafficYield(unit);
+            const yieldOrder=unit._trafficYield;
+            if(!yieldOrder||!yieldOrder.route)return wodMoveUnitAlongRoute(unit,dt);
+            if(!yieldOrder.route?.target)return;
+            // The private avoidance route may change; the issued destination, all
+            // waypoint legs and their arrow remain the player's command throughout.
+            const command=wodCaptureTrafficOrder(unit);
+            Object.assign(unit,yieldOrder.route);unit._trafficMoving=true;
+            try {wodMoveUnitAlongRoute(unit,dt);}
+            finally {yieldOrder.route=wodCaptureTrafficOrder(unit);Object.assign(unit,command);unit._trafficMoving=false;}
+        }
+        function wodMoveUnitAlongRoute(unit, dt) {
+            if(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute)ensureUnitPixelOnWalkableHex(unit,18);
             if(!unit.target) return;
             unit._wodTerrainRepairCooldown=Math.max(0,(unit._wodTerrainRepairCooldown||0)-dt);
             preparePathTarget(unit);
@@ -34568,7 +34654,7 @@
                             if(!onDeck && !landAhead && !wodUnitNearNarrowLandLane(unit)) {
                                 let hrA = gameData.hexRadius || 20;
                                 let adx = unit.orderTarget.x - unit.x, ady = unit.orderTarget.y - unit.y;
-                                let arriveR = hrA * 1.35 * 5.5;
+                                let arriveR = Math.max(hrA*1.5,(unit.radius||12)*2+4);
                                 if(adx * adx + ady * ady < arriveR * arriveR) {
                                     unit.target = null;
                                     unit.path = null;
@@ -45466,6 +45552,7 @@
 
         function wodDefaultLifetimeStats() {
             return {
+                enemyMotorizedKills:0,ownMotorizedLosses:0,enemyMountaineerKills:0,ownMountaineerLosses:0,enemyTruckKills:0,ownTruckLosses:0,enemyHorseKills:0,ownHorseLosses:0,
                 enemyTroopKills: 0, ownTroopLosses: 0, enemyMarineKills: 0, ownMarineLosses: 0,
                 enemyTankKills: 0, ownTankLosses: 0, enemyShipKills: 0, ownShipLosses: 0,
                 peakFieldManpower: 0, battlesWon: 0, campaignLosses: 0,
@@ -50186,6 +50273,7 @@
 
         function wodClearUnitOrdersInstant(unit) {
             if(!unit) return;
+            unit._trafficYield=null;
             unit.target = null;
             unit.path = null;
             unit.orderTarget = null;
@@ -51629,6 +51717,9 @@
                 money:fog?null:wodPlayerTreasury(owner),pool:fog?null:wodPlayerMpPool(owner),
                 mpGrowth:fog?null:cities.reduce((n,c)=>n+getCityManpowerIncome(c),0),
                 manpower:units.reduce((n,u)=>n+(u.manpower||0),0),tanks:units.reduce((n,u)=>n+(u.tanks||0),0),
+                motorizedPersonnel:units.filter(u=>u.type==='motorized').reduce((n,u)=>n+(u.manpower||0),0),
+                mountaineerPersonnel:units.filter(u=>u.type==='mountaineer').reduce((n,u)=>n+(u.manpower||0),0),
+                motorizedEquipment:units.reduce((n,u)=>n+wodMotorizedEquipment(u).count,0),
                 readiness:units.length?100*units.reduce((n,u)=>n+Math.max(0,Math.min(1,u.hp/u.maxHp)),0)/units.length:100,
                 fighting:units.filter(u=>u._combatEngaged||(u.activeCombatVisual||0)>.1).length,
                 moving:units.filter(u=>u.target).length,healing:units.filter(wodUnitHealingIcon).length,
@@ -51666,9 +51757,21 @@
                 ]);
                 const army=group(r.fog?'SPOTTED FORCES':'ARMY IN THE FIELD',[
                     [r.fog?'Visible units':'Field units',num(r.units.length)],['Infantry / marines',num(r.byType.light)+' / '+num(r.byType.marine)],
+                    [wodSpecialistLabel('motorized')+' regiments',num(r.byType.motorized)],[wodSpecialistLabel('mountaineer')+' regiments',num(r.byType.mountaineer)],
                     [wodActivePeriodFlavor().heavy,num(r.byType.heavy)],['Warships / transports',num(r.byType.ship)+' / '+num(r.byType.transport)],
                     ['Supply ships',num(r.byType.supply)],['Field personnel',num(r.manpower)],['Average strength',r.readiness.toFixed(1)+'%'],
                     ['Out of supply',num(r.cut)]
+                ]);
+                const specialists=group('EQUIPMENT & SPECIALISTS',[
+                    [wodMotorizedEquipment().label+' in service',num(r.motorizedEquipment)],
+                    [wodSpecialistLabel('motorized')+' personnel',num(r.motorizedPersonnel)],
+                    [wodSpecialistLabel('mountaineer')+' personnel',num(r.mountaineerPersonnel)],
+                    [wodMotorizedEquipment().label+' lost',r.fog?'Unknown':num(m['own'+wodMotorizedEquipment().kind+'Losses'])],
+                    [wodMotorizedEquipment().label+' destroyed',r.fog?'Unknown':num(m['enemy'+wodMotorizedEquipment().kind+'Kills'])],
+                    [wodSpecialistLabel('motorized')+' personnel lost',r.fog?'Unknown':num(m.ownMotorizedLosses)],
+                    [wodSpecialistLabel('motorized')+' personnel killed',r.fog?'Unknown':num(m.enemyMotorizedKills)],
+                    [wodSpecialistLabel('mountaineer')+' lost',r.fog?'Unknown':num(m.ownMountaineerLosses)],
+                    [wodSpecialistLabel('mountaineer')+' killed',r.fog?'Unknown':num(m.enemyMountaineerKills)]
                 ]);
                 const economy=group('ECONOMY & RESERVES',[
                     ['Treasury',money(r.money)],['Net income',r.fog?'Unknown':formatDollarRate(r.net)],['Manpower reserve',num(r.pool)],
@@ -51681,6 +51784,8 @@
                     ['Armor / vessels lost',num(r.tankLosses)+' / '+num(r.shipLosses)]
                 ]);
                 const attrition=group('ATTRITION LOSSES',[
+                    [wodMotorizedEquipment().label+' lost',r.fog?'Unknown':num(m['attrition'+wodMotorizedEquipment().label+'Lost'])],
+                    [wodSpecialistLabel('mountaineer')+' lost',r.fog?'Unknown':num(m.attritionMountaineerPersonnelLost)],
                     ['Personnel lost',r.fog?'Unknown':num(m.attritionPersonnelLost)],['Armor lost',r.fog?'Unknown':num(m.attritionArmorLost)],
                     ['Units lost',r.fog?'Unknown':num(m.attritionUnitsLost)],['Vessels lost',r.fog?'Unknown':num(m.attritionVesselsLost)],
                     ['Attrition damage',r.fog?'Unknown':num(m.attritionDamage,1)]
@@ -51693,7 +51798,7 @@
                     <header><i></i><h3>${wodBattleOwnerLabel(owner)}</h3><span>${owner===local?'Your faction':r.fog?'Spotted forces':'Faction totals'}</span></header>
                     <div class="battle-land"><strong data-land-tiles="${owner}">${num(r.land)}</strong><span>land tiles <b>${r.share.toFixed(1)}%</b></span></div>
                     <div class="battle-share" role="img" aria-label="${r.share.toFixed(1)} percent of land"><i style="width:${r.share}%"></i></div>
-                    <div class="battle-faction-groups">${holdings+army+economy+combat+attrition+final}</div>
+                    <div class="battle-faction-groups">${holdings+army+specialists+economy+combat+attrition+final}</div>
                     ${r.fog?'<p class="battle-note">Only spotted forces are shown. Enemy reserves, production and losses remain hidden; land totals are public.</p>':''}
                 </article>`;
             }).join('')}</div>`;
@@ -51704,7 +51809,7 @@
             const r=wodFactionBattleStats(wodLocalPlayerOwner()),m=r.metrics,stat=wodStatTiles,num=wodStatNumber;
             document.getElementById('wodStatsIdentity').innerHTML=`<strong style="--side:${factionColors[r.owner]||'#94a3b8'}"><i></i>${wodBattleOwnerLabel(r.owner)} · Your faction</strong><span>${wodPeriodLabel(wodGetMatchPeriod())} · ${formatGameDurationForSummary(wodBattleLedger().seconds)}</span>`;
             document.getElementById('wodStatsOverview').innerHTML=stat('Land controlled',num(r.land),r.share.toFixed(1)+'% of all land')+stat('Field units',r.units.length,num(r.manpower)+' personnel')+stat('Towns',r.cities.length,r.forts.length+' forts')+stat('Net income',formatDollarRate(r.net),formatGameDurationForSummary(wodBattleLedger().seconds)+' battle time');
-            for(const [id,value] of Object.entries({'ui-money':wodStatMoney(r.money),'ui-income':formatDollarRate(r.income),'ui-land-income':formatDollarRate(getOwnerLandIncome(r.owner)),'ui-expenses':formatDollarRate(-r.upkeep),'ui-manpower':num(r.pool),'ui-manpower-income':formatManpowerRate(r.mpGrowth),'ui-troops':num(r.manpower),'ui-tanks':num(r.tanks),'ui-ships':r.byType.ship+r.byType.transport+r.byType.supply,
+            for(const [id,value] of Object.entries({'ui-money':wodStatMoney(r.money),'ui-income':formatDollarRate(r.income),'ui-land-income':formatDollarRate(getOwnerLandIncome(r.owner)),'ui-expenses':formatDollarRate(-r.upkeep),'ui-manpower':num(r.pool),'ui-manpower-income':formatManpowerRate(r.mpGrowth),'ui-troops':num(r.manpower),'ui-motorized-equipment-label':wodMotorizedEquipment().label+' in service','ui-motorized-equipment':num(r.motorizedEquipment),'ui-motorized-personnel-label':wodSpecialistLabel('motorized')+' personnel','ui-motorized-personnel':num(r.motorizedPersonnel),'ui-mountaineer-personnel-label':wodSpecialistLabel('mountaineer')+' personnel','ui-mountaineer-personnel':num(r.mountaineerPersonnel),'ui-tanks':num(r.tanks),'ui-ships':r.byType.ship+r.byType.transport+r.byType.supply,
                 'ui-casualties':num(r.casualties),'ui-tank-casualties':num(r.tankLosses),'ui-ship-casualties':num(r.shipLosses),'ui-enemy-casualties':num(r.kills),'ui-tank-kills':num(r.tankKills),'ui-ship-kills':num(r.shipKills)})) {
                 const el=document.getElementById(id);if(el)el.textContent=value;
             }
@@ -51717,11 +51822,13 @@
             const built=['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].map(t=>stat(wodProductionLabel(t),num(m['unitsBuilt'+({light:'Light',motorized:'Motorized',mountaineer:'Mountaineer',marine:'Marine',heavy:'Heavy',ship:'Ship',transport:'Transport',supply:'Supply'})[t]]))).join('');
             document.getElementById('wodStatsForcesDetail').innerHTML=
                 wodStatSection('Army composition',['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].map(t=>stat(wodProductionLabel(t),r.byType[t])).join('')+stat('Convoys',gameData.entities.filter(u=>u.owner===r.owner&&u.type==='convoy'&&u.hp>0).length))+
+                wodStatSection('Equipment & specialist personnel',stat(wodMotorizedEquipment().label+' in service',num(r.motorizedEquipment))+stat(wodSpecialistLabel('motorized')+' personnel',num(r.motorizedPersonnel))+stat(wodSpecialistLabel('mountaineer')+' personnel',num(r.mountaineerPersonnel)))+
                 wodStatSection('Readiness & supply',stat('Average strength',r.readiness.toFixed(1)+'%')+stat('In combat',r.fighting)+stat('Marching',r.moving)+stat('Recovering',r.healing)+stat('Out of supply',r.cut)+stat('Embarked troops',r.embarked)+stat('Transport passengers',r.cargo)+stat('Personnel restored',num(m.personnelRestored)))+
                 wodStatSection('Units mobilized this battle',built,'Opening armies and editor placements are excluded.');
             document.getElementById('wodStatsCombatDetail').innerHTML=
                 wodStatSection('Combat record',stat('Units destroyed',num(m.unitsDestroyed))+stat('Units lost',num(m.unitsLost))+stat('Damage dealt',num(m.damageDealt,1))+stat('Combat damage received',num(m.combatDamageTaken,1))+stat('Other damage received',num(m.otherDamageTaken,1))+stat('Enemy armor destroyed',num(r.tankKills))+stat('Enemy vessels sunk',num(r.shipKills))+stat('Towns captured',num(m.citiesCaptured)))+
-                wodStatSection('Attrition losses',stat('Personnel lost',num(m.attritionPersonnelLost))+stat('Armor lost',num(m.attritionArmorLost))+stat('Units lost',num(m.attritionUnitsLost))+stat('Vessels lost',num(m.attritionVesselsLost))+stat('Attrition damage',num(m.attritionDamage,1))+stat('Land supply damage',num(m.supplyAttritionDamage,1))+stat('Water attrition damage',num(m.waterAttritionDamage,1))+stat('Unpaid upkeep damage',num(m.unpaidAttritionDamage,1)))+
+                wodStatSection('Specialist & equipment losses',stat(wodMotorizedEquipment().label+' lost',num(m['own'+wodMotorizedEquipment().kind+'Losses']))+stat('Enemy '+wodMotorizedEquipment().label.toLowerCase()+' destroyed',num(m['enemy'+wodMotorizedEquipment().kind+'Kills']))+stat(wodSpecialistLabel('motorized')+' personnel lost',num(m.ownMotorizedLosses))+stat(wodSpecialistLabel('motorized')+' personnel killed',num(m.enemyMotorizedKills))+stat(wodSpecialistLabel('mountaineer')+' lost',num(m.ownMountaineerLosses))+stat(wodSpecialistLabel('mountaineer')+' killed',num(m.enemyMountaineerKills)))+
+                wodStatSection('Attrition losses',stat(wodMotorizedEquipment().label+' lost',num(m['attrition'+wodMotorizedEquipment().label+'Lost']))+stat(wodSpecialistLabel('mountaineer')+' lost',num(m.attritionMountaineerPersonnelLost))+stat('Personnel lost',num(m.attritionPersonnelLost))+stat('Armor lost',num(m.attritionArmorLost))+stat('Units lost',num(m.attritionUnitsLost))+stat('Vessels lost',num(m.attritionVesselsLost))+stat('Attrition damage',num(m.attritionDamage,1))+stat('Land supply damage',num(m.supplyAttritionDamage,1))+stat('Water attrition damage',num(m.waterAttritionDamage,1))+stat('Unpaid upkeep damage',num(m.unpaidAttritionDamage,1)))+
                 wodStatSection('Territory movement',stat('Land tiles gained',num(m.landGained))+stat('Land tiles lost',num(m.landLost))+stat('Current land',num(r.land))+stat('Land share',r.share.toFixed(1)+'%'));
             document.getElementById('playerSummaryBody').innerHTML=wodRenderFactionStats();
         }
@@ -52122,6 +52229,9 @@
                             infoTanks.innerText = `${hf.heavyCount}: ${Math.round(sel.tanks || 0)} / ${sel.maxTanks || 500}`;
                             infoTanks.style.display = '';
                             infoTanks.setAttribute('aria-hidden', 'false');
+                        } else if(sel.type==='motorized'){
+                            const gear=wodMotorizedEquipment(sel);infoTanks.innerText=gear.label+': '+Math.round(gear.count)+' / '+gear.capacity;
+                            infoTanks.style.display='';infoTanks.setAttribute('aria-hidden','false');
                         } else {
                             infoTanks.innerText = '';
                             infoTanks.style.display = 'none';
@@ -56242,6 +56352,7 @@
             ctx.restore();
         }
         function wodClearTransportMove(u) {
+            if(!u._trafficMoving)u._trafficYield=null;
             u.target=null;u.path=null;u.orderTarget=null;u.fullMarchWaypoints=null;u.marchWpCursor=0;u.holding=false;u._wodOrderIntoWater=false;
         }
         function wodNavalDestinationClear(unit,point) {
