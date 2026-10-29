@@ -104,6 +104,7 @@ function defaultProfile(playerId) {
       ownedShopVisuals: {},
       equippedShopMapId: null,
       gamePeriod: 'modern',
+      gamePeriodChangedAt: 0,
       mpDisplayName: '',
       friends: [],
       friendRequestsOut: [],
@@ -116,6 +117,7 @@ function defaultProfile(playerId) {
       periodMedieval: false,
     },
     achievementGoldGranted: {},
+    matchGoldGranted: {},
     secrets: { creditsCoin: 0 },
     missions: { completed: {} },
     storeMissions: { completed: {}, spent: {} },
@@ -362,6 +364,15 @@ function mergeMpStatsMax(a, b) {
   return out;
 }
 
+function mergeMatchGoldClaims(a, b) {
+  const claims = {};
+  for (const map of [a, b]) for (const [id, value] of Object.entries(map || {})) {
+    if (!/^[a-zA-Z0-9:_-]{1,100}$/.test(id)) continue;
+    const n = clampInt(value, 0, 50);
+    if (n) claims[id] = Math.max(claims[id] || 0, n);
+  }
+  return Object.fromEntries(Object.entries(claims).slice(-128));
+}
 function hydrateProfile(playerId, row) {
   const base = defaultProfile(playerId);
   if (!row || typeof row !== 'object') return base;
@@ -369,6 +380,8 @@ function hydrateProfile(playerId, row) {
   base.profile.gold = p.gold == null ? DEFAULT_GOLD : clampInt(p.gold, 0, 999999999);
   base.profile.unitSkin = sanitizeSkin(p.unitSkin);
   base.profile.aiUnitSkin = sanitizeSkin(p.aiUnitSkin);
+  base.profile.gamePeriod = ['modern','ancient','medieval','napoleonic'].includes(p.gamePeriod) ? p.gamePeriod : 'modern';
+  base.profile.gamePeriodChangedAt = clampInt(p.gamePeriodChangedAt, 0, Number.MAX_SAFE_INTEGER);
   base.profile.ownedUnitSkins = sanitizeOwnedMap(p.ownedUnitSkins);
   base.profile.ownedShopVisuals = sanitizeOwnedMap(p.ownedShopVisuals);
   delete base.profile.ownedUnitSkins.nato;
@@ -380,6 +393,7 @@ function hydrateProfile(playerId, row) {
   base.profile.friendRequestsIn = sanitizeFriendRequests(p.friendRequestsIn);
   base.achievements = Object.assign(base.achievements, row.achievements || {});
   base.achievementGoldGranted = sanitizeBoolMap(row.achievementGoldGranted);
+  base.matchGoldGranted = mergeMatchGoldClaims({}, row.matchGoldGranted);
   base.secrets = { creditsCoin: clampInt(row.secrets && row.secrets.creditsCoin, 0, 3) };
   base.missions = {
     completed: sanitizeBoolMap(row.missions && row.missions.completed),
@@ -472,6 +486,7 @@ function syncProgress(playerId, payload) {
   if (payload.secrets && typeof payload.secrets === 'object') {
     profile.secrets = { creditsCoin: Math.max(profile.secrets?.creditsCoin || 0, clampInt(payload.secrets.creditsCoin, 0, 3)) };
   }
+  profile.matchGoldGranted = mergeMatchGoldClaims(profile.matchGoldGranted, payload.matchGoldGranted);
 
   if (payload.lifetime && typeof payload.lifetime === 'object') {
     profile.lifetime = mergeLifetimeMonotonic(profile.lifetime, payload.lifetime);
@@ -523,6 +538,12 @@ function syncProgress(playerId, payload) {
     }
     if (cp.unitSkin != null) cur.unitSkin = validateEquippedSkin(profile, cp.unitSkin);
     if (cp.aiUnitSkin != null) cur.aiUnitSkin = validateEquippedSkin(profile, cp.aiUnitSkin);
+    if (['modern','ancient','medieval','napoleonic'].includes(cp.gamePeriod) &&
+        clampInt(cp.gamePeriodChangedAt,0,Number.MAX_SAFE_INTEGER) >= (cur.gamePeriodChangedAt||0) &&
+        (cp.gamePeriod === 'modern' || cur.ownedUnitSkins[cp.gamePeriod] || profile.achievements['period' + cp.gamePeriod[0].toUpperCase() + cp.gamePeriod.slice(1)])) {
+      cur.gamePeriod = cp.gamePeriod;
+      cur.gamePeriodChangedAt = clampInt(cp.gamePeriodChangedAt,0,Number.MAX_SAFE_INTEGER);
+    }
     if (cp.equippedShopMapId != null) {
       const mapId = String(cp.equippedShopMapId || '').slice(0, 64);
       const shopKey = mapId ? `shop_map_${mapId}` : '';
