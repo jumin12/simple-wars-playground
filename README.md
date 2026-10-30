@@ -76,8 +76,9 @@ Music credits are generated directly from the playback catalog of 25 shipped rec
    npm start
    ```
 
-   Default WebSocket URL: `ws://localhost:8080` (or set `window.WOD_MP_WS_URL` before `multiplayer-client.js` loads).  
-   On **`simple-wars-live.onrender.com`**, the game injects **`wss://simple-wars.onrender.com`** and connects when you open **Multiplayer** — no manual URL.
+   Local browser development defaults to `ws://localhost:8080`. The Steam desktop app and **`simple-wars-live.onrender.com`** both use **`wss://simple-wars.onrender.com`** automatically. Steam serves bundled files over loopback, but that does not require a local multiplayer server. Set `window.WOD_MP_WS_URL` before `multiplayer-client.js` loads to override either default, including for LAN play.
+
+   Run `node scripts/verify-desktop-multiplayer.js` for URL selection checks. After syncing the Steam packages, add `--desktop` to test the real executable/preload and multiplayer UI against an intercepted relay, and `--live` for anonymous, read-only production health/handshake checks.
 
 3. **Flow:** open **Multiplayer** (wait until status shows connected) → browse **Open games** or **Create lobby**. Optional lobby password; host sets **Map & rules** (same screen as **Play vs AI**), then **Launch match**. Clients stay in sync via snapshots.
 

@@ -8,6 +8,9 @@
 
   function defaultWsUrl() {
     if (global.WOD_MP_WS_URL) return global.WOD_MP_WS_URL;
+    // Steam serves bundled files over loopback too; only browser development
+    // should default to the local LAN relay. The preload bridge exists at boot.
+    if (global.simpleWarsDesktop) return 'wss://simple-wars.onrender.com';
     const h = location.hostname;
     if (h === 'localhost' || h === '127.0.0.1') return 'ws://localhost:8080';
     const sch = location.protocol === 'https:' ? 'wss' : 'ws';
