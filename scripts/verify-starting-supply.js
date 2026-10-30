@@ -129,13 +129,13 @@ const server = http.createServer((req,res)=>{
       const emptyPreserved=left.every(h=>h.owner===1);
       const h=gameData.hexes['5,0'];createUnitAt('light',h.x,h.y,2,{startSpawn:true});
       wodEncirclementApplyPocket(left,1,work());
-      const occupiedCaptures=left.every(h=>h.owner===2);
+      const occupiedPreserved=left.every(h=>h.owner===1);
       for(const h of left)h.owner=1;
       const own=gameData.hexes['-5,0'],u=createUnitAt('light',own.x,own.y,1,{startSpawn:true}),w=work();
       wodEncirclementApplyPocket(left,1,w);gameData.encircledHexes=w.encircledHexes;gameData._encircWork=null;
-      return {emptyPreserved,occupiedCaptures,infantryStillEncircled:!!wodGetUnitEncirclementState(u,own)};
+      return {emptyPreserved,occupiedPreserved,infantryStillEncircled:!!wodGetUnitEncirclementState(u,own)};
     });
-    assert(offshoreCapture.emptyPreserved&&offshoreCapture.occupiedCaptures&&offshoreCapture.infantryStillEncircled,'empty claims stay balanced; occupied islands use normal capture and supply rules');
+    assert(offshoreCapture.emptyPreserved&&offshoreCapture.occupiedPreserved&&offshoreCapture.infantryStillEncircled,'empty and occupied islands retain local capture and real supply requirements');
     const shapes=['island','rectangle','ring','archipelago','forest','mountain','desert'];
     const cases=shapes.flatMap((shape,i)=>[2,3,4].map(players=>({shape,players,size:40,seed:230010+i*100+players})));
     cases.push(...['island','archipelago','mountain'].flatMap((shape,i)=>[2,4].map(players=>({shape,players,size:80,mp:players===4,seed:423000+i*100+players}))));

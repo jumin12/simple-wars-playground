@@ -30,7 +30,7 @@ const server=http.createServer((req,res)=>{
    gameData.cities=[town(-10,0,1,'West'),town(10,0,2,'East')];gameData.roads=[{from:gameData.cities[0],to:gameData.cities[1]}];
    for(const [type,q,r,owner] of [['light',-14,-8,1],['heavy',-8,7,1],['marine',8,7,2],['ship',0,12,2]]){const h=gameData.hexes[`${q},${r}`],u=createUnitAt(type,h.x,h.y,owner);u.x=h.x;u.y=h.y;u.name='Authored '+type;}
    const middle=gameData.hexes['0,6'],dims=wodBridgeDefaultDims();placeBridgeAt(1,middle.x,middle.y,0,dims.w,dims.h,{editor:true});
-   const fort=gameData.hexes['-6,5'];placeFortAtHex(fort,1,{editor:true,suppressNotes:true});WOD.addAlliance(1,2);
+   const fort=gameData.hexes['-6,5'];placeFortAtHex(fort,1,{editor:true,suppressNotes:true});placeHospitalAtHex(gameData.hexes['-6,-5'],1,{editor:true});WOD.addAlliance(1,2);
    gameData.money=4321;gameData.manpower=9876;gameData.aiMoneyByOwner={2:12345};gameData.aiManpowerByOwner={2:56789};
    wodApplyGamePeriod('ancient',{allowAnyPeriod:true,saveProfile:false});
    gameData.mission={version:1,title:'Crossing scenario',victoryMode:'annihilation',objective:{type:'capture',label:'Capture the eastern crossing',cityIds:['East']},events:[
@@ -44,9 +44,9 @@ const server=http.createServer((req,res)=>{
   await page.locator('[data-gen-tab="files"]').click();
   const importData=async data=>{await page.locator('#editorImportJsonFile').setInputFiles({name:'scenario.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});await page.waitForFunction(title=>gameData.mission?.title===title,data.mission.title);};
   await importData(fixture.data);
-  results.loaded=await page.evaluate(()=>({era:gameData.gamePeriod,mission:gameData.mission,units:gameData.entities.map(u=>({uid:u.uid,type:u.type,name:u.name,hp:u.hp})),money:gameData.money,mp:gameData.manpower,aiMoney:gameData.aiMoneyByOwner[2],aiMp:gameData.aiManpowerByOwner[2],forts:gameData.forts.length,bridge:isBridgeHex(gameData.hexes['0,6']),road:gameData.roads[0].from===gameData.cities[0],radius:gameData.hexRadius,layers:gameData.layers}));
+  results.loaded=await page.evaluate(()=>({era:gameData.gamePeriod,mission:gameData.mission,units:gameData.entities.map(u=>({uid:u.uid,type:u.type,name:u.name,hp:u.hp})),money:gameData.money,mp:gameData.manpower,aiMoney:gameData.aiMoneyByOwner[2],aiMp:gameData.aiManpowerByOwner[2],forts:gameData.forts.length,hospitals:gameData.hospitals.length,bridge:isBridgeHex(gameData.hexes['0,6']),road:gameData.roads[0].from===gameData.cities[0],radius:gameData.hexRadius,layers:gameData.layers}));
   console.log('loaded',JSON.stringify(results.loaded));
-  assert(results.loaded.era==='ancient'&&Math.abs(results.loaded.radius-18)<.00001&&results.loaded.bridge&&results.loaded.forts===1&&results.loaded.road);
+  assert(results.loaded.era==='ancient'&&Math.abs(results.loaded.radius-18)<.00001&&results.loaded.bridge&&results.loaded.forts===1&&results.loaded.hospitals===1&&results.loaded.road);
   assert(results.loaded.money===4321&&results.loaded.mp===9876&&results.loaded.aiMoney===12345&&results.loaded.aiMp===56789);
   assert.equal(await page.locator('#editorEconomyCash').inputValue(),'4321');
   assert.equal(await page.locator('#editorEconomyMp').inputValue(),'9876');

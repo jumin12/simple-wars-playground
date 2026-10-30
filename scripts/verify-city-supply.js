@@ -38,7 +38,7 @@ const server=http.createServer((req,res)=>{
    gameData.encircledHexes=new Set(oldKeys);gameData._encircWork={idx:gameData.hexList.length,visited:new Set(),encircledHexes:new Set(oldKeys),encircledReliefHexes:new Set(),marineWaterSupplyHexes:new Set()};
    const immediate={infantry:out(foot),armor:out(armor),marine:out(marine),cityBlocked:isCityEncircledForProduction(captured),owner:captured.owner};
    for(const u of [foot,armor,marine]){u.hp=u.maxHp*.7;u.manpower=Math.round(u.maxManpower*.7);}
-   gameData.unitSpatialGrid=buildUnitSpatialGrid(200);const hp=foot.hp,canHeal=canHealUnit(foot);update(.25);
+   foot.x=captured.x;foot.y=captured.y;gameData.unitSpatialGrid=buildUnitSpatialGrid(200);const hp=foot.hp,canHeal=canHealUnit(foot);update(.25);
    const afterTick={hp:foot.hp,before:hp,canHeal,infantry:out(foot),armor:out(armor),marine:out(marine)};
    // The city becomes hostile again: the original city across enemy land cannot supply this pocket.
    wodExecuteCityCapture(captured,2);scan();const lostCity={infantry:out(foot),armor:out(armor),marine:out(marine)};

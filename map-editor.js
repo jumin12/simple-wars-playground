@@ -413,7 +413,7 @@
   }
 
   function toolIsClickPlace(tool) {
-    return tool === "unit" || tool === "city" || tool === "factory" || tool === "harbor" || tool === "fort";
+    return tool === "unit" || tool === "city" || tool === "factory" || tool === "harbor" || tool === "fort" || tool === "hospital";
   }
 
   function queueEditorSnapshot() {
@@ -2326,7 +2326,7 @@
             </div>
             <button type="button" class="editor-btn" data-tool="factory">Add factory</button>
             <button type="button" class="editor-btn" data-tool="harbor">Add harbor</button>
-            <button type="button" class="editor-btn" data-tool="fort">Place fort</button>
+            <button type="button" class="editor-btn" data-tool="fort">Place fort</button><button type="button" class="editor-btn" data-tool="hospital">Place hospital</button>
             <button type="button" class="editor-btn" data-tool="erase">Erase terrain</button>
           </div>
         </section>
@@ -3282,7 +3282,9 @@
         let fortIdx = -1;
         if (WOD.gameData.forts && WOD.gameData.forts.length)
           fortIdx = WOD.gameData.forts.findIndex(f => f.q === h.q && f.r === h.r);
-        if (h.type === "grass" && !h.cityId && fortIdx < 0) continue;
+        const hospitalIdx=(WOD.gameData.hospitals||[]).findIndex(f=>f.q===h.q&&f.r===h.r);
+        if (h.type === "grass" && !h.cityId && fortIdx < 0 && hospitalIdx < 0) continue;
+        if(hospitalIdx>=0)WOD.gameData.hospitals.splice(hospitalIdx,1);
         h.type = "grass";
         h.baseColor = WOD.getTerrainColor("grass");
         h.cityId = null;
@@ -3325,6 +3327,13 @@
       if (state.tool === "harbor") city.hasHarbor = true;
       state.selected = { type: "city", value: city };
       renderSelection();
+      return true;
+    }
+    if (state.tool === "hospital") {
+      touchEditorMutation();
+      const owner=Math.max(1,state.owner||1);
+      if(hex.owner!==owner)WOD.setHexOwner(hex,owner);
+      WOD.placeHospitalAtHex(hex,owner,{editor:true});
       return true;
     }
     if (state.tool === "fort") {
@@ -3650,6 +3659,9 @@
       }
     }
 
+    if(L.structures!==false)for(const hospital of WOD.gameData.hospitals||[]){
+      const p=toCanvas(hospital.x,hospital.y);ctx.save();ctx.translate(p.x,p.y);ctx.scale(p.scale,p.scale);WOD.wodDrawHospital(ctx,{...hospital,x:0,y:0});ctx.restore();
+    }
     if (state.editorMarquee) {
       const mm = state.editorMarquee;
       const ax = Math.min(mm.ax, mm.bx);

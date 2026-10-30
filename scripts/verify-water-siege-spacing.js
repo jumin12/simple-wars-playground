@@ -54,7 +54,7 @@ const server=http.createServer((req,res)=>{
    return rows;
   });console.log('water',JSON.stringify(results.water));
   for(const r of results.water) {
-   if(['marine','merchant','ship'].includes(r.type))assert(!r.unsupplied&&(r.type!=='ship'?!r.heals&&r.loss===0:r.heals&&r.loss<0),'amphibious/naval exemption '+JSON.stringify(r));
+   if(['marine','merchant','ship'].includes(r.type))assert(!r.unsupplied&&!r.heals&&r.loss===0,'amphibious/naval exemption without field healing '+JSON.stringify(r));
    else assert(r.unsupplied&&!r.heals&&r.stillInWater&&Math.abs(r.loss-.0175)<.00001,'same water attrition for every owner/order '+JSON.stringify(r));
   }
   results.grace=await page.evaluate(()=>{
@@ -66,7 +66,7 @@ const server=http.createServer((req,res)=>{
     const hp=u.hp;for(let i=0;i<99;i++)update(.1);const at49=u.hp;
     update(.1);const at5=u.hp;update(.25);const after=u.hp;
     const synced=wodEntityFromNet(wodStripEntityForNet(u)).waterExposureSeconds;
-    h.type='grass';update(.1);const reset=u.waterExposureSeconds;h.type='water';const fresh=u.hp;update(2);const reentry=u.hp;
+    h.type='grass';setHexOwner(h,owner);update(.1);const reset=u.waterExposureSeconds;h.type='water';setHexOwner(h,0);const fresh=u.hp;update(2);const reentry=u.hp;
     const dt=wodAdvanceWaterExposure(u,9,h); // 2 + 9 crosses the threshold by exactly 1 second.
     rows.push({owner,type,hp,at49,at5,loss:(at5-after)/u.maxHp,synced,reset,fresh,reentry,dt});
    }
