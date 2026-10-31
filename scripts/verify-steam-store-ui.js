@@ -40,7 +40,7 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
   assert.equal(await page.evaluate(()=>gameData.gold),100);
   async function buy(sku,gold){const before=orders.size;await page.locator('[data-steam-product="'+sku+'"]').click();await page.waitForFunction(()=>!WodSteamStore.state.busy);assert.equal(orders.size,before+1);const order=[...orders.values()].at(-1);assert.equal(await page.evaluate(()=>gameData.gold),gold-require('../store-catalog').products[sku].gold,'no credit before capture');order.status='Approved';await native.onAuthorized({app_id:5043620,order_id:BigInt(order.orderid),authorized:true});await page.waitForFunction(expected=>gameData.gold===expected,gold);}
   await buy('gold1000',1100);
-  await page.evaluate(()=>{switchShopTab('troops');purchaseUnitSkin('atlasUnits');});await page.waitForFunction(()=>!WodSteamStore.state.busy&&gameData.ownedUnitSkins.atlasUnits);assert.equal(await page.evaluate(()=>gameData.gold),600);
+  await page.evaluate(()=>{switchShopTab('mapSkins');void setShopMapSkin('atlas_hd');});await page.waitForFunction(()=>!WodSteamStore.state.busy&&gameData.ownedShopVisuals.map_atlas_hd);assert.equal(await page.evaluate(()=>gameData.gold),600);
   await page.evaluate(()=>switchShopTab('gold'));await buy('gold6000',6600);await buy('gold15000',21600);await buy('supporter',26600);
   assert(await page.evaluate(()=>wodHasSupporterPack()&&!wodShopSkinOwned('civRome')),'supporter is exclusive art plus gold, not whole-shop unlock');
   assert.equal(await page.locator('#supporterPackBtn').innerText(),'Supporter Pack owned');
@@ -74,13 +74,13 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
   await page.evaluate(()=>WodSteamStore.refresh());await page.waitForFunction(()=>!WodSteamStore.state.busy);assert.equal(await page.evaluate(()=>gameData.gold),26600);
   await page.setViewportSize({width:1440,height:900});await page.goto(origin+'/?autostart=1');
   await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks&&WodSteamStore.state.connected,null,{timeout:180000});
-  const match=await page.evaluate(()=>{setGameSpeed(0,true);wodDismissChangelogPopup();gameData.unitSkin='supporterGold_ancient';gameData._matchPeriod='ancient';
+  const match=await page.evaluate(()=>{setGameSpeed(0,true);wodDismissChangelogPopup();gameData.uiSettings.mapSkin='default';gameData.unitSkin='supporterGold_ancient';gameData._matchPeriod='ancient';
    const general=gameData.entities.find(u=>u.owner===1&&u.isGeneral);gameData.selection=[general];for(const u of gameData.entities)u.selected=u===general;gameData.camera={zoom:2,x:general.x*2-innerWidth/2,y:general.y*2-innerHeight*.4};syncInfoCardPanel();wodMarkTerrainFullDirty();
    return{skin:getEffectiveUnitSkin(general),gold:gameData.gold,general:general.isGeneral};});
   assert.deepEqual(match,{skin:'supporterGold_ancient',gold:26600,general:true});await page.waitForTimeout(200);await page.screenshot({path:path.join(OUT,'patron-in-battle.png')});
   await page.evaluate(()=>{gameState='MENU';pauseMenuBackgroundBattle();showPanel('settings');});await page.locator('#settingsPanel [onclick="resetAllGameProgress()"]').click();
   await page.locator('#wodConfirmDlgOk').click();await page.waitForFunction(()=>document.getElementById('wodConfirmDlg').classList.contains('hidden'));
-  assert(await page.evaluate(()=>gameData.gold===26600&&wodHasSupporterPack()&&gameData.ownedUnitSkins.atlasUnits),'progress reset preserves the Steam wallet and collection');
+  assert(await page.evaluate(()=>gameData.gold===26600&&wodHasSupporterPack()&&gameData.ownedShopVisuals.map_atlas_hd),'progress reset preserves the Steam wallet and collection');
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({products,eras,mobile,paidCheckout:true,noCreditBeforeCapture:true,restore:true,errors},null,2));console.log(JSON.stringify({products,eras,mobile:mobile.length,paidCheckout:true,errors}));
  }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();browser=null;await router.close();await store.close();store=null;server.close();}
  // Required browser gameplay smoke uses the bundled action client and local relay.

@@ -18,13 +18,14 @@ function isSupporter(data) {
   return !!data.dlcActive || Object.values(data.orders).some(o => o.product.supporter && o.granted && !o.reversed);
 }
 function wallet(data) {
+  if(data.ownedSkins?.atlasUnits)data.ownedVisuals.map_atlas_hd=true;
   const ownedSkins = { ...data.ownedSkins };
   for (const base of ['goldenChip', 'supporterGold']) for (const id of catalog.premiumVariants(base)) ownedSkins[id] = base === 'supporterGold' ? isSupporter(data) : !!data.ownedSkins.goldenChip;
   return { gold: Math.max(0, data.gold), debt: Math.max(0, -data.gold), revision: data.revision,
     supporter: isSupporter(data), ownedSkins,
     ownedVisuals: data.ownedVisuals };
 }
-function knownSkin(id) { return id === 'nato' || id === 'goldenChip' || catalog.skins.includes(id) || Object.values(catalog.ancient).flat().includes(id); }
+function knownSkin(id) { return id === 'atlasUnits' || id === 'nato' || id === 'goldenChip' || catalog.skins.includes(id) || Object.values(catalog.ancient).flat().includes(id); }
 function importAndReward(data, progress) {
   progress = safeMap(progress);
   const matches = Object.entries(safeMap(progress.matchGoldGranted)).slice(-2000);

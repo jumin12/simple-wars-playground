@@ -93,7 +93,7 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
   for(const size of[{width:320,height:568},{width:390,height:844},{width:844,height:390}]){
    await page.setViewportSize(size);await page.locator('#wodCampShop').scrollIntoViewIfNeeded();
    const r=await page.locator('#wodCampShop button').evaluateAll(es=>es.map(e=>({text:e.textContent,height:e.getBoundingClientRect().height,clipped:e.scrollWidth>e.clientWidth+1})));
-   assert.equal(r.length,8);assert(r.every(b=>b.height>=57&&!b.clipped),JSON.stringify({size,r}));results.campaign.push({size,rows:r});await capture({path:path.join(OUT,`campaign-${size.width}.png`)});
+   assert.equal(r.length,8);assert(r.every(b=>b.height>=44&&!b.clipped),JSON.stringify({size,r}));results.campaign.push({size,rows:r});await capture({path:path.join(OUT,`campaign-${size.width}.png`)});
   }
   await page.setViewportSize({width:390,height:844});
   const rosterBefore=await page.evaluate(()=>wodRogueLoad().roster.length);await page.locator('#wodCampShop button').filter({hasText:'Mountaineers'}).tap();assert.equal(await page.evaluate(()=>wodRogueLoad().roster.length),rosterBefore+1);

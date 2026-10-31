@@ -33,14 +33,14 @@ const ANCIENT_CIV_PACK_IDS = Object.keys(ANCIENT_CIV_PACKS);
 const ANCIENT_CIV_VARIANT_IDS = ANCIENT_CIV_PACK_IDS.flatMap((id) => ANCIENT_CIV_PACKS[id].variants);
 
 const PURCHASABLE_SKINS = new Set([
-  'napoleonic', 'medieval', 'ancient', 'atlasUnits',
+  'napoleonic', 'medieval', 'ancient',
   'civRome', 'civCarthage', 'civGaul', 'civEgypt', 'civMacedon', 'civSparta',
   'usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china',
   'ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina',
 ]);
 
 const SHOP_VISUAL_IDS = new Set([
-  'map_atlas_hd',
+  'map_atlas_hd', 'map_chalkboard', 'map_whiteboard',
   'viz_frontline_dotted', 'viz_frontline_double', 'viz_frontline_dashed', 'viz_frontline_dashdot',
   'viz_frontline_thick', 'viz_frontline_glow',
   'viz_arrow_dotted', 'viz_arrow_line', 'viz_arrow_dashed', 'viz_arrow_chevron',
@@ -436,6 +436,7 @@ function hydrateProfile(playerId, row) {
   base.profile.gamePeriodChangedAt = clampInt(p.gamePeriodChangedAt, 0, Number.MAX_SAFE_INTEGER);
   base.profile.ownedUnitSkins = sanitizeOwnedMap(p.ownedUnitSkins);
   base.profile.ownedShopVisuals = sanitizeOwnedMap(p.ownedShopVisuals);
+  if(base.profile.ownedUnitSkins.atlasUnits)base.profile.ownedShopVisuals.map_atlas_hd=true;
   delete base.profile.ownedUnitSkins.nato;
   base.profile.ownedUnitSkins.nato = true;
   base.profile.equippedShopMapId = p.equippedShopMapId ? String(p.equippedShopMapId).slice(0, 64) : null;
@@ -661,8 +662,9 @@ function shopPurchase(playerId, req) {
   } else if (kind === 'visual') {
     if (!SHOP_VISUAL_IDS.has(itemId)) return { ok: false, msg: 'Unknown shop item' };
     if (cur.ownedShopVisuals[itemId]) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
-    if ((cur.gold || 0) < SHOP_VISUAL_COST) return { ok: false, msg: 'Not enough gold' };
-    cur.gold -= SHOP_VISUAL_COST;
+    const cost = catalog.visualCost(itemId);
+    if ((cur.gold || 0) < cost) return { ok: false, msg: 'Not enough gold' };
+    cur.gold -= cost;
     cur.ownedShopVisuals[itemId] = true;
   } else if (kind === 'map') {
     const shopId = itemId.startsWith('shop_map_') ? itemId : `shop_map_${itemId}`;
@@ -678,7 +680,7 @@ function shopPurchase(playerId, req) {
   } else if (kind === 'skin_bulk') {
     const section = String(req.section || '').trim();
     const sections = {
-      standard: ['napoleonic', 'medieval', 'ancient', 'atlasUnits'],
+      standard: ['napoleonic', 'medieval', 'ancient'],
       ancientCiv: ANCIENT_CIV_PACK_IDS.slice(),
       countryballs: ['usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china'],
       ruse: ['ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina'],

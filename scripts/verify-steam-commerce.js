@@ -90,7 +90,8 @@ async function paid(session, sku, { interrupt = false, lostResponse = false, amo
     const receipt = { matchGoldGranted: { 'battle-one': 5000 }, achievementGoldGranted: { brokenShield: true, inventedBadge: true }, secrets: { creditsCoin: 3 } };
     const earned = await service.sync(session, receipt); assert.equal(earned.wallet.gold, 27260);
     assert.equal((await service.sync(session, receipt)).wallet.gold, 27260);
-    const skin = await service.spend(session, { kind: 'skin', itemId: 'atlasUnits', price: 1 }); assert.equal(skin.cost, 500); assert.equal(skin.wallet.gold, 26760);
+    const skin = await service.spend(session, { kind: 'visual', itemId: 'map_atlas_hd', price: 1 }); assert.equal(skin.cost, 500); assert.equal(skin.wallet.gold, 26760);
+    await assert.rejects(service.spend(session,{kind:'skin',itemId:'atlasUnits'}),/Unknown/);
     const map = await service.spend(session, { kind: 'map', itemId: 'shop_map_normandy-dday', price: 1 }); assert.equal(map.cost, 1000); assert.equal(map.wallet.gold, 25760);
     await assert.rejects(service.spend(session, {kind:'map',itemId:'shop_map_fake',price:1}), /Unknown/);
     const romans = await service.spend(session, {kind:'skin',itemId:'civRome'}); assert.equal(romans.cost,1000); assert(romans.wallet.ownedSkins.civRome2);
@@ -111,7 +112,15 @@ async function paid(session, sku, { interrupt = false, lostResponse = false, amo
     const restored = await login({profile:{gold:9999999}}); assert.equal(restored.wallet.gold,5100); assert(restored.wallet.supporter);
     fixture.dlc = false; const removed = await login(); assert.equal(removed.wallet.gold,100); assert(!removed.wallet.supporter);
     await login(); assert.equal((await service.getWallet(service.session(removed.session))).gold,100);
-    fixture.steamId = A; const again = await login({profile:{gold:9999999}}); assert.equal(again.wallet.gold,19760); assert(again.wallet.ownedSkins.atlasUnits);
+    fixture.steamId = A; const again = await login({profile:{gold:9999999}}); assert.equal(again.wallet.gold,19760); assert(again.wallet.ownedVisuals.map_atlas_hd);
+    const packSession=service.session(again.session);
+    for(const itemId of ['map_chalkboard','map_whiteboard']){const pack=await service.spend(packSession,{kind:'visual',itemId,price:1});assert.equal(pack.cost,2500);assert(pack.wallet.ownedVisuals[itemId]);assert.equal((await service.spend(packSession,{kind:'visual',itemId})).cost,0);}
+    assert.equal((await service.getWallet(packSession)).gold,14760);
+    fixture.steamId='76561198000000105';
+    const legacyAtlas=await login({profile:{gold:123,ownedUnitSkins:{atlasUnits:true}}});
+    assert(legacyAtlas.wallet.ownedVisuals.map_atlas_hd,'retired unit entitlement includes the Atlas map');
+    const legacyEquip=await service.spend(service.session(legacyAtlas.session),{kind:'visual',itemId:'map_atlas_hd'});
+    assert.equal(legacyEquip.cost,0);assert.equal(legacyEquip.wallet.gold,123);
     fixture.steamId = '76561198000000104'; fixture.dlc = false;
     const taxedAuth = await login(), taxed = service.session(taxedAuth.session);
     assert.equal((await paid(taxed, 'gold1000', {amount:100,vat:6})).wallet.gold,1100,'sales tax may be added to the catalog price');

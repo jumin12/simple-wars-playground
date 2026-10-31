@@ -18,13 +18,15 @@
     civSparta: ['civSparta', 'civSparta2'], civGaul: ['civGaul'],
   });
   const sections = Object.freeze({
-    standard: ['napoleonic', 'medieval', 'ancient', 'atlasUnits'],
+    standard: ['napoleonic', 'medieval', 'ancient'],
     ancientCiv: Object.keys(ancient),
     countryballs: ['usa', 'uk', 'germany', 'france', 'japan', 'ussr', 'italy', 'china'],
     ruse: ['ruseUsa', 'ruseUk', 'ruseFrance', 'ruseGermany', 'ruseUssr', 'ruseJapan', 'ruseItaly', 'ruseChina'],
   });
   const skins = Object.values(sections).flat();
-  const visuals = ['map_atlas_hd', ...['dotted', 'double', 'dashed', 'dashdot', 'thick', 'glow'].map(x => 'viz_frontline_' + x),
+  const mapPacks = Object.freeze({default:{shopId:null,price:0},atlas_hd:{shopId:'map_atlas_hd',price:500},chalkboard:{shopId:'map_chalkboard',price:2500},whiteboard:{shopId:'map_whiteboard',price:2500}});
+  const visualCost = id => Object.values(mapPacks).find(pack => pack.shopId === id)?.price || price(100);
+  const visuals = [...Object.values(mapPacks).map(pack => pack.shopId).filter(Boolean), ...['dotted', 'double', 'dashed', 'dashdot', 'thick', 'glow'].map(x => 'viz_frontline_' + x),
     ...['dotted', 'line', 'dashed', 'chevron', 'bold', 'rail'].map(x => 'viz_arrow_' + x),
     ...['gold', 'white', 'red', 'blue'].map(x => 'viz_color_' + x)];
   const price = base => Math.max(0, Math.floor(Number(base) || 0)) * PRICE_MULTIPLIER;
@@ -37,7 +39,7 @@
     const req = request || {}, id = String(req.itemId || '');
     if (req.kind === 'skin' && skins.includes(id)) return [{ kind: 'skin', id, price: skinCost(id), grants: ancient[id] || [id] }];
     if (req.kind === 'skin_bulk' && Object.hasOwn(sections, req.section)) return sections[req.section].map(id => ({ kind: 'skin', id, price: skinCost(id), grants: ancient[id] || [id] }));
-    if (req.kind === 'visual' && visuals.includes(id)) return [{ kind: 'visual', id, price: price(100), grants: [id] }];
+    if (req.kind === 'visual' && visuals.includes(id)) return [{ kind: 'visual', id, price: visualCost(id), grants: [id] }];
     if (req.kind === 'map') {
       const key = id.replace(/^shop_map_/, '');
       const entry = [...(missionManifest?.maps || []), ...(missionManifest?.missions || [])].find(e => e.id === key);
@@ -45,5 +47,5 @@
     }
     throw new Error('Unknown shop item');
   }
-  return Object.freeze({ version: 2, PRICE_MULTIPLIER, products, ancient, sections, skins, visuals, price, skinCost, shopItems, premiumBase, premiumPeriod, premiumVariants, achievementIds });
+  return Object.freeze({ version: 3, PRICE_MULTIPLIER, products, ancient, sections, skins, visuals, mapPacks, visualCost, price, skinCost, shopItems, premiumBase, premiumPeriod, premiumVariants, achievementIds });
 });
