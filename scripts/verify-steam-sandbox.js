@@ -10,6 +10,7 @@ const WRAPPER = path.resolve(ROOT, '../simple wars steam');
 const OUT = path.join(ROOT, 'output/steam-commerce/real-sandbox');
 const CATALOG = 'https://simple-wars.onrender.com/api/steam/catalog';
 const purchase = process.argv.find(value => value.startsWith('--purchase='))?.split('=')[1];
+const resultFile = path.join(OUT, purchase ? purchase + (process.argv.includes('--cancel') ? '-canceled' : '') + '.json' : 'authentication.json');
 assert(!purchase || ['gold1000', 'gold6000', 'gold15000', 'supporter'].includes(purchase), 'Unknown sandbox product');
 fs.mkdirSync(OUT, { recursive: true });
 async function sandboxOnly() {
@@ -39,8 +40,16 @@ async function sandboxOnly() {
     Object.assign(result, { authenticated: true, startingGold: status.gold, supporter: status.supporter });
     await page.waitForFunction(() => !window._wodBootBusy && !window._wodMenuBootstrapBusy, null, { timeout: 180000 });
     await page.evaluate(() => { wodDismissChangelogPopup(); pauseMenuBackgroundBattle(); showPanel('shop'); switchShopTab('gold'); });
-    await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setFullScreen(false); w.setSize(1280, 900); w.showInactive(); });
+    await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]; w.setFullScreen(false); w.setSize(1600, 1200); w.showInactive(); });
     await page.screenshot({ path: path.join(OUT, 'authenticated-shop.png') });
+    // Use the real native refresh directly so a focus-triggered UI refresh
+    // cannot make this explicit verification return early while already busy.
+    const recovery = await page.evaluate(async () => {
+      const response = await simpleWarsDesktop.store('refresh');
+      if (response.ok) WodSteamStore.apply(response);
+      return { ok: response.ok, error: response.error, gold: response.wallet?.gold };
+    });
+    assert(recovery.ok, recovery.error || 'Native purchase recovery failed');
     if (purchase) {
       await sandboxOnly();
       const before = await page.evaluate(() => WodSteamStore.state.wallet.gold);
@@ -50,14 +59,21 @@ async function sandboxOnly() {
       const pending = await page.evaluate(() => ({ error: WodSteamStore.state.error }));
       assert(!pending.error, pending.error);
       console.log('SANDBOX CHECKOUT OPEN: approve or cancel in the Steam overlay. No wallet funds are charged.');
-      await page.waitForFunction(() => window.__sandboxStoreEvents.some(event => event.pending === false || event.error), null, { timeout: 240000 });
+      await page.waitForFunction(() => window.__sandboxStoreEvents.some(event => event.pending === false || event.error), null, { timeout: 600000 });
       result.callbacks = await page.evaluate(() => window.__sandboxStoreEvents);
       assert(!result.callbacks.some(event => event.error), 'Steam authorization callback reported a verification failure');
       result.product = purchase;
       result.endingGold = await page.evaluate(() => WodSteamStore.state.wallet.gold);
       result.grantedGold = result.endingGold - before;
+      assert.equal(result.grantedGold, process.argv.includes('--cancel') ? 0 : require('../store-catalog').products[purchase].gold, 'Sandbox purchase grant must match the selected product');
+      if (purchase === 'supporter' && !process.argv.includes('--cancel')) {
+        const variants = require('../store-catalog').premiumVariants('supporterGold');
+        result.supporterUnlocked = await page.evaluate(ids => WodSteamStore.state.wallet.supporter && ids.every(id => WodSteamStore.state.wallet.ownedSkins[id]), variants);
+        assert(result.supporterUnlocked, 'Supporter purchase must unlock every Patron Gold era');
+      }
       await page.screenshot({ path: path.join(OUT, purchase + '-result.png') });
     }
+    await page.waitForFunction(() => !WodSteamStore.state.busy);
     await page.evaluate(() => WodSteamStore.refresh(true));
     const restored = await page.evaluate(() => ({ connected: WodSteamStore.state.connected, gold: WodSteamStore.state.wallet.gold, error: WodSteamStore.state.error }));
     assert.equal(restored.connected, true);
@@ -65,11 +81,11 @@ async function sandboxOnly() {
     result.restoredGold = restored.gold;
     assert.deepEqual(errors, []);
     result.errors = errors;
-    fs.writeFileSync(path.join(OUT, purchase ? purchase + '.json' : 'authentication.json'), JSON.stringify(result, null, 2));
+    fs.writeFileSync(resultFile, JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result));
   } catch (error) {
     result.error = error.message;
-    fs.writeFileSync(path.join(OUT, purchase ? purchase + '.json' : 'authentication.json'), JSON.stringify(result, null, 2));
+    fs.writeFileSync(resultFile, JSON.stringify(result, null, 2));
     throw error;
   } finally { await app.close(); }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });
