@@ -67,7 +67,8 @@ function createCommerceHttp(env = process.env, testService) {
       } else {
         const token = String(req.headers.authorization || '').replace(/^Bearer /, '');
         const session = commerce.session(token);
-        if (action === 'sync') result = await commerce.sync(session, body.progress);
+        if (action === 'multiplayer') result = await require('./profiles').steamIdentity(session.steamId,body.progress);
+        else if (action === 'sync') result = await commerce.sync(session, body.progress);
         else if (action === 'spend') result = await commerce.spend(session, body);
         else if (action === 'begin') result = await commerce.begin(session, body.productId, body.requestId);
         else if (action === 'resolve') result = await commerce.resolve(session, body.orderId, body.authorized);
@@ -80,6 +81,11 @@ function createCommerceHttp(env = process.env, testService) {
       reply(res, status, { ok: false, error: error instanceof CommerceError ? error.message : 'The Steam store is temporarily unavailable. Your purchases are preserved.' });
     }
   }
-  return { handle, close: async () => { clearInterval(timer); if (store) await store.close(); } };
+  async function profileWallet(steamId,progress,purchase){
+    if(!commerce){if(env.STEAM_PURCHASES_ENABLED==='1')throw new CommerceError('Steam wallet is temporarily unavailable. Please try again.',503);return null;}
+    const session={steamId};
+    return purchase?await commerce.spend(session,purchase):progress?await commerce.sync(session,progress):{wallet:await commerce.getWallet(session)};
+  }
+  return { handle,profileWallet, close: async () => { clearInterval(timer); if (store) await store.close(); } };
 }
 module.exports = { createCommerceHttp };

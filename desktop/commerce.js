@@ -37,7 +37,7 @@ function createDesktopCommerce({ getClient, notify, request = fetch }) {
       const client = getClient();
       return { steamId: client ? String(client.localplayer.getSteamId().steamId64) : '' };
     }
-    const allowed = ['connect', 'sync', 'spend', 'begin', 'refresh'];
+    const allowed = ['connect', 'sync', 'spend', 'begin', 'refresh','multiplayer'];
     if (!allowed.includes(name)) throw new Error('Unknown Steam store action.');
     if (Buffer.byteLength(JSON.stringify(body || {})) > 256 * 1024) throw new Error('Store request is too large.');
     if (name === 'connect') return connect(body?.progress);

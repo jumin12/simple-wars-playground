@@ -133,11 +133,19 @@ function startLocalServer() {
       });
     });
 
-    localServer.listen(0, '127.0.0.1', () => {
-      localPort = localServer.address().port;
-      resolve(localPort);
-    });
-    localServer.on('error', reject);
+    // A changing origin discards Chromium's local saves on every launch. Reuse
+    // this installation's port; Steam identity also restores cloud progress.
+    const portFile=path.join(app.getPath('userData'),'game-origin-port.json');
+    let preferred=0;try{const value=JSON.parse(fs.readFileSync(portFile,'utf8'));if(Number.isInteger(value)&&value>=1024&&value<=65535)preferred=value;}catch(_){}
+    const listen=port=>{
+      const failed=error=>{if(port&&error.code==='EADDRINUSE')listen(0);else reject(error);};
+      localServer.once('error',failed);
+      localServer.listen(port,'127.0.0.1',()=>{localServer.removeListener('error',failed);localPort=localServer.address().port;
+        try{fs.mkdirSync(path.dirname(portFile),{recursive:true});fs.writeFileSync(portFile,JSON.stringify(localPort));}catch(_){}
+        resolve(localPort);
+      });
+    };
+    listen(preferred);
   });
 }
 

@@ -26,6 +26,7 @@
     isHost: false,
     max: 6,
     connected: false,
+    registered:false,playerId:'',
     socketOpen: false,
     lastSeq: 0,
     online: 0,
@@ -92,7 +93,9 @@
   }
 
   function attachHandlers() {
+    const socket=ws;
     ws.onmessage = (ev) => {
+      if(ws!==socket)return;
       let msg;
       try {
         msg = JSON.parse(ev.data);
@@ -115,6 +118,7 @@
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
         case 'registered':
+          api.registered=true;api.playerId=msg.playerId||'';
           emit('Registered', { playerId: msg.playerId || '', profile: msg.profile || null });
           break;
         case 'profile':
@@ -130,6 +134,7 @@
           emit('MpMatchEndAck', { updatedPlayerIds: msg.updatedPlayerIds || [] });
           break;
         case 'register_failed':
+          api.registered=false;
           emit('RegisterFailed', { reason: msg.reason || '', msg: msg.msg || 'Registration failed' });
           break;
         case 'profile_failed':
@@ -223,6 +228,7 @@
             count: msg.count,
           });
           break;
+        case 'player_forfeited':emit('PlayerForfeited',{slot:msg.slot|0,count:msg.count});break;
         case 'player_disconnected':
           emit('PlayerDisconnected', { slot: msg.slot | 0, count: msg.count, canRejoin: !!msg.canRejoin });
           break;
@@ -290,7 +296,7 @@
           emit('RemoteCmd', { fromSlot: msg.fromSlot, cmd: msg.cmd });
           break;
         case 'error':
-          clearJoinHandlers(new Error(msg.msg || 'Error'));
+          clearJoinHandlers(Object.assign(new Error(msg.msg||'Error'),{code:msg.reason||''}));
           clearCreateHandlers(new Error(msg.msg || 'Error'));
           emit('Error', { msg: msg.msg });
           break;
@@ -306,12 +312,13 @@
       }
     };
     ws.onclose = () => {
+      if(ws!==socket)return;
       stopPing();
       const keepSession = inActiveMatchSession();
       const prevCode = api.code;
       const prevSlot = api.slot;
       const prevHost = api.isHost;
-      api.socketOpen = false;
+      api.socketOpen = false;api.registered=false;
       api.connected = false;
       if (!keepSession) {
         api.code = '';
@@ -328,7 +335,7 @@
         isHost: keepSession ? prevHost : false,
       });
     };
-    ws.onerror = () => emit('Error', { msg: 'WebSocket error' });
+    ws.onerror = () => {if(ws===socket)emit('Error', { msg: 'WebSocket error' });};
   }
 
   global.WodMultiplayer = {
@@ -446,6 +453,7 @@
       const p = payload && typeof payload === 'object' ? payload : {};
       send({
         t: 'register_player',
+        deviceSecret:String(p.deviceSecret||''),profileToken:String(p.profileToken||''),autoName:!!p.autoName,
         playerId: p.playerId != null ? String(p.playerId) : '',
         displayName: p.displayName != null ? String(p.displayName) : '',
         unitSkin: p.unitSkin != null ? String(p.unitSkin) : 'nato',
@@ -490,6 +498,7 @@
     kickPlayer(slot) {
       send({ t: 'kick_player', slot: slot | 0 });
     },
+    forfeitMatch(){send({t:'forfeit'});api.code='';api.slot=0;api.isHost=false;api.connected=false;},
     leaveLobby() {
       if (ws && ws.readyState === 1) send({ t: 'leave' });
       api.code = '';

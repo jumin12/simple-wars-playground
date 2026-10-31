@@ -32,7 +32,7 @@ const server=http.createServer((req,res)=>{
   });assert(results.combat.every(r=>r.loss>0&&r.shipLoss>0&&r.target&&r.shipTarget&&r.shipHp===300&&(r.type==='marine'?r.icon:!r.icon)),'both owners exchange fire between dry land and water, and marines also fight afloat');
   results.marineAndHealing=await page.evaluate(()=>{
    resetWaterTest();testTown(-8,0,1,'Supply');const h=gameData.hexes['0,0'];h.type='water';h.owner=0;const u=createUnitAt('marine',0,0,1);u.x=u.y=0;u.hp=70;u.manpower=700;update(7);const afloat={hp:u.hp,heals:canHealUnit(u),icon:u.waterFlash>0};
-   h.type='grass';h.owner=1;u.hp=100;u.manpower=1000;u.healingFlash=.25;const fullIcon=wodUnitHealingIcon(u);updateUnitHealing(u,.1);const flash=u.healingFlash;
+   h.type='grass';h.owner=1;gameData._citySupplyCache=null;gameData.hospitals=[{owner:1,q:0,r:1,x:0,y:27}];u.hp=100;u.manpower=1000;u.healingFlash=.25;const fullIcon=wodUnitHealingIcon(u);updateUnitHealing(u,.1);const flash=u.healingFlash;
    u.hp=99;u.manpower=990;gameData.manpower=0;updateUnitHealing(u,.1);const unfunded=u.healingFlash;gameData.manpower=5000;updateUnitHealing(u,1);
    return{afloat,fullIcon,flash,unfunded,repaired:u.hp===100&&u.manpower===1000,endIcon:wodUnitHealingIcon(u)};
   });console.log('healing',JSON.stringify(results.marineAndHealing));assert(results.marineAndHealing.afloat.hp===70&&!results.marineAndHealing.afloat.heals&&results.marineAndHealing.afloat.icon&&!results.marineAndHealing.fullIcon&&results.marineAndHealing.flash===0&&results.marineAndHealing.unfunded===0&&results.marineAndHealing.repaired&&!results.marineAndHealing.endIcon,'marine embarkment is visible without immunity to fire or healing; full/unfunded units have no healing icon');

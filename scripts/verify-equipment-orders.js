@@ -25,7 +25,7 @@ const server=http.createServer((req,res)=>{
     resetWaterTest(owner);gameData._matchPeriod=gameData.gamePeriod=era;gameData.ownedUnitSkins={ancient:true,medieval:true,napoleonic:true};gameData.menuAttractMode=false;gameData._lifetimeMatch=null;wodProgress=defaultWodProgress();wodBeginLifetimeMatch();testTown(-8,0,owner,'Supply');
     const motor=createUnitAt('motorized',0,0,owner),mount=createUnitAt('mountaineer',81,0,owner);motor.x=motor.y=0;mount.x=81;mount.y=0;gameData.unitSpatialGrid=buildUnitSpatialGrid();
     const cap=wodMotorizedEquipment(motor).capacity;applyDamage(motor,motor.maxHp*.25,3-owner);applyDamage(mount,mount.maxHp*.25,3-owner);const damaged=wodMotorizedEquipment(motor).count;
-    applyDamage(motor,motor.maxHp*.1,0,'water');applyDamage(mount,mount.maxHp*.1,0,'supply');const beforeHeal=wodMotorizedEquipment(motor).count;updateUnitHealing(motor,1);const healed=wodMotorizedEquipment(motor).count;
+    applyDamage(motor,motor.maxHp*.1,0,'water');applyDamage(mount,mount.maxHp*.1,0,'supply');const beforeHeal=wodMotorizedEquipment(motor).count;gameData.hospitals=[{owner,q:0,r:0,x:0,y:0}];updateUnitHealing(motor,1);const healed=wodMotorizedEquipment(motor).count;
     const ledger=JSON.parse(JSON.stringify(wodBattleLedger().byOwner)),r=wodFactionBattleStats(owner,true),saved=wodStripEntityForNet(motor),restored=wodEntityFromNet(saved);
     const current=wodMotorizedEquipment(motor),kind=current.kind;
     rows.push({era,owner,label:wodSpecialistLabel('mountaineer'),gear:current.label,cap,damaged,beforeHeal,healed,current:r.motorizedEquipment,restored:wodMotorizedEquipment(restored).count,

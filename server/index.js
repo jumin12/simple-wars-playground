@@ -6,16 +6,19 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto=require('crypto');
 const { WebSocketServer } = require('ws');
 const profiles = require('./profiles');
 const commerceHttp = require('./commerce-http').createCommerceHttp();
+const profileHttp = require('./profile-http').createProfileHttp(profiles);
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
-const LEADERBOARD_FILE = path.join(__dirname, 'leaderboard.json');
-const FRIEND_REMOVALS_FILE = path.join(__dirname, 'friend-removals.json');
-const FRIEND_REQUESTS_FILE = path.join(__dirname, 'friend-requests-pending.json');
+const DATA_DIR=process.env.WOD_DATA_DIR||__dirname;fs.mkdirSync(DATA_DIR,{recursive:true});
+const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
+const FRIEND_REMOVALS_FILE = path.join(DATA_DIR, 'friend-removals.json');
+const FRIEND_REQUESTS_FILE = path.join(DATA_DIR, 'friend-requests-pending.json');
 const LEADERBOARD_SAVE_DEBOUNCE_MS = 2000;
 const FRIEND_REMOVALS_SAVE_DEBOUNCE_MS = 2000;
 
@@ -336,7 +339,7 @@ function hydrateLeaderboardFromProfiles() {
       playerId,
       displayName: fromProf.displayName || existing.displayName,
       unitSkin: fromProf.unitSkin || existing.unitSkin,
-      stats: profNewer ? fromProf.stats : existing.stats,
+      stats: fromProf.stats,
       updatedAt: Math.max(fromProf.updatedAt || 0, existing.updatedAt || 0),
     });
   }
@@ -421,6 +424,7 @@ function registerClientPlayer(client, payload) {
   const nameCheck = validateDisplayNameForPlayer(payload.displayName, playerId);
   if (!nameCheck.ok) return nameCheck;
   if (client.playerId && client.playerId !== playerId) onlineByPlayerId.delete(client.playerId);
+  if(client.identityKey&&[...wss.clients].some(w=>w!==client.ws&&w.readyState===1&&w._wodClient?.playerId===playerId&&w._wodClient.room))return {ok:false,reason:'profile_in_use',msg:'Your profile is already in a game. Leave that game before joining another.'};
   client.playerId = playerId;
   client.displayName = nameCheck.name;
   const profile = profiles.getProfile(playerId);
@@ -704,7 +708,7 @@ function migrateMatchHostIfNeeded(room) {
       JSON.stringify({
         t: 'host_takeover',
         payload: room.matchInitPayload || null,
-        snap: room.lastSnap || null,
+        snap: room.lastSnap || null,forfeitedSlots:[...(room.forfeitedSlots||[])],
       }),
     );
   } catch (_) {}
@@ -746,7 +750,7 @@ function disconnectClientFromMatch(client, immediate) {
   }
 
   if (immediate) {
-    markSlotDisconnectedInMatch(room, leftSlot);
+    if(room.forfeitedSlots?.has(leftSlot))broadcastAll(room,{t:'player_forfeited',slot:leftSlot,count:room.clients.length});else markSlotDisconnectedInMatch(room, leftSlot);
     if (room.clients.length === 0) maybeEndMatchWhenEmpty(room);
     client.room = null;
     client.slot = 0;
@@ -778,13 +782,16 @@ function disconnectClientFromMatch(client, immediate) {
   broadcastLobbyList();
 }
 
-function forfeitClientFromMatch(client) {
-  const room = client.room;
-  if (!room || !room.matchStarted) {
-    leaveRoom(client);
-    return;
-  }
-  disconnectClientFromMatch(client, true);
+async function forfeitClientFromMatch(client) {
+  const room=client.room;if(!room?.matchStarted){leaveRoom(client);return;}
+  const slot=client.slot;room.forfeitedSlots||=new Set();room.forfeitedSlots.add(slot);
+  const outcomes=Object.fromEntries(Object.values(room.seatByPlayerId||{}).map(s=>[s,s===slot?'lost':'ongoing']));
+  const result=profiles.recordMpMatchEnd(client.playerId,room,{outcomes,participants:[{slot,playerId:client.playerId}]});
+  await profiles.flush();
+  if(result.ok){profiles.attachClientProfile(client,client.displayName);updateLeaderboardEntry(client,client.combinedStats);if(client.ws.readyState===1)client.ws.send(JSON.stringify({t:'profile',profile:profiles.exportProfile(client.playerId)}));}
+  const patch=payload=>{if(!payload)return;payload.forfeitedSlots=[...room.forfeitedSlots];payload.eliminatedSlots=[...new Set([...(payload.eliminatedSlots||[]),slot])];if(payload.entities)payload.entities=payload.entities.filter(u=>u.owner!==slot);if(payload.cities)for(const c of payload.cities)if(c.owner===slot)c.owner=0;if(payload.hexOwners)payload.hexOwners=payload.hexOwners.map(o=>o===slot?0:o);if(payload.hexList)for(const h of payload.hexList)if(h.owner===slot)h.owner=0;};
+  patch(room.matchInitPayload);patch(room.lastSnap?.payload);
+  disconnectClientFromMatch(client,true);
 }
 
 function scheduleMatchSocketClose(client) {
@@ -948,6 +955,7 @@ function leaveRoom(client) {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/api/profile/')) { void profileHttp.handle(req, res); return; }
   if (req.url.startsWith('/api/steam/')) { void commerceHttp.handle(req, res); return; }
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
@@ -985,7 +993,9 @@ wss.on('connection', (ws) => {
   } catch (_) {}
   broadcastLobbyList();
 
-  ws.on('message', (raw) => {
+  let messageQueue=Promise.resolve();
+  ws.on('message',raw=>{messageQueue=messageQueue.then(()=>handleMessage(raw)).catch(()=>{if(ws.readyState===1)ws.send(JSON.stringify({t:'error',msg:'Profile service temporarily unavailable. Please reconnect; saved progress is preserved.'}));});});
+  async function handleMessage(raw) {
     let msg;
     try {
       msg = JSON.parse(String(raw));
@@ -995,11 +1005,20 @@ wss.on('connection', (ws) => {
     const t = msg && msg.t;
 
     if (t === 'register_player') {
-      const result = registerClientPlayer(client, msg);
+      if(client.identityKey&&!msg.profileToken&&client.identityKey!=='browser:'+crypto.createHash('sha256').update(String(msg.deviceSecret||'')).digest('hex')){ws.send(JSON.stringify({t:'register_failed',reason:'identity_locked',msg:'This connection already belongs to a player profile.'}));return;}
+      const identity=msg.profileToken?await profiles.steamIdentityToken(msg.profileToken):await profiles.bindBrowser(msg.deviceSecret,msg.playerId);
+      if(!identity){ws.send(JSON.stringify({t:'register_failed',reason:'identity_required',msg:'Reconnect using the current game version to restore your player profile.'}));return;}
+      if(client.identityKey&&client.identityKey!==identity.identityKey){ws.send(JSON.stringify({t:'register_failed',reason:'identity_locked',msg:'This connection already belongs to a player profile.'}));return;}
+      client.identityKey=identity.identityKey;
+      const steamId=profiles.steamIdForPlayer(identity.playerId);
+      if(steamId){try{const result=await commerceHttp.profileWallet(steamId,profiles.exportProfile(identity.playerId));profiles.applySteamWallet(identity.playerId,result?.wallet);}catch(_){ws.send(JSON.stringify({t:'register_failed',reason:'temporarily_unavailable',msg:'Your saved Steam wallet is temporarily unavailable. Please reconnect shortly.'}));return;}}
+      const savedName=profiles.getProfile(identity.playerId)?.profile.mpDisplayName;
+      const result = registerClientPlayer(client, {...msg,playerId:identity.playerId,displayName:msg.autoName&&savedName?savedName:msg.displayName});
       if (!result.ok) {
         ws.send(JSON.stringify({ t: 'register_failed', reason: result.reason, msg: result.msg }));
         return;
       }
+      await profiles.flush();
       ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId, profile: result.profile || null }));
       flushFriendRemovalsForClient(client);
       flushFriendRequestsForClient(client);
@@ -1008,8 +1027,8 @@ wss.on('connection', (ws) => {
 
     if (t === 'get_profile') {
       const playerId = sanitizePlayerId(msg.playerId || (client.playerId || ''));
-      if (!playerId) {
-        ws.send(JSON.stringify({ t: 'profile_failed', msg: 'Invalid player ID' }));
+      if (!client.playerId || playerId!==client.playerId) {
+        ws.send(JSON.stringify({ t: 'profile_failed', msg: 'Register your profile before requesting saved progress.' }));
         return;
       }
       ws.send(JSON.stringify({ t: 'profile', profile: profiles.exportProfile(playerId) }));
@@ -1018,11 +1037,13 @@ wss.on('connection', (ws) => {
 
     if (t === 'sync_progress') {
       const playerId = sanitizePlayerId(msg.playerId || client.playerId);
-      if (!playerId || (client.playerId && client.playerId !== playerId)) {
+      if (!client.playerId || playerId!==client.playerId) {
         ws.send(JSON.stringify({ t: 'profile_failed', msg: 'Register before syncing progress' }));
         return;
       }
       const result = profiles.syncProgress(playerId, msg.progress || msg);
+      const steamId=profiles.steamIdForPlayer(playerId);
+      if(steamId){const wallet=await commerceHttp.profileWallet(steamId,msg.progress||msg);profiles.applySteamWallet(playerId,wallet?.wallet);result.profile=profiles.exportProfile(playerId);}
       if (!result.ok) {
         ws.send(JSON.stringify({ t: 'profile_failed', msg: result.msg || 'Sync rejected' }));
         return;
@@ -1031,22 +1052,29 @@ wss.on('connection', (ws) => {
         profiles.attachClientProfile(client, client.displayName);
         updateLeaderboardEntry(client, client.combinedStats);
       }
+      await profiles.flush();
       ws.send(JSON.stringify({ t: 'profile', profile: result.profile }));
       return;
     }
 
     if (t === 'shop_purchase') {
       const playerId = sanitizePlayerId(msg.playerId || client.playerId);
-      if (!playerId || (client.playerId && client.playerId !== playerId)) {
+      if (!client.playerId || playerId!==client.playerId) {
         ws.send(JSON.stringify({ t: 'shop_failed', msg: 'Register before purchasing' }));
         return;
       }
-      const result = profiles.shopPurchase(playerId, msg);
+      const steamId=profiles.steamIdForPlayer(playerId);
+      let result;
+      if(steamId){
+        try{const paid=await commerceHttp.profileWallet(steamId,null,msg);if(!paid)throw Error('Steam wallet is unavailable.');profiles.applySteamWallet(playerId,paid.wallet);result={ok:true,profile:profiles.exportProfile(playerId),alreadyOwned:paid.alreadyOwned};}
+        catch(error){ws.send(JSON.stringify({t:'shop_failed',msg:error.message||'Your Steam wallet could not be updated.'}));return;}
+      }else result=profiles.shopPurchase(playerId,msg);
       if (!result.ok) {
         ws.send(JSON.stringify({ t: 'shop_failed', msg: result.msg || 'Purchase failed' }));
         return;
       }
       if (client.playerId === playerId) profiles.attachClientProfile(client, client.displayName);
+      await profiles.flush();
       ws.send(JSON.stringify({ t: 'shop_purchase_ok', profile: result.profile, alreadyOwned: !!result.alreadyOwned }));
       return;
     }
@@ -1066,6 +1094,7 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', msg: result.msg || 'Could not record match' }));
         return;
       }
+      await profiles.flush();
       for (const pid of result.updatedPlayerIds || []) {
         const peer = onlineByPlayerId.get(pid);
         if (peer) {
@@ -1344,9 +1373,12 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', msg: 'Lobby not found' }));
         return;
       }
+      if(!client.playerId||sanitizePlayerId(msg.playerId||client.playerId)!==client.playerId){ws.send(JSON.stringify({t:'error',msg:'Register your own profile before joining.'}));return;}
+      if(room.clients.some(c=>c!==client&&c.playerId===client.playerId)){ws.send(JSON.stringify({t:'error',msg:'Your profile is already in this game.'}));return;}
       const pw = String(msg.password || '');
-      if (room.password && pw !== room.password) {
-        ws.send(JSON.stringify({ t: 'error', msg: 'Wrong password' }));
+      const knownSeat=room.matchStarted&&client.playerId===sanitizePlayerId(msg.playerId||client.playerId)&&room.seatByPlayerId?.[client.playerId]&&!room.forfeitedSlots?.has(room.seatByPlayerId[client.playerId]);
+      if (room.password && pw !== room.password&&!knownSeat) {
+        ws.send(JSON.stringify({t:'error',reason:pw?'wrong_password':'password_required',msg:pw?'Wrong password':'Password required'}));
         return;
       }
       const joinPlayerId = sanitizePlayerId(msg.playerId || client.playerId);
@@ -1359,7 +1391,7 @@ wss.on('connection', (ws) => {
         const rejoinSlot = room.seatByPlayerId[joinPlayerId];
         const inGrace = !!(room.pendingReconnect && room.pendingReconnect.has(rejoinSlot));
         const inDisc = !!(room.disconnectedSlots && room.disconnectedSlots.has(rejoinSlot));
-        if (!rejoinSlot || (!inGrace && !inDisc)) {
+        if (!rejoinSlot || room.forfeitedSlots?.has(rejoinSlot) || (!inGrace && !inDisc)) {
           ws.send(
             JSON.stringify({
               t: 'error',
@@ -1540,6 +1572,7 @@ wss.on('connection', (ws) => {
       if (!client.room || client.room.matchStarted) return;
       const rawName = msg.displayName != null ? String(msg.displayName) : '';
       const playerId = sanitizePlayerId(msg.playerId != null ? msg.playerId : client.playerId);
+      if(!client.identityKey||playerId!==client.playerId){ws.send(JSON.stringify({t:'profile_failed',msg:'Lobby updates must use your registered profile.'}));return;}
       let displayName = client.displayName || `Player ${client.slot}`;
       if (rawName.trim()) {
         const nameCheck = playerId
@@ -1580,8 +1613,9 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if(t==='forfeit'){if(client.room?.matchStarted)await forfeitClientFromMatch(client);else leaveRoom(client);ws.send(JSON.stringify({t:'left'}));return;}
     if (t === 'leave') {
-      if (client.room && client.room.matchStarted) forfeitClientFromMatch(client);
+      if (client.room && client.room.matchStarted) await forfeitClientFromMatch(client);
       else leaveRoom(client);
       try {
         ws.send(JSON.stringify({ t: 'left' }));
@@ -1604,7 +1638,8 @@ wss.on('connection', (ws) => {
       client.room.lobbyPreview = null;
       client.room._matchEndRecorded = false;
       client.room.pendingReconnect = new Map();
-      const payload = msg.payload;
+      client.room.matchId=require('crypto').randomUUID();client.room.forfeitedSlots=new Set();
+      const payload = {...msg.payload,serverMatchId:client.room.matchId};
       client.room.matchInitPayload = payload;
       client.room.lastSnap = null;
       client.room.hostPlayerId = sanitizePlayerId(client.playerId);
@@ -1639,7 +1674,7 @@ wss.on('connection', (ws) => {
       broadcast(client.room, { t: 'cmd', fromSlot: client.slot, cmd: msg.cmd }, ws);
       return;
     }
-  });
+  }
 
   ws.on('close', () => {
     if (client.room && client.room.matchStarted) scheduleMatchSocketClose(client);
@@ -1668,10 +1703,9 @@ setInterval(() => {
 loadLeaderboardFromDisk();
 loadFriendRemovalsFromDisk();
 loadFriendRequestsFromDisk();
-profiles.loadProfilesFromDisk();
-hydrateLeaderboardFromProfiles();
-scheduleLeaderboardSave();
-
-server.listen(PORT, () => {
-  console.log(`simple-wars-mp listening on ${PORT} (max ${MAX_PLAYERS} players / room)`);
-});
+profiles.initialize().then(()=>{
+  hydrateLeaderboardFromProfiles();scheduleLeaderboardSave();
+  server.listen(PORT,()=>console.log(`simple-wars-mp listening on ${PORT} (max ${MAX_PLAYERS} players / room)`));
+}).catch(()=>{console.error('[profiles] durable storage unavailable; refusing to start with empty profiles');process.exitCode=1;});
+let closing=false;async function shutdown(){if(closing)return;closing=true;server.close();for(const ws of wss.clients)ws.close();try{await profiles.close();await commerceHttp.close();}finally{process.exit(0);}}
+process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

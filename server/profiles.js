@@ -5,6 +5,12 @@ const fs = require('fs');
 const path = require('path');
 const catalog = require('./store-catalog');
 const missionManifest = require('./mission-catalog.json');
+const crypto=require('crypto');
+const {ProfileStore}=require('./profile-store');
+const profileStore=new ProfileStore();
+const steamTokens=new Map();
+let saveWork=Promise.resolve();
+const persisted=new Map();
 
 const PROFILES_FILE = path.join(__dirname, 'player-profiles.json');
 const SAVE_DEBOUNCE_MS = 1500;
@@ -97,6 +103,7 @@ function defaultProfile(playerId) {
   return {
     playerId,
     version: 1,
+    progressImported:false,
     updatedAt: Date.now(),
     profile: {
       gold: DEFAULT_GOLD,
@@ -125,6 +132,8 @@ function defaultProfile(playerId) {
     storeMissions: { completed: {}, spent: {} },
     lifetime: defaultLifetime(),
     lifetimeByPeriod: {},
+    statsByMode:{singleplayer:{totals:{},byPeriod:{}},multiplayer:{totals:{},byPeriod:{}}},
+    mpMatchReceipts:{},multiplayerByPeriod:{},
     multiplayer: { gamesPlayed: 0, wins: 0, losses: 0 },
   };
 }
@@ -289,40 +298,79 @@ function mergeLifetimeByPeriod(serverMap, clientMap) {
   return out;
 }
 
+function hydrateModeStats(value){const out={};for(const mode of ['singleplayer','multiplayer','legacy']){const block=value?.[mode];if(mode==='legacy'&&!block)continue;out[mode]={totals:sanitizeLifetime(block?.totals),byPeriod:{}};for(const [era,row]of Object.entries(block?.byPeriod||{}))if(['modern','ancient','medieval','napoleonic'].includes(era))out[mode].byPeriod[era]=sanitizeLifetime(row);}return out;}
+function hydratePeriodStats(value){return Object.fromEntries(Object.entries(value||{}).filter(([era])=>['modern','ancient','medieval','napoleonic'].includes(era)).map(([era,row])=>[era,sanitizeLifetime(row)]));}
+function mergeModeStats(a,b){
+  const out={};for(const mode of ['singleplayer','multiplayer','legacy']){const left=a?.[mode],right=b?.[mode];if(mode==='legacy'&&!left&&!right)continue;out[mode]={totals:mergeLifetimeMonotonic(left?.totals||{},right?.totals),byPeriod:mergeLifetimeByPeriod(left?.byPeriod,right?.byPeriod)};}return out;
+}
 function computeCombinedStats(profile) {
-  const mp = profile.multiplayer || {};
-  const L = profile.lifetime || defaultLifetime();
-  const kills =
-    (L.enemyTroopKills || 0) +
-    (L.enemyMarineKills || 0) +
-    (L.enemyTankKills || 0) +
-    (L.enemyShipKills || 0);
-  const unitLosses =
-    (L.ownTroopLosses || 0) +
-    (L.ownMarineLosses || 0) +
-    (L.ownTankLosses || 0) +
-    (L.ownShipLosses || 0);
-  return {
-    // wins/defeats = matches won/lost (MP + solo); kills/losses = troops killed/lost.
-    wins: (mp.wins || 0) + (L.battlesWon || 0),
-    defeats: (mp.losses || 0) + (L.campaignLosses || 0),
-    kills,
-    losses: unitLosses,
-    gamesPlayed: (mp.gamesPlayed || 0) + (L.gamesStarted || 0),
-  };
+  const mp=profile.multiplayer||{},L=profile.statsByMode?.multiplayer?.totals||{};
+  return {wins:mp.wins||0,defeats:mp.losses||0,gamesPlayed:mp.gamesPlayed||0,kills:(L.enemyTroopKills||0)+(L.enemyMarineKills||0)+(L.enemyTankKills||0)+(L.enemyShipKills||0),losses:(L.ownTroopLosses||0)+(L.ownMarineLosses||0)+(L.ownTankLosses||0)+(L.ownShipLosses||0)};
 }
 
 function scheduleSave() {
   if (saveTimer) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    try {
-      fs.writeFileSync(PROFILES_FILE, JSON.stringify(Object.fromEntries(profiles), null, 2), 'utf8');
-    } catch (err) {
-      console.warn('[profiles] save failed:', err.message);
-    }
+    void flush().catch(()=>{console.warn('[profiles] durable save will retry');scheduleSave();});
   }, SAVE_DEBOUNCE_MS);
 }
+
+async function initialize(){
+  await profileStore.initialize();
+  const rows=await profileStore.load();
+  for(const [id,row]of Object.entries(rows)){const pid=sanitizePlayerId(id);if(pid)profiles.set(pid,hydrateProfile(pid,row));}
+  await flush();
+}
+function flush(){
+  if(saveTimer){clearTimeout(saveTimer);saveTimer=null;}
+  const run=async()=>{
+    const dirty={},serial=new Map();
+    for(const [id,p]of profiles){const value=JSON.stringify(p);if(persisted.get(id)!==value){dirty[id]=JSON.parse(value);serial.set(id,value);}}
+    // Local saves contain the complete profile set; database writes contain only changes.
+    if(!profileStore.pool||serial.size){await profileStore.save(profileStore.pool?dirty:Object.fromEntries(profiles));for(const [id,value]of serial)persisted.set(id,value);}
+  };
+  saveWork=saveWork.catch(()=>{}).then(run);return saveWork;
+}
+async function bindBrowser(secret,candidateId){
+  if(!/^[a-f0-9]{64}$/.test(String(secret||'')))return null;
+  const key='browser:'+crypto.createHash('sha256').update(secret).digest('hex');
+  let candidate=sanitizePlayerId(candidateId);if(profiles.has(candidate)&&!profileStore.links.has(key))candidate='';
+  const id=await profileStore.bind(key,candidate,defaultProfile);
+  await ensureStoredProfile(id);await flush();return {playerId:id,identityKey:key};
+}
+async function ensureStoredProfile(id){if(!profiles.has(id)){const row=await profileStore.get(id);profiles.set(id,hydrateProfile(id,row));}return profiles.get(id);}
+async function steamIdentity(steamId,progress,deviceSecret){
+  if(!/^\d{17}$/.test(String(steamId)))throw Error('Invalid Steam account');
+  const key='steam:'+steamId,existed=profileStore.links.has(key);
+  const device=deviceSecret?await bindBrowser(deviceSecret,progress?.profile?.playerId):null;
+  const id=await profileStore.bind(key,device?.playerId||null,defaultProfile,!!device);
+  const p=await ensureStoredProfile(id),name=p.profile.mpDisplayName;
+  // Linking a new account preserves the device save. An existing account never
+  // imports another player's local records just because they sign in here.
+  const priorSteam=steamIdForPlayer(progress?.profile?.playerId);
+  const canImportNew=!existed&&(!device||id===device.playerId)&&(!priorSteam||priorSteam===steamId);
+  if(progress&&typeof progress==='object'&&(canImportNew||progress.profile?.playerId===id))syncProgress(id,progress);
+  if(name)p.profile.mpDisplayName=name;
+  await flush();
+  for(const [token,value]of steamTokens)if(value.expires<Date.now())steamTokens.delete(token);
+  const token=crypto.randomBytes(32).toString('hex');steamTokens.set(crypto.createHash('sha256').update(token).digest('hex'),{playerId:id,identityKey:key,expires:Date.now()+8*3600000});
+  return {playerId:id,profile:exportProfile(id),profileToken:token};
+}
+async function steamIdentityToken(token){
+  if(!/^[a-f0-9]{64}$/.test(String(token||'')))return null;
+  const hash=crypto.createHash('sha256').update(token).digest('hex'),result=steamTokens.get(hash);return result&&result.expires>Date.now()?result:await profileStore.session(hash);
+}
+async function webSteamIdentity(steamId,progress,secret){
+  const result=await steamIdentity(steamId,progress,secret),expires=Date.now()+30*86400000;
+  await profileStore.saveSession(crypto.createHash('sha256').update(result.profileToken).digest('hex'),{playerId:result.playerId,identityKey:'steam:'+steamId,expires});await flush();
+  return {...result,expires};
+}
+function steamIdForPlayer(id){return [...profileStore.links].find(([key,pid])=>pid===id&&key.startsWith('steam:'))?.[0].slice(6)||'';}
+function applySteamWallet(id,wallet){
+  if(!wallet)return;const p=getProfile(id);Object.assign(p.profile,{steamWalletManaged:true,gold:wallet.gold,ownedUnitSkins:wallet.ownedSkins,ownedShopVisuals:wallet.ownedVisuals,supporterPack:wallet.supporter});p.updatedAt=Date.now();scheduleSave();
+}
+async function close(){await flush();await profileStore.close();}
 
 function loadProfilesFromDisk() {
   try {
@@ -379,6 +427,8 @@ function hydrateProfile(playerId, row) {
   const base = defaultProfile(playerId);
   if (!row || typeof row !== 'object') return base;
   const p = row.profile && typeof row.profile === 'object' ? row.profile : {};
+  base.progressImported=row.progressImported!==false;
+  base.profile.steamWalletManaged=!!p.steamWalletManaged;base.profile.supporterPack=!!p.supporterPack;
   base.profile.gold = p.gold == null ? DEFAULT_GOLD : clampInt(p.gold, 0, 999999999);
   base.profile.unitSkin = sanitizeSkin(p.unitSkin);
   base.profile.aiUnitSkin = sanitizeSkin(p.aiUnitSkin);
@@ -404,8 +454,11 @@ function hydrateProfile(playerId, row) {
     completed: sanitizeBoolMap(row.storeMissions && row.storeMissions.completed),
     spent: sanitizeBoolMap(row.storeMissions && row.storeMissions.spent),
   };
+  base.statsByMode=row.statsByMode?hydrateModeStats(row.statsByMode):{...base.statsByMode,legacy:{totals:sanitizeLifetime(row.lifetime),byPeriod:hydratePeriodStats(row.lifetimeByPeriod)}};
+  base.mpMatchReceipts=sanitizeBoolMap(row.mpMatchReceipts);
+  base.multiplayerByPeriod={};for(const [era,value]of Object.entries(row.multiplayerByPeriod||{}))base.multiplayerByPeriod[era]=mergeMpStatsMax({},value);
   base.lifetime = sanitizeLifetime(row.lifetime);
-  base.lifetimeByPeriod = mergeLifetimeByPeriod({}, row.lifetimeByPeriod || {});
+  base.lifetimeByPeriod = hydratePeriodStats(row.lifetimeByPeriod);
   base.multiplayer = {
     gamesPlayed: clampInt(row.multiplayer && row.multiplayer.gamesPlayed, 0, 999999),
     wins: clampInt(row.multiplayer && row.multiplayer.wins, 0, 999999),
@@ -493,11 +546,12 @@ function syncProgress(playerId, payload) {
   }
   profile.matchGoldGranted = mergeMatchGoldClaims(profile.matchGoldGranted, payload.matchGoldGranted);
 
+  if(payload.statsByMode)profile.statsByMode=profile.progressImported?mergeModeStats(profile.statsByMode,payload.statsByMode):hydrateModeStats(payload.statsByMode);
   if (payload.lifetime && typeof payload.lifetime === 'object') {
-    profile.lifetime = mergeLifetimeMonotonic(profile.lifetime, payload.lifetime);
+    profile.lifetime = profile.progressImported?mergeLifetimeMonotonic(profile.lifetime, payload.lifetime):sanitizeLifetime(payload.lifetime);
   }
   if (payload.lifetimeByPeriod && typeof payload.lifetimeByPeriod === 'object') {
-    profile.lifetimeByPeriod = mergeLifetimeByPeriod(profile.lifetimeByPeriod, payload.lifetimeByPeriod);
+    profile.lifetimeByPeriod = profile.progressImported?mergeLifetimeByPeriod(profile.lifetimeByPeriod, payload.lifetimeByPeriod):Object.fromEntries(Object.entries(payload.lifetimeByPeriod).filter(([era])=>['modern','ancient','medieval','napoleonic'].includes(era)).map(([era,row])=>[era,sanitizeLifetime(row)]));
   }
   if (payload.achievements && typeof payload.achievements === 'object') {
     for (const [k, v] of Object.entries(payload.achievements)) {
@@ -570,6 +624,7 @@ function syncProgress(playerId, payload) {
   }
 
   recomputeAchievements(profile);
+  profile.progressImported=true;
   profile.updatedAt = Date.now();
   scheduleSave();
   return { ok: true, profile: exportProfile(id) };
@@ -656,36 +711,28 @@ function shopPurchase(playerId, req) {
   return { ok: true, profile: exportProfile(id) };
 }
 
-function recordMpMatchEnd(hostPlayerId, room, payload) {
-  const hostId = sanitizePlayerId(hostPlayerId);
-  if (!hostId || !room || !room.matchStarted) {
-    return { ok: false, msg: 'Match not active' };
+function recordMpMatchEnd(hostPlayerId,room,payload) {
+  if(!sanitizePlayerId(hostPlayerId)||!room?.matchStarted||!payload)return {ok:false,msg:'Match not active'};
+  room.matchId||=crypto.randomUUID();room._resolvedSlots||={};
+  const outcomes=payload.outcomes||{},participants=payload.participants||[],updated=[];
+  const era=['modern','ancient','medieval','napoleonic'].includes(room.meta?.gamePeriod)?room.meta.gamePeriod:'modern';
+  for(const [slot,oc]of Object.entries(outcomes))if(oc==='won'||oc==='lost')room._resolvedSlots[slot]=oc;
+  for(const part of participants){
+    const pid=sanitizePlayerId(part?.playerId),slot=clampInt(part?.slot,0,8);if(!pid||!slot)continue;
+    if(room.seatByPlayerId&&room.seatByPlayerId[pid]!==slot)continue;
+    const outcome=room.forfeitedSlots?.has(slot)?'lost':outcomes[String(slot)];if(outcome!=='won'&&outcome!=='lost')continue;
+    const profile=getProfile(pid);profile.mpMatchReceipts||={};if(profile.mpMatchReceipts[room.matchId])continue;
+    profile.mpMatchReceipts[room.matchId]=true;profile.mpMatchReceipts=Object.fromEntries(Object.entries(profile.mpMatchReceipts).slice(-256));
+    profile.multiplayer.gamesPlayed++;profile.multiplayer[outcome==='won'?'wins':'losses']++;
+    profile.multiplayerByPeriod||={};const period=profile.multiplayerByPeriod[era]||={gamesPlayed:0,wins:0,losses:0};period.gamesPlayed++;period[outcome==='won'?'wins':'losses']++;
+    profile.statsByMode||=hydrateModeStats({});const block=profile.statsByMode.multiplayer;block.byPeriod[era]||={};
+    for(const [target,source]of [[block.totals,profile.multiplayer],[block.byPeriod[era],period]])for(const [key,field]of [['gamesPlayed','matchesCompleted'],['wins','matchesWon'],['losses','matchesLost']])target[field]=Math.max(target[field]||0,source[key]||0);
+    profile.updatedAt=Date.now();updated.push(pid);
   }
-  if (!payload || typeof payload !== 'object') return { ok: false, msg: 'Invalid match end' };
-  const outcomes = payload.outcomes && typeof payload.outcomes === 'object' ? payload.outcomes : {};
-  const participants = Array.isArray(payload.participants) ? payload.participants : [];
-  const updated = [];
-
-  for (const part of participants) {
-    if (!part || typeof part !== 'object') continue;
-    const pid = sanitizePlayerId(part.playerId);
-    const slot = clampInt(part.slot, 0, 8);
-    if (!pid || !slot) continue;
-    const oc = outcomes[String(slot)] || outcomes[slot];
-    if (oc !== 'won' && oc !== 'lost') continue;
-    const profile = getProfile(pid);
-    profile.multiplayer.gamesPlayed = (profile.multiplayer.gamesPlayed || 0) + 1;
-    if (oc === 'won') profile.multiplayer.wins = (profile.multiplayer.wins || 0) + 1;
-    else profile.multiplayer.losses = (profile.multiplayer.losses || 0) + 1;
-    profile.updatedAt = Date.now();
-    updated.push(pid);
-  }
-
-  if (!updated.length) return { ok: false, msg: 'No valid participants' };
-  room.matchStarted = false;
-  room.lastMatchEndedAt = Date.now();
-  scheduleSave();
-  return { ok: true, updatedPlayerIds: updated };
+  const active=room.matchInitPayload?.factionSlots||Object.values(room.seatByPlayerId||{});
+  const slots=active.length?active:participants.map(p=>p.slot);
+  if(slots.length&&slots.every(slot=>['won','lost'].includes(room._resolvedSlots[String(slot)]))){room.matchStarted=false;room.lastMatchEndedAt=Date.now();}
+  scheduleSave();return {ok:true,updatedPlayerIds:updated};
 }
 
 function attachClientProfile(client, displayName) {
@@ -703,6 +750,7 @@ function attachClientProfile(client, displayName) {
 }
 
 module.exports = {
+  initialize,flush,close,bindBrowser,steamIdentity,webSteamIdentity,steamIdentityToken,steamIdForPlayer,applySteamWallet,
   loadProfilesFromDisk,
   getProfile,
   getAllPlayerIds,
