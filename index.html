@@ -11064,6 +11064,7 @@
         @media(max-width:600px){#shopPanel .shop-gold-wallet{font-size:22px;padding:7px 9px;gap:8px;}#shopPanel .shop-heading .shop-gold-wallet strong{font-size:22px;}#shopPanel .shop-gold-wallet .wod-gold-coin{--coin-size:32px;}.cs-gold-breakdown{grid-template-columns:repeat(2,minmax(0,1fr));}.cs-gold-total{font-size:28px;}}
     </style>
 <link rel="stylesheet" href="commerce-shop.css">
+    <link rel="stylesheet" href="campaign-ui.css">
 </head>
 <body>
 
@@ -11163,13 +11164,14 @@
                             <h3>New war</h3>
                             <div class="setup-row">
                                 <label for="wodCampSetDiff">Difficulty</label>
-                                <select id="wodCampSetDiff">
+                                <select id="wodCampSetDiff" aria-describedby="wodCampDifficultyCopy">
                                     <option value="easy">Easy</option>
                                     <option value="normal" selected>Normal</option>
                                     <option value="hard">Hard</option>
                                     <option value="brutal">Brutal</option>
                                 </select>
                             </div>
+                            <p class="wod-camp-difficulty-copy" id="wodCampDifficultyCopy" aria-live="polite"></p>
                             <div class="setup-row">
                                 <label for="wodCampSetLen">Length</label>
                                 <select id="wodCampSetLen">
@@ -11211,6 +11213,7 @@
                     </div>
                     <div class="wod-camp-map-col">
                         <canvas id="wodCampMapCanvas" width="880" height="628" aria-label="Campaign map"></canvas>
+                        <div class="wod-camp-map-key"><span><b>◉</b> Your regions · <b>◎</b> Available battles</span><span>Select a region for orders</span></div>
                         <div class="wod-camp-stats" id="wodCampStats"></div>
                     </div>
                     <div class="wod-camp-orders" id="wodCampOrders">
@@ -11821,7 +11824,7 @@
                 </div>
                 <div class="esc-help-block">
                     <h4>AI commanders, generals and recovery</h4>
-                    <p class="esc-help-prose">Each enemy receives a hidden, randomly chosen commander. Commanders combine town guards, frontline screens, mobile reserves, scouts and attack groups, and reorganize them as threats and reinforcements change. They recruit for military needs while keeping upkeep affordable. Under fog, they scout and remember last-seen forces with increasing uncertainty.</p>
+                    <p class="esc-help-prose">Each enemy receives a hidden, randomly chosen commander. Commanders combine town guards, frontline screens, mobile reserves, scouts and attack groups, and reorganize them as threats and reinforcements change. They recruit for military needs while keeping upkeep affordable. Attacks assemble most of their assigned troops, count support by actual arrival time, and regroup in supplied cover when locally outmatched. Commanders defend threatened supply corridors, withdraw endangered troops before a pocket closes, and look for exposed enemy supply necks. Under fog, they scout and remember last-seen forces with increasing uncertainty.</p>
                     <p class="esc-help-prose">Enemy <strong>generals fight as armor</strong> and position their golden command radius to support nearby troops. Wounded troops withdraw to reachable towns, hospitals or harbors and return after recovering. Commanders build useful rear hospitals and coordinate naval assaults with transports, sufficient fighting strength, escorts when threatened, and supply for ordinary troops ashore. They follow the same healing, supply, siege and production rules as you.</p>
                 </div>
                 <div class="esc-help-block">
@@ -13045,6 +13048,7 @@
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=supply-ships-v1"></script>
     <script src="ai-command.js"></script>
+    <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
         const UI = {
@@ -13062,6 +13066,16 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:'2026-10-31T08:00:00-04:00',
+                title:'Stronger frontlines and a new campaign atlas',
+                items:[
+                    'Attacks gather 80% of their assigned group before launching. Support estimates use actual movement speed, advancing formations keep up with their leaders, and rally points move forward with secured territory.',
+                    'Outmatched troops fall back to supplied cover and regroup. Threatened supply corridors receive forces sized to enemy combat power; endangered troops can withdraw before a neck closes. The defense graph includes real bridge connections. Commanders seek exposed enemy supply necks that can cut off observed forces.',
+                    'The campaign has a shaded terrain atlas, region boundaries, route lines and clear region markers, with a new responsive command layout. Recruiting preserves button focus, scroll position and map size. Difficulty explanations show the actual resource, garrison, reward and counterattack settings below the selector.',
+                    'Campaign briefings correctly describe untimed skirmish assaults and full ten-minute defenses. The hospital is redrawn with distinct wards, shaded roofs, windows, an entrance and a pink medical sign.'
+                ]
+            },
             {
                 at:'2026-10-31T00:00:00-04:00',
                 title:'Coordinated commanders, supporting generals and recovery',
@@ -14721,7 +14735,7 @@
                 showEscSection(opts.defaultSection || 'helpSection');
         }
 
-        const WOD_ESC_HELP_VERSION = '20';
+        const WOD_ESC_HELP_VERSION = '21';
 
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
@@ -24724,19 +24738,21 @@
             for(const e of threats){
                 if(checked.has(e.uid)||e._intelMemory||!members.some(m=>Math.hypot(m.x-e.x,m.y-e.y)<hr*6))continue;
                 const nearby=members.filter(m=>Math.hypot(m.x-e.x,m.y-e.y)<hr*9&&
-                    Math.max(0,Math.hypot(m.x-e.x,m.y-e.y)-(m.range||50))/Math.max(1,m.speed||15)<=6),cluster=threats.filter(t=>Math.hypot(t.x-e.x,t.y-e.y)<hr*7);
+                    Math.max(0,Math.hypot(m.x-e.x,m.y-e.y)-(m.range||50))/Math.max(1,(m.speed||15)*getUnitSpeedMultiplier(m)*WOD_MOVE_SPEED_FACTOR)<=6),cluster=threats.filter(t=>Math.hypot(t.x-e.x,t.y-e.y)<hr*7);
                 cluster.forEach(t=>checked.add(t.uid));const local=wodAiForecast(owner,nearby,cluster);contactRatio=Math.min(contactRatio,local.ratio);
                 if(local.ratio<Math.max(1,profile.ratio-.18))contactSafe=false;
             }
             const supplied=members.filter(u=>!u.outOfSupplySeconds||u.outOfSupplySeconds<4||u.type==='marine').length;
             const supplySafe=!members.length||supplied>=Math.ceil(members.length*.6);
-            return {own,enemy,ratio:profile.ratio,ready:supplySafe&&contactSafe&&own>=.4&&forecast.ratio>=profile.ratio,
+            const sufficientNumbers=!threats.length||members.length>=Math.min(3,Math.max(2,Math.ceil(threats.length*.65)));
+            return {own,enemy,ratio:profile.ratio,ready:supplySafe&&contactSafe&&sufficientNumbers&&own>=.4&&forecast.ratio>=profile.ratio,
                 maintain:own>=.4&&supplySafe&&contactSafe&&forecast.ratio>=Math.max(1,profile.ratio-.18),contactSafe,
                 contactRatio:Number.isFinite(contactRatio)?contactRatio:null,forecast,threats:threats.length};
         }
 
         function wodAiTerritoryObjective(owner,members,sectors,taken={}) {
             if(!members.length)return null;
+            const cutoff=wodAiCutObjective(owner,members);if(cutoff?.holdHex)return cutoff;
             const lead=members.find(u=>!wodCanClimb(u))||members[0],reach=wodAiOperationReach(lead),hr=gameData.hexRadius||20;
             const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
             const choices=sectors.filter(t=>t.holdHex&&t.attackHex&&reach.has(getHexKey(t.attackHex))&&wodIsHostileOwner(t.attackHex.owner,owner)&&(!explored||explored.has(getHexKey(t.attackHex))));
@@ -40627,6 +40643,7 @@
 
         /** Keep current AI orders until they arrive, settle on a hold line, or get stuck. */
         function wodAiShouldKeepCurrentOrder(unit) {
+            if(unit&&wodAiTacticalFallback(unit,wodAiGetUnitTaskJob(unit),false))return false;
             if(unit?._trafficYield)return true;
             if(unit?.isGeneral&&wodAiOperationTime()-(unit._aiGeneralAt||0)>3500)return false;
             if(!unit || unit.retreating || unit.moraleBroken) return false;
@@ -40970,12 +40987,13 @@
             const old=gameData._aiDefenseByOwner[owner];
             if(!force && old && old.hexes===gameData.hexes && old.cityStamp===cityStamp && old.topology===topology && now>=old.at && now-old.at<6000)return old;
             const walk=h=>h && (!isWaterHex(h)||isBridgeHex(h));
-            const friendly=h=>walk(h)&&wodIsFriendlyOwner(h.owner,owner);
+            const friendly=h=>walk(h)&&wodSupplyPassable(h,owner);
             const tiles=gameData.hexList.filter(friendly), index=new Map(tiles.map((h,i)=>[getHexKey(h),i]));
-            const edges=tiles.map(h=>cardinalHexDirections.map(d=>index.get(`${h.q+d.q},${h.r+d.r}`)).filter(i=>i!==undefined));
+            const edges=tiles.map(h=>{const links=[];wodSupplyNeighbors(h,n=>{const i=index.get(getHexKey(n));if(i!==undefined&&!links.includes(i))links.push(i);});return links;});
             const roots=[...new Set(wodAiKnownCities(owner).filter(c=>wodIsFriendlyOwner(c.owner,owner)).map(c=>index.get(`${c.q},${c.r}`)).filter(i=>i!==undefined))];
-            const supplied=new Set(roots), queue=roots.slice();
-            for(let qi=0;qi<queue.length;qi++)for(const j of edges[queue[qi]])if(!supplied.has(j)){supplied.add(j);queue.push(j);}
+            const supplied=new Set(roots), queue=roots.slice(),supplyDepth=new Map(roots.map(i=>[i,0]));
+            for(let qi=0;qi<queue.length;qi++)for(const j of edges[queue[qi]])if(!supplied.has(j)){supplied.add(j);supplyDepth.set(j,supplyDepth.get(queue[qi])+1);queue.push(j);}
+            const supplyDistance=new Map([...supplyDepth].map(([i,d])=>[getHexKey(tiles[i]),d]));
             const army=units.filter(u=>u.hp>0&&!['convoy','ship'].includes(u.type));
             army.forEach(ensureUnitId);
             const positions=new Map(army.map(u=>[u.uid,index.get(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))]));
@@ -41056,13 +41074,13 @@
                 for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(k!==i&&k!==j&&!reached.has(k)){reached.add(k);flood.push(k);}
                 let count=0, size=0;
                 for(const k of supplied)if(k!==i&&k!==j&&!reached.has(k)){count+=weights[k];size++;}
-                if(count>=2)cuts.set(i,{troops:count,area:size});
+                if(count>=2)cuts.set(i,{troops:count,area:size,keys:[i,j]});
             }
             for(const [i,cut] of cuts) {
                 const h=tiles[i], pressure=closeEnemies(h);
                 if(h.owner!==owner||!pressure)continue;
                 threats.push({id:'corridor-'+getHexKey(h),kind:'corridor',role:'fix',holdHex:h,area:cut.area,atRisk:cut.troops,
-                    enemies:pressure,score:350+cut.troops*18+Math.min(80,cut.area)});
+                    cutIndices:cut.keys||[i],enemies:pressure,score:350+cut.troops*18+Math.min(80,cut.area)});
             }
             // Wide pincers and attacks away from towns: defend contested territory, not just assets.
             // Cluster the invading force so one battle cannot request a garrison on every tile.
@@ -41081,15 +41099,24 @@
             threats.sort((a,b)=>b.score-a.score);
             const selected=[];
             for(const t of threats)if(t.kind==='relief'||!selected.some(s=>s.kind!=='relief'&&wodAiDist2(s.holdHex.x,s.holdHex.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*7,2)))selected.push(t);
+            for(const cut of selected.filter(t=>t.kind==='corridor').slice(0,12)){
+                const blocked=new Set(cut.cutIndices),safe=new Set(roots.filter(r=>!blocked.has(r))),flood=[...safe];
+                for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(!blocked.has(k)&&!safe.has(k)){safe.add(k);flood.push(k);}
+                cut.riskUnits=new Set(army.filter(u=>positions.get(u.uid)!==undefined&&!safe.has(positions.get(u.uid))&&!blocked.has(positions.get(u.uid))).map(u=>u.uid));
+            }
             const trappedIds=new Set(pockets.flatMap(p=>p.trapped));
             const unitJob={}, jobs=[], available=army.filter(u=>!u.moraleBroken&&(trappedIds.has(u.uid)||!u.retreating&&u.hp/u.maxHp>.34)), plan=gameData.aiTaskForces?.[owner];
-            let budget=Math.max(2,Math.ceil(available.length*(pockets.length?.55:Math.max(.3,wodAiCommander(owner).defense+.1))));
+            let budget=Math.max(2,Math.ceil(available.length*(pockets.length?.55:Math.max(.4,wodAiCommander(owner).defense+.16))));
             const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);};
             for(const t of selected.slice(0,12)) {
                 const job={...t,members:[],response:true};
                 // Trapped units break outward while a limited relief force attacks the same cut from outside.
                 for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
+                const trappedCount=job.members.length;
                 let want=Math.min(t.kind==='relief'?4:6,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
+                const opposition=wodAiThreats(owner).filter(e=>Math.hypot(e.x-t.holdHex.x,e.y-t.holdHex.y)<hr*8);
+                const neededPower=opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*1.15;
+                let responsePower=available.filter(u=>job.members.includes(u.uid)).reduce((n,u)=>n+wodAiUnitCombatPower(u),0);
                 const candidates=available.filter(u=>!unitJob[u.uid]&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
                     wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*(t.kind==='relief'?60:24),2));
@@ -41099,15 +41126,15 @@
                     (old?.unitJob[u.uid]===t.id?-hr*hr*70:0);
                 candidates.sort((a,b)=>cost(a)-cost(b));
                 for(const u of candidates) {
-                    if(want<=0||budget<=0)break;
+                    if(want<=0&&responsePower>=neededPower||budget<=0||job.members.length>=trappedCount+10)break;
                     // Keep the sole fort garrison in place. Its line and relief troops can reinforce it.
                     if(base(u)?.fort||base(u)?.city)continue;
-                    add(job,u);want--;budget--;
+                    add(job,u);want--;budget--;responsePower+=wodAiUnitCombatPower(u);
                 }
                 if(job.members.length)jobs.push(job);
             }
             const rec={at:now,hexes:gameData.hexes,cityStamp,topology,jobs,unitJob,pockets,
-                corridors:selected.filter(t=>t.kind==='corridor'),incursions:incursions.length,suppliedHexes:supplied.size};
+                corridors:selected.filter(t=>t.kind==='corridor'),incursions:incursions.length,suppliedHexes:supplied.size,supplyDistance};
             gameData._aiDefenseByOwner[owner]=rec;return rec;
         }
 
@@ -41286,6 +41313,7 @@
                 if(!next){plan.expireAt=0;return false;}
                 job.objectiveCity=null;job.objectiveHex=null;Object.assign(job,next);goal=job.objectiveCity||job.objectiveHex;
             }
+            wodAiRefreshRally(unit.owner,job,members,goal);
             const balance=wodAiAssaultBalance(unit.owner,members,goal);job.forceBalance=balance;
             const strategy=wodAiBattlePlan(unit.owner),request=strategy.requests[job.id]||{};
             strategy.requests[job.id]={...request,at:now,power:Math.max(0,balance.enemy*balance.ratio-balance.own),goal:goal.id||getHexKey(goal)};
@@ -41298,8 +41326,8 @@
                 const gathered=members.filter(u=>(wodAiDist2(u.x,u.y,job.holdHex.x,job.holdHex.y)<Math.pow(hr*5,2)||wodAiDist2(u.x,u.y,goal.x,goal.y)<Math.pow(hr*7,2)));
                 const gatheredBalance=wodAiAssaultBalance(unit.owner,gathered,goal);
                 const ownJob=members.filter(u=>plan.unitJob[u.uid]===job.id);
-                const assembled=gathered.filter(u=>plan.unitJob[u.uid]===job.id).length>=Math.max(1,Math.ceil(ownJob.length*.6));
-                const ready=gatheredBalance.ready&&(assembled||gatheredBalance.enemy===0&&gathered.length>0);
+                const assembled=gathered.filter(u=>plan.unitJob[u.uid]===job.id).length>=Math.max(1,Math.ceil(ownJob.length*.8));
+                const ready=gatheredBalance.ready&&assembled;
                 job.waitingForStrength=!ready;job.neededPower=Math.max(0,balance.enemy*balance.ratio-balance.own);
                 if(ready){job.phase='assault';job.phaseAt=now;}
             }
@@ -41314,7 +41342,12 @@
                 }
             }else job.stalledAt=null;
             const destination=job.objectiveCity?wodAiTownAssaultHex(unit,job.objectiveCity,members):job.objectiveHex;
-            const target=job.phase==='assemble'?wodAiAssemblyHex(unit,job,goal):destination&&wodAiAdvanceHex(unit,destination,members);
+            let target=job.phase==='assemble'?wodAiAssemblyHex(unit,job,goal):destination&&wodAiAdvanceHex(unit,destination,members);
+            if(job.phase==='assault'&&members.length>=3){
+                const distances=members.map(u=>Math.hypot(u.x-goal.x,u.y-goal.y)).sort((a,b)=>a-b),median=distances[Math.floor(distances.length/2)];
+                const near=wodAiThreats(unit.owner,false).some(e=>Math.hypot(e.x-unit.x,e.y-unit.y)<(e.range||50)+hr*2);
+                if(!near&&Math.hypot(unit.x-goal.x,unit.y-goal.y)<median-hr*4){const here=getNearestHexToPoint(unit.x,unit.y);if(here?.owner===unit.owner)target=here;}
+            }
             unit.aiCaptureHexKey=job.phase==='assemble'?null:destination&&getHexKey(destination);
             if(!target)return false;
             const moved=wodAiMoveUnitTowardHex(unit,target,job.phase==='assemble',job.phase==='assemble'?.7:unit.type==='heavy'?.35:.65);
@@ -41399,6 +41432,7 @@
             let hr = gameData.hexRadius || 20;
             if(job.kind==='scout')return wodAiIssueScoutOrder(unit,job);
             if(unit._medicalRecovering)return true;
+            if(wodAiTacticalFallback(unit,job))return true;
             if(unit.isGeneral&&job.response&&job.kind!=='relief')return wodAiIssueGeneralOrder(unit,job);
             if(job.response)return wodAiIssueDefenseResponse(unit,job);
             if(unit.isGeneral)return wodAiIssueGeneralOrder(unit,job);
@@ -49416,93 +49450,12 @@
             _wodRogueMapBaseKey = '';
         }
 
-        function wodRoguePaintMapBase(ctx2, c, W, H, cells, nodes, edges, cw, ch) {
-            let px = cw / W, py = ch / H;
-            for(let gy = 0; gy < H; gy++) {
-                for(let gx = 0; gx < W; gx++) {
-                    ctx2.fillStyle = getTerrainColor(cells[gy * W + gx]);
-                    ctx2.fillRect(gx * px, gy * py, px + 1, py + 1);
-                }
-            }
-            let pts = nodes.map(n => ({ n, p: wodRogueNodeCanvasPos(n, cw, ch) }));
-            for(let gy = 0; gy < H; gy++) {
-                for(let gx = 0; gx < W; gx++) {
-                    if(cells[gy * W + gx] === 'water') continue;
-                    let x = (gx + 0.5) * px, y = (gy + 0.5) * py;
-                    let best = null, bd = Infinity;
-                    for(let e of pts) {
-                        let dx = x - e.p.x, dy = y - e.p.y;
-                        let d = dx * dx + dy * dy;
-                        if(d < bd) { bd = d; best = e.n; }
-                    }
-                    let own = c && best && c.nodesState[best.id] ? c.nodesState[best.id].owner : (best && best.hq ? 'player' : 'enemy');
-                    ctx2.fillStyle = own === 'player' ? 'rgba(46,204,113,0.20)' : 'rgba(231,76,60,0.16)';
-                    ctx2.fillRect(gx * px, gy * py, px + 1, py + 1);
-                }
-            }
-            ctx2.lineWidth = 2;
-            let advanceBlocked = !!(c && wodRogueAdvanceBlocked(c));
-            for(let [a, b] of edges) {
-                let na = nodes.find(n => n.id === a), nb = nodes.find(n => n.id === b);
-                if(!na || !nb) continue;
-                let pa = wodRogueNodeCanvasPos(na, cw, ch), pb = wodRogueNodeCanvasPos(nb, cw, ch);
-                let oa = c ? c.nodesState[a].owner : (na.hq ? 'player' : 'enemy');
-                let ob = c ? c.nodesState[b].owner : (nb.hq ? 'player' : 'enemy');
-                let isFront = oa !== ob;
-                if(advanceBlocked && isFront) {
-                    ctx2.strokeStyle = 'rgba(231,76,60,0.85)';
-                    ctx2.setLineDash([4, 5]);
-                    ctx2.lineWidth = 3;
-                } else {
-                    ctx2.strokeStyle = isFront ? 'rgba(255,214,90,0.75)' : 'rgba(255,255,255,0.22)';
-                    ctx2.setLineDash(isFront ? [] : [5, 5]);
-                    ctx2.lineWidth = 2;
-                }
-                ctx2.beginPath();
-                ctx2.moveTo(pa.x, pa.y);
-                ctx2.lineTo(pb.x, pb.y);
-                ctx2.stroke();
-            }
-            ctx2.setLineDash([]);
-            ctx2.lineWidth = 2;
+        function wodRoguePaintMapBase(ctx2,c,W,H,cells,nodes,edges,cw,ch) {
+            wodCampaignPaintAtlas(ctx2,c,W,H,cells,nodes,edges,cw,ch);
         }
 
-        function wodRoguePaintMapNodes(ctx2, c, nodes, cw, ch) {
-            let selId = _wodRogueSelectedNode;
-            for(let n of nodes) {
-                let p = wodRogueNodeCanvasPos(n, cw, ch);
-                let owner = c && c.nodesState[n.id] ? c.nodesState[n.id].owner : (n.hq ? 'player' : 'enemy');
-                let playable = c ? wodRogueNodePlayable(n.id) : false;
-                let r = n.capital || n.hq ? 13 : 10;
-                ctx2.beginPath();
-                ctx2.arc(p.x, p.y, r, 0, Math.PI * 2);
-                ctx2.fillStyle = owner === 'player' ? '#2ecc71' : '#c0392b';
-                ctx2.fill();
-                ctx2.lineWidth = n.id === selId ? 4 : 2;
-                ctx2.strokeStyle = n.id === selId ? '#ffffff' : (playable ? '#ffd968' : 'rgba(0,0,0,0.55)');
-                ctx2.stroke();
-                if(n.capital || n.hq || n.industry) {
-                    ctx2.fillStyle = '#ffffff';
-                    ctx2.font = 'bold 11px sans-serif';
-                    ctx2.textAlign = 'center';
-                    ctx2.textBaseline = 'middle';
-                    ctx2.fillText(n.capital ? '★' : n.hq ? '⚑' : '🏭', p.x, p.y + 0.5);
-                }
-                if(c && c.alerts[n.id]) {
-                    ctx2.fillStyle = '#ffd968';
-                    ctx2.font = 'bold 15px sans-serif';
-                    ctx2.textAlign = 'center';
-                    ctx2.fillText('⚠', p.x + r + 8, p.y - r - 2);
-                }
-                ctx2.fillStyle = '#eef6ff';
-                ctx2.font = '600 11px sans-serif';
-                ctx2.textAlign = 'center';
-                ctx2.textBaseline = 'top';
-                ctx2.strokeStyle = 'rgba(0,0,0,0.75)';
-                ctx2.lineWidth = 3;
-                ctx2.strokeText(n.name, p.x, p.y + r + 4);
-                ctx2.fillText(n.name, p.x, p.y + r + 4);
-            }
+        function wodRoguePaintMapNodes(ctx2,c,nodes,cw,ch) {
+            wodCampaignPaintMarkers(ctx2,c,nodes,cw,ch);
         }
 
         function wodRoguePaintMap(opts) {
@@ -49545,7 +49498,8 @@
                 let p = wodRogueNodeCanvasPos(n, cv.width, cv.height);
                 let dx = mx - p.x, dy = my - p.y;
                 let d = dx * dx + dy * dy;
-                if(d < 22 * 22 && d < bd) { bd = d; best = n; }
+                const hit=Math.min(60,Math.max(22,22*cv.width/(cv.clientWidth||cv.width)));
+                if(d < hit * hit && d < bd) { bd = d; best = n; }
             }
             return best;
         }
@@ -49562,9 +49516,7 @@
             let cv = document.getElementById('wodCampMapCanvas');
             if(cv) cv.addEventListener('click', (ev) => {
                 if(!wodRogueLoad()) return;
-                let rect = cv.getBoundingClientRect();
-                let mx = (ev.clientX - rect.left) * (cv.width / rect.width);
-                let my = (ev.clientY - rect.top) * (cv.height / rect.height);
+                const {x:mx,y:my}=wodCampaignMapPoint(ev,cv);
                 let n = wodRogueSelectableNodeAtCanvas(mx, my);
                 if(!n || n.id === _wodRogueSelectedNode) return;
                 _wodRogueSelectedNode = n.id;
@@ -49863,13 +49815,12 @@
                         blockNote = '<p style="color:#ff9d8f">Advance blocked — clear the Concord counterattack first.</p>';
                     else if(blocked && alert)
                         blockNote = '<p style="color:#ffd968">This defense must be fought before the front can move again. Hold ' +
-                            holdClock + ' or take all enemy cities.</p>';
+                            holdClock + ' while retaining a friendly town.</p>';
                     else if(alert)
                         blockNote = '<p style="color:#ffd968">Defense: hold ' + holdClock +
-                            ' or capture every enemy city.</p>';
+                            ' while retaining a friendly town, even if you clear the enemy early.</p>';
                     else if(st.owner === 'enemy')
-                        blockNote = '<p style="color:#ffd968">Assault: capture every enemy city within ' +
-                            holdClock + ' or the attack fails.</p>';
+                        blockNote = '<p style="color:#ffd968">Assault: capture every enemy city. Recruit and build as in skirmish. There is no time limit.</p>';
                     let fromPicker = '';
                     if(origins.length && (alert || st.owner === 'enemy')) {
                         let opts = origins.map(oid => {
@@ -49896,7 +49847,7 @@
                             (wodRogueScaleMapSize(node.size || 60, wodRogueEffectiveAiCount(node)) >= 60 ? 'large' : 'compact')) +
                           ' battlefield' +
                           (wodRogueEffectiveAiCount(node) > 1 ? ' · ' + (wodRogueEffectiveAiCount(node) + 1) + ' factions' : '') +
-                          ' · ' + holdClock + ' battle clock</p>' +
+                          (alert ? ' · survive ' + holdClock : ' · untimed assault') + '</p>' +
                         '<p>' + node.brief + '</p>' +
                         (node.industry ? '<p style="color:#d4af37">Industrial region — still worth +' + WOD_ROGUE_REQ_PER_TERRITORY + ' requisition each turn while held.</p>' : '') +
                         blockNote +
@@ -49923,6 +49874,8 @@
         function wodRefreshCampaignPanel() {
             wodRogueWirePanelOnce();
             let c = wodRogueLoad();
+            const panel=document.querySelector('#campaignPanel .wod-camp-panel'),panelScroll=panel?.scrollTop||0;
+            document.getElementById('campaignPanel').dataset.phase=c?'active':'setup';
             let setup = document.getElementById('wodCampSetup');
             let active = document.getElementById('wodCampSideActive');
             if(setup) setup.style.display = c ? 'none' : 'flex';
@@ -49936,6 +49889,7 @@
                 let lenEl = document.getElementById('wodCampSetLen');
                 if(diffEl && diffEl.value !== d.difficulty) diffEl.value = d.difficulty;
                 if(lenEl && lenEl.value !== d.length) lenEl.value = d.length;
+                const explanation=document.getElementById('wodCampDifficultyCopy');if(explanation)explanation.textContent=wodCampaignDifficultyCopy(d.difficulty);
                 let hint = document.getElementById('wodCampSetHint');
                 if(hint) {
                     let D = WOD_ROGUE_DIFF_PRESETS[d.difficulty] || WOD_ROGUE_DIFF_PRESETS.normal;
@@ -50116,12 +50070,13 @@
             }
             // Shop.
             let shop = document.getElementById('wodCampShop');
-            if(shop) {
-                shop.innerHTML = '';
+            const shopStamp=c.settings.gamePeriod||'modern';
+            if(shop&&shop.dataset.catalogPeriod!==shopStamp) {
+                shop.dataset.catalogPeriod=shopStamp;shop.innerHTML = '';
                 for(let t of ['light','motorized','mountaineer','marine','heavy','ship','transport','supply']) {
                     let b = document.createElement('button');
                     b.type = 'button';
-                    b.className = 'menu-btn';
+                    b.className = 'menu-btn';b.dataset.recruitType=t;
                     let cost = WOD_ROGUE_UNIT_COSTS[t];
                     let unitUp = wodRogueUnitUpkeepRate(t);
                     b.textContent = wodRogueUnitLabel(t) + ' — ' + cost + ' · +' + wodRogueFormatUpkeep(unitUp);
@@ -50140,6 +50095,7 @@
                     shop.appendChild(b);
                 }
             }
+            if(shop)for(const b of shop.querySelectorAll('[data-recruit-type]'))b.disabled=c.over||c.points<WOD_ROGUE_UNIT_COSTS[b.dataset.recruitType]||c.roster.length>=WOD_ROGUE_MAX_ROSTER;
             let healBtn = document.getElementById('wodCampHealBtn');
             if(healBtn) {
                 let hc = wodRogueHealCost();
@@ -50160,6 +50116,7 @@
                     '<p>' + (i === 0 ? '<strong>' + l + '</strong>' : l) + '</p>').join('');
             }
             if(side) side.scrollTop = sideScroll;
+            if(panel)panel.scrollTop=panelScroll;
             // Keep the chronicle scroll box flush with the side panel (research / heal row).
             requestAnimationFrame(() => wodCampFitEventLog());
         }
@@ -57096,11 +57053,17 @@
             return true;
         }
         function wodDrawHospital(ctx,h) {
-            ctx.save();ctx.translate(h.x,h.y);ctx.fillStyle='#17202a88';ctx.fillRect(-18,-9,38,30);
-            ctx.fillStyle='#eee3d8';ctx.strokeStyle='#5b4855';ctx.lineWidth=2;ctx.fillRect(-17,-13,34,29);ctx.strokeRect(-17,-13,34,29);
-            ctx.fillStyle='#bd6d90';ctx.beginPath();ctx.moveTo(-21,-12);ctx.lineTo(0,-24);ctx.lineTo(21,-12);ctx.closePath();ctx.fill();ctx.stroke();
-            ctx.fillStyle='#d95696';ctx.fillRect(-3,-8,6,18);ctx.fillRect(-9,-2,18,6);
-            ctx.fillStyle=factionColors[h.owner]||'#8b9aa2';ctx.fillRect(-17,13,34,4);ctx.restore();
+            ctx.save();ctx.translate(h.x,h.y);ctx.lineJoin='round';
+            ctx.fillStyle='#071b2360';ctx.beginPath();ctx.ellipse(3,17,29,12,0,0,Math.PI*2);ctx.fill();
+            ctx.fillStyle='#a8b0a3';ctx.strokeStyle='#48595a';ctx.lineWidth=1.1;ctx.beginPath();ctx.roundRect(-26,-9,52,31,4);ctx.fill();ctx.stroke();
+            // Two wards flank a taller central entrance, with shaded wall faces.
+            const ward=(x,y,w,hh)=>{ctx.fillStyle='#e2e1cc';ctx.fillRect(x,y,w,hh);ctx.fillStyle='#b4c0b8';ctx.fillRect(x+w-4,y,4,hh);ctx.fillStyle='#718a89';ctx.beginPath();ctx.moveTo(x-2,y);ctx.lineTo(x+2,y-5);ctx.lineTo(x+w+2,y-5);ctx.lineTo(x+w,y);ctx.closePath();ctx.fill();ctx.strokeStyle='#3e595e';ctx.stroke();ctx.fillStyle='#294d5c';for(let wx=x+3;wx<x+w-4;wx+=7){ctx.fillRect(wx,y+5,4,5);ctx.fillStyle='#a8d7cf';ctx.fillRect(wx,y+5,3,1);ctx.fillStyle='#294d5c';}};
+            ward(-24,-4,17,20);ward(7,-4,17,20);ward(-10,-13,20,31);
+            ctx.fillStyle='#4d6470';ctx.beginPath();ctx.roundRect(-13,-22,26,15,2);ctx.fill();ctx.strokeStyle='#344955';ctx.stroke();
+            ctx.fillStyle='#f2e9dc';ctx.beginPath();ctx.roundRect(-7,-20,14,12,2);ctx.fill();ctx.fillStyle='#e775a7';ctx.fillRect(-1.8,-18,3.6,8);ctx.fillRect(-4,-15.8,8,3.6);
+            ctx.fillStyle='#244454';ctx.fillRect(-4,7,8,11);ctx.fillStyle='#9ab8bb';ctx.fillRect(-3,8,2.5,6);ctx.fillRect(.5,8,2.5,6);
+            ctx.fillStyle='#bec3b4';ctx.fillRect(-8,18,16,3);ctx.fillStyle='#e2dfcc';ctx.fillRect(-11,21,22,2);
+            ctx.strokeStyle='#d5d8c7';ctx.beginPath();ctx.moveTo(27,12);ctx.lineTo(27,-17);ctx.stroke();ctx.fillStyle=factionColors[h.owner]||'#93aaa8';ctx.beginPath();ctx.moveTo(27,-17);ctx.lineTo(37,-14);ctx.lineTo(27,-10);ctx.fill();ctx.restore();
         }
         function wodDrawMedicalAndCommandAuras(ctx,structures=true,lite=false) {
             const radius=wodFortCombatAuraRadiusPx(),local=wodLocalPlayerOwner();
