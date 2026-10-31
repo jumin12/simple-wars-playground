@@ -50,7 +50,12 @@ function importAndReward(data, progress) {
 function applyPaidState(data, order, params) {
   if (String(params.steamid) !== order.steamId || String(params.orderid) !== order.id || params.currency !== 'USD') throw new CommerceError('Steam transaction identity did not match.');
   const items = Array.isArray(params.items) ? params.items : params.items?.item;
-  if (!Array.isArray(items) || items.length !== 1 || Number(items[0].itemid) !== order.product.itemId || Number(items[0].qty) !== 1 || Number(items[0].amount) + Number(items[0].vat || 0) !== order.product.usdCents) throw new CommerceError('Steam transaction contents did not match.');
+  const amount = Number(items?.[0]?.amount), tax = Number(items?.[0]?.vat || 0);
+  // Steam adds sales tax in some regions and includes VAT in others. Validate
+  // our stored price against the verified net OR tax-inclusive Steam amount.
+  const priceMatches = Number.isSafeInteger(amount) && Number.isSafeInteger(tax) && amount >= 0 && tax >= 0
+    && (amount === order.product.usdCents || amount + tax === order.product.usdCents);
+  if (!Array.isArray(items) || items.length !== 1 || Number(items[0].itemid) !== order.product.itemId || Number(items[0].qty) !== 1 || !priceMatches) throw new CommerceError('Steam transaction contents did not match.');
   if (REVERSED.test(params.status) || REVERSED.test(items[0].itemstatus)) {
     if (order.granted && !order.reversed) data.gold -= order.product.gold;
     order.reversed = true;
@@ -169,8 +174,9 @@ class SteamCommerce {
   async refresh(session) {
     const orders = await this.store.transaction(session.steamId, data => Object.values(data.orders || {}).filter(o => !o.reversed && (o.granted || this.now() - o.created < 86400000)).slice(-30).map(o => o.id));
     for (const id of orders) {
-      // Refresh never authorizes a new charge; it recovers already captured orders.
-      await this.resolve(session, id, undefined).catch(() => {});
+      // Steam's Approved state proves user consent even if the native callback
+      // was interrupted. Unapproved Init orders still cannot be captured.
+      await this.resolve(session, id, true).catch(() => {});
     }
     return { wallet: await this.getWallet(session) };
   }

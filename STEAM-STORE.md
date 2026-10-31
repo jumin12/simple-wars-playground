@@ -20,7 +20,7 @@ their license. Borrowed/family/café licenses do not grant that currency.
 ## Render
 
 1. Review/apply `render-commerce.yaml` to create the PostgreSQL database in
-   Oregon. It intentionally creates no new relay service, avoiding a change to
+   Ohio, matching the existing multiplayer web service. It intentionally creates no new relay service, avoiding a change to
    the production URL. Review the recurring charge in Render before creation.
 2. On the existing `simple-wars.onrender.com` **web service**, configure the
    database's internal connection string as `DATABASE_URL` and a Steamworks
@@ -54,8 +54,11 @@ bearer sessions are exposed to the renderer. The publisher key is server-only.
 Orders are stored before `InitTxn`. An authorization callback triggers server
 `QueryTxn`, identity/item/currency/price checks, `FinalizeTxn`, and a second query.
 An atomic PostgreSQL transaction applies each settled grant once. A lost final
-response or database write is recovered from Steam's settled state. Refresh does
-not authorize new charges. A canceled/unfinished checkout grants nothing.
+response or database write is recovered from Steam's settled state. Refresh can
+finish an order that Steam confirms the user already approved, including after
+a lost callback; it cannot authorize an unapproved order. Steam's regional sales
+tax and inclusive VAT are checked against the stored price. A canceled or
+unapproved checkout grants nothing.
 
 Settlement reports run every minute with a persistent overlapping cursor.
 Refunds and chargebacks reverse their one-time grant and supporter entitlement;
@@ -78,6 +81,10 @@ failed/canceled orders, server prices, DLC ownership, refunds and bridge tests.
 No real money or production player data is used by these tests.
 
 Run the store UI verification and the bundled web-game client before release.
+`node scripts/verify-steam-sandbox.js` checks real Steam authentication and
+restoration with an isolated desktop profile. Add `--purchase=gold1000` (or another
+catalog product ID) to open an actual no-charge sandbox authorization in the
+Steam overlay. The script refuses to run against a live checkout backend.
 `desktop/` contains the canonical Electron sources; copy these to the wrapper's
 `electron/` directory and rebuild ASAR when changing native integration.
 Runtime sync includes the catalog, art, commerce client and responsive stylesheet.

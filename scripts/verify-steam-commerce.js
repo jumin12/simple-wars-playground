@@ -45,8 +45,10 @@ async function open() {
   service = new SteamCommerce({ store, steam: new SteamApi(secret, 'sandbox', transport) });
 }
 async function login(progress = { profile: { gold: 100 } }) { return service.authenticate(ticket, progress); }
-async function paid(session, sku, { interrupt = false, lostResponse = false } = {}) {
+async function paid(session, sku, { interrupt = false, lostResponse = false, amount, vat } = {}) {
   const order = await service.begin(session, sku, crypto.randomUUID());
+  if (amount !== undefined) fixture.orders.get(order.orderId).items[0].amount = amount;
+  if (vat !== undefined) fixture.orders.get(order.orderId).items[0].vat = vat;
   fixture.orders.get(order.orderId).status = 'Approved';
   fixture.loseFinalizeResponse = lostResponse;
   if (interrupt) {
@@ -110,11 +112,27 @@ async function paid(session, sku, { interrupt = false, lostResponse = false } = 
     fixture.dlc = false; const removed = await login(); assert.equal(removed.wallet.gold,100); assert(!removed.wallet.supporter);
     await login(); assert.equal((await service.getWallet(service.session(removed.session))).gold,100);
     fixture.steamId = A; const again = await login({profile:{gold:9999999}}); assert.equal(again.wallet.gold,19760); assert(again.wallet.ownedSkins.atlasUnits);
+    fixture.steamId = '76561198000000104'; fixture.dlc = false;
+    const taxedAuth = await login(), taxed = service.session(taxedAuth.session);
+    assert.equal((await paid(taxed, 'gold1000', {amount:100,vat:6})).wallet.gold,1100,'sales tax may be added to the catalog price');
+    assert.equal((await paid(taxed, 'gold1000', {amount:83,vat:17})).wallet.gold,2100,'VAT may be included in the catalog price');
+    const interruptedApproval = await service.begin(taxed,'gold1000',crypto.randomUUID());
+    assert.equal((await service.refresh(taxed)).wallet.gold,2100,'refresh cannot capture an unapproved order');
+    fixture.orders.get(interruptedApproval.orderId).status = 'Approved';
+    assert.equal((await service.refresh(taxed)).wallet.gold,3100,'refresh recovers Steam approval after a lost callback');
+    assert.equal((await service.refresh(taxed)).wallet.gold,3100,'recovered approval grants once');
+    const wrongPrice = await service.begin(taxed,'gold1000',crypto.randomUUID());
+    Object.assign(fixture.orders.get(wrongPrice.orderId),{status:'Approved'});
+    fixture.orders.get(wrongPrice.orderId).items[0].amount=99;
+    await assert.rejects(service.resolve(taxed,wrongPrice.orderId,true),/contents did not match/);
+    fixture.orders.get(wrongPrice.orderId).items[0].amount=100;
+    fixture.orders.get(wrongPrice.orderId).items[0].vat=-1;
+    await assert.rejects(service.resolve(taxed,wrongPrice.orderId,true),/contents did not match/);
     const unrevealing = new SteamApi(secret,'sandbox',async url=>{throw Error(url);});
     await assert.rejects(unrevealing.authenticate(ticket), error=>!error.message.includes(secret)&&!error.message.includes(ticket));
     assert(fixture.calls.filter(c=>['InitTxn','FinalizeTxn','QueryTxn','GetReport'].includes(c.method)).every(c=>c.service==='ISteamMicroTxnSandbox'));
     results.postgres = { rollbackRecovery:true, concurrentSpends:true, coldRestart:true, exactOrderIds:true };
-    results.steam = { verifiedIdentity:true, fourProducts:true, duplicateCallback:true, canceledPurchase:true, receiptDeduplication:true, serverPrices:true, refunds:true, directDlcOwnersOnly:true, secretsRedacted:true, sandboxOnly:true };
+    results.steam = { verifiedIdentity:true, fourProducts:true, duplicateCallback:true, canceledPurchase:true, receiptDeduplication:true, serverPrices:true, salesTaxAndVat:true, interruptedApprovalRecovery:true, refunds:true, directDlcOwnersOnly:true, secretsRedacted:true, sandboxOnly:true };
     const notifications=[];let capturedAction;
     const native=createDesktopCommerce({getClient:()=>({localplayer:{getSteamId:()=>({steamId64:BigInt(A)})},auth:{getAuthTicketForWebApi:async identity=>{assert.equal(identity,'simple-wars-store');return{getBytes:()=>Buffer.from(ticket,'hex'),cancel(){}};}}}),notify:result=>notifications.push(result),request:async(url,options)=>{
       capturedAction=url.split('/').pop();const body=JSON.parse(options.body);
