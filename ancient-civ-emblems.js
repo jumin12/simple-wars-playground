@@ -147,7 +147,7 @@
     }
 
     function wodAncientCivPackCost(packId) {
-        return WOD_ANCIENT_CIV_PACKS[packId] ? WOD_ANCIENT_CIV_PACKS[packId].cost : 100;
+        return global.WodStoreCatalog ? global.WodStoreCatalog.skinCost(packId) : (WOD_ANCIENT_CIV_PACKS[packId] ? WOD_ANCIENT_CIV_PACKS[packId].cost : 100) * 5;
     }
 
     function wodAncientCivPackVariants(packId) {

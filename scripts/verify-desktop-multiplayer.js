@@ -67,6 +67,12 @@ async function verifyPackagedDesktop() {
     await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForFunction(() => window.WodMultiplayer && typeof showPanel === 'function');
     assert.equal(await page.evaluate(() => !!window.simpleWarsDesktop), true, 'real sandboxed preload bridge');
+    assert.equal(await page.evaluate(() => typeof simpleWarsDesktop.store), 'function', 'Steam store IPC is exposed');
+    const identity = await page.evaluate(() => simpleWarsDesktop.store('identity'));
+    assert.equal(identity.ok, true, 'trusted main frame can query Steam identity');
+    assert.equal(typeof identity.steamId, 'string');
+    const rejected = await page.evaluate(() => simpleWarsDesktop.store('not-a-real-action'));
+    assert.equal(rejected.ok, false, 'unknown native actions are rejected');
     assert.equal(new URL(page.url()).hostname, '127.0.0.1', 'real desktop loopback origin');
     assert.equal(await page.evaluate(() => WodMultiplayer.getUrl()), PUBLIC_RELAY);
     await page.waitForFunction(() => !window._wodBootBusy && !window._wodMenuBootstrapBusy, null, { timeout: 180000 });
@@ -83,7 +89,7 @@ async function verifyPackagedDesktop() {
     });
     await page.screenshot({ path: path.join(OUT, 'steam-multiplayer.png') });
     assert.deepEqual(errors, [], 'no renderer errors');
-    return { origin: new URL(page.url()).origin, url: await page.evaluate(() => WodMultiplayer.getUrl()), sockets: sockets.length, connected: true, errors };
+    return { origin: new URL(page.url()).origin, url: await page.evaluate(() => WodMultiplayer.getUrl()), sockets: sockets.length, connected: true, steamSdkAvailable: identity.steamId.length === 17, errors };
   } finally {
     fs.writeFileSync(path.join(OUT, 'errors.json'), JSON.stringify(errors, null, 2));
     await app.close();

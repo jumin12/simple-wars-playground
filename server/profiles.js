@@ -3,15 +3,17 @@
  */
 const fs = require('fs');
 const path = require('path');
+const catalog = require('./store-catalog');
+const missionManifest = require('./mission-catalog.json');
 
 const PROFILES_FILE = path.join(__dirname, 'player-profiles.json');
 const SAVE_DEBOUNCE_MS = 1500;
 const DEFAULT_GOLD = 100;
-const SHOP_SKIN_COST = 100;
-const SHOP_ANCIENT_CIV_GAUL_COST = 100;
-const SHOP_ANCIENT_CIV_PACK_COST = 200;
-const SHOP_VISUAL_COST = 100;
-const SHOP_MAP_DEFAULT_PRICE = 150;
+const SHOP_SKIN_COST = 500;
+const SHOP_ANCIENT_CIV_GAUL_COST = 500;
+const SHOP_ANCIENT_CIV_PACK_COST = 1000;
+const SHOP_VISUAL_COST = 500;
+const SHOP_MAP_DEFAULT_PRICE = 750;
 
 const ANCIENT_CIV_PACKS = {
   civRome: { cost: SHOP_ANCIENT_CIV_PACK_COST, variants: ['civRome', 'civRome2'] },
@@ -463,6 +465,9 @@ function ancientCivVariantOwned(profile, variantId) {
 
 function skinIsOwned(profile, skinId) {
   const id = sanitizeSkin(skinId);
+  const premium = catalog.premiumBase(id);
+  if (premium === 'supporterGold') return !!profile.profile.ownedUnitSkins?.supporterGold;
+  if (premium === 'goldenChip') return !!profile.achievements?.goldenChipMaster;
   if (id === 'nato') return true;
   if (id === 'goldenChip') return !!(profile.achievements && profile.achievements.goldenChipMaster);
   if (ANCIENT_CIV_VARIANT_IDS.includes(id)) return ancientCivVariantOwned(profile, id);
@@ -608,7 +613,9 @@ function shopPurchase(playerId, req) {
     const shopId = itemId.startsWith('shop_map_') ? itemId : `shop_map_${itemId}`;
     const mapKey = shopId.replace(/^shop_map_/, '');
     if (cur.ownedShopVisuals[shopId]) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
-    const price = clampInt(req.price, 0, 999999) || SHOP_MAP_DEFAULT_PRICE;
+    let price;
+    try { price = catalog.shopItems({kind:'map',itemId:shopId},missionManifest)[0].price; }
+    catch (_) { return { ok:false, msg:'Unknown mission' }; }
     if ((cur.gold || 0) < price) return { ok: false, msg: 'Not enough gold' };
     cur.gold -= price;
     cur.ownedShopVisuals[shopId] = true;

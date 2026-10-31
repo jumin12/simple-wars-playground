@@ -5,7 +5,7 @@ const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/hd-cosmetics'
 const server=http.createServer((req,res)=>{
  const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
  if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.png':'image/png','.svg':'image/svg+xml','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
+ fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.json':'application/json','.png':'image/png','.svg':'image/svg+xml','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
 });
 (async()=>{
  const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
@@ -16,10 +16,10 @@ const server=http.createServer((req,res)=>{
   results.localPurchases=await page.evaluate(async()=>{
    gameData.gold=99;const denied=await setShopMapSkin('atlas_hd');purchaseUnitSkin('atlasUnits');
    const insufficient=!denied&&gameData.uiSettings.mapSkin==='default'&&!wodShopSkinOwned('atlasUnits')&&gameData.gold===99;
-   gameData.gold=400;await setShopMapSkin('atlas_hd');const mapOnly=gameData.gold===300&&wodHdMapActive()&&!wodShopSkinOwned('atlasUnits');
-   purchaseUnitSkin('atlasUnits');const both=gameData.gold===200&&wodShopSkinOwned('atlasUnits');
+   gameData.gold=2000;await setShopMapSkin('atlas_hd');const mapOnly=gameData.gold===1500&&wodHdMapActive()&&!wodShopSkinOwned('atlasUnits');
+   purchaseUnitSkin('atlasUnits');const both=gameData.gold===1000&&wodShopSkinOwned('atlasUnits');
    await setShopMapSkin('default');await setShopMapSkin('atlas_hd');purchaseUnitSkin('atlasUnits');
-   const noDoubleCharge=gameData.gold===200;updateSkinShop();
+   const noDoubleCharge=gameData.gold===1000;updateSkinShop();
    const equipOption=[...document.querySelector('#shopSelectPlayer').options].some(o=>o.value==='atlasUnits');
    persistWodProgressNow();return{insufficient,mapOnly,both,noDoubleCharge,equipOption};
   });assert(Object.values(results.localPurchases).every(Boolean),JSON.stringify(results.localPurchases));
@@ -31,15 +31,15 @@ const server=http.createServer((req,res)=>{
    return{rows,historicalPack,differentPacks:image('atlas_hd','nato')!==image('atlas_hd','atlasUnits')};
   });assert(results.independence.rows.every(r=>r.sameAcrossMaps)&&results.independence.differentPacks&&results.independence.historicalPack);
   results.cloudPurchases=await page.evaluate(async()=>{
-   delete gameData.ownedShopVisuals.map_atlas_hd;gameData.uiSettings.mapSkin='default';gameData.gold=300;wodCloudCanSync=()=>true;
+   delete gameData.ownedShopVisuals.map_atlas_hd;gameData.uiSettings.mapSkin='default';gameData.gold=1500;wodCloudCanSync=()=>true;
    const original=wodCloudTryPurchase,requests=[];
-   wodCloudTryPurchase=async req=>{requests.push(req);await new Promise(r=>setTimeout(r,30));gameData.gold-=100;gameData.ownedShopVisuals[req.itemId]=true;return true;};
+   wodCloudTryPurchase=async req=>{requests.push(req);await new Promise(r=>setTimeout(r,30));gameData.gold-=500;gameData.ownedShopVisuals[req.itemId]=true;return true;};
    const attempts=await Promise.all([setShopMapSkin('atlas_hd'),setShopMapSkin('atlas_hd')]);
-   const success=gameData.gold===200&&requests.length===1&&attempts[0]&&!attempts[1]&&wodHdMapActive();
+   const success=gameData.gold===1000&&requests.length===1&&attempts[0]&&!attempts[1]&&wodHdMapActive();
    delete gameData.ownedShopVisuals.map_atlas_hd;gameData.uiSettings.mapSkin='default';wodCloudTryPurchase=async()=>false;
-   const rejected=!(await setShopMapSkin('atlas_hd'))&&gameData.uiSettings.mapSkin==='default'&&gameData.gold===200;
+   const rejected=!(await setShopMapSkin('atlas_hd'))&&gameData.uiSettings.mapSkin==='default'&&gameData.gold===1000;
    wodCloudTryPurchase=original;wodCloudCanSync=()=>false;
-   gameData.supporterPack=true;gameData.gold=0;const supporter=await setShopMapSkin('atlas_hd');const included=supporter&&gameData.gold===0&&wodShopSkinOwned('atlasUnits');gameData.supporterPack=false;gameData.ownedShopVisuals.map_atlas_hd=true;
+   gameData.supporterPack=true;gameData.gold=0;const supporter=await setShopMapSkin('atlas_hd');const included=!supporter&&gameData.gold===0&&!wodOwnsShopVisual('map_atlas_hd');gameData.supporterPack=false;gameData.ownedShopVisuals.map_atlas_hd=true;
    return{success,rejected,included};
   });assert(Object.values(results.cloudPurchases).every(Boolean),JSON.stringify(results.cloudPurchases));
   // Every pack retains its own body; each transport is distinct from its warship.
@@ -87,9 +87,9 @@ const server=http.createServer((req,res)=>{
   await page.evaluate(()=>{persistWodProgressNow();saveUiSettings();});await page.reload();await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
   results.persistence=await page.evaluate(()=>({map:wodHdMapActive(),unit:gameData.unitSkin==='atlasUnits',ai:gameData.aiUnitSkin==='nato',mapOwned:wodOwnsShopVisual('map_atlas_hd'),unitOwned:wodShopSkinOwned('atlasUnits')}));assert(Object.values(results.persistence).every(Boolean),JSON.stringify(results.persistence));
   // Validate authoritative purchases without loading or writing actual profiles.
-  const module={exports:{}},sandbox={module,exports:module.exports,require,console,__dirname:path.join(ROOT,'server'),setTimeout:()=>1,clearTimeout:()=>{}};vm.runInNewContext(fs.readFileSync(path.join(ROOT,'server/profiles.js'),'utf8'),sandbox);const profiles=module.exports,id='WOD-TEST-HDCP',p=profiles.getProfile(id);p.profile.gold=199;
-  assert(profiles.shopPurchase(id,{kind:'visual',itemId:'map_atlas_hd'}).ok);assert(!profiles.shopPurchase(id,{kind:'skin',itemId:'atlasUnits'}).ok);p.profile.gold=200;
-  assert(profiles.shopPurchase(id,{kind:'skin',itemId:'atlasUnits'}).ok);assert.equal(p.profile.gold,100);assert(profiles.shopPurchase(id,{kind:'skin',itemId:'atlasUnits'}).alreadyOwned);assert.equal(p.profile.gold,100);assert.equal(profiles.validateEquippedSkin(p,'atlasUnits'),'atlasUnits');results.server=true;
+  const module={exports:{}},sandbox={module,exports:module.exports,require:require('module').createRequire(path.join(ROOT,'server/profiles.js')),console,__dirname:path.join(ROOT,'server'),setTimeout:()=>1,clearTimeout:()=>{}};vm.runInNewContext(fs.readFileSync(path.join(ROOT,'server/profiles.js'),'utf8'),sandbox);const profiles=module.exports,id='WOD-TEST-HDCP',p=profiles.getProfile(id);p.profile.gold=999;
+  assert(profiles.shopPurchase(id,{kind:'visual',itemId:'map_atlas_hd'}).ok);assert(!profiles.shopPurchase(id,{kind:'skin',itemId:'atlasUnits'}).ok);p.profile.gold=1000;
+  assert(profiles.shopPurchase(id,{kind:'skin',itemId:'atlasUnits'}).ok);assert.equal(p.profile.gold,500);assert(profiles.shopPurchase(id,{kind:'skin',itemId:'atlasUnits'}).alreadyOwned);assert.equal(p.profile.gold,500);assert.equal(profiles.validateEquippedSkin(p,'atlasUnits'),'atlasUnits');results.server=true;
   assert.equal(errors.length,0,errors.join('\n'));fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results,null,2));
  } finally {fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

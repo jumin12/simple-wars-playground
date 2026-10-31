@@ -3,7 +3,7 @@ const http=require('http'),fs=require('fs'),path=require('path'),assert=require(
 const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/mobile-specialists');
 fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!f.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(f,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(f)]||'application/octet-stream');res.end(b);});});
+const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!f.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(f,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(f)]||'application/octet-stream');res.end(b);});});
 (async()=>{
  const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));

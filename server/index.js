@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const profiles = require('./profiles');
+const commerceHttp = require('./commerce-http').createCommerceHttp();
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
@@ -947,6 +948,7 @@ function leaveRoom(client) {
 }
 
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/api/steam/')) { void commerceHttp.handle(req, res); return; }
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('simple-wars-mp ok');
