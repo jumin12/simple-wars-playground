@@ -63,7 +63,7 @@ const server=http.createServer((req,res)=>{
     resetWaterTest(owner);testTown(-8,0,owner,'Supply town');const h=gameData.hexes['0,0'];h.type='water';h.owner=0;
     const u=createUnitAt(type,h.x,h.y,owner);u.x=h.x;u.y=h.y;u.hp=u.maxHp*.75;u.range=0;
     if(type==='convoy'){u.convoySeaRoute=false;u._convoyRetryAt=Infinity;}
-    const hp=u.hp;for(let i=0;i<99;i++)update(.1);const at49=u.hp;
+    const hp=u.hp;for(let i=0;i<119;i++)update(.1);const at49=u.hp;
     update(.1);const at5=u.hp;update(.25);const after=u.hp;
     const synced=wodEntityFromNet(wodStripEntityForNet(u)).waterExposureSeconds;
     h.type='grass';setHexOwner(h,owner);update(.1);const reset=u.waterExposureSeconds;h.type='water';setHexOwner(h,0);const fresh=u.hp;update(2);const reentry=u.hp;
@@ -72,7 +72,7 @@ const server=http.createServer((req,res)=>{
    }
    return rows;
   });
-  for(const r of results.grace){assert(Math.abs(r.at49-r.hp)<1e-7&&Math.abs(r.at5-r.hp)<1e-7,'ten full seconds without damage '+JSON.stringify(r));assert(Math.abs(r.loss-.00875)<1e-7,'only time after threshold damages '+JSON.stringify(r));assert(Math.abs(r.synced-10.25)<1e-7&&r.reset===0&&r.fresh===r.reentry&&Math.abs(r.dt-1)<1e-7,'replicated timer, reset, fresh crossing and partial tick '+JSON.stringify(r));}
+  for(const r of results.grace){assert(Math.abs(r.at49-r.hp)<1e-7&&Math.abs(r.at5-r.hp)<1e-7,'ten full seconds without damage '+JSON.stringify(r));assert(Math.abs(r.loss-.00875)<1e-7,'only time after threshold damages '+JSON.stringify(r));assert(Math.abs(r.synced-12.25)<1e-7&&r.reset===0&&r.fresh===r.reentry&&Math.abs(r.dt-1)<1e-7,'replicated timer, reset, fresh crossing and partial tick '+JSON.stringify(r));}
   results.routes=await page.evaluate(async()=>{
    const rows=[];
    for(const owner of [1,2])for(const kind of ['detour','necessary','explicit']) {

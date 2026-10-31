@@ -259,7 +259,7 @@ const server = http.createServer((req, res) => {
       gameData._campaignRun.battleLive=true;
       gameData.money=0;gameData.manpower=0;
       let town=gameData.cities.find(ct=>ct.owner===1&&findSpawnHex(reserve.type,ct,1));
-      let called=wodApplyBuildAtCityForOwner(town,reserve.type,1);
+      let called=wodApplyBuildAtCityForOwner(town,'reserve:'+reserve.type,1);
       let queued=gameData.constructionJobs.find(j=>j.rosterId===reserve.id);
       let remaining=wodCampaignReserveUnits(reserve.type).length;
       wodUpdateConstruction(WOD_PRODUCTION_SECONDS[reserve.type]-1);
@@ -276,9 +276,10 @@ const server = http.createServer((req, res) => {
     });
     let reinforcementType=await page.evaluate(()=>wodCampaignReserveUnits().find(r=>r.type==='heavy')?.type);
     assert(reinforcementType,'armor reserve available for UI check');
-    await page.locator('button[onclick="buyUnit(\''+reinforcementType+'\')"]:visible').first().click();
+    await page.locator('#wodPcProdPaneUnits .campaign-reserves summary').click();
+    await page.locator('#wodPcProdPaneUnits button[onclick="enterBuildPlacementMode(\'reserve:'+reinforcementType+'\')"]').click();
     const arrivalPoint=await page.evaluate(type=>{
-      let c=gameData.cities.find(c=>cityEligibleForBuildPlacementForOwner(c,type,1));
+      let c=gameData.cities.find(c=>cityEligibleForBuildPlacementForOwner(c,'reserve:'+type,1));
       wodFocusOwnedCityFromList(c.id);
       let rect=canvas.getBoundingClientRect();return {x:rect.left+c.x*gameData.camera.zoom-gameData.camera.x,y:rect.top+c.y*gameData.camera.zoom-gameData.camera.y};
     },reinforcementType);
