@@ -11824,7 +11824,7 @@
                 </div>
                 <div class="esc-help-block">
                     <h4>AI commanders, generals and recovery</h4>
-                    <p class="esc-help-prose">Each enemy receives a hidden, randomly chosen commander. Commanders combine town guards, frontline screens, mobile reserves, scouts and attack groups, and reorganize them as threats and reinforcements change. They recruit for military needs while keeping upkeep affordable. Attacks assemble most of their assigned troops, count support by actual arrival time, and regroup in supplied cover when locally outmatched. Commanders defend threatened supply corridors, withdraw endangered troops before a pocket closes, and look for exposed enemy supply necks. Under fog, they scout and remember last-seen forces with increasing uncertainty.</p>
+                    <p class="esc-help-prose">Each enemy receives a hidden, randomly chosen commander. Commanders combine town guards, frontline screens, mobile reserves, scouts and attack groups, and reorganize them as threats and reinforcements change. They keep recruiting whenever a usable town, purchase resources and future upkeep allow it; reaching a preferred army composition never stops recruitment. They may save for a needed unit, invest in useful buildings or pause when resources or upkeep are insufficient. Commanders can recall attackers to defend exposed land and reserves, predict wider closing supply corridors, and coordinate assembly, approach security, flank protection, attack, consolidation and recovery. Attacks assemble most of their assigned troops, count support by actual arrival time, and regroup in supplied cover when locally outmatched. Commanders defend threatened supply corridors, withdraw endangered troops before a pocket closes, and look for exposed enemy supply necks. Under fog, they scout and remember last-seen forces with increasing uncertainty.</p>
                     <p class="esc-help-prose">Enemy <strong>generals fight as armor</strong> and position their golden command radius to support nearby troops. Wounded troops withdraw to reachable towns, hospitals or harbors and return after recovering. Commanders build useful rear hospitals and coordinate naval assaults with transports, sufficient fighting strength, escorts when threatened, and supply for ordinary troops ashore. They follow the same healing, supply, siege and production rules as you.</p>
                 </div>
                 <div class="esc-help-block">
@@ -13070,6 +13070,17 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:'2026-10-31T22:00:00-04:00',
+                title:'Reliable recruitment and stronger battlefield command',
+                items:[
+                    'AI keeps recruiting whenever a usable town, purchase resources and future upkeep allow it. Army composition targets no longer stop production. Useful factory unlocks can happen before ten units; saving has an affordable fallback when defense is urgent or the wait grows long.',
+                    'Frontline coverage reflects border size and known threats. Commanders can recall assigned attackers into defense and reserves while preserving town guards. Supply analysis predicts threatened corridors up to six cells wide and compares closure time with withdrawal time.',
+                    'Reinforcement arrival checks follow legal terrain and bridge crossings. Marines share tactical retreat safeguards. Emergency withdrawals and relief routes take priority over routine movement requests.',
+                    'Land operations share assembly, approach security, flank protection, attack, consolidation and recovery stages. Understrength formations withdraw together, maintain rear screens and finish capturing every town cell before handing over to a garrison.',
+                    'Local bounded decision diagnostics explain recruitment, saving, idle production, defensive reassignment, corridor warnings and operation transitions. New simulations exercise continued recruitment, remote land raids, closing pincers, upkeep limits and group recovery.'
+                ]
+            },
             {
                 at:'2026-10-31T16:00:00-04:00',
                 title:'Chalkboard, Whiteboard and complete battlefield packs',
@@ -14749,7 +14760,7 @@
                 showEscSection(opts.defaultSection || 'helpSection');
         }
 
-        const WOD_ESC_HELP_VERSION = '21';
+        const WOD_ESC_HELP_VERSION = '22';
 
         function populateEscHelpGuide() {
             let mount = document.getElementById('escFullHelpGuide');
@@ -24754,7 +24765,7 @@
             for(const e of threats){
                 if(checked.has(e.uid)||e._intelMemory||!members.some(m=>Math.hypot(m.x-e.x,m.y-e.y)<hr*6))continue;
                 const nearby=members.filter(m=>Math.hypot(m.x-e.x,m.y-e.y)<hr*9&&
-                    Math.max(0,Math.hypot(m.x-e.x,m.y-e.y)-(m.range||50))/Math.max(1,(m.speed||15)*getUnitSpeedMultiplier(m)*WOD_MOVE_SPEED_FACTOR)<=6),cluster=threats.filter(t=>Math.hypot(t.x-e.x,t.y-e.y)<hr*7);
+                    wodAiArrivalSeconds(m,e,m.range||50,6)<=6),cluster=threats.filter(t=>Math.hypot(t.x-e.x,t.y-e.y)<hr*7);
                 cluster.forEach(t=>checked.add(t.uid));const local=wodAiForecast(owner,nearby,cluster);contactRatio=Math.min(contactRatio,local.ratio);
                 if(local.ratio<Math.max(1,profile.ratio-.18))contactSafe=false;
             }
@@ -24795,12 +24806,13 @@
             const requested=Object.values(strategy.requests).filter(r=>wodAiOperationTime()-r.at<30000);
             const pressureByGoal=new Map();for(const r of requested)pressureByGoal.set(r.goal,Math.max(pressureByGoal.get(r.goal)||0,r.power||0));
             const pressureNeed=[...pressureByGoal.values()].reduce((n,p)=>n+Math.ceil(p),0);
-            const desiredGround=Math.min(140,Math.max(guards*4+4,Math.ceil(enemyGround.reduce((n,u)=>n+wodAiUnitCombatPower(u),0)*1.3)+guards*2,pressureNeed>0?ground+Math.min(12,pressureNeed):0));
+            const defenseNeed=taskPlan?.defenseDemand||wodAiDefenseDemand(owner,army,buildAiFrontlineSectors(owner,18),strategy);
+            const desiredGround=Math.max(ground+2,guards*4+4,defenseNeed.armyFloor,Math.ceil(enemyGround.reduce((n,u)=>n+wodAiUnitCombatPower(u),0)*1.3)+guards*2,pressureNeed>0?ground+Math.min(12,pressureNeed):0);
             const hasFactory=cities.some(c=>c.hasFactory),hasHarbor=cities.some(c=>c.hasHarbor&&wodAiHarborUseful(c,owner));
             const infantryMin=guards+Math.max(3,Math.ceil(desiredGround*.42));
             const desired={light:infantryMin,mountaineer:rough>=.12?Math.max(1,Math.ceil(desiredGround*profile.mountain*Math.min(1,rough*2))):0,
                 motorized:hasFactory&&open>.18?Math.max(1,Math.ceil(desiredGround*profile.motor)):0,
-                heavy:hasFactory&&open>.2?Math.min(8,Math.max(1,Math.ceil(desiredGround*profile.armor),Math.ceil(known.filter(u=>u.type==='heavy').length*.7))):0,
+                heavy:hasFactory&&open>.2?Math.min(Math.max(8,Math.ceil(desiredGround*.16)),Math.max(1,Math.ceil(desiredGround*profile.armor),Math.ceil(known.filter(u=>u.type==='heavy').length*.7))):0,
                 marine:0,ship:0,transport:0,supply:0};
             const waiting=army.filter(u=>u._needsTransport&&!u._navalEvacuating).length,demand=context.islandDemand||waiting>0&&count('transport')>0;
             const rescue=army.some(u=>u._navalEvacuating);
@@ -24826,14 +24838,10 @@
             choices.sort((a,b)=>(priority[b]+(desired[b]-count(b))/Math.max(1,desired[b])*15)-(priority[a]+(desired[a]-count(a))/Math.max(1,desired[a])*15));
             // Opening infantry and town guards remain affordable before specialist investment.
             if(missing.length||ground<Math.max(4,guards*2)&&!(rescue&&hasHarbor))return {types:['light'],desired,missing,atRisk,profile};
-            if(ground>=desiredGround)for(let i=choices.length-1;i>=0;i--){
-                const type=choices[i];
-                // Basic troops raised before a factory completes must not lock out
-                // the combined-arms specialists the army is still missing.
-                if(type==='light'||isLandArmyUnit({type})&&ground>=Math.ceil(desiredGround*1.4))choices.splice(i,1);
-            }
-            if(!choices.length&&ground<desiredGround)choices.push('light');
-            return {types:choices,desired,missing,atRisk,profile};
+            // Composition targets select the next useful recruit; they never stop
+            // a solvent army from recruiting. Keep an affordable basic fallback.
+            if(!choices.includes('light'))choices.push('light');
+            return {types:choices,desired,missing,atRisk,profile,desiredGround,needsFactory:!hasFactory&&open>.18&&ground>=Math.max(4,guards*2)};
         }
 
         function wodAiDoctrine(owner) {
@@ -39416,6 +39424,10 @@
             gameData.constructionJobs = [];
             window.wodBattleAudio?.reset();
             gameData._aiEconomyClock = 0;
+            gameData._aiDecisionLog=null;gameData._aiArrivalCache=null;
+            gameData._aiMoveQueue=new Map();gameData._aiLocalSituation=new WeakMap();gameData._aiCombatContexts={};
+            gameData._wodPfCache=new Map();gameData._wodPfVer=(gameData._wodPfVer||0)+1;
+            gameData._landIncomeCacheDirty=true;
             gameData.aiCommanderProfiles = {};
             gameData.aiBattlePlans = {};gameData.aiNavalPlans = {};
             delete gameData.aiCommanderStyle;
@@ -40666,6 +40678,7 @@
             // A new job (flank, relief, counterattack) outranks the march already underway.
             if(unit.aiOrderKind && unit.aiTfKind && unit.aiOrderKind !== unit.aiTfKind) return false;
             const job=wodAiGetUnitTaskJob(unit),phase=job?.operation?.phase||job?.phase;
+            if(job?.stage&&unit.aiOperationStage!==job.stage)return false;
             if(job?.phase==='assault'&&(job.objectiveCity||job.objectiveHex)){
                 const members=wodAiAssaultMembers(unit.owner,job,gameData.aiTaskForces?.[unit.owner]);
                 const balance=wodAiAssaultBalance(unit.owner,members,job.objectiveCity||job.objectiveHex);
@@ -41001,7 +41014,7 @@
             const topology=gameData._supplyTopologyVersion||0;
             gameData._aiDefenseByOwner ||= {};
             const old=gameData._aiDefenseByOwner[owner];
-            if(!force && old && old.hexes===gameData.hexes && old.cityStamp===cityStamp && old.topology===topology && now>=old.at && now-old.at<6000)return old;
+            if(!force && old && old.hexes===gameData.hexes && old.cityStamp===cityStamp && old.topology===topology && now>=old.at && now-old.at<2500)return old;
             const walk=h=>h && (!isWaterHex(h)||isBridgeHex(h));
             const friendly=h=>walk(h)&&wodSupplyPassable(h,owner);
             const tiles=gameData.hexList.filter(friendly), index=new Map(tiles.map((h,i)=>[getHexKey(h),i]));
@@ -41010,7 +41023,7 @@
             const supplied=new Set(roots), queue=roots.slice(),supplyDepth=new Map(roots.map(i=>[i,0]));
             for(let qi=0;qi<queue.length;qi++)for(const j of edges[queue[qi]])if(!supplied.has(j)){supplied.add(j);supplyDepth.set(j,supplyDepth.get(queue[qi])+1);queue.push(j);}
             const supplyDistance=new Map([...supplyDepth].map(([i,d])=>[getHexKey(tiles[i]),d]));
-            const army=units.filter(u=>u.hp>0&&!['convoy','ship'].includes(u.type));
+            const army=units.filter(u=>u.hp>0&&u.type!=='convoy'&&!wodIsNavalUnit(u));
             army.forEach(ensureUnitId);
             const positions=new Map(army.map(u=>[u.uid,index.get(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))]));
             const weights=new Int32Array(tiles.length);
@@ -41092,11 +41105,17 @@
                 for(const k of supplied)if(k!==i&&k!==j&&!reached.has(k)){count+=weights[k];size++;}
                 if(count>=2)cuts.set(i,{troops:count,area:size,keys:[i,j]});
             }
+            for(const cut of wodAiPredictCorridors(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth)){
+                if(!cuts.has(cut.i))cuts.set(cut.i,cut);
+            }
             for(const [i,cut] of cuts) {
-                const h=tiles[i], pressure=closeEnemies(h);
+                const h=tiles[i], pressure=cut.predictive?enemies.filter(e=>wodAiDist2(e.x,e.y,h.x,h.y)<Math.pow(hr*12,2)).length:closeEnemies(h);
                 if(h.owner!==owner||!pressure)continue;
+                const approaching=enemies.filter(e=>wodAiDist2(e.x,e.y,h.x,h.y)<Math.pow(hr*12,2));
+                const cx=approaching.reduce((n,e)=>n+e.x,0)/Math.max(1,approaching.length),cy=approaching.reduce((n,e)=>n+e.y,0)/Math.max(1,approaching.length);
                 threats.push({id:'corridor-'+getHexKey(h),kind:'corridor',role:'fix',holdHex:h,area:cut.area,atRisk:cut.troops,
-                    cutIndices:cut.keys||[i],enemies:pressure,score:350+cut.troops*18+Math.min(80,cut.area)});
+                    cutIndices:cut.keys||[i],cutHexes:(cut.keys||[i]).map(j=>tiles[j]),riskTileKeys:cut.riskTileKeys,predictive:!!cut.predictive,closureSeconds:cut.closureSeconds,withdrawSeconds:cut.withdrawSeconds,
+                    enemies:pressure,score:350+Math.min(8,cut.troops)*18+Math.min(80,cut.area)-Math.hypot(h.x-cx,h.y-cy)/hr*15});
             }
             // Wide pincers and attacks away from towns: defend contested territory, not just assets.
             // Cluster the invading force so one battle cannot request a garrison on every tile.
@@ -41114,7 +41133,9 @@
             }
             threats.sort((a,b)=>b.score-a.score);
             const selected=[];
-            for(const t of threats)if(t.kind==='relief'||!selected.some(s=>s.kind!=='relief'&&wodAiDist2(s.holdHex.x,s.holdHex.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*7,2)))selected.push(t);
+            for(const t of threats)if(t.kind==='relief'||!selected.some(s=>s.kind!=='relief'&&(
+                wodAiDist2(s.holdHex.x,s.holdHex.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*7,2)||
+                t.kind==='corridor'&&s.kind==='corridor'&&t.riskTileKeys&&s.riskTileKeys&&t.riskTileKeys.filter(k=>s.riskTileKeys.includes(k)).length>=Math.min(t.riskTileKeys.length,s.riskTileKeys.length)*.6)))selected.push(t);
             for(const cut of selected.filter(t=>t.kind==='corridor').slice(0,12)){
                 const blocked=new Set(cut.cutIndices),safe=new Set(roots.filter(r=>!blocked.has(r))),flood=[...safe];
                 for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(!blocked.has(k)&&!safe.has(k)){safe.add(k);flood.push(k);}
@@ -41129,7 +41150,7 @@
                 // Trapped units break outward while a limited relief force attacks the same cut from outside.
                 for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
                 const trappedCount=job.members.length;
-                let want=Math.min(t.kind==='relief'?4:6,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
+                let want=t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(6,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
                 const opposition=wodAiThreats(owner).filter(e=>Math.hypot(e.x-t.holdHex.x,e.y-t.holdHex.y)<hr*8);
                 const neededPower=opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*1.15;
                 let responsePower=available.filter(u=>job.members.includes(u.uid)).reduce((n,u)=>n+wodAiUnitCombatPower(u),0);
@@ -41137,9 +41158,10 @@
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
                     wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*(t.kind==='relief'?60:24),2));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
-                const cost=u=>wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y)+
-                    (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main'].includes(base(u)?.kind)?hr*hr*100:0)+
-                    (old?.unitJob[u.uid]===t.id?-hr*hr*70:0);
+                const critical=t.kind==='corridor'||t.kind==='relief';
+                const cost=u=>wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y)/Math.max(.5,wodAiUnitCombatPower(u))+
+                    (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main'].includes(base(u)?.kind)?hr*hr*(critical?1:100):0)+
+                    (old?.unitJob[u.uid]===t.id?-hr*hr*20:0);
                 candidates.sort((a,b)=>cost(a)-cost(b));
                 for(const u of candidates) {
                     if(want<=0&&responsePower>=neededPower||budget<=0||job.members.length>=trappedCount+10)break;
@@ -41147,17 +41169,23 @@
                     if(base(u)?.fort||base(u)?.city)continue;
                     add(job,u);want--;budget--;responsePower+=wodAiUnitCombatPower(u);
                 }
+                if(job.kind==='corridor'){
+                    const rear=available.filter(u=>job.members.includes(u.uid)&&u.hp>u.maxHp*(u.isGeneral?.75:.6)).sort((a,b)=>(supplyDistance.get(getHexKey(getNearestHexToPoint(a.x,a.y)))??Infinity)-(supplyDistance.get(getHexKey(getNearestHexToPoint(b.x,b.y)))??Infinity));
+                    job.delayUnits=new Set(rear.slice(0,8).map(u=>u.uid));
+                }
                 if(job.members.length)jobs.push(job);
             }
             const rec={at:now,hexes:gameData.hexes,cityStamp,topology,jobs,unitJob,pockets,
                 corridors:selected.filter(t=>t.kind==='corridor'),incursions:incursions.length,suppliedHexes:supplied.size,supplyDistance};
-            gameData._aiDefenseByOwner[owner]=rec;return rec;
+            gameData._aiDefenseByOwner[owner]=rec;
+            for(const cut of rec.corridors)wodAiRecord(owner,'corridor-warning',{job:cut.id,width:cut.cutIndices.length,troops:cut.atRisk,predictive:cut.predictive});
+            return rec;
         }
 
         function wodAiIssueDefenseResponse(unit,job) {
             const h=getNearestHexToPoint(unit.x,unit.y), trapped=job.pocketKeys?.has(h&&getHexKey(h));
             const anchor=trapped?job.innerHex:job.holdHex;
-            const target=job.kind==='relief'?anchor:wodAiDefendStandHex(unit.owner,anchor,unit);
+            const target=job.kind==='relief'?wodAiReliefStandHex(unit,job,trapped):job.kind==='corridor'?wodAiCorridorStandHex(unit,job):wodAiDefendStandHex(unit.owner,anchor,unit);
             if(!target)return false;
             const holding=job.kind!=='relief'&&wodAiDist2(unit.x,unit.y,target.x,target.y)<Math.pow((gameData.hexRadius||20)*2.4,2);
             const moved=wodAiMoveUnitTowardHex(unit,target,holding,job.kind==='relief'?.16:.12);
@@ -41235,9 +41263,10 @@
                 if(wodAiCanReach(infantry[0],asset))add('defend',infantry.splice(0,1),null,asset);
             }
             if(wodFogActive()&&infantry.length>=3){const n=Math.min(2,Math.max(1,Math.floor(infantry.length*.1)));for(const scout of infantry.splice(0,n))add('scout',[scout],sectors[0]);}
-            const lineN=infantry.length>4?Math.max(1,Math.round(infantry.length*strategy.defenseShare)):0;
-            for(let i=0;i<lineN;i+=3)add('hold',infantry.splice(0,Math.min(3,lineN-i)),sectors[Math.floor(i/3)%Math.max(1,sectors.length)]);
-            const reserveN=Math.min(Math.max(0,infantry.length-3),Math.floor(ready.length*strategy.reserveShare));
+            const defenseDemand=wodAiDefenseDemand(owner,ready,sectors,strategy,jobs.filter(j=>j.kind==='defend').reduce((n,j)=>n+j.members.length,0));
+            const lineN=Math.min(infantry.length,defenseDemand.line);
+            for(let i=0;i<lineN;i++)add('hold',infantry.splice(0,1),defenseDemand.ranked[i%Math.max(1,sectors.length)]);
+            const reserveN=Math.min(Math.max(0,infantry.length-2),defenseDemand.reserve);
             if(reserveN&&sectors.length)add('reserve',infantry.splice(-reserveN),sectors[0]);
             if(profile.id==='highland'){const climbers=infantry.filter(wodCanClimb);if(climbers.length>=2){for(const u of climbers.slice(0,3))infantry.splice(infantry.indexOf(u),1);add('main',climbers.slice(0,3),attackSectors[0]);}}
             const armor=ready.filter(u=>['heavy','motorized'].includes(u.type));
@@ -41264,7 +41293,7 @@
                 if(operation){operation.jobIds=[marine.id,...(naval?[naval.id]:[])];marine.operation=operation;if(naval)naval.operation=operation;operations.push(operation);}
             }
             for(let i=0;i<ships.length;i+=3)add('naval',ships.slice(i,i+3),attackSectors[0]);
-            const plan={owner,assetSignature,jobs,unitJob,sectors,operations,readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+30000};
+            const plan={owner,assetSignature,jobs,unitJob,sectors,operations,defenseDemand:{line:lineN,reserve:reserveN,frontage:defenseDemand.frontage,armyFloor:defenseDemand.armyFloor},readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+30000};
             gameData.aiTaskForces[owner]=plan;wodAiReadDefense(owner,units,true);return plan;
         }
 
@@ -41323,7 +41352,8 @@
             const hr=gameData.hexRadius||20,now=wodAiOperationTime(),plan=gameData.aiTaskForces[unit.owner];
             const members=wodAiAssaultMembers(unit.owner,job,plan);
             let goal=job.objectiveCity||job.objectiveHex;
-            if(!goal||!wodIsHostileOwner(goal.owner,unit.owner)) {
+            const unfinishedTown=job.objectiveCity&&getCityUrbanTerrainHexes(job.objectiveCity).some(h=>!wodIsFriendlyOwner(h.owner,unit.owner));
+            if(!goal||!wodIsHostileOwner(goal.owner,unit.owner)&&!unfinishedTown&&(!job.operationState||job.operationState.stage==='complete')) {
                 if(job.objectiveHex)plan.sectors=buildAiFrontlineSectors(unit.owner,Math.min(24,Math.max(6,Math.ceil(plan.readyN/2))));
                 const next=job.objectiveHex?wodAiTerritoryObjective(unit.owner,members,plan.sectors):wodAiAssaultObjective(unit.owner,members,plan.sectors);
                 if(!next){plan.expireAt=0;return false;}
@@ -41331,22 +41361,10 @@
             }
             wodAiRefreshRally(unit.owner,job,members,goal);
             const balance=wodAiAssaultBalance(unit.owner,members,goal);job.forceBalance=balance;
+            const op=wodAiUpdateOperation(unit.owner,job,members,goal,plan,balance);
             const strategy=wodAiBattlePlan(unit.owner),request=strategy.requests[job.id]||{};
-            strategy.requests[job.id]={...request,at:now,power:Math.max(0,balance.enemy*balance.ratio-balance.own),goal:goal.id||getHexKey(goal)};
-            if(job.phase==='assault'&&!balance.maintain){
-                const key=goal.id||getHexKey(goal),prior=wodAiBattlePlan(unit.owner).failures[key]||{};
-                wodAiBattlePlan(unit.owner).failures[key]={at:now,count:(prior.count||0)+1};
-                job.phase='assemble';job.phaseAt=now;job.stalledAt=now;
-            }
-            if(job.phase==='assemble') {
-                const gathered=members.filter(u=>(wodAiDist2(u.x,u.y,job.holdHex.x,job.holdHex.y)<Math.pow(hr*5,2)||wodAiDist2(u.x,u.y,goal.x,goal.y)<Math.pow(hr*7,2)));
-                const gatheredBalance=wodAiAssaultBalance(unit.owner,gathered,goal);
-                const ownJob=members.filter(u=>plan.unitJob[u.uid]===job.id);
-                const assembled=gathered.filter(u=>plan.unitJob[u.uid]===job.id).length>=Math.max(1,Math.ceil(ownJob.length*.8));
-                const ready=gatheredBalance.ready&&assembled;
-                job.waitingForStrength=!ready;job.neededPower=Math.max(0,balance.enemy*balance.ratio-balance.own);
-                if(ready){job.phase='assault';job.phaseAt=now;}
-            }
+            strategy.requests[job.id]={...request,at:now,power:Math.max(0,balance.enemy*balance.ratio-balance.own,job.waitingForStrength?Math.ceil(op.roster*.8)-members.length:0),goal:goal.id||getHexKey(goal)};
+            job.neededPower=strategy.requests[job.id].power;
             if(job.waitingForStrength){
                 job.stalledAt??=now;
                 if(now-job.stalledAt>18000&&now-(job.reconsiderAt||0)>18000){
@@ -41358,16 +41376,20 @@
                 }
             }else job.stalledAt=null;
             const destination=job.objectiveCity?wodAiTownAssaultHex(unit,job.objectiveCity,members):job.objectiveHex;
-            let target=job.phase==='assemble'?wodAiAssemblyHex(unit,job,goal):destination&&wodAiAdvanceHex(unit,destination,members);
-            if(job.phase==='assault'&&members.length>=3){
+            let target=['assemble','recover'].includes(op.stage)?wodAiAssemblyHex(unit,job,goal):['secure-approach','protect-flanks'].includes(op.stage)?op.approach:destination&&wodAiAdvanceHex(unit,destination,members);
+            if(op.stage==='consolidate')target=wodAiDefendStandHex(unit.owner,getNearestHexToPoint(unit.x,unit.y),unit);
+            if(op.stage==='attack'&&op.screenIds?.includes(unit.uid))target=wodAiOperationScreenHex(unit,op,goal,members);
+            if(op.stage==='attack'&&unit.isGeneral)return wodAiIssueGeneralOrder(unit,job);
+            if(op.stage==='attack'&&members.length>=3&&!op.screenIds?.includes(unit.uid)){
                 const distances=members.map(u=>Math.hypot(u.x-goal.x,u.y-goal.y)).sort((a,b)=>a-b),median=distances[Math.floor(distances.length/2)];
                 const near=wodAiThreats(unit.owner,false).some(e=>Math.hypot(e.x-unit.x,e.y-unit.y)<(e.range||50)+hr*2);
                 if(!near&&Math.hypot(unit.x-goal.x,unit.y-goal.y)<median-hr*4){const here=getNearestHexToPoint(unit.x,unit.y);if(here?.owner===unit.owner)target=here;}
             }
-            unit.aiCaptureHexKey=job.phase==='assemble'?null:destination&&getHexKey(destination);
+            unit.aiCaptureHexKey=op.stage==='attack'&&!op.screenIds?.includes(unit.uid)?destination&&getHexKey(destination):null;
             if(!target)return false;
-            const moved=wodAiMoveUnitTowardHex(unit,target,job.phase==='assemble',job.phase==='assemble'?.7:unit.type==='heavy'?.35:.65);
-            if(moved){unit.aiHoldStartAt=0;wodAiStampOrder(unit,job.phase==='assemble',target,job.phase==='assemble'?3500:12000);unit.aiOrderPhase=job.phase;}
+            const holding=op.stage!=='attack'||op.screenIds?.includes(unit.uid);
+            const moved=wodAiMoveUnitTowardHex(unit,target,holding,holding?.45:unit.type==='heavy'?.35:.65);
+            if(moved){unit.aiHoldStartAt=0;wodAiStampOrder(unit,holding,target,holding?2500:7000);unit.aiOrderPhase=job.phase;unit.aiOperationStage=op.stage;}
             return true; // Waiting/repathing cannot fall through to an individual suicide attack.
         }
         function wodAiIssueCoastalOperation(unit,job) {
@@ -41451,7 +41473,7 @@
             if(wodAiTacticalFallback(unit,job))return true;
             if(unit.isGeneral&&job.response&&job.kind!=='relief')return wodAiIssueGeneralOrder(unit,job);
             if(job.response)return wodAiIssueDefenseResponse(unit,job);
-            if(unit.isGeneral)return wodAiIssueGeneralOrder(unit,job);
+            if(unit.isGeneral&&!(job.objectiveCity||job.objectiveHex))return wodAiIssueGeneralOrder(unit,job);
             if(job.operation)return wodAiIssueCoastalOperation(unit,job);
             if(wodFogActive()&&['marine','naval'].includes(job.kind)&&!job.operation&&!wodAiKnownCities(unit.owner).some(c=>wodIsHostileOwner(c.owner,unit.owner)))return wodAiIssueScoutOrder(unit,job);
             if((job.objectiveCity||job.objectiveHex) && ['main','armor','raid'].includes(job.kind))return wodAiIssueCoordinatedAssault(unit,job);
@@ -42211,12 +42233,14 @@
             const navalGroundMin=Math.max(4,cities.length*2),navalReady=islandDemand&&!needGuards&&ground>=navalGroundMin;
             seaFront||=islandDemand&&coast.length>0;
             let total = army.length + recruits.length;
-            let limit = gameData.menuAttractMode ? 60 : Math.max(12,Math.min(160,Math.ceil(income/.65)));
+            let limit = gameData.menuAttractMode ? 60 : Infinity;
             const strategy=wodAiBattlePlan(owner,army),mpShort=manpower()<getUnitCost('light').manpower*2;
+            const initialDemand=wodAiRecruitPriorities(owner,cities,army,recruits,{islandDemand});
+            const unlockFactory=initialDemand.needsFactory&&!pending.some(j=>j.mode==='factory');
             const economyRescue=income-upkeep-committedUpkeep<3||mpShort;
             // Keep a recruitment town free when investing; one-town owners invest after their current recruit arrives.
             const navalReserve=navalReady&&count('transport')>0&&count('supply')>0&&count('ship')<Math.max(1,Math.ceil(count('transport')/2))&&ground>=navalGroundMin+2;
-            let canInvest = (!plan.savingFor||economyRescue) && !wodAiKnownEntities(owner).some(u=>u.hp>0&&wodIsHostileOwner(u.owner,owner)&&cities.some(c=>Math.hypot(u.x-c.x,u.y-c.y)<(gameData.hexRadius||20)*10)) && !navalReserve && !needGuards && (army.length>=10||navalReady||economyRescue&&army.length>=4) && clock-plan.lastBuilding >= (navalReady&&!coast.some(c=>c.hasHarbor)?15:65) &&
+            let canInvest = (!plan.savingFor||economyRescue||unlockFactory) && !wodAiKnownEntities(owner).some(u=>u.hp>0&&wodIsHostileOwner(u.owner,owner)&&cities.some(c=>Math.hypot(u.x-c.x,u.y-c.y)<(gameData.hexRadius||20)*10)) && !navalReserve && !needGuards && (army.length>=10||navalReady||unlockFactory||economyRescue&&army.length>=4) && clock-plan.lastBuilding >= (navalReady&&!coast.some(c=>c.hasHarbor)?15:65) &&
                 !pending.some(j => !['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].includes(j.mode)) &&
                 free.length >= Math.min(2,cities.length) && cash() >= (navalReady&&!coast.some(c=>c.hasHarbor)?WOD_PRICE_HARBOR+WOD_PRICE_LIGHT*2:WOD_PRICE_FACTORY+WOD_PRICE_LIGHT*3);
             if(canInvest) {
@@ -42229,6 +42253,7 @@
                 else if(income-upkeep < 9 && cities.filter(c=>c.hasFactory).length < Math.ceil(cities.length/2)) mode = 'factory';
                 let site = mode && free.slice().reverse().find(c => cityEligibleForBuildPlacementForOwner(c,mode,owner)&&(mode!=='harbor'||wodAiHarborUseful(c,owner)));
                 if(site && wodApplyBuildAtCityForOwner(site,mode,owner)) {
+                    wodAiRecord(owner,'investment',{city:site.id,type:mode,reason:unlockFactory&&mode==='factory'?'unlock-combined-arms':'economy-or-access'});
                     plan.lastBuilding=clock; free=free.filter(c=>c!==site);
                 }
             }
@@ -42240,21 +42265,36 @@
                 const first=procurement.types[0];
                 if(first&&wodIsNavalType(first)&&!city.hasHarbor&&wodPlayerTreasury(owner)<getUnitCost(first).money+WOD_PRICE_LIGHT&&!procurement.missing.length){plan.savingFor=first;continue;}
                 let types=procurement.types.filter(t=>t!=='motorized'||city.hasFactory).filter(t=>t!=='heavy'||city.hasFactory).filter(t=>!wodIsNavalType(t)||wodAiHarborUseful(city,owner));
-                const wanted=types[0];
+                let wanted=types[0];
                 plan.desired=procurement.desired;plan.commander=procurement.profile.id;
                 if(wanted&&!canAffordUnit(owner,wanted)){
-                    // Save for the needed class instead of perpetually consuming its budget.
-                    plan.savingFor=wanted;continue;
+                    if(plan.savingFor!==wanted)plan.savingSince=clock;
+                    plan.savingFor=wanted;
+                    const urgent=procurement.missing.length||procurement.atRisk||strategy.intent==='defend'||army.length<10||townPlan?.jobs.some(j=>j.waitingForStrength);
+                    const fallback=types.find(t=>canAffordUnit(owner,t)&&cityEligibleForBuildPlacementForOwner(city,t,owner));
+                    if(fallback&&(urgent||clock-(plan.savingSince??clock)>=20)){
+                        types=[fallback,...types.filter(t=>t!==fallback)];wanted=fallback;
+                        wodAiRecord(owner,'recruit-fallback',{city:city.id,type:fallback,preferred:plan.savingFor,reason:urgent?'military-need':'saving-deadline'});
+                    }else{
+                        plan.idleReason='saving-'+wanted;
+                        wodAiRecord(owner,'production-idle',{city:city.id,reason:plan.idleReason,money:Math.floor(cash()),manpower:Math.floor(manpower())});continue;
+                    }
                 }
                 plan.savingFor=null;
                 for(let type of types) {
                     let newUpkeep = getUnitUpkeep({type});
-                    if(income-upkeep-committedUpkeep-newUpkeep < (wodAiCommander(owner).id==='defensive'?4:2)) continue;
+                    if(income-upkeep-committedUpkeep-newUpkeep < 0) {plan.idleReason='upkeep-unaffordable';continue;}
                     if(!cityEligibleForBuildPlacementForOwner(city,type,owner)) continue;
                     if(wodApplyBuildAtCityForOwner(city,type,owner)) {
+                        plan.idleReason=null;plan.savingSince=null;
+                        wodAiRecord(owner,'recruit',{city:city.id,type,reason:procurement.missing.length?'town-guard':'army-demand'});
                         total++; bought++; committedUpkeep+=newUpkeep;recruits.push(gameData.constructionJobs[gameData.constructionJobs.length-1]);break;
                     }
                 }
+            }
+            if(!bought){
+                plan.idleReason=free.length?(plan.idleReason||(!initialDemand.types.length?'army-target-met':total>=limit?'upkeep-cap':'resources-or-upkeep')):'towns-busy-or-besieged';
+                wodAiRecord(owner,'production-idle',{reason:plan.idleReason,army:total,limit});
             }
             // Fortify a threatened corridor only after funding the army; never stack auras.
             if(!plan.savingFor && !needGuards && army.length >= 10 && clock-plan.lastFort >= 90 && clock-plan.lastBuilding >= 30 &&
@@ -54366,7 +54406,9 @@
             if(unit._medicalRecovering)return false;
             if(gameData._wodPfFrameActive&&!fromQueue&&!wodMpIsHumanOwner(unit.owner)) {
                 const queue=gameData._aiMoveQueue||(gameData._aiMoveQueue=new Map());
-                queue.set(unit,{unit,owner:unit.owner,x,y,holding:holdingOpt,hexes:gameData.hexes});
+                const job=wodAiGetUnitTaskJob(unit),now=wodAiOperationTime();
+                const priority=unit.retreating||unit._aiRegroupUntil>now?4:job?.response?3:['hold','reserve','defend'].includes(job?.kind)?2:1;
+                queue.set(unit,{unit,owner:unit.owner,x,y,holding:holdingOpt,hexes:gameData.hexes,priority,at:now});
                 return true;
             }
             if(wodIsNavalUnit(unit)) {
@@ -54428,7 +54470,8 @@
             gameData._wodAiRouteFrameDone=true;
             // Coalesce orders per unit and apply one complete route per frame. Units
             // retain their current route while waiting instead of stopping or losing it.
-            for(const [unit,order] of queue) {
+            const ordered=[...queue.entries()].sort((a,b)=>(b[1].priority||0)-(a[1].priority||0)||(a[1].at||0)-(b[1].at||0));
+            for(const [unit,order] of ordered) {
                 queue.delete(unit);
                 if(order.hexes!==gameData.hexes||unit.owner!==order.owner||unit.hp<=0||wodMpIsHumanOwner(unit.owner)||
                     !gameData.entities.includes(unit)||unit.boardTransportUid||unit._trafficYield||unit._navalAssaultUntil>wodAiOperationTime()||unit._navalEscortUntil>wodAiOperationTime())continue;
