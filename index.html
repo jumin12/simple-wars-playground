@@ -13071,6 +13071,14 @@
 
         const WOD_CHANGELOG = [
             {
+                at:'2026-11-01T20:20:00Z',
+                title:'Steam and browser startup fix',
+                items:[
+                    'Fixed a launch error in the menu background battle: its AI now has an initialized construction queue before checking hospital needs.',
+                    'The main menu remains available if the optional background battlefield fails to load.'
+                ]
+            },
+            {
                 at:'2026-11-01T18:52:00Z',
                 title:'Persistent offensives, river routes and coordinated invasion staging',
                 items:[
@@ -15458,7 +15466,7 @@
 
         let gameData = {
             money: 10000, income: 10, expenses: 0, manpower: 5000, manpowerIncome: 0, gold: 100, speed: 1,
-            entities: [], cities: [], roads: [], forts: [], hospitals: [], bridges: [],
+            entities: [], cities: [], roads: [], forts: [], hospitals: [], bridges: [], constructionJobs: [],
             hexes: {}, hexList: [],
             camera: { x: 0, y: 0, zoom: 0.5 },
             selection: [], buildMode: null,
@@ -39848,15 +39856,16 @@
             function revealMenu() {
                 if(inner) inner.classList.remove('wod-boot-tween-suppress');
                 requestAnimationFrame(() => {
-                    if(!bootErr) {
-                        if(ov) {
-                            ov.classList.add('hidden');
-                            ov.setAttribute('aria-busy', 'false');
-                        }
-                        // A match may have started while the splash finished — never pop the
-                        // main menu (and its attract battle) on top of live gameplay.
-                        if(gameState === 'MENU') {
-                            if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                    if(ov) {
+                        ov.classList.add('hidden');
+                        ov.setAttribute('aria-busy', 'false');
+                    }
+                    // A match may have started while the splash finished — never pop the
+                    // main menu (and its attract battle) on top of live gameplay.
+                    // A failed optional attract battle must not lock players out of the game.
+                    if(gameState === 'MENU') {
+                        if(UI.mainMenu) UI.mainMenu.classList.remove('hidden');
+                        if(!bootErr) {
                             if(menuDemoSeeded) resumeMenuBackgroundBattle();
                             wodShowChangelogPopup();
                         }
@@ -39940,7 +39949,10 @@
                 } catch(err) {
                     bootErr = true;
                     console.error(err);
-                    if(caption) caption.textContent = 'Could not load. Try refreshing.';
+                    pauseMenuBackgroundBattle();
+                    menuDemoSeeded = false;
+                    menuBattleLive = null;
+                    menuBattleHexListRef = null;
                     if(inner) inner.classList.remove('wod-boot-tween-suppress');
                     gameData._wodSkipMapGenLoader = false;
                     window._wodBootBusy = false;
