@@ -8,18 +8,18 @@ const server=http.createServer((req,res)=>{
 });
 (async()=>{
  const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
+ const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={},lifecycle=[];page.on('pageerror',e=>errors.push(e.stack));page.on('framenavigated',f=>{if(f===page.mainFrame())lifecycle.push({event:'navigation',url:f.url()});});page.on('crash',()=>lifecycle.push({event:'crash'}));
  try{
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
-  await page.evaluate(()=>{
-   setGameSpeed(0,true);wodDismissChangelogPopup();gameData.ownedShopVisuals={...gameData.ownedShopVisuals,map_atlas_hd:true};
+  const installFixtures=()=>{
+   setGameSpeed(0,true);cancelAnimationFrame(animationFrameId);wodDismissChangelogPopup();gameData.ownedShopVisuals={...gameData.ownedShopVisuals,map_atlas_hd:true};
    window.resetWaterTest=(owner=1)=>{
     WOD.makeBlankMap(30);gameState='PLAYING';gameData.mp={enabled:false};gameData._campaignRun=null;gameData.entities=[];gameData.cities=[];gameData.forts=[];gameData.bridges=[];gameData.constructionJobs=[];gameData._encircWork=null;gameData.encircledHexes=new Set();gameData.encircledReliefHexes=new Set();gameData._cityCombatStagingKeys=new Set();gameData.cityCombatBlockForProd=new Set();gameData._matchReadyForEndChecks=false;gameData._aiSpawnBurst=null;gameData._aiStratWork=null;gameData._aiFormChunk=null;gameData.aiTimer=-1e6;gameData.aiStrategyTimer=-1e6;gameData._aiFortGuardTimer=-1e6;gameData.convoyTimer=-1e6;gameData._wodPfCache=new Map();gameData._wodPfVer=(gameData._wodPfVer||0)+1;gameData.money=1e7;gameData.manpower=1e7;gameData.aiMoneyByOwner={2:1e7};gameData.aiManpowerByOwner={2:1e7};
     gameData._aiBridgeCooldown={};
     for(const h of gameData.hexList){h.type='grass';h.owner=owner;h.cityId=null;}
    };
    window.testTown=(q,r,owner,id)=>{const h=gameData.hexes[`${q},${r}`];h.type='urban';h.cityId=id;const c={id,name:id,owner,q,r,x:h.x,y:h.y,hp:1000,maxHp:1000,hasFactory:true,hasHarbor:true};gameData.cities.push(c);return c;};
-  });
+  };await page.evaluate(installFixtures);
 
   results.coastClick=await page.evaluate(()=>{
    resetWaterTest();gameData._transportAiTimer=-1e6;
@@ -71,6 +71,9 @@ const server=http.createServer((req,res)=>{
    const cargo=createUnitAt('light',270,0,1),t=createUnitAt('transport',0,-162,1);t.x=0;t.y=-162;t.cargo=cargo;gameData.entities=gameData.entities.filter(u=>u!==cargo);gameData.selection=[t];t.selected=true;
    gameData.camera={zoom:.8,x:-90,y:-300};setMobileOrderMode(null);syncInfoCardPanel();wodMarkTerrainFullDirty();updateTerrainCache();draw();const h=gameData.hexes['24,4'],r=canvas.getBoundingClientRect();return {x:r.left+h.x*.8+90,y:r.top+h.y*.8+300};
   });await page.mouse.click(results.pointer.x,results.pointer.y,{button:'right'});results.pointer=await page.evaluate(()=>{const t=gameData.entities.find(u=>u.type==='transport');return {key:t.unloadHexKey,goal:t.unloadGoal,arrow:wodPlayerMarchArrowPoints(t)?.length};});await page.screenshot({path:path.join(OUT,'clicked-landing-order.png')});console.log('pointer',JSON.stringify(results.pointer));
+  // Pointer/formation fixtures replace world geometry repeatedly. Test the
+  // defended invasion from a fresh match, without their deferred UI work.
+  await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});await page.evaluate(installFixtures);
   results.townAssault=await page.evaluate(()=>{
    resetWaterTest(2);gameData.fogOfWar=false;gameData._aiEconomyClock=0;gameData._transportAiTimer=0;gameData.aiStrategyTimer=99;gameData.aiTaskForces={};gameData._aiDefenseByOwner={};gameData._aiMoveQueue=new Map();
    for(const h of gameData.hexList){const home=h.q>=-18&&h.q<=-6&&Math.abs(h.r)<=6,island=h.q>=6&&h.q<=18&&Math.abs(h.r)<=6;h.type=home||island?'grass':'water';h.owner=isWaterHex(h)?0:home?2:1;h.cityId=null;}
@@ -78,8 +81,8 @@ const server=http.createServer((req,res)=>{
    const invaders=[];for(const [type,q,r]of [['light',-12,0],['light',-12,3],['light',-12,-3],['heavy',-9,0],['heavy',-9,3],['transport',-5,-2],['transport',-5,2],['supply',-4,0],['ship',-3,-5]]){const u=createUnitAt(type,q*27,r*27,2);u.x=q*27;u.y=r*27;if(isLandArmyUnit(u)&&q!==-12||type==='light'&&r!==0)invaders.push(u);}
    const defender=createUnitAt('light',town.x,town.y,1);defender.x=town.x;defender.y=town.y;let loaded=false,landed=false;
    for(let n=0;n<5000;n++){update(.1);loaded ||= gameData.entities.some(t=>t.type==='transport'&&t.cargo);landed ||= invaders.some(u=>u._navalLanded);if(town.owner===2&&getCityUrbanTerrainHexes(town).every(h=>h.owner===2))break;}
-   gameData.camera={zoom:1,x:-500,y:-390};wodMarkTerrainFullDirty();draw();return{mission:(()=>{const p=gameData.aiNavalPlans?.[2];return p&&{goal:p.goal,phase:p.phase,reason:p.reason};})(),loaded,landed,captured:town.owner===2,fullTown:getCityUrbanTerrainHexes(town).every(h=>h.owner===2),defenderHp:defender.hp,alive:invaders.filter(u=>u.hp>0).length,attrition:invaders.reduce((n,u)=>n+(u.attritionHpLost||0),0),fleet:gameData.entities.filter(wodIsNavalUnit).map(u=>({type:u.type,x:u.x,y:u.y,goal:u.orderTarget,cargo:u.cargo?.type})),troops:invaders.map(u=>({type:u.type,x:u.x,y:u.y,hp:u.hp,job:u.aiTfKind,advance:u._navalAdvanceGoal,landed:u._navalLanded,yield:u._trafficYield,goal:u.orderTarget}))};
-  });console.log('townAssault',JSON.stringify(results.townAssault));await page.screenshot({path:path.join(OUT,'defended-town-invasion.png')});
+   return{mission:(()=>{const p=gameData.aiNavalPlans?.[2];return p&&{goal:p.goal&&{id:p.goal.id,x:p.goal.x,y:p.goal.y,owner:p.goal.owner},phase:p.phase,reason:p.reason};})(),loaded,landed,captured:town.owner===2,fullTown:getCityUrbanTerrainHexes(town).every(h=>h.owner===2),defenderHp:defender.hp,alive:invaders.filter(u=>u.hp>0).length,attrition:invaders.reduce((n,u)=>n+(u.attritionHpLost||0),0),fleet:gameData.entities.filter(wodIsNavalUnit).map(u=>({type:u.type,x:u.x,y:u.y,goal:u.orderTarget,cargo:u.cargo?.type})),troops:invaders.map(u=>({type:u.type,x:u.x,y:u.y,hp:u.hp,job:u.aiTfKind,advance:u._navalAdvanceGoal,landed:u._navalLanded,yield:u._trafficYield,goal:u.orderTarget}))};
+  });console.log('townAssault',JSON.stringify(results.townAssault));await page.evaluate(()=>{gameData.selection=[];gameData.camera={zoom:1,x:-500,y:-390};wodMarkTerrainFullDirty();draw();});await page.screenshot({path:path.join(OUT,'defended-town-invasion.png')});
   results.obstacles=await page.evaluate(()=>{
    const rows=[];for(const type of ['light','heavy','transport','supply']){
     resetWaterTest();gameData.fogOfWar=false;gameData._transportAiTimer=-1e6;const naval=wodIsNavalUnit({type});for(const h of gameData.hexList){h.type=naval?'water':'grass';h.owner=naval?0:1;if(h.q===0&&Math.abs(h.r)<=7)h.type=naval?'grass':'mountain';}
@@ -90,6 +93,6 @@ const server=http.createServer((req,res)=>{
   });console.log('obstacles',JSON.stringify(results.obstacles));
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));assert(!errors.length,errors.join('\n'));
   if(!process.env.WOD_PROBE){assert(results.coastClick.planned.distance<=54&&results.coastClick.landed&&!results.coastClick.invalid,'clicked coast must be the landing destination');assert(results.liveAi.landed>=4&&results.liveAi.army.every(u=>u.hp>0&&!u.attrition)&&results.liveAi.support.safe/results.liveAi.support.ticks>.95&&!results.liveAi.invalid,'normal AI must ferry and sustain successive waves');assert(results.routes.every(r=>r.arrived&&!r.invalid&&r.ratio<1.04),'clear routes should be direct and arrive');assert(results.fogScout.initiallyKnown===0&&results.fogScout.discovered&&results.fogScout.loaded&&results.fogScout.landed,'idle fleet must scout, discover and invade without hidden knowledge');assert(results.groupLanding.landed===2&&results.groupLanding.planned.every(r=>r.distance<=54)&&!results.groupLanding.invalid,'selected transports must land together near the clicked coast');assert(results.pointer.key==='24,4'&&results.pointer.arrow>=2,'real right click must set the correct landing and water-route arrow');assert(results.townAssault.loaded&&results.townAssault.landed&&results.townAssault.captured&&results.townAssault.fullTown,'AI must complete a defended coastal town assault');assert(results.obstacles.every(r=>r.arrived&&!r.invalid&&r.length<820),'land and naval units must take clean obstacle detours');}
- }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));fs.writeFileSync(path.join(OUT,'lifecycle.json'),JSON.stringify(lifecycle,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
 
