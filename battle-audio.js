@@ -8,7 +8,7 @@
   const buffers=new Map(),loading=new Map(),seen=new Set(),shots=new Set();
   let oldJobs=new Map(),activeEra=null,selectionToken=0,lastSelection=-10000,lastMove=-10000,selectionVoice=null;
   const buses=new Set(),battles=new Map(),selectionVariants={},recentPlays=[];
-  const plays={battle:0,mobilize:0,construction:0,complete:0,selection:0,move:0};
+  const plays={battle:0,mobilize:0,construction:0,complete:0,selection:0,move:0,destruction:0};
   function record(era,kind){recentPlays.push({era,kind});if(recentPlays.length>40)recentPlays.shift();}
   let volume=1,muted=false;
   try{volume=Math.max(0,Math.min(1,Number(localStorage.getItem('wodSfxVolume')??1)));muted=localStorage.getItem('wodSfxMuted')==='1';}catch(_){}
@@ -147,6 +147,22 @@
     src.connect(amp);amp.connect(filter);filter.connect(pan);pan.connect(master);shots.add(src);plays[kind]++;record(era,kind);
     src.onended=()=>{shots.delete(src);src.disconnect();amp.disconnect();filter.disconnect();pan.disconnect();};src.start();
   }
+  // A compact collapse: low impact, falling masonry and a soft dust tail.
+  // No modern weapons are introduced into pre-gunpowder eras.
+  function destroyStructure(point){
+    if(!context||context.state!=='running'||muted||volume===0||!scene?.enabled||shots.size>=6)return false;
+    const pos=spatial(point);if(pos.gain<=0)return false;
+    const now=context.currentTime,duration=1.35,rate=context.sampleRate,buffer=context.createBuffer(1,Math.ceil(rate*duration),rate),data=buffer.getChannelData(0);
+    let low=0;
+    for(let i=0;i<data.length;i++){const t=i/rate,noise=Math.random()*2-1;low=low*.94+noise*.06;
+      const impact=Math.sin(2*Math.PI*(68*t-18*t*t))*Math.exp(-t*12),rubble=noise*Math.exp(-t*4)*(.22+.18*Math.sin(t*53)**2),dust=low*Math.exp(-t*2.5)*1.4;
+      data[i]=Math.tanh(impact*.6+rubble+dust)*Math.min(1,t/.007)*Math.min(1,(duration-t)/.12);
+    }
+    const src=context.createBufferSource(),amp=context.createGain(),filter=context.createBiquadFilter(),pan=context.createStereoPanner();
+    src.buffer=buffer;src._wodEra=scene.era;amp.gain.value=pos.gain*.72;filter.type='lowpass';filter.frequency.value=pos.cutoff+700;pan.pan.value=pos.pan;
+    src.connect(amp);amp.connect(filter);filter.connect(pan);pan.connect(master);shots.add(src);plays.destruction++;record(scene.era,'destruction');
+    src.onended=()=>{shots.delete(src);src.disconnect();amp.disconnect();filter.disconnect();pan.disconnect();};src.start(now);return true;
+  }
   function update(s){
     scene=s;if(!setEra(s.era)){stopBattle(true);return;}
     if(context?.state==='running')for(let kind of KINDS)load(s.era,kind);
@@ -189,7 +205,7 @@
     document.querySelectorAll('.wod-sfx-mute').forEach(e=>e.addEventListener('change',()=>{muted=e.checked;try{localStorage.setItem('wodSfxMuted',muted?'1':'0');}catch(_){}syncUi();}));syncUi();
   }
   document.addEventListener('visibilitychange',()=>{if(document.hidden)reset();});
-  window.wodBattleAudio={update,reset,spatial,selectUnits:(era,units)=>acknowledge(era,units,'selection'),moveUnits:(era,units)=>acknowledge(era,units,'move'),collectEngagements,debug:()=>({
+  window.wodBattleAudio={update,reset,spatial,destroyStructure,selectUnits:(era,units)=>acknowledge(era,units,'selection'),moveUnits:(era,units)=>acknowledge(era,units,'move'),collectEngagements,debug:()=>({
     unlocked:context?.state==='running',era:scene?.era,playing:battles.size>0,volume,muted,loaded:buffers.size,plays:{...plays},recentPlays:recentPlays.slice(),
     audibleEras:[...new Set([...buses].filter(bus=>bus.amp.gain.value>0).map(bus=>bus.era).concat([...shots].map(voice=>voice._wodEra)))],
     gain:Math.max(0,...[...battles.values()].map(bus=>bus.amp.gain.value)),

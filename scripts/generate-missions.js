@@ -1431,7 +1431,7 @@ function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   const manifest = [];
   for (const build of MISSIONS) {
-    const m = build();
+    const m = require('./mission-rosters').modernizeMissionRoster(build());
     // sanity: player owns >= 1 city; every AI owner referenced owns >= 1 city
     const owners = new Set(m.data.cities.map((c) => c.owner));
     if (!owners.has(1)) throw new Error(m.file + ': player owns no city');
@@ -1448,9 +1448,9 @@ function main() {
     for (const u of m.data.entities) {
       const h = byKey.get(Math.round(u.x / SPACING) + ',' + Math.round(u.y / SPACING));
       if (!h) throw new Error(m.file + ': unit ' + u.uid + ' off map');
-      if (u.type === 'ship' && h.type !== 'water') throw new Error(m.file + ': ship ' + u.uid + ' on ' + h.type + ' at ' + h.q + ',' + h.r);
-      if (u.type !== 'ship' && (h.type === 'water' || h.type === 'mountain')) throw new Error(m.file + ': ' + u.type + ' ' + u.uid + ' on ' + h.type + ' at ' + h.q + ',' + h.r);
-      if (u.type !== 'ship' && h.owner !== 0 && h.owner !== u.owner) throw new Error(m.file + ': ' + u.type + ' ' + u.uid + ' standing on owner-' + h.owner + ' land (unit owner ' + u.owner + ') at ' + h.q + ',' + h.r);
+      if (['ship','transport','supply'].includes(u.type) && h.type !== 'water') throw new Error(m.file + ': ship ' + u.uid + ' on ' + h.type + ' at ' + h.q + ',' + h.r);
+      if (!['ship','transport','supply'].includes(u.type) && (h.type === 'water' || h.type === 'mountain')) throw new Error(m.file + ': ' + u.type + ' ' + u.uid + ' on ' + h.type + ' at ' + h.q + ',' + h.r);
+      if (!['ship','transport','supply'].includes(u.type) && h.owner !== 0 && h.owner !== u.owner) throw new Error(m.file + ': ' + u.type + ' ' + u.uid + ' standing on owner-' + h.owner + ' land (unit owner ' + u.owner + ') at ' + h.q + ',' + h.r);
     }
     // Connectivity: every enemy capital reachable over land/bridges — except the naval
     // missions where marines/ships are the intended route.

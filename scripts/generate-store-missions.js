@@ -1403,7 +1403,7 @@ function validateMission(m) {
     for(let i=0;i<queue.length;i++)for(const [q,r]of dirs){const n=byKey.get(`${queue[i].q+q},${queue[i].r+r}`),k=n&&`${n.q},${n.r}`;if(n&&n.owner===c.owner&&!['water','mountain'].includes(n.type)&&!seen.has(k)){seen.add(k);queue.push(n);}}
   }
   const occupied=new Set();for(const u of data.entities){const key=`${Math.round(u.x/27)},${Math.round(u.y/27)}`,h=byKey.get(key);if(!h||occupied.has(key))throw Error(m.file+': invalid/overlapping unit');occupied.add(key);
-    if(['ship','transport'].includes(u.type)&&h.type!=='water'||!['ship','transport','marine'].includes(u.type)&&!supply.get(u.owner)?.has(key))throw Error(m.file+': unsupplied unit '+u.name);
+    if(['ship','transport','supply'].includes(u.type)&&h.type!=='water'||!['ship','transport','supply','marine'].includes(u.type)&&!supply.get(u.owner)?.has(key))throw Error(m.file+': unsupplied unit '+u.name);
   }
 }
 
@@ -1411,7 +1411,7 @@ function main() {
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
   const campaign=buildHistoricalCampaigns({MapBuilder,ev});
   const singles = [buildNormandyDDay(), buildKurskCitadel(), buildMidway(), ...buildHistoricalMissions({MapBuilder,ev})].map(refineLegacyBattlefield).map(polishStoreMission).map(m=>refineHistoricalMission(m,ev));
-  const missions=[...singles,...campaign.missions.map(polishStoreMission)];
+  const missions=[...singles,...campaign.missions.map(polishStoreMission)].map(require('./mission-rosters').modernizeMissionRoster);
   const catalog=[...singles.map(m=>m.entry),...campaign.packs];
   const keep = new Set(catalog.map(m=>m.id));
   const manifest = { maps: [], missions: [] };
