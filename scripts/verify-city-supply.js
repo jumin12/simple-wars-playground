@@ -55,6 +55,7 @@ const server=http.createServer((req,res)=>{
    const reconnected=out(runner);setHexOwner(hex(2,0),2);const cutAgain=out(runner);
    reset();city(0,0,1,'Diagonal town');city(-12,-12,2,'Enemy');hex(1,1).owner=1;hex(2,2).owner=1;
    const diagonal=spawn(2,2);scan();const diagonalCut=out(diagonal);
+   setHexOwner(hex(1,0),1);setHexOwner(hex(1,1),1);setHexOwner(hex(2,1),1);const diagonalCorridor=!out(diagonal);
    hex(3,2).owner=0;scan();const neutralEdge=out(diagonal);
    const maxQ=Math.max(...gameData.hexList.filter(h=>h.r===0).map(h=>h.q));const edgeHex=hex(maxQ,0);edgeHex.owner=1;const edgeInf=spawn(maxQ,0),edgeMarine=spawn(maxQ,0,'marine');
    scan();const mapEdge=out(edgeInf);hex(maxQ-1,0).type='water';scan();const coast={infantry:out(edgeInf),marine:out(edgeMarine)};
@@ -67,7 +68,7 @@ const server=http.createServer((req,res)=>{
    const editor=document.getElementById('mapEditorApp');if(editor)editor.style.display='none';UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.classList.remove('hidden');canvas.style.display='block';WOD.setEditorSuppressTerrainBake(false);wodSyncViewportAndCanvas();
    const extent=Math.max(...gameData.hexList.map(h=>Math.max(Math.abs(h.x),Math.abs(h.y))));gameData.camera.zoom=Math.min(canvas.clientWidth,canvas.clientHeight)/(extent*2.1);gameData.camera.x=-canvas.clientWidth/2;gameData.camera.y=-canvas.clientHeight/2;
    wodMarkTerrainFullDirty();updateTerrainCache();draw();
-   return {before,immediate,afterTick,lostCity,allied,allianceEnded,guestSupplied,disconnected,reconnected,cutAgain,diagonalCut,neutralEdge,mapEdge,coast,waterLost};
+   return {before,immediate,afterTick,lostCity,allied,allianceEnded,guestSupplied,disconnected,reconnected,cutAgain,diagonalCut,diagonalCorridor,neutralEdge,mapEdge,coast,waterLost};
   });
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));await page.screenshot({path:path.join(OUT,'captured-city-supply.png')});
   assert(Object.values(results.before).every(Boolean),'townless pocket starts out of supply');
@@ -77,7 +78,7 @@ const server=http.createServer((req,res)=>{
   assert(Object.values(results.allied).every(v=>!v)&&results.allianceEnded,'friendly allied cities supply the pocket until alliance ends');
   assert(results.guestSupplied,'multiplayer guests ignore stale encirclement flags after the host reports town capture');
   assert(results.disconnected&&!results.reconnected&&results.cutAgain,'opening or cutting a land corridor updates supply immediately');
-  assert(!results.diagonalCut&&!results.neutralEdge&&results.mapEdge,'friendly diagonal land reaches its town; an unrelated neutral tile or map edge is not a supply source');
+  assert(results.diagonalCut&&results.diagonalCorridor&&!results.neutralEdge&&results.mapEdge,'corner-only contacts are cut; a friendly stair-step corridor supplies normally; neutral cells and map edges do not supply');
   assert(results.coast.infantry&&!results.coast.marine&&results.waterLost,'only marines retain ocean/river supply and lose it when cut off from water');
   assert.equal(errors.length,0,errors.join('\n'));console.log(JSON.stringify(results,null,2));
  }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}

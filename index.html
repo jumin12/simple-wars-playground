@@ -11888,7 +11888,7 @@
                     <h4>Supply and the 10-second attrition timer</h4>
                     <p class="esc-help-prose"><strong>10-second grace period:</strong> isolation must first persist for two full seconds before an out-of-supply warning or countdown appears. Brief interruptions reset this confirmation. The unit then receives ten full seconds of game time before supply attrition damages it (twelve continuous seconds of isolation in total). A yellow countdown appears above the unit; its effects page shows the remaining time. Restoring supply or boarding a transport resets the clock. Pausing stops the timer; 2× and 3× advance game time faster. Healing is blocked while out of supply, including during the countdown. This rule is identical for your troops and the AI. Ships and marines are exempt from water attrition; ordinary troops swimming without a transport are not protected by supply ships.</p>
                     <p class="esc-help-prose">Starting armies deploy on friendly land connected to an owned town. About 20% cover the supplied border evenly and 80% start near towns, with armor in the rear. Empty offshore holdings count toward balanced land ownership but receive no starting land troops.</p>
-                    <p class="esc-help-prose">Every <strong>friendly town supplies its connected friendly land</strong>, including a captured enemy town. Supply can enter through any friendly-held urban cell while you own the town; a center cell contested during a siege does not disable the rest of the town. Capturing urban cells of a town still owned by an enemy does not make it your supply source. A surrounded pocket containing a friendly town remains supplied: its units take no encirclement damage and can recover when safe. Units lose land supply only when they have no continuous straight or diagonal land route to a friendly town. Completed bridges act only as land corridors: a unit on a bridge still needs that corridor to reach a friendly city. Bridge ownership, or a disconnected bridge by itself, does not supply units. These supply, warning and attrition rules apply equally to player and enemy armies, including when hostile territory is captured underneath a unit. Such pockets are marked <strong>encircled</strong>. After two seconds confirming isolation, units receive <strong>ten uninterrupted simulation seconds out of supply</strong> before taking <strong>3.5% max HP attrition per second</strong>; they cannot heal during this grace period. Regaining city or supply-ship supply, or boarding a transport, resets the countdown. Moving between unsupplied land and water does not reset it. The warning above each unit and its effects page show the time remaining. Map edges and neutral borders do not supply a townless pocket. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though it had a town connection. Infantry and armor in the same coastal pocket still need a friendly town. Forts only halve unsupplied attrition. Active fighting at a town can pause production even while it supplies its territory.</p>
+                    <p class="esc-help-prose">Every <strong>friendly town supplies its connected friendly land</strong>, including a captured enemy town. Supply can enter through any friendly-held urban cell while you own the town; a center cell contested during a siege does not disable the rest of the town. Capturing urban cells of a town still owned by an enemy does not make it your supply source. A surrounded pocket containing a friendly town remains supplied: its units take no encirclement damage and can recover when safe. Units lose land supply when they have no continuous land corridor to a friendly town. Diagonal advances remain supplied through friendly side cells; touching only at a corner between hostile or water cells does not carry supply. Completed bridges act only as land corridors: a unit on a bridge still needs that corridor to reach a friendly city. Bridge ownership, or a disconnected bridge by itself, does not supply units. These supply, warning and attrition rules apply equally to player and enemy armies, including when hostile territory is captured underneath a unit. Such pockets are marked <strong>encircled</strong>. After two seconds confirming isolation, units receive <strong>ten uninterrupted simulation seconds out of supply</strong> before taking <strong>3.5% max HP attrition per second</strong>; they cannot heal during this grace period. Regaining city or supply-ship supply, or boarding a transport, resets the countdown. Moving between unsupplied land and water does not reset it. The warning above each unit and its effects page show the time remaining. Map edges and neutral borders do not supply a townless pocket. <strong>Marines only:</strong> a pocket connected to an ocean or river remains supplied for marines, as though it had a town connection. Infantry and armor in the same coastal pocket still need a friendly town. Forts only halve unsupplied attrition. Active fighting at a town can pause production even while it supplies its territory.</p>
                     <p class="esc-help-prose"><strong>Bridge supply:</strong> completed bridges count as land for movement and supply. Recovery still requires a town or hospital radius. They connect friendly land on both banks to a friendly town, so an island without a town can be supplied across a bridge. A supplied deck can carry a hospital aura; a bridge alone does not provide healing. Capturing a bank or removing the bridge can break this connection. Unfinished bridges and open water do not carry ordinary land supply.</p>
                     <p class="esc-help-prose"><strong>Bridge construction:</strong> both ends must touch usable land and at least one bank must be in the builder’s own territory. The opposite bank may be hostile. Player and AI use the same rule. If both banks are lost before construction finishes, the job is cancelled and its money refunded.</p>
                     <p class="esc-help-prose"><strong>Island landings:</strong> troops capture only the normal area around them, even when an island is undefended or its town has been captured. Water is an open boundary: coastal territory never surrenders automatically as an encircled pocket. Fully surrounded inland remnants can still transfer. Infantry and armor on a townless island still need a friendly town connection for supply; marines retain their water-supply exception.</p>
@@ -13053,7 +13053,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=diagonal-supply-front-reserves-20261102"></script>
+    <script src="ai-command.js?v=natural-corners-supply-20261102"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13072,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-02T07:20:00Z",
+                title:"Natural terrain joins and reliable encirclements",
+                items:[
+                    "Supply follows real land corridors and completed bridge links for both factions. Corner-only contacts through hostile flanks no longer supply trapped troops or generals; friendly stair-step corridors and held town supply still work.",
+                    "Checkerboard frontlines form complete rounded rings instead of four broken ends. Empty diagonal tips are tidied without transferring occupied cells, towns or structures or opening artificial supply routes.",
+                    "Generated terrain resolves alternating mountain, forest and plain corners. Older maps render those joins with rounded edges; water corners never create a fake land bridge."
+                ]
+            },
             {
                 at:'2026-11-02T02:00:00Z',
                 title:'Connected town supply, active reserves and clearer structures',
@@ -33692,8 +33701,7 @@
             for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
                 let city = gameData.cities[ci];
                 if(!wodIsFriendlyOwner(city.owner,owner)) continue;
-                if(regionKeys.has(`${city.q},${city.r}`)) return true;
-                for(let uh of getCityUrbanTerrainHexes(city)) {
+                for(let uh of wodCitySupplySourceHexes(city)) {
                     if(regionKeys.has(getHexKey(uh))) return true;
                 }
             }
@@ -33704,16 +33712,11 @@
          * Cache the whole component so a large trapped army shares one search per topology change. */
         function wodSupplyNeighbors(hex,fn) {
             const seen=new Set(),emit=n=>{if(!n||seen.has(getHexKey(n)))return;seen.add(getHexKey(n));fn(n);};
-            for(const d of hexDirections){
+            // A point contact has no width: two hostile flanks must be able to
+            // close a pocket. Stair-step diagonals still connect through their
+            // friendly side cells; bridge banks use physical portals below.
+            for(const d of cardinalHexDirections){
                 const n=gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`];
-                if(d.q&&d.r){
-                    // Friendly diagonal land belongs to the same supplied region.
-                    // Two water corners are a sea gap; bridge banks still use
-                    // their explicit physical deck connections below.
-                    if(!n||isWaterHex(hex)||isWaterHex(n)||isBridgeHex(hex)||isBridgeHex(n))continue;
-                    const a=gameData.hexes[`${hex.q+d.q},${hex.r}`],b=gameData.hexes[`${hex.q},${hex.r+d.r}`];
-                    if(!a||!b||isWaterHex(a)&&isWaterHex(b))continue;
-                }
                 emit(n);
             }
             wodForEachBridgePathPortal({type:'light'},hex,n=>{
@@ -33737,7 +33740,7 @@
             // supply source. Use only the physical urban footprint connected
             // to the town center, regardless of who contests individual cells.
             const queue=[center],seen=new Set([getHexKey(center)]);
-            for(let i=0;i<queue.length;i++)for(const d of hexDirections){
+            for(let i=0;i<queue.length;i++)for(const d of cardinalHexDirections){
                 const h=gameData.hexes[`${queue[i].q+d.q},${queue[i].r+d.r}`],k=h&&getHexKey(h);
                 if(!h||!keys.has(k)||seen.has(k))continue;seen.add(k);queue.push(h);
             }
@@ -35748,6 +35751,39 @@
             for(const d of hexDirections)keys.add(`${hex.q+d.q},${hex.r+d.r}`);
         }
 
+        // Remove empty, unsupported tips at checkerboard ownership corners.
+        // Never open a supply corridor by filling an enemy flank, cut a real
+        // corridor, or transfer a cell occupied by a unit/town/structure.
+        function wodCleanupTerritoryCorner(hex,protectedKeys) {
+            const keepsLinks=(h,owner)=>{
+                const neighbors=cardinalHexDirections.map(dir=>gameData.hexes[`${h.q+dir.q},${h.r+dir.r}`]).filter(n=>n&&!isWaterHex(n)&&wodIsFriendlyOwner(n.owner,owner));
+                if(neighbors.length<2)return true;
+                const seen=new Set([getHexKey(neighbors[0])]),queue=[neighbors[0]];
+                for(let i=0;i<queue.length;i++)for(const dir of cardinalHexDirections){
+                    const n=gameData.hexes[`${queue[i].q+dir.q},${queue[i].r+dir.r}`],k=n&&getHexKey(n);
+                    if(!n||n===h||isWaterHex(n)||!wodIsFriendlyOwner(n.owner,owner)||seen.has(k)||Math.abs(n.q-h.q)>3||Math.abs(n.r-h.r)>3)continue;
+                    seen.add(k);queue.push(n);
+                }
+                return neighbors.every(n=>seen.has(getHexKey(n)));
+            };
+            for(const dq of [-1,0])for(const dr of [-1,0]) {
+                const q=hex.q+dq,r=hex.r+dr,cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>gameData.hexes[`${x},${y}`]);
+                const [a,b,c,d]=cells;
+                if(cells.some(h=>!h||isWaterHex(h)||h.owner<=0)||a.owner!==d.owner||b.owner!==c.owner||!wodIsHostileOwner(a.owner,b.owner))continue;
+                const choices=[];
+                for(const h of cells) {
+                    if(protectedKeys.has(getHexKey(h)))continue;
+                    const other=h.owner===a.owner?b.owner:a.owner;
+                    let own=0,enemy=0;
+                    for(const dir of cardinalHexDirections){const n=gameData.hexes[`${h.q+dir.q},${h.r+dir.r}`];if(!n||isWaterHex(n))continue;if(n.owner===h.owner)own++;if(n.owner===other)enemy++;}
+                    const rank=o=>(Math.imul(h.q+503,73856093)^Math.imul(h.r+509,19349663)^Math.imul(o,83492791))>>>0;
+                    if(enemy>=2&&enemy>=own&&(enemy>own||rank(other)<rank(h.owner))&&keepsLinks(h,h.owner)&&keepsLinks(h,other))choices.push({h,other,gain:enemy-own});
+                }
+                choices.sort((a,b)=>b.gain-a.gain||a.h.q-b.h.q||a.h.r-b.h.r);
+                if(choices.length)setHexOwner(choices[0].h,choices[0].other);
+            }
+        }
+
         /** Absorb empty inland crumbs and small coastal cutoffs. The sea neither
          * connects a land pocket to its old owner nor supplies it with a town. */
         function wodCleanupTinyTerritoryPockets(maxChecks=96) {
@@ -35759,7 +35795,7 @@
                 for(const h of getCityUrbanTerrainHexes(c))protectedKeys.add(getHexKey(h));
             }
             for(const u of gameData.entities)if(u.hp>0&&u.type!=='convoy')protectedKeys.add(getHexKey(getNearestHexToPoint(u.x,u.y)));
-            for(const site of [...(gameData.forts||[]),...(gameData.bridges||[]),...(gameData.constructionJobs||[])]) {
+            for(const site of [...(gameData.forts||[]),...(gameData.hospitals||[]),...(gameData.bridges||[]),...(gameData.constructionJobs||[])]) {
                 protectedKeys.add(`${site.q},${site.r}`);
                 for(const key of site.hexKeys||[])protectedKeys.add(key);
             }
@@ -35771,6 +35807,7 @@
                 const first=gameData.hexes[key];if(!first||first.owner<=0)continue;
                 // Water is a political extension of its banks, never a land supply route.
                 if(isWaterHex(first))continue;
+                wodCleanupTerritoryCorner(first,protectedKeys);
                 const owner=first.owner,component=[first],seen=new Set([key]);
                 let captor=0,valid=true,coastal=false;
                 for(let i=0;i<component.length&&valid;i++) {
@@ -38489,7 +38526,23 @@
                 let edits=0;
                 for(const h of gameData.hexList) {
                     const a=gameData.hexes[`${h.q+1},${h.r}`],b=gameData.hexes[`${h.q},${h.r+1}`],c=gameData.hexes[`${h.q+1},${h.r+1}`];
-                    if(!a||!b||!c||isWaterHex(h)!==isWaterHex(c)||isWaterHex(a)!==isWaterHex(b)||isWaterHex(h)===isWaterHex(a))continue;
+                    if(!a||!b||!c)continue;
+                    if(!isWaterHex(h)&&!isWaterHex(a)&&!isWaterHex(b)&&!isWaterHex(c)&&h.type===c.type&&a.type===b.type&&h.type!==a.type) {
+                        // Round terrain in the data too: alternating forest /
+                        // mountain / plain tips otherwise retain square joins.
+                        const choices=[];
+                        for(const cell of [h,a,b,c]) {
+                            const type=cell.type===h.type?a.type:h.type;
+                            if(cell.type==='urban'||type==='urban')continue;
+                            let own=0,other=0;
+                            for(const dir of cardinalHexDirections){const n=gameData.hexes[`${cell.q+dir.q},${cell.r+dir.r}`];if(n?.type===cell.type)own++;if(n?.type===type)other++;}
+                            if(other>own||other===own&&type<cell.type)choices.push({cell,type,gain:other-own});
+                        }
+                        choices.sort((a,b)=>b.gain-a.gain||a.cell.q-b.cell.q||a.cell.r-b.cell.r);
+                        if(choices.length){wodSetGeneratedTerrainType(choices[0].cell,choices[0].type);edits++;changed++;}
+                        continue;
+                    }
+                    if(isWaterHex(h)!==isWaterHex(c)||isWaterHex(a)!==isWaterHex(b)||isWaterHex(h)===isWaterHex(a))continue;
                     const cells=[h,a,b,c],dry=cells.filter(x=>!isWaterHex(x)),wet=cells.filter(isWaterHex);
                     const count=x=>cardinalHexDirections.reduce((n,d)=>n+!!(gameData.hexes[`${x.q+d.q},${x.r+d.r}`]&&!isWaterHex(gameData.hexes[`${x.q+d.q},${x.r+d.r}`])),0);
                     dry.sort((x,y)=>count(x)-count(y)||x.q-y.q||x.r-y.r);
@@ -43321,8 +43374,11 @@
                 wodFillCellSquare(overlayCtx,hex,ox,oy,spacing);
             }
             w.hi = end;
-            if(w.hi>=list.length)wodMaskTerritoryWaterCorners(overlayCtx,ox,oy);
-            return w.hi >= list.length;
+            if(w.hi<list.length)return false;
+            const cornerEnd=Math.min(list.length,(w.cornerHi||0)+batchSize);
+            wodRoundPoliticalCorners(overlayCtx,ox,oy,list.slice(w.cornerHi||0,cornerEnd));w.cornerHi=cornerEnd;
+            if(cornerEnd>=list.length)wodMaskTerritoryWaterCorners(overlayCtx,ox,oy);
+            return cornerEnd>=list.length;
         }
 
         function wodEnsurePoliticalStagingCtx(w, h) {
@@ -43826,15 +43882,28 @@
             wodFillCellSquare(ctx,hex,offsetX,offsetY,sp);
         }
 
-        // Round only a minority corner in a 3:1 junction. Checkerboard corners never
-        // grow phantom diagonal land bridges. Every pixel starts as a real cell.
+        // Round minority corners and disambiguate old checkerboard terrain joins.
+        // Water wins a wet/dry saddle, so rendering never invents a dry sea bridge.
         function wodRoundTerrainCorners(ctx, ox, oy, paint, filter, list) {
             const sp=gameData.hexRadius*1.35, radius=sp*.5;
             for(const h of list||gameData.hexList) {
                 if(wodDrawHexSet && !wodDrawHexSet.has(getHexKey(h))) continue;
                 for(const sx of [-1,1]) for(const sy of [-1,1]) {
                     const a=gameData.hexes[`${h.q+sx},${h.r}`],b=gameData.hexes[`${h.q},${h.r+sy}`],c=gameData.hexes[`${h.q+sx},${h.r+sy}`];
-                    if(!a||!b||!c||a.type===h.type||a.type!==b.type||a.type!==c.type)continue;
+                    if(!a||!b||!c||a.type===h.type||a.type!==b.type||a.type!==c.type&&c.type!==h.type)continue;
+                    if(c.type===h.type) {
+                        let winner;
+                        if(isWaterHex(a)!==isWaterHex(h))winner=isWaterHex(a)?a.type:h.type;
+                        else {
+                            let side=0,diagonal=0;
+                            const q=Math.min(h.q,c.q),r=Math.min(h.r,c.r);
+                            for(let x=q-1;x<=q+2;x++)for(let y=r-1;y<=r+2;y++){
+                                const type=gameData.hexes[`${x},${y}`]?.type;if(type===a.type)side++;if(type===h.type)diagonal++;
+                            }
+                            winner=side===diagonal?[a.type,h.type].sort()[0]:side>diagonal?a.type:h.type;
+                        }
+                        if(winner!==a.type)continue;
+                    }
                     if(filter&&!filter(h,a))continue;
                     // Match the pixel-snapped cell fill exactly. Half-pixel
                     // cutouts left thin L-shaped strips of land in the ocean.
@@ -43854,6 +43923,41 @@
             ctx.save();ctx.globalCompositeOperation='destination-out';
             wodRoundTerrainCorners(ctx,ox,oy,()=>'#000',(h,a)=>!isWaterHex(h)&&isWaterHex(a),list);
             ctx.restore();
+        }
+
+        function wodCornerPinchedOwner(cells,lookup) {
+            const q=cells[0].q,r=cells[0].r;
+            const connected=(a,b)=>{
+                const queue=[a],seen=new Set([getHexKey(a)]);
+                for(let i=0;i<queue.length;i++)for(const d of cardinalHexDirections){
+                    const h=lookup[`${queue[i].q+d.q},${queue[i].r+d.r}`],k=h&&getHexKey(h);
+                    if(!h||isWaterHex(h)||h.owner!==a.owner||seen.has(k)||Math.abs(h.q-q)>3||Math.abs(h.r-r)>3)continue;
+                    if(h===b)return true;seen.add(k);queue.push(h);
+                }
+                return false;
+            };
+            const support=(a,b)=>Number(connected(a,b))*32+[a,b].reduce((sum,h)=>sum+cardinalHexDirections.filter(d=>{const n=lookup[`${h.q+d.q},${h.r+d.r}`];return n&&!isWaterHex(n)&&n.owner===h.owner;}).length,0);
+            return support(cells[0],cells[3])<=support(cells[1],cells[2])?cells[0].owner:cells[1].owner;
+        }
+
+        // Political colors use the same corner decision as the border tracer.
+        // Full and patched bakes must not leave square claims outside a curve.
+        function wodRoundPoliticalCorners(ctx,ox,oy,list) {
+            const sp=gameData.hexRadius*1.35,radius=sp*.44;
+            for(const h of list||gameData.hexList){
+              if(!h.owner||isWaterHex(h))continue;
+              for(const sx of [-1,1])for(const sy of [-1,1]){
+                const a=gameData.hexes[`${h.q+sx},${h.r}`],b=gameData.hexes[`${h.q},${h.r+sy}`],c=gameData.hexes[`${h.q+sx},${h.r+sy}`];
+                if(!a||!b||!c||!a.owner||!b.owner||!c.owner||h.owner===a.owner||a.owner!==b.owner||c.owner!==a.owner&&c.owner!==h.owner||isWaterHex(a)||isWaterHex(b)||isWaterHex(c))continue;
+                if(c.owner===h.owner){
+                    const q=Math.min(h.q,c.q),r=Math.min(h.r,c.r),cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>gameData.hexes[`${x},${y}`]);
+                    if(h.owner!==wodCornerPinchedOwner(cells,gameData.hexes))continue;
+                }
+                const x=Math.round(h.x+ox+sx*sp/2),y=Math.round(h.y+oy+sy*sp/2);
+                ctx.fillStyle=factionColors[a.owner];ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x-sx*radius,y);
+                ctx.quadraticCurveTo(x,y,x,y-sy*radius);ctx.closePath();ctx.fill();
+              }
+            }
         }
 
         function neighborWorldPoint(hex, dir, spacing) {
@@ -43917,6 +44021,7 @@
                 overlayCtx.fillStyle=factionColors[hex.owner];
                 wodFillCellSquare(overlayCtx,hex,offsetX,offsetY,spacing);
             }
+            wodRoundPoliticalCorners(overlayCtx,offsetX,offsetY);
             wodMaskTerritoryWaterCorners(overlayCtx,offsetX,offsetY);
             ctx.save();
             ctx.globalAlpha = 0.32;
@@ -44751,7 +44856,23 @@
                     const key=hexPairBorderKey(h,n);if(seen.has(key))continue;seen.add(key);
                     const a=d.q?node(2*h.q+1,2*h.r-1):node(2*h.q-1,2*h.r+1);
                     const b=d.q?node(2*h.q+1,2*h.r+1):node(2*h.q+1,2*h.r+1);
-                    const edge={a,b,used:false};a.edges.push(edge);b.edges.push(edge);edges.push(edge);
+                    const edge={a,b,h,n,used:false};a.edges.push(edge);b.edges.push(edge);edges.push(edge);
+                }
+            }
+            // A checkerboard is two separate corners, not a four-way branch.
+            // Round around the less-connected diagonal. Prefer the side that
+            // already has a real land route as the continuous outside region;
+            // this closes the visible ring around a trapped unit instead of
+            // terminating four unrelated strokes on top of one another.
+            for(const junction of nodes.values())if(junction.edges.length===4) {
+                const [x,y]=junction.key.split(',').map(Number),q=(x-1)/2,r=(y-1)/2;
+                const cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([a,b])=>hexLookup[`${a},${b}`]);
+                if(cells.some(h=>!h)||cells[0].owner!==cells[3].owner||cells[1].owner!==cells[2].owner)continue;
+                const pinched=wodCornerPinchedOwner(cells,hexLookup);
+                junction.pairs=new Map();
+                for(const cell of cells.filter(h=>h.owner===pinched)){
+                    const pair=junction.edges.filter(e=>e.h===cell||e.n===cell);
+                    if(pair.length===2){junction.pairs.set(pair[0],pair[1]);junction.pairs.set(pair[1],pair[0]);}
                 }
             }
             const chains=[];
@@ -44761,12 +44882,12 @@
                     edge.used=true;const next=edge.a===current?edge.b:edge.a;
                     if(next===start){closed=true;break;}
                     pts.push({x:next.x,y:next.y});
-                    if(next.edges.length!==2)break; // All branches meet at this exact junction.
-                    current=next;edge=next.edges.find(e=>!e.used);
+                    if(next.edges.length!==2&&!next.pairs)break; // Real multi-faction junctions stay exact.
+                    current=next;edge=next.pairs?next.pairs.get(edge):next.edges.find(e=>!e.used);
                 }
                 if(pts.length>=2)chains.push({closed,pts});
             };
-            for(const n of nodes.values())if(n.edges.length!==2)for(const e of n.edges)if(!e.used)walk(n,e);
+            for(const n of nodes.values())if(n.edges.length!==2&&!n.pairs)for(const e of n.edges)if(!e.used)walk(n,e);
             for(const e of edges)if(!e.used)walk(e.a,e);
             return chains;
         }
@@ -45017,6 +45138,7 @@
                 overlayCtx.fillStyle=factionColors[hex.owner];
                 wodFillCellSquare(overlayCtx,hex,ox,oy,spacing);
             }
+            wodRoundPoliticalCorners(overlayCtx,ox,oy,halo);
             wodMaskTerritoryWaterCorners(overlayCtx,ox,oy,halo);
             overlayCtx.restore();
         }

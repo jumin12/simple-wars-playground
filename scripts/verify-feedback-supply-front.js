@@ -20,7 +20,7 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
   results.supply=[];
   for(const owner of [1,2]){
    const row=await page.evaluate(owner=>{
-    feedbackWorld(owner);feedbackTown(0,0,owner,'Home');for(let i=1;i<=6;i++)feedbackHex(i,i).owner=owner;
+    feedbackWorld(owner);feedbackTown(0,0,owner,'Home');for(let i=1;i<=6;i++){feedbackHex(i,i).owner=owner;feedbackHex(i,i-1).owner=owner;}
     const u=feedbackUnit(6,6,'light',owner);feedbackRefresh();gameData.encircledHexes=new Set(['6,6']);
     const supplied=!wodGetUnitEncirclementState(u,feedbackHex(6,6)),flagCleared=!wodHexKeyIsEncircled('6,6');feedbackScan();
     const scanSupplied=!wodGetUnitEncirclementState(u,feedbackHex(6,6)),preserved=Array.from({length:7},(_,i)=>feedbackHex(i,i).owner).every(o=>o===owner);
