@@ -13053,7 +13053,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=naval-pressure-20261102"></script>
+    <script src="ai-command.js?v=front-initiative-20261102"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13072,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-02T21:47:50Z",
+                title:"Coordinated breakthroughs and enclosing wings",
+                items:[
+                    "Nearby land groups commit to a shared front operation, including mobile frontline troops that previously waited in separate small formations. Rear reinforcements join the existing advance without recalling its leading troops.",
+                    "Commanders concentrate against a reachable weak section and can make a short supported probe against an evenly matched front. A substantially stronger assembled army can pin an observed enemy concentration with armor while two separate wings capture connecting corridors and meet behind it.",
+                    "Town and fort guards, urgent town defense, supply relief and medical care retain priority. Offensives respect fog of war, dry terrain and actual force strength, and abandon a sustained disadvantage. Successful groups hand their old line positions forward instead of returning to the old border."
+                ]
+            },
             {
                 "at": "2026-11-02T18:22:31.510Z",
                 "title": "Marine flanking raids and stronger land pressure",
@@ -40891,6 +40900,12 @@
             // A new job (flank, relief, counterattack) outranks the march already underway.
             if(unit.aiOrderKind && unit.aiTfKind && unit.aiOrderKind !== unit.aiTfKind) return false;
             const job=wodAiGetUnitTaskJob(unit),phase=job?.operation?.phase||job?.phase;
+            if(job?.frontOperation){
+                if(unit.aiOrderResponseId!==job.id||unit.aiOrderPhase!==job.frontOperation.phase||unit.aiFrontBound!==job.bound)return false;
+                const end=unit.orderTarget||unit.target?.finalTarget||unit.target;
+                return !!(unit.target&&end&&Math.hypot(unit.x-end.x,unit.y-end.y)>(gameData.hexRadius||20)*1.2&&
+                    (unit.stuckTimer||0)<3&&(unit.blockedTimer||0)<3&&wodAiOperationTime()-(unit.aiOrderIssuedAt||0)<14000);
+            }
             const support=wodAiFrontSupportFor(unit,job);
             if(support&&(!unit.orderTarget||Math.hypot(unit.orderTarget.x-support.h.x,unit.orderTarget.y-support.h.y)>(gameData.hexRadius||20)*2))return false;
             if(job?.stage&&unit.aiOperationStage!==job.stage)return false;
@@ -41474,7 +41489,7 @@
             });
             if(prev&&prev.assetSignature===assetSignature&&(now<prev.expireAt||activeMission)) {
                 wodAiRebalanceGroups(owner,prev,ready);
-                prev.readyN=ready.length;wodAiReadDefense(owner,units);return prev;
+                prev.readyN=ready.length;wodAiReadDefense(owner,units);wodAiPlanFrontOffensive(owner,prev,ready);return prev;
             }
             const sectors=buildAiFrontlineSectors(owner,Math.min(24,Math.max(6,Math.ceil(ready.length/2))));
             const attackSectors=sectors.slice().sort((a,b)=>wodAiAttackSectorScore(owner,a)-wodAiAttackSectorScore(owner,b));
@@ -41547,7 +41562,7 @@
             }
             for(let i=0;i<ships.length;i+=3)add('naval',ships.slice(i,i+3),attackSectors[0]);
             const plan={owner,assetSignature,jobs,unitJob,sectors,operations,landOperations:continuedLandOperations,defenseDemand:{line:lineN,reserve:reserveN,frontage:defenseDemand.frontage,armyFloor:defenseDemand.armyFloor},readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+30000};
-            gameData.aiTaskForces[owner]=plan;wodAiCoordinateCampaign(owner,plan,ready);wodAiConcentrateAssaults(owner,plan,ready);wodAiReadDefense(owner,units,true);return plan;
+            gameData.aiTaskForces[owner]=plan;wodAiCoordinateCampaign(owner,plan,ready);wodAiConcentrateAssaults(owner,plan,ready);wodAiReadDefense(owner,units,true);wodAiPlanFrontOffensive(owner,plan,ready);return plan;
         }
 
         function wodAiTownAssaultHex(unit,city,members) {
@@ -41684,6 +41699,8 @@
             ensureUnitId(unit);
             const defense=gameData._aiDefenseByOwner?.[unit.owner];
             const response=defense?.jobs.find(j=>j.id===defense.unitJob[unit.uid]);
+            const offensive=wodAiFrontOffensiveJob(unit,plan,response);
+            if(offensive)return offensive;
             if(response)return response;
             let jid = plan.unitJob[unit.uid] || unit.aiTfJobId;
             if(!jid) return null;
@@ -41745,6 +41762,7 @@
             let hr = gameData.hexRadius || 20;
             if(job.kind==='scout'&&!wodAiCorridorWithdrawal(unit))return wodAiIssueScoutOrder(unit,job);
             if(unit._medicalRecovering)return true;
+            if(job.frontOperation)return wodAiIssueFrontOffensive(unit,job);
             if(job.kind==='counter'&&wodAiIssueTownDefense(unit,job))return true;
             if(wodAiTacticalFallback(unit,job))return true;
             if(unit.isGeneral&&job.response&&job.kind!=='relief')return wodAiIssueGeneralOrder(unit,job);
