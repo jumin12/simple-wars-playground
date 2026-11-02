@@ -11900,7 +11900,7 @@
                     <p class="esc-help-prose"><strong>Hospitals</strong> cost $3,000 and take 60 seconds to build on owned open land. Their pink radius matches a fort and enables healing only; it does not grant supply or defense. Every nation starts each battle with <strong>one general</strong>: a unique armor unit that cannot be trained or replaced after death. Its golden fort-sized radius grants friendly units <strong>+5% attack, toughness, movement and weapon range</strong>, without stacking. It fights and suffers terrain, supply and attrition effects like armor. Embarked generals command from their transports; naval-only nations begin with their general safely aboard one.</p>
                     <p class="esc-help-prose"><strong>Mixed-terrain combat:</strong> attacks combine a unit’s effectiveness on its own tile and the opponent’s tile using the geometric mean, then apply the opponent’s own terrain cover. Thus armor on plains firing into mountains suffers an uphill penalty, while a mountaineer keeps its mountain cover. The selected unit’s <strong>Enemy terrain effects</strong> entry shows resulting outgoing and incoming terrain percentages; morale, veteran, fort and general effects are separate.</p>
                     <h4>Healing</h4>
-                    <p class="esc-help-prose">Recovery is limited to <strong>friendly town cells or a hospital’s pink radius</strong> at <strong>3% maximum HP/manpower per second</strong>, using replacement manpower. Ships can repair at a friendly harbor or within hospital coverage. Ordinary troops and marines cannot heal afloat. Town healing stops throughout the town while it is under attack. <strong>Hospitals can treat supplied units even during combat</strong>, and captured hospitals and forts are destroyed. Recovery ticks only when the hex is <strong>yours</strong>, the unit is <strong>supplied</strong> (a land route to a town, or marine-only ocean/river supply), and, for town recovery, there are <strong>no hostile combat units threatening the town</strong>. HP, manpower, and morale all inch back together, shown with the small green <strong>+</strong> pulse only while strength is actually being restored; the icon clears at full HP and manpower.</p>
+                    <p class="esc-help-prose">Recovery is limited to <strong>friendly town cells or a hospital’s pink radius</strong> at <strong>3% maximum HP/manpower per second</strong>, using replacement manpower. Ships can repair at a friendly harbor or within hospital coverage. Ordinary troops and marines cannot heal afloat. Town healing stops throughout the town while it is under attack. <strong>Hospital treatment pauses for each unit that is firing or under enemy fire</strong>; safe patients elsewhere in the radius can still recover, and captured hospitals and forts are destroyed. Recovery ticks only when the hex is <strong>yours</strong>, the unit is <strong>supplied</strong> (a land route to a town, or marine-only ocean/river supply), and, for town recovery, there are <strong>no hostile combat units threatening the town</strong>. HP, manpower, and morale all inch back together, shown with the small green <strong>+</strong> pulse only while strength is actually being restored; the icon clears at full HP and manpower.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -13051,7 +13051,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=frontline-routes-20261101"></script>
+    <script src="ai-command.js?v=wide-push-cover-20261101"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13070,6 +13070,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:'2026-11-01T21:00:00Z',
+                title:'Hospital combat rules and wider offensive flank cover',
+                items:[
+                    'Units stop hospital recovery while firing or receiving enemy fire. Safe patients elsewhere in the same hospital radius can keep healing. This applies equally to every faction and to naval repair.',
+                    'AI supply defense checks broad salients across the map, beyond short choke points. Threatened wings request reinforcements sized to the opposing force, and each end needs timely cover before exposed attackers continue.',
+                    'When the army cannot hold a closing route, endangered formations fall back toward city supply before the pocket closes. Larger threats can recall more attackers without stripping town garrisons.'
+                ]
+            },
             {
                 at:'2026-11-01T20:20:00Z',
                 title:'Steam and browser startup fix',
@@ -33066,6 +33075,25 @@
                 unit.isGeneral=true;gameData._generalIssuedOwners.add(owner);gameData._generalAuraCache=null;
             }
         }
+        function wodUnitHealingCombatBlocked(unit) {
+            // Check both weapon ranges, including incoming fire on retreating
+            // troops and unarmed support boats. Do not rely on fading FX or on
+            // which faction happened to update first in this simulation tick.
+            let cache=gameData._healingCombatRange;
+            if(!cache||cache.tick!==gameData._wodSimTick||cache.entities!==gameData.entities||cache.count!==gameData.entities.length)
+                cache=gameData._healingCombatRange={tick:gameData._wodSimTick,entities:gameData.entities,count:gameData.entities.length,
+                    range:gameData.entities.reduce((n,u)=>u.hp>0&&u.damage>0?Math.max(n,(u.range||0)*1.05):n,0)};
+            let blocked=false;
+            const test=other=>{
+                if(blocked||other===unit||other.hp<=0||other.boardTransportUid||other.type==='convoy'||!wodIsHostileOwner(other.owner,unit.owner))return;
+                const own=unit.damage>0&&!unit.retreating&&!unit.moraleBroken?(unit.range||0)*wodGeneralStatMultiplier(unit):0;
+                const incoming=other.damage>0&&!other.retreating&&!other.moraleBroken?(other.range||0)*wodGeneralStatMultiplier(other):0;
+                if(Math.hypot(other.x-unit.x,other.y-unit.y)<=Math.max(own,incoming))blocked=true;
+            };
+            if(gameData.unitSpatialGrid)forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,Math.max(cache.range,(unit.range||0)*1.05),test);
+            else gameData.entities.forEach(test);
+            return blocked;
+        }
         function canHealUnit(unit) {
             if(!unit || unit.hp <= 0 || unit.type === 'convoy') return false;
             let mpCap = unit.maxManpower || (wodIsNavalUnit(unit) ? WOD_MANPOWER_SHIP : WOD_MANPOWER_INFANTRY);
@@ -33079,8 +33107,9 @@
             if(wodGetUnitEncirclementState(unit, hex)) return false;
             const care=wodUnitHealingSite(unit,hex);
             if(!care) return false;
-            // Field hospitals continue treatment under fire. Town care stops for
-            // the whole urban footprint as soon as that town is attacked.
+            // Hospital patients stop recovering while exchanging fire; safe
+            // patients elsewhere in the same radius can continue treatment.
+            if(wodUnitHealingCombatBlocked(unit))return false;
             if(care.kind==='hospital')return true;
             return !isCitySiegeBlockedForProduction(care.site) && countNearbyUnits(unit.owner, unit.x, unit.y, 115, true) === 0;
         }
@@ -33317,7 +33346,7 @@
             { id: 'encircled', title: 'Encircled', overhead: 'encircled', drawType: 'light', note: 'Red exclamation when the hex is cut off behind enemy lines.', effect: { label: 'Encircled', stats: '−3.5% max HP/s · No heal until pocket breaks', block: true, warn: true, detail: 'Hex is cut off behind enemy lines.' } },
             { id: 'deepwater', title: 'Deep water', overhead: 'water', drawType: 'light', note: 'Blue tilde when a land unit is stranded in ocean tiles.', effect: { label: 'Deep water', stats: '−3.5% max HP/s · No healing', block: true, warn: true, detail: 'Ordinary land units lose 3.5% HP/s after ten full seconds out of supply. Only ships can heal afloat; ships and marines are exempt from water attrition.' } },
             { id: 'unpaid', title: 'Unpaid upkeep', overhead: 'unpaid', drawType: 'light', note: 'Gold dollar sign when treasury cannot cover upkeep.', effect: { label: '$ Unpaid', stats: '−3% max HP/s', block: true, warn: true, detail: 'Treasury cannot cover upkeep.' } },
-            { id: 'healing', title: 'Healing', overhead: 'heal', drawType: 'light', note: 'Green plus while regenerating in a safe supplied town or hospital radius.', effect: { label: '+ Healing', stats: '+3% max HP/s', detail: 'Requires supply and replacement manpower. Town care stops under attack; hospitals can treat units during combat.' } },
+            { id: 'healing', title: 'Healing', overhead: 'heal', drawType: 'light', note: 'Green plus while regenerating in a safe supplied town or hospital radius.', effect: { label: '+ Healing', stats: '+3% max HP/s', detail: 'Requires supply and replacement manpower. Town care stops under attack; hospital care stops while this unit is in combat.' } },
             { id: 'forest', title: 'Forest cover', overhead: null, drawType: 'light', note: 'Terrain tilt on the unit sheet — no overhead icon for tile cover alone.', effect: { label: 'Forest', render: 'terrainCombat', atkPct: 85, defPct: 90, block: true, terrain: true, detail: 'Example: infantry in forest — weaker attacks, softer incoming hits.' } },
             { id: 'amphib', title: 'Amphibious march', overhead: null, drawType: 'marine', note: 'Marines embarked in deep water — pill only (no drowning chip).', effect: { label: '∿ Amphib', stats: 'March ×62%', detail: 'Marines embarked in deep water — no drowning chip.' } },
             { id: 'march', title: 'Slow march', overhead: null, drawType: 'heavy', note: 'Morale, rough ground, or a hostile fort zone is slowing orders.', effect: { label: 'March', stats: '×70%', detail: 'Morale, rough ground, or a hostile fort zone is slowing orders.' } },
@@ -33480,7 +33509,7 @@
             if(unit.cargo?.isGeneral)effects.push({label:'General aboard',stats:'Unique commander · Unload to fight as armor',detail:'The general still commands within the golden radius while aboard this transport. It cannot fire or heal as a passenger; sinking the transport loses the general permanently.',block:true});
             if(wodGeneralForUnit(unit))effects.push({label:'General command',stats:'+5% attack, toughness, speed and range',detail:'A friendly general covers this unit. Command does not stack; incoming combat damage is divided by 1.05, and attack, movement and weapon range are multiplied by 1.05. Supply, attrition and healing requirements remain unchanged.',block:true});
             const healingSite=wodUnitHealingSite(unit);
-            if(healingSite)effects.push({label:healingSite.kind==='hospital'?'Hospital care':'Town recovery',stats:'Up to +3% strength/s · Uses manpower',detail:'Requires supply and replacement manpower. Town healing stops while the town is attacked; hospitals continue treatment under fire. Ships can repair near a friendly harbor or hospital; other units cannot heal in open water.',block:true});
+            if(healingSite)effects.push({label:healingSite.kind==='hospital'?'Hospital care':'Town recovery',stats:'Up to +3% strength/s · Uses manpower',detail:'Requires supply and replacement manpower. Town healing stops while the town is attacked. Hospital treatment pauses while this unit is firing or under enemy fire; other safe patients can still recover. Ships can repair near a friendly harbor or hospital; other units cannot heal in open water.',block:true});
             else if(unit.type!=='convoy'&&(wodUnitMissingStrength(unit)||unit.moraleBroken))effects.push({label:'Medical support needed',stats:'Recover at a town or hospital',detail:'Open countryside and forts alone do not heal units. Return to supplied friendly town cells or a hospital’s pink radius. Ships need a harbor or hospital; ordinary land units and marines must leave open water.',block:true});
             let hex = getNearestHexToPoint(unit.x, unit.y);
             if(hex && unit.type !== 'convoy') {
@@ -41128,7 +41157,7 @@
                 } else {
                     stack.pop();const p=parents[v];if(p<0)continue;
                     low[p]=Math.min(low[p],low[v]);area[p]+=area[v];troops[p]+=troops[v];
-                    if(p!==root&&low[v]>=disc[p]&&troops[v]>=2) {
+                    if(p!==root&&low[v]>=disc[p]&&troops[v]>=1) {
                         const prior=cuts.get(p)||{troops:0,area:0};prior.troops+=troops[v];prior.area+=area[v];cuts.set(p,prior);
                     }
                 }
@@ -41153,18 +41182,21 @@
                 for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(k!==i&&k!==j&&!reached.has(k)){reached.add(k);flood.push(k);}
                 let count=0, size=0;
                 for(const k of supplied)if(k!==i&&k!==j&&!reached.has(k)){count+=weights[k];size++;}
-                if(count>=2)cuts.set(i,{troops:count,area:size,keys:[i,j]});
+                if(count>=1)cuts.set(i,{troops:count,area:size,keys:[i,j]});
             }
             for(const cut of wodAiPredictCorridors(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth)){
                 if(!cuts.has(cut.i))cuts.set(cut.i,cut);
             }
             for(const [i,cut] of cuts) {
-                const h=tiles[i], pressure=cut.predictive?enemies.filter(e=>wodAiDist2(e.x,e.y,h.x,h.y)<Math.pow(hr*12,2)).length:closeEnemies(h);
+                const h=tiles[i],crossing=(cut.keys||[i]).map(j=>tiles[j]);
+                const screenPoints=crossing.length>2?[crossing[0],crossing[crossing.length-1]]:[h];
+                const nearScreen=e=>screenPoints.some(p=>wodAiDist2(e.x,e.y,p.x,p.y)<Math.pow(hr*10,2));
+                const pressure=enemies.filter(nearScreen).length;
                 if(h.owner!==owner||!pressure)continue;
-                const approaching=enemies.filter(e=>wodAiDist2(e.x,e.y,h.x,h.y)<Math.pow(hr*12,2));
+                const approaching=enemies.filter(nearScreen);
                 const cx=approaching.reduce((n,e)=>n+e.x,0)/Math.max(1,approaching.length),cy=approaching.reduce((n,e)=>n+e.y,0)/Math.max(1,approaching.length);
                 threats.push({id:'corridor-'+getHexKey(h),kind:'corridor',role:'fix',holdHex:h,area:cut.area,atRisk:cut.troops,
-                    cutIndices:cut.keys||[i],cutHexes:(cut.keys||[i]).map(j=>tiles[j]),riskTileKeys:cut.riskTileKeys,predictive:!!cut.predictive,closureSeconds:cut.closureSeconds,withdrawSeconds:cut.withdrawSeconds,
+                    cutIndices:cut.keys||[i],cutHexes:crossing,screenPoints,riskTileKeys:cut.riskTileKeys,predictive:!!cut.predictive,wide:!!cut.wide,closureSeconds:cut.closureSeconds,withdrawSeconds:cut.withdrawSeconds,
                     enemies:pressure,score:350+Math.min(8,cut.troops)*18+Math.min(80,cut.area)-Math.hypot(h.x-cx,h.y-cy)/hr*15});
             }
             // Wide pincers and attacks away from towns: defend contested territory, not just assets.
@@ -41196,7 +41228,8 @@
             const unitJob={}, jobs=[], available=army.filter(u=>!u.moraleBroken&&(trappedIds.has(u.uid)||!u._medicalRecovering&&!u.retreating&&u.hp/u.maxHp>.34)), plan=gameData.aiTaskForces?.[owner];
             const primaryTheater=wodAiDefenseTheater(owner,selected,available,plan);
             const townEmergency=selected.some(t=>t.kind==='counter');
-            let budget=Math.max(2,Math.ceil(available.length*(townEmergency?.85:pockets.length?.55:Math.max(.4,wodAiCommander(owner).defense+.16))));
+            const majorCut=selected.some(t=>t.kind==='corridor'&&t.atRisk>=Math.max(2,army.length*.25));
+            let budget=Math.max(2,Math.ceil(available.length*((townEmergency||majorCut) ? .85 : pockets.length ? .55 : Math.max(.4,wodAiCommander(owner).defense+.16))));
             const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);};
             for(const t of selected.slice(0,12)) {
                 const job={...t,members:[],response:true};
@@ -41204,22 +41237,25 @@
                 for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
                 const trappedCount=job.members.length;
                 let want=t.kind==='counter'?(primaryTheater&&t!==primaryTheater?Math.min(2,Math.max(1,Math.ceil(t.neededPower*.35))):Math.min(12,Math.max(1,Math.ceil(t.neededPower*.85)))):t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(6,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
-                const opposition=wodAiThreats(owner).filter(e=>Math.hypot(e.x-t.holdHex.x,e.y-t.holdHex.y)<hr*8);
+                const responsePoints=t.screenPoints||[t.holdHex];
+                const responseDistance=u=>Math.min(...responsePoints.map(p=>Math.hypot(u.x-p.x,u.y-p.y)));
+                const opposition=wodAiThreats(owner).filter(e=>responseDistance(e)<hr*8);
                 const neededPower=t.kind==='counter'&&primaryTheater&&t!==primaryTheater?Math.min(2,t.neededPower):t.neededPower||opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*1.15;
                 let responsePower=available.filter(u=>job.members.includes(u.uid)).reduce((n,u)=>n+wodAiUnitCombatPower(u),0);
                 const candidates=available.filter(u=>!unitJob[u.uid]&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
-                    wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*(t.kind==='relief'?60:24),2));
+                    responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
                 const critical=t.kind==='corridor'||t.kind==='relief'||t.kind==='counter';
-                const cost=u=>(t.arrivals?.[u.uid]!=null?Math.min(1000,t.arrivals[u.uid])*hr*hr*3:wodAiDist2(u.x,u.y,t.holdHex.x,t.holdHex.y))/Math.max(.5,wodAiUnitCombatPower(u))+
+                const cost=u=>(t.arrivals?.[u.uid]!=null?Math.min(1000,t.arrivals[u.uid])*hr*hr*3:responseDistance(u)**2)/Math.max(.5,wodAiUnitCombatPower(u))+
+                    (t.kind==='corridor'&&t.riskUnits?.has(u.uid)?hr*hr*60:0)+
                     (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main'].includes(base(u)?.kind)?hr*hr*(critical?1:100):0)+
                     (t.kind==='counter'?Math.pow(Math.max(0,wodAiUnitCombatPower(u)-neededPower),2)*hr*hr*400+
                         (base(u)?.phase==='assault'&&neededPower<4?hr*hr*150:0):0)+
                     (old?.unitJob[u.uid]===t.id?-hr*hr*20:0);
                 candidates.sort((a,b)=>cost(a)-cost(b));
                 for(const u of candidates) {
-                    if(want<=0&&responsePower>=neededPower||budget<=0||job.members.length>=trappedCount+10)break;
+                    if(want<=0&&responsePower>=neededPower||budget<=0||t.kind!=='corridor'&&job.members.length>=trappedCount+10)break;
                     // Keep the sole fort garrison in place. Its line and relief troops can reinforce it.
                     if(base(u)?.fort||base(u)?.city||t.kind==='counter'&&!t.primaryTheater&&t.arrivals?.[u.uid]>t.deadline)continue;
                     // Routine land skirmishes must not repeatedly recall every
@@ -41247,7 +41283,7 @@
             if(!target)return false;
             const holding=job.kind!=='relief'&&wodAiDist2(unit.x,unit.y,target.x,target.y)<Math.pow((gameData.hexRadius||20)*2.4,2);
             const moved=wodAiMoveUnitTowardHex(unit,target,holding,job.kind==='relief'?.16:.12);
-            if(moved){unit.aiHoldStartAt=0;wodAiStampOrder(unit,holding,target,5000);}
+            if(moved){unit.aiHoldStartAt=0;wodAiStampOrder(unit,holding,target,job.kind==='corridor'?2000:5000);}
             return moved;
         }
 
@@ -41555,7 +41591,7 @@
             unit.aiTfRole = job.role;
             unit.aiCaptureHexKey = null;
             let hr = gameData.hexRadius || 20;
-            if(job.kind==='scout')return wodAiIssueScoutOrder(unit,job);
+            if(job.kind==='scout'&&!wodAiCorridorWithdrawal(unit))return wodAiIssueScoutOrder(unit,job);
             if(unit._medicalRecovering)return true;
             if(job.kind==='counter'&&wodAiIssueTownDefense(unit,job))return true;
             if(wodAiTacticalFallback(unit,job))return true;

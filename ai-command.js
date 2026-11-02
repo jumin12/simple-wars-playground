@@ -167,14 +167,83 @@ function wodAiPredictCorridors(owner, tiles, index, edges, roots, supplied, weig
         let troops=0,area=0,depth=0;const riskTileKeys=[];
         const neckDepth=Math.min(...section.map(i=>supplyDepth.get(i)??0));
         for(const i of supplied)if(!blocked.has(i)&&!reached.has(i)){troops+=weights[i];area++;depth+=weights[i]*Math.max(0,(supplyDepth.get(i)||0)-neckDepth);if(weights[i])riskTileKeys.push(getHexKey(tiles[i]));}
-        if(troops<2||area<section.length*2)continue;
+        if(troops<1||area<section.length*2)continue;
         const center=tiles[section[Math.floor(section.length/2)]];
         const closing=visible.filter(e=>Math.hypot(e.x-center.x,e.y-center.y)<hr*12);
         const closureSeconds=Math.min(...closing.map(e=>Math.max(0,Math.hypot(e.x-center.x,e.y-center.y)-(e.range||50))/Math.max(1,(e.speed||15)*WOD_MOVE_SPEED_FACTOR)))+section.length*1.5;
-        const withdrawSeconds=depth/Math.max(1,troops)*hr*1.35/(12*WOD_MOVE_SPEED_FACTOR);
+        const withdrawSeconds=wodAiCorridorEvacSeconds(owner,riskTileKeys,index,supplyDepth,neckDepth);
         sections.push({i:section[Math.floor(section.length/2)],troops,area,keys:section,riskTileKeys,predictive:true,closureSeconds,withdrawSeconds});
     }
-    return sections;
+    return sections.concat(wodAiWideCorridors(owner,tiles,index,edges,roots,supplied,weights,visible,supplyDepth));
+}
+
+// Whole-map cross-sections complement the short, winding choke search above.
+// A broad salient can have no articulation point and be far wider than six
+// cells. Its hostile-facing ends, rather than its empty center, need cover.
+function wodAiWideCorridors(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth) {
+    const hr=gameData.hexRadius||20,candidates=[],result=[];
+    // Supplied insertion order is BFS order. Accumulate each column's actual
+    // city routes in reverse, so empty frontier crossings cannot consume the
+    // flood budget ahead of a distant push that really needs protection.
+    const load=weights.slice(),ordered=[...supplied];
+    for(let n=ordered.length-1;n>=0;n--){const i=ordered[n],parent=edges[i].find(j=>(supplyDepth.get(j)??Infinity)<supplyDepth.get(i));if(parent!==undefined)load[parent]+=load[i];}
+    const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
+    const hostile=(h,d)=>{const n=gameData.hexes[(h.q+d.q)+','+(h.r+d.r)];return n&&!isWaterHex(n)&&wodIsHostileOwner(n.owner,owner)&&(!explored||explored.has(getHexKey(n)));};
+    for(const axis of ['q','r']){
+        const other=axis==='q'?'r':'q',rows=new Map();
+        for(const i of supplied){const h=tiles[i];if(!rows.has(h[axis]))rows.set(h[axis],[]);rows.get(h[axis]).push(i);}
+        for(const row of rows.values()){
+            row.sort((a,b)=>tiles[a][other]-tiles[b][other]);let run=[];
+            const consider=()=>{
+                if(run.length<=6)return;
+                const a=tiles[run[0]],b=tiles[run[run.length-1]],d=axis==='q'?{q:0,r:1}:{q:1,r:0};
+                if(!hostile(a,{q:-d.q,r:-d.r})||!hostile(b,d)||run.some(i=>roots.includes(i)))return;
+                const traffic=run.reduce((n,i)=>n+load[i],0);if(traffic<1)return;
+                const pressure=enemies.filter(e=>Math.min(Math.hypot(e.x-a.x,e.y-a.y),Math.hypot(e.x-b.x,e.y-b.y))<hr*10&&wodAiCanReach(e,a));
+                if(!pressure.length)return;
+                const distance=Math.min(...pressure.map(e=>Math.min(Math.hypot(e.x-a.x,e.y-a.y),Math.hypot(e.x-b.x,e.y-b.y))));
+                candidates.push({keys:run.slice(),gates:[a,b],pressure,score:(distance+run.length*hr*.08)/(1+Math.sqrt(traffic)*.1)});
+            };
+            for(const i of row){if(run.length&&!edges[run[run.length-1]].includes(i)){consider();run=[];}run.push(i);}consider();
+        }
+    }
+    candidates.sort((a,b)=>a.score-b.score);
+    const tested=[],blockedTags=new Uint16Array(tiles.length),safeTags=new Uint16Array(tiles.length),queue=new Int32Array(tiles.length);let floods=0;
+    for(const candidate of candidates){
+        // Spread the bounded graph floods between different flanking axes.
+        if(tested.some(p=>candidate.gates.every(g=>p.some(h=>Math.hypot(h.x-g.x,h.y-g.y)<hr*3))))continue;
+        tested.push(candidate.gates);if(floods++>=10)break;
+        const stamp=floods;let head=0,tail=0;
+        for(const i of candidate.keys)blockedTags[i]=stamp;
+        for(const i of roots){safeTags[i]=stamp;queue[tail++]=i;}
+        while(head<tail)for(const j of edges[queue[head++]])if(blockedTags[j]!==stamp&&safeTags[j]!==stamp){safeTags[j]=stamp;queue[tail++]=j;}
+        let troops=0,area=0,depth=0;const riskTileKeys=[];
+        const neckDepth=Math.min(...candidate.keys.map(i=>supplyDepth.get(i)??0));
+        for(const i of supplied)if(blockedTags[i]!==stamp&&safeTags[i]!==stamp){
+            troops+=weights[i];area++;
+            if(weights[i]){riskTileKeys.push(getHexKey(tiles[i]));depth=Math.max(depth,(supplyDepth.get(i)||0)-neckDepth);}
+        }
+        if(troops<1||area<candidate.keys.length*2)continue;
+        const speed=e=>Math.max(1,(e.speed||15)*WOD_MOVE_SPEED_FACTOR*.8);
+        const closureSeconds=Math.max(...candidate.keys.map(i=>Math.min(...candidate.pressure.map(e=>
+            Math.max(0,Math.hypot(e.x-tiles[i].x,e.y-tiles[i].y)-hr*(e.type==='heavy'?2:1))/speed(e)))))+2;
+        const withdrawSeconds=wodAiCorridorEvacSeconds(owner,riskTileKeys,index,supplyDepth,neckDepth);
+        const center=candidate.keys[Math.floor(candidate.keys.length/2)];
+        result.push({i:center,troops,area,keys:candidate.keys,riskTileKeys,predictive:true,wide:true,closureSeconds,withdrawSeconds});
+    }
+    return result;
+}
+
+function wodAiCorridorEvacSeconds(owner,riskTileKeys,index,supplyDepth,neckDepth) {
+    const risk=new Set(riskTileKeys),hr=gameData.hexRadius||20;let longest=0;
+    for(const u of gameData.entities){
+        if(u.owner!==owner||u.hp<=0||u.boardTransportUid||u.type==='marine'||!isLandArmyUnit(u))continue;
+        const h=getNearestHexToPoint(u.x,u.y),key=h&&getHexKey(h);if(!risk.has(key))continue;
+        const distance=Math.max(0,(supplyDepth.get(index.get(key))||0)-neckDepth)*hr*1.35;
+        const speed=Math.max(.5,(u.speed||12)*WOD_MOVE_SPEED_FACTOR*getUnitSpeedMultiplier(u,h)*.75);
+        longest=Math.max(longest,distance/speed);
+    }
+    return longest;
 }
 
 function wodAiSetOperationStage(owner,op,stage,reason) {
@@ -814,8 +883,9 @@ function wodAiManageRecovery(owner) {
         const trigger=u.isGeneral?.72:u.veteran?.6:.55;
         if(hp>=trigger&&manpower>=trigger&&morale>=.35&&!u._medicalRecovering&&!u.moraleBroken)continue;
         if(u.pickupUid||u.cargo||u._navalEvacuating)continue;
-        if(wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y))){
-            // An unreachable hospital order must not veto an urgent breakout.
+        if(wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y))||!wodIsNavalUnit(u)&&wodAiCorridorWithdrawal(u)){
+            // Medical orders yield before a threatened supply route closes,
+            // not only after the patient is already trapped.
             if(u._medicalRecovering){u._medicalRecovering=false;u.retreating=false;u._medicalGoal=null;u.aiOrderUntil=0;}
             continue;
         }
@@ -1312,26 +1382,45 @@ function wodAiLocalSituation(unit) {
 function wodAiCorridorWithdrawal(unit) {
     const defense=gameData._aiDefenseByOwner?.[unit.owner];
     if(!defense||defense.hexes!==gameData.hexes)return null;
-    const hr=gameData.hexRadius||20;
+    const hr=gameData.hexRadius||20,withdrawals=gameData._aiSupplyWithdrawals||=(new WeakMap());
+    let pending=withdrawals.get(unit);
+    const current=defense.supplyDistance?.get(getHexKey(getNearestHexToPoint(unit.x,unit.y)));
+    if(pending&&(pending.hexes!==gameData.hexes||current<=pending.safeDepth)){withdrawals.delete(unit);pending=null;}
     for(const cut of defense.corridors||[]){
         if(!cut.riskUnits?.has(unit.uid))continue;
-        const threats=wodAiThreats(unit.owner).filter(e=>Math.hypot(e.x-cut.holdHex.x,e.y-cut.holdHex.y)<hr*8);
+        const gates=cut.screenPoints||[cut.holdHex],known=wodAiThreats(unit.owner);
+        const threats=known.filter(e=>gates.some(p=>Math.hypot(e.x-p.x,e.y-p.y)<hr*8));
         const stamp=Math.floor(wodAiOperationTime()/900);
         if(cut._holdStamp!==stamp){
             cut._holdStamp=stamp;
-            const horizon=cut.predictive?Math.min(12,Math.max(3,cut.closureSeconds||12)):10;
-            const help=gameData.entities.filter(u=>u.owner===unit.owner&&!u.boardTransportUid&&!wodIsNavalUnit(u)&&u.type!=='convoy'&&
-                u.hp>u.maxHp*.55&&!u._medicalRecovering&&!u.retreating&&!u.moraleBroken&&Math.hypot(u.x-cut.holdHex.x,u.y-cut.holdHex.y)<hr*10&&
-                (defense.unitJob?.[u.uid]===cut.id||Math.hypot(u.x-cut.holdHex.x,u.y-cut.holdHex.y)<(u.range||50)*.9&&
-                    threats.some(e=>Math.hypot(u.x-e.x,u.y-e.y)<(u.range||50)))&&
-                wodAiArrivalSeconds(u,cut.holdHex,u.range||50,horizon)<=horizon);
-            cut._holdRatio=help.length>=2?wodAiForecast(unit.owner,help,threats).ratio:0;
+            const horizon=cut.predictive?Math.min(18,Math.max(3,cut.closureSeconds||12)):10;
+            const ratios=gates.flatMap(gate=>{
+                const foes=threats.filter(e=>Math.hypot(e.x-gate.x,e.y-gate.y)<hr*8);
+                if(!foes.length)return [];
+                const help=gameData.entities.filter(u=>u.owner===unit.owner&&!u.boardTransportUid&&!wodIsNavalUnit(u)&&u.type!=='convoy'&&
+                    u.hp>u.maxHp*.55&&!u._medicalRecovering&&!u.retreating&&!u.moraleBroken&&Math.hypot(u.x-gate.x,u.y-gate.y)<hr*12&&
+                    // A reserve beyond the opposite wing cannot cover both ends.
+                    gates.every(p=>p===gate||Math.hypot(u.x-gate.x,u.y-gate.y)<=Math.hypot(u.x-p.x,u.y-p.y)||Math.hypot(p.x-gate.x,p.y-gate.y)<(u.range||50)*1.5)&&
+                    (defense.unitJob?.[u.uid]===cut.id||Math.hypot(u.x-gate.x,u.y-gate.y)<(u.range||50)*.9&&
+                        foes.some(e=>Math.hypot(u.x-e.x,u.y-e.y)<(u.range||50)))&&wodAiArrivalSeconds(u,gate,u.range||50,horizon)<=horizon);
+                return [help.length?wodAiForecast(unit.owner,help,foes).ratio:0];
+            });
+            cut._holdRatio=ratios.length?Math.min(...ratios):Infinity;
         }
         // A fast hypothetical closure is not a forced retreat when a real,
         // timely force can hold the neck. The defense response screens it while
         // the main attack continues; distant reserves never count as protection.
-        if(threats.length&&(cut._holdRatio<1.05||cut.predictive&&cut._holdRatio<1.35&&cut.closureSeconds<cut.withdrawSeconds*1.25+4))return cut;
+        const urgent=!cut.predictive||!Number.isFinite(cut.closureSeconds)||cut.closureSeconds<cut.withdrawSeconds*1.4+8;
+        if(threats.length&&urgent&&cut._holdRatio<(cut.predictive?1.35:1.05)){
+            const safeDepth=Math.max(0,Math.min(...(cut.cutHexes||[cut.holdHex]).map(h=>defense.supplyDistance?.get(getHexKey(h))??0))-2);
+            withdrawals.set(unit,{hexes:gameData.hexes,cut,safeDepth});return cut;
+        }
+        if(pending?.cut.id===cut.id){withdrawals.delete(unit);pending=null;}
     }
+    // The last tank must finish leaving even after the infantry have cleared
+    // the cut and the two-unit strategic warning has disappeared.
+    if(pending&&(pending.cut.screenPoints||[pending.cut.holdHex]).some(p=>wodAiThreats(unit.owner).some(e=>Math.hypot(e.x-p.x,e.y-p.y)<hr*10)))return pending.cut;
+    withdrawals.delete(unit);
     return null;
 }
 
@@ -1456,14 +1545,24 @@ function wodAiCorridorStandHex(unit,job) {
     const cut=job.cutHexes,hr=gameData.hexRadius||20;
     if(!cut?.length)return wodAiDefendStandHex(unit.owner,job.holdHex,unit);
     const ids=job.members.slice().sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})),rank=Math.max(0,ids.indexOf(unit.uid));
-    const endpoint=cut[rank%2?cut.length-1:0],center=job.holdHex;
+    const gates=job.screenPoints||[cut[0],cut[cut.length-1]];
+    if(!job._gateAssignments){
+        const members=gameData.entities.filter(u=>job.members.includes(u.uid)),foes=wodAiThreats(unit.owner);
+        const needed=gates.map(g=>Math.max(1,foes.filter(e=>Math.hypot(e.x-g.x,e.y-g.y)<hr*8).reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*1.2));
+        const pairs=members.flatMap(u=>gates.map((g,i)=>({u,i,d:Math.hypot(u.x-g.x,u.y-g.y)}))).sort((a,b)=>a.d-b.d);
+        const assigned=job._gateAssignments={};
+        for(const {u,i} of pairs)if(assigned[u.uid]===undefined&&needed[i]>0){assigned[u.uid]=i;needed[i]-=wodAiUnitCombatPower(u);}
+        for(const u of members)if(assigned[u.uid]===undefined)assigned[u.uid]=gates.map((g,i)=>({i,d:Math.hypot(g.x-u.x,g.y-u.y)})).sort((a,b)=>a.d-b.d)[0].i;
+    }
+    const gateIndex=job._gateAssignments[unit.uid]??rank%gates.length;
+    const endpoint=gates[gateIndex],center=job.holdHex;
     const axis={x:cut[cut.length-1].x-cut[0].x,y:cut[cut.length-1].y-cut[0].y},length=Math.hypot(axis.x,axis.y)||1;
     const used=job._corridorTargets||=( {} ),points=[],reach=wodAiOperationReach(unit);
     for(const p of getHexesInRadius(endpoint.q,endpoint.r,4)){
         const h=gameData.hexes[p.q+','+p.r];if(!h||!reach.has(getHexKey(h))||!wodSupplyPassable(h,unit.owner)||!canUnitEnterHex(unit,h)||isWaterHex(h)&&!isBridgeHex(h))continue;
         // Guard the hostile-facing ends, leaving the middle of a wider passage
         // clear for retreating columns instead of stacking at its center.
-        const inward=((h.x-endpoint.x)*axis.x+(h.y-endpoint.y)*axis.y)/length*(rank%2?-1:1);
+        const inward=((h.x-endpoint.x)*axis.x+(h.y-endpoint.y)*axis.y)/length*(gateIndex?-1:1);
         if(cut.length>=3&&inward>hr*.8)continue;
         const separation=Object.entries(used).filter(([id,point])=>id!==unit.uid&&Math.hypot(point.x-h.x,point.y-h.y)<(unit.radius||12)*2+7).length;
         const score=wodAiDist2(h.x,h.y,endpoint.x,endpoint.y)+separation*hr*hr*80+
@@ -1494,7 +1593,7 @@ function wodAiSharedFallbackHex(unit,job,local,cut,defense) {
     }
     // While a corridor is still open, follow the supply graph to its safe side.
     // Keep the agreed fallback line once the column has cleared that passage.
-    if(cut&&Math.hypot(unit.x-anchor.x,unit.y-anchor.y)>hr*5){const hop=wodAiSupplyRetreatHop(unit,defense);if(hop)return hop;}
+    if(cut){const hop=wodAiSupplyRetreatHop(unit,defense);if(hop)return hop;}
     const ids=(cut?.riskUnits?[...cut.riskUnits]:job?.members||local.allies.map(u=>u.uid)).slice().sort(),rank=Math.max(0,ids.indexOf(unit.uid));
     const dx=city.x-anchor.x,dy=city.y-anchor.y,len=Math.hypot(dx,dy)||1,lane=(rank%5-2)*hr*1.7;
     const slot=getNearestHexToPoint(anchor.x-dy/len*lane+dx/len*Math.floor(rank/5)*hr*2,anchor.y+dx/len*lane+dy/len*Math.floor(rank/5)*hr*2);
