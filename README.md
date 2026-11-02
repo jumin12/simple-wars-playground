@@ -4,6 +4,8 @@ Browser strategy game with optional **host-authoritative multiplayer** (up to **
 
 ## Run locally
 
+Assault groups assemble around their actual army and travel in shared forward bounds with distinct line and second-rank slots. Distant recruits do not restart a bound; passed slots do not pull vanguards backward. Bridge occupancy uses the physical deck over water, leaving riverbank clicks and dry bridge caps on land. `node scripts/verify-assault-bridges.js` checks actual attack movement, local assembly, formation commitment and 60 bank-order cases; the campaign bridge suite also verifies necessary crossings and bridge supply corridors.
+
 Match gold requires 60 active seconds and damage dealt by the local faction. Every unit uses infantry's base speed (15), with terrain/water/morale effects; generals and veterancy do not modify movement. Healthy solitary screens probe empty ground in short steps, covered border assaults retain their command, and stalled nearby attack groups share a reachable production objective. `node scripts/verify-strategy-rewards-speed.js` tests eligibility boundaries and real awards, movement parity, old speed normalization, lone advances, emergency priority, shared objectives and fog limits.
 
 Combat XP accrues at half its previous rate without resetting existing units or changing rank thresholds. Healthy frontline screens can advance in supported short bounds while town/fort guards, reserves and emergency responders remain reserved. Assembled superior forces deploy without waiting to already be in firing range; active town assaults also reassess real enemy supply-cut opportunities. `node scripts/verify-ai-front-engagement.js` checks XP, physical frontline movement, force readiness, actual corridor closure and fog limits.

@@ -2082,6 +2082,52 @@ function wodAiFormationSlot(unit,job,anchor,goal,members) {
     sites.sort((a,b)=>score(a)-score(b));const target=sites[0]||anchor;used[unit.uid]=getHexKey(target);return target;
 }
 
+// Travel as a line with a second rank, rather than independently chasing the
+// final town. A bound belongs to the gathered force; distant recruits join it
+// without moving everybody's destination or increasing its arrival quorum.
+function wodAiAssaultMarchHex(unit,op,goal,members) {
+    if(op.stage!=='attack'||op.screenIds?.includes(unit.uid)||unit.isGeneral)return null;
+    const hr=gameData.hexRadius||20,now=wodAiOperationTime();
+    const force=members.filter(u=>!op.screenIds?.includes(u.uid)&&!u.isGeneral);
+    if(force.length<2)return null;
+    const threats=wodAiThreats(unit.owner,false);
+    if(threats.some(e=>Math.hypot(e.x-unit.x,e.y-unit.y)<(e.range||50)+hr*2))return null;
+    let march=op.march;
+    const roster=march&&force.filter(u=>march.ids.includes(u.uid));
+    const arrived=march&&roster.filter(u=>Math.hypot(u.x-march.anchor.x,u.y-march.anchor.y)<hr*3.5).length;
+    if(!march||march.goal!==(goal.id||getHexKey(goal))||!roster.length||
+        arrived>=Math.ceil(roster.length*.7)||now-march.at>30000){
+        const cluster=u=>force.filter(m=>Math.hypot(m.x-u.x,m.y-u.y)<hr*6);
+        const ranked=force.map(u=>({u,near:cluster(u)})).sort((a,b)=>b.near.length-a.near.length||
+            Math.hypot(a.u.x-goal.x,a.u.y-goal.y)-Math.hypot(b.u.x-goal.x,b.u.y-goal.y));
+        const core=ranked[0].near,cx=core.reduce((n,u)=>n+u.x,0)/core.length,cy=core.reduce((n,u)=>n+u.y,0)/core.length;
+        const lead=core.slice().sort((a,b)=>Math.hypot(a.x-cx,a.y-cy)-Math.hypot(b.x-cx,b.y-cy))[0];
+        if(Math.hypot(lead.x-goal.x,lead.y-goal.y)<hr*7){op.march=null;return null;}
+        const route=wodAiLandRoute(lead,goal);if(!route||route.length<3)return null;
+        const anchor=route[Math.min(5,route.length-1)],origin=getNearestHexToPoint(lead.x,lead.y);
+        const dx=anchor.x-origin.x,dy=anchor.y-origin.y,len=Math.hypot(dx,dy)||1;
+        const ordered=force.slice().sort((a,b)=>(a.x-cx)*-dy+(a.y-cy)*dx-((b.x-cx)*-dy+(b.y-cy)*dx)||a.uid.localeCompare(b.uid));
+        march=op.march={id:(op.boundSerial=(op.boundSerial||0)+1),at:now,goal:goal.id||getHexKey(goal),anchor,origin,dx:dx/len,dy:dy/len,
+            ids:core.map(u=>u.uid),order:ordered.map(u=>u.uid),slots:{}};
+    }
+    if(!march.order.includes(unit.uid))march.order.push(unit.uid);
+    const rank=march.order.indexOf(unit.uid),width=Math.min(5,march.order.length),lane=(rank%width-(width-1)/2)*hr*1.6,row=Math.floor(rank/width)*hr*1.7;
+    const x=march.anchor.x-march.dy*lane-march.dx*row,y=march.anchor.y+march.dx*lane-march.dy*row;
+    const reach=wodAiOperationReach(unit),legal=h=>h&&!isWaterHex(h)&&canUnitEnterHex(unit,h)&&reach.has(getHexKey(h));
+    let target=gameData.hexes[march.slots[unit.uid]];
+    if(!legal(target)){
+        const used=new Set(Object.entries(march.slots).filter(([id])=>id!==unit.uid).map(([,k])=>k));
+        const sites=getHexesInRadius(march.anchor.q,march.anchor.r,4).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>legal(h)&&!used.has(getHexKey(h))&&
+            (h.x-march.origin.x)*march.dx+(h.y-march.origin.y)*march.dy>hr*.5);
+        sites.sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y));target=sites[0];
+        if(target)march.slots[unit.uid]=getHexKey(target);
+    }
+    // A vanguard that already passed this bound keeps moving forward. It must
+    // never reverse to an old formation slot while the rear catches up.
+    if(target&&(target.x-unit.x)*march.dx+(target.y-unit.y)*march.dy<-hr*.7)return null;
+    return target||null;
+}
+
 function wodAiDirectBeachhead(owner,supplyShips) {
     const now=wodAiOperationTime(),hr=gameData.hexRadius||20,radius=wodFortCombatAuraRadiusPx();
     const troops=gameData.entities.filter(u=>u.owner===owner&&u.hp>0&&u._navalLanded&&!u._navalEvacuating&&
@@ -2234,9 +2280,25 @@ function wodAiRefreshRally(owner,job,members,goal){
  const route=wodAiLandRoute(lead,goal);
  const force=members,center=getNearestHexToPoint(cx,cy),reach=wodAiOperationReach(lead),threats=wodAiThreats(owner,false);
  if(!center)return;
+ const assembling=!job.operationState||['assemble','recover'].includes(job.operationState.stage);
+ const goalKey=goal.id||getHexKey(goal),old=job._assemblyRally;
+ if(assembling&&old?.goal===goalKey&&wodIsFriendlyOwner(old.hex.owner,owner)&&wodCurrentSupplyComponent(old.hex,owner).city&&
+     !threats.some(e=>Math.hypot(e.x-old.hex.x,e.y-old.hex.y)<(e.range||50)+hr)){
+  job.holdHex=old.hex;return;
+ }
+ // Reverse route fields fill over several bounded AI pulses. While they are
+ // warming up, assemble at the supplied army center instead of issuing the
+ // stale, distant rally order and retaining it until everybody arrives there.
+ if(assembling&&!route&&!isWaterHex(center)&&canUnitEnterHex(lead,center)&&
+     wodIsFriendlyOwner(center.owner,owner)&&wodCurrentSupplyComponent(center,owner).city&&
+     !threats.some(e=>Math.hypot(e.x-center.x,e.y-center.y)<(e.range||50)+hr)){
+  job.holdHex=center;job._assemblyRally={goal:goalKey,hex:center};return;
+ }
  if(route){
   let rally=null;
-  for(const h of route){
+  // Assemble near the actual army. The last friendly cell of a long route can
+  // be minutes away, forcing scattered regiments to march there separately.
+  for(const h of assembling?route.slice(0,5):route){
    if(!wodIsFriendlyOwner(h.owner,owner)||!wodCurrentSupplyComponent(h,owner).city)break;
    if(threats.some(e=>Math.hypot(e.x-h.x,e.y-h.y)<(e.range||50)+hr))break;
    rally=h;
@@ -2246,7 +2308,8 @@ function wodAiRefreshRally(owner,job,members,goal){
        !threats.some(e=>Math.hypot(e.x-current.x,e.y-current.y)<(e.range||50)+hr);
    const oldIndex=current?route.indexOf(current):-1;
    const backwards=safe&&(oldIndex>=0&&route.indexOf(rally)<oldIndex||!wodAiNeedsLandDetour(lead,goal)&&Math.hypot(rally.x-goal.x,rally.y-goal.y)>Math.hypot(current.x-goal.x,current.y-goal.y)+hr*2);
-   if(!backwards&&!['secure-approach','protect-flanks'].includes(job.operationState?.stage))job.holdHex=rally;
+   if((assembling||!backwards)&&!['secure-approach','protect-flanks'].includes(job.operationState?.stage))job.holdHex=rally;
+   if(assembling)job._assemblyRally={goal:goalKey,hex:job.holdHex};
    return;
   }
  }
@@ -2255,8 +2318,8 @@ function wodAiRefreshRally(owner,job,members,goal){
  for(const p of getHexesInRadius(center.q,center.r,6)){
   const h=gameData.hexes[p.q+','+p.r];if(!h||isWaterHex(h)||!wodIsFriendlyOwner(h.owner,owner)||!reach.has(getHexKey(h))||!canUnitEnterHex(lead,h)||!wodCurrentSupplyComponent(h,owner).city)continue;
   if(threats.some(e=>Math.hypot(e.x-h.x,e.y-h.y)<(e.range||50)+hr*2))continue;
-  const d=Math.hypot(h.x-goal.x,h.y-goal.y);if(d>oldDistance-hr*2)continue;
+  const d=Math.hypot(h.x-goal.x,h.y-goal.y);if(!assembling&&d>oldDistance-hr*2)continue;
   const value=Math.hypot(h.x-cx,h.y-cy)*1.5+d*.6;if(value<score){score=value;best=h;}
  }
- if(best)job.holdHex=best;
+ if(best){job.holdHex=best;if(assembling)job._assemblyRally={goal:goalKey,hex:best};}
 }

@@ -13073,6 +13073,15 @@
 
         const WOD_CHANGELOG = [
             {
+                at:"2026-11-02T17:20:00Z",
+                title:"Formed assault advances and accurate riverbank orders",
+                items:[
+                    "AI armies gather around their actual troops before moving to the enemy, rather than sending scattered regiments to a distant rally. Route calculation no longer preserves a stale rally across the map.",
+                    "Advancing assault groups use shared forward bounds with distinct line and second-rank positions. Reinforcements join the existing advance, and troops that have passed a bound do not reverse to an old slot. Combat, town defense and supply emergencies still take priority.",
+                    "Riverbank movement stays on dry ground, including land beneath bridge end caps. Nearby land clicks no longer snap to a bridge's center, and marines can complete short moves within the same bank cell. Necessary bridge crossings remain supported."
+                ]
+            },
+            {
                 at:"2026-11-02T17:00:00Z",
                 title:"Gold participation, equal march speed and purposeful attacks",
                 items:[
@@ -17934,33 +17943,21 @@
             // No bridges on the map (or point nowhere near one) → skip the radius scans entirely.
             if(!gameData.bridges || !gameData.bridges.length) return null;
             if(!wodPointNearAnyBridge(x, y)) return null;
+            // A bridge cap may overlap a bank. Dry ground remains dry ground;
+            // neither its occupied cell nor a nearby click belongs to the deck.
+            const ground = getNearestHexToPoint(x, y);
+            if(ground && !isWaterHex(ground)) return null;
             if(gameData.bridges && gameData.bridges.length) {
                 for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
                     let br = gameData.bridges[bi];
                     if(!br) continue;
                     if(br.x == null) wodSyncBridgeWorldCoords(br);
-                    if(!wodPointInBridgeRect(x, y, br, 1.42)) continue;
+                    if(!wodPointInBridgeRect(x, y, br, 1.05)) continue;
                     let h = wodBridgeWaterHexNearPoint(br, x, y);
                     if(h) return h;
                 }
             }
-            let coord = pixelToHex(x, y);
-            let direct = gameData.hexes[`${coord.q},${coord.r}`];
-            if(direct && isBridgeHex(direct)) return direct;
-            let best = null,
-                bestD = Infinity;
-            for(let pt of getHexesInRadius(coord.q, coord.r, 3)) {
-                let h = gameData.hexes[`${pt.q},${pt.r}`];
-                if(!h || !isBridgeHex(h)) continue;
-                let dx = x - h.x,
-                    dy = y - h.y;
-                let d = dx * dx + dy * dy;
-                if(d < bestD) {
-                    bestD = d;
-                    best = h;
-                }
-            }
-            return best;
+            return null;
         }
         function wodPointOnBridgeDeck(unit, x, y) {
             return !!wodBridgeHexAtPoint(unit, x, y);
@@ -32605,7 +32602,7 @@
             }
             // Same-hex / already-on-tile land orders (formation slots beside a bridge): march
             // straight to the exact pixel — never invent a bridge detour.
-            if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext && startHex &&
+            if(path.length <= 1 && (wodUnitPrefersLandOnlyPath(unit) || unit.type==='marine'&&!isWaterHex(reachNext.hex)) && reachNext && startHex &&
                 wodHexKeysEqual(startHex, reachNext.hex) && !wodOrderIntoWater(unit, reachNext.hex)) {
                 unit._wodRouteUsesBridge = false;
                 unit.path = null;
@@ -40887,6 +40884,7 @@
             const support=wodAiFrontSupportFor(unit,job);
             if(support&&(!unit.orderTarget||Math.hypot(unit.orderTarget.x-support.h.x,unit.orderTarget.y-support.h.y)>(gameData.hexRadius||20)*2))return false;
             if(job?.stage&&unit.aiOperationStage!==job.stage)return false;
+            if(job?.operationState?.march&&!unit.isGeneral&&!job.operationState.screenIds?.includes(unit.uid)&&unit.aiAssaultBound!==job.operationState.march.id&&job.stage==='attack')return false;
             if(job?.phase==='assault'&&(job.objectiveCity||job.objectiveHex)){
                 const members=wodAiAssaultMembers(unit.owner,job,gameData.aiTaskForces?.[unit.owner]);
                 const balance=wodAiAssaultBalance(unit.owner,members,job.objectiveCity||job.objectiveHex);
@@ -41623,7 +41621,7 @@
                 }
             }else job.stalledAt=null;
             const destination=job.objectiveCity?wodAiTownAssaultHex(unit,job.objectiveCity,members):wodAiSectorAdvanceHex(unit,job,members);
-            let target=['assemble','recover'].includes(op.stage)?wodAiFormationSlot(unit,job,job.holdHex||getNearestHexToPoint(unit.x,unit.y),goal,members):['secure-approach','protect-flanks'].includes(op.stage)?wodAiFormationSlot(unit,job,op.approach,goal,members):destination&&wodAiAdvanceHex(unit,destination,members);
+            let target=['assemble','recover'].includes(op.stage)?wodAiFormationSlot(unit,job,job.holdHex||getNearestHexToPoint(unit.x,unit.y),goal,members):['secure-approach','protect-flanks'].includes(op.stage)?wodAiFormationSlot(unit,job,op.approach,goal,members):destination&&(wodAiAssaultMarchHex(unit,op,goal,members)||wodAiAdvanceHex(unit,destination,members));
             if(op.stage==='consolidate')target=wodAiDefendStandHex(unit.owner,getNearestHexToPoint(unit.x,unit.y),unit);
             if(op.stage==='attack'&&op.screenIds?.includes(unit.uid))target=wodAiOperationScreenHex(unit,op,goal,members);
             if(op.stage==='attack'&&unit.isGeneral)return wodAiIssueGeneralOrder(unit,job);
@@ -41637,7 +41635,7 @@
             if(!target)return false;
             const holding=op.stage!=='attack'||op.screenIds?.includes(unit.uid);
             const moved=wodAiMoveUnitTowardHex(unit,target,holding,holding?.45:unit.type==='heavy'?.35:.65);
-            if(moved){unit.aiHoldStartAt=0;wodAiStampOrder(unit,holding,target,holding?2500:7000);unit.aiOrderPhase=job.phase;unit.aiOperationStage=op.stage;}
+            if(moved){unit.aiHoldStartAt=0;wodAiStampOrder(unit,holding,target,holding?2500:7000);unit.aiOrderPhase=job.phase;unit.aiOperationStage=op.stage;unit.aiAssaultBound=op.march?.id;}
             return true; // Waiting/repathing cannot fall through to an individual suicide attack.
         }
         function wodAiIssueCoastalOperation(unit,job) {
