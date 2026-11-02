@@ -77,7 +77,7 @@ const server=http.createServer((req,res)=>{
   assert(Object.values(results.allied).every(v=>!v)&&results.allianceEnded,'friendly allied cities supply the pocket until alliance ends');
   assert(results.guestSupplied,'multiplayer guests ignore stale encirclement flags after the host reports town capture');
   assert(results.disconnected&&!results.reconnected&&results.cutAgain,'opening or cutting a land corridor updates supply immediately');
-  assert(results.diagonalCut&&results.neutralEdge&&results.mapEdge,'diagonals, neutral borders and map edges cannot replace a city route');
+  assert(!results.diagonalCut&&!results.neutralEdge&&results.mapEdge,'friendly diagonal land reaches its town; an unrelated neutral tile or map edge is not a supply source');
   assert(results.coast.infantry&&!results.coast.marine&&results.waterLost,'only marines retain ocean/river supply and lose it when cut off from water');
   assert.equal(errors.length,0,errors.join('\n'));console.log(JSON.stringify(results,null,2));
  }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}

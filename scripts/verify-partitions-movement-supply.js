@@ -98,7 +98,7 @@ const server=http.createServer((req,res)=>{
      gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRunUnitSeparationSync(40,96);elapsed+=.1;
      if(units.every(u=>Math.abs(u.x-goals.get(u).x)<150))break;
     }
-    rows.push({kind,elapsed:Math.round(elapsed),invalid,crossed:units.filter(u=>Math.abs(u.x-goals.get(u).x)<150).length,total:units.length});
+    rows.push({kind,elapsed:Math.round(elapsed),invalid,crossed:units.filter(u=>Math.abs(u.x-goals.get(u).x)<150).length,total:units.length,blocked:units.filter(u=>Math.abs(u.x-goals.get(u).x)>=150).map(u=>({id:u.uid,x:u.x,y:u.y,target:u.target,order:u.orderTarget,path:u.path,yield:u._trafficYield,stuck:u.stuckTimer,block:u.blockedTimer}))});
    }
    return rows;
   });

@@ -85,12 +85,15 @@ const server=http.createServer((req,res)=>{
         results.withdrawal=await page.evaluate(()=>{
             const forward=coverSetup(16);gameData.entities=gameData.entities.filter(u=>forward.includes(u)||u.owner!==2||u.x<coverHex(-30).x);coverRefresh();
             const initial=forward.map(u=>u.x),job={id:'advance',kind:'main',members:forward.map(u=>u.uid)};
+            wodAiReadDefense(2,gameData.entities.filter(u=>u.owner===2),true);wodAiCorridorWithdrawal(forward[0]);
+            const safeDepth=gameData._aiSupplyWithdrawals?.get(forward[0])?.safeDepth;
             let ordered=false;
             for(let tick=0;tick<2400;tick++){
                 if(tick%10===0){wodAiReadDefense(2,gameData.entities.filter(u=>u.owner===2),true);for(const u of forward)ordered=wodAiTacticalFallback(u,job)||ordered;}
                 wodBeginSimPfBudget(gameData.entities.length);gameData._wodPfFrameActive=true;try{update(.1);}finally{gameData._wodPfFrameActive=false;}wodDrainAiMoveQueue();
             }
-            return{ordered,initial,final:forward.map(u=>u.x),alive:forward.every(u=>u.hp>0),cleared:forward.every(u=>u.x<coverHex(-8).x),attrition:forward.reduce((n,u)=>n+(u.attritionHpLost||0),0)};
+            const roots=forward.map(u=>gameData._aiDefenseByOwner[2]?.supplyDistance.get(getHexKey(getNearestHexToPoint(u.x,u.y))));
+            return{ordered,initial,final:forward.map(u=>u.x),safeDepth,roots,alive:forward.every(u=>u.hp>0),cleared:roots.every(d=>d<=safeDepth)&&forward.every(u=>!wodAiCorridorWithdrawal(u)&&!wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y))),attrition:forward.reduce((n,u)=>n+(u.attritionHpLost||0),0)};
         });
         assert(results.withdrawal.ordered&&results.withdrawal.alive&&results.withdrawal.cleared&&results.withdrawal.attrition===0,'the endangered column actually clears the threatened passage without attrition');
         results.solo=await page.evaluate(()=>{const forward=coverSetup(16),u=forward[0];gameData.entities=gameData.entities.filter(e=>e.owner!==2||e===u||e.x<coverHex(-30).x);coverRefresh();const d=wodAiReadDefense(2,gameData.entities.filter(e=>e.owner===2),true);return{protected:d.corridors.some(c=>c.riskUnits?.has(u.uid)),warned:!!wodAiCorridorWithdrawal(u)};});

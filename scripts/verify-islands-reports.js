@@ -47,12 +47,18 @@ const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+(req
   // Make a multiplayer report whose local player is not faction one.
   await page.evaluate(()=>{
    islandFixture();gameData.mp={enabled:true,isHost:false,localSlot:2,factionSlots:[1,2],humanSlots:[1,2]};gameData.money=12000;gameData.manpower=8000;gameData.aiMoneyByOwner={2:18000};gameData.aiManpowerByOwner={2:9000};
-   for(const owner of[1,2])for(const [i,type]of['light','marine','heavy','ship','transport'].entries()){const u=createUnitAt(type,-15*27,(owner===1?-8:8)*27+i*45,owner,{startSpawn:true});u.hp=u.maxHp;}
+   for(const owner of[1,2])for(const [i,type]of['light','marine','motorized','mountaineer','heavy','ship','transport','supply'].entries()){const u=createUnitAt(type,-15*27,(owner===1?-8:8)*27+i*45,owner,{startSpawn:true});u.hp=u.maxHp;}
    gameData._battleLedger={seconds:245,byOwner:{1:{unitsLost:2,unitsDestroyed:1,landGained:15},2:{unitsLost:1,unitsDestroyed:3,landGained:20,landLost:5,moneySpent:6000,damageDealt:125.5,combatDamageTaken:48.2}}};gameData._battleLedgerMap=gameData.hexes;
    UI.mainMenu.classList.add('hidden');UI.panels.forEach(p=>p.classList.add('hidden'));UI.inGameUI.classList.remove('hidden');UI.escMenu.classList.add('hidden');toggleWodStatsPanel(true);
   });
   assert.equal(await page.locator('.stats-m-page.active').getAttribute('data-stats-page'),'players','Players opens first');
   assert.equal(await page.locator('#playerSummaryBody [data-stats-owner]').first().getAttribute('data-stats-owner'),'2','local multiplayer seat appears first');
+  results.unitColumns=await page.evaluate(()=>[false,true].map(complete=>{
+   const doc=new DOMParser().parseFromString(wodRenderFactionStats(complete),'text/html');
+   return{complete,owners:[...doc.querySelectorAll('[data-stats-owner]')].map(card=>({owner:card.dataset.statsOwner,counts:Object.fromEntries([...card.querySelectorAll('[data-stats-unit-type]')].map(row=>[row.dataset.statsUnitType,row.querySelector('dd').textContent]))}))};
+  }));
+  assert(results.unitColumns.every(report=>report.owners.every(row=>Object.keys(row.counts).length===8&&Object.values(row.counts).every(n=>n==='1'))),'every unit class has its own live and completed-report value');
+  assert.equal(await page.locator('#ui-ships').textContent(),'1');assert.equal(await page.locator('#ui-transports').textContent(),'1');assert.equal(await page.locator('#ui-supply-ships').textContent(),'1');
   results.tabs=[];
   for(const width of[1440,768,390,320]){
    await page.setViewportSize({width,height:width>900?1000:844});
@@ -61,6 +67,7 @@ const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+(req
     const state=await page.evaluate(()=>{const root=document.querySelector('#statsMenu'),scroll=root.querySelector('.stats-m-pages'),active=root.querySelector('.stats-m-page.active');return{active:active.dataset.statsPage,visible:[...root.querySelectorAll('[role="tabpanel"]')].filter(p=>getComputedStyle(p).display!=='none').length,scroll:scroll.scrollTop,noOverflow:scroll.scrollWidth<=scroll.clientWidth+2,heading:active.querySelector('h3').getBoundingClientRect().top,viewport:scroll.getBoundingClientRect().top,tabs:root.querySelector('.stats-m-tabs').getBoundingClientRect().bottom,display:getComputedStyle(active).display,gap:getComputedStyle(active).gap};});
     assert(state.active===section&&state.visible===1&&state.display==='grid'&&state.scroll===0&&state.noOverflow&&state.heading>=state.tabs&&Math.abs(state.heading-state.viewport)<5,JSON.stringify({width,section,state}));
     results.tabs.push({width,section,...state});if(width===1440||width===390)await page.screenshot({path:path.join(OUT,`report-${width}-${section}.png`)});
+    if(section==='players'&&(width===1440||width===390)){await page.locator('#playerSummaryBody [data-stats-owner="2"] [data-stats-unit-type="marine"]').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(OUT,`report-${width}-unit-columns.png`)});}
    }
   }
   await page.locator('#report-tab-combat').focus();await page.keyboard.press('Home');assert.equal(await page.locator('.stats-m-tab[aria-selected="true"]').getAttribute('data-stats-page'),'players');await page.keyboard.press('ArrowRight');assert.equal(await page.locator('.stats-m-page.active').getAttribute('data-stats-page'),'economy');await page.keyboard.press('End');assert.equal(await page.locator('.stats-m-page.active').getAttribute('data-stats-page'),'combat');
