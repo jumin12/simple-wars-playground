@@ -552,11 +552,11 @@ function wodAiRebalanceGroups(owner, plan, ready) {
     const desiredLine=demand.line;
     let line=plan.jobs.filter(j=>j.kind==='hold').reduce((n,j)=>n+j.members.length,0);
     const release=(job,u)=>{job.members=job.members.filter(id=>id!==u.uid);delete plan.unitJob[u.uid];u.aiOrderUntil=0;};
-    if(strategy.intent!=='defend'&&line>desiredLine+2){
+    if(!['defend','recover'].includes(strategy.intent)&&line>desiredLine){
         const threats=wodAiThreats(owner);
         for(const job of plan.jobs.filter(j=>j.kind==='hold').sort((a,b)=>b.members.length-a.members.length)){
             for(const uid of job.members.slice()){
-                if(line<=desiredLine+1)break;
+                if(line<=desiredLine)break;
                 const u=ready.find(u=>u.uid===uid);
                 if(u&&!u._combatEngaged&&!threats.some(e=>Math.hypot(e.x-u.x,e.y-u.y)<hr*8)){
                     release(job,u);line--;
@@ -584,9 +584,9 @@ function wodAiRebalanceGroups(owner, plan, ready) {
     }
     const reserveTarget=demand.reserve;
     let reserve=plan.jobs.filter(j=>j.kind==='reserve').reduce((n,j)=>n+j.members.length,0);
-    if(strategy.intent==='attack'&&reserve>reserveTarget+1)for(const job of plan.jobs.filter(j=>j.kind==='reserve')){
+    if(strategy.intent==='attack'&&reserve>reserveTarget)for(const job of plan.jobs.filter(j=>j.kind==='reserve')){
         for(const uid of job.members.slice()){
-            if(reserve<=reserveTarget+1)break;
+            if(reserve<=reserveTarget)break;
             const u=ready.find(u=>u.uid===uid);if(u&&!u._combatEngaged){release(job,u);reserve--;}
         }
     }
@@ -860,6 +860,13 @@ function wodAiBorderBattleCovered(owner,cluster,plan) {
 // A screen can advance the front in short supported bounds. Keeping every
 // hold group stationary even on an empty border stranded most small armies.
 // Town/fort guards, reserves and emergency response troops remain reserved.
+function wodAiFrontProbeSafe(owner,goal) {
+    const hr=gameData.hexRadius||20;
+    return !wodAiThreats(owner).some(e=>Math.hypot(e.x-goal.x,e.y-goal.y)<hr*12&&
+        (e._intelMemory?Math.hypot(e.x-goal.x,e.y-goal.y)<(e.range||50)+hr*3+(e.uncertainty||0)*.15:
+            wodAiArrivalSeconds(e,goal,e.range||50,8)<=8));
+}
+
 function wodAiIssueFrontAdvance(unit,job) {
     const owner=unit.owner,hr=gameData.hexRadius||20,now=wodAiOperationTime(),plan=gameData.aiTaskForces?.[owner];
     if(!plan||!job.attackHex||Math.hypot(unit.x-job.holdHex.x,unit.y-job.holdHex.y)>hr*7)return false;
@@ -891,13 +898,12 @@ function wodAiIssueFrontAdvance(unit,job) {
         const members=gameData.entities.filter(u=>u.owner===owner&&isLandArmyUnit(u)&&u.hp>u.maxHp*.65&&!u.retreating&&!u.moraleBroken&&!u._medicalRecovering&&!u.boardTransportUid&&
             !gameData._aiDefenseByOwner?.[owner]?.unitJob[u.uid]&&Math.hypot(u.x-job.holdHex.x,u.y-job.holdHex.y)<hr*7&&
             ['hold','main','armor','raid'].includes(plan.jobs.find(j=>j.id===plan.unitJob[u.uid])?.kind)&&!wodAiCorridorWithdrawal(u));
-        const unopposed=!wodAiThreats(owner).some(e=>Math.hypot(e.x-job.attackHex.x,e.y-job.attackHex.y)<hr*12&&
-            (e._intelMemory||wodAiArrivalSeconds(e,job.attackHex,e.range||50,18)<=18));
+        const unopposed=wodAiFrontProbeSafe(owner,job.attackHex);
         if(!members.includes(unit)||members.length<(unopposed?1:2))return false;
         const reach=wodAiOperationReach(unit),explored=wodFogActive()?wodFogFactionIntel(owner).explored:null,sites=getHexesInRadius(job.holdHex.q,job.holdHex.r,3).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&
             !isWaterHex(h)&&wodIsHostileOwner(h.owner,owner)&&hasOwnerNeighbor(h,owner)&&reach.has(getHexKey(h))&&canUnitEnterHex(unit,h)&&(!explored||explored.has(getHexKey(h))));
         sites.sort((a,b)=>Math.hypot(a.x-job.attackHex.x,a.y-job.attackHex.y)-Math.hypot(b.x-job.attackHex.x,b.y-job.attackHex.y)-(forward(a)-forward(b))*.6);
-        const goal=sites.slice(0,8).find(h=>wodAiAssaultBalance(owner,members,h).ready);
+        const goal=sites.slice(0,8).find(h=>members.length===1&&wodAiFrontProbeSafe(owner,h)||wodAiAssaultBalance(owner,members,h).ready);
         if(!goal)return false;
         push={anchor:job.holdHex,objectiveHex:goal,members:members.map(u=>u.uid),until:now+18000};
         plan.frontAdvances=(plan.frontAdvances||[]).filter(p=>p.until>now&&wodIsHostileOwner(p.objectiveHex.owner,owner)).slice(-15);plan.frontAdvances.push(push);
@@ -905,13 +911,13 @@ function wodAiIssueFrontAdvance(unit,job) {
     }
     const members=gameData.entities.filter(u=>push.members.includes(u.uid)&&u.hp>u.maxHp*.5&&!u._medicalRecovering&&!u.retreating&&!u.moraleBroken&&!u.boardTransportUid&&
         !gameData._aiDefenseByOwner?.[owner]?.unitJob[u.uid]&&!wodAiCorridorWithdrawal(u));
-    const unopposed=!wodAiThreats(owner).some(e=>Math.hypot(e.x-push.objectiveHex.x,e.y-push.objectiveHex.y)<hr*12&&
-        (e._intelMemory||wodAiArrivalSeconds(e,push.objectiveHex,e.range||50,18)<=18));
-    if(members.length<(unopposed?1:2)||!members.includes(unit)||!wodAiAssaultBalance(owner,members,push.objectiveHex).ready)return false;
+    const unopposed=wodAiFrontProbeSafe(owner,push.objectiveHex);
+    if(members.length<(unopposed?1:2)||!members.includes(unit)||!(unopposed&&members.length===1)&&!wodAiAssaultBalance(owner,members,push.objectiveHex).ready)return false;
     const destination=wodAiSectorAdvanceHex(unit,push,members);
     const route=members.length===1&&destination?wodAiLandRoute(unit,destination):null;
     const target=route?.[Math.min(1,route.length-1)]||(members.length>1&&destination?wodAiAdvanceHex(unit,destination,members):null);
     if(!target)return false;
+    if(members.length===1&&!wodAiFrontProbeSafe(owner,target))return false;
     unit.aiCaptureHexKey=getHexKey(destination);
     if(wodAiMoveUnitTowardHex(unit,target,false,.12))wodAiStampOrder(unit,false,target,4000);
     return true;
@@ -1179,7 +1185,8 @@ function wodAiExpeditionDemand(owner,cities,army,pending=[]) {
     const stamp=Math.floor(now/1500)+':'+army.length+':'+pending.length+':'+cities.map(c=>c.id+Number(c.hasHarbor)+Number(c.hasFactory)).join(',');
     const prior=cache.owners[owner];if(prior?.stamp===stamp)return prior;
     const profile=wodAiCommander(owner),known=wodAiThreats(owner),ownRegions=cities.map(c=>wodTransportLandingRegion({type:'light',owner},c)).filter(Boolean);
-    const targets=wodAiNavalAssaultTargets(owner).filter(t=>{
+    const coastalObjectives=wodAiNavalAssaultTargets(owner);
+    const targets=coastalObjectives.filter(t=>{
         const h=getNearestHexToPoint(t.x,t.y);return h&&!ownRegions.some(r=>r.has(getHexKey(h)));
     });
     const old=gameData.aiNavalPlans?.[owner],oldGoal=old?.goal&&targets.find(t=>t.id===old.goal.id);
@@ -1215,7 +1222,10 @@ function wodAiExpeditionDemand(owner,cities,army,pending=[]) {
     const combatGap=Math.max(0,enemyPower*profile.ratio-ourPower-(canBombard?shipCount*shipPower*.8:0));
     const coast=cities.some(c=>cityHasWaterNeighbor(c)&&wodAiHarborUseful(c,owner));
     const exploring=!goal&&coast&&wodFogActive()&&gameData.hexList.some(h=>wodIsOpenWaterHex(h)&&!wodFogFactionIntel(owner).explored.has(getHexKey(h)));
-    const plannedMarines=goal?Math.min(12,Math.max(2,Math.ceil(waveSize*.65))):exploring?2:0;
+    const raidGoal=!goal&&coast&&ready.length>=Math.max(8,cities.length*4)&&
+        coastalObjectives.find(t=>ownRegions.some(r=>r.has(getHexKey(getNearestHexToPoint(t.x,t.y))))&&
+            (t.shore||cityHasWaterNeighbor(t)));
+    const plannedMarines=goal?Math.min(12,Math.max(2,Math.ceil(waveSize*.65))):raidGoal?profile.id==='amphibious'?3:2:exploring?2:0;
     // Existing marines can cross under their own orders. Lift is for the actual
     // ordinary first wave, plus a live rescue request if no free seat can serve it.
     const firstWaveSlots=goal?Math.min(10,Math.max(ordinary.length?1:0,Math.min(ordinary.length,defenders.length?Math.ceil(waveSize*.4):1))):0;
@@ -1252,7 +1262,7 @@ function wodAiExpeditionDemand(owner,cities,army,pending=[]) {
         if(shipCount<ship)shortages.push('ship');
     }
     const result={stamp,goal,region,wave:wave.map(u=>u.uid),desired,preferred:[...new Set(shortages)],combatGap,enemyPower,ourPower,
-        firstWaveSlots,medicalSeats:medSeats,protectedSupply,canBombard,exploring,needFactory:!!goal&&!canBombard&&combatGap>2&&!cities.some(c=>c.hasFactory),
+        firstWaveSlots,medicalSeats:medSeats,protectedSupply,canBombard,exploring,marineRaidGoal:raidGoal?.id||null,needFactory:!!goal&&!canBombard&&combatGap>2&&!cities.some(c=>c.hasFactory),
         firstLanding:prior?.goal?.id===goal?.id?prior?.firstLanding:null};
     cache.owners[owner]=result;return result;
 }
@@ -1304,11 +1314,12 @@ function wodAiNavalRecon(owner,transports) {
     const ships=gameData.entities.filter(u=>u.owner===owner&&u.hp>u.maxHp*.7&&!u._medicalRecovering&&!u._aiMedicalFor&&!u.retreating&&!u.moraleBroken&&!u._trafficYield&&!(u._aiSupplyEscortUntil>now));
     const knownTargets=wodAiNavalAssaultTargets(owner);
     const required=gameData.aiNavalPlans?.[owner]?.requiredEscorts||0;
-    const invasionKnown=knownTargets.some(t=>!t.shore);
+    const mission=gameData.aiNavalPlans?.[owner];
+    const invasionKnown=knownTargets.some(t=>!t.shore)&&!(mission?.phase==='prepare'&&mission.reason==='escort'&&!mission.canMarinesSail);
     const warships=ships.filter(u=>u.type==='ship'),ferries=ships.filter(u=>u.type==='transport'&&!u.cargo&&!u.pickupUid);
     const ferryCount=gameData.entities.filter(u=>u.owner===owner&&u.type==='transport'&&u.hp>0).length;
     const pool=[...(warships.length>required+(invasionKnown?2:0)?warships:[]),...(!knownTargets.length||!invasionKnown&&ferryCount>1?ferries:[]),
-        ...ships.filter(u=>!invasionKnown&&u.type==='marine'&&!u._navalLanded&&!u._combatEngaged&&!u.boardTransportUid)];
+        ...ships.filter(u=>!invasionKnown&&u.type==='marine'&&!u._aiMarineRaid&&!u._navalLanded&&!u._combatEngaged&&!u.boardTransportUid)];
     const scout=pool.find(u=>u.uid===state.uid&&u.type===pool[0]?.type)||pool[0];
     if(!scout){const old=gameData.entities.find(u=>u.uid===state.uid);if(old)old._aiScoutUntil=0;return null;}
     if(state.uid!==scout.uid){const old=gameData.entities.find(u=>u.uid===state.uid);if(old){old._aiScoutUntil=0;old._navalScoutGoal=null;}state.uid=scout.uid;state.goal=null;}
@@ -1333,8 +1344,16 @@ function wodAiNavalRecon(owner,transports) {
         choices.push({h,score:Math.hypot(scout.x-h.x,scout.y-h.y)+danger*5+(state.history.includes(key)?hr*40:0)-(coast?hr*3:0)});
     }
     choices.sort((a,b)=>a.score-b.score);
+    const scoutDeadline=performance.now()+6;
     for(const {h}of choices.slice(0,12)){
-        if(assignUnitMoveAlongWaypoints(scout,[{x:h.x,y:h.y,intoWater:true}],{transportInternal:true})){
+        if(scout.type==='marine'&&performance.now()>scoutDeadline)break;
+        let points=[{x:h.x,y:h.y,intoWater:true}];
+        if(scout.type==='marine'){
+            const start=isWaterHex(current)?current:wodNearestOpenWaterHex(scout,current,h,4);
+            const path=start&&wodAiMarineWaterPath(owner,start,h);if(!path?.length)continue;
+            points=path;
+        }
+        if(assignUnitMoveAlongWaypoints(scout,points,{transportInternal:true})){
             state.goal=h;state.progressAt=now;state.position={x:scout.x,y:scout.y};scout._aiScoutUntil=now+12000;scout._navalScoutGoal={x:h.x,y:h.y};
             wodAiRecord(owner,'naval-scout',{unit:scout.uid,goal:getHexKey(h)});return scout;
         }
@@ -1360,6 +1379,153 @@ function wodAiGeneralCanTransfer(unit,targets,supplyShips) {
         if(foothold&&(!seaFoes.length||wodAiForecast(owner,escorts,seaFoes).ratio>=1.35)&&wodAiForecast(owner,[...friends,unit],foes).ratio>=1.3)return true;
     }
     return false;
+}
+
+// An amphibious raid chooses an actual safe sea lane, rather than comparing
+// every marine with the entire hostile fleet. No hidden positions are read.
+function wodAiMarineWaterPath(owner,start,end) {
+    if(!start||!end)return [];
+    const threats=wodAiSeaThreats(owner),hr=gameData.hexRadius||20,probe={type:'ship',owner};
+    if(!threats.length)return wodWaterBfsPath(probe,start,end,9000);
+    const safe=h=>wodIsOpenWaterHex(h)&&!threats.some(e=>Math.hypot(e.x-h.x,e.y-h.y)<(e.range||80)+hr*2.5+(e._intelMemory?hr:0));
+    if(!safe(start)||!safe(end))return [];
+    const heap=[],cost=new Map([[getHexKey(start),0]]),parent=new Map(),closed=new Set(),deadline=performance.now()+6;
+    const push=(h,g)=>{const item={h,g,f:g+Math.hypot(h.q-end.q,h.r-end.r)};let i=heap.length;heap.push(item);while(i){const p=(i-1)>>1;if(heap[p].f<=item.f)break;heap[i]=heap[p];i=p;}heap[i]=item;};
+    const pop=()=>{const first=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let j=i*2+1;if(j+1<heap.length&&heap[j+1].f<heap[j].f)j++;if(heap[j].f>=last.f)break;heap[i]=heap[j];i=j;}heap[i]=last;}return first;};
+    push(start,0);let nodes=0;
+    while(heap.length&&nodes++<3000){
+        if((nodes&127)===0&&performance.now()>deadline)return [];
+        const {h,g}=pop(),key=getHexKey(h);if(closed.has(key))continue;closed.add(key);
+        if(wodHexKeysEqual(h,end)){const route=[h];let cur=h;while(parent.has(getHexKey(cur))){cur=parent.get(getHexKey(cur));route.push(cur);}return route.reverse();}
+        for(const d of hexDirections){const n=gameData.hexes[(h.q+d.q)+','+(h.r+d.r)],k=n&&getHexKey(n);if(!n||closed.has(k)||!safe(n)||!wodCanStepBetweenHexes(probe,h,n,false))continue;
+            const next=g+Math.hypot(d.q,d.r);if(next>=(cost.get(k)??Infinity))continue;cost.set(k,next);parent.set(k,h);push(n,next);}
+    }
+    return [];
+}
+
+// Marine flanks can return to the same continent or land on another island.
+// Keep explicit sea legs so a land route cannot steal the landing.
+function wodAiPlanMarineRaids(owner,marines) {
+    const now=wodAiOperationTime(),hr=gameData.hexRadius||20;
+    let cache=gameData._aiMarineRaids;
+    if(cache?.hexes!==gameData.hexes)cache=gameData._aiMarineRaids={hexes:gameData.hexes,owners:{},checked:{},blocked:{}};
+    let raid=cache.owners[owner];
+    const eligible=u=>u.hp>u.maxHp*.6&&(!u.retreating||raid&&u._aiMarineRaidRetreat===raid.id)&&!u.moraleBroken&&!u._medicalRecovering&&!u.boardTransportUid;
+    if(raid){
+        if(['gather','crossing'].includes(raid.phase)&&raid.ids.length<6){
+            const region=wodTransportLandingRegion({type:'light',owner},raid.source),active=gameData.aiNavalPlans?.[owner];
+            for(const u of marines.filter(u=>eligible(u)&&!u._combatEngaged&&!raid.ids.includes(u.uid)&&!u._navalLanded&&!(u._aiScoutUntil>now)&&Math.hypot(u.x-raid.source.x,u.y-raid.source.y)<hr*14&&
+                !(active&&u._aiFleetId===active.id&&active.phase!=='complete'&&!(active.reason==='escort'&&['prepare','regroup'].includes(active.phase)))&&region?.has(getHexKey(getNearestHexToPoint(u.x,u.y))))){
+                raid.ids.push(u.uid);u._aiMarineRaidOrder=null;gameData._aiMoveQueue?.delete(u);if(raid.ids.length>=6)break;
+            }
+        }
+        const force=marines.filter(u=>raid.ids.includes(u.uid)&&eligible(u));
+        for(const u of marines.filter(u=>raid.ids.includes(u.uid)&&!eligible(u))){u._aiMarineRaid=null;u._navalAssaultUntil=0;}
+        const done=!force.length||now-raid.at>240000||raid.phase==='exploit'&&
+            (raid.town?getCityUrbanTerrainHexes(raid.town).every(h=>wodIsFriendlyOwner(h.owner,owner)):now-raid.landedAt>30000);
+        if(done){for(const u of marines.filter(u=>raid.ids.includes(u.uid))){u._aiMarineRaid=null;u._navalAssaultUntil=0;}delete cache.owners[owner];cache.checked[owner]=now;return;}
+        for(const u of force){u._aiMarineRaid=raid.id;u._navalAssaultUntil=now+8000;}
+        const navalDanger=wodAiSeaThreats(owner).filter(e=>force.some(u=>isWaterHex(getNearestHexToPoint(u.x,u.y))&&Math.hypot(e.x-u.x,e.y-u.y)<(e.range||80)+hr*2));
+        const exposed=force.filter(u=>navalDanger.some(e=>Math.hypot(e.x-u.x,e.y-u.y)<(e.range||80)+hr*6));
+        if(raid.phase==='crossing'&&navalDanger.length&&wodAiForecast(owner,exposed,navalDanger).ratio<1){
+            raid.phase='withdraw';wodAiRecord(owner,'marine-raid-withdraw',{job:raid.id,reason:'intercepting-fleet'});
+            for(const u of force){u._aiMarineRaidOrder=null;u._navalLanded=false;}
+        }
+        if(raid.phase==='withdraw'){
+            for(const u of force){
+                if(Math.hypot(u.x-raid.source.x,u.y-raid.source.y)<hr*3&&!isWaterHex(getNearestHexToPoint(u.x,u.y))){u._aiMarineRaid=null;u._navalAssaultUntil=0;continue;}
+                if(u._trafficYield||u._aiMarineRaidOrder===raid.id+'-withdraw'&&u.target)continue;
+                const here=getNearestHexToPoint(u.x,u.y),start=isWaterHex(here)?here:raid.water.at(-1);
+                const path=wodWaterBfsPath({type:'ship',owner},start,raid.water[0],9000);
+                const next=path[1]||raid.source,skip=isWaterHex(here)&&wodSegmentClearsTerrainForUnit(u,u.x,u.y,next.x,next.y);
+                if(path.length){u._aiMarineRaidRetreat=raid.id;if(assignUnitMoveAlongWaypoints(u,[...(skip?path.slice(1):path),raid.source],{transportInternal:true,forceRetreat:true}))u._aiMarineRaidOrder=raid.id+'-withdraw';}
+            }
+            if(force.every(u=>!u._aiMarineRaid)){delete cache.owners[owner];cache.checked[owner]=now;}
+            return;
+        }
+        if(raid.phase==='gather'){
+            const rally=raid.rally||raid.source,gathered=force.filter(u=>Math.hypot(u.x-rally.x,u.y-rally.y)<hr*6);
+            const foes=wodAiThreats(owner).filter(e=>!wodIsNavalUnit(e)&&Math.hypot(e.x-raid.beach.x,e.y-raid.beach.y)<hr*8);
+            const pending=gameData.constructionJobs.some(j=>j.owner===owner&&j.mode==='marine');
+            const minimum=pending||foes.length||now-raid.at<30000?2:1;
+            const seaClear=!wodAiSeaThreats(owner).some(e=>raid.water.some((h,i)=>i>0&&distPointToSegmentSquared(e.x,e.y,raid.water[i-1].x,raid.water[i-1].y,h.x,h.y)<Math.pow((e.range||80)+hr*2,2)));
+            if(gathered.length>=minimum&&seaClear&&wodAiForecast(owner,gathered,foes).ratio>=wodAiCommander(owner).ratio){raid.phase='crossing';raid.launchedAt=now;}
+            else for(const u of force)if(!u.target||u._aiMarineRaidOrder!==raid.id+'-gather'){
+                gameData._aiMoveQueue?.delete(u);
+                if(assignUnitMoveAlongWaypoints(u,[rally],{transportInternal:true}))u._aiMarineRaidOrder=raid.id+'-gather';
+            }
+        }
+        if(raid.phase==='crossing')for(const u of force){
+            const here=getNearestHexToPoint(u.x,u.y);
+            if(!isWaterHex(here)&&Math.hypot(u.x-raid.beach.x,u.y-raid.beach.y)<hr*3){u._navalLanded=true;u._aiFleetId=raid.id;continue;}
+            if(u._trafficYield)continue;
+            if(!u.target||u._aiMarineRaidOrder!==raid.id){
+                const start=isWaterHex(here)?here:raid.water[0],probe={type:'ship',owner};
+                const path=wodAiMarineWaterPath(owner,start,raid.water.at(-1));
+                if(path.length){assignUnitMoveAlongWaypoints(u,[...path,raid.beach],{transportInternal:true});u._aiMarineRaidOrder=raid.id;}
+            }
+        }
+        if(raid.phase==='crossing'&&force.filter(u=>u._navalLanded).length>=Math.ceil(force.length*.7)){
+            raid.phase='exploit';raid.landedAt=now;wodAiRecord(owner,'marine-raid-landed',{job:raid.id,troops:force.length,beach:getHexKey(raid.beach)});
+        }
+        return;
+    }
+    if(cache.checked[owner]!=null&&now-cache.checked[owner]<6000)return;
+    cache.checked[owner]=now;
+    const active=gameData.aiNavalPlans?.[owner];
+    const free=marines.filter(u=>eligible(u)&&!u._combatEngaged&&!u._navalLanded&&!(u._aiScoutUntil>now)&&
+        !(active&&u._aiFleetId===active.id&&active.phase!=='complete'&&!(active.reason==='escort'&&['prepare','regroup'].includes(active.phase))));
+    if(!free.length)return;
+    const coast=gameData._navalCoastCells?.hexes===gameData.hexes?gameData._navalCoastCells.cells:[];
+    const lead=free.find(u=>!isWaterHex(getNearestHexToPoint(u.x,u.y)))||free[0];
+    const current=getNearestHexToPoint(lead.x,lead.y);
+    const here=!isWaterHex(current)?current:coast.filter(h=>wodIsFriendlyOwner(h.owner,owner)&&wodCurrentSupplyComponent(h,owner).city&&Math.hypot(h.x-lead.x,h.y-lead.y)<hr*14)
+        .sort((a,b)=>Math.hypot(a.x-lead.x,a.y-lead.y)-Math.hypot(b.x-lead.x,b.y-lead.y))[0];
+    if(!here)return;
+    const land=wodTransportLandingRegion({type:'light',owner},here),known=wodAiThreats(owner),towns=wodAiKnownCities(owner);
+    if(!land)return;
+    for(const town of towns.filter(c=>c.owner===owner)){
+        const pressure=known.filter(e=>Math.hypot(e.x-town.x,e.y-town.y)<(e.range||50)+hr*3);if(!pressure.length)continue;
+        const guards=gameData.entities.filter(u=>u.owner===owner&&isLandArmyUnit(u)&&u.hp>u.maxHp*.5&&!u._medicalRecovering&&!u.retreating&&wodAiArrivalSeconds(u,town,hr*3,12)<=12);
+        if(wodAiForecast(owner,guards,pressure).ratio<1.1)return;
+    }
+    const source=coast.filter(h=>land.has(getHexKey(h))&&wodIsFriendlyOwner(h.owner,owner)&&wodCurrentSupplyComponent(h,owner).city&&
+        Math.hypot(h.x-lead.x,h.y-lead.y)<hr*14).sort((a,b)=>Math.hypot(a.x-lead.x,a.y-lead.y)-Math.hypot(b.x-lead.x,b.y-lead.y))[0];
+    if(!source)return;
+    const entry=getNeighborHexes(source).find(wodIsOpenWaterHex),probe={type:'ship',owner},sea=entry&&wodNavalWaterRegionKeys(probe,entry);
+    if(!sea||sea.size<80)return;
+    if(!getHexesInRadius(entry.q,entry.r,3).some(p=>{const h=gameData.hexes[p.q+','+p.r];return h&&wodIsOpenWaterHex(h)&&getNeighborHexes(h).filter(wodIsOpenWaterHex).length>=7;}))return;
+    const party=free.filter(u=>{const h=getNearestHexToPoint(u.x,u.y);return (land.has(getHexKey(h))||isWaterHex(h)&&sea.has(getHexKey(h)))&&Math.hypot(u.x-lead.x,u.y-lead.y)<hr*12;}).slice(0,4);
+    if(!party.length)return;
+    const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null,front=wodCachedFrontlineHexes(owner);
+    cache.blocked||={};const blocked=cache.blocked[owner]||={};
+    const choices=coast.filter(h=>wodIsHostileOwner(h.owner,owner)&&!(blocked[getHexKey(h)]>now)&&(!explored||explored.has(getHexKey(h)))&&
+        Math.hypot(h.x-source.x,h.y-source.y)>hr*10&&getNeighborHexes(h).some(n=>sea.has(getHexKey(n))));
+    const score=h=>{
+        const town=towns.filter(c=>wodIsHostileOwner(c.owner,owner)).reduce((d,c)=>Math.min(d,Math.hypot(c.x-h.x,c.y-h.y)),hr*20);
+        const depth=front.reduce((d,f)=>Math.min(d,Math.hypot(f.x-h.x,f.y-h.y)),hr*16);
+        return Math.hypot(h.x-source.x,h.y-source.y)*.35+town*.7-Math.min(hr*12,depth)*.65;
+    };
+    choices.sort((a,b)=>score(a)-score(b));
+    const deadline=performance.now()+7;
+    const spread=[];for(const h of choices)if(!spread.some(p=>Math.hypot(p.x-h.x,p.y-h.y)<hr*6)){spread.push(h);if(spread.length>=6)break;}
+    for(const beach of spread){
+        if(performance.now()>deadline)break;
+        const foes=known.filter(e=>!wodIsNavalUnit(e)&&Math.hypot(e.x-beach.x,e.y-beach.y)<hr*8);
+        if(wodAiForecast(owner,party,foes).ratio<wodAiCommander(owner).ratio)continue;
+        const exit=getNeighborHexes(beach).filter(h=>sea.has(getHexKey(h))).sort((a,b)=>Math.hypot(a.x-entry.x,a.y-entry.y)-Math.hypot(b.x-entry.x,b.y-entry.y))[0];
+        const water=wodAiMarineWaterPath(owner,entry,exit);if(water.length<2){blocked[getHexKey(beach)]=now+20000;continue;}
+        const seaThreats=wodAiSeaThreats(owner).filter(e=>water.some((h,i)=>i>0&&
+            distPointToSegmentSquared(e.x,e.y,water[i-1].x,water[i-1].y,h.x,h.y)<Math.pow((e.range||80)+hr*2,2)));
+        if(seaThreats.length)continue; // Clear sea lanes before committing unsupported marines.
+        const town=towns.filter(c=>wodIsHostileOwner(c.owner,owner)&&Math.hypot(c.x-beach.x,c.y-beach.y)<hr*9).sort((a,b)=>Math.hypot(a.x-beach.x,a.y-beach.y)-Math.hypot(b.x-beach.x,b.y-beach.y))[0];
+        const afloat=party.filter(u=>isWaterHex(getNearestHexToPoint(u.x,u.y)));
+        const center=afloat.length>=Math.ceil(party.length*.7)&&getNearestHexToPoint(afloat.reduce((n,u)=>n+u.x,0)/afloat.length,afloat.reduce((n,u)=>n+u.y,0)/afloat.length);
+        const rally=center&&sea.has(getHexKey(center))&&!wodAiSeaThreats(owner).some(e=>Math.hypot(e.x-center.x,e.y-center.y)<(e.range||80)+hr*2.5)?center:source;
+        raid=cache.owners[owner]={id:owner+'-marine-raid-'+now,at:now,phase:'gather',source,rally,beach,water,town,ids:party.map(u=>u.uid)};
+        for(const u of party){u._aiMarineRaid=raid.id;u._navalAssaultUntil=now+8000;u._aiMarineRaidOrder=null;gameData._aiMoveQueue?.delete(u);if(assignUnitMoveAlongWaypoints(u,[rally],{transportInternal:true}))u._aiMarineRaidOrder=raid.id+'-gather';}
+        wodAiRecord(owner,'marine-raid-prepare',{job:raid.id,troops:party.length,beach:getHexKey(beach)});return;
+    }
 }
 
 function wodAiChooseNavalMission(owner, transports, candidates, targets, supplyShips) {
@@ -1459,12 +1625,11 @@ function wodAiChooseNavalMission(owner, transports, candidates, targets, supplyS
     const loadedBalance=wodAiForecast(owner,[...new Set(loadedUnits),...fireSupport],beachEnemies);
     const profile=wodAiCommander(owner),groundReady=invaders.length>0&&wodAiForecast(owner,[...invaders,...fireSupport],beachEnemies).ratio>=profile.ratio;
     const independentMarines=!loaded.length&&!landed.length?marineForce:[];
-    const marineCore=independentMarines.filter(u=>independentMarines.some(lead=>
-        independentMarines.filter(m=>Math.hypot(m.x-lead.x,m.y-lead.y)<hr*6).length>=Math.ceil(independentMarines.length*.7)&&
-        Math.hypot(u.x-lead.x,u.y-lead.y)<hr*6));
+    const marineClusters=independentMarines.map(lead=>independentMarines.filter(m=>Math.hypot(m.x-lead.x,m.y-lead.y)<hr*6)).sort((a,b)=>b.length-a.length);
+    const marineCore=marineClusters[0]||[];
     const crossingForce=[...new Set([...loadedUnits,...marineCore])];
     const marineWave=[...new Set([...waveMarines,...marineCore,...landed.filter(u=>u.type==='marine'&&Math.hypot(u.x-landing.x,u.y-landing.y)<hr*7)])];
-    const marineOnlyReady=marineWave.length>=3&&
+    const marineOnlyReady=marineWave.length>=(groundEnemies.length?2:1)&&
         wodAiForecast(owner,[...marineWave,...fireSupport],groundEnemies).ratio>=profile.ratio;
     const waveReady=crossingForce.length>0&&wodAiForecast(owner,[...crossingForce,...fireSupport],beachEnemies).ratio>=Math.max(1.05,profile.ratio-.1);
     const launchFleet=loaded.length?loaded:fleet;

@@ -13053,7 +13053,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=campaign-intent-20261102"></script>
+    <script src="ai-command.js?v=naval-pressure-20261102"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13072,16 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                "at": "2026-11-02T18:22:31.510Z",
+                "title": "Marine flanking raids and stronger land pressure",
+                "items": [
+                    "Marines can raid exposed enemy shores on the same continent or other islands, sailing through open water to land behind the front and capture territory or a rear town. New marines join an existing wave instead of remaining idle or restarting it.",
+                    "Naval launch decisions use the force actually gathered and the known defenders. A ready marine pair can sail while ordinary cargo waits for supply; ordinary troops retain their transport and supply requirements.",
+                    "Coastal commanders recruit a small marine force for useful flanks without buying unnecessary ferry seats or supply boats. Raids respect fog of war, seek routes around known hostile fleets, scout alternatives when an invasion is waiting for escorts, and withdraw from an observed interception.",
+                    "Quiet surplus frontline guards reinforce attacks while keeping required line coverage, reserves and every town's infantry guard. Healthy screens make short safe land probes instead of waiting because distant enemies might eventually approach; nearby resistance still stops unsupported advances."
+                ]
+            },
             {
                 at:"2026-11-02T17:20:00Z",
                 title:"Formed assault advances and accurate riverbank orders",
@@ -57791,6 +57801,7 @@
             }
             const targets=wodAiNavalAssaultTargets(owner);
             const supplyShips=gameData.entities.filter(u=>u.owner===owner&&u.type==='supply'&&u.hp>0&&!u._medicalRecovering&&!u.retreating&&!u.moraleBroken&&!(u._aiMedicalSupplyUntil>clock));
+            wodAiPlanMarineRaids(owner,gameData.entities.filter(u=>u.owner===owner&&u.type==='marine'));
             wodAiRescueIslandTroops(owner,supplyShips);
             wodAiRetireBeachheads(owner);
             wodAiPlanBeachhead(owner,supplyShips);
@@ -57803,7 +57814,7 @@
             for(const u of land)u._navalGarrison=guards.has(u);
             const regions=new Map();
             const regionFor=c=>{const h=getNearestHexToPoint(c.x,c.y),key=getHexKey(h);if(regions.has(key))return regions.get(key);const region=wodTransportLandingRegion({type:'light',owner},c);if(region)for(const k of region)regions.set(k,region);return region;};
-            const candidates=land.filter(u=>!u._medicalEvacuating&&wodAiGeneralCanTransfer(u,targets,supplyShips)&&!(u._aiScoutUntil>clock)&&!guards.has(u)&&(u._navalEvacuating||!['defend','hold'].includes(u.aiTfKind)&&(u.type==='marine'||!(u._navalAssaultUntil>wodAiOperationTime()))));
+            const candidates=land.filter(u=>!u._aiMarineRaid&&!u._medicalEvacuating&&wodAiGeneralCanTransfer(u,targets,supplyShips)&&!(u._aiScoutUntil>clock)&&!guards.has(u)&&(u._navalEvacuating||!['defend','hold'].includes(u.aiTfKind)&&(u.type==='marine'||!(u._navalAssaultUntil>wodAiOperationTime()))));
             const mission=wodAiChooseNavalMission(owner,transports,candidates,targets,supplyShips);
             // Water-separated targets create explicit ferry requests, even if a
             // normal land route never produced a movement target in the first place.
