@@ -13053,7 +13053,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=front-initiative-20261102"></script>
+    <script src="ai-command.js?v=pursuit-hospitals-20261102"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13072,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-02T22:49:22Z",
+                title:"Sustained offensives and purposeful field hospitals",
+                items:[
+                    "Healthy, supplied AI armies choose follow-up objectives without repeatedly rebuilding their assault. Advancing operations retain their orders while making real progress, and moderate battle damage alone no longer discards a viable force.",
+                    "AI troops target exposed enemy forts and hospitals, including short detours from a town assault. Field structures must be discovered under fog of war, and nearby known defenders still affect attack decisions.",
+                    "Hospital investment depends on wounded ground troops and uncovered recovery needs. Ships do not increase the hospital limit. Existing and planned hospitals reserve their service area, and new sites require supply, a setback from hostile land and distance from enemy weapons."
+                ]
+            },
             {
                 at:"2026-11-02T21:47:50Z",
                 title:"Coordinated breakthroughs and enclosing wings",
@@ -41192,6 +41201,9 @@
         }
         function wodAiAssaultObjective(owner,members,sectors,taken={}) {
             if(!members.length)return null;
+            const structure=wodAiStructureObjective(owner,members);
+            if(structure)return {objectiveStructure:structure,objectiveHex:structure.hex,attackHex:structure.hex,
+                holdHex:getNearestHexToPoint(members[0].x,members[0].y),phase:'assemble',phaseAt:wodAiOperationTime(),operationAt:wodAiOperationTime()};
             const lead=members.find(u=>u.type==='heavy')||members.find(u=>!wodCanClimb(u))||members[0], reach=wodAiOperationReach(lead);
             const hr=gameData.hexRadius||20;
             const towns=wodAiKnownCities(owner).filter(c=>wodIsHostileOwner(c.owner,owner)&&reach.has(`${c.q},${c.r}`));
@@ -53556,7 +53568,7 @@
             const now=performance.now();
             if(rec&&!force&&now-rec.at<220)return rec;
             if(!rec)rec={visible:new Set(),explored:new Set(),cities:new Map(),forts:new Map(),units:new Map(),revision:0};
-            rec.units ||= new Map();
+            rec.units ||= new Map();rec.hospitals ||= new Map();
             const visible=new Set(),explored=rec.explored,friendly=o=>wodIsFriendlyOwner(o,owner);
             for(const h of gameData.hexList)if(friendly(h.owner)) {
                 const key=getHexKey(h);visible.add(key);explored.add(key);
@@ -53580,7 +53592,7 @@
                 }
                 for(const [key,item] of memory)if(!seen.has(key)&&visible.has(`${item.q},${item.r}`))memory.delete(key);
             };
-            remember(gameData.cities,rec.cities);remember(gameData.forts||[],rec.forts);
+            remember(gameData.cities,rec.cities);remember(gameData.forts||[],rec.forts);remember(gameData.hospitals||[],rec.hospitals);
             const simNow=wodAiOperationTime(),seenUnits=new Set();
             const visibleGenerals=gameData.entities.filter(g=>g.hp>0&&g.isGeneral&&visible.has(getHexKey(getNearestHexToPoint(g.x,g.y)||{})));
             for(const u of gameData.entities){
