@@ -11820,7 +11820,7 @@
 
                 <div class="esc-help-block">
                     <h4>Experience and unit ranks</h4>
-                    <p class="esc-help-prose">Combat earns experience. Select a unit to see its XP and progress below manpower and morale: <strong>Trained at 25 XP</strong>, <strong>Seasoned at 50 XP</strong>, and <strong>Veteran at 100 XP</strong>. One, two or three separated gold bars appear across the top of experienced units on the map. Regular units have no gold bars. The existing Veteran bonus is unchanged: +10% damage and movement speed.</p>
+                    <p class="esc-help-prose">Combat earns experience at half the previous rate, so each rank takes twice as much combat to earn. Select a unit to see its XP and progress below manpower and morale: <strong>Trained at 25 XP</strong>, <strong>Seasoned at 50 XP</strong>, and <strong>Veteran at 100 XP</strong>. One, two or three separated gold bars appear across the top of experienced units on the map. Regular units have no gold bars. The existing Veteran bonus is unchanged: +10% damage and movement speed.</p>
                 </div>
                 <div class="esc-help-block">
                     <h4>AI commanders, generals and recovery</h4>
@@ -13053,7 +13053,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=committed-marches-20261102"></script>
+    <script src="ai-command.js?v=frontline-initiative-20261102"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13072,16 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-02T10:00:00Z",
+                title:"Slower experience and active frontline armies",
+                items:[
+                    "Combat experience is earned at half its previous rate for every faction and unit class. Existing experience and the 25/50/100 XP rank milestones are preserved.",
+                    "Frontline groups advance together over weak or unguarded ground while retaining town guards, reserves and emergency supply defenses.",
+                    "Gathered assault forces can deploy before every regiment is already in firing support range. Superior armies move into contact; inferior armies still regroup or withdraw.",
+                    "Engaged armies reassess enemy supply corridors and coordinate opposing wings to close achievable encirclements, including during town assaults. Fog-of-war limits still apply."
+                ]
+            },
             {
                 at:"2026-11-02T08:00:00Z",
                 title:"Steadier AI marches and sustained counterattacks",
@@ -34107,7 +34117,7 @@
                 attacker.kills += casualtiesDealt;
                 xpGain += casualtiesDealt * 0.02;
             }
-            attacker.xp += xpGain;
+            attacker.xp += xpGain * 0.5;
             if(!attacker.veteran && attacker.xp >= WOD_VETERAN_XP_THRESHOLD) attacker.veteran = true;
         }
 
@@ -41862,8 +41872,8 @@
             };
 
             if(job.kind === 'hold') {
-                let canCounter = false;
-                if(!canCounter) {
+                if(wodAiIssueFrontAdvance(unit,job))return true;
+                {
                     const cover=wodAiDefendStandHex(unit.owner,assignment.holdHex,unit)||assignment.holdHex;
                     const covered=wodAiMoveUnitTowardHex(unit,cover,true,.12);
                     if(covered)wodAiStampOrder(unit,true,cover);
