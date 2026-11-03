@@ -1,9 +1,9 @@
 'use strict';
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{chromium}=require('playwright');
-const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/line-routes',process.env.ROUTE_TAG||(process.env.BASELINE_DIR?'before':'after'));fs.mkdirSync(OUT,{recursive:true});
+const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,process.env.ROUTE_ROOT||'output/line-routes',process.env.ROUTE_TAG||(process.env.BASELINE_DIR?'before':'after'));fs.mkdirSync(OUT,{recursive:true});
 const enabled=name=>!process.env.ROUTE_CASE||process.env.ROUTE_CASE.split(',').includes(name);
 const server=http.createServer((req,res)=>{let f=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!f.startsWith(ROOT+path.sep))return res.writeHead(403).end();if(process.env.BASELINE_DIR&&['index.html','ai-command.js'].includes(path.relative(ROOT,f)))f=path.join(ROOT,process.env.BASELINE_DIR,path.basename(f));fs.readFile(f,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.svg':'image/svg+xml','.json':'application/json'})[path.extname(f)]||'application/octet-stream');res.end(b);});});
-(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960},hasTouch:true}),page=await context.newPage(),errors=[],results={};page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});
 try{
  await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks);
  await page.evaluate(()=>{
@@ -51,8 +51,43 @@ try{
    rows.push({seed,type,optimum,actual,ratio:actual/optimum,reached:points.at(-1)===goal});
   }return rows;
  });
+ if(enabled('gestures')){
+  const cases=[
+   {name:'right-short-out',zoom:.5,dy:8,line:true},
+   {name:'right-short-in',zoom:2,dy:8,line:true},
+   {name:'right-minimum',zoom:1,dy:4,line:true},
+   {name:'right-diagonal',zoom:1,dx:8,dy:8,line:true},
+   {name:'right-click',zoom:1,dy:0,line:false},
+   {name:'right-jitter',zoom:1,dy:3,line:false},
+   {name:'formation-tap',zoom:1,dy:0,mode:'formation',line:true},
+   {name:'formation-tiny',zoom:1,dy:2,mode:'formation',line:true},
+   {name:'formation-right-tap',zoom:1,dy:0,mode:'formation',button:'right',line:true},
+   {name:'shift-short',zoom:1,dy:8,shift:true,line:true},
+   {name:'waypoint-short',zoom:1,dy:8,mode:'waypoint',line:true},
+   {name:'waypoint-right-short',zoom:1,dy:8,mode:'waypoint',button:'right',line:true},
+   {name:'touch-formation-tap',zoom:.5,dy:0,mode:'formation',touch:true,line:true},
+   {name:'touch-formation-tiny',zoom:.5,dy:2,mode:'formation',touch:true,line:true},
+   {name:'touch-waypoint-short',zoom:.5,dy:8,mode:'waypoint',touch:true,line:true}
+  ];
+  for(const c of cases){
+   await page.setViewportSize(c.touch?{width:390,height:844}:{width:1440,height:960});
+   const points=await page.evaluate(c=>{world();wodSuppressCanvasMouseUntil=0;setMobileOrderMode(null);wodCancelMobileNavTouch();formationDrag.active=false;shiftWaypointDrag.active=false;leftMapOrderDrag.active=false;window.uiArmy=Array.from({length:c.zoom===2?8:12},(_,i)=>unit(-10-i%4*2,Math.floor(i/4)*2-2));gameData.selection=uiArmy;for(const u of uiArmy)u.selected=true;refresh();UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='block';wodSyncViewportAndCanvas();gameData.camera={zoom:c.zoom,x:100*c.zoom-canvas.clientWidth*.55,y:-canvas.clientHeight*.37};syncInfoCardPanel();wodMarkTerrainFullDirty();updateTerrainCache();draw();const r=canvas.getBoundingClientRect(),a={x:100-(c.dx||0)/c.zoom/2,y:-(c.dy||0)/c.zoom/2},b={x:100+(c.dx||0)/c.zoom/2,y:(c.dy||0)/c.zoom/2},screen=p=>({x:r.left+p.x*c.zoom-gameData.camera.x,y:r.top+p.y*c.zoom-gameData.camera.y});window.gestureAxis=(c.dx||c.dy)?{a,b}:{a:{x:99,y:0},b:{x:101,y:0}};return{a:screen(a),b:screen(b)};},c);
+   if(c.mode)await page.locator('#infoCard [data-mo="'+c.mode+'"]').click();
+   if(c.shift)await page.keyboard.down('Shift');
+   let touch;
+   if(c.touch){touch=await context.newCDPSession(page);await touch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[points.a]});if(c.dx||c.dy)await touch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[points.b]});}
+   else{await page.mouse.move(points.a.x,points.a.y);await page.mouse.down({button:c.button||(c.mode?'left':'right')});if(c.dx||c.dy)await page.mouse.move(points.b.x,points.b.y,{steps:4});}
+   await page.evaluate(()=>draw());await page.screenshot({path:path.join(OUT,c.name+'-preview.png')});
+   const preview=await page.evaluate(()=>typeof wodFormationDragPlan==='function'?[...wodFormationDragPlan(getMovableSelectedUnits()).slots].map(([u,p])=>({uid:u.uid,...p})):[...wodLineFormationPlan(uiArmy,formationDrag.startWorld,formationDrag.endWorld).slots].map(([u,p])=>({uid:u.uid,...p})));
+   if(c.touch){await touch.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await touch.detach();}else await page.mouse.up({button:c.button||(c.mode?'left':'right')});
+   if(c.shift)await page.keyboard.up('Shift');
+   results['gesture-'+c.name]=await page.evaluate(({preview,c,planOnly})=>{pump();const geometry=shape(uiArmy,gestureAxis.a,gestureAxis.b),previewError=Math.max(0,...preview.map(p=>{const u=uiArmy.find(u=>u.uid===p.uid);return u.orderTarget?Math.hypot(u.orderTarget.x-p.x,u.orderTarget.y-p.y):9999;})),movement=planOnly?{}:sim(uiArmy,170);draw();return{expectLine:c.line,...geometry,previewError,...movement};},{preview,c,planOnly:!!process.env.GESTURE_PLAN_ONLY});
+   await page.screenshot({path:path.join(OUT,c.name+'-arrived.png')});console.log(c.name,JSON.stringify({...results['gesture-'+c.name],goals:undefined,distance:undefined,arrival:undefined,remaining:undefined}));
+  }
+ }
  if(enabled('ui')){
- const screen=await page.evaluate(()=>{world();window.uiArmy=Array.from({length:24},(_,i)=>unit(-15-i%6,Math.floor(i/6)*2-3));gameData.selection=uiArmy;for(const u of uiArmy)u.selected=true;refresh();UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='block';gameData.camera={zoom:.8,x:-760,y:-520};wodMarkTerrainFullDirty();updateTerrainCache();draw();const r=canvas.getBoundingClientRect();const screen=p=>({x:r.left+(p.x*gameData.camera.zoom-gameData.camera.x)*r.width/canvas.clientWidth,y:r.top+(p.y*gameData.camera.zoom-gameData.camera.y)*r.height/canvas.clientHeight});return{a:screen({x:100,y:-40}),b:screen({x:100,y:40})};});
+ await page.setViewportSize({width:1440,height:960});
+ const screen=await page.evaluate(()=>{world();setMobileOrderMode(null);wodSuppressCanvasMouseUntil=0;wodSyncViewportAndCanvas();window.uiArmy=Array.from({length:24},(_,i)=>unit(-15-i%6,Math.floor(i/6)*2-3));gameData.selection=uiArmy;for(const u of uiArmy)u.selected=true;refresh();UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='block';gameData.camera={zoom:.8,x:-760,y:-520};wodMarkTerrainFullDirty();updateTerrainCache();draw();const r=canvas.getBoundingClientRect();const screen=p=>({x:r.left+(p.x*gameData.camera.zoom-gameData.camera.x)*r.width/canvas.clientWidth,y:r.top+(p.y*gameData.camera.zoom-gameData.camera.y)*r.height/canvas.clientHeight});return{a:screen({x:100,y:-40}),b:screen({x:100,y:40})};});
  await page.mouse.move(screen.a.x,screen.a.y);await page.mouse.down({button:'right'});await page.mouse.move(screen.b.x,screen.b.y,{steps:14});await page.evaluate(()=>draw());await page.screenshot({path:path.join(OUT,'line-preview.png')});
  const preview=await page.evaluate(()=>typeof wodLineFormationPlan==='function'?[...wodLineFormationPlan(uiArmy,formationDrag.startWorld,formationDrag.endWorld).slots].map(([u,p])=>({uid:u.uid,...p})):[]);
  await page.mouse.up({button:'right'});results.ui=await page.evaluate(preview=>{pump();const geometry=shape(uiArmy,{x:100,y:-40},{x:100,y:40}),previewError=Math.max(0,...preview.map(p=>{const u=uiArmy.find(u=>u.uid===p.uid);return Math.hypot(u.orderTarget.x-p.x,u.orderTarget.y-p.y);}));draw();return{...geometry,previewError,previewCount:preview.length,...sim(uiArmy,230)};},preview);await page.evaluate(()=>draw());await page.screenshot({path:path.join(OUT,'line-arrived.png')});
@@ -61,6 +96,7 @@ try{
  if(!process.env.OBSERVE_ONLY){
   for(const [name,r]of Object.entries(results)){if(Array.isArray(r))continue;assert.equal(r.arrived,r.total,name+' every unit reaches its unchanged target');assert.equal(r.overlaps,0,name+' no body overlap');assert.equal(r.invalid,0,name+' no illegal terrain');assert.equal(r.changed,0,name+' no command changes');}
   if(results.optimal)for(const r of results.optimal){assert(r.reached&&Number.isFinite(r.optimum),'oracle fixture must be reachable');assert(r.ratio<=1.00001,'A* must equal independent shortest travel-time oracle: '+JSON.stringify(r));}
+  for(const [name,r]of Object.entries(results).filter(([n])=>n.startsWith('gesture-'))){assert(r.expectLine?r.maxPerpendicular<1:r.maxPerpendicular>10,name+' must distinguish a tight line from an ordinary click');assert(r.previewError<.1,name+' preview must match the issued formation');}
   if(results.obstacleGroup)assert(results.obstacleGroup.distance.every((d,i)=>d/results.obstacleGroup.planned[i]<1.5),'large group must not orbit or take excessive detours around the wall');
   for(const name of ['vertical','diagonal','horizontal','reverse','long','mixed','shiftLine','remoteLine','ui']){if(!results[name])continue;assert(results[name].maxPerpendicular<1,name+' must be a single line');assert(results[name].minGap>=26.9,name+' bodies must fit side by side');}if(results.ui){assert.equal(results.ui.previewCount,24);assert(results.ui.previewError<.1,'preview positions must equal issued positions');}
   for(const type of ['light','heavy','marine']){const r=results['ridge-'+type];if(!r)continue;assert(r.ratio<1.001,type+' clear land route must be straight');assert(r.distance[0]/r.straight<1.01,type+' actual movement must stay straight');}if(results.forest)assert(results.forest.planned/results.forest.straight<1.001,'infantry must not detour around forest');if(results.motorized)assert(results.motorized.detours,'motorized should prefer faster dry ground over long swamp');if(results.parallel)assert(results.parallel.distance.every((d,i)=>d/results.parallel.straight[i]<1.02),'parallel land group must not weave or detour');assert.equal(errors.length,0);

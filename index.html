@@ -11919,7 +11919,7 @@
 
                 <div class="esc-help-block">
                     <h4>Touch controls</h4>
-                    <p class="esc-help-prose">The unit card has <strong>Move</strong>, <strong>Waypoint</strong>, and <strong>Formation</strong> buttons. Pick a mode, then click or tap the map. Waypoint mode keeps appending destinations; dragging places a formation-line waypoint. <strong>Board</strong> and <strong>Unload</strong> appear in the same order bar when transports are available. Camera zoom and pan retain their usual gestures.</p>
+                    <p class="esc-help-prose">The unit card has <strong>Move</strong>, <strong>Waypoint</strong>, and <strong>Formation</strong> buttons. Pick a mode, then click or tap the map. Formation mode places one compact line even with a tap; drag to set its direction and length. Short lines expand just enough to fit the units. Waypoint mode keeps appending destinations; dragging places a formation-line waypoint. <strong>Board</strong> and <strong>Unload</strong> appear in the same order bar when transports are available. Camera zoom and pan retain their usual gestures.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -13072,6 +13072,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-03T16:58:00Z",
+                title:"Minimum formation gestures stay in one line",
+                items:[
+                    "Short formation drags no longer become ordinary group moves with multiple rows. Drag recognition uses screen distance at every zoom level, and clicking or tapping in Formation mode places a compact single line.",
+                    "Mouse, touch and waypoint formation controls share the same rule. Previews distinguish normal group moves from lines and show the actual destinations before committing."
+                ]
+            },
             {
                 at:"2026-11-03T08:17:00Z",
                 title:"Accurate line formations and shorter land routes",
@@ -54176,9 +54184,11 @@
             wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull);
 
             if(formationDrag.active) {
-                const units=getMovableSelectedUnits(),plan=wodLineFormationPlan(units,formationDrag.startWorld,formationDrag.endWorld);
-                ctx.beginPath();ctx.moveTo(plan.layout.start.x,plan.layout.start.y);ctx.lineTo(plan.layout.end.x,plan.layout.end.y);
-                ctx.strokeStyle='rgba(241,196,15,.95)';ctx.lineWidth=4;ctx.lineCap='round';ctx.stroke();
+                const units=getMovableSelectedUnits(),plan=wodFormationDragPlan(units);
+                if(plan.layout){
+                    ctx.beginPath();ctx.moveTo(plan.layout.start.x,plan.layout.start.y);ctx.lineTo(plan.layout.end.x,plan.layout.end.y);
+                    ctx.strokeStyle='rgba(241,196,15,.95)';ctx.lineWidth=4;ctx.lineCap='round';ctx.stroke();
+                }
                 for(const unit of units){
                     const point=plan.slots.get(unit);if(!point)continue;
                     ctx.beginPath();ctx.arc(point.x,point.y,unit.radius||12,0,Math.PI*2);
@@ -54612,6 +54622,10 @@
             let units = getMovableSelectedUnits();
             if(units.length === 0) return;
             let worldPos = getWorldPosFromClientXY(clientX, clientY);
+            if(mobileOrderMode === 'formation') {
+                issueLineFormationOrder(worldPos,worldPos);
+                return;
+            }
             if(mobileOrderMode === 'waypoint') {
                 wodCommitShiftWaypointAt(worldPos);
                 return;
@@ -54865,6 +54879,29 @@
                 do{const j1=way[j0];p[j0]=p[j1];j0=j1;}while(j0);
             }
             const result=new Map();for(let j=1;j<=n;j++)result.set(units[p[j]-1],slots[j-1]);return result;
+        }
+
+        function wodFormationGestureIsLine(start,end,force=false) {
+            // Distinguish a deliberate drag from click jitter in screen pixels.
+            // Formation mode is always a line, including a tap at minimum spacing.
+            return force||Math.hypot(end.x-start.x,end.y-start.y)*(gameData.camera.zoom||1)+1e-6>=4;
+        }
+
+        function wodFormationDragPlan(units) {
+            const start=formationDrag.startWorld,end=formationDrag.endWorld;
+            const mode=leftMapOrderDrag.active?leftMapOrderDrag.mode:mobileOrderMode;
+            const pointMove=leftMapOrderDrag.active&&mode==='move';
+            if(!pointMove&&(mode==='formation'||units.length>1&&wodFormationGestureIsLine(start,end)))
+                return wodLineFormationPlan(units,start,end);
+            if(shiftWaypointDrag.active||mode==='waypoint'){
+                const offsets=wodGroupFormationOffsetMap(units),selected=new Set(units),used=[],slots=new Map();
+                for(const unit of units){
+                    const off=offsets.get(unit)||{ox:0,oy:0},desired=wodSnapWaypointWorldPoint(unit,end.x+off.ox,end.y+off.oy);
+                    const point=desired&&wodReserveGroupPoint(unit,desired,used,selected);
+                    if(point){used.push({unit,point});slots.set(unit,point);}
+                }return {slots};
+            }
+            return {slots:wodGroupDestinationSlots(units,end)};
         }
 
         function wodLineFormationLayout(units,start,end) {
@@ -55302,7 +55339,7 @@
                     gameData.selection.forEach(s => s.selected = false);
                     gameData.selection = [];
                 }
-            } else if (e.button === 2 && e.shiftKey && getMovableSelectedUnits().length > 0) {
+            } else if (e.button === 2 && (e.shiftKey||mobileOrderMode==='waypoint') && getMovableSelectedUnits().length > 0) {
                 shiftWaypointDrag.active = true;
                 shiftWaypointDrag.startClient = {x: cx, y: cy};
                 shiftWaypointDrag.startWorld = {x: worldPos.x, y: worldPos.y};
@@ -55358,9 +55395,9 @@
             if(e.button===0&&leftMapOrderDrag.active) {
                 const order=leftMapOrderDrag,end=getMouseWorldPos(e),start=order.startWorld;
                 leftMapOrderDrag.active=false;formationDrag.active=false;
-                const line=getMovableSelectedUnits().length>1&&Math.hypot(end.x-start.x,end.y-start.y)>35;
+                const line=getMovableSelectedUnits().length>1&&wodFormationGestureIsLine(start,end);
                 if(order.mode==='waypoint') {if(line)wodCommitShiftFormationWaypoint(start,end);else wodCommitShiftWaypointAt(end);}
-                else if(order.mode==='formation'&&line)issueLineFormationOrder(start,end);
+                else if(order.mode==='formation')issueLineFormationOrder(start,end);
                 else issueMoveOrder(end);
                 e.preventDefault();return;
             }
@@ -55417,17 +55454,14 @@
                 formationDrag.active = false;
                 let endWorld = getMouseWorldPos(e);
                 let startWorld = shiftWaypointDrag.startWorld || endWorld;
-                let dragDist = Math.hypot(endWorld.x - startWorld.x, endWorld.y - startWorld.y);
-                if(getMovableSelectedUnits().length > 1 && dragDist > 35)
+                if(getMovableSelectedUnits().length > 1 && wodFormationGestureIsLine(startWorld,endWorld))
                     wodCommitShiftFormationWaypoint(startWorld, endWorld);
                 else if(getMovableSelectedUnits().length > 0)
                     wodCommitShiftWaypointAt(endWorld);
             } else if (e.button === 2 && formationDrag.active) {
                 let endWorld = getMouseWorldPos(e);
                 formationDrag.endWorld = endWorld;
-                let dx = formationDrag.endWorld.x - formationDrag.startWorld.x;
-                let dy = formationDrag.endWorld.y - formationDrag.startWorld.y;
-                if(Math.sqrt(dx * dx + dy * dy) > 35 && getMovableSelectedUnits().length > 1) {
+                if(mobileOrderMode==='formation'||getMovableSelectedUnits().length > 1 && wodFormationGestureIsLine(formationDrag.startWorld,endWorld)) {
                     issueLineFormationOrder(formationDrag.startWorld, formationDrag.endWorld);
                 } else {
                     issueMoveOrder(formationDrag.endWorld);
@@ -55582,7 +55616,7 @@
                 let g = wodMobileOrderGesture;
                 let mdx = touch.clientX - g.startClientX;
                 let mdy = touch.clientY - g.startClientY;
-                if(Math.hypot(mdx, mdy) > 24) {
+                if(Math.hypot(mdx, mdy) >= (mobileOrderMode==='waypoint'?4:24)) {
                     if(mobileOrderMode === 'waypoint' && getMovableSelectedUnits().length > 1) {
                         let start = getWorldPosFromClientXY(g.startClientX, g.startClientY);
                         let now = getWorldPosFromClientXY(touch.clientX, touch.clientY);
@@ -55716,17 +55750,15 @@
                 let endWorld = getWorldPosFromClientXY(touch.clientX, touch.clientY);
                 formationDrag.endWorld = endWorld;
                 let startWorld = formationDrag.startWorld;
-                let dx = endWorld.x - startWorld.x;
-                let dy = endWorld.y - startWorld.y;
                 let asWaypoint = shiftWaypointDrag.active || mobileOrderMode === 'waypoint';
                 shiftWaypointDrag.active = false;
                 formationDrag.active = false;
                 if(asWaypoint) {
-                    if(Math.sqrt(dx * dx + dy * dy) > 35 && getMovableSelectedUnits().length > 1)
+                    if(getMovableSelectedUnits().length > 1 && wodFormationGestureIsLine(startWorld,endWorld))
                         wodCommitShiftFormationWaypoint(startWorld, endWorld);
                     else if(getMovableSelectedUnits().length > 0)
                         wodCommitShiftWaypointAt(endWorld);
-                } else if(Math.sqrt(dx * dx + dy * dy) > 35 && getMovableSelectedUnits().length > 1) {
+                } else if(mobileOrderMode==='formation'||getMovableSelectedUnits().length > 1 && wodFormationGestureIsLine(startWorld,endWorld)) {
                     issueLineFormationOrder(startWorld, endWorld);
                 } else {
                     issueMoveOrder(endWorld);
