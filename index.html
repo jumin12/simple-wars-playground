@@ -13073,6 +13073,15 @@
 
         const WOD_CHANGELOG = [
             {
+                at:"2026-11-03T08:17:00Z",
+                title:"Accurate line formations and shorter land routes",
+                items:[
+                    "Drawn formations stay in one line. Short drags expand just enough to fit the selected unit counters with small gaps, and the preview shows the actual assigned positions. Ordinary, queued waypoint and multiplayer line orders share the same layout.",
+                    "Land routes use real distance and terrain movement effects, without artificial detours around nearby mountains or attraction to cheap bridge tiles. Clear dry marches can start directly, and the path search keeps stable priorities as better routes are found.",
+                    "Route smoothing preserves useful motorized and mountaineer terrain detours instead of cutting straight through slower ground. Friendly avoidance continues to preserve commanded destinations and waypoint legs."
+                ]
+            },
+            {
                 at:"2026-11-03T07:12:19Z",
                 title:"Reliable group destinations and friendly traffic",
                 items:[
@@ -17797,11 +17806,14 @@
         function wodPullMarchPathTaut(unit,points) {
             if(!unit||!points.length)return points;
             const result=[];let anchor={x:unit.x,y:unit.y},i=0;
-            if(wodStraightMarchSegmentClear(unit,anchor,points[points.length-1]))return [points[points.length-1]];
+            const weighted=wodMpIsHumanOwner(unit.owner)&&['motorized','mountaineer'].includes(unit.type),prefix=[];
+            if(weighted){let prev=anchor,total=0;for(const p of points){total+=wodLandChordTravelCost(unit,prev,p);prefix.push(total);prev=p;}}
+            const useful=(a,b,j)=>!weighted||wodLandChordTravelCost(unit,a,b)<=(prefix[j]-(i?prefix[i-1]:0))*1.01;
+            if(wodStraightMarchSegmentClear(unit,anchor,points[points.length-1])&&useful(anchor,points[points.length-1],points.length-1))return [points[points.length-1]];
             while(i<points.length) {
                 let next=i;
                 for(let j=Math.min(points.length-1,i+48);j>i;j--) {
-                    if(wodStraightMarchSegmentClear(unit,anchor,points[j])){next=j;break;}
+                    if(wodStraightMarchSegmentClear(unit,anchor,points[j])&&useful(anchor,points[j],j)){next=j;break;}
                 }
                 result.push(points[next]);anchor=points[next];i=next+1;
             }
@@ -31302,6 +31314,7 @@
                 let mtnProxHeuristicCache = new Map();
                 let landMountRingExtraCache = new Map();
                 function heuristic(a, b) {
+                    if(wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit))return Math.hypot(a.x-b.x,a.y-b.y)/((gameData.hexRadius||20)*1.35)/(unit.type==='mountaineer'?1.05:1);
                     let dx = a.q - b.q;
                     let dy = a.r - b.r;
                     let h0 = Math.sqrt(dx * dx + dy * dy);
@@ -31316,6 +31329,14 @@
                 }
                 function movementCost(a, b) {
                     let stepDist = wodHexStepDistance(a, b);
+                    if(wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit)){
+                        // Price the actual distance and terrain speed, including
+                        // bridge portals. Mountain proximity and cheap deck edges
+                        // used to attract long detours unrelated to travel time.
+                        const distance=Math.hypot(a.x-b.x,a.y-b.y)/((gameData.hexRadius||20)*1.35);
+                        const cost=distance*(1/wodLandRouteSpeed(unit,a)+1/wodLandRouteSpeed(unit,b))*.5;
+                        return cost+(isWaterHex(b)&&!isBridgeHex(b)?(unit.type==='marine'?2.65:62):0);
+                    }
                     if(isBridgeHex(a) && isBridgeHex(b)) return stepDist * 0.015;
                     if(isBridgeHex(b) || isBridgeHex(a)) return stepDist * 0.025;
                     let terrain = 0;
@@ -31370,19 +31391,22 @@
                     }
                     return stepDist + terrain;
                 }
-                function heapScore(hex, fScoreLoc) {
-                    return fScoreLoc[key(hex)] ?? Infinity;
+                function heapScore(entry) {
+                    return entry.score;
                 }
                 function heapPush(heap, hex, fScoreLoc) {
-                    heap.push(hex);
+                    // Immutable priorities: decreasing a shared fScore silently
+                    // broke the heap order for all older copies of the same tile.
+                    const entry={hex,score:fScoreLoc[key(hex)]??Infinity};
+                    heap.push(entry);
                     let i = heap.length - 1;
                     while(i > 0) {
                         let p = (i - 1) >> 1;
-                        if(heapScore(heap[p], fScoreLoc) <= heapScore(hex, fScoreLoc)) break;
+                        if(heapScore(heap[p]) <= heapScore(entry)) break;
                         heap[i] = heap[p];
                         i = p;
                     }
-                    heap[i] = hex;
+                    heap[i] = entry;
                 }
                 function heapPop(heap, fScoreLoc) {
                     let top = heap[0];
@@ -31400,7 +31424,7 @@
                         }
                         heap[i] = last;
                     }
-                    return top;
+                    return top.hex;
                 }
                 function rebuildPath(endHex, cameFromLoc) {
                     let path = [endHex];
@@ -32345,6 +32369,29 @@
         }
 
         /** Build one terrain-aware corridor for a land march and queue it in unit.path. */
+        function wodLandRouteSpeed(unit,hex) {
+            if(isBridgeHex(hex))return 1;
+            return unit.type==='motorized'?({forest:.72,hill:.68,swamp:.42,urban:.8}[hex?.type]||1):unit.type==='mountaineer'?({hill:1.05,mountain:.65}[hex?.type]||1):1;
+        }
+
+        function wodLandChordTravelCost(unit,a,b) {
+            const distance=Math.hypot(b.x-a.x,b.y-a.y),steps=Math.max(1,Math.ceil(distance/((gameData.hexRadius||20)*.3)));
+            let cost=0;
+            for(let i=0;i<steps;i++){
+                const t=(i+.5)/steps,h=getNearestHexToPoint(a.x+(b.x-a.x)*t,a.y+(b.y-a.y)*t);
+                cost+=distance/steps/wodLandRouteSpeed(unit,h);
+            }return cost;
+        }
+
+        function wodUniformDryChord(unit,a,b) {
+            if(!isLandArmyUnit(unit)||['motorized','mountaineer'].includes(unit.type)||!wodStraightMarchSegmentClear(unit,a,b))return false;
+            const n=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/((gameData.hexRadius||20)*.5)));
+            for(let i=0;i<=n;i++){
+                const x=a.x+(b.x-a.x)*i/n,y=a.y+(b.y-a.y)*i/n,h=getNearestHexToPoint(x,y);
+                if(!h||isWaterHex(h)||isBridgeHex(h))return false;
+            }return true;
+        }
+
         function wodTryAssignPlayerCorridorPath(unit, marchPts, exactLast, fromAdvance) {
             // Multi-stop orders advance one leg at a time. Tautening a combined
             // route can shortcut deliberate waypoint corners in open terrain.
@@ -32354,10 +32401,11 @@
             let human = wodMpIsHumanOwner(unit.owner);
             wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, fromAdvance ? (human ? 18 : 14) : (human ? 28 : 20));
             let startPt = { x: unit.x, y: unit.y };
-            let fullHex = buildConcatenatedHexPath(unit, marchPts, startPt, true, { forOrder: true });
-            if(fullHex.length <= 1) return false;
             let endPt = exactLast ? { x: exactLast.x, y: exactLast.y } : marchPts[marchPts.length - 1];
-            let corridor = wodWorldPointsFromHexMarchPath(unit, fullHex, endPt);
+            const direct=wodUniformDryChord(unit,startPt,endPt);
+            let fullHex = direct?[]:buildConcatenatedHexPath(unit, marchPts, startPt, true, { forOrder: true });
+            if(!direct&&fullHex.length <= 1) return false;
+            let corridor = direct?[startPt,endPt]:wodWorldPointsFromHexMarchPath(unit, fullHex, endPt);
             corridor[0] = { x: unit.x, y: unit.y };
             if(corridor.length < 2) return false;
             wodApplyCorridorExactEnd(corridor, endPt, unit);
@@ -54128,27 +54176,13 @@
             wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull);
 
             if(formationDrag.active) {
-                ctx.beginPath();
-                ctx.moveTo(formationDrag.startWorld.x, formationDrag.startWorld.y);
-                ctx.lineTo(formationDrag.endWorld.x, formationDrag.endWorld.y);
-                ctx.strokeStyle = 'rgba(241, 196, 15, 0.95)';
-                ctx.lineWidth = 6;
-                ctx.lineCap = 'round';
-                ctx.stroke();
-
-                let units = getMovableSelectedUnits();
-                let count = Math.max(2, units.length);
-                for(let i = 0; i < units.length; i++) {
-                    let t = units.length === 1 ? 0.5 : i / (count - 1);
-                    let x = formationDrag.startWorld.x + (formationDrag.endWorld.x - formationDrag.startWorld.x) * t;
-                    let y = formationDrag.startWorld.y + (formationDrag.endWorld.y - formationDrag.startWorld.y) * t;
-                    ctx.beginPath();
-                    ctx.arc(x, y, 9, 0, Math.PI * 2);
-                    ctx.fillStyle = 'rgba(241, 196, 15, 0.65)';
-                    ctx.fill();
-                    ctx.strokeStyle = '#050505';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
+                const units=getMovableSelectedUnits(),plan=wodLineFormationPlan(units,formationDrag.startWorld,formationDrag.endWorld);
+                ctx.beginPath();ctx.moveTo(plan.layout.start.x,plan.layout.start.y);ctx.lineTo(plan.layout.end.x,plan.layout.end.y);
+                ctx.strokeStyle='rgba(241,196,15,.95)';ctx.lineWidth=4;ctx.lineCap='round';ctx.stroke();
+                for(const unit of units){
+                    const point=plan.slots.get(unit);if(!point)continue;
+                    ctx.beginPath();ctx.arc(point.x,point.y,unit.radius||12,0,Math.PI*2);
+                    ctx.fillStyle='rgba(241,196,15,.3)';ctx.fill();ctx.strokeStyle='#f1c40f';ctx.lineWidth=2;ctx.stroke();
                 }
             }
 
@@ -54833,7 +54867,35 @@
             const result=new Map();for(let j=1;j<=n;j++)result.set(units[p[j]-1],slots[j-1]);return result;
         }
 
+        function wodLineFormationLayout(units,start,end) {
+            const count=units.length,dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy),ax=length?dx/length:1,ay=length?dy/length:0;
+            // Counters extend beyond their collision circles. Leave a small visible
+            // gap, including on diagonals, without turning a short drag into ranks.
+            const gap=Math.max(3,...units.map(u=>Math.max((u.radius||12)*2+3,((u.radius||12)*2.8+3)/Math.max(Math.abs(ax),Math.abs(ay))))),span=Math.max(length,Math.max(0,count-1)*gap),cx=(start.x+end.x)/2,cy=(start.y+end.y)/2;
+            const first={x:cx-ax*span/2,y:cy-ay*span/2},last={x:cx+ax*span/2,y:cy+ay*span/2};
+            return {start:first,end:last,spacing:count>1?span/(count-1):gap,slots:units.map((u,i)=>{
+                const t=count===1?.5:i/(count-1);return {x:first.x+(last.x-first.x)*t,y:first.y+(last.y-first.y)*t};
+            })};
+        }
+
+        function wodLineFormationPlan(units,start,end) {
+            // Selection ordering must not change the preview's unit-to-slot assignment
+            // when the mouse is released or a multiplayer command is received.
+            const ordered=units.slice().sort((a,b)=>String(a.uid).localeCompare(String(b.uid)));
+            const key=start.x+','+start.y+'>'+end.x+','+end.y+'|'+ordered.map(u=>u.uid+':'+u.type+':'+u.radius+':'+Math.round(u.x/4)+','+Math.round(u.y/4)).join('|')+'|'+(gameData._wodPfVer||0);
+            const cached=gameData._wodLinePreview;
+            if(cached?.hexes===gameData.hexes&&cached.key===key&&performance.now()-cached.at<80)return cached;
+            const layout=wodLineFormationLayout(ordered,start,end),slots=wodMatchGroupSlots(ordered,layout.slots),selected=new Set(ordered),used=[],resolved=new Map();
+            const center={x:(start.x+end.x)/2,y:(start.y+end.y)/2};
+            for(const unit of ordered){
+                const point=wodReserveGroupPoint(unit,slots.get(unit),used,selected,center);
+                if(point){used.push({unit,point});resolved.set(unit,point);}
+            }
+            return gameData._wodLinePreview={hexes:gameData.hexes,key,at:performance.now(),layout,slots:resolved};
+        }
+
         function wodGroupDestinationSlots(units,center,line) {
+            if(line)return wodLineFormationPlan(units,line.start,line.end).slots;
             const n=units.length,spacing=Math.max(32,(gameData.hexRadius||20)*1.35,...units.map(u=>(u.radius||12)*4+6));
             const length=line?Math.hypot(line.end.x-line.start.x,line.end.y-line.start.y):0;
             const cols=line?Math.max(1,Math.min(n,Math.floor(length/spacing)+1)):Math.ceil(Math.sqrt(n)),rows=Math.ceil(n/cols),slots=[];
@@ -54940,6 +55002,7 @@
         function wodApplyShiftWaypointPaths(units, wps, line) {
             if(!units || !units.length || !wps || !wps.length) return;
             let offsets = wodGroupFormationOffsetMap(units);
+            const lineSlots=line?wodLineFormationPlan(units,line.start,line.end).slots:null;
             if(line && units.length > 1)
                 wodSortUnitsAlongLine(units, line.start, line.end);
             wodApplyPlayerMoveOrders(units, (unit) => {
@@ -54949,10 +55012,10 @@
                 for(let wi = 0; wi < wps.length; wi++) {
                     let dest;
                     if(line && wi === lastIdx)
-                        dest = wodLineFormationSlot(line.start, line.end, units.indexOf(unit), units.length);
+                        dest = lineSlots.get(unit);
                     else
                         dest = { x: wps[wi].x + off.ox, y: wps[wi].y + off.oy };
-                    let snapped = wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
+                    let snapped = dest&&wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
                     if(snapped) pathPts.push(snapped);
                 }
                 return wodTrimNearMarchPoints(unit, pathPts);
@@ -55045,6 +55108,7 @@
             if(wps.length > 32) wps.splice(0, wps.length - 32);
             let offsets = wodGroupFormationOffsetMap(units);
             let order = units.slice();
+            const lineSlots=line?wodLineFormationPlan(units,line.start,line.end).slots:null;
             if(line && order.length > 1)
                 wodSortUnitsAlongLine(order, line.start, line.end);
             let paths = order.map((unit) => {
@@ -55054,10 +55118,10 @@
                 for(let wi = 0; wi < wps.length; wi++) {
                     let dest;
                     if(line && wi === lastIdx)
-                        dest = wodLineFormationSlot(line.start, line.end, order.indexOf(unit), order.length);
+                        dest = lineSlots.get(unit);
                     else
                         dest = { x: wps[wi].x + off.ox, y: wps[wi].y + off.oy };
-                    let snapped = wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
+                    let snapped = dest&&wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
                     if(snapped) pathPts.push(snapped);
                 }
                 return wodTrimNearMarchPoints(unit, pathPts);
