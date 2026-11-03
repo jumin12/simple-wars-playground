@@ -13073,6 +13073,15 @@
 
         const WOD_CHANGELOG = [
             {
+                at:"2026-11-03T07:12:19Z",
+                title:"Reliable group destinations and friendly traffic",
+                items:[
+                    "Group moves assign nearby units to separate reachable positions, with room to pass through arriving ranks. Selection order no longer makes the group crisscross itself, and short formation lines use additional ranks instead of stacking units together.",
+                    "Each unit follows its own terrain-aware route instead of an offset copy of the group leader's route. Queued orders show their destination immediately, and a newer command cancels an older queued march. Multiplayer host orders use the same destination assignment.",
+                    "Friendly avoidance predicts actual movement before bodies touch. Temporary yielding preserves every player destination and waypoint, reserves return positions and resumes when traffic clears. Arriving player units finish at their assigned position instead of silently stopping short."
+                ]
+            },
+            {
                 at:"2026-11-02T22:49:22Z",
                 title:"Sustained offensives and purposeful field hospitals",
                 items:[
@@ -15519,9 +15528,10 @@
                         if(d<.0001){const hash=String(ensureUnitId(a)+ensureUnitId(b)).split('').reduce((n,c)=>n*31+c.charCodeAt(0),0)>>>0;const angle=(hash%360)*Math.PI/180;dx=Math.cos(angle);dy=Math.sin(angle);d=1;}
                         const len=Math.hypot(dx,dy),nx=dx/len,ny=dy/len,over=min-Math.hypot(b.x-a.x,b.y-a.y)+.002;
                         const move=(u,x,y)=>{if(!wodSamplePosOnWalkableTerrain(u,x,y))return false;u.x=x;u.y=y;u._drawX=x;u._drawY=y;return true;};
-                        let am=move(a,a.x-nx*over*.5,a.y-ny*over*.5),bm=move(b,b.x+nx*over*.5,b.y+ny*over*.5);
-                        if(am&&!bm)move(a,a.x-nx*over*.5,a.y-ny*over*.5);
-                        if(bm&&!am)move(b,b.x+nx*over*.5,b.y+ny*over*.5);
+                        const movingA=!!a.target,movingB=!!b.target,aw=movingA&&!movingB?1:!movingA&&movingB?0:.5,bw=1-aw;
+                        let am=aw>0&&move(a,a.x-nx*over*aw,a.y-ny*over*aw),bm=bw>0&&move(b,b.x+nx*over*bw,b.y+ny*over*bw);
+                        if(am&&!bm&&bw)move(a,a.x-nx*over*bw,a.y-ny*over*bw);
+                        if(bm&&!am&&aw)move(b,b.x+nx*over*aw,b.y+ny*over*aw);
                         if(!am&&!bm)for(const turn of [Math.PI/2,-Math.PI/2,Math.PI,-Math.PI/4,Math.PI/4]) {
                             const cx=nx*Math.cos(turn)-ny*Math.sin(turn),cy=nx*Math.sin(turn)+ny*Math.cos(turn);
                             if(move(b,a.x+cx*min,a.y+cy*min))break;
@@ -23859,17 +23869,8 @@
                     if(units.length === 0) return;
                     gameData.playerShiftWaypoints = [];
                     let worldPos = { x: d.cmd.x, y: d.cmd.y };
-                    let spacing = Math.max(28,gameData.hexRadius*1.25,...units.map(u=>(u.radius||12)*2+4));
-                    let cols = Math.ceil(Math.sqrt(units.length));
-                    let rows = Math.ceil(units.length / cols);
-                    let midCol = (cols - 1) / 2;
-                    let midRow = (rows - 1) / 2;
-                    units.forEach((unit, index) => {
-                        let r = Math.floor(index / cols), c = index % cols;
-                        let tx = worldPos.x + (c - midCol) * spacing;
-                        let ty = worldPos.y + (r - midRow) * spacing;
-                        assignUnitMoveAlongWaypoints(unit,[wodExplicitWaterSlot(unit,tx,ty,worldPos)]);
-                    });
+                    const slots=wodGroupDestinationSlots(units,worldPos);
+                    wodApplyPlayerMoveOrders(units,u=>slots.has(u)?[slots.get(u)]:null);
                 } else if(d.cmd.kind === 'lineFormation') {
                     let units = [];
                     for(let id of d.cmd.uids || []) {
@@ -23880,20 +23881,8 @@
                     gameData.playerShiftWaypoints = [];
                     let start = { x: d.cmd.sx, y: d.cmd.sy };
                     let end = { x: d.cmd.ex, y: d.cmd.ey };
-                    units.sort((a, b) => {
-                        let dx = end.x - start.x;
-                        let dy = end.y - start.y;
-                        let len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-                        let ax = ((a.x - start.x) * dx + (a.y - start.y) * dy) / len;
-                        let bx = ((b.x - start.x) * dx + (b.y - start.y) * dy) / len;
-                        return ax - bx;
-                    });
-                    for(let i = 0; i < units.length; i++) {
-                        let t = units.length === 1 ? 0.5 : i / (units.length - 1);
-                        let tx = start.x + (end.x - start.x) * t;
-                        let ty = start.y + (end.y - start.y) * t;
-                        assignUnitMoveTarget(units[i], tx, ty);
-                    }
+                    const slots=wodGroupDestinationSlots(units,{x:(start.x+end.x)/2,y:(start.y+end.y)/2},{start,end});
+                    wodApplyPlayerMoveOrders(units,u=>slots.has(u)?[slots.get(u)]:null);
                 } else if(d.cmd.kind === 'shiftMarch') {
                     let units = [];
                     for(let id of d.cmd.uids || []) {
@@ -29709,21 +29698,42 @@
             });return blocked;
         }
 
-        function wodSteerAroundFriendlyUnits(unit,nx,ny) {
-            let friends=0,hostiles=0;
-            forEachNearbyUnit(gameData.unitSpatialGrid,nx,ny,(unit.radius||10)+50,u=>{
-                if(u===unit||u.hp<=0||u.type==='convoy')return;
-                if(Math.hypot(u.x-nx,u.y-ny)>(unit.radius||10)+(u.radius||10)+6)return;
-                if(wodIsFriendlyOwner(u.owner,unit.owner))friends++;else hostiles++;
+        function wodSteerAroundFriendlyUnits(unit,nx,ny,dt=1/60) {
+            const sx=nx-unit.x,sy=ny-unit.y,step=Math.hypot(sx,sy);if(step<.00001)return null;
+            const speed=step/Math.max(.001,dt),friends=[];let hostile=false;
+            forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,(unit.radius||12)+100,u=>{
+                if(u===unit||u.hp<=0||u.type==='convoy'||u.boardTransportUid)return;
+                if(!wodIsFriendlyOwner(u.owner,unit.owner)){if(Math.hypot(u.x-nx,u.y-ny)<(unit.radius||12)+(u.radius||12)+6)hostile=true;return;}
+                const goal=u._trafficYield?.route?.target||u.target,dx=goal?goal.x-u.x:0,dy=goal?goal.y-u.y:0,len=Math.hypot(dx,dy)||1;
+                const velocity=goal?(u.speed||15)*WOD_MOVE_SPEED_FACTOR*getUnitSpeedMultiplier(u):0;
+                const recent=goal&&u._wodVelocityAt!=null&&(gameData._aiEconomyClock||0)-u._wodVelocityAt<.3;
+                const vx=recent?u._wodVelocityX:dx/len*velocity,vy=recent?u._wodVelocityY:dy/len*velocity;
+                const reach=(unit.radius||12)+(u.radius||12)+3+(speed+Math.hypot(vx,vy))*3;
+                if((u.x-unit.x)**2+(u.y-unit.y)**2<=reach*reach)friends.push({u,vx,vy});
             });
-            if(!friends||hostiles)return null;
-            const dx=nx-unit.x,dy=ny-unit.y,sign=1;
-            for(const angle of [.38,-.38,.75,-.75,1.12,-1.12,1.5,-1.5,2.1,-2.1,Math.PI]) {
-                const a=angle*sign,c=Math.cos(a),s=Math.sin(a),x=unit.x+dx*c-dy*s,y=unit.y+dx*s+dy*c;
+            if(hostile||!friends.length)return null;
+            const horizon=3,now=gameData._aiEconomyClock||0;
+            const risk=(vx,vy)=>friends.reduce((sum,f)=>{
+                const dx=unit.x-f.u.x,dy=unit.y-f.u.y,rx=vx-f.vx,ry=vy-f.vy,den=rx*rx+ry*ry;
+                const t=den>.001?Math.max(0,Math.min(horizon,-(dx*rx+dy*ry)/den)):0;
+                const gap=Math.hypot(dx+rx*t,dy+ry*t),clear=(unit.radius||12)+(f.u.radius||12)+3;
+                return sum+Math.max(0,clear-gap)**2*4;
+            },0);
+            if(risk(sx/dt,sy/dt)<.1&&!isWorldPositionBlockedByUnits(unit,nx,ny))return null;
+            let best=null,score=Infinity;
+            for(const angle of [0,.35,-.35,.7,-.7,1.1,-1.1,1.5,-1.5,2,-2,Math.PI,null]){
+                const c=angle===null?0:Math.cos(angle),s=angle===null?0:Math.sin(angle),dx=sx*c-sy*s,dy=sx*s+sy*c,x=unit.x+dx,y=unit.y+dy;
                 if(!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,x,y)||isWorldPositionBlockedByUnits(unit,x,y))continue;
-                return {x,y};
+                // Avoidance looks ahead, rather than colliding first and forcing
+                // body separation to push a standing friendly out of the way.
+                if(angle!==null&&!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,unit.x+dx/step*Math.min(32,speed*horizon),unit.y+dy/step*Math.min(32,speed*horizon)))continue;
+                const side=angle==null?0:Math.sign(angle),turn=angle===null?65:(1-c)*25+Math.abs(angle)*2+(side<0?1:0);
+                const preference=unit._wodAvoidUntil>now&&side&&side!==unit._wodAvoidSide?9:0;
+                const cost=risk(dx/dt,dy/dt)+turn+preference;
+                if(cost<score){score=cost;best={x,y,side};}
             }
-            return null;
+            if(best?.side){unit._wodAvoidSide=best.side;unit._wodAvoidUntil=now+1;}
+            return best;
         }
 
         const WOD_TRAFFIC_ORDER_FIELDS = ['target','path','orderTarget','fullMarchWaypoints','marchWpCursor','holding',
@@ -29749,6 +29759,20 @@
             if(ok)unit._trafficYield=record;
             return ok;
         }
+        function wodReturnIdleTraffic(unit,record) {
+            const point=record.points?.[0],clock=gameData._aiEconomyClock||0;
+            if(!point||Math.hypot(unit.x-point.x,unit.y-point.y)<1){unit._trafficYield=null;return;}
+            unit._trafficYield=record;record.returning=true;
+            if((record.returnRetryAt||0)>clock)return;
+            record.returnRetryAt=clock+1;
+            // An idle blocker must retain its return intent if the temporary
+            // route times out or pathfinding is busy. It is not a new order.
+            record.route={target:null};
+            if(isWorldPositionBlockedByUnits(unit,point.x,point.y))return;
+            record.until=clock+12;record.lastProgressAt=clock;
+            wodPlanTrafficDetour(unit,[point],record);
+            unit._trafficYield=record;
+        }
         function wodResumeTrafficYield(unit) {
             const y=unit._trafficYield;if(!y)return;
             // A passenger may have landed after this sidestep was planned.
@@ -29769,6 +29793,7 @@
                 // Two mutually yielding ships can stop a few pixels short of their
                 // sidesteps. Expired avoidance must not suppress fleet orders forever.
                 if(clock>y.until&&clock-y.lastProgressAt>3&&!unit._combatEngaged){
+                    if(y.idle&&wodMpIsHumanOwner(unit.owner)){wodReturnIdleTraffic(unit,y);return;}
                     unit._trafficYield=null;
                     if(wodMpIsHumanOwner(unit.owner)){if(unit.orderTarget)replanUnitOrder(unit);}
                     else if(isLandArmyUnit(unit)&&!y.idle&&y.points?.length)
@@ -29777,9 +29802,13 @@
                 }
                 return;
             }
-            if(y.returning){unit._trafficYield=null;return;}
+            if(y.returning){
+                if(y.idle&&wodMpIsHumanOwner(unit.owner))wodReturnIdleTraffic(unit,y);
+                else unit._trafficYield=null;
+                return;
+            }
             const leader=gameData.entities.find(u=>u.uid===y.leader&&u.hp>0);
-            const passed=!leader||(leader.x-y.x)*y.ax+(leader.y-y.y)*y.ay>0||Math.hypot(leader.x-unit.x,leader.y-unit.y)>(gameData.hexRadius||20)*5;
+            const passed=!leader||!leader.target&&!leader._trafficYield||(leader.x-y.x)*y.ax+(leader.y-y.y)*y.ay>0||Math.hypot(leader.x-unit.x,leader.y-unit.y)>(gameData.hexRadius||20)*5;
             if(!passed&&(gameData._aiEconomyClock||0)<y.until)return;
             unit._trafficYield=null;
             if(y.idle&&unit._navalLanded)return;
@@ -29791,7 +29820,7 @@
                 return;
             }
             if(y.owner===unit.owner&&y.points.length){
-                if(y.idle&&wodMpIsHumanOwner(unit.owner)){y.returning=true;wodPlanTrafficDetour(unit,y.points,y);}
+                if(y.idle&&wodMpIsHumanOwner(unit.owner))wodReturnIdleTraffic(unit,y);
                 // AI detours replace fullMarchWaypoints with the sidestep.
                 // The saved points, not that temporary route, are the march.
                 else if(!wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit))
@@ -29822,9 +29851,12 @@
             if(loser._trafficYield||loser._combatEngaged||loser.moraleBroken||loser.retreating)return false;
             if(loser===mover){dx=-dx;dy=-dy;}
             const center=getNearestHexToPoint(loser.x,loser.y),spacing=(gameData.hexRadius||20)*1.35;if(!center)return false;
+            const reserved=gameData.entities.filter(u=>u!==loser&&u.hp>0&&wodIsFriendlyOwner(u.owner,loser.owner)).map(u=>({u,
+                point:u._trafficYield?.idle?u._trafficYield.points?.[0]:u.fullMarchWaypoints?.at(-1)||u.orderTarget})).filter(s=>s.point);
             const sites=[];
             for(const pt of getHexesInRadius(center.q,center.r,6)) {
                 const h=gameData.hexes[`${pt.q},${pt.r}`];if(!h||!wodPathTileWalkable(loser,h,false)||!wodIsNavalUnit(loser)&&isWaterHex(h)&&!isBridgeHex(h)||isWorldPositionBlockedByUnits(loser,h.x,h.y))continue;
+                if(reserved.some(s=>Math.hypot(h.x-s.point.x,h.y-s.point.y)<(loser.radius||12)+(s.u.radius||12)+4))continue;
                 if(loser.type==='supply'&&(!wodSupplyParkingSafe(loser,h)||!wodOpenWaterChordClear(loser,loser.x,loser.y,h.x,h.y)))continue;
                 if(loser._navalLanded&&loser.type!=='marine'&&!wodCurrentSupplyComponent(h,loser.owner).city&&
                     !gameData.entities.some(s=>s.owner===loser.owner&&s.type==='supply'&&s.hp>0&&Math.hypot(s.x-h.x,s.y-h.y)<wodFortCombatAuraRadiusPx()*.9))continue;
@@ -31669,8 +31701,13 @@
 
         function wodQueuePlayerMoveOrder(unit, worldPoints, opt) {
             if(!unit || !worldPoints || !worldPoints.length) return;
+            const epoch=unit._wodPlayerOrderEpoch=(unit._wodPlayerOrderEpoch||0)+1;
+            unit._trafficYield=null;unit.target=null;unit.path=null;
+            unit.fullMarchWaypoints=worldPoints.map(p=>({x:p.x,y:p.y}));unit.marchWpCursor=0;
+            unit.orderTarget={...unit.fullMarchWaypoints.at(-1)};invalidateUnitOrderArrowCache(unit);
             wodPlayerOrderQueue.push({
                 unit,
+                epoch,
                 worldPoints: worldPoints.map(w => ({ x: w.x, y: w.y })),
                 opt: opt || null
             });
@@ -31698,7 +31735,7 @@
             let n = 0;
             while(wodPlayerOrderQueue.length && n < batch && performance.now() - t0 < budgetMs) {
                 let job = wodPlayerOrderQueue.shift();
-                if(job.unit && job.unit.hp > 0) {
+                if(job.unit && job.unit.hp > 0&&job.epoch===job.unit._wodPlayerOrderEpoch) {
                     job.tries = (job.tries || 0) + 1;
                     let assigned = false;
                     if(job.opt && job.opt.groupBridgeCorridor && job.opt.groupBridgeCorridor.length >= 2) {
@@ -31714,7 +31751,7 @@
                         );
                     }
                     if(!assigned)
-                        assigned = assignUnitMoveAlongWaypoints(job.unit, job.worldPoints, job.opt);
+                        assigned = assignUnitMoveAlongWaypoints(job.unit, job.worldPoints, {...job.opt,_queuedPlayerOrder:true});
                     if(assigned)
                         job.tries = 0;
                     else if(job.tries < 10)
@@ -32136,181 +32173,25 @@
         }
 
         /** Apply move orders immediately for a few units, queue the rest to avoid input hitch. */
-        function wodApplyPlayerMoveOrders(units, pathForUnit) {
-            if(!units || !units.length) return;
-            const requestedPath=pathForUnit;let acknowledged=false;
-            pathForUnit=(unit,index)=>{
-                const points=requestedPath(unit,index);
-                if(points?.length&&!acknowledged){acknowledged=true;wodPlayUnitMoveSound(units);}
-                return points;
-            };
-            if(wodPlayerOrderQueue.length) {
-                let drop = new Set(units);
-                wodPlayerOrderQueue = wodPlayerOrderQueue.filter(j => !j.unit || !drop.has(j.unit));
-            }
-            wodPfSpentMs = 0;
-            wodPfBudgetMs = Math.max(wodPfBudgetMs || 0, Math.min(52, 15 + units.length * 0.65));
-            // Group fast path: pathfind ONCE for a lead land unit near the selection centroid,
-            // then clone the corridor (offset per unit) onto every other land unit. Previously
-            // only the first unit was assigned synchronously and the rest pumped over frames —
-            // arrows appeared one at a time and late-queue units fell back to straight lines.
-            if(units.length > 2) {
-                let cx = 0, cy = 0, nL = 0;
-                for(let u of units) {
-                    if(isLandArmyUnit(u)) { cx += u.x; cy += u.y; nL++; }
+        function wodApplyPlayerMoveOrders(units,pathForUnit) {
+            if(!units?.length)return;
+            const selected=new Set(units),reserved=new Map();let acknowledged=false,syncDone=0;
+            wodPlayerOrderQueue=wodPlayerOrderQueue.filter(j=>!selected.has(j.unit));
+            wodPfSpentMs=0;wodPfBudgetMs=Math.max(wodPfBudgetMs||0,15);
+            for(let i=0;i<units.length;i++){
+                const unit=units[i],requested=pathForUnit(unit,i);if(!requested?.length)continue;
+                const points=requested.map(p=>({...p}));
+                // Reserve each leg independently: snapping many coastal or mountain
+                // slots onto one tile must never give a whole army the same endpoint.
+                for(let leg=0;leg<points.length;leg++){
+                    const used=reserved.get(leg)||[];reserved.set(leg,used);
+                    points[leg]=wodReserveGroupPoint(unit,points[leg],used,selected);
+                    if(!points[leg])break;used.push({unit,point:points[leg]});
                 }
-                let leadIdx = -1;
-                if(nL >= 2) {
-                    cx /= nL;
-                    cy /= nL;
-                    let bestD = Infinity;
-                    for(let i = 0; i < units.length; i++) {
-                        if(!isLandArmyUnit(units[i])) continue;
-                        let dx = units[i].x - cx, dy = units[i].y - cy;
-                        let d = dx * dx + dy * dy;
-                        if(d < bestD) { bestD = d; leadIdx = i; }
-                    }
-                }
-                if(leadIdx >= 0) {
-                    let lead = units[leadIdx];
-                    let leadStart = { x: lead.x, y: lead.y };
-                    let leadPts = pathForUnit(lead, leadIdx);
-                    if(leadPts && leadPts.length && assignUnitMoveAlongWaypoints(lead, leadPts) && lead.target) {
-                        // Multi-waypoint marches must keep every click on each unit. Cloning the
-                        // lead's first corridor then snapping the exact-end to the last click
-                        // collapses intermediate waypoints for the rest of the group.
-                        if(leadPts.length > 1) {
-                            let syncCap = wodUsesVisualViewportLayout() ? 1 : 3;
-                            let syncDone = 0;
-                            for(let i = 0; i < units.length; i++) {
-                                if(i === leadIdx) continue;
-                                let pts = pathForUnit(units[i], i);
-                                if(!pts || !pts.length) continue;
-                                if(syncDone < syncCap && assignUnitMoveAlongWaypoints(units[i], pts))
-                                    syncDone++;
-                                else
-                                    wodQueuePlayerMoveOrder(units[i], pts);
-                            }
-                            return;
-                        }
-                        let leadCorridor = [{ x: leadStart.x, y: leadStart.y }, { x: lead.target.x, y: lead.target.y }];
-                        if(lead.path) {
-                            for(let pi = 0; pi < lead.path.length; pi++)
-                                leadCorridor.push({ x: lead.path[pi].x, y: lead.path[pi].y });
-                        }
-                        let leadClick = leadPts[leadPts.length - 1];
-                        let leadWater = !!lead._wodOrderIntoWater;
-                        let leadBridge = !!lead._wodRouteUsesBridge || !!wodLeadCorridorBridgeFunnelScales(leadCorridor);
-                        // Shared far-shore destination for all bridge followers — per-unit
-                        // formation offsets often land mid-deck and stop the crossing early.
-                        let leadFarExact = lead.orderTarget
-                            ? { x: lead.orderTarget.x, y: lead.orderTarget.y }
-                            : { x: leadClick.x, y: leadClick.y };
-                        if(leadBridge) {
-                            let leadFarSnap = wodSnapLandArmyOrderPoint(lead, leadFarExact.x, leadFarExact.y);
-                            if(leadFarSnap && !(
-                                wodPointOnBridgeForUnit(lead, leadFarSnap.x, leadFarSnap.y, 1.15) ||
-                                (getNearestHexToPoint(leadFarSnap.x, leadFarSnap.y) &&
-                                    isBridgeHex(getNearestHexToPoint(leadFarSnap.x, leadFarSnap.y)))
-                            )) {
-                                leadFarExact = { x: leadFarSnap.x, y: leadFarSnap.y };
-                            } else {
-                                // Prefer last off-deck lead corridor point.
-                                for(let k = leadCorridor.length - 1; k >= 0; k--) {
-                                    let p = leadCorridor[k];
-                                    if(!p) continue;
-                                    let onD = wodPointOnBridgeForUnit(lead, p.x, p.y, 1.15) ||
-                                        (getNearestHexToPoint(p.x, p.y) && isBridgeHex(getNearestHexToPoint(p.x, p.y)));
-                                    if(!onD) {
-                                        leadFarExact = { x: p.x, y: p.y };
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        let tile = (gameData.hexRadius || 20) * 1.35;
-                        // Generous caps: the cloned lane is only a first-frame hint — any unit
-                        // whose lane clips bad terrain re-paths itself within ~0.25s via the
-                        // budgeted blocked-repath. Queuing instead just meant no arrow at all.
-                        let maxOffE2 = Math.pow(tile * 40, 2);
-                        let maxOffS2 = Math.pow(tile * 80, 2);
-                        // Bridge groups: pathfind a few followers to the join synchronously so
-                        // they don't sit stuck at the shore waiting on the order queue.
-                        let bridgeSyncLeft = leadBridge ? (wodUsesVisualViewportLayout() ? 2 : 4) : 0;
-                        for(let i = 0; i < units.length; i++) {
-                            if(i === leadIdx) continue;
-                            let u = units[i];
-                            let pts = pathForUnit(u, i);
-                            if(!pts || !pts.length) continue;
-                            let cloned = false;
-                            if(isLandArmyUnit(u) && leadCorridor.length >= 2) {
-                                let last = pts[pts.length - 1];
-                                let offE = { x: last.x - leadClick.x, y: last.y - leadClick.y };
-                                let offS = { x: u.x - leadStart.x, y: u.y - leadStart.y };
-                                if(offE.x * offE.x + offE.y * offE.y <= maxOffE2 &&
-                                    offS.x * offS.x + offS.y * offS.y <= maxOffS2) {
-                                    let reach = findReachableOrderHex(u, last.x, last.y);
-                                    // Lead clicked LAND but this unit's formation offset fell in
-                                    // the ocean — shrink the offset toward the group target until
-                                    // it lands, instead of sending the unit swimming.
-                                    if(reach && reach.intoWater && !leadWater) {
-                                        for(let t of [0.7, 0.45, 0.2, 0]) {
-                                            let cand = findReachableOrderHex(u, leadClick.x + offE.x * t, leadClick.y + offE.y * t);
-                                            if(cand && !cand.intoWater) {
-                                                reach = cand;
-                                                offE = { x: reach.exactX - leadClick.x, y: reach.exactY - leadClick.y };
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    let exact = reach ? { x: reach.exactX, y: reach.exactY } : { x: last.x, y: last.y };
-                                    let water = reach ? !!reach.intoWater : leadWater;
-                                    if(leadBridge) {
-                                        // Pathfind to bridge join + ride lead deck — never offset-clone across water.
-                                        // Always use the shared far-shore destination.
-                                        if(bridgeSyncLeft > 0) {
-                                            cloned = wodAssignGroupBridgeCorridor(u, leadCorridor, leadFarExact, water, pts, {
-                                                routeUsesBridge: true
-                                            });
-                                            if(cloned) bridgeSyncLeft--;
-                                        }
-                                    } else {
-                                        cloned = wodAssignGroupCorridorClone(u, leadCorridor, offS, offE, exact, water, pts, {
-                                            routeUsesBridge: false
-                                        });
-                                    }
-                                }
-                            }
-                            if(!cloned) {
-                                if(leadBridge && isLandArmyUnit(u)) {
-                                    // Queue with a marker so the pump prefers bridge-join assignment.
-                                    wodQueuePlayerMoveOrder(u, pts, {
-                                        groupBridgeCorridor: leadCorridor,
-                                        groupBridgeExact: leadFarExact
-                                    });
-                                } else {
-                                    wodQueuePlayerMoveOrder(u, pts);
-                                }
-                            }
-                        }
-                        return;
-                    }
-                }
-            }
-            // Small selections / no land lead: assign a few synchronously, pump the rest.
-            let syncCap = wodUsesVisualViewportLayout() || units.length > 6 ? 1 : 3;
-            let syncDone = 0;
-            for(let i = 0; i < units.length; i++) {
-                let pts = pathForUnit(units[i], i);
-                if(!pts || !pts.length) continue;
-                if(syncDone < syncCap) {
-                    if(assignUnitMoveAlongWaypoints(units[i], pts))
-                        syncDone++;
-                    else
-                        wodQueuePlayerMoveOrder(units[i], pts);
-                } else {
-                    wodQueuePlayerMoveOrder(units[i], pts);
-                }
+                if(points.some(p=>!p))continue;
+                if(!acknowledged){acknowledged=true;wodPlayUnitMoveSound(units);}
+                if(syncDone<3&&assignUnitMoveAlongWaypoints(unit,points))syncDone++;
+                else wodQueuePlayerMoveOrder(unit,points);
             }
         }
 
@@ -32518,6 +32399,7 @@
         }
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
+            if(unit&&!opt?._queuedPlayerOrder&&!opt?.fromLegAdvance&&!opt?.transportInternal)unit._wodPlayerOrderEpoch=(unit._wodPlayerOrderEpoch||0)+1;
             if(unit&&!unit._trafficMoving)unit._trafficYield=null;
             if(unit&&(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute))ensureUnitPixelOnWalkableHex(unit,18);
             if(!opt?.fromLegAdvance&&!opt?.transportInternal) {
@@ -35347,7 +35229,7 @@
                     unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: false };
                     return true;
                 }
-                if(d2 > hr * hr * 2.25) {
+                if(d2 > (wodMpIsHumanOwner(unit.owner)?1:hr * hr * 2.25)) {
                     unit.path = null;
                     unit.target = { x: unit.orderTarget.x, y: unit.orderTarget.y, pathPrepared: false };
                     return true;
@@ -35384,7 +35266,20 @@
         }
 
         function moveUnitTowardTarget(unit,dt) {
+            const beforeX=unit.x,beforeY=unit.y;
+            try {
             wodResumeTrafficYield(unit);
+            if(unit.target&&!unit._trafficYield){
+                const key=unit.target.x.toFixed(1)+','+unit.target.y.toFixed(1),distance=Math.hypot(unit.x-unit.target.x,unit.y-unit.target.y),now=gameData._aiEconomyClock||0;
+                let progress=unit._wodTrafficProgress;
+                if(!progress||progress.key!==key||distance<progress.distance-2)unit._wodTrafficProgress={key,distance,at:now};
+                else if(now-progress.at>2){
+                    // A unit can orbit a parked formation without ever setting
+                    // the zero-motion blocked timer. Yield only after that local
+                    // avoidance has failed to make forward progress.
+                    if(wodYieldFriendlyTraffic(unit))unit._wodTrafficProgress=null;
+                }
+            }
             const yieldOrder=unit._trafficYield;
             if(!yieldOrder||!yieldOrder.route)return wodMoveUnitAlongRoute(unit,dt);
             if(!yieldOrder.route?.target)return;
@@ -35394,6 +35289,10 @@
             Object.assign(unit,yieldOrder.route);unit._trafficMoving=true;
             try {wodMoveUnitAlongRoute(unit,dt);}
             finally {yieldOrder.route=wodCaptureTrafficOrder(unit);Object.assign(unit,command);unit._trafficMoving=false;}
+            } finally {
+                const vx=(unit.x-beforeX)/Math.max(.001,dt),vy=(unit.y-beforeY)/Math.max(.001,dt),length=Math.hypot(vx,vy),cap=(unit.speed||15)*WOD_MOVE_SPEED_FACTOR*2;
+                unit._wodVelocityX=vx*Math.min(1,cap/Math.max(.001,length));unit._wodVelocityY=vy*Math.min(1,cap/Math.max(.001,length));unit._wodVelocityAt=gameData._aiEconomyClock||0;
+            }
         }
         function wodMoveUnitAlongRoute(unit, dt) {
             if(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute)ensureUnitPixelOnWalkableHex(unit,18);
@@ -35587,11 +35486,12 @@
             } else unit._wodTerrainStallT=0;
             nx = terrainClamp.x;
             ny = terrainClamp.y;
-            if(unit.type!=='convoy'&&isWorldPositionBlockedByUnits(unit,nx,ny)) {
+            const avoidance=unit.type!=='convoy'&&wodSteerAroundFriendlyUnits(unit,nx,ny,dt);
+            if(avoidance){nx=avoidance.x;ny=avoidance.y;}
+            if(unit.type!=='convoy'&&(isWorldPositionBlockedByUnits(unit,nx,ny)||avoidance&&Math.hypot(nx-unit.x,ny-unit.y)<.001)) {
                 unit._trafficBlockT=(unit._trafficBlockT||0)+dt;
                 if(unit._trafficBlockT>.4&&wodYieldFriendlyTraffic(unit))return;
-                const steer=wodSteerAroundFriendlyUnits(unit,nx,ny);
-                if(steer){nx=steer.x;ny=steer.y;}
+
             }else unit._trafficBlockT=0;
             if(unit.type !== 'convoy' && isWorldPositionBlockedByUnits(unit, nx, ny)) {
                 if(wodYieldFriendlyTraffic(unit))return;
@@ -35614,7 +35514,7 @@
                             if(!onDeck && !landAhead && !wodUnitNearNarrowLandLane(unit)) {
                                 let hrA = gameData.hexRadius || 20;
                                 let adx = unit.orderTarget.x - unit.x, ady = unit.orderTarget.y - unit.y;
-                                let arriveR = Math.max(hrA*1.5,(unit.radius||12)*2+4);
+                                let arriveR = Math.max(2,(unit.radius||12)*.25);
                                 if(adx * adx + ady * ady < arriveR * arriveR) {
                                     unit.target = null;
                                     unit.path = null;
@@ -54892,6 +54792,64 @@
             return [];
         }
 
+        function wodReserveGroupPoint(unit,desired,used,selected,reference=desired) {
+            const hr=gameData.hexRadius||20,requested=getNearestHexToPoint(reference.x,reference.y),water=wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute;
+            const wet=water||requested&&isWaterHex(requested)&&!isBridgeHex(requested),reach=wodAiOperationReach(unit,water);
+            const legal=p=>{
+                const h=getNearestHexToPoint(p.x,p.y);if(!h||!canUnitEnterHex(unit,h)||(water||!wet)&&!reach.has(getHexKey(h))||(!wet||water)&&!wodSamplePosOnWalkableTerrain(unit,p.x,p.y))return false;
+                if(water?!wodIsOpenWaterHex(h):!wet&&isWaterHex(h)&&!isBridgeHex(h)||wet&&!water&&!isWaterHex(h)&&!isBridgeHex(h))return false;
+                if(used.some(s=>Math.hypot(s.point.x-p.x,s.point.y-p.y)<(unit.radius||12)+(s.unit.radius||12)+4))return false;
+                let blocked=false;forEachNearbyUnit(gameData.unitSpatialGrid,p.x,p.y,(unit.radius||12)+65,u=>{
+                    if(u!==unit&&!selected.has(u)&&u.hp>0&&!u.boardTransportUid&&Math.hypot(u.x-p.x,u.y-p.y)<(unit.radius||12)+(u.radius||12)+4)blocked=true;
+                });return !blocked;
+            };
+            if(legal(desired))return {x:desired.x,y:desired.y};
+            const at=getNearestHexToPoint(desired.x,desired.y);if(!at)return null;
+            const sites=getHexesInRadius(at.q,at.r,Math.max(4,Math.ceil(Math.sqrt(selected.size))+2)).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&legal(h));
+            sites.sort((a,b)=>Math.hypot(a.x-desired.x,a.y-desired.y)-Math.hypot(b.x-desired.x,b.y-desired.y));
+            return sites[0]?{x:sites[0].x,y:sites[0].y}:null;
+        }
+
+        // Minimum total travel keeps the order independent of selection/UID order.
+        // The assignment is made once; traffic never changes these destinations.
+        function wodMatchGroupSlots(units,slots) {
+            const n=units.length,u=new Float64Array(n+1),v=new Float64Array(n+1),p=new Int32Array(n+1),way=new Int32Array(n+1);
+            if(n>128){
+                const order=units.slice().sort((a,b)=>a.y-b.y||a.x-b.x),points=slots.slice().sort((a,b)=>a.y-b.y||a.x-b.x);
+                return new Map(order.map((unit,i)=>[unit,points[i]]));
+            }
+            for(let i=1;i<=n;i++){
+                p[0]=i;let j0=0;const min=new Float64Array(n+1).fill(Infinity),used=new Uint8Array(n+1);
+                do{
+                    used[j0]=1;const i0=p[j0];let delta=Infinity,j1=0;
+                    for(let j=1;j<=n;j++)if(!used[j]){
+                        const cost=(units[i0-1].x-slots[j-1].x)**2+(units[i0-1].y-slots[j-1].y)**2-u[i0]-v[j];
+                        if(cost<min[j]){min[j]=cost;way[j]=j0;}if(min[j]<delta){delta=min[j];j1=j;}
+                    }
+                    for(let j=0;j<=n;j++)if(used[j]){u[p[j]]+=delta;v[j]-=delta;}else min[j]-=delta;j0=j1;
+                }while(p[j0]!==0);
+                do{const j1=way[j0];p[j0]=p[j1];j0=j1;}while(j0);
+            }
+            const result=new Map();for(let j=1;j<=n;j++)result.set(units[p[j]-1],slots[j-1]);return result;
+        }
+
+        function wodGroupDestinationSlots(units,center,line) {
+            const n=units.length,spacing=Math.max(32,(gameData.hexRadius||20)*1.35,...units.map(u=>(u.radius||12)*4+6));
+            const length=line?Math.hypot(line.end.x-line.start.x,line.end.y-line.start.y):0;
+            const cols=line?Math.max(1,Math.min(n,Math.floor(length/spacing)+1)):Math.ceil(Math.sqrt(n)),rows=Math.ceil(n/cols),slots=[];
+            const ax=line&&length?(line.end.x-line.start.x)/length:1,ay=line&&length?(line.end.y-line.start.y)/length:0;
+            for(let i=0;i<n;i++){
+                const row=Math.floor(i/cols),count=Math.min(cols,n-row*cols),lane=(i%cols-(count-1)/2)*spacing,back=(row-(rows-1)/2)*spacing;
+                slots.push({x:center.x+ax*lane-ay*back,y:center.y+ay*lane+ax*back});
+            }
+            const match=wodMatchGroupSlots(units,slots),selected=new Set(units),used=[],result=new Map();
+            for(const unit of units){
+                if((wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute)&&!wodResolveShipMarchHex(unit,center.x,center.y))continue;
+                const point=wodReserveGroupPoint(unit,match.get(unit),used,selected,center);
+                if(point){used.push({unit,point});result.set(unit,point);}
+            }return result;
+        }
+
         function wodGroupFormationOffsetMap(units) {
             let map = new Map();
             if(!units || !units.length) return map;
@@ -55196,37 +55154,11 @@
                 units=units.filter(u=>!ferries.includes(u));if(!units.length)return;
             }
             gameData.playerShiftWaypoints = [];
-            let spacing = Math.max(28,gameData.hexRadius*1.25,...units.map(u=>(u.radius||12)*2+4));
-            let cols = Math.ceil(Math.sqrt(units.length));
-            let rows = Math.ceil(units.length / cols);
-            let midCol = (cols - 1) / 2;
-            let midRow = (rows - 1) / 2;
-            if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) {
-                let marched = 0,
-                    shipsHeld = 0;
-                wodApplyPlayerMoveOrders(units, (unit, index) => {
-                    let r = Math.floor(index / cols), c = index % cols;
-                    let tx = worldPos.x + (c - midCol) * spacing;
-                    let ty = worldPos.y + (r - midRow) * spacing;
-                    // Ships: only accept open-water clicks. Land clicks → stay still (even in mixed groups).
-                    if(wodIsNavalUnit(unit) || (unit.type === 'convoy' && unit.convoySeaRoute)) {
-                        let sea = wodResolveShipMarchHex(unit, tx, ty);
-                        if(!sea) { shipsHeld++; return null; }
-                        marched++;
-                        return [{ x: sea.exactX, y: sea.exactY }];
-                    }
-                    marched++;
-                    return [wodExplicitWaterSlot(unit,tx,ty,worldPos)];
-                });
-                if(marched === 0 && shipsHeld > 0)
-                    showNotification(shipsHeld === 1 ? 'Ships stay in water' : 'Ships stay in water');
-                else if(shipsHeld > 0)
-                    showNotification(`Marching (${marched}) · ships held`);
-                else
-                    showNotification(marched === 1 ? 'Marching' : `Marching (${marched} units)`);
-            } else {
-                showNotification(units.length === 1 ? 'Marching' : `Marching (${units.length} units)`);
-            }
+            if(!gameData.mp||!gameData.mp.enabled||gameData.mp.isHost){
+                const slots=wodGroupDestinationSlots(units,worldPos);
+                wodApplyPlayerMoveOrders(units,u=>slots.has(u)?[slots.get(u)]:null);
+                showNotification(slots.size===1?'Marching':slots.size?'Marching ('+slots.size+' units)':'No reachable formation space');
+            }else showNotification(units.length===1?'Marching':'Marching ('+units.length+' units)');
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost)
                 wodMpSendCmd({ kind: 'move', uids: units.map(u => u.uid), x: worldPos.x, y: worldPos.y });
         }
@@ -55254,49 +55186,8 @@
                     return;
             }
 
-            wodApplyPlayerMoveOrders(units, (unit, index) => {
-                let t = units.length === 1 ? 0.5 : index / (units.length - 1);
-                let tx = start.x + (end.x - start.x) * t;
-                let ty = start.y + (end.y - start.y) * t;
-                if(wodIsNavalUnit(unit) || (unit.type === 'convoy' && unit.convoySeaRoute)) {
-                    let sea = wodResolveShipMarchHex(unit, tx, ty);
-                    if(!sea) return null;
-                    return [{ x: sea.exactX, y: sea.exactY }];
-                }
-                // Land formation slots: keep land on land. Only snap when the slot is
-                // actually on open water/deck AND no nearby pure-land hex can hold it —
-                // shoreline slots near bridges used to yank onto the deck.
-                if(isLandArmyUnit(unit) || wodUnitPrefersLandOnlyPath(unit)) {
-                    let h = getNearestHexToPoint(tx, ty);
-                    if(h && (wodIsOpenWaterHex(h) || isBridgeHex(h))) {
-                        let landNear = null,
-                            landD = Infinity;
-                        let jc = pixelToHex(tx, ty);
-                        for(let pt of getHexesInRadius(jc.q, jc.r, 2)) {
-                            let lh = gameData.hexes[`${pt.q},${pt.r}`];
-                            if(!lh || lh.type === 'mountain' || isWaterHex(lh) || isBridgeHex(lh)) continue;
-                            if(!wodHexWalkableForLandPath(unit, lh, false)) continue;
-                            let dx = lh.x - tx,
-                                dy = lh.y - ty;
-                            let d = dx * dx + dy * dy;
-                            if(d < landD) {
-                                landD = d;
-                                landNear = lh;
-                            }
-                        }
-                        let hr = gameData.hexRadius || 20;
-                        if(landNear && landD <= Math.pow(hr * 2.4, 2))
-                            return [{ x: landNear.x, y: landNear.y }];
-                        if(wodPointOnBridgeForUnit(unit, tx, ty, 1.05) || wodIsOpenWaterHex(h)) {
-                            let snap = wodSnapLandArmyOrderPoint(unit, tx, ty);
-                            if(snap) return [{ x: snap.x, y: snap.y }];
-                        }
-                    }
-                }
-                let target = findReachableOrderHex(unit, tx, ty);
-                if(!target) return null;
-                return [{ x: target.exactX, y: target.exactY }];
-            });
+            const slots=wodGroupDestinationSlots(units,{x:(start.x+end.x)/2,y:(start.y+end.y)/2},{start,end});
+            wodApplyPlayerMoveOrders(units,u=>slots.has(u)?[slots.get(u)]:null);
         }
 
         canvas.addEventListener('mousedown', (e) => {
