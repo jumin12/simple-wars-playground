@@ -13073,6 +13073,15 @@
 
         const WOD_CHANGELOG = [
             {
+                at:"2026-11-03T20:07:33Z",
+                title:"Tight large-army formations",
+                items:[
+                    "Large formations use close gaps sized for each neighboring pair of units. A tank no longer widens every infantry gap in the army, and shortening a line packs large selections as closely as small ones.",
+                    "Near coasts, map edges and occupied ground, the planner fits the whole line into nearby reachable space before spreading individual positions. The preview shows the fitted line and every selected unit receives its assigned destination when the line fits.",
+                    "Unit assignment follows the line direction for large selections too. Packed map counters reduce visual clutter while keeping their collision sizes, stats and movement unchanged."
+                ]
+            },
+            {
                 at:"2026-11-03T16:58:00Z",
                 title:"Minimum formation gestures stay in one line",
                 items:[
@@ -47807,6 +47816,18 @@
             return rec;
         }
 
+        function wodCrowdedUnitMarkerRadius(unit) {
+            const radius=unit.radius||10;let fit=1;
+            forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,radius*3+45,other=>{
+                if(other===unit||other.owner!==unit.owner||other.hp<=0||other.boardTransportUid)return;
+                const span=1.4*(radius+(other.radius||10))+2;
+                fit=Math.min(fit,Math.max(Math.abs(unit.x-other.x),Math.abs(unit.y-other.y))/span);
+            });
+            // Shared sprite sizes keep packed counters readable; physical sizes
+            // and movement stay unchanged, regardless of selection size.
+            return radius*(fit<.86?.82:fit<.99?.9:1);
+        }
+
         function drawUnitSkin(ctx, unit, radius, color) {
             let spr = wodEnsureUnitBodySprite(unit, radius, color);
             if(spr) {
@@ -54041,7 +54062,7 @@
                     ctx.translate(dp.x, dp.y);
                     
                     let uColor = factionColors[unit.owner];
-                    let ur = unit.radius || 10;
+                    let ur = wodCrowdedUnitMarkerRadius(unit);
 
                     let spawnScale = 1;
                     if((unit.spawnFx || 0) > 0) {
@@ -54840,7 +54861,7 @@
             return [];
         }
 
-        function wodReserveGroupPoint(unit,desired,used,selected,reference=desired) {
+        function wodReserveGroupPoint(unit,desired,used,selected,reference=desired,strict=false) {
             const hr=gameData.hexRadius||20,requested=getNearestHexToPoint(reference.x,reference.y),water=wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute;
             const wet=water||requested&&isWaterHex(requested)&&!isBridgeHex(requested),reach=wodAiOperationReach(unit,water);
             const legal=p=>{
@@ -54852,6 +54873,7 @@
                 });return !blocked;
             };
             if(legal(desired))return {x:desired.x,y:desired.y};
+            if(strict)return null;
             const at=getNearestHexToPoint(desired.x,desired.y);if(!at)return null;
             const sites=getHexesInRadius(at.q,at.r,Math.max(4,Math.ceil(Math.sqrt(selected.size))+2)).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&legal(h));
             sites.sort((a,b)=>Math.hypot(a.x-desired.x,a.y-desired.y)-Math.hypot(b.x-desired.x,b.y-desired.y));
@@ -54906,12 +54928,15 @@
 
         function wodLineFormationLayout(units,start,end) {
             const count=units.length,dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy),ax=length?dx/length:1,ay=length?dy/length:0;
-            // Counters extend beyond their collision circles. Leave a small visible
-            // gap, including on diagonals, without turning a short drag into ranks.
-            const gap=Math.max(3,...units.map(u=>Math.max((u.radius||12)*2+3,((u.radius||12)*2.8+3)/Math.max(Math.abs(ax),Math.abs(ay))))),span=Math.max(length,Math.max(0,count-1)*gap),cx=(start.x+end.x)/2,cy=(start.y+end.y)/2;
+            // Pairwise clearance, independent of army size: one tank must not
+            // impose tank-sized gaps between every pair of infantry.
+            const order=units.slice().sort((a,b)=>(a.x-b.x)*ax+(a.y-b.y)*ay||String(a.uid).localeCompare(String(b.uid)));
+            const gaps=order.slice(1).map((u,i)=>((u.radius||12)+(order[i].radius||12)+6)/Math.max(Math.abs(ax),Math.abs(ay)));
+            const minimum=gaps.reduce((s,g)=>s+g,0),span=Math.max(length,minimum),extra=count>1?(span-minimum)/(count-1):0,cx=(start.x+end.x)/2,cy=(start.y+end.y)/2;
             const first={x:cx-ax*span/2,y:cy-ay*span/2},last={x:cx+ax*span/2,y:cy+ay*span/2};
-            return {start:first,end:last,spacing:count>1?span/(count-1):gap,slots:units.map((u,i)=>{
-                const t=count===1?.5:i/(count-1);return {x:first.x+(last.x-first.x)*t,y:first.y+(last.y-first.y)*t};
+            let along=0;
+            return {start:first,end:last,spacing:count>1?span/(count-1):0,order,slots:order.map((u,i)=>{
+                if(i)along+=gaps[i-1]+extra;const offset=count===1?span/2:along;return {x:first.x+ax*offset,y:first.y+ay*offset};
             })};
         }
 
@@ -54922,10 +54947,47 @@
             const key=start.x+','+start.y+'>'+end.x+','+end.y+'|'+ordered.map(u=>u.uid+':'+u.type+':'+u.radius+':'+Math.round(u.x/4)+','+Math.round(u.y/4)).join('|')+'|'+(gameData._wodPfVer||0);
             const cached=gameData._wodLinePreview;
             if(cached?.hexes===gameData.hexes&&cached.key===key&&performance.now()-cached.at<80)return cached;
-            const layout=wodLineFormationLayout(ordered,start,end),slots=wodMatchGroupSlots(ordered,layout.slots),selected=new Set(ordered),used=[],resolved=new Map();
+            let layout=wodLineFormationLayout(ordered,start,end);
+            const selected=new Set(ordered);
             const center={x:(start.x+end.x)/2,y:(start.y+end.y)/2};
-            for(const unit of ordered){
-                const point=wodReserveGroupPoint(unit,slots.get(unit),used,selected,center);
+            const dx=layout.end.x-layout.start.x,dy=layout.end.y-layout.start.y,len=Math.hypot(dx,dy)||1,ax=dx/len,ay=dy/len;
+            const fit=(shift,across=0)=>{
+                const used=[],slots=new Map();
+                for(let i=0;i<layout.order.length;i++){
+                    const unit=layout.order[i],p=layout.slots[i],point=wodReserveGroupPoint(unit,{x:p.x+ax*shift-ay*across,y:p.y+ay*shift+ax*across},used,selected,center,true);
+                    if(!point)return null;used.push({unit,point});slots.set(unit,point);
+                }return slots;
+            };
+            let resolved=fit(0),shift=0,across=0;
+            if(!resolved){
+                let bounds=gameData._wodFormationBounds;
+                if(bounds?.hexes!==gameData.hexes){bounds={hexes:gameData.hexes,minX:Infinity,maxX:-Infinity,minY:Infinity,maxY:-Infinity};for(const h of gameData.hexList){bounds.minX=Math.min(bounds.minX,h.x);bounds.maxX=Math.max(bounds.maxX,h.x);bounds.minY=Math.min(bounds.minY,h.y);bounds.maxY=Math.max(bounds.maxY,h.y);}gameData._wodFormationBounds=bounds;}
+                const pad=(gameData.hexRadius||20)*.675-1;
+                const step=(gameData.hexRadius||20)*.675,candidates=[];
+                for(const normal of [0,step*2,-step*2,step*4,-step*4]){
+                    let lo=-Infinity,hi=Infinity;
+                    for(const [axis,key,min,max,offset]of [[ax,'x',bounds.minX-pad,bounds.maxX+pad,-ay*normal],[ay,'y',bounds.minY-pad,bounds.maxY+pad,ax*normal]])if(Math.abs(axis)>1e-6){
+                        for(const p of [layout.start,layout.end]){const a=(min-p[key]-offset)/axis,b=(max-p[key]-offset)/axis;lo=Math.max(lo,Math.min(a,b));hi=Math.min(hi,Math.max(a,b));}
+                    }
+                    if(lo>hi)continue;
+                    const base=Math.max(lo,Math.min(hi,0));
+                    for(let i=0;i<241;i++){
+                        const trial=base+(i%2?1:-1)*Math.ceil(i/2)*step;if(trial>=lo&&trial<=hi)candidates.push({shift:trial,across:normal,cost:trial*trial+normal*normal});
+                    }
+                }
+                candidates.sort((a,b)=>a.cost-b.cost);
+                for(const trial of candidates){resolved=fit(trial.shift,trial.across);if(resolved){shift=trial.shift;across=trial.across;break;}}
+            }
+            if(resolved){
+                const sx=ax*shift-ay*across,sy=ay*shift+ax*across;
+                layout={...layout,start:{x:layout.start.x+sx,y:layout.start.y+sy},end:{x:layout.end.x+sx,y:layout.end.y+sy},slots:layout.order.map(u=>resolved.get(u))};
+                return gameData._wodLinePreview={hexes:gameData.hexes,key,at:performance.now(),layout,slots:resolved};
+            }
+            // Disconnected shores or a physically undersized clearing still use
+            // legal reachable positions; never solve a tight line by overlapping bodies.
+            const used=[];resolved=new Map();
+            for(let i=0;i<layout.order.length;i++){
+                const unit=layout.order[i],point=wodReserveGroupPoint(unit,layout.slots[i],used,selected,center);
                 if(point){used.push({unit,point});resolved.set(unit,point);}
             }
             return gameData._wodLinePreview={hexes:gameData.hexes,key,at:performance.now(),layout,slots:resolved};

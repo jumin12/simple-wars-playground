@@ -36,6 +36,32 @@ try{
  if(enabled('mixed'))results.mixed=await page.evaluate(()=>{world();const army=Array.from({length:18},(_,i)=>unit(-15-i%6,Math.floor(i/6)*2-2,i%3===0?'heavy':i%3===1?'motorized':'light'));refresh();gameData.selection=army;const a={x:300,y:-40},b={x:300,y:40};issueLineFormationOrder(a,b);pump();return{...shape(army,a,b),...sim(army,250)};});
  if(enabled('shiftLine'))results.shiftLine=await page.evaluate(()=>{world();const army=Array.from({length:12},(_,i)=>unit(-15-i%4,Math.floor(i/4)*2-2));refresh();const a={x:300,y:-40},b={x:300,y:40};wodApplyShiftWaypointPaths(army,[{x:-120,y:-200},{x:300,y:0}],{start:a,end:b});pump();return{...shape(army,a,b),...sim(army,260)};});
  if(enabled('remoteLine'))results.remoteLine=await page.evaluate(()=>{wodMpWireLobbyUi();world();for(const p of gameData.hexList)p.owner=2;gameData.cities[0].owner=2;gameData.mp={enabled:true,isHost:true,localSlot:1,humanSlots:[1,2],allReady:true};const army=Array.from({length:12},(_,i)=>{const u=unit(-15-i%4,Math.floor(i/4)*2-2);u.owner=2;return u;});refresh();const a={x:300,y:-40},b={x:300,y:40};dispatchEvent(new CustomEvent('wod-mp-RemoteCmd',{detail:{fromSlot:2,cmd:{kind:'lineFormation',uids:army.map(u=>u.uid).reverse(),sx:a.x,sy:a.y,ex:b.x,ey:b.y}}}));pump();return{...shape(army,a,b),...sim(army,240)};});
+ if(enabled('largeLines')){
+  for(const c of [
+   {name:'small-mixed',n:12,radius:40,mixed:true},
+   {name:'large-mixed',n:48,radius:40,mixed:true},
+   {name:'large-light',n:80,radius:60},
+   {name:'near-edge',n:48,radius:40,mixed:true,cy:760},
+   {name:'coast',n:48,radius:60,mixed:true,coast:true},
+   {name:'blocker',n:48,radius:60,mixed:true,blocker:true},
+   {name:'larger-mixed',n:96,radius:80,mixed:true,planOnly:true},
+   {name:'over-128',n:160,radius:80,horizontal:true,planOnly:true}
+  ]){
+   results['large-'+c.name]=await page.evaluate(c=>{world();WOD.makeBlankMap(c.radius);for(const h of gameData.hexList){h.type=c.coast&&h.r<-18?'water':'grass';h.owner=h.type==='water'?0:1;}gameData.cities=[];const home=h(-25);home.type='urban';home.cityId='home';gameData.cities=[{id:'home',name:'Home',q:-25,r:0,x:home.x,y:home.y,owner:1,hp:1000,maxHp:1000}];const army=Array.from({length:c.n},(_,i)=>unit(-16-i%8,Math.floor(i/8)*2-Math.floor(c.n/16),c.mixed&&i%6===0?'heavy':'light'));if(c.blocker){const idle=unit(11);idle.x=300;idle.y=0;}refresh();const a=c.horizontal?{x:290,y:0}:{x:300,y:(c.cy||0)-10},b=c.horizontal?{x:310,y:0}:{x:300,y:(c.cy||0)+10},t=performance.now(),plan=wodLineFormationPlan(army,a,b),planMs=performance.now()-t,entries=[...plan.slots],xs=entries.map(([,p])=>c.horizontal?p.y:p.x),ys=entries.map(([,p])=>c.horizontal?p.x:p.y);let minClearance=Infinity;for(let i=0;i<entries.length;i++)for(let j=i+1;j<entries.length;j++)minClearance=Math.min(minClearance,Math.hypot(entries[i][1].x-entries[j][1].x,entries[i][1].y-entries[j][1].y)-entries[i][0].radius-entries[j][0].radius);gameData.selection=army;for(const u of army)u.selected=true;issueLineFormationOrder(a,b);pump();const previewError=Math.max(0,...entries.map(([u,p])=>u.orderTarget?Math.hypot(u.orderTarget.x-p.x,u.orderTarget.y-p.y):9999)),shape={selected:c.n,commanded:entries.length,perpendicularSpread:Math.max(...xs)-Math.min(...xs),span:Math.max(...ys)-Math.min(...ys),minClearance,planMs,previewError};window.uiArmy=army;UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='block';gameData.camera={zoom:c.n>48?.18:.38,x:-canvas.clientWidth*.5,y:-canvas.clientHeight*.4};wodMarkTerrainFullDirty();updateTerrainCache();draw();return{...shape,...(!c.planOnly&&!c.observe?sim(army,270):{})};},{...c,observe:!!process.env.OBSERVE_ONLY});
+   await page.evaluate(()=>draw());await page.screenshot({path:path.join(OUT,c.name+'.png')});console.log(c.name,JSON.stringify({...results['large-'+c.name],distance:undefined,arrival:undefined,remaining:undefined}));
+  }
+ }
+ if(enabled('largeUi')){
+  await page.setViewportSize({width:1440,height:960});
+  const points=await page.evaluate(()=>{world();setMobileOrderMode(null);wodSuppressCanvasMouseUntil=0;window.uiArmy=Array.from({length:64},(_,i)=>unit(-12-i%8,Math.floor(i/8)*2-7,i%6===0?'heavy':'light'));gameData.selection=[];refresh();UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='block';wodSyncViewportAndCanvas();gameData.camera={zoom:.3,x:-540,y:-430};wodMarkTerrainFullDirty();updateTerrainCache();draw();const rect=canvas.getBoundingClientRect(),screen=(x,y)=>({x:rect.left+x*.3+540,y:rect.top+y*.3+430});return{boxA:screen(-550,-220),boxB:screen(-290,220),a:screen(300,-8/.3/2),b:screen(300,8/.3/2)};});
+  await page.mouse.move(points.boxA.x,points.boxA.y);await page.mouse.down();await page.mouse.move(points.boxB.x,points.boxB.y,{steps:8});await page.mouse.up();
+  const selected=await page.evaluate(()=>gameData.selection.length);assert.equal(selected,64,'real box selection must include all 64 units');
+  await page.mouse.move(points.a.x,points.a.y);await page.mouse.down({button:'right'});await page.mouse.move(points.b.x,points.b.y,{steps:4});await page.evaluate(()=>draw());await page.screenshot({path:path.join(OUT,'large-ui-preview.png')});
+  const preview=await page.evaluate(()=>[...wodFormationDragPlan(getMovableSelectedUnits()).slots].map(([u,p])=>({uid:u.uid,...p})));
+  await page.mouse.up({button:'right'});results.largeUi=await page.evaluate(preview=>{pump();const geometry=shape(uiArmy,{x:300,y:-10},{x:300,y:10}),previewError=Math.max(0,...preview.map(p=>{const u=uiArmy.find(u=>u.uid===p.uid);return u.orderTarget?Math.hypot(u.orderTarget.x-p.x,u.orderTarget.y-p.y):9999;}));return{...geometry,previewError,...sim(uiArmy,280)};},preview);await page.evaluate(()=>draw());await page.screenshot({path:path.join(OUT,'large-ui-arrived.png')});
+  if(!process.env.OBSERVE_ONLY){assert(results.largeUi.maxPerpendicular<.1);assert(results.largeUi.previewError<.1);}
+ }
+ if(enabled('single'))results.single=await page.evaluate(()=>{world();const u=unit(-10);gameData.selection=[u];refresh();issueLineFormationOrder({x:200,y:-50},{x:200,y:50});pump();const centerError=Math.hypot(u.orderTarget.x-200,u.orderTarget.y);return{centerError,...sim([u],140)};});
  if(enabled('optimal'))results.optimal=await page.evaluate(()=>{
   const rows=[];
   for(let seed=1;seed<=6;seed++)for(const type of ['light','motorized']){
@@ -94,8 +120,10 @@ try{
  }
  console.log('other',JSON.stringify({forest:results.forest,parallel:results.parallel,obstacle:results.obstacle,motorized:results.motorized,ui:{...results.ui,goals:undefined,distance:undefined,remaining:undefined}}));
  if(!process.env.OBSERVE_ONLY){
-  for(const [name,r]of Object.entries(results)){if(Array.isArray(r))continue;assert.equal(r.arrived,r.total,name+' every unit reaches its unchanged target');assert.equal(r.overlaps,0,name+' no body overlap');assert.equal(r.invalid,0,name+' no illegal terrain');assert.equal(r.changed,0,name+' no command changes');}
+  for(const [name,r]of Object.entries(results)){if(Array.isArray(r)||r.total===undefined)continue;assert.equal(r.arrived,r.total,name+' every unit reaches its unchanged target');assert.equal(r.overlaps,0,name+' no body overlap');assert.equal(r.invalid,0,name+' no illegal terrain');assert.equal(r.changed,0,name+' no command changes');}
+  for(const [name,r]of Object.entries(results).filter(([n])=>n.startsWith('large-'))){assert.equal(r.commanded,r.selected,name+' must place every selected unit');assert(r.perpendicularSpread<.1,name+' must keep one straight line');assert(r.minClearance>=4,name+' must leave collision clearance');assert(r.previewError<.1,name+' preview must match issued goals');}
   if(results.optimal)for(const r of results.optimal){assert(r.reached&&Number.isFinite(r.optimum),'oracle fixture must be reachable');assert(r.ratio<=1.00001,'A* must equal independent shortest travel-time oracle: '+JSON.stringify(r));}
+  if(results.single)assert(results.single.centerError<.1,'a single-unit formation stays centered');
   for(const [name,r]of Object.entries(results).filter(([n])=>n.startsWith('gesture-'))){assert(r.expectLine?r.maxPerpendicular<1:r.maxPerpendicular>10,name+' must distinguish a tight line from an ordinary click');assert(r.previewError<.1,name+' preview must match the issued formation');}
   if(results.obstacleGroup)assert(results.obstacleGroup.distance.every((d,i)=>d/results.obstacleGroup.planned[i]<1.5),'large group must not orbit or take excessive detours around the wall');
   for(const name of ['vertical','diagonal','horizontal','reverse','long','mixed','shiftLine','remoteLine','ui']){if(!results[name])continue;assert(results[name].maxPerpendicular<1,name+' must be a single line');assert(results[name].minGap>=26.9,name+' bodies must fit side by side');}if(results.ui){assert.equal(results.ui.previewCount,24);assert(results.ui.previewError<.1,'preview positions must equal issued positions');}
