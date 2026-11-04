@@ -13053,7 +13053,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=flanks-defense-20261103"></script>
+    <script src="ai-command.js?v=front-expansion-20261103"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13072,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-04T00:30:00Z",
+                title:"AI keeps its frontline gains",
+                items:[
+                    "Frontline troops keep advancing into reachable weakly defended land after a capture, instead of returning to an old rally point. Quiet-line assignments follow their troops' current positions.",
+                    "Supply-corridor defenses preserve their identity and wing assignments as the tested crossing shifts. Guards no longer repeatedly swap roles or take small repositioning orders after reaching a defensive slot. Genuine emergencies still interrupt advances."
+                ]
+            },
             {
                 at:"2026-11-03T21:00:00Z",
                 title:"Stronger flanks and defensive responses",
@@ -41245,7 +41253,7 @@
             const positions=new Map(army.map(u=>[u.uid,index.get(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))]));
             const weights=new Int32Array(tiles.length);
             for(const u of army)if(u.type!=='marine'&&positions.get(u.uid)!==undefined)weights[positions.get(u.uid)]++;
-            const enemies=wodAiKnownEntities(owner).filter(u=>u.hp>0&&!['convoy','ship'].includes(u.type)&&wodIsHostileOwner(u.owner,owner));
+            const enemies=wodAiKnownEntities(owner).filter(u=>u.hp>0&&isLandArmyUnit(u)&&wodIsHostileOwner(u.owner,owner));
             const closeEnemies=h=>enemies.filter(e=>wodAiDist2(e.x,e.y,h.x,h.y)<Math.pow(hr*8,2)).length;
             const threats=[], pockets=[], seen=new Set(supplied);
             // Each disconnected component gets a shortest land breach to the supplied army.
@@ -41366,6 +41374,7 @@
                 for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(!blocked.has(k)&&!safe.has(k)){safe.add(k);flood.push(k);}
                 cut.riskUnits=new Set(army.filter(u=>positions.get(u.uid)!==undefined&&!safe.has(positions.get(u.uid))&&!blocked.has(positions.get(u.uid))).map(u=>u.uid));
             }
+            wodAiStabilizeCorridorJobs(selected,old);
             const trappedIds=new Set(pockets.flatMap(p=>p.trapped));
             const unitJob={}, jobs=[], available=army.filter(u=>!u.moraleBroken&&(trappedIds.has(u.uid)||!u._medicalRecovering&&!u.retreating&&u.hp/u.maxHp>.34)), plan=gameData.aiTaskForces?.[owner];
             const primaryTheater=wodAiDefenseTheater(owner,selected,available,plan);
@@ -41386,7 +41395,7 @@
                 let responsePower=available.filter(u=>job.members.includes(u.uid)).reduce((n,u)=>n+wodAiUnitCombatPower(u),0);
                 const candidates=available.filter(u=>!unitJob[u.uid]&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
-                    responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24));
+                    responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24)&&wodAiResponseCanArrive(u,t,responseDistance(u)));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
                 const critical=t.kind==='corridor'||t.kind==='relief'||t.kind==='counter';
                 const cost=u=>(t.arrivals?.[u.uid]!=null?Math.min(1000,t.arrivals[u.uid])*hr*hr*3:responseDistance(u)**2)/Math.max(.5,wodAiUnitCombatPower(u))+
@@ -41394,7 +41403,7 @@
                     (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main'].includes(base(u)?.kind)?hr*hr*(critical?1:100):0)+
                     (t.kind==='counter'?Math.pow(Math.max(0,wodAiUnitCombatPower(u)-neededPower),2)*hr*hr*400+
                         (base(u)?.phase==='assault'&&neededPower<4?hr*hr*150:0):0)+
-                    (old?.unitJob[u.uid]===t.id?-hr*hr*(critical?20:200):0);
+                    (old?.unitJob[u.uid]===t.id?-hr*hr*(t.kind==='corridor'?100:critical?20:200):0);
                 candidates.sort((a,b)=>cost(a)-cost(b));
                 const responseLimit=t.kind==='counter'&&t.primaryTheater?24:t.kind==='territory'?Math.min(20,Math.max(6,Math.ceil(neededPower*1.2))):10;
                 for(const u of candidates) {
@@ -41900,7 +41909,7 @@
             if(job.kind === 'hold') {
                 if(wodAiIssueFrontAdvance(unit,job))return true;
                 {
-                    const cover=wodAiDefendStandHex(unit.owner,assignment.holdHex,unit)||assignment.holdHex;
+                    const cover=wodAiDefendStandHex(unit.owner,job.holdHex,unit)||job.holdHex;
                     const covered=wodAiMoveUnitTowardHex(unit,cover,true,.12);
                     if(covered)wodAiStampOrder(unit,true,cover);
                     return covered;
@@ -54825,6 +54834,12 @@
                     reach = { hex: resolved.hex, exactX: resolved.exactX, exactY: resolved.exactY, intoWater: false };
             }
             if(!reach) return false;
+            if(holdingOpt&&unit.holding&&!unit.target&&!unit._trafficYield&&Math.hypot(unit.x-reach.exactX,unit.y-reach.exactY)<(gameData.hexRadius||20)*.7&&
+                sh&&wodIsFriendlyOwner(sh.owner,unit.owner)&&!isWaterHex(sh)){
+                // Reissuing an already reached defensive slot caused small
+                // sidesteps and collision yielding even on a quiet line.
+                return true;
+            }
             const route=isLandArmyUnit(unit)&&!isWaterHex(sh)&&!isWaterHex(reach.hex)&&wodAiNeedsLandDetour(unit,reach.hex)&&wodAiLandRoute(unit,reach.hex,false);
             // A proven shared land corridor must survive the order builder's
             // frame budget. Otherwise its fallback can endlessly hop toward the

@@ -525,7 +525,12 @@ function wodAiRebalanceGroups(owner, plan, ready) {
         const threats=wodAiThreats(owner,false);
         for(const job of plan.jobs.filter(j=>['hold','reserve','support'].includes(j.kind)&&j.holdHex)){
             if(threats.some(e=>Math.hypot(e.x-job.holdHex.x,e.y-job.holdHex.y)<hr*7))continue;
-            const sector=fronts.slice().sort((a,b)=>wodAiDist2(a.holdHex.x,a.holdHex.y,job.holdHex.x,job.holdHex.y)-wodAiDist2(b.holdHex.x,b.holdHex.y,job.holdHex.x,job.holdHex.y))[0];
+            const members=ready.filter(u=>job.members.includes(u.uid));
+            const anchor=members.length?{x:members.reduce((n,u)=>n+u.x,0)/members.length,y:members.reduce((n,u)=>n+u.y,0)/members.length}:job.holdHex;
+            const bearing=job._frontBearing;
+            const sector=fronts.filter(s=>!bearing||!wodIsFriendlyOwner(job.holdHex.owner,owner)||
+                (s.holdHex.x-job.holdHex.x)*bearing.x+(s.holdHex.y-job.holdHex.y)*bearing.y>=-hr)
+                .sort((a,b)=>wodAiDist2(a.holdHex.x,a.holdHex.y,anchor.x,anchor.y)-wodAiDist2(b.holdHex.x,b.holdHex.y,anchor.x,anchor.y))[0];
             if(sector&&Math.hypot(sector.holdHex.x-job.holdHex.x,sector.holdHex.y-job.holdHex.y)>hr*3){
                 job.holdHex=sector.holdHex;job.attackHex=sector.attackHex;
                 for(const uid of job.members){const u=ready.find(u=>u.uid===uid);if(u){u.aiOrderUntil=0;u.aiOrderResponseId='front-shift';}}
@@ -659,6 +664,32 @@ function wodAiTerritoryThreat(owner,cluster,previous,used) {
     return {id,kind:'territory',role:'fix',holdHex,contacts,contactPoint:{x:cluster.x,y:cluster.y},
         anchorAt:stable?(old.anchorAt??previous.at):now,responseState:old?.responseState,_formationSlots:old?._formationSlots,
         enemies:cluster.count,score:100+cluster.count*12};
+}
+
+// A moving threat can shift the tested supply cross-section by one tile. It
+// is still the same defense. Preserve its roster preference and wing choices
+// instead of sending the same guards back and forth between fresh tile IDs.
+function wodAiStabilizeCorridorJobs(selected,previous) {
+    if(previous?.hexes!==gameData.hexes)return;
+    const hr=gameData.hexRadius||20,used=new Set();
+    for(const threat of selected.filter(t=>t.kind==='corridor')){
+        const candidates=previous.jobs.filter(j=>j.kind==='corridor'&&!used.has(j.id)).map(job=>{
+            const distance=Math.hypot(job.holdHex.x-threat.holdHex.x,job.holdHex.y-threat.holdHex.y);
+            const overlap=[...(threat.riskUnits||[])].filter(id=>job.riskUnits?.has(id)).length;
+            const share=overlap/Math.max(1,Math.min(threat.riskUnits?.size||0,job.riskUnits?.size||0));
+            return{job,distance,share};
+        }).filter(c=>c.distance<hr*5&&(c.share>=.5||c.job.id===threat.id)).sort((a,b)=>b.share-a.share||a.distance-b.distance);
+        const old=candidates[0]?.job;
+        if(!old){if(used.has(threat.id))threat.id+='-shift-'+getHexKey(threat.holdHex);used.add(threat.id);continue;}
+        used.add(old.id);
+        threat.id=old.id;threat._gateAssignments=old._gateAssignments&&{...old._gateAssignments};
+        const gates=threat.screenPoints||[threat.holdHex],prior=old.screenPoints||[old.holdHex];
+        if(gates.length!==prior.length)threat._gateAssignments=null;
+        if(gates.length===2&&prior.length===2&&threat._gateAssignments&&
+            Math.hypot(gates[1].x-prior[0].x,gates[1].y-prior[0].y)<Math.hypot(gates[0].x-prior[0].x,gates[0].y-prior[0].y))
+            for(const id of Object.keys(threat._gateAssignments))threat._gateAssignments[id]=1-threat._gateAssignments[id];
+        threat._corridorTargets=old._corridorTargets;
+    }
 }
 
 function wodAiIssueTerritoryResponse(unit,job) {
@@ -869,7 +900,7 @@ function wodAiFrontProbeSafe(owner,goal) {
 
 function wodAiIssueFrontAdvance(unit,job) {
     const owner=unit.owner,hr=gameData.hexRadius||20,now=wodAiOperationTime(),plan=gameData.aiTaskForces?.[owner];
-    if(!plan||!job.attackHex||Math.hypot(unit.x-job.holdHex.x,unit.y-job.holdHex.y)>hr*7)return false;
+    if(!plan||!job.attackHex||!job.holdHex)return false;
     const here=getNearestHexToPoint(unit.x,unit.y);
     if(!here||!wodCurrentSupplyComponent(here,owner).city)return false;
     if(!job._frontBearing||job._frontAimId&&!wodAiKnownCities(owner).some(c=>c.id===job._frontAimId&&wodIsHostileOwner(c.owner,owner))){
@@ -883,17 +914,24 @@ function wodAiIssueFrontAdvance(unit,job) {
     // Capturing the ordered cell can finish before the marker reaches its
     // center. Move the guard line onto that gain instead of ordering it back
     // to yesterday's rally point on the next command pass.
-    if(!wodIsHostileOwner(job.attackHex.owner,owner)){
+    const gained=!wodIsHostileOwner(job.attackHex.owner,owner);
+    if(gained){
         const front=getHexesInRadius(here.q,here.r,5).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&
             !isWaterHex(h)&&wodIsFriendlyOwner(h.owner,owner)&&canUnitEnterHex(unit,h)&&wodCurrentSupplyComponent(h,owner).city&&
             getNeighborHexes(h).some(n=>!isWaterHex(n)&&wodIsHostileOwner(n.owner,owner)));
         front.sort((a,b)=>Math.hypot(a.x-job.attackHex.x,a.y-job.attackHex.y)-Math.hypot(b.x-job.attackHex.x,b.y-job.attackHex.y)-(forward(a)-forward(b))*.25);
         if(front[0]){job.holdHex=front[0];job.attackHex=getNeighborHexes(front[0]).filter(h=>!isWaterHex(h)&&wodIsHostileOwner(h.owner,owner)).sort((a,b)=>forward(b)-forward(a))[0];}
     }
+    if(!job.attackHex||Math.hypot(unit.x-job.holdHex.x,unit.y-job.holdHex.y)>hr*7)return false;
     let push=plan.frontAdvances?.find(p=>Math.hypot(p.anchor.x-job.holdHex.x,p.anchor.y-job.holdHex.y)<hr*5&&p.until>now&&
         p.members.includes(unit.uid)&&wodIsHostileOwner(p.objectiveHex.owner,owner));
     if(!push){
-        if(job._frontProbeAt!=null&&now-job._frontProbeAt<2500)return false;
+        if(job._frontProbeAt!=null&&now-job._frontProbeAt<2500){
+            // A probe's paint can finish before the next planning pulse. Keep
+            // that gain rather than issuing an interim march to the old line.
+            if(gained&&unit.target)return true;
+            return false;
+        }
         job._frontProbeAt=now;
         const members=gameData.entities.filter(u=>u.owner===owner&&isLandArmyUnit(u)&&u.hp>u.maxHp*.65&&!u.retreating&&!u.moraleBroken&&!u._medicalRecovering&&!u.boardTransportUid&&
             !gameData._aiDefenseByOwner?.[owner]?.unitJob[u.uid]&&Math.hypot(u.x-job.holdHex.x,u.y-job.holdHex.y)<hr*7&&
@@ -1878,10 +1916,30 @@ function wodAiTownDefenseThreats(owner,army) {
         const reinforcementPower=Math.max(0,power*1.2-garrisonPower);
         if(reinforcementPower<.3)return [];
         return [{id:'town-relief-'+city.id,kind:'counter',role:'counter',city,holdHex:getNearestHexToPoint(city.x,city.y),
-            enemies:enemies.length,enemyIds:enemies.map(e=>e.uid),score:850+power*25,neededPower:reinforcementPower}];
+            enemies:enemies.length,enemyIds:enemies.map(e=>e.uid),score:850+power*25,neededPower:reinforcementPower,contactAt:now}];
     });
+    // A short break in the approach detector is not a new strategic order.
+    // Finish gathering the same relief force while the observed enemy remains
+    // near town; release immediately after destruction or a real withdrawal.
+    for(const job of gameData._aiDefenseByOwner?.[owner]?.jobs||[]){
+        if(job.kind!=='counter'||job.city?.owner!==owner||result.some(t=>t.id===job.id)||now-(job.contactAt??-Infinity)>10000)continue;
+        const contacts=foes.filter(e=>job.enemyIds.includes(e.uid)&&Math.hypot(e.x-job.city.x,e.y-job.city.y)<hr*14);
+        if(contacts.length)result.push({...job,primaryTheater:false,enemyIds:contacts.map(e=>e.uid),enemies:contacts.length});
+    }
     cache.owners[owner]=Object.fromEntries(foes.map(e=>[e.uid,{x:e.x,y:e.y,at:now}]));
     return result;
+}
+
+function wodAiResponseCanArrive(unit,threat,distance) {
+    const hr=gameData.hexRadius||20;
+    if(threat.kind==='relief')return true;
+    const eta=Math.max(0,distance-hr*3)/Math.max(1,(unit.speed||WOD_UNIT_BASE_SPEED)*WOD_MOVE_SPEED_FACTOR);
+    if(threat.kind==='counter'){
+        const actual=threat.arrivals?.[unit.uid]??eta;
+        return actual<=Math.max(45,(threat.deadline||25)+(threat.primaryTheater?15:0));
+    }
+    if(threat.kind==='corridor')return eta<=Math.min(75,Math.max(20,threat.closureSeconds||35)+10);
+    return eta<=45;
 }
 
 // One response line and commitment for the group. Local evasive orders cannot
