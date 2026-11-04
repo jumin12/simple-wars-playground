@@ -140,18 +140,24 @@ function wodAiDefenseDemand(owner, ready, sectors, strategy=wodAiBattlePlan(owne
 // section must actually disconnect troops from every town; coastlines alone
 // cannot manufacture a pocket. Work is capped independently of total map area.
 function wodAiPredictCorridors(owner, tiles, index, edges, roots, supplied, weights, enemies, supplyDepth) {
+    const scan=wodAiPredictCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth);let step;do{step=scan.next();}while(!step.done);return step.value;
+}
+function* wodAiPredictCorridorSteps(owner, tiles, index, edges, roots, supplied, weights, enemies, supplyDepth) {
     const hr=gameData.hexRadius||20,visible=wodAiThreats(owner,false).filter(e=>!wodIsNavalUnit(e)),sections=[],tested=new Set();
     if(!roots.length||!visible.length)return sections;
     const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
     const outward=i=>cardinalHexDirections.map(d=>gameData.hexes[(tiles[i].q+d.q)+','+(tiles[i].r+d.r)])
         .filter(h=>h&&!isWaterHex(h)&&wodIsHostileOwner(h.owner,owner)&&(!explored||explored.has(getHexKey(h))));
     const boundary=[];
+    let checked=0;
     for(const h of wodCachedFrontlineHexes(owner)){
+        if((++checked&31)===0)yield;
         const i=index.get(getHexKey(h));if(i===undefined||!supplied.has(i)||!visible.some(e=>Math.hypot(e.x-h.x,e.y-h.y)<hr*12))continue;
         const outside=outward(i);if(outside.length)boundary.push({i,outside,d:Math.min(...visible.map(e=>Math.hypot(e.x-tiles[i].x,e.y-tiles[i].y)))});
     }
     boundary.sort((a,b)=>a.d-b.d);let floods=0;
     for(const seed of boundary.slice(0,20)){
+        yield;
         if(floods>=8)break;
         const start=tiles[seed.i],normal={x:seed.outside[0].x-start.x,y:seed.outside[0].y-start.y};
         const queue=[{i:seed.i,path:[seed.i]}],seen=new Set([seed.i]);let section=null;
@@ -164,7 +170,7 @@ function wodAiPredictCorridors(owner, tiles, index, edges, roots, supplied, weig
         if(!section)continue;
         const signature=section.slice().sort((a,b)=>a-b).join(',');if(tested.has(signature))continue;tested.add(signature);floods++;
         const blocked=new Set(section),reached=new Set(roots.filter(i=>!blocked.has(i))),flood=[...reached];
-        for(let q=0;q<flood.length;q++)for(const j of edges[flood[q]])if(!blocked.has(j)&&!reached.has(j)){reached.add(j);flood.push(j);}
+        for(let q=0;q<flood.length;q++){for(const j of edges[flood[q]])if(!blocked.has(j)&&!reached.has(j)){reached.add(j);flood.push(j);}if((q&255)===255)yield;}
         let troops=0,area=0,depth=0;const riskTileKeys=[];
         const neckDepth=Math.min(...section.map(i=>supplyDepth.get(i)??0));
         for(const i of supplied)if(!blocked.has(i)&&!reached.has(i)){troops+=weights[i];area++;depth+=weights[i]*Math.max(0,(supplyDepth.get(i)||0)-neckDepth);if(weights[i])riskTileKeys.push(getHexKey(tiles[i]));}
@@ -175,25 +181,30 @@ function wodAiPredictCorridors(owner, tiles, index, edges, roots, supplied, weig
         const withdrawSeconds=wodAiCorridorEvacSeconds(owner,riskTileKeys,index,supplyDepth,neckDepth);
         sections.push({i:section[Math.floor(section.length/2)],troops,area,keys:section,riskTileKeys,predictive:true,closureSeconds,withdrawSeconds});
     }
-    return sections.concat(wodAiWideCorridors(owner,tiles,index,edges,roots,supplied,weights,visible,supplyDepth));
+    return sections.concat(yield* wodAiWideCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,visible,supplyDepth));
 }
 
 // Whole-map cross-sections complement the short, winding choke search above.
 // A broad salient can have no articulation point and be far wider than six
 // cells. Its hostile-facing ends, rather than its empty center, need cover.
 function wodAiWideCorridors(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth) {
+    const scan=wodAiWideCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth);let step;do{step=scan.next();}while(!step.done);return step.value;
+}
+function* wodAiWideCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth) {
     const hr=gameData.hexRadius||20,candidates=[],result=[];
     // Supplied insertion order is BFS order. Accumulate each column's actual
     // city routes in reverse, so empty frontier crossings cannot consume the
     // flood budget ahead of a distant push that really needs protection.
     const load=weights.slice(),ordered=[...supplied];
-    for(let n=ordered.length-1;n>=0;n--){const i=ordered[n],parent=edges[i].find(j=>(supplyDepth.get(j)??Infinity)<supplyDepth.get(i));if(parent!==undefined)load[parent]+=load[i];}
+    for(let n=ordered.length-1;n>=0;n--){const i=ordered[n],parent=edges[i].find(j=>(supplyDepth.get(j)??Infinity)<supplyDepth.get(i));if(parent!==undefined)load[parent]+=load[i];if((n&255)===255)yield;}
     const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
     const hostile=(h,d)=>{const n=gameData.hexes[(h.q+d.q)+','+(h.r+d.r)];return n&&!isWaterHex(n)&&wodIsHostileOwner(n.owner,owner)&&(!explored||explored.has(getHexKey(n)));};
     for(const axis of ['q','r']){
         const other=axis==='q'?'r':'q',rows=new Map();
-        for(const i of supplied){const h=tiles[i];if(!rows.has(h[axis]))rows.set(h[axis],[]);rows.get(h[axis]).push(i);}
+        let examined=0;
+        for(const i of supplied){const h=tiles[i];if(!rows.has(h[axis]))rows.set(h[axis],[]);rows.get(h[axis]).push(i);if((++examined&255)===0)yield;}
         for(const row of rows.values()){
+            yield;
             row.sort((a,b)=>tiles[a][other]-tiles[b][other]);let run=[];
             const consider=()=>{
                 if(run.length<=6)return;
@@ -211,13 +222,14 @@ function wodAiWideCorridors(owner,tiles,index,edges,roots,supplied,weights,enemi
     candidates.sort((a,b)=>a.score-b.score);
     const tested=[],blockedTags=new Uint16Array(tiles.length),safeTags=new Uint16Array(tiles.length),queue=new Int32Array(tiles.length);let floods=0;
     for(const candidate of candidates){
+        yield;
         // Spread the bounded graph floods between different flanking axes.
         if(tested.some(p=>candidate.gates.every(g=>p.some(h=>Math.hypot(h.x-g.x,h.y-g.y)<hr*3))))continue;
         tested.push(candidate.gates);if(floods++>=10)break;
         const stamp=floods;let head=0,tail=0;
         for(const i of candidate.keys)blockedTags[i]=stamp;
         for(const i of roots){safeTags[i]=stamp;queue[tail++]=i;}
-        while(head<tail)for(const j of edges[queue[head++]])if(blockedTags[j]!==stamp&&safeTags[j]!==stamp){safeTags[j]=stamp;queue[tail++]=j;}
+        while(head<tail){for(const j of edges[queue[head++]])if(blockedTags[j]!==stamp&&safeTags[j]!==stamp){safeTags[j]=stamp;queue[tail++]=j;}if((head&255)===0)yield;}
         let troops=0,area=0,depth=0;const riskTileKeys=[];
         const neckDepth=Math.min(...candidate.keys.map(i=>supplyDepth.get(i)??0));
         for(const i of supplied)if(blockedTags[i]!==stamp&&safeTags[i]!==stamp){
@@ -445,6 +457,13 @@ function wodAiCanReach(unit, target) {
 function wodAiTravelCost(unit, target) {
     if (!wodAiCanReach(unit,target)) return Infinity;
     const start = getNearestHexToPoint(unit.x,unit.y), end = gameData.hexes[`${target.q},${target.r}`] || target;
+    // Sorting a roster asks for the same route estimate many times. Reuse it
+    // only while the unit, target and terrain are exactly unchanged.
+    let cache=unit._aiTravelCosts;
+    const version=gameData._wodPfVer||0,geometry=gameData._landGeometryRevision||0;
+    if(!cache||cache.hexes!==gameData.hexes||cache.version!==version||cache.geometry!==geometry||cache.type!==unit.type||cache.owner!==unit.owner||cache.x!==unit.x||cache.y!==unit.y||cache.speed!==unit.speed||cache.startOwner!==start?.owner)
+        cache=unit._aiTravelCosts={hexes:gameData.hexes,version,geometry,type:unit.type,owner:unit.owner,x:unit.x,y:unit.y,speed:unit.speed,startOwner:start?.owner,values:new Map()};
+    const key=end.x+','+end.y;if(cache.values.has(key))return cache.values.get(key);
     const distance = Math.hypot(unit.x-end.x,unit.y-end.y), hr=gameData.hexRadius||20;
     let obstacle=0;
     const steps=Math.min(40,Math.max(1,Math.ceil(distance/hr)));
@@ -452,7 +471,8 @@ function wodAiTravelCost(unit, target) {
         const h=getNearestHexToPoint(unit.x+(end.x-unit.x)*i/steps,unit.y+(end.y-unit.y)*i/steps);
         if(h && (isWaterHex(h)&&!isBridgeHex(h)||!canUnitEnterHex(unit,h)))obstacle+=hr*3;
     }
-    return (distance+obstacle)/Math.max(1,unit.speed||15)+(start?.owner===unit.owner?0:2);
+    const result=(distance+obstacle)/Math.max(1,unit.speed||15)+(start?.owner===unit.owner?0:2);
+    if(cache.values.size>=128)cache.values.clear();cache.values.set(key,result);return result;
 }
 
 // Reuse a bounded reverse route field for an entire operation. Straight-line

@@ -69,6 +69,22 @@ const server=http.createServer((req,res)=>{
             },width);
             console.log('wide',JSON.stringify(row));assert(row.detected&&row.cutWidth>6&&row.response>=2,'wide salient requests a real defense');assert(row.stands.some(p=>p.r<0)&&row.stands.some(p=>p.r>0),'both wings receive cover');results.wide.push(row);
         }
+        results.incremental=[];
+        for(const width of [16,56]){
+            const row=await page.evaluate(width=>{
+                const forward=coverSetup(width),army=gameData.entities.filter(u=>u.owner===2);
+                gameData._aiDefenseByOwner={};
+                const exact=wodAiReadDefense(2,army,true),getCut=d=>d.corridors.find(c=>c.wide&&forward.every(u=>c.riskUnits?.has(u.uid))),cut=getCut(exact);
+                gameData._aiDefenseByOwner={};gameData._aiDefenseWork=new Map();gameData._wodPfFrameActive=true;
+                wodAiReadDefense(2,army);let slices=0,maxSlice=0,advances=0;
+                const iterator=gameData._aiDefenseWork.get(2).iterator,next=iterator.next.bind(iterator);iterator.next=()=>{advances++;return next();};
+                wodBeginSimPfBudget(army.length);wodStepAiDefenseWork();const once=advances;wodStepAiDefenseWork();wodStepAiDefenseWork();const oneBudget=advances===once;
+                while(gameData._aiDefenseWork.size&&slices<240){wodBeginSimPfBudget(army.length);const t=performance.now();wodStepAiDefenseWork();maxSlice=Math.max(maxSlice,performance.now()-t);slices++;}
+                gameData._wodPfFrameActive=false;const actual=getCut(gameData._aiDefenseByOwner[2]);
+                return{width,slices,maxSlice,oneBudget,finished:!gameData._aiDefenseWork.size,same:!!cut&&!!actual&&cut.atRisk===actual.atRisk&&JSON.stringify(cut.cutIndices)===JSON.stringify(actual.cutIndices),response:gameData._aiDefenseByOwner[2].jobs.find(j=>j.id===actual?.id)?.members.length||0};
+            },width);
+            assert(row.finished&&row.same&&row.oneBudget&&row.slices>1&&row.response>=2,JSON.stringify(row));results.incremental.push(row);console.log('incremental',JSON.stringify(row));
+        }
         results.townSupply=await page.evaluate(()=>{const forward=coverSetup(24);coverTown(20,0,2,'Beachhead');coverRefresh();const d=wodAiReadDefense(2,gameData.entities.filter(u=>u.owner===2),true);return{forwardAtRisk:d.corridors.some(c=>forward.some(u=>c.riskUnits?.has(u.uid)))};});
         assert(!results.townSupply.forwardAtRisk,'a controlled town supplies the surrounded advance');
         results.coverage=await page.evaluate(()=>{

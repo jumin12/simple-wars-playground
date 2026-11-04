@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=naval-lifecycle-20261104"></script>
+    <script src="ai-command.js?v=frontline-performance-20261104"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-04T07:48:00Z",
+                title:"Smoother battles and accurate frontline supply",
+                items:[
+                    "AI defense, pocket and broad-flank analysis runs in small batches across frames, sharing one CPU budget at every game speed. Units keep their orders while the next defense plan is prepared.",
+                    "Supply reuses unchanged land and bridge connections instead of rebuilding them on every periodic scan. Repeated route estimates and redundant HUD color updates are avoided, and tactical work yields between regiments.",
+                    "Troops standing on visibly friendly rounded frontline corners use the matching friendly land connection. Genuine encirclements, corner-only contacts, water attrition and bridge supply rules remain in effect for players and AI."
+                ]
+            },
             {
                 at:"2026-11-04T06:00:00Z",
                 title:"Reliable landings, recovery and steady unit artwork",
@@ -14487,10 +14496,9 @@
             setUiText('ui-manpower-net', formatManpowerRate(mp));
             for(let id of ['ui-economy-net', 'ui-manpower-net']) {
                 document.querySelectorAll('[data-ui-sync="' + id + '"],#' + id).forEach(el => {
-                    el.classList.remove('positive', 'negative');
                     let v = id === 'ui-economy-net' ? econ : mp;
-                    if(v > 0.05) el.classList.add('positive');
-                    else if(v < -0.05) el.classList.add('negative');
+                    if(el.classList.contains('positive')!==(v>0.05))el.classList.toggle('positive',v>0.05);
+                    if(el.classList.contains('negative')!==(v<-.05))el.classList.toggle('negative',v<-.05);
                 });
             }
         }
@@ -15704,7 +15712,7 @@
             gameData.unitSpatialGrid=buildUnitSpatialGrid(cs);
         }
         function wodBeginSimPfBudget(entCount) {
-            wodPfSpentMs = 0;gameData._wodBridgeSearchFrameDone=false;gameData._wodAiRouteFrameDone=false;gameData._wodTradeSpawnFrameDone=false;gameData._wodBridgeRouteFrameDone=false;gameData._trafficPlanFrameDone=false;
+            wodPfSpentMs = 0;gameData._wodBridgeSearchFrameDone=false;gameData._wodAiRouteFrameDone=false;gameData._wodTradeSpawnFrameDone=false;gameData._wodBridgeRouteFrameDone=false;gameData._trafficPlanFrameDone=false;gameData._wodDefenseFrameDone=false;
             let n = entCount | 0;
             let mapCells = (gameData && gameData.hexList) ? gameData.hexList.length : 0;
             // Larger maps need a bit more PF headroom so columns don't fall back to
@@ -17495,6 +17503,7 @@
         const WOD_BRIDGE_INDEX_VERSION = 11;
         function wodEnsureBridgePathIndex() {
             if(!gameData.bridges || !gameData.bridges.length) {
+                if(gameData._bridgeIndexSig==='0:'&&gameData._bridgeIndexVer===WOD_BRIDGE_INDEX_VERSION&&gameData._bridgeByHexKey&&gameData._bridgeLandEntry&&gameData._bridgeExitLand)return;
                 gameData._bridgeByHexKey = {};
                 gameData._bridgeLandEntry = {};
                 gameData._bridgeExitLand = {};
@@ -33908,21 +33917,27 @@
 
         /** Revalidate stale pocket flags against current cities and connected land ownership.
          * Cache the whole component so a large trapped army shares one search per topology change. */
+        const wodSupplyNeighborCache=new WeakMap();
         function wodSupplyNeighbors(hex,fn) {
+            const revision=gameData._wodPfVer||0;
+            let cached=wodSupplyNeighborCache.get(hex);
+            if(cached?.hexes===gameData.hexes&&cached.revision===revision){for(const h of cached.links)fn(h);return;}
+            const links=[];
             const seen=new Set(),emit=n=>{if(!n||seen.has(getHexKey(n)))return;seen.add(getHexKey(n));fn(n);};
             // A point contact has no width: two hostile flanks must be able to
             // close a pocket. Stair-step diagonals still connect through their
             // friendly side cells; bridge banks use physical portals below.
             for(const d of cardinalHexDirections){
                 const n=gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`];
-                emit(n);
+                if(n){links.push(n);seen.add(getHexKey(n));fn(n);}
             }
             wodForEachBridgePathPortal({type:'light'},hex,n=>{
                 const a=isBridgeHex(hex),b=isBridgeHex(n);
                 if(a!==b){const deck=a?hex:n,land=a?n:hex,br=gameData._bridgeByHexKey?.[getHexKey(deck)];
                     if(!br||wodDistToBridgeRect(land.x,land.y,br)>(gameData.hexRadius||20)*1.35*.95)return;}
-                emit(n);
+                if(n&&!seen.has(getHexKey(n))){links.push(n);emit(n);}
             });
+            wodSupplyNeighborCache.set(hex,{hexes:gameData.hexes,revision,links});
         }
         function wodSupplyPassable(hex,owner) {
             return !!(hex&&(isBridgeHex(hex)||!isWaterHex(hex)&&isClaimableLand(hex)&&wodIsFriendlyOwner(hex.owner,owner)));
@@ -33947,10 +33962,11 @@
         function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
             if(!hex||owner<=0||isWaterHex(hex)&&!isBridgeHex(hex))return {city:false,water:false};
             wodEnsureBridgePathIndex();
-            const citySig=gameData.cities.map(c=>c.owner+':'+c.q+','+c.r).join('|');
-            const allySig=JSON.stringify(gameData.alliances||[]),version=(gameData._supplyTopologyVersion||0)+'|'+(gameData._wodPfVer||0);
+            const version=gameData._supplyTopologyVersion||0,pfVersion=gameData._wodPfVer||0;
+            let allySig=0;for(const pair of gameData.alliances||[])for(const owner of pair)allySig=(Math.imul(allySig,31)+owner)|0;
             let cache=gameData._citySupplyCache;
-            if(!cache||cache.hexes!==gameData.hexes||cache.version!==version||cache.citySig!==citySig||cache.allySig!==allySig) {
+            const citiesChanged=!cache||cache.cities.length!==gameData.cities.length||gameData.cities.some((c,i)=>{const old=cache.cities[i];return old.city!==c||old.owner!==c.owner||old.q!==c.q||old.r!==c.r;});
+            if(!cache||cache.hexes!==gameData.hexes||cache.version!==version||cache.pfVersion!==pfVersion||citiesChanged||cache.allySig!==allySig) {
                 const sources=new Map();
                 for(const c of gameData.cities) {
                     if(c.owner<=0)continue;
@@ -33959,7 +33975,7 @@
                         const key=getHexKey(h),list=sources.get(key)||[];list.push(c.owner);sources.set(key,list);
                     }
                 }
-                cache=gameData._citySupplyCache={hexes:gameData.hexes,version,citySig,allySig,sources,owners:new Map()};
+                cache=gameData._citySupplyCache={hexes:gameData.hexes,version,pfVersion,cities:gameData.cities.map(city=>({city,owner:city.owner,q:city.q,r:city.r})),allySig,sources,owners:new Map()};
             }
             if(!wodSupplyPassable(hex,owner)) {
                 const result={city:false,water:false};
@@ -34009,7 +34025,6 @@
             if(wodUsesVisualViewportLayout()) interval = Math.max(interval * 1.35, 1.8);
             if(gameData.encirclementTimer < interval) return;
             gameData.encirclementTimer = 0;
-            gameData._citySupplyCache = null;
             gameData._encircWork = {
                 visited: new Set(),
                 encircledHexes: new Set(),
@@ -34200,6 +34215,21 @@
             if(!unit || unit.type !== 'marine' || !hex || !wodIsFriendlyOwner(hex.owner, unit.owner)) return false;
             return isWaterHex(hex)||wodCurrentSupplyComponent(hex).water;
         }
+        function wodUnitSupplyHex(unit,hex) {
+            if(!hex||isWaterHex(hex)||wodIsFriendlyOwner(hex.owner,unit.owner))return hex;
+            // Resolve the small corner wedges exactly as the rounded political
+            // fill does. This never joins diagonally touching supply regions.
+            const sp=(gameData.hexRadius||20)*1.35,radius=sp*.44;
+            for(const sx of [-1,1])for(const sy of [-1,1]){
+                const dx=(hex.x+sx*sp/2-unit.x)*sx/radius,dy=(hex.y+sy*sp/2-unit.y)*sy/radius;
+                if(dx<0||dy<0||Math.sqrt(dx)+Math.sqrt(dy)>1)continue;
+                const a=gameData.hexes[`${hex.q+sx},${hex.r}`],b=gameData.hexes[`${hex.q},${hex.r+sy}`],c=gameData.hexes[`${hex.q+sx},${hex.r+sy}`];
+                if(!a||!b||!c||!wodIsFriendlyOwner(a.owner,unit.owner)||a.owner!==b.owner||c.owner!==a.owner&&c.owner!==hex.owner||isWaterHex(a)||isWaterHex(b)||isWaterHex(c))continue;
+                if(c.owner===hex.owner){const q=Math.min(hex.q,c.q),r=Math.min(hex.r,c.r),cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>gameData.hexes[`${x},${y}`]);if(hex.owner!==wodCornerPinchedOwner(cells,gameData.hexes))continue;}
+                return a;
+            }
+            return hex;
+        }
         function wodGetUnitEncirclementState(unit, hex) {
             if(!unit||!hex||wodIsNavalUnit(unit)||unit.type==='convoy'&&(!isWaterHex(hex)||unit.convoySeaRoute))return null;
             if(!wodUnitInUnsuppliedWater(unit,hex)&&wodSupplyShipForUnit(unit))return null;
@@ -34210,6 +34240,7 @@
                 // The bridge is only a neutral land corridor. Its builder/owner
                 // does not supply it: the deck must reach an actual friendly city.
             }
+            hex=wodUnitSupplyHex(unit,hex);
             if(!wodIsFriendlyOwner(hex.owner,unit.owner)) {
                 const supply=wodCurrentSupplyComponent(hex,unit.owner);
                 if(supply.city||unit.type==='marine'&&supply.water)return null;
@@ -39816,6 +39847,7 @@
             gameData.aiBattlePlans = {};gameData.aiNavalPlans = {};
             delete gameData.aiCommanderStyle;
             gameData._aiDefenseByOwner = {};
+            gameData._aiDefenseWork = new Map();
             gameData.marineWaterSupplyHexes = new Set();
             gameData._citySupplyCache = null;
             gameData._supplyTopologyVersion = 0;
@@ -41415,29 +41447,54 @@
             const topology=gameData._supplyTopologyVersion||0;
             gameData._aiDefenseByOwner ||= {};
             const old=gameData._aiDefenseByOwner[owner];
-            if(!force && old && old.hexes===gameData.hexes && old.cityStamp===cityStamp && old.topology===topology && now>=old.at && now-old.at<2500)return old;
+            if(!force && old && !old.pending && old.hexes===gameData.hexes && old.cityStamp===cityStamp && old.topology===topology && now>=old.at && now-old.at<2500)return old;
+            const work=gameData._aiDefenseWork||=(new Map());
+            if(!force&&gameData._wodPfFrameActive){
+                if(work.get(owner)?.hexes!==gameData.hexes)work.set(owner,{hexes:gameData.hexes,cityStamp,iterator:wodAiBuildDefense(owner,units,old,now,hr,cityStamp,topology)});
+                if(old?.hexes===gameData.hexes)return old;
+                return gameData._aiDefenseByOwner[owner]={pending:true,hexes:gameData.hexes,at:now,jobs:[],unitJob:{},pockets:[],corridors:[],incursions:0,suppliedHexes:0,supplyDistance:new Map()};
+            }
+            work.delete(owner);
+            const scan=wodAiBuildDefense(owner,units,old,now,hr,cityStamp,topology);let step;
+            do{step=scan.next();}while(!step.done);return step.value;
+        }
+        function wodStepAiDefenseWork() {
+            if(gameData._wodDefenseFrameDone)return;gameData._wodDefenseFrameDone=true;
+            const work=gameData._aiDefenseWork;if(!work?.size)return;
+            const start=performance.now(),budget=wodUsesVisualViewportLayout()?1.1:2;
+            do{
+                const [owner,job]=work.entries().next().value;work.delete(owner);
+                if(job.hexes!==gameData.hexes)continue;
+                const step=job.iterator.next();if(!step.done)work.set(owner,job);
+            }while(work.size&&performance.now()-start<budget);
+        }
+        function* wodAiBuildDefense(owner,units,old,now,hr,cityStamp,topology) {
             const walk=h=>h && (!isWaterHex(h)||isBridgeHex(h));
             const friendly=h=>walk(h)&&wodSupplyPassable(h,owner);
             const tiles=gameData.hexList.filter(friendly), index=new Map(tiles.map((h,i)=>[getHexKey(h),i]));
-            const edges=tiles.map(h=>{const links=[];wodSupplyNeighbors(h,n=>{const i=index.get(getHexKey(n));if(i!==undefined&&!links.includes(i))links.push(i);});return links;});
+            yield;
+            const edges=[];
+            for(let ti=0;ti<tiles.length;ti++){const links=[];wodSupplyNeighbors(tiles[ti],n=>{const i=index.get(getHexKey(n));if(i!==undefined&&!links.includes(i))links.push(i);});edges.push(links);if((ti&127)===127)yield;}
             const roots=[...new Set(wodAiKnownCities(owner).filter(c=>wodIsFriendlyOwner(c.owner,owner)).flatMap(c=>wodCitySupplySourceHexes(c).map(h=>index.get(getHexKey(h)))).filter(i=>i!==undefined))];
             const supplied=new Set(roots), queue=roots.slice(),supplyDepth=new Map(roots.map(i=>[i,0]));
-            for(let qi=0;qi<queue.length;qi++)for(const j of edges[queue[qi]])if(!supplied.has(j)){supplied.add(j);supplyDepth.set(j,supplyDepth.get(queue[qi])+1);queue.push(j);}
+            for(let qi=0;qi<queue.length;qi++){for(const j of edges[queue[qi]])if(!supplied.has(j)){supplied.add(j);supplyDepth.set(j,supplyDepth.get(queue[qi])+1);queue.push(j);}if((qi&255)===255)yield;}
             const supplyDistance=new Map([...supplyDepth].map(([i,d])=>[getHexKey(tiles[i]),d]));
             const army=units.filter(u=>u.hp>0&&u.type!=='convoy'&&!wodIsNavalUnit(u));
             army.forEach(ensureUnitId);
-            const positions=new Map(army.map(u=>[u.uid,index.get(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))]));
+            const positions=new Map(army.map(u=>[u.uid,index.get(getHexKey(wodUnitSupplyHex(u,getNearestHexToPoint(u.x,u.y))||{}))]));
             const weights=new Int32Array(tiles.length);
             for(const u of army)if(u.type!=='marine'&&positions.get(u.uid)!==undefined)weights[positions.get(u.uid)]++;
             const enemies=wodAiKnownEntities(owner).filter(u=>u.hp>0&&isLandArmyUnit(u)&&wodIsHostileOwner(u.owner,owner));
-            const closeEnemies=h=>enemies.filter(e=>wodAiDist2(e.x,e.y,h.x,h.y)<Math.pow(hr*8,2)).length;
+            const nearbyEnemyRange2=(hr*8)**2;
+            const closeEnemies=h=>enemies.some(e=>wodAiDist2(e.x,e.y,h.x,h.y)<nearbyEnemyRange2);
             const threats=[], pockets=[], seen=new Set(supplied);
             // Each disconnected component gets a shortest land breach to the supplied army.
             // Search the whole map, including large pockets; mountains/water are never shortcuts.
             for(let i=0;i<tiles.length;i++) {
+                if((i&255)===255)yield;
                 if(seen.has(i))continue;
                 const component=[i];seen.add(i);
-                for(let ci=0;ci<component.length;ci++)for(const j of edges[component[ci]])if(!seen.has(j)){seen.add(j);component.push(j);}
+                for(let ci=0;ci<component.length;ci++){for(const j of edges[component[ci]])if(!seen.has(j)){seen.add(j);component.push(j);}if((ci&255)===255)yield;}
                 const keys=new Set(component.map(j=>getHexKey(tiles[j])));
                 const waterAccess=component.some(j=>cardinalHexDirections.some(d=>isWaterHex(gameData.hexes[`${tiles[j].q+d.q},${tiles[j].r+d.r}`])));
                 const trapped=army.filter(u=>keys.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
@@ -41445,6 +41502,7 @@
                 if(!trapped.length||!roots.length)continue;
                 const search=component.map(j=>tiles[j]), visited=new Set(keys), parent=new Map();let end=null;
                 for(let qi=0;qi<search.length&&!end;qi++) {
+                    if((qi&255)===255)yield;
                     const h=search[qi];
                     for(const d of cardinalHexDirections) {
                         const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`], k=n&&getHexKey(n);
@@ -41469,8 +41527,9 @@
             const disc=new Int32Array(n+1), low=new Int32Array(n+1), area=new Int32Array(n+1), troops=new Int32Array(n+1);
             const parents=new Int32Array(n+1).fill(-1);let tick=1;
             disc[root]=low[root]=tick;const stack=[{i:root,next:0}];
-            const cuts=new Map();
+            const cuts=new Map();let scanTicks=0;
             while(stack.length) {
+                if((++scanTicks&511)===0)yield;
                 const frame=stack[stack.length-1], v=frame.i;
                 if(frame.next<adj[v].length) {
                     const w=adj[v][frame.next++];
@@ -41488,6 +41547,7 @@
             // Bound these secondary floods; the main scan above stays linear in map size.
             const pairs=[], pairSeen=new Set();
             for(let i=0;i<n;i++) {
+                if((i&127)===127)yield;
                 if(!supplied.has(i)||tiles[i].owner!==owner||!closeEnemies(tiles[i]))continue;
                 const exposed=h=>cardinalHexDirections.some(d=>{const x=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];return walk(x)&&wodIsHostileOwner(x.owner,owner);});
                 if(!exposed(tiles[i]))continue;
@@ -41498,18 +41558,24 @@
                 }
             }
             pairs.sort((a,b)=>a.d-b.d);
+            const pairReached=new Uint8Array(n),pairQueue=new Int32Array(n);
             for(const {i,j} of pairs.slice(0,12)) {
+                yield;
                 if(cuts.has(i)||cuts.has(j))continue;
-                const reached=new Set(roots.filter(r=>r!==i&&r!==j)), flood=[...reached];
-                for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(k!==i&&k!==j&&!reached.has(k)){reached.add(k);flood.push(k);}
+                pairReached.fill(0);let tail=0;
+                for(const r of roots)if(r!==i&&r!==j&&!pairReached[r]){pairReached[r]=1;pairQueue[tail++]=r;}
+                for(let q=0;q<tail;q++)for(const k of edges[pairQueue[q]])if(k!==i&&k!==j&&!pairReached[k]){pairReached[k]=1;pairQueue[tail++]=k;}
                 let count=0, size=0;
-                for(const k of supplied)if(k!==i&&k!==j&&!reached.has(k)){count+=weights[k];size++;}
+                for(const k of supplied)if(k!==i&&k!==j&&!pairReached[k]){count+=weights[k];size++;}
                 if(count>=1)cuts.set(i,{troops:count,area:size,keys:[i,j]});
             }
-            for(const cut of wodAiPredictCorridors(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth)){
+            yield;
+            const predicted=yield* wodAiPredictCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth);
+            for(const cut of predicted){
                 if(!cuts.has(cut.i))cuts.set(cut.i,cut);
             }
             for(const [i,cut] of cuts) {
+                yield;
                 const h=tiles[i],crossing=(cut.keys||[i]).map(j=>tiles[j]);
                 const screenPoints=crossing.length>2?[crossing[0],crossing[crossing.length-1]]:[h];
                 const nearScreen=e=>screenPoints.some(p=>wodAiDist2(e.x,e.y,p.x,p.y)<Math.pow(hr*10,2));
@@ -41546,6 +41612,7 @@
                 wodAiDist2(s.holdHex.x,s.holdHex.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*7,2)||
                 t.kind==='corridor'&&s.kind==='corridor'&&t.riskTileKeys&&s.riskTileKeys&&t.riskTileKeys.filter(k=>s.riskTileKeys.includes(k)).length>=Math.min(t.riskTileKeys.length,s.riskTileKeys.length)*.6)))selected.push(t);
             for(const cut of selected.filter(t=>t.kind==='corridor').slice(0,12)){
+                yield;
                 const blocked=new Set(cut.cutIndices),safe=new Set(roots.filter(r=>!blocked.has(r))),flood=[...safe];
                 for(let q=0;q<flood.length;q++)for(const k of edges[flood[q]])if(!blocked.has(k)&&!safe.has(k)){safe.add(k);flood.push(k);}
                 cut.riskUnits=new Set(army.filter(u=>positions.get(u.uid)!==undefined&&!safe.has(positions.get(u.uid))&&!blocked.has(positions.get(u.uid))).map(u=>u.uid));
@@ -41559,6 +41626,7 @@
             let budget=Math.max(2,Math.ceil(available.length*((townEmergency||majorCut) ? .85 : pockets.length ? .55 : Math.max(.4,wodAiCommander(owner).defense+.16))));
             const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);if(job.kind==='territory'&&u._aiTerritoryJob!==job.id){u._aiTerritoryJob=job.id;u._aiTerritoryAssignedAt=now;}};
             for(const t of selected.slice(0,12)) {
+                yield;
                 const job={...t,members:[],response:true};
                 // Trapped units break outward while a limited relief force attacks the same cut from outside.
                 for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
@@ -41738,7 +41806,7 @@
             }
             for(let i=0;i<ships.length;i+=3)add('naval',ships.slice(i,i+3),attackSectors[0]);
             const plan={owner,assetSignature,jobs,unitJob,sectors,operations,landOperations:continuedLandOperations,defenseDemand:{line:lineN,reserve:reserveN,frontage:defenseDemand.frontage,armyFloor:defenseDemand.armyFloor},readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+30000};
-            gameData.aiTaskForces[owner]=plan;wodAiOrganizeFronts(owner,plan,ready);wodAiCoordinateCampaign(owner,plan,ready);wodAiConcentrateAssaults(owner,plan,ready);wodAiReadDefense(owner,units,true);wodAiPlanFrontOffensive(owner,plan,ready);return plan;
+            gameData.aiTaskForces[owner]=plan;wodAiOrganizeFronts(owner,plan,ready);wodAiCoordinateCampaign(owner,plan,ready);wodAiConcentrateAssaults(owner,plan,ready);wodAiReadDefense(owner,units);wodAiPlanFrontOffensive(owner,plan,ready);return plan;
         }
 
         function wodAiTownAssaultHex(unit,city,members) {
@@ -42136,6 +42204,7 @@
         }
 
         function assignAiFormationOrders(owner, units, serial) {
+            const setupAt=performance.now();
             let readyUnits = units
                 .filter(unit => unit.type !== 'convoy' && unit.hp > unit.maxHp * 0.42 && !unit.moraleBroken && !unit.retreating)
                 .sort((a, b) => {
@@ -42165,6 +42234,7 @@
 
             let t0 = performance.now();
             let budgetMs = wodUsesVisualViewportLayout() ? 1.45 : 3.1;
+            if(t0-setupAt>=budgetMs)return false;
             let idleN = 0;
             for(let iu = ch.idx; iu < ch.readyUnits.length; iu++) if(!ch.readyUnits[iu].target) idleN++;
             let maxUnits = (wodUsesVisualViewportLayout() ? 4 : 7) + Math.min(8, idleN >> 2);
@@ -42819,10 +42889,10 @@
                 let BATCH = wodUsesVisualViewportLayout() ? 22 : 52;
                 let nExamined = 0;
                 while(w.ei < ents.length && nExamined < BATCH) {
+                    if(nExamined>0&&overBudget())break;
                     let unit = ents[w.ei++];
                     if(['transport','supply'].includes(unit?.type)||unit?.boardTransportUid||unit?._navalAssaultUntil>wodAiOperationTime()||unit?._navalEscortUntil>wodAiOperationTime()||unit?._aiScoutUntil>wodAiOperationTime()||unit?._aiCareYieldUntil>wodAiOperationTime())continue;
                     nExamined++;
-                    if((nExamined & 7) === 0 && overBudget()) break;
                     if(unit.type === 'convoy' || unit.hp <= 0) continue;
                     if(wodMpIsHumanOwner(unit.owner)) continue;
                     if(unit.moraleBroken) continue;
@@ -43078,6 +43148,7 @@
             gameData._cityCombatStagingKeys = new Set();
             wodUpdateConstruction(dt);
             if(!gameData._wodPfFrameActive)wodBeginSimPfBudget(gameData.entities.length);
+            wodStepAiDefenseWork();
             wodDrainAiMoveQueue();
             wodStepTradeConvoySpawns();
             wodStepBridgeRouteRefresh();
