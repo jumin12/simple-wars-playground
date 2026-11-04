@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=encirclement-prevention-20261104"></script>
+    <script src="ai-command.js?v=pursuit-border-coverage-20261104"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-04T22:06:31Z",
+                title:"Coordinated pursuit and defense across multiple threats",
+                items:[
+                    "Supported AI groups pursue beaten, retreating enemies instead of stopping at the previous battle position. Pursuit follows current visible contacts, advances in short bounds and stops for unfavorable battles, threatened supply routes or lost support.",
+                    "Border defense reserves separate nearby groups for different enemy approaches before spending the remaining troops on larger battles. Urgent town relief receives a viable force first. Assigned defenders obey their new defense orders, while superior forces already fighting keep pressure on their opponents.",
+                    "Ordinary ground advances require at least three troops. Unsupported vanguards hold supplied ground while their rear units catch up, and lone ground scouts stay near the friendly frontier. Town guards, encirclement wings and naval landing operations retain their assignments."
+                ]
+            },
             {
                 at:"2026-11-04T21:16:33Z",
                 title:"Earlier AI encirclement prevention",
@@ -25115,7 +25124,8 @@
             }
             const supplied=members.filter(u=>!u.outOfSupplySeconds||u.outOfSupplySeconds<4||u.type==='marine').length;
             const supplySafe=!members.length||supplied>=Math.ceil(members.length*.6);
-            const sufficientNumbers=!threats.length||members.length>=Math.min(3,Math.max(2,Math.ceil(threats.length*.65)));
+            const sufficientNumbers=(members.length>=3||members.length>0&&members.every(u=>u.type==='marine'||wodIsNavalUnit(u)||u._navalLanded))&&
+                (!threats.length||members.length>=Math.min(3,Math.max(2,Math.ceil(threats.length*.65))));
             const strategicReady=supplySafe&&sufficientNumbers&&own>=.4&&forecast.ratio>=profile.ratio;
             return {own,enemy,ratio:profile.ratio,strategicReady,strategicMaintain:own>=.4&&supplySafe&&forecast.ratio>=Math.max(1,profile.ratio-.18),ready:strategicReady&&contactSafe,
                 maintain:own>=.4&&supplySafe&&contactSafe&&forecast.ratio>=Math.max(1,profile.ratio-.18),contactSafe,
@@ -41109,6 +41119,7 @@
 
         /** Keep current AI orders until they arrive, settle on a hold line, or get stuck. */
         function wodAiShouldKeepCurrentOrder(unit) {
+            if(unit?._aiPursuitOrderAt!=null&&wodAiOperationTime()-unit._aiPursuitOrderAt>=1500)return false;
             if(unit&&wodAiTacticalFallback(unit,wodAiGetUnitTaskJob(unit),false))return false;
             if(unit?._trafficYield)return true;
             if(unit?.isGeneral&&wodAiOperationTime()-(unit._aiGeneralAt||0)>3500)return false;
@@ -41610,7 +41621,7 @@
             const incursions=[];
             for(const e of enemies) {
                 const h=getNearestHexToPoint(e.x,e.y);if(!h)continue;
-                const near=getHexesInRadius(h.q,h.r,2).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(t=>t&&t.owner===owner&&friendly(t));
+                const near=getHexesInRadius(h.q,h.r,4).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(t=>t&&t.owner===owner&&friendly(t));
                 if(near.length<2)continue;
                 let cluster=incursions.find(t=>wodAiDist2(t.x,t.y,e.x,e.y)<Math.pow(hr*7,2));
                 if(!cluster){cluster={x:e.x,y:e.y,count:0,near,contacts:[]};incursions.push(cluster);}cluster.count++;cluster.contacts.push(e.uid);
@@ -41657,8 +41668,11 @@
             const townEmergency=selected.some(t=>t.kind==='counter');
             const majorCut=selected.some(t=>t.kind==='corridor'&&t.atRisk>=Math.max(2,army.length*.25));
             let budget=Math.max(2,Math.ceil(available.length*((townEmergency||majorCut) ? .85 : pockets.length ? .55 : Math.max(.4,wodAiCommander(owner).defense+.16))));
+            const responseThreats=selected.slice(0,12),screens=yield* wodAiReserveDefenseScreens(owner,responseThreats,
+                available.filter(u=>supplied.has(positions.get(u.uid))),plan,budget,old);
+            const responseWeight=t=>Math.max(1,Math.sqrt(t.enemies||t.atRisk||t.neededPower||2))*(t.kind==='counter'?2:t.kind==='corridor'?1.5:1);
             const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);if(job.kind==='territory'&&u._aiTerritoryJob!==job.id){u._aiTerritoryJob=job.id;u._aiTerritoryAssignedAt=now;}};
-            for(const t of selected.slice(0,12)) {
+            for(const [threatIndex,t] of responseThreats.entries()) {
                 yield;
                 const job={...t,members:[],response:true};
                 // Trapped units break outward while a limited relief force attacks the same cut from outside.
@@ -41670,7 +41684,11 @@
                 const opposition=wodAiThreats(owner).filter(e=>responseDistance(e)<hr*8);
                 const neededPower=t.kind==='counter'&&primaryTheater&&!t.primaryTheater?Math.min(2,t.neededPower):t.neededPower||opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*(t.kind==='corridor'?1.4:1.15);
                 let responsePower=available.filter(u=>job.members.includes(u.uid)).reduce((n,u)=>n+wodAiUnitCombatPower(u),0);
-                const candidates=available.filter(u=>!unitJob[u.uid]&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
+                const reservedElsewhere=[...screens.byUnit].filter(([id,target])=>target!==t.id&&!unitJob[id]).length;
+                const remainingWeight=responseThreats.slice(threatIndex).filter(s=>s===t||screens.counts.has(s.id)).reduce((n,s)=>n+responseWeight(s),0);
+                const responseBudget=Math.min(Math.max(0,budget-reservedElsewhere),Math.max(screens.counts.get(t.id)||0,Math.ceil(budget*responseWeight(t)/Math.max(1,remainingWeight))));
+                let recruited=0;
+                const candidates=available.filter(u=>!unitJob[u.uid]&&(!screens.byUnit.has(u.uid)||screens.byUnit.get(u.uid)===t.id)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
                     responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24)&&wodAiResponseCanArrive(u,t,responseDistance(u)));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
@@ -41689,7 +41707,7 @@
                 while(candidates.length) {
                     if(t.kind==='corridor')candidates.sort((a,b)=>cost(a)-cost(b));
                     const u=candidates.shift();
-                    if(want<=0&&responsePower>=neededPower||budget<=0||t.kind!=='corridor'&&job.members.length>=trappedCount+responseLimit)break;
+                    if(want<=0&&responsePower>=neededPower||budget<=0||recruited>=responseBudget||t.kind!=='corridor'&&job.members.length>=trappedCount+responseLimit)break;
                     const previousResponse=old?.jobs.find(j=>j.id===old.unitJob[u.uid]);
                     if(!critical&&previousResponse?.kind==='territory'&&previousResponse.id!==t.id&&
                         selected.some(s=>s.id===previousResponse.id)&&u.target&&(u.stuckTimer||0)<3&&
@@ -41699,7 +41717,7 @@
                     // Routine land skirmishes must not repeatedly recall every
                     // scout. Town emergencies and real supply cuts still can.
                     if(base(u)?.kind==='scout'&&!critical)continue;
-                    add(job,u);want--;budget--;responsePower+=wodAiUnitCombatPower(u);
+                    add(job,u);want--;budget--;recruited++;responsePower+=wodAiUnitCombatPower(u);
                 }
                 if(job.kind==='corridor'){
                     const rear=available.filter(u=>job.members.includes(u.uid)&&u.hp>u.maxHp*(u.isGeneral?.75:.6)).sort((a,b)=>(supplyDistance.get(getHexKey(getNearestHexToPoint(a.x,a.y)))??Infinity)-(supplyDistance.get(getHexKey(getNearestHexToPoint(b.x,b.y)))??Infinity));
@@ -41922,6 +41940,7 @@
                     }
                 }
             }else job.stalledAt=null;
+            if(op.stage==='attack'&&!op.screenIds?.includes(unit.uid)&&wodAiHoldUnsupportedVanguard(unit,job,members,goal))return true;
             const destination=job.objectiveCity?wodAiTownAssaultHex(unit,job.objectiveCity,members):wodAiSectorAdvanceHex(unit,job,members);
             let target=['assemble','recover'].includes(op.stage)?wodAiFormationSlot(unit,job,job.holdHex||getNearestHexToPoint(unit.x,unit.y),goal,members):['secure-approach','protect-flanks'].includes(op.stage)?wodAiFormationSlot(unit,job,op.approach,goal,members):destination&&(wodAiAssaultMarchHex(unit,op,goal,members)||wodAiAdvanceHex(unit,destination,members));
             if(op.stage==='consolidate')target=wodAiDefendStandHex(unit.owner,getNearestHexToPoint(unit.x,unit.y),unit);
@@ -42005,6 +42024,7 @@
             for(const h of gameData.hexList) {
                 if(!reach.has(getHexKey(h))||job.scoutBlocked?.[getHexKey(h)]>clock)continue;
                 if(intel.visible.has(getHexKey(h))||h.type==='mountain'&&!wodCanClimb(unit)||water&&!isWaterHex(h)||!water&&unit.type!=='marine'&&isWaterHex(h))continue;
+                if(isLandArmyUnit(unit)&&!wodIsFriendlyOwner(h.owner,unit.owner)&&!hasOwnerNeighbor(h,unit.owner))continue;
                 // Scout the edge of existing knowledge, rather than selecting a hidden asset.
                 if(!cardinalHexDirections.some(d=>intel.explored.has(`${h.q+d.q},${h.r+d.r}`)))continue;
                 const danger=enemies.reduce((n,e)=>n+(Math.hypot(e.x-h.x,e.y-h.y)<sp*6?1:0),0);
@@ -42042,6 +42062,7 @@
             if(job.frontOperation)return wodAiIssueFrontOffensive(unit,job);
             if(job.kind==='counter'&&wodAiIssueTownDefense(unit,job))return true;
             if(wodAiTacticalFallback(unit,job))return true;
+            if(wodAiIssuePursuit(unit,job))return true;
             if(unit.isGeneral&&job.response&&job.kind!=='relief')return wodAiIssueGeneralOrder(unit,job);
             if(job.response)return wodAiIssueDefenseResponse(unit,job);
             const frontSupport=wodAiFrontSupportFor(unit,job);
@@ -43540,6 +43561,7 @@
                 unit.combatTargetUid=null;
                 if(enemy && enemy.hp>0 && unit.damage > 0 && !unit.retreating && !unit.moraleBroken) {
                     ensureUnitId(enemy);unit.combatTargetUid=enemy.uid;
+                    if(isLandArmyUnit(unit)){unit._aiLastCombatUid=enemy.uid;unit._aiLastCombatAt=wodAiOperationTime();}
                     const modifiers=wodCombatModifiers(unit,enemy),attackerHex=modifiers.from,defenderHex=modifiers.to;
                     const atkMod=modifiers.attack,defMod=modifiers.cover;
                     unit._combatHex=attackerHex;enemy._combatHex=defenderHex;
