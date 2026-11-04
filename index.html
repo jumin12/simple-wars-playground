@@ -11900,7 +11900,7 @@
                     <p class="esc-help-prose"><strong>Hospitals</strong> cost $3,000 and take 60 seconds to build on owned open land. Their pink radius matches a fort and enables healing only; it does not grant supply or defense. Every nation starts each battle with <strong>one general</strong>: a unique armor unit that cannot be trained or replaced after death. Its purple fort-sized radius grants friendly units <strong>+5% attack, toughness and weapon range</strong>, without stacking. It fights and suffers terrain, supply and attrition effects like armor. Embarked generals command from their transports; naval-only nations begin with their general safely aboard one.</p>
                     <p class="esc-help-prose"><strong>Mixed-terrain combat:</strong> attacks combine a unit’s effectiveness on its own tile and the opponent’s tile using the geometric mean, then apply the opponent’s own terrain cover. Thus armor on plains firing into mountains suffers an uphill penalty, while a mountaineer keeps its mountain cover. The selected unit’s <strong>Enemy terrain effects</strong> entry shows resulting outgoing and incoming terrain percentages; morale, veteran, fort and general effects are separate.</p>
                     <h4>Healing</h4>
-                    <p class="esc-help-prose">Recovery is limited to <strong>friendly town cells or a hospital’s pink radius</strong> at <strong>3% maximum HP/manpower per second</strong>, using replacement manpower. Ships can repair at a friendly harbor or within hospital coverage. Ordinary troops and marines cannot heal afloat. Town healing stops throughout the town while it is under attack. <strong>Hospital treatment pauses for each unit that is firing or under enemy fire</strong>; safe patients elsewhere in the radius can still recover, and captured hospitals and forts are destroyed. Recovery ticks only when the hex is <strong>yours</strong>, the unit is <strong>supplied</strong> (a land route to a town, or marine-only ocean/river supply), and, for town recovery, there are <strong>no hostile combat units threatening the town</strong>. HP, manpower, and morale all inch back together, shown with the small green <strong>+</strong> pulse only while strength is actually being restored; the icon clears at full HP and manpower.</p>
+                    <p class="esc-help-prose">Recovery is limited to <strong>friendly town cells or a hospital’s pink radius</strong> at <strong>3% maximum HP/manpower per second</strong>, using replacement manpower. Ships can repair within <strong>three hexes of the nearest friendly town cell</strong> or within hospital coverage. Passing enemy ships do not stop a town’s recruitment or healing unless they engage a unit on its town cells. Ordinary troops and marines cannot heal afloat. Town healing stops throughout the town while it is under attack. <strong>Hospital treatment pauses for each unit that is firing or under enemy fire</strong>; safe patients elsewhere in the radius can still recover, and captured hospitals and forts are destroyed. Recovery ticks only when the hex is <strong>yours</strong>, the unit is <strong>supplied</strong> (a land route to a town, or marine-only ocean/river supply), and, for town recovery, there are <strong>no hostile combat units threatening the town</strong>. HP, manpower, and morale all inch back together, shown with the small green <strong>+</strong> pulse only while strength is actually being restored; the icon clears at full HP and manpower.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=enemy-fronts-20261104"></script>
+    <script src="ai-command.js?v=naval-lifecycle-20261104"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,18 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-04T06:00:00Z",
+                title:"Reliable landings, recovery and steady unit artwork",
+                items:[
+                    "Landing craft repair interrupted pickups and stalled unloading routes for players and AI. Blocked shores receive a wider reachable search, and invalid boarding reservations release both units.",
+                    "Naval recruitment uses the actual invasion roster. Marine raids and warship fleets do not request unneeded landing craft or supply ships; ordinary troop invasions retain a funded wave, its seats, escorts and supply coverage.",
+                    "Marines leave completed island objectives, clear abandoned raid orders and retry stalled marching legs. Wounded marines can return across water for treatment without purchasing a ferry.",
+                    "Wounded retreating troops continue to a real town or hospital instead of stopping after a short fallback. Lost treatment sites release stale recovery orders. Unit artwork keeps a fixed size while nearby troops move, removing the growing and shrinking effect.",
+                    "Coastal group clicks, drawn formations and queued waypoints keep land-connected regiments on land, including marines. Formation offsets no longer turn shore waypoints into accidental water orders; explicit water destinations still work.",
+                    "Naval assaults continue to remaining towns on the same island. Passing enemy vessels stop recruitment or town healing only when exchanging fire with troops on its town cells. Vessels repair within three hexes of the nearest friendly town cell, with no harbor required."
+                ]
+            },
             {
                 at:"2026-11-04T04:15:00Z",
                 title:"Stable enemy fronts, town relief and marine objectives",
@@ -19555,7 +19567,7 @@
                 convoySeaRoute: !!u.convoySeaRoute, tradeValue: u.tradeValue, convoyFromKey:u.convoyFromKey||null,convoyToKey:u.convoyToKey||null,convoyDock:u.convoyDock||null,shake: u.shake || 0,
                 combatTargetUid:u.combatTargetUid||null, spawnFx: u.spawnFx || 0, activeCombatVisual: u.activeCombatVisual || 0, encircledFlash: u.encircledFlash || 0,
                 healingFlash: u.healingFlash || 0, waterFlash: u.waterFlash || 0, waterExposureSeconds:u.waterExposureSeconds||0,supplyPendingSeconds:u.supplyPendingSeconds||0,outOfSupplySeconds:u.outOfSupplySeconds||0,attritionLosses:u.attritionLosses||0,attritionTankLosses:u.attritionTankLosses||0,attritionHpLost:u.attritionHpLost||0, unpaidFlash: u.unpaidFlash || 0,
-                target: tgt, orderTarget: ot, path: pth, fullMarchWaypoints: fmw, marchWpCursor: u.marchWpCursor || 0
+                target: tgt, orderTarget: ot, path: pth, fullMarchWaypoints: fmw, marchWpCursor: u.marchWpCursor || 0, _wodKeepLandFormation:!!u._wodKeepLandFormation
             };
         }
         function wodEntityFromNet(d) {
@@ -26504,7 +26516,7 @@
         function wodHexWalkableForLandPath(unit, hex, allowOpenWater) {
             if(!hex || !unit) return false;
             if(wodIsNavalUnit(unit)) return wodIsOpenWaterHex(hex);
-            if(unit.type === 'marine') {
+            if(unit.type === 'marine'&&!unit._wodKeepLandFormation) {
                 if(hex.type === 'mountain' && !wodCanClimb(unit)) return false;
                 return isWaterHex(hex) || isClaimableLand(hex);
             }
@@ -28690,6 +28702,12 @@
         }
 
         /** True when urban combat or encirclement blocks recruiting from this town. */
+        function wodShipEngagesTown(ship,city,urban=getCityUrbanTerrainHexes(city)) {
+            const inside=u=>u&&u.hp>0&&wodIsHostileOwner(u.owner,ship.owner)&&urban.some(h=>wodHexKeysEqual(h,getNearestHexToPoint(u.x,u.y)));
+            const target=gameData.entities.find(u=>u.uid===ship.combatTargetUid)||ship._combatEngaged&&ship._combatEnemy;
+            if(inside(target)&&ship.damage>0&&!ship.retreating&&!ship.moraleBroken&&Math.hypot(ship.x-target.x,ship.y-target.y)<=(ship.range||0)*wodGeneralStatMultiplier(ship))return true;
+            return gameData.entities.some(u=>inside(u)&&u.combatTargetUid===ship.uid&&u.damage>0&&!u.retreating&&!u.moraleBroken&&Math.hypot(ship.x-u.x,ship.y-u.y)<=(u.range||0)*wodGeneralStatMultiplier(u));
+        }
         function isCitySiegeBlockedForProduction(city) {
             if(!city || !city.id) return false;
             if(isCityEncircledForProduction(city)) return true;
@@ -28703,6 +28721,7 @@
             if(bounds?.urban!==urban){bounds={urban,minX:Infinity,minY:Infinity,maxX:-Infinity,maxY:-Infinity};for(const h of urban){bounds.minX=Math.min(bounds.minX,h.x);bounds.maxX=Math.max(bounds.maxX,h.x);bounds.minY=Math.min(bounds.minY,h.y);bounds.maxY=Math.max(bounds.maxY,h.y);}city._siegeUrbanBounds=bounds;}
             return gameData.entities.some(u=>{
                 if(u.hp<=0||u.type==='convoy'||!wodIsHostileOwner(u.owner,city.owner))return false;
+                if(wodIsNavalUnit(u))return wodShipEngagesTown(u,city,urban);
                 const reach=(u.range||50)+gameData.hexRadius*.5;
                 return u.x>=bounds.minX-reach&&u.x<=bounds.maxX+reach&&u.y>=bounds.minY-reach&&u.y<=bounds.maxY+reach&&urban.some(h=>(u.x-h.x)**2+(u.y-h.y)**2<=reach*reach);
             });
@@ -29423,7 +29442,7 @@
         }
 
         function wodUnitPrefersLandOnlyPath(unit) {
-            return !wodIsNavalUnit(unit) && unit.type !== 'marine' &&
+            return !wodIsNavalUnit(unit) && (unit.type !== 'marine'||unit._wodKeepLandFormation) &&
                 !(unit.type === 'convoy' && unit.convoySeaRoute);
         }
 
@@ -29520,7 +29539,7 @@
             if(wodBridgeHexAtPoint(unit, px, py)) return true;
             if(wodPointOnBridgeForUnit(unit, px, py, 1.18)) return true;
             let h = getNearestHexToPoint(px, py);
-            if(h&&isWaterHex(h)&&isLandArmyUnit(unit)&&!wodOrderIntoWater(unit,h)&&!isWaterHex(getNearestHexToPoint(unit.x,unit.y)))return false;
+            if(h&&isWaterHex(h)&&(isLandArmyUnit(unit)||unit._wodKeepLandFormation)&&!wodOrderIntoWater(unit,h)&&!isWaterHex(getNearestHexToPoint(unit.x,unit.y)))return false;
             if(h&&isWaterHex(h)&&isLandArmyUnit(unit)&&(unit._wodBoardingNoWater||!wodMpIsHumanOwner(unit.owner)&&!unit._wodAiRescueWater))return false;
             if(h && wodUnitUsesLandBridges(unit) && isBridgeHex(h)) return true;
             if(h && wodPathTileWalkable(unit, h, wodOrderIntoWater(unit, h))) return true;
@@ -29929,7 +29948,7 @@
         }
 
         const WOD_TRAFFIC_ORDER_FIELDS = ['target','path','orderTarget','fullMarchWaypoints','marchWpCursor','holding',
-            '_wodOrderIntoWater','_wodRouteUsesBridge','_routeArrowBuildGen','_routeArrowSig','_routeArrowThrottleUntil',
+            '_wodOrderIntoWater','_wodKeepLandFormation','_wodRouteUsesBridge','_routeArrowBuildGen','_routeArrowSig','_routeArrowThrottleUntil',
             '_routeArrowFrozenPts','_routeArrowMarchSig','_routeArrowProgressIdx','_routeArrowFrozenReady'];
         function wodCaptureTrafficOrder(unit) {
             return Object.fromEntries(WOD_TRAFFIC_ORDER_FIELDS.map(k=>[k,unit[k]]));
@@ -29945,7 +29964,7 @@
             const command=wodCaptureTrafficOrder(unit);
             let ok=false;
             try {
-                ok=assignUnitMoveAlongWaypoints(unit,points,{retainRetreat:true,transportInternal:true});
+                ok=assignUnitMoveAlongWaypoints(unit,points,{retainRetreat:true,transportInternal:true,keepLandFormation:!!command._wodKeepLandFormation});
                 if(ok)record.route=wodCaptureTrafficOrder(unit);
             } finally {Object.assign(unit,command);}
             if(ok)unit._trafficYield=record;
@@ -31907,6 +31926,7 @@
             if(!unit || !worldPoints || !worldPoints.length) return;
             const epoch=unit._wodPlayerOrderEpoch=(unit._wodPlayerOrderEpoch||0)+1;
             unit._trafficYield=null;unit.target=null;unit.path=null;
+            unit._wodKeepLandFormation=!!opt?.keepLandFormation;unit._wodOrderIntoWater=false;
             unit.fullMarchWaypoints=worldPoints.map(p=>({x:p.x,y:p.y}));unit.marchWpCursor=0;
             unit.orderTarget={...unit.fullMarchWaypoints.at(-1)};invalidateUnitOrderArrowCache(unit);
             wodPlayerOrderQueue.push({
@@ -32394,8 +32414,11 @@
                 }
                 if(points.some(p=>!p))continue;
                 if(!acknowledged){acknowledged=true;wodPlayUnitMoveSound(units);}
-                if(syncDone<3&&assignUnitMoveAlongWaypoints(unit,points))syncDone++;
-                else wodQueuePlayerMoveOrder(unit,points);
+                const start=getNearestHexToPoint(unit.x,unit.y),region=units.length>1&&!wodIsNavalUnit(unit)&&start&&!isWaterHex(start)&&wodTransportLandingRegion(unit,start);
+                const keepLandFormation=!!region&&points.every(p=>region.has(getHexKey(getNearestHexToPoint(p.x,p.y))));
+                const opt={keepLandFormation};
+                if(syncDone<3&&assignUnitMoveAlongWaypoints(unit,points,opt))syncDone++;
+                else wodQueuePlayerMoveOrder(unit,points,opt);
             }
         }
 
@@ -32584,6 +32607,7 @@
             let endPt = exactLast ? { x: exactLast.x, y: exactLast.y } : marchPts[marchPts.length - 1];
             const direct=wodUniformDryChord(unit,startPt,endPt);
             let fullHex = direct?[]:buildConcatenatedHexPath(unit, marchPts, startPt, true, { forOrder: true });
+            if(unit._wodKeepLandFormation&&wodPathCrossesOpenWater(fullHex))return false;
             if(!direct&&fullHex.length <= 1) return false;
             let corridor = direct?[startPt,endPt]:wodWorldPointsFromHexMarchPath(unit, fullHex, endPt);
             corridor[0] = { x: unit.x, y: unit.y };
@@ -32636,6 +32660,7 @@
             }
             if(!worldPoints || worldPoints.length === 0) return false;
             let fromAdvance = !!(opt && opt.fromLegAdvance);
+            if(!fromAdvance&&!unit._trafficMoving)unit._wodKeepLandFormation=!!opt?.keepLandFormation;
             if(!fromAdvance&&!wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit))unit._wodAiRescueWater=isWaterHex(getNearestHexToPoint(unit.x,unit.y));
             if(!fromAdvance) invalidateUnitOrderArrowCache(unit);
             unit.blockedTimer = 0;
@@ -33211,7 +33236,7 @@
             const hospital=(gameData.hospitals||[]).find(h=>wodIsFriendlyOwner(wodEffectiveHospitalOwner(h),unit.owner)&&Math.hypot(h.x-unit.x,h.y-unit.y)<=wodFortCombatAuraRadiusPx());
             if(hospital)return {kind:'hospital',site:hospital};
             const city=gameData.cities.find(c=>wodIsFriendlyOwner(c.owner,unit.owner)&&
-                (hex.type==='urban'&&hex.cityId===c.id||wodIsNavalUnit(unit)&&c.hasHarbor&&getCityUrbanTerrainHexes(c).some(h=>wodIsFriendlyOwner(h.owner,unit.owner)&&Math.hypot(h.x-unit.x,h.y-unit.y)<(gameData.hexRadius||20)*2.5)));
+                (hex.type==='urban'&&hex.cityId===c.id||wodIsNavalUnit(unit)&&getCityUrbanTerrainHexes(c).some(h=>wodIsFriendlyOwner(h.owner,unit.owner)&&wodHexCellDist(hex,h)<=3)));
             return city?{kind:'city',site:city}:null;
         }
         function wodEffectiveHospitalOwner(h) {
@@ -33268,7 +33293,7 @@
                 unit.isGeneral=true;gameData._generalIssuedOwners.add(owner);gameData._generalAuraCache=null;
             }
         }
-        function wodUnitHealingCombatBlocked(unit) {
+        function wodUnitHealingCombatBlocked(unit,care) {
             // Check both weapon ranges, including incoming fire on retreating
             // troops and unarmed support boats. Do not rely on fading FX or on
             // which faction happened to update first in this simulation tick.
@@ -33279,6 +33304,7 @@
             let blocked=false;
             const test=other=>{
                 if(blocked||other===unit||other.hp<=0||other.boardTransportUid||other.type==='convoy'||!wodIsHostileOwner(other.owner,unit.owner))return;
+                if(care?.kind==='city'&&!wodIsNavalUnit(unit)&&wodIsNavalUnit(other)&&!wodShipEngagesTown(other,care.site))return;
                 const own=unit.damage>0&&!unit.retreating&&!unit.moraleBroken?(unit.range||0)*wodGeneralStatMultiplier(unit):0;
                 const incoming=other.damage>0&&!other.retreating&&!other.moraleBroken?(other.range||0)*wodGeneralStatMultiplier(other):0;
                 if(Math.hypot(other.x-unit.x,other.y-unit.y)<=Math.max(own,incoming))blocked=true;
@@ -33302,9 +33328,10 @@
             if(!care) return false;
             // Hospital patients stop recovering while exchanging fire; safe
             // patients elsewhere in the same radius can continue treatment.
-            if(wodUnitHealingCombatBlocked(unit))return false;
+            if(wodUnitHealingCombatBlocked(unit,care))return false;
             if(care.kind==='hospital')return true;
-            return !isCitySiegeBlockedForProduction(care.site) && countNearbyUnits(unit.owner, unit.x, unit.y, 115, true) === 0;
+            return !isCitySiegeBlockedForProduction(care.site)&&!gameData.entities.some(other=>other.hp>0&&other.type!=='convoy'&&wodIsHostileOwner(other.owner,unit.owner)&&
+                Math.hypot(other.x-unit.x,other.y-unit.y)<115&&(!wodIsNavalUnit(other)||wodShipEngagesTown(other,care.site)));
         }
 
         function updateUnitHealing(unit, dt) {
@@ -33702,8 +33729,8 @@
             if(unit.cargo?.isGeneral)effects.push({label:'General aboard',stats:'Unique commander · Unload to fight as armor',detail:'The general still commands within the purple radius while aboard this transport. It cannot fire or heal as a passenger; sinking the transport loses the general permanently.',block:true});
             if(wodGeneralForUnit(unit))effects.push({label:'General command',stats:'+5% attack, toughness and range',detail:'A friendly general covers this unit. Command does not stack; incoming combat damage is divided by 1.05, and attack and weapon range are multiplied by 1.05; command never changes movement speed. Supply, attrition and healing requirements remain unchanged.',block:true});
             const healingSite=wodUnitHealingSite(unit);
-            if(healingSite)effects.push({label:healingSite.kind==='hospital'?'Hospital care':'Town recovery',stats:'Up to +3% strength/s · Uses manpower',detail:'Requires supply and replacement manpower. Town healing stops while the town is attacked. Hospital treatment pauses while this unit is firing or under enemy fire; other safe patients can still recover. Ships can repair near a friendly harbor or hospital; other units cannot heal in open water.',block:true});
-            else if(unit.type!=='convoy'&&(wodUnitMissingStrength(unit)||unit.moraleBroken))effects.push({label:'Medical support needed',stats:'Recover at a town or hospital',detail:'Open countryside and forts alone do not heal units. Return to supplied friendly town cells or a hospital’s pink radius. Ships need a harbor or hospital; ordinary land units and marines must leave open water.',block:true});
+            if(healingSite)effects.push({label:healingSite.kind==='hospital'?'Hospital care':'Town recovery',stats:'Up to +3% strength/s · Uses manpower',detail:'Requires supply and replacement manpower. Town healing stops while the town is attacked. Hospital treatment pauses while this unit is firing or under enemy fire; other safe patients can still recover. Ships repair within three hexes of a friendly town cell or near a hospital; other units cannot heal in open water.',block:true});
+            else if(unit.type!=='convoy'&&(wodUnitMissingStrength(unit)||unit.moraleBroken))effects.push({label:'Medical support needed',stats:'Recover at a town or hospital',detail:'Open countryside and forts alone do not heal units. Return to supplied friendly town cells or a hospital’s pink radius. Ships need a friendly town cell within three hexes or a hospital; ordinary land units and marines must leave open water.',block:true});
             let hex = getNearestHexToPoint(unit.x, unit.y);
             if(hex && unit.type !== 'convoy') {
                 let terrCombat = getTerrainCombatEffect(unit, hex);
@@ -35470,6 +35497,7 @@
         function wodClearRetreatOnArrival(unit) {
             if(!unit || unit.moraleBroken) return;
             if(unit.retreating || unit._wodOrderedRetreat) {
+                if(!wodMpIsHumanOwner(unit.owner)&&(unit.hp<unit.maxHp*.94||(unit.manpower??unit.maxManpower)<unit.maxManpower*.94))unit._medicalRecovering=true;
                 unit.retreating = false;
                 unit._wodOrderedRetreat = false;
             }
@@ -47988,15 +48016,9 @@
         }
 
         function wodCrowdedUnitMarkerRadius(unit) {
-            const radius=unit.radius||10;let fit=1;
-            forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,radius*3+45,other=>{
-                if(other===unit||other.owner!==unit.owner||other.hp<=0||other.boardTransportUid)return;
-                const span=1.4*(radius+(other.radius||10))+2;
-                fit=Math.min(fit,Math.max(Math.abs(unit.x-other.x),Math.abs(unit.y-other.y))/span);
-            });
-            // Shared sprite sizes keep packed counters readable; physical sizes
-            // and movement stay unchanged, regardless of selection size.
-            return radius*(fit<.86?.82:fit<.99?.9:1);
+            // Crowd spacing is solved by movement, never by resizing the art.
+            // Crossing density thresholds used to make marching armies pulse.
+            return unit.radius||10;
         }
 
         function drawUnitSkin(ctx, unit, radius, color) {
@@ -53300,7 +53322,7 @@
                 const water=type==='water',blocked=naval?!water:type==='mountain'&&!wodCanClimb(unit);
                 const u={...probe,inWater:water&&!marine&&!naval,amphibInWater:water&&marine};
                 const h={type},attack=getTerrainAttackModifier(u,h),damage=getTerrainDefenseModifier(u,h);
-                const note=blocked?'Cannot enter':water?(naval?'Repairs at a harbor/hospital only · No water attrition':marine?'No water attrition · Cannot heal afloat':'10s grace, then −3.5% max HP/s · Cannot heal · Supply ships do not protect swimmers'):type==='bridge'?'Completed bridges count as land':'Supply from a connected friendly town or nearby supply ship';
+                const note=blocked?'Cannot enter':water?(naval?'Repairs within 3 town hexes or a hospital · No water attrition':marine?'No water attrition · Cannot heal afloat':'10s grace, then −3.5% max HP/s · Cannot heal · Supply ships do not protect swimmers'):type==='bridge'?'Completed bridges count as land':'Supply from a connected friendly town or nearby supply ship';
                 return '<div class="info-terrain-entry" style="border-bottom:1px solid #60778755;padding:9px 0"><strong>'+wodEscapeEffectInner(terrainLabel(type))+'</strong><div style="display:flex;flex-wrap:wrap;gap:6px 12px;margin:5px 0;color:#d9e5ec">'+(blocked?'Movement blocked':'<span>Attack '+pct(attack)+'</span><span>Damage taken '+pct(damage)+'</span><span>Speed '+(water&&!marine&&!naval?'46% ordered / 28% idle':pct(getUnitSpeedMultiplier(u,h)))+'</span>')+'</div><small style="color:#a9c1cc">'+note+'</small></div>';
             }).join('');
             const html='<p><strong>'+wodEscapeEffectInner(wodProductionLabel(unit.type))+'</strong> · This unit’s terrain modifiers. 100% is normal; lower damage taken means better cover.</p><h4>Current effects</h4><div class="info-terrain-active-effects effect-list"></div><h4>Terrain by tile</h4>'+rows;
@@ -55279,27 +55301,25 @@
             return pathPts;
         }
 
-        function wodApplyShiftWaypointPaths(units, wps, line) {
-            if(!units || !units.length || !wps || !wps.length) return;
-            let offsets = wodGroupFormationOffsetMap(units);
-            const lineSlots=line?wodLineFormationPlan(units,line.start,line.end).slots:null;
-            if(line && units.length > 1)
-                wodSortUnitsAlongLine(units, line.start, line.end);
-            wodApplyPlayerMoveOrders(units, (unit) => {
-                let off = offsets.get(unit) || { ox: 0, oy: 0 };
-                let lastIdx = wps.length - 1;
-                let pathPts = [];
-                for(let wi = 0; wi < wps.length; wi++) {
-                    let dest;
-                    if(line && wi === lastIdx)
-                        dest = lineSlots.get(unit);
-                    else
-                        dest = { x: wps[wi].x + off.ox, y: wps[wi].y + off.oy };
-                    let snapped = dest&&wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
-                    if(snapped) pathPts.push(snapped);
+        function wodGroupWaypointPaths(units,wps,line) {
+            const paths=new Map(units.map(u=>[u,[]]));
+            for(let wi=0;wi<wps.length;wi++){
+                const slots=wi===wps.length-1&&line?wodLineFormationPlan(units,line.start,line.end).slots:wodGroupDestinationSlots(units,wps[wi]);
+                for(const unit of units){
+                    const path=paths.get(unit),dest=slots.get(unit);if(!path)continue;
+                    const snapped=dest&&wodSnapWaypointWorldPoint(unit,dest.x,dest.y);
+                    if(!snapped){paths.set(unit,null);continue;}
+                    path.push(snapped);
                 }
-                return wodTrimNearMarchPoints(unit, pathPts);
-            });
+            }
+            for(const unit of units)if(paths.get(unit))paths.set(unit,wodTrimNearMarchPoints(unit,paths.get(unit)));
+            return paths;
+        }
+
+        function wodApplyShiftWaypointPaths(units, wps, line) {
+            if(!units?.length||!wps?.length)return;
+            const paths=wodGroupWaypointPaths(units,wps,line);
+            wodApplyPlayerMoveOrders(units,u=>paths.get(u));
         }
 
         function seedPlayerShiftWaypointsFromActiveMarch(units) {
@@ -55386,26 +55406,9 @@
         function wodSendOrApplyShiftWaypointPaths(units, wps, line) {
             if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
             if(wps.length > 32) wps.splice(0, wps.length - 32);
-            let offsets = wodGroupFormationOffsetMap(units);
             let order = units.slice();
-            const lineSlots=line?wodLineFormationPlan(units,line.start,line.end).slots:null;
-            if(line && order.length > 1)
-                wodSortUnitsAlongLine(order, line.start, line.end);
-            let paths = order.map((unit) => {
-                let off = offsets.get(unit) || { ox: 0, oy: 0 };
-                let lastIdx = wps.length - 1;
-                let pathPts = [];
-                for(let wi = 0; wi < wps.length; wi++) {
-                    let dest;
-                    if(line && wi === lastIdx)
-                        dest = lineSlots.get(unit);
-                    else
-                        dest = { x: wps[wi].x + off.ox, y: wps[wi].y + off.oy };
-                    let snapped = dest&&wodSnapWaypointWorldPoint(unit, dest.x, dest.y);
-                    if(snapped) pathPts.push(snapped);
-                }
-                return wodTrimNearMarchPoints(unit, pathPts);
-            });
+            const grouped=wodGroupWaypointPaths(order,wps,line);
+            let paths=order.map(u=>grouped.get(u));
             if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
                 if(wodMpSendCmd({
                     kind: 'shiftMarch',
@@ -57889,7 +57892,7 @@
                     rows.push({land:h,water:w,score});
                 }
             }
-            rows.sort((a,b)=>a.score-b.score);return rows.slice(0,40);
+            rows.sort((a,b)=>a.score-b.score);return rows.filter(p=>(transport._ferryBlockedShores?.[getHexKey(p.land)]||0)<=(transport._ferryElapsed||0)).slice(0,transport._ferryRepairing?160:40);
         }
         function wodOrderBoardTransport(unit,transport) {
             if(!unit||!transport||unit.hp<=0||transport.hp<=0||unit.owner!==transport.owner||wodIsNavalUnit(unit)||unit.type==='convoy'||transport.type!=='transport'||transport.cargo||transport.pickupUid&&transport.pickupUid!==unit.uid)return false;
@@ -57900,7 +57903,8 @@
                 assignUnitMoveAlongWaypoints(transport,[{x:unit.x,y:unit.y}],{transportInternal:true});return true;
             }
             let pair=null,path=null,seaPath=null;
-            for(const p of wodTransportShorePairs(unit,transport,unit).slice(0,16)) {
+            for(const p of wodTransportShorePairs(unit,transport,unit).slice(0,transport._ferryRepairing?80:16)) {
+                if(!wodNavalDestinationClear(transport,p.water))continue;
                 const dry=wodLandBfsPath(unit,from,p.land,16000,true);
                 if(!dry.length||!wodHexKeysEqual(dry[dry.length-1],p.land))continue;
                 const sea=wodWaterBfsPath(transport,water,p.water,18000);
@@ -58052,14 +58056,6 @@
             wodAiPlanMedicalFerries(owner,transports);
             wodAiNavalRecon(owner,transports);
             transports=transports.filter(t=>!t._aiMedicalFor&&!(t._aiScoutUntil>clock));
-            for(const t of transports.filter(t=>t.owner===owner&&t.hp>0&&!t.retreating&&!t._trafficYield&&(t.cargo||t.pickupUid))){
-                const old=t._aiFleetProgress,passenger=t.pickupUid&&gameData.entities.find(u=>u.uid===t.pickupUid);
-                if(!old||Math.hypot(t.x-old.x,t.y-old.y)>(gameData.hexRadius||20)*.7||passenger&&Math.hypot(passenger.x-(old.px??passenger.x),passenger.y-(old.py??passenger.y))>(gameData.hexRadius||20)*.7){t._aiFleetProgress={x:t.x,y:t.y,px:passenger?.x,py:passenger?.y,at:clock};continue;}
-                if(clock-old.at<18000)continue;
-                t._aiFleetProgress={x:t.x,y:t.y,at:clock};
-                if(t.cargo&&wodAiFerryCanSail(t)){const goal=t.ferryGoal||t.unloadGoal;if(goal){t.unloadHexKey=null;wodClearTransportMove(t);wodOrderUnloadTransport(t,goal);}}
-                else if(t.pickupUid){const waiting=gameData.entities.find(u=>u.uid===t.pickupUid);if(waiting){waiting.boardTransportUid=null;waiting._wodBoardingNoWater=false;waiting._needsTransport=true;wodClearTransportMove(waiting);}t.pickupUid=null;t.pickupLandKey=null;wodClearTransportMove(t);}
-            }
             const targets=wodAiNavalAssaultTargets(owner);
             const supplyShips=gameData.entities.filter(u=>u.owner===owner&&u.type==='supply'&&u.hp>0&&!u._medicalRecovering&&!u.retreating&&!u.moraleBroken&&!(u._aiMedicalSupplyUntil>clock));
             wodAiPlanMarineRaids(owner,gameData.entities.filter(u=>u.owner===owner&&u.type==='marine'));
@@ -58081,6 +58077,9 @@
             // normal land route never produced a movement target in the first place.
             for(const u of candidates){
                 if(u._navalEvacuating)continue;
+                if(u.type!=='marine'&&(!mission||!mission.troops.includes(u.uid))){
+                    u._needsTransport=false;u._navalAssaultGoal=null;continue;
+                }
                 const from=getNearestHexToPoint(u.x,u.y);if(!from||isWaterHex(from)&&u.type!=='marine')continue;
                 let target=mission?.goal||targets.slice().sort((a,b)=>wodAiDist2(u.x,u.y,a.x,a.y)*(a.shore?1:.25)-wodAiDist2(u.x,u.y,b.x,b.y)*(b.shore?1:.25)).find(c=>{const region=regionFor(c);return region&&!region.has(getHexKey(from));});
                 if(target?.shore){const region=regionFor(target),town=targets.filter(c=>!c.shore&&region.has(getHexKey(getNearestHexToPoint(c.x,c.y)))).sort((a,b)=>wodAiDist2(target.x,target.y,a.x,a.y)-wodAiDist2(target.x,target.y,b.x,b.y))[0];if(town)target=town;}
@@ -58162,6 +58161,38 @@
             }else wodAiScoutFleet(owner,transports);
             wodAiNavalRecon(owner,transports);
         }
+        function wodRepairFerryProgress(t,dt) {
+            t._ferryElapsed=(t._ferryElapsed||0)+dt;
+            const passenger=t.pickupUid&&gameData.entities.find(u=>u.uid===t.pickupUid);
+            const goal=t.cargo?(t.unloadGoal||t.ferryGoal):passenger;
+            if(!goal||t.retreating||t._trafficYield||t._combatEngaged||t.cargo&&!wodAiFerryCanSail(t)){
+                t._ferryProgress=null;return;
+            }
+            const key=t.cargo?'unload:'+t.cargo.uid+':'+t.unloadHexKey:'pickup:'+passenger.uid+':'+t.pickupLandKey;
+            let p=t._ferryProgress;
+            if(!p||p.key!==key)p=t._ferryProgress={key,x:t.x,y:t.y,px:passenger?.x,py:passenger?.y,idle:0,lost:0};
+            const moved=Math.hypot(t.x-p.x,t.y-p.y)>4||passenger&&Math.hypot(passenger.x-p.px,passenger.y-p.py)>4;
+            if(moved){p.x=t.x;p.y=t.y;p.px=passenger?.x;p.py=passenger?.y;p.idle=0;}else p.idle+=dt;
+            const boatDone=!t.target&&!t.path?.length,unitDone=!passenger?.target&&!passenger?.path?.length;
+            p.lost=boatDone&&(!passenger||unitDone)?p.lost+dt:0;
+            if(p.idle<8&&p.lost<2)return;
+            // Re-plan actual reachable shores, rather than perpetually retaining
+            // a stale pickup lease or a blocked far-away unloading target.
+            const shore=t.cargo?t.unloadHexKey:t.pickupLandKey;
+            t._ferryBlockedShores||={};
+            for(const k of Object.keys(t._ferryBlockedShores))if(t._ferryBlockedShores[k]<=t._ferryElapsed)delete t._ferryBlockedShores[k];
+            if(shore)t._ferryBlockedShores[shore]=t._ferryElapsed+12;
+            t._ferryRepairing=true;
+            let repaired=false;
+            if(passenger)repaired=wodOrderBoardTransport(passenger,t);
+            else if(t.cargo)repaired=wodOrderUnloadTransport(t,goal);
+            t._ferryRepairing=false;t._ferryProgress=null;
+            if(!repaired&&passenger){
+                passenger.boardTransportUid=null;passenger._wodBoardingNoWater=false;
+                wodClearTransportMove(passenger);passenger.aiOrderUntil=0;
+                t.pickupUid=null;t.pickupLandKey=null;wodClearTransportMove(t);
+            }
+        }
         function wodUpdateTransports(dt) {
             if(gameData.mp?.enabled&&!gameData.mp.isHost)return;
             const transports=gameData.entities.filter(t=>t.type==='transport');
@@ -58169,7 +58200,7 @@
                 if(t.hp<=0){if(t.pickupUid){const waiting=gameData.entities.find(u=>u.uid===t.pickupUid);if(waiting){waiting.boardTransportUid=null;waiting._wodBoardingNoWater=false;wodClearTransportMove(waiting);}t.pickupUid=null;}if(t.cargo){t.cargo.x=t.x;t.cargo.y=t.y;applyDamage(t.cargo,t.cargo.maxHp*2,t.lastAttackerOwner||0);t.cargo=null;}continue;}
                 if(t.pickupUid) {
                     const u=gameData.entities.find(u=>u.uid===t.pickupUid);
-                    if(!u||u.hp<=0||u.owner!==t.owner||u.boardTransportUid!==t.uid){t.pickupUid=null;continue;}
+                    if(!u||u.hp<=0||u.owner!==t.owner||u.boardTransportUid!==t.uid){t.pickupUid=null;t.pickupLandKey=null;t._ferryProgress=null;wodClearTransportMove(t);continue;}
                     const land=gameData.hexes[t.pickupLandKey],uh=getNearestHexToPoint(u.x,u.y),th=getNearestHexToPoint(t.x,t.y);
                     if(uh&&((land&&!isWaterHex(uh))||(isWaterHex(uh)&&wodOpenWaterChordClear(t,u.x,u.y,t.x,t.y)))&&th&&isWaterHex(th)&&Math.hypot(u.x-t.x,u.y-t.y)<=gameData.hexRadius*1.35*1.8) {
                         t._ferryHome={x:t.x,y:t.y};t.cargo=u;t.pickupUid=null;u.boardTransportUid=null;u._wodBoardingNoWater=false;u.selected=false;wodClearTransportMove(u);wodClearTransportMove(t);
@@ -58184,6 +58215,7 @@
                         if(!wodTryUnloadTransport(t)&&(close||!t.target)){t._unloadWait=(t._unloadWait||0)+dt;if(t._unloadWait>=3){t._unloadWait=0;wodOrderUnloadTransport(t,t.unloadGoal||land);}}else t._unloadWait=0;
                     }
                 }
+                wodRepairFerryProgress(t,dt);
             }
             if(transports.length)gameData.unitSpatialGrid=buildUnitSpatialGrid();
             gameData._transportAiTimer=(gameData._transportAiTimer||0)+dt;
