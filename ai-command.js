@@ -136,9 +136,16 @@ function wodAiDefenseDemand(owner, ready, sectors, strategy=wodAiBattlePlan(owne
     return {line,reserve,frontage,contested,ranked,armyFloor:Math.min(140,guards+frontage+Math.max(4,towns.length*2)+Math.ceil(frontage*.2))};
 }
 
-// Search short cross-sections between opposite hostile flanks. Removing a tested
-// section must actually disconnect troops from every town; coastlines alone
-// cannot manufacture a pocket. Work is capped independently of total map area.
+// A coast or map edge can close the other side of an enemy's pincer. Bridges
+// remain real supply corridors, and unknown hostile land is not revealed.
+function wodAiCorridorEdge(owner,h,d,explored) {
+    const n=gameData.hexes[(h.q+d.q)+','+(h.r+d.r)];
+    if(!n||isWaterHex(n)&&!isBridgeHex(n))return -1;
+    return wodIsHostileOwner(n.owner,owner)&&(!explored||explored.has(getHexKey(n)))?1:0;
+}
+
+// Removing a tested section must actually disconnect troops from every town;
+// a coast alone cannot manufacture a pocket. Work remains bounded and yielding.
 function wodAiPredictCorridors(owner, tiles, index, edges, roots, supplied, weights, enemies, supplyDepth) {
     const scan=wodAiPredictCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,enemies,supplyDepth);let step;do{step=scan.next();}while(!step.done);return step.value;
 }
@@ -163,7 +170,8 @@ function* wodAiPredictCorridorSteps(owner, tiles, index, edges, roots, supplied,
         const queue=[{i:seed.i,path:[seed.i]}],seen=new Set([seed.i]);let section=null;
         for(let q=0;q<queue.length&&q<160;q++){
             const {i,path}=queue[q],h=tiles[i];
-            if(path.length>=3&&outward(i).some(n=>(n.x-h.x)*normal.x+(n.y-h.y)*normal.y<-.2*hr*hr)){section=path;break;}
+            if(path.length>=3&&cardinalHexDirections.some(d=>wodAiCorridorEdge(owner,h,d,explored)!==0&&
+                (d.q*normal.x+d.r*normal.y)<0)){section=path;break;}
             if(path.length>=6)continue;
             for(const j of edges[i])if(!seen.has(j)&&supplied.has(j)&&Math.hypot(tiles[j].x-start.x,tiles[j].y-start.y)<hr*7.5){seen.add(j);queue.push({i:j,path:path.concat(j)});}
         }
@@ -179,7 +187,8 @@ function* wodAiPredictCorridorSteps(owner, tiles, index, edges, roots, supplied,
         const closing=visible.filter(e=>Math.hypot(e.x-center.x,e.y-center.y)<hr*12);
         const closureSeconds=Math.min(...closing.map(e=>Math.max(0,Math.hypot(e.x-center.x,e.y-center.y)-(e.range||50))/Math.max(1,(e.speed||15)*WOD_MOVE_SPEED_FACTOR)))+section.length*1.5;
         const withdrawSeconds=wodAiCorridorEvacSeconds(owner,riskTileKeys,index,supplyDepth,neckDepth);
-        sections.push({i:section[Math.floor(section.length/2)],troops,area,keys:section,riskTileKeys,predictive:true,closureSeconds,withdrawSeconds});
+        const screenIndices=[section[0],section[section.length-1]].filter(i=>outward(i).length);
+        sections.push({i:section[Math.floor(section.length/2)],troops,area,keys:section,screenIndices,riskTileKeys,predictive:true,closureSeconds,withdrawSeconds});
     }
     return sections.concat(yield* wodAiWideCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,visible,supplyDepth));
 }
@@ -198,7 +207,6 @@ function* wodAiWideCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,
     const load=weights.slice(),ordered=[...supplied];
     for(let n=ordered.length-1;n>=0;n--){const i=ordered[n],parent=edges[i].find(j=>(supplyDepth.get(j)??Infinity)<supplyDepth.get(i));if(parent!==undefined)load[parent]+=load[i];if((n&255)===255)yield;}
     const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
-    const hostile=(h,d)=>{const n=gameData.hexes[(h.q+d.q)+','+(h.r+d.r)];return n&&!isWaterHex(n)&&wodIsHostileOwner(n.owner,owner)&&(!explored||explored.has(getHexKey(n)));};
     for(const axis of ['q','r']){
         const other=axis==='q'?'r':'q',rows=new Map();
         let examined=0;
@@ -209,12 +217,14 @@ function* wodAiWideCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,
             const consider=()=>{
                 if(run.length<=6)return;
                 const a=tiles[run[0]],b=tiles[run[run.length-1]],d=axis==='q'?{q:0,r:1}:{q:1,r:0};
-                if(!hostile(a,{q:-d.q,r:-d.r})||!hostile(b,d)||run.some(i=>roots.includes(i)))return;
+                const sides=[wodAiCorridorEdge(owner,a,{q:-d.q,r:-d.r},explored),wodAiCorridorEdge(owner,b,d,explored)];
+                if(sides.includes(0)||!sides.includes(1)||run.some(i=>roots.includes(i)))return;
+                const gates=[a,b].filter((h,i)=>sides[i]===1);
                 const traffic=run.reduce((n,i)=>n+load[i],0);if(traffic<1)return;
-                const pressure=enemies.filter(e=>Math.min(Math.hypot(e.x-a.x,e.y-a.y),Math.hypot(e.x-b.x,e.y-b.y))<hr*10&&wodAiCanReach(e,a));
+                const pressure=enemies.filter(e=>gates.some(g=>Math.hypot(e.x-g.x,e.y-g.y)<hr*10&&wodAiCanReach(e,g)));
                 if(!pressure.length)return;
-                const distance=Math.min(...pressure.map(e=>Math.min(Math.hypot(e.x-a.x,e.y-a.y),Math.hypot(e.x-b.x,e.y-b.y))));
-                candidates.push({keys:run.slice(),gates:[a,b],pressure,score:(distance+run.length*hr*.08)/(1+Math.sqrt(traffic)*.1)});
+                const distance=Math.min(...pressure.flatMap(e=>gates.map(g=>Math.hypot(e.x-g.x,e.y-g.y))));
+                candidates.push({keys:run.slice(),gates,pressure,score:(distance+run.length*hr*.08)/(1+Math.sqrt(traffic)*.1)});
             };
             for(const i of row){if(run.length&&!edges[run[run.length-1]].includes(i)){consider();run=[];}run.push(i);}consider();
         }
@@ -242,7 +252,7 @@ function* wodAiWideCorridorSteps(owner,tiles,index,edges,roots,supplied,weights,
             Math.max(0,Math.hypot(e.x-tiles[i].x,e.y-tiles[i].y)-hr*(e.type==='heavy'?2:1))/speed(e)))))+2;
         const withdrawSeconds=wodAiCorridorEvacSeconds(owner,riskTileKeys,index,supplyDepth,neckDepth);
         const center=candidate.keys[Math.floor(candidate.keys.length/2)];
-        result.push({i:center,troops,area,keys:candidate.keys,riskTileKeys,predictive:true,wide:true,closureSeconds,withdrawSeconds});
+        result.push({i:center,troops,area,keys:candidate.keys,screenIndices:candidate.gates.map(g=>index.get(getHexKey(g))),riskTileKeys,predictive:true,wide:true,closureSeconds,withdrawSeconds});
     }
     return result;
 }
@@ -2047,7 +2057,7 @@ function wodAiSupplyRetreatHop(unit,defense) {
 }
 
 function wodAiTownDefenseThreats(owner,army) {
-    const hr=gameData.hexRadius||20,foes=wodAiThreats(owner,false).filter(e=>isLandArmyUnit(e));
+    const hr=gameData.hexRadius||20,foes=wodAiThreats(owner,false).filter(e=>isLandArmyUnit(e)||e.type==='marine');
     let cache=gameData._aiTownApproaches;
     if(cache?.hexes!==gameData.hexes)cache=gameData._aiTownApproaches={hexes:gameData.hexes,owners:{}};
     const previous=cache.owners[owner]||{},now=wodAiOperationTime();
