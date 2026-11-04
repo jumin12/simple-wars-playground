@@ -13053,7 +13053,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=pursuit-hospitals-20261102"></script>
+    <script src="ai-command.js?v=flanks-defense-20261103"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13072,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-03T21:00:00Z",
+                title:"Stronger flanks and defensive responses",
+                items:[
+                    "Armies can flank along one open side when a coast, river or mountain blocks a full encirclement. Larger forces coordinate up to 32 troops, retaining a fixing force while their wings advance on connected land routes.",
+                    "Town relief and territorial defense scale to the observed enemy's combat strength. Defenders form an interception line and counterattack with troops already nearby, while distant reinforcements join without delaying a viable response. Town and fort guards remain protected."
+                ]
+            },
             {
                 at:"2026-11-03T20:07:33Z",
                 title:"Tight large-army formations",
@@ -41370,7 +41378,7 @@
                 // Trapped units break outward while a limited relief force attacks the same cut from outside.
                 for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
                 const trappedCount=job.members.length;
-                let want=t.kind==='counter'?(primaryTheater&&t!==primaryTheater?Math.min(2,Math.max(1,Math.ceil(t.neededPower*.35))):Math.min(12,Math.max(1,Math.ceil(t.neededPower*.85)))):t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(6,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
+                let want=t.kind==='counter'?(primaryTheater&&t!==primaryTheater?Math.min(2,Math.max(1,Math.ceil(t.neededPower*.35))):Math.min(24,Math.max(1,Math.ceil(t.neededPower*.85)))):t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(12,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
                 const responsePoints=t.screenPoints||[t.holdHex];
                 const responseDistance=u=>Math.min(...responsePoints.map(p=>Math.hypot(u.x-p.x,u.y-p.y)));
                 const opposition=wodAiThreats(owner).filter(e=>responseDistance(e)<hr*8);
@@ -41388,8 +41396,9 @@
                         (base(u)?.phase==='assault'&&neededPower<4?hr*hr*150:0):0)+
                     (old?.unitJob[u.uid]===t.id?-hr*hr*(critical?20:200):0);
                 candidates.sort((a,b)=>cost(a)-cost(b));
+                const responseLimit=t.kind==='counter'&&t.primaryTheater?24:t.kind==='territory'?Math.min(20,Math.max(6,Math.ceil(neededPower*1.2))):10;
                 for(const u of candidates) {
-                    if(want<=0&&responsePower>=neededPower||budget<=0||t.kind!=='corridor'&&job.members.length>=trappedCount+10)break;
+                    if(want<=0&&responsePower>=neededPower||budget<=0||t.kind!=='corridor'&&job.members.length>=trappedCount+responseLimit)break;
                     const previousResponse=old?.jobs.find(j=>j.id===old.unitJob[u.uid]);
                     if(!critical&&previousResponse?.kind==='territory'&&previousResponse.id!==t.id&&
                         selected.some(s=>s.id===previousResponse.id)&&u.target&&(u.stuckTimer||0)<3&&

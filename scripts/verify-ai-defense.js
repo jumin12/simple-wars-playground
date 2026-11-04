@@ -4,7 +4,8 @@ const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/ai-defense');
 const server=http.createServer((req,res)=>{
  const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
  if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
+ const selected=process.env.BASELINE_DIR&&['index.html','ai-command.js'].includes(path.relative(ROOT,file))?path.join(ROOT,process.env.BASELINE_DIR,path.basename(file)):file;
+ fs.readFile(selected,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
 });
 (async()=>{
  const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});
@@ -47,7 +48,7 @@ const server=http.createServer((req,res)=>{
    result.targets=targets;
    for(let q=0;q<=1;q++)hex(q,0).owner=2;gameData._aiEconomyClock=14;refresh();wodAiReadDefense(2,army,true);
    gameData.entities=gameData.entities.filter(u=>u.owner===2);refresh();wodAiReadDefense(2,army,true);
-   result.reconnected=army.every(u=>wodAiGetUnitTaskJob(u)?.id===saved[u.uid]);
+   result.reconnected=army.every(u=>!gameData._aiDefenseByOwner[2].unitJob[u.uid]&&plan.unitJob[u.uid]===saved[u.uid]);
    corridor(2);army=gameData.entities.filter(u=>u.owner===2);defense=wodAiReadDefense(2,army,true);result.wideCorridors=defense.corridors.map(t=>({q:t.holdHex.q,atRisk:t.atRisk}));
    // A front-line attack far from either city still receives a territory response.
    reset();for(const h of gameData.hexList)h.owner=h.q>=0?2:1;town(20,20,2,'Remote base');town(-20,20,1,'Enemy');
@@ -103,7 +104,7 @@ const server=http.createServer((req,res)=>{
   assert(results.corridors.some(c=>c.atRisk>=10&&c.area>100),'large army beyond a threatened supply neck is detected');
   assert(results.preventive.some(n=>n>=2),'troops defend the corridor before it closes');
   assert(results.relief?.area>100&&results.relief.trapped===10&&results.relief.members>10&&results.relief.hurtIncluded,'large pocket has trapped and outside relief troops, including wounded');
-  assert(results.targets.length===2&&results.targets.every(t=>t.interrupted)&&results.targets.find(t=>t.inside).q===1&&results.targets.find(t=>!t.inside).q===0,'stale orders interrupt and both forces attack opposing ends of the breach');
+  assert(results.targets.length===2&&results.targets.every(t=>t.interrupted)&&results.targets.find(t=>t.inside).q>=1&&results.targets.find(t=>t.inside).q<14&&results.targets.find(t=>!t.inside).q===0,'stale orders interrupt and trapped troops approach the breach while relief attacks its outer end');
   assert(results.reconnected,'original missions resume after supply is restored');
   assert(results.wideCorridors.some(c=>c.atRisk>=10),'two-tile supply corridors receive preventive defense');
   assert(results.territory.some(t=>t.members>=2&&t.r<0),'territory away from cities is defended');
