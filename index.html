@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=engagement-pincers-20261104"></script>
+    <script src="ai-command.js?v=enemy-fronts-20261104"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,16 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-04T04:15:00Z",
+                title:"Stable enemy fronts, town relief and marine objectives",
+                items:[
+                    "Troops retain assignments to individual enemy fronts. Mixed groups split by front, each front can run its own offensive, and ordinary replanning or a town changing hands no longer redirects the whole army toward a different opponent.",
+                    "Simultaneous town attacks receive local relief assessed by combat strength. Supply screens balance their defenders across both ends of a threatened corridor. Relief troops can counterattack a recently overrun town instead of abandoning their mission immediately.",
+                    "Landed marines choose persistent objectives: cutting a real enemy supply corridor, capturing a weak town and its urban cells, or expanding their beachhead. Routine naval planning no longer ends a successful raid after an arbitrary short shore timeout.",
+                    "Spectators can rejoin with their original report, without recording another defeat. Online multiplayer outcome totals use the relay's match receipts, and late readiness or host-transfer messages cannot restart a completed battle."
+                ]
+            },
             {
                 at:"2026-11-04T03:18:04Z",
                 title:"Committed encirclements and post-defeat spectating",
@@ -14350,6 +14360,15 @@
             const bar=document.getElementById('wodSpectatorBar');bar?.classList.toggle('hidden',!state?.active||state.finished);
             const remaining=document.getElementById('wodSpectatorRemaining');if(remaining)remaining.textContent=wodSpectatorSurvivors().length+' factions remain';
         }
+        function wodSaveSpectatorReport() {
+            if(!gameData.mp?.enabled||!gameData._spectator||gameData._restoringSpectator)return;
+            const report={code:WodMultiplayer.api.code,slot:wodLocalPlayerOwner(),ledger:wodBattleLedger().id,match:gameData._lifetimeMatch,active:gameData._spectator.active,
+                title:document.getElementById('campaignSummaryTitle')?.textContent,sub:document.getElementById('campaignSummarySub')?.textContent,stats:document.getElementById('campaignSummaryStats')?.innerHTML};
+            window._wodSpectatorReport=report;try{sessionStorage.setItem('wodSpectatorReport',JSON.stringify(report));}catch(_){}
+        }
+        function wodReadSpectatorReport() {
+            try{const r=window._wodSpectatorReport||JSON.parse(sessionStorage.getItem('wodSpectatorReport')||'null');return r?.code===WodMultiplayer.api.code&&r.slot===wodLocalPlayerOwner()?r:null;}catch(_){return null;}
+        }
         function wodFinalizePersonalEnd() {
             if(!gameData._spectator)return;
             const slot=gameData._spectator.slot;
@@ -14363,12 +14382,12 @@
             gameData.selection=[];gameData.buildMode=null;gameData._missionRuntime=null;gameData.mission=null;gameData._campaignRun=null;
             gameData.constructionJobs=gameData.constructionJobs.filter(j=>j.owner!==slot);
             if(gameData.mp?.enabled){gameData._campaignEnded=false;setGameSpeed(1,true);}
-            wodSyncSpectatorUi();
+            wodSyncSpectatorUi();wodSaveSpectatorReport();
         }
         function wodStartSpectating() {
             const state=gameData._spectator;if(!state||state.finished)return;
             state.active=true;hideCampaignSummaryOverlay();gameData._campaignEnded=false;
-            gameData._fogCanvasDirty=true;gameData._fogVisionTimer=1;setGameSpeed(1,true);wodSyncSpectatorUi();wodFrameSpectatorBattle();
+            gameData._fogCanvasDirty=true;gameData._fogVisionTimer=1;setGameSpeed(1,true);wodSyncSpectatorUi();wodFrameSpectatorBattle();wodSaveSpectatorReport();
         }
         function wodFrameSpectatorBattle() {
             if(!gameData._spectator?.active)return;
@@ -19767,6 +19786,8 @@
         async function wodMpApplyMatchStartPayload(p, opts) {
             opts = opts || {};
             if(!p || !p.hexList || !p.hexList.length) throw new Error('Match start payload has no map');
+            gameData._mpLoadingMatch=true;
+            try {
             wodMpNormalizeHexListTerrainColors(p.hexList);
             if(opts.asyncHexes) await wodMpRebuildHexesFromListAsync(p.hexList);
             else wodMpRebuildHexesFromList(p.hexList);
@@ -19824,8 +19845,11 @@
             gameData._wodTerrainPoliticsBase = null;
             gameData._wodTerrainPoliticsBaseFp = '';
             if(p.mapGenSeed != null) gameData._mapGenSeed = p.mapGenSeed >>> 0;
+            gameData.menuAttractMode=false;gameData._matchReadyForEndChecks=true;
             for(const slot of p.forfeitedSlots||[])wodMpApplyForfeitSlot(slot,false);
             if(opts.bake !== false) wodMpRefreshMatchViewportAndTerrain();
+            } finally {gameData._mpLoadingMatch=false;}
+            if(!opts.resumeMatch)wodMpApplyDeferredSnapshot();
         }
         async function wodMpPrepareHostLaunchPayload(meta) {
             wodMpNormalizeLobbyMeta(meta);
@@ -19898,6 +19922,7 @@
         }
         function wodMpFinalizeMatchStart() {
             if(!gameData.mp || !gameData.mp.enabled) return;
+            if(gameData._campaignEnded||gameData._spectator?.finished)return;
             gameData.mp.allReady = true;gameData.menuAttractMode=false;gameData._campaignEnded=false;
             wodBeginLifetimeMatch();
             wodMpFreezeSeatPlayerMap();
@@ -20141,7 +20166,13 @@
             wodMpClientApplyMatchEnd(spec);
             gameData._mpMatchEnd = null;
         }
+        function wodMpApplyDeferredSnapshot(fallback) {
+            const s=gameData._mpDeferredSnap||fallback,end=gameData._mpDeferredEnd;
+            gameData._mpDeferredSnap=null;gameData._mpDeferredEnd=null;
+            if(s)wodMpApplySnapPayload(s);if(end)wodMpClientApplyMatchEnd(end);
+        }
         function wodMpApplySnapPayload(s) {
+            if(gameData._mpLoadingMatch){gameData._mpDeferredSnap=s;if(s.matchEnd?.final)gameData._mpDeferredEnd=s.matchEnd;return;}
             if(Array.isArray(s.eliminatedSlots)&&gameData.mp)gameData.mp.eliminatedSlots=s.eliminatedSlots.slice();
             if(s.battleLedger){gameData._battleLedger=JSON.parse(JSON.stringify(s.battleLedger));gameData._battleLedgerMap=gameData.hexes;}
             gameData._fogVisionTimer=1;
@@ -23757,16 +23788,23 @@
                     wodMpRefreshSyncOverlay();
                     let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
                     if(syncMsg) syncMsg.textContent = 'Loading host map…';
+                    const observer=!!WodMultiplayer.api.spectating,saved=observer?wodReadSpectatorReport():null;
+                    if(observer){gameData._restoringSpectator=true;gameData._lifetimeMatch={...(saved?.match||{}),mode:'multiplayer',finished:true,mpOutcomeRecorded:true,outcome:'defeat',reason:saved?.match?.reason||'eliminated',applied:{}};}
                     try {
                         await wodMpApplyMatchStartPayload(pl, { asyncHexes: true, resumeMatch: true });
                     } catch(err) {
                         console.error(err);
-                        showNotification('Failed to load host map on rejoin.');
+                        gameData._restoringSpectator=false;showNotification('Failed to load host map on rejoin.');
                         gameState = 'MENU';
                         return;
                     }
-                    wodBeginLifetimeMatch();
-                    if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
+                    if(!observer)wodBeginLifetimeMatch();
+                    wodMpApplyDeferredSnapshot(d.snap?.payload);
+                    gameData._restoringSpectator=false;
+                    if(observer&&saved&&saved.ledger===wodBattleLedger().id&&gameData._spectator&&!gameData._spectator.finished){
+                        document.getElementById('campaignSummaryTitle').textContent=saved.title||'Defeat';document.getElementById('campaignSummarySub').textContent=saved.sub||'';document.getElementById('campaignSummaryStats').innerHTML=saved.stats||'';
+                        if(saved.active)wodStartSpectating();else wodSaveSpectatorReport();
+                    }
                     wodMpEnsureLocalSlotConnected();
                     if(!gameData.hexList || !gameData.hexList.length) {
                         showNotification('Host map data was empty — cannot rejoin.');
@@ -23777,7 +23815,7 @@
                     gameData.mp.allReady = true;
                     if(gameData.mp.isHost) wodMpHostMarkSlotReconnected(gameData.mp.localSlot);
                     wodMpRefreshSyncOverlay();
-                    setGameSpeed(1, true);
+                    if(!gameData._campaignEnded&&!gameData._spectator?.finished)setGameSpeed(1, true);
                     wodMpFlushStatsToServer();
                     wodMpRefreshMatchViewportAndTerrain();
                     wodTerrainBakeNextMs = 0;
@@ -23888,7 +23926,7 @@
                 wodMpHostEmitSnapshot();
                 wodMpFreezeSeatPlayerMap();
                 wodMpRefreshSyncOverlay();
-                setGameSpeed(1, true);
+                if(!gameData._campaignEnded&&!gameData._spectator?.finished)setGameSpeed(1, true);
                 wodMpSaveSession();
                 showNotification('You are now the host — the battle continues on your machine.');
             });
@@ -25014,6 +25052,7 @@
             const compatible=new Set(plan.jobs.filter(j=>{
                 if(j===job)return true;
                 if(!['main','armor','raid'].includes(j.kind))return false;
+                if(job.frontOwner&&j.frontOwner&&job.frontOwner!==j.frontOwner)return false;
                 if(job.objectiveCity)return j.objectiveCity?.id===job.objectiveCity.id;
                 const other=j.objectiveHex||j.attackHex;
                 return !j.objectiveCity&&goal&&other&&Math.hypot(goal.x-other.x,goal.y-other.y)<hr*5;
@@ -25046,6 +25085,7 @@
 
         function wodAiTerritoryObjective(owner,members,sectors,taken={}) {
             if(!members.length)return null;
+            const front=wodAiFrontOwner(members[0]);if(front)sectors=sectors.filter(s=>s.attackHex?.owner===front);
             const cutoff=wodAiCutObjective(owner,members);if(cutoff?.holdHex)return cutoff;
             const lead=members.find(u=>!wodCanClimb(u))||members[0],reach=wodAiOperationReach(lead),hr=gameData.hexRadius||20;
             const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
@@ -25736,8 +25776,12 @@
             wodBumpLifetimeMax('peakFieldManpower',getOwnerTroopManpower(wodLocalPlayerOwner()));
             wodBumpLifetimeMax('peakMoneyHeld',Math.floor(wodHudMoney()));
             match.finished=true;match.outcome=outcome;match.reason=reason||'';
-            wodBumpLifetime('matchesCompleted',1);
-            wodBumpLifetime(outcome==='victory'?'matchesWon':'matchesLost',1);
+            // Online MP outcome totals come from the relay's match receipts. A
+            // profile packet may arrive before this screen, so adding again races it.
+            const bumpResult=field=>{if(match.mode==='multiplayer'&&wodCloudCanSync()){
+                wodProgress.lifetime[field]=(wodProgress.lifetime[field]||0)+1;const bucket=wodLifetimeBucket();if(bucket)bucket[field]=(bucket[field]||0)+1;
+            }else wodBumpLifetime(field,1);};
+            bumpResult('matchesCompleted');bumpResult(outcome==='victory'?'matchesWon':'matchesLost');
             if(reason==='surrender')wodBumpLifetime('matchesSurrendered',1);
             if(outcome!=='victory'&&!gameData.mp?.enabled)wodBumpLifetime('campaignLosses',1);
             wodAwardMatchGold(match,outcome,reason);
@@ -41291,7 +41335,7 @@
                 holdHex:getNearestHexToPoint(members[0].x,members[0].y),phase:'assemble',phaseAt:wodAiOperationTime(),operationAt:wodAiOperationTime()};
             const lead=members.find(u=>u.type==='heavy')||members.find(u=>!wodCanClimb(u))||members[0], reach=wodAiOperationReach(lead);
             const hr=gameData.hexRadius||20;
-            const towns=wodAiKnownCities(owner).filter(c=>wodIsHostileOwner(c.owner,owner)&&reach.has(`${c.q},${c.r}`));
+            const front=wodAiFrontOwner(lead),towns=wodAiKnownCities(owner).filter(c=>wodIsHostileOwner(c.owner,owner)&&(!front||c.owner===front)&&reach.has(`${c.q},${c.r}`));
             const score=c=>wodAiObjectiveCost(owner,members,c)+(taken[c.id]||0)*(wodAiCommander(owner).id==='maneuver'?5:1);
             const costs=new Map(towns.map(c=>[c,{ready:wodAiAssaultBalance(owner,members,c).ready,cost:score(c)}]));
             towns.sort((a,b)=>Number(!costs.get(a).ready)-Number(!costs.get(b).ready)||costs.get(a).cost-costs.get(b).cost);
@@ -41470,7 +41514,7 @@
             threats.push(...wodAiTownDefenseThreats(owner,army));
             threats.sort((a,b)=>b.score-a.score);
             const selected=[];
-            for(const t of threats)if(t.kind==='relief'||!selected.some(s=>s.kind!=='relief'&&(
+            for(const t of threats)if(t.kind==='counter'||t.kind==='relief'||!selected.some(s=>s.kind!=='relief'&&(
                 wodAiDist2(s.holdHex.x,s.holdHex.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*7,2)||
                 t.kind==='corridor'&&s.kind==='corridor'&&t.riskTileKeys&&s.riskTileKeys&&t.riskTileKeys.filter(k=>s.riskTileKeys.includes(k)).length>=Math.min(t.riskTileKeys.length,s.riskTileKeys.length)*.6)))selected.push(t);
             for(const cut of selected.filter(t=>t.kind==='corridor').slice(0,12)){
@@ -41491,18 +41535,21 @@
                 // Trapped units break outward while a limited relief force attacks the same cut from outside.
                 for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
                 const trappedCount=job.members.length;
-                let want=t.kind==='counter'?(primaryTheater&&t!==primaryTheater?Math.min(2,Math.max(1,Math.ceil(t.neededPower*.35))):Math.min(24,Math.max(1,Math.ceil(t.neededPower*.85)))):t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(12,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
+                let want=t.kind==='counter'?(primaryTheater&&!t.primaryTheater?Math.min(2,Math.max(1,Math.ceil(t.neededPower*.35))):Math.min(24,Math.max(1,Math.ceil(t.neededPower*.85)))):t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(12,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
                 const responsePoints=t.screenPoints||[t.holdHex];
                 const responseDistance=u=>Math.min(...responsePoints.map(p=>Math.hypot(u.x-p.x,u.y-p.y)));
                 const opposition=wodAiThreats(owner).filter(e=>responseDistance(e)<hr*8);
-                const neededPower=t.kind==='counter'&&primaryTheater&&t!==primaryTheater?Math.min(2,t.neededPower):t.neededPower||opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*1.15;
+                const neededPower=t.kind==='counter'&&primaryTheater&&!t.primaryTheater?Math.min(2,t.neededPower):t.neededPower||opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*(t.kind==='corridor'?1.4:1.15);
                 let responsePower=available.filter(u=>job.members.includes(u.uid)).reduce((n,u)=>n+wodAiUnitCombatPower(u),0);
                 const candidates=available.filter(u=>!unitJob[u.uid]&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
                     responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24)&&wodAiResponseCanArrive(u,t,responseDistance(u)));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
                 const critical=t.kind==='corridor'||t.kind==='relief'||t.kind==='counter';
-                const cost=u=>(t.arrivals?.[u.uid]!=null?Math.min(1000,t.arrivals[u.uid])*hr*hr*3:responseDistance(u)**2)/Math.max(.5,wodAiUnitCombatPower(u))+
+                const hostileFront=new Set(t.frontOwner?[t.frontOwner]:opposition.map(e=>e.owner));
+                const gateFor=u=>responsePoints.slice().sort((a,b)=>Math.hypot(a.x-u.x,a.y-u.y)-Math.hypot(b.x-u.x,b.y-u.y))[0];
+                const gateSaturation=u=>{if(t.kind!=='corridor'||responsePoints.length<2)return 0;const gate=gateFor(u),need=opposition.filter(e=>gateFor(e)===gate).reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*1.4,assigned=available.filter(a=>job.members.includes(a.uid)&&gateFor(a)===gate).reduce((n,a)=>n+wodAiUnitCombatPower(a),0);return assigned>=Math.max(1,need)?hr*hr*1000:0;};
+                const cost=u=>gateSaturation(u)+(wodAiFrontOwner(u)&&hostileFront.size&&!hostileFront.has(wodAiFrontOwner(u))?hr*hr*180:0)+(t.arrivals?.[u.uid]!=null?Math.min(1000,t.arrivals[u.uid])*hr*hr*3:responseDistance(u)**2)/Math.max(.5,wodAiUnitCombatPower(u))+
                     (t.kind==='corridor'&&t.riskUnits?.has(u.uid)?hr*hr*60:0)+
                     (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main'].includes(base(u)?.kind)?hr*hr*(critical?1:100):0)+
                     (t.kind==='counter'?Math.pow(Math.max(0,wodAiUnitCombatPower(u)-neededPower),2)*hr*hr*400+
@@ -41510,7 +41557,9 @@
                     (old?.unitJob[u.uid]===t.id?-hr*hr*(t.kind==='corridor'?100:critical?20:200):0);
                 candidates.sort((a,b)=>cost(a)-cost(b));
                 const responseLimit=t.kind==='counter'&&t.primaryTheater?24:t.kind==='territory'?Math.min(20,Math.max(6,Math.ceil(neededPower*1.2))):10;
-                for(const u of candidates) {
+                while(candidates.length) {
+                    if(t.kind==='corridor')candidates.sort((a,b)=>cost(a)-cost(b));
+                    const u=candidates.shift();
                     if(want<=0&&responsePower>=neededPower||budget<=0||t.kind!=='corridor'&&job.members.length>=trappedCount+responseLimit)break;
                     const previousResponse=old?.jobs.find(j=>j.id===old.unitJob[u.uid]);
                     if(!critical&&previousResponse?.kind==='territory'&&previousResponse.id!==t.id&&
@@ -41661,7 +41710,7 @@
             }
             for(let i=0;i<ships.length;i+=3)add('naval',ships.slice(i,i+3),attackSectors[0]);
             const plan={owner,assetSignature,jobs,unitJob,sectors,operations,landOperations:continuedLandOperations,defenseDemand:{line:lineN,reserve:reserveN,frontage:defenseDemand.frontage,armyFloor:defenseDemand.armyFloor},readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+30000};
-            gameData.aiTaskForces[owner]=plan;wodAiCoordinateCampaign(owner,plan,ready);wodAiConcentrateAssaults(owner,plan,ready);wodAiReadDefense(owner,units,true);wodAiPlanFrontOffensive(owner,plan,ready);return plan;
+            gameData.aiTaskForces[owner]=plan;wodAiOrganizeFronts(owner,plan,ready);wodAiCoordinateCampaign(owner,plan,ready);wodAiConcentrateAssaults(owner,plan,ready);wodAiReadDefense(owner,units,true);wodAiPlanFrontOffensive(owner,plan,ready);return plan;
         }
 
         function wodAiTownAssaultHex(unit,city,members) {
