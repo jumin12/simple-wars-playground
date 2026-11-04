@@ -238,6 +238,7 @@
         case 'pong':
           break;
         case 'rejoin_match':
+          api.spectating=!!msg.spectating;
           api.code = msg.code || '';
           api.slot = msg.slot | 0;
           api.isHost = !!msg.isHost;
@@ -278,6 +279,7 @@
           } catch (_) {}
           break;
         case 'match_start':
+          api.spectating=false;
           emit('MatchStart', { payload: msg.payload, fromSlot: msg.fromSlot });
           break;
         case 'player_ready':
@@ -301,6 +303,7 @@
           emit('Error', { msg: msg.msg });
           break;
         case 'left':
+          api.spectating=false;
           api.code = '';
           api.slot = 0;
           api.isHost = false;
@@ -498,8 +501,9 @@
     kickPlayer(slot) {
       send({ t: 'kick_player', slot: slot | 0 });
     },
-    forfeitMatch(){send({t:'forfeit'});api.code='';api.slot=0;api.isHost=false;api.connected=false;},
+    forfeitMatch(options){send({t:'forfeit',spectate:!!options?.spectate});if(options?.spectate){api.spectating=true;return;}api.spectating=false;api.code='';api.slot=0;api.isHost=false;api.connected=false;},
     leaveLobby() {
+      api.spectating=false;
       if (ws && ws.readyState === 1) send({ t: 'leave' });
       api.code = '';
       api.slot = 0;
@@ -549,6 +553,7 @@
       send({ t: 'snap', seq, payload });
     },
     sendCmd(cmd) {
+      if(api.spectating)return;
       send({ t: 'cmd', fromSlot: api.slot, cmd });
     },
   };

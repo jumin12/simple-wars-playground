@@ -13027,11 +13027,20 @@
             <p id="campaignSummarySub" class="campaign-summary-sub"></p>
             <div id="campaignSummaryStats" class="cs-stats-root"></div>
             <div class="campaign-summary-actions">
+                <button type="button" id="wodSpectateMatch" class="menu-btn hidden" onclick="wodStartSpectating()">Spectate remaining battle</button>
                 <button type="button" id="wodNextPackStage" class="menu-btn hidden" onclick="wodContinueHistoricalPack()">Next campaign stage</button>
                 <button type="button" class="menu-btn" onclick="dismissCampaignSummaryToMenu()">Return to main menu</button>
             </div>
         </div>
     </div>
+
+    <div id="wodSpectatorBar" class="hidden" role="status"><span>Spectating · <strong id="wodSpectatorRemaining"></strong></span><button type="button" onclick="wodFrameSpectatorBattle()">View battle</button><button type="button" onclick="wodShowSpectatorResult()">Your result</button><button type="button" onclick="dismissCampaignSummaryToMenu()">Exit</button></div>
+    <style>
+        #wodSpectatorBar{position:fixed;z-index:115;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:12px;max-width:calc(100vw - 24px);padding:12px 16px;border:1px solid #d9b763;border-radius:12px;background:#10222fed;color:#f4f0df;box-shadow:0 8px 24px #0008;font:600 14px system-ui}
+        #wodSpectatorBar.hidden{display:none}#wodSpectatorBar button{padding:9px 12px;border-radius:7px;border:1px solid #718392;background:#203b4c;color:#fff;cursor:pointer;white-space:nowrap}
+        body.wod-spectating #wodPcProdRoot,body.wod-spectating #wodDockPack,body.wod-spectating #wodCommandHud,body.wod-spectating .wod-m-sheet--units,body.wod-spectating .wod-m-sheet--build{display:none!important}
+        @media(max-width:600px){#wodSpectatorBar{width:calc(100vw - 24px);box-sizing:border-box;gap:7px;flex-wrap:wrap;justify-content:center;bottom:16px;padding:10px}#wodSpectatorBar span{width:100%;text-align:center}.campaign-summary-actions{flex-wrap:wrap}}
+    </style>
 
     <!-- Production: static site simple-wars-live.onrender.com talks to Node relay simple-wars.onrender.com (wss). -->
     <script>
@@ -13049,11 +13058,11 @@
 <script src="hd-relief.js"></script>
 <link rel="stylesheet" href="board-art.css">
 <script src="commerce-client.js"></script>
-<script src="multiplayer-client.js"></script>
+<script src="multiplayer-client.js?v=spectating-20261104"></script>
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=front-expansion-20261103"></script>
+    <script src="ai-command.js?v=engagement-pincers-20261104"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13072,6 +13081,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-04T03:18:04Z",
+                title:"Committed encirclements and post-defeat spectating",
+                items:[
+                    "Supported armies coordinate up to 48 mobile troops around larger enemy groups. Their holding force moves into combat while enclosing wings advance, and a breakthrough can change into an encirclement when it encounters visible defenders. Town guards, supply defense and retreat safeguards remain in place.",
+                    "After defeat or surrender, choose to spectate or exit if at least two other factions remain. This works in singleplayer and multiplayer, including when the eliminated player is hosting. Spectators can follow the whole battlefield, revisit their result and leave at any time.",
+                    "Your personal result is recorded once. Multiplayer observers cannot command units and can reconnect to watch; the simulation transfers to another connected player when its host leaves. The original report returns when the remaining battle ends."
+                ]
+            },
             {
                 at:"2026-11-04T00:30:00Z",
                 title:"AI keeps its frontline gains",
@@ -14314,6 +14332,70 @@
             if(el) el.classList.add('hidden');
         }
 
+        function wodSpectatorSurvivors(excludeLocal=false) {
+            const lo=wodLocalPlayerOwner(),dead=new Set(gameData.mp?.eliminatedSlots||[]);
+            if(gameData._spectator||excludeLocal)dead.add(lo);
+            return [...new Set(gameData.cities.filter(c=>c.owner>0).map(c=>c.owner))].filter(o=>!dead.has(o)&&
+                (gameData.victoryMode!=='annihilation'||countFriendlyCombatExcludingConvoys(o)>0));
+        }
+        function wodPrepareSpectatorChoice(outcome) {
+            if(outcome!=='defeat'||wodSpectatorSurvivors(true).length<2)return false;
+            gameData._spectator={active:false,finished:false,outcome,slot:wodLocalPlayerOwner()};
+            return true;
+        }
+        function wodSyncSpectatorUi() {
+            const state=gameData._spectator;
+            document.body.classList.toggle('wod-spectating',!!state&&!state.finished);
+            document.getElementById('wodSpectateMatch')?.classList.toggle('hidden',!state||state.finished);
+            const bar=document.getElementById('wodSpectatorBar');bar?.classList.toggle('hidden',!state?.active||state.finished);
+            const remaining=document.getElementById('wodSpectatorRemaining');if(remaining)remaining.textContent=wodSpectatorSurvivors().length+' factions remain';
+        }
+        function wodFinalizePersonalEnd() {
+            if(!gameData._spectator)return;
+            const slot=gameData._spectator.slot;
+            // Keep the personal result frozen while the remaining world lives.
+            if(gameData.mp?.enabled)wodMpApplyForfeitSlot(slot,false);
+            else{
+                gameData.entities=gameData.entities.filter(u=>u.owner!==slot);
+                for(const c of gameData.cities)if(c.owner===slot)c.owner=0;
+                const batch=batchHexOwner;batchHexOwner=true;for(const h of gameData.hexList)if(h.owner===slot)setHexOwner(h,0);batchHexOwner=batch;wodMarkTerrainPoliticalDirty();
+            }
+            gameData.selection=[];gameData.buildMode=null;gameData._missionRuntime=null;gameData.mission=null;gameData._campaignRun=null;
+            gameData.constructionJobs=gameData.constructionJobs.filter(j=>j.owner!==slot);
+            if(gameData.mp?.enabled){gameData._campaignEnded=false;setGameSpeed(1,true);}
+            wodSyncSpectatorUi();
+        }
+        function wodStartSpectating() {
+            const state=gameData._spectator;if(!state||state.finished)return;
+            state.active=true;hideCampaignSummaryOverlay();gameData._campaignEnded=false;
+            gameData._fogCanvasDirty=true;gameData._fogVisionTimer=1;setGameSpeed(1,true);wodSyncSpectatorUi();wodFrameSpectatorBattle();
+        }
+        function wodFrameSpectatorBattle() {
+            if(!gameData._spectator?.active)return;
+            const owners=new Set(wodSpectatorSurvivors()),points=gameData.entities.filter(u=>u.hp>0&&owners.has(u.owner));
+            if(!points.length)points.push(...gameData.cities.filter(c=>owners.has(c.owner)));
+            if(!points.length)return;
+            const minX=Math.min(...points.map(p=>p.x)),maxX=Math.max(...points.map(p=>p.x)),minY=Math.min(...points.map(p=>p.y)),maxY=Math.max(...points.map(p=>p.y));
+            const w=canvas.clientWidth,h=canvas.clientHeight,zoom=Math.min(1.5,Math.max(.15,Math.min((w-60)/(maxX-minX+180),(h-200)/(maxY-minY+180))));
+            gameData.camera={zoom,x:(minX+maxX)/2*zoom-w/2,y:(minY+maxY)/2*zoom-h/2};
+        }
+        function wodShowSpectatorResult() {
+            if(!gameData._spectator)return;
+            document.getElementById('campaignSummaryOverlay')?.classList.remove('hidden');wodSyncSpectatorUi();
+        }
+        function wodFinishSpectating(winner) {
+            const state=gameData._spectator;if(!state||state.finished)return;
+            state.finished=true;gameData._campaignEnded=true;setGameSpeed(0,true);
+            const name=winner?wodBattleOwnerLabel(winner):'The remaining factions';
+            document.getElementById('campaignSummarySub').textContent='Battle finished. '+name+' won. Your result was recorded when you left the battle.';
+            wodSyncSpectatorUi();wodShowSpectatorResult();
+        }
+        function wodCheckSpectatorEnd() {
+            if(!gameData._spectator||gameData._spectator.finished)return;
+            const left=wodSpectatorSurvivors();wodSyncSpectatorUi();
+            if(!gameData.mp?.enabled&&left.length<=1)wodFinishSpectating(left[0]);
+        }
+
         function dismissCampaignSummaryToMenu() {
             hideCampaignSummaryOverlay();
             returnToMenu();
@@ -15016,12 +15098,15 @@
         window.showEscSection = showEscSection;
 
         function confirmSurrender() {
+            if(gameData._spectator){dismissCampaignSummaryToMenu();return;}
             if(gameState!=='PLAYING'||gameData._campaignEnded)return;
             if(gameData.mp?.enabled){
                 gameData.menuAttractMode=false;toggleEscMenu(false);gameData._lifetimeEndReason='surrender';
                 wodFinishLifetimeMatch('defeat','surrender');
+                if(!gameData._lifetimeMatch?.mpOutcomeRecorded){if(gameData._lifetimeMatch)gameData._lifetimeMatch.mpOutcomeRecorded=true;wodMpRecordLocalMultiplayerOutcome('lost');}
                 if(wodCloudCanSync())WodMultiplayer.syncProgress(wodEnsurePlayerId(),wodBuildCloudSyncPayload());
-                WodMultiplayer.forfeitMatch();wodMpClearSession();triggerSurrenderDefeat();return;
+                const watch=wodSpectatorSurvivors(true).length>1;
+                WodMultiplayer.forfeitMatch({spectate:watch});if(!watch)wodMpClearSession();triggerSurrenderDefeat();return;
             }
             if(gameData.menuAttractMode)return;
             toggleEscMenu(false);
@@ -15040,6 +15125,7 @@
             }
             if(wodEscMenuOpen()) toggleEscMenu(false);
             gameData._lifetimeEndReason='surrender';
+            wodPrepareSpectatorChoice('defeat');
             gameData._campaignEnded = true;
             setGameSpeed(0, true);
             wodResetEndCountdowns();
@@ -15049,6 +15135,7 @@
                 'Defeat — you surrendered.',
                 'Defeat — you surrendered the battle.'
             );
+            wodFinalizePersonalEnd();
         }
 
         function setGameSpeed(speed, allowNonRealtime) {
@@ -15161,6 +15248,7 @@
             if(gameState==='PLAYING'&&!gameData.menuAttractMode)wodFinishLifetimeMatch('defeat','quit');
             wodFlushLifetimeProgress();
             hideCampaignSummaryOverlay();
+            gameData._spectator=null;wodSyncSpectatorUi();
             wodHideMissionPopup();
             let deployBanner = document.getElementById('wodDeployBanner');
             if(deployBanner) deployBanner.classList.add('hidden');
@@ -19834,6 +19922,7 @@
             }
         }
         function wodMpSendCmd(cmd) {
+            if(gameData._spectator)return false;
             if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) return false;
             if(!wodMpMatchCanPlay()) return false;
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.sendCmd) return false;
@@ -19891,15 +19980,17 @@
                 wodMpPushLobbyProfile();
         }
         function wodMpClientApplyMatchEnd(me) {
+            if(gameData._spectator){if(me?.final)wodFinishSpectating(me.winnerSlot);return;}
             if(!me || !me.outcomes || gameData._campaignEnded) return;
             if(!gameData.mp || !gameData.mp.enabled) return;
             wodMpFlushStatsToServer();
-            wodMpClearSession();
             gameData._mpLastMatchEnd = me;
             let slot = gameData.mp.localSlot;
             if(slot == null) return;
             let oc = me.outcomes[String(slot)];
             if(!oc || oc === 'ongoing') return;
+            if(me.final||wodSpectatorSurvivors(true).length<2)wodMpClearSession();
+            if(oc==='lost'&&typeof WodMultiplayer!=='undefined')WodMultiplayer.api.spectating=true;
             let mpActive = !!(gameData.mp && gameData.mp.enabled);
             if(oc === 'won') triggerCampaignVictory(me.message || 'Victory', !mpActive && me.countAsBattleWon === true);
             else if(oc === 'lost') triggerCampaignDefeat(me.message || 'Defeat');
@@ -19916,6 +20007,7 @@
         function wodMpApplyForfeitSlot(slot,emit=true) {
             if(!slot||!gameData.mp)return;wodMpMarkSlotEliminated(slot);
             gameData.entities=gameData.entities.filter(u=>u.owner!==slot);
+            gameData.constructionJobs=gameData.constructionJobs.filter(j=>j.owner!==slot);
             for(const c of gameData.cities)if(c.owner===slot)c.owner=0;
             const saved=batchHexOwner;batchHexOwner=true;for(const h of gameData.hexList)if(h.owner===slot)setHexOwner(h,0);batchHexOwner=saved;wodMarkTerrainPoliticalDirty();
             gameData.mp.connectedSlots=(gameData.mp.connectedSlots||[]).filter(s=>s!==slot);gameData.mp.aiControlledSlots=(gameData.mp.aiControlledSlots||[]).filter(s=>s!==slot);
@@ -19942,7 +20034,7 @@
                 seen.add(s);
                 outcomes[String(s)] = (s === winnerSlot) ? 'won' : 'lost';
             }
-            wodMpHostBroadcastMatchEnd({ outcomes: wodMpShareWinWithAllies(outcomes), message, countAsBattleWon: false });
+            wodMpHostBroadcastMatchEnd({ outcomes: wodMpShareWinWithAllies(outcomes), message, countAsBattleWon: false,final:true,winnerSlot });
         }
         function wodMpShareWinWithAllies(outcomes, exceptSlots) {
             let out = Object.assign({}, outcomes || {});
@@ -19986,10 +20078,11 @@
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost) return;
             let hs = gameData.mp.humanSlots;
             if(!hs || !hs.length) return;
+            const contenders=wodGetActiveFactionSlotsForMap()||hs;
             let mode = gameData.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
 
             if(mode === 'domination') {
-                for(let s of hs) {
+                for(let s of contenders) {
                     if(wodMpIsSlotEliminated(s)) continue;
                     if(!factionControlsAnyCity(s)) continue;
                     if(!anyEnemyOwnedCityRemainsFor(s)) {
@@ -20001,7 +20094,7 @@
                 gameData._mpAnnihilationWinAcc = (gameData._mpAnnihilationWinAcc || 0) + (dt || 0);
                 if(gameData._mpAnnihilationWinAcc >= 0.14) {
                     gameData._mpAnnihilationWinAcc = 0;
-                    for(let s of hs) {
+                    for(let s of contenders) {
                         if(wodMpIsSlotEliminated(s)) continue;
                         if(!factionControlsAnyCity(s)) continue;
                         let myMil = countFriendlyCombatExcludingConvoys(s);
@@ -20020,7 +20113,7 @@
                 if(!factionControlsAnyCity(s)) newCityElim.push(s);
             }
             if(newCityElim.length) {
-                for(let s of newCityElim) wodMpMarkSlotEliminated(s);
+                for(let s of newCityElim) wodMpApplyForfeitSlot(s,false);
                 let outcomes = {};
                 for(let s of hs) outcomes[String(s)] = wodMpIsSlotEliminated(s) ? 'lost' : 'ongoing';
                 wodMpHostBroadcastMatchEnd({ outcomes: wodMpMergeOutcomesAllActiveSlots(outcomes), message: 'Defeat — all cities lost.', countAsBattleWon: false });
@@ -20034,7 +20127,7 @@
                     if(countFriendlyCombatExcludingConvoys(s) === 0 && countEnemyCombatExcludingConvoysFor(s) > 0) newAnnih.push(s);
                 }
                 if(newAnnih.length) {
-                    for(let s of newAnnih) wodMpMarkSlotEliminated(s);
+                    for(let s of newAnnih) wodMpApplyForfeitSlot(s,false);
                     let outcomes = {};
                     for(let s of hs) outcomes[String(s)] = wodMpIsSlotEliminated(s) ? 'lost' : 'ongoing';
                     wodMpHostBroadcastMatchEnd({ outcomes: wodMpMergeOutcomesAllActiveSlots(outcomes), message: 'Defeat — annihilation: all your combat forces were destroyed.', countAsBattleWon: false });
@@ -20049,6 +20142,7 @@
             gameData._mpMatchEnd = null;
         }
         function wodMpApplySnapPayload(s) {
+            if(Array.isArray(s.eliminatedSlots)&&gameData.mp)gameData.mp.eliminatedSlots=s.eliminatedSlots.slice();
             if(s.battleLedger){gameData._battleLedger=JSON.parse(JSON.stringify(s.battleLedger));gameData._battleLedgerMap=gameData.hexes;}
             gameData._fogVisionTimer=1;
             let lo = wodLocalPlayerOwner();
@@ -20208,6 +20302,8 @@
             if(s.allReady && gameData.mp && gameData.mp.enabled && !gameData.mp.allReady)
                 wodMpFinalizeMatchStart();
             for(const slot of s.forfeitedSlots||[])wodMpApplyForfeitSlot(slot,false);
+            if(gameData.mp?.eliminatedSlots?.includes(gameData.mp.localSlot)&&!gameData._spectator&&!gameData._campaignEnded)
+                wodMpClientApplyMatchEnd({outcomes:{[gameData.mp.localSlot]:'lost'},message:'Defeat — your faction has been eliminated.'});
         }
 
         let wodMpSnapSeq = 0;
@@ -20300,6 +20396,7 @@
                 marineWaterSupplyKeys: [...(gameData.marineWaterSupplyHexes || [])],
                 cityWarKeys,
                 matchEnd: gameData._mpMatchEnd || undefined,
+                eliminatedSlots:(gameData.mp?.eliminatedSlots||[]).slice(),
                 allReady: !!(gameData.mp && gameData.mp.allReady),
                 connectedSlots: (gameData.mp && gameData.mp.connectedSlots)
                     ? gameData.mp.connectedSlots.slice()
@@ -23898,6 +23995,7 @@
                 if(!wodMpMatchCanPlay()) return;
                 let d = ev.detail;
                 if(!d || !d.cmd) return;
+                if(wodMpIsSlotEliminated(d.fromSlot))return;
                 if(d.cmd.kind === 'forfeit') {
                     let slot = d.fromSlot | 0;
                     if(!slot) return;
@@ -27995,6 +28093,7 @@
             statsEl.innerHTML+='<section class="cs-card battle-final-stats"><p class="cs-card-title">Territory & detailed faction totals</p>'+wodRenderFactionStats(true)+'</section>';
             statsEl.insertAdjacentHTML('afterbegin',wodMatchGoldReport());
             overlay.classList.remove('hidden');
+            wodSyncSpectatorUi();
             wodPrewarmMenuBattleForSummary();
         }
 
@@ -28092,16 +28191,19 @@
         }
 
         function triggerCampaignDefeat(message) {
+            if(gameData._spectator)return;
             if(gameData._campaignEnded) return;
             // Ignore false defeats before the match/army is actually live.
             if(gameData._campaignRun && !gameData._campaignRun.battleLive) return;
             if(gameData._matchReadyForEndChecks === false) return;
             if(wodEscMenuOpen()) toggleEscMenu(false);
+            wodPrepareSpectatorChoice('defeat');
             gameData._campaignEnded = true;
             setGameSpeed(0, true);
             wodResetEndCountdowns();
             if(gameData._campaignRun) wodCampaignAfterBattle(false);
             openCampaignBattleSummary('defeat', message, message);
+            wodFinalizePersonalEnd();
         }
 
         const WOD_END_COUNTDOWN_SECONDS = 15;
@@ -28181,6 +28283,7 @@
             if(wodEscMenuOpen() || wodMissionPopupOpen()) return;
             if(gameData._matchReadyForEndChecks === false) return;
             if(window._wodBootBusy || window._wodMenuBootstrapBusy || gameData._mapGenInProgress) return;
+            if(gameData._spectator&&!gameData.mp?.enabled){wodCheckSpectatorEnd();return;}
             if(gameData.mp && gameData.mp.enabled) {
                 if(gameData.mp.isHost) wodMpCheckEndConditionsHost(dt);
                 return;
@@ -39624,6 +39727,7 @@
             wodMpClearTerrainCachesForNewMatch();
         }
         function wodPrepareForNewMatch(opts) {
+            gameData._spectator=null;wodSyncSpectatorUi();
             if(!opts?.keepLifetimeMatch){gameData._lifetimeMatch=null;gameData._lifetimeStatsByOwner={};gameData._lifetimeEndReason=null;}
             gameData.controlGroups = {};
             gameData._territoryCleanupKeys = new Set();
@@ -53642,11 +53746,13 @@
         }
 
         function wodFogHexVisible(hex) {
+            if(gameData._spectator?.active)return true;
             if(!wodFogActive() || !hex) return true;
             return !!(gameData._fogVisible && gameData._fogVisible.has(getHexKey(hex)));
         }
 
         function wodFogHexExplored(hex) {
+            if(gameData._spectator?.active)return true;
             if(!wodFogActive() || !hex) return true;
             return !!(gameData._fogExplored && gameData._fogExplored.has(getHexKey(hex)));
         }
@@ -53738,6 +53844,7 @@
             fc.fill();fc.restore();gameData._fogCanvasDirty=false;
         }
         function wodDrawFogOverlay(ctx) {
+            if(gameData._spectator?.active)return;
             if(!wodFogActive() || !gameData._fogVisible) return;
             if(gameData._fogCanvasDirty) wodTryRebuildFogCanvas();
             if(!gameData._fogCanvas || gameData._fogCanvas.width <= 0) return;
@@ -54759,6 +54866,7 @@
         }
 
         function getMovableSelectedUnits() {
+            if(gameData._spectator)return [];
             let o = wodLocalPlayerOwner();
             return gameData.selection.filter(s => s && s.hp !== undefined && s.hp > 0 && !s.id && s.type !== 'convoy' && s.owner === o);
         }
@@ -57462,6 +57570,7 @@
         }
 
         function enterBuildPlacementMode(mode) {
+            if(gameData._spectator)return;
             if(gameState !== 'PLAYING') return;
             if(gameData.buildMode === mode) {
                 exitBuildPlacementMode();

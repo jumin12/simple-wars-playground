@@ -692,7 +692,7 @@ function maybeEndMatchWhenEmpty(room) {
 
 function migrateMatchHostIfNeeded(room) {
   if (!room || !room.matchStarted || room.clients.length === 0) return null;
-  const newHost = room.clients.find((c) => c.ws.readyState === 1) || room.clients[0];
+  const newHost = room.clients.find((c) => c.ws.readyState === 1&&!c.spectating) || room.clients.find(c=>c.ws.readyState===1) || room.clients[0];
   if (!newHost) return null;
   room.host = newHost;
   room.hostPlayerId = sanitizePlayerId(newHost.playerId);
@@ -782,7 +782,7 @@ function disconnectClientFromMatch(client, immediate) {
   broadcastLobbyList();
 }
 
-async function forfeitClientFromMatch(client) {
+async function forfeitClientFromMatch(client, spectate=false) {
   const room=client.room;if(!room?.matchStarted){leaveRoom(client);return;}
   const slot=client.slot;room.forfeitedSlots||=new Set();room.forfeitedSlots.add(slot);
   const outcomes=Object.fromEntries(Object.values(room.seatByPlayerId||{}).map(s=>[s,s===slot?'lost':'ongoing']));
@@ -791,6 +791,7 @@ async function forfeitClientFromMatch(client) {
   if(result.ok){profiles.attachClientProfile(client,client.displayName);updateLeaderboardEntry(client,client.combinedStats);if(client.ws.readyState===1)client.ws.send(JSON.stringify({t:'profile',profile:profiles.exportProfile(client.playerId)}));}
   const patch=payload=>{if(!payload)return;payload.forfeitedSlots=[...room.forfeitedSlots];payload.eliminatedSlots=[...new Set([...(payload.eliminatedSlots||[]),slot])];if(payload.entities)payload.entities=payload.entities.filter(u=>u.owner!==slot);if(payload.cities)for(const c of payload.cities)if(c.owner===slot)c.owner=0;if(payload.hexOwners)payload.hexOwners=payload.hexOwners.map(o=>o===slot?0:o);if(payload.hexList)for(const h of payload.hexList)if(h.owner===slot)h.owner=0;};
   patch(room.matchInitPayload);patch(room.lastSnap?.payload);
+  if(spectate){client.spectating=true;room.observerSlots||=new Set();room.observerSlots.add(slot);cancelMatchReconnectGrace(room,slot);broadcastAll(room,{t:'player_forfeited',slot,count:room.clients.length});return;}
   disconnectClientFromMatch(client,true);
 }
 
@@ -1095,6 +1096,8 @@ wss.on('connection', (ws) => {
         return;
       }
       await profiles.flush();
+      client.room.observerSlots||=new Set();
+      for(const peer of client.room.clients)if(outcomes[String(peer.slot)]==='lost'){peer.spectating=true;client.room.observerSlots.add(peer.slot);}
       for (const pid of result.updatedPlayerIds || []) {
         const peer = onlineByPlayerId.get(pid);
         if (peer) {
@@ -1376,7 +1379,8 @@ wss.on('connection', (ws) => {
       if(!client.playerId||sanitizePlayerId(msg.playerId||client.playerId)!==client.playerId){ws.send(JSON.stringify({t:'error',msg:'Register your own profile before joining.'}));return;}
       if(room.clients.some(c=>c!==client&&c.playerId===client.playerId)){ws.send(JSON.stringify({t:'error',msg:'Your profile is already in this game.'}));return;}
       const pw = String(msg.password || '');
-      const knownSeat=room.matchStarted&&client.playerId===sanitizePlayerId(msg.playerId||client.playerId)&&room.seatByPlayerId?.[client.playerId]&&!room.forfeitedSlots?.has(room.seatByPlayerId[client.playerId]);
+      const knownSlot=room.seatByPlayerId?.[client.playerId];
+      const knownSeat=room.matchStarted&&client.playerId===sanitizePlayerId(msg.playerId||client.playerId)&&knownSlot&&(!room.forfeitedSlots?.has(knownSlot)||room.observerSlots?.has(knownSlot));
       if (room.password && pw !== room.password&&!knownSeat) {
         ws.send(JSON.stringify({t:'error',reason:pw?'wrong_password':'password_required',msg:pw?'Wrong password':'Password required'}));
         return;
@@ -1391,7 +1395,7 @@ wss.on('connection', (ws) => {
         const rejoinSlot = room.seatByPlayerId[joinPlayerId];
         const inGrace = !!(room.pendingReconnect && room.pendingReconnect.has(rejoinSlot));
         const inDisc = !!(room.disconnectedSlots && room.disconnectedSlots.has(rejoinSlot));
-        if (!rejoinSlot || room.forfeitedSlots?.has(rejoinSlot) || (!inGrace && !inDisc)) {
+        if (!rejoinSlot || (room.forfeitedSlots?.has(rejoinSlot)&&!room.observerSlots?.has(rejoinSlot)) || (!inGrace && !inDisc)) {
           ws.send(
             JSON.stringify({
               t: 'error',
@@ -1405,6 +1409,7 @@ wss.on('connection', (ws) => {
         if (room.disconnectedSlots) room.disconnectedSlots.delete(rejoinSlot);
         client.room = room;
         client.slot = rejoinSlot;
+        client.spectating=!!room.observerSlots?.has(rejoinSlot);
         room.clients.push(client);
         patchRoomSnapConnectedSlots(room);
         const hostLive = room.clients.some((c) => c.isHost && c.ws.readyState === 1);
@@ -1424,6 +1429,7 @@ wss.on('connection', (ws) => {
             code: room.id,
             slot: client.slot,
             isHost: client.isHost,
+            spectating: client.spectating,
             payload: room.matchInitPayload || null,
             snap: room.lastSnap || null,
             lobbyName: room.name,
@@ -1613,7 +1619,7 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if(t==='forfeit'){if(client.room?.matchStarted)await forfeitClientFromMatch(client);else leaveRoom(client);ws.send(JSON.stringify({t:'left'}));return;}
+    if(t==='forfeit'){if(client.room?.matchStarted)await forfeitClientFromMatch(client,!!msg.spectate);else leaveRoom(client);if(!msg.spectate)ws.send(JSON.stringify({t:'left'}));return;}
     if (t === 'leave') {
       if (client.room && client.room.matchStarted) await forfeitClientFromMatch(client);
       else leaveRoom(client);
@@ -1634,11 +1640,12 @@ wss.on('connection', (ws) => {
     if (!client.room) return;
 
     if (t === 'start' && client.isHost) {
+      for(const peer of client.room.clients)peer.spectating=false;
       client.room.matchStarted = true;
       client.room.lobbyPreview = null;
       client.room._matchEndRecorded = false;
       client.room.pendingReconnect = new Map();
-      client.room.matchId=require('crypto').randomUUID();client.room.forfeitedSlots=new Set();
+      client.room.matchId=require('crypto').randomUUID();client.room.forfeitedSlots=new Set();client.room.observerSlots=new Set();
       const payload = {...msg.payload,serverMatchId:client.room.matchId};
       client.room.matchInitPayload = payload;
       client.room.lastSnap = null;
@@ -1664,6 +1671,7 @@ wss.on('connection', (ws) => {
       return;
     }
     if (t === 'cmd' && !client.isHost) {
+      if(client.spectating||client.room.forfeitedSlots?.has(client.slot))return;
       if (msg.fromSlot !== client.slot) return;
       if (client.room.host && client.room.host.ws.readyState === 1) {
         client.room.host.ws.send(JSON.stringify({ t: 'cmd', fromSlot: client.slot, cmd: msg.cmd }));
@@ -1671,6 +1679,7 @@ wss.on('connection', (ws) => {
       return;
     }
     if (t === 'cmd' && client.isHost) {
+      if(client.spectating||client.room.forfeitedSlots?.has(client.slot))return;
       broadcast(client.room, { t: 'cmd', fromSlot: client.slot, cmd: msg.cmd }, ws);
       return;
     }

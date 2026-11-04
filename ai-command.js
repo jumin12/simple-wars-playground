@@ -2437,7 +2437,7 @@ function wodAiFrontEnvelopment(owner,army,foes,anchor) {
     const dx=cx-anchor.x,dy=cy-anchor.y,len=Math.hypot(dx,dy)||1,ax=dx/len,ay=dy/len;
     let width=hr*4,depth=hr*3;
     for(const e of foes){width=Math.max(width,Math.abs((e.x-cx)*-ay+(e.y-cy)*ax)+(e.range||50)+hr*2);depth=Math.max(depth,(e.x-cx)*ax+(e.y-cy)*ay+(e.range||50)+hr*3);}
-    if(width>hr*22||depth>hr*18)return null;
+    if(width>hr*26||depth>hr*20)return null;
     const rear={x:cx+ax*depth,y:cy+ay*depth},routes=[];
     for(const side of [-1,1]){
         const outer={x:anchor.x-ay*width*side,y:anchor.y+ax*width*side};
@@ -2454,6 +2454,36 @@ function wodAiFrontEnvelopment(owner,army,foes,anchor) {
         routes[1-preferred]=null;
     }
     return {routes,rear:getNearestHexToPoint(rear.x,rear.y)};
+}
+
+function wodAiAssignFrontWings(op,army,envelope,anchor) {
+    const wingsN=envelope.routes.filter(Boolean).length;
+    op.anchor=anchor;op.mode=wingsN===2?'envelopment':'flank';op.rear=envelope.rear;op.jobs=[];
+    const add=(role,members,route)=>op.jobs.push({id:op.id+'-'+role,kind:role==='pin'?'hold':'main',role,response:true,members:members.map(u=>u.uid),frontOperation:op,holdHex:anchor,route,cursor:0,bound:0});
+    const pin=army.slice().sort((a,b)=>Number(!!b.isGeneral)-Number(!!a.isGeneral)||Number(b.type==='heavy')-Number(a.type==='heavy')||Number(!!b._combatEngaged)-Number(!!a._combatEngaged)).slice(0,Math.max(2,Math.ceil(army.length*(wingsN===1?.55:.3))));
+    const dx=op.goal.x-anchor.x,dy=op.goal.y-anchor.y;
+    const wings=army.filter(u=>!pin.includes(u)).sort((a,b)=>(a.y-anchor.y)*dx-(a.x-anchor.x)*dy-((b.y-anchor.y)*dx-(b.x-anchor.x)*dy)),half=Math.ceil(wings.length/2);
+    add('pin',pin);
+    if(wingsN===2){add('left',wings.slice(0,half),envelope.routes[0]);add('right',wings.slice(half),envelope.routes[1]);}
+    else add(envelope.routes[0]?'left':'right',wings,envelope.routes[0]||envelope.routes[1]);
+}
+
+function wodAiReconsiderFrontManeuver(owner,op,army,known) {
+    const now=wodAiOperationTime(),hr=gameData.hexRadius||20;
+    if(op.phase!=='advance'||op.mode!=='breakthrough'||army.length<8||now-(op.maneuverAt??-Infinity)<8000)return;
+    op.maneuverAt=now;
+    const contacts=known.filter(e=>!e._intelMemory&&e.owner===op.hostile&&army.some(u=>Math.hypot(u.x-e.x,u.y-e.y)<hr*12));
+    if(contacts.length<2)return;
+    const cx=army.reduce((n,u)=>n+u.x,0)/army.length,cy=army.reduce((n,u)=>n+u.y,0)/army.length;
+    const lead=army.filter(u=>{const h=getNearestHexToPoint(u.x,u.y);return h&&!wodIsNavalUnit(u)&&wodIsFriendlyOwner(h.owner,owner)&&wodCurrentSupplyComponent(h,owner).city;})
+        .sort((a,b)=>Math.hypot(a.x-cx,a.y-cy)-Math.hypot(b.x-cx,b.y-cy))[0];
+    if(!lead)return;
+    const anchor=getNearestHexToPoint(lead.x,lead.y),envelope=wodAiFrontEnvelopment(owner,army,contacts,anchor);
+    if(!envelope)return;
+    const x=contacts.reduce((n,e)=>n+e.x,0)/contacts.length,y=contacts.reduce((n,e)=>n+e.y,0)/contacts.length;
+    op.goal=getNearestHexToPoint(x,y);wodAiAssignFrontWings(op,army,envelope,anchor);op.launchedAt=now;op.until=Math.max(op.until,now+180000);op.march=null;
+    for(const u of army){u.aiOrderUntil=0;u.aiOrderResponseId=null;gameData._aiMoveQueue?.delete(u);}
+    wodAiRecord(owner,'front-operation-maneuver',{id:op.id,mode:op.mode,troops:army.length,enemy:contacts.length});
 }
 
 function wodAiPlanFrontOffensive(owner,plan,ready) {
@@ -2483,7 +2513,8 @@ function wodAiPlanFrontOffensive(owner,plan,ready) {
             if(!progress||progress.key!==key||closest<progress.distance-hr*.75){previous.progress={key,distance:closest,at:now};previous.until=Math.max(previous.until,now+45000);}
             // Feed this operation from the rear without moving its original
             // rendezvous or recalling the vanguard to collect new recruits.
-            const capacity=previous.capacity||32;
+            wodAiReconsiderFrontManeuver(owner,previous,army,known);
+            const capacity=previous.capacity||48;
             if(previous.members.length<capacity)for(const u of pool){
                 if(previous.members.includes(u.uid)||base(u)?.kind==='reserve'||Math.hypot(u.x-previous.anchor.x,u.y-previous.anchor.y)>hr*30)continue;
                 const other=known.some(e=>e.owner!==previous.hostile&&Math.hypot(e.x-u.x,e.y-u.y)<hr*9);
@@ -2505,7 +2536,7 @@ function wodAiPlanFrontOffensive(owner,plan,ready) {
         const h=sector.attackHex,a=sector.holdHex;
         if(!h||!a||isWaterHex(h)||!wodIsHostileOwner(h.owner,owner)||explored&&!explored.has(getHexKey(h))||!wodCurrentSupplyComponent(a,owner).city)continue;
         const army=pool.filter(u=>Math.hypot(u.x-a.x,u.y-a.y)<hr*32&&wodAiCanReach(u,h)&&
-            !known.some(e=>e.owner!==h.owner&&Math.hypot(e.x-u.x,e.y-u.y)<hr*8)).sort((u,v)=>Math.hypot(u.x-a.x,u.y-a.y)-Math.hypot(v.x-a.x,v.y-a.y)).slice(0,32);
+            !known.some(e=>e.owner!==h.owner&&Math.hypot(e.x-u.x,e.y-u.y)<hr*8)).sort((u,v)=>Math.hypot(u.x-a.x,u.y-a.y)-Math.hypot(v.x-a.x,v.y-a.y)).slice(0,48);
         if(army.length<3)continue;
         const foes=known.filter(e=>Math.hypot(e.x-h.x,e.y-h.y)<hr*8),ratio=wodAiForecast(owner,army,foes).ratio;
         if(ratio<.98)continue;
@@ -2519,7 +2550,7 @@ function wodAiPlanFrontOffensive(owner,plan,ready) {
     for(const c of choices.slice().sort((a,b)=>b.army.length-a.army.length).slice(0,6)){
         if(c.army.length<6)continue;
         const center=c.foes.find(e=>!e._intelMemory&&e.owner===c.sector.attackHex.owner);if(!center)continue;
-        const foes=known.filter(e=>!e._intelMemory&&e.owner===center.owner&&Math.hypot(e.x-center.x,e.y-center.y)<hr*8);
+        const foes=known.filter(e=>!e._intelMemory&&e.owner===center.owner&&Math.hypot(e.x-center.x,e.y-center.y)<hr*14);
         const front=choices.filter(p=>p.sector.attackHex.owner===center.owner).sort((a,b)=>Math.hypot(a.sector.holdHex.x-center.x,a.sector.holdHex.y-center.y)-Math.hypot(b.sector.holdHex.x-center.x,b.sector.holdHex.y-center.y))[0];
         const envelope=wodAiFrontEnvelopment(owner,c.army,foes,front.sector.holdHex);
         if(envelope){c.sector=front.sector;c.foes=foes;c.envelope=envelope;c.score+=18+Math.min(12,foes.length);break;}
@@ -2529,16 +2560,10 @@ function wodAiPlanFrontOffensive(owner,plan,ready) {
     const foes=choice.foes.filter(e=>!e._intelMemory&&e.owner===sector.attackHex.owner);
     const envelope=choice.envelope||wodAiFrontEnvelopment(owner,army,foes,anchor);
     const wingsN=envelope?.routes.filter(Boolean).length||0;
-    const id='front-'+owner+'-'+Math.floor(now),op={id,hexes:gameData.hexes,at:now,until:now+180000,anchor,goal:sector.attackHex,hostile:sector.attackHex.owner,members:army.map(u=>u.uid),initialN:army.length,capacity:32,phase:'gather',mode:wingsN===2?'envelopment':wingsN===1?'flank':'breakthrough',probe:!envelope&&choice.foes.length>0&&choice.ratio<1.12,jobs:[],bound:0};
+    const id='front-'+owner+'-'+Math.floor(now),op={id,hexes:gameData.hexes,at:now,until:now+180000,anchor,goal:sector.attackHex,hostile:sector.attackHex.owner,members:army.map(u=>u.uid),initialN:army.length,capacity:48,phase:'gather',mode:wingsN===2?'envelopment':wingsN===1?'flank':'breakthrough',probe:!envelope&&choice.foes.length>0&&choice.ratio<1.12,jobs:[],bound:0};
     const add=(role,members,route)=>op.jobs.push({id:id+'-'+role,kind:role==='pin'?'hold':'main',role,response:true,members:members.map(u=>u.uid),frontOperation:op,holdHex:anchor,route,cursor:0,bound:0});
     if(envelope){
-        const pin=army.slice().sort((a,b)=>Number(!!b.isGeneral)-Number(!!a.isGeneral)||Number(b.type==='heavy')-Number(a.type==='heavy')||Number(!!b._combatEngaged)-Number(!!a._combatEngaged)).slice(0,Math.max(2,Math.ceil(army.length*(wingsN===1?.55:.3))));
-        const dx=op.goal.x-anchor.x,dy=op.goal.y-anchor.y;
-        const wings=army.filter(u=>!pin.includes(u)).sort((a,b)=>(a.y-anchor.y)*dx-(a.x-anchor.x)*dy-((b.y-anchor.y)*dx-(b.x-anchor.x)*dy)),half=Math.ceil(wings.length/2);
-        add('pin',pin);
-        if(wingsN===2){add('left',wings.slice(0,half),envelope.routes[0]);add('right',wings.slice(half),envelope.routes[1]);}
-        else add(envelope.routes[0]?'left':'right',wings,envelope.routes[0]||envelope.routes[1]);
-        op.rear=envelope.rear;
+        wodAiAssignFrontWings(op,army,envelope,anchor);
     }else add('breakthrough',army);
     gameData._aiFrontOffensives[owner]=op;
     for(const u of army){u.aiOrderUntil=0;gameData._aiMoveQueue?.delete(u);}
@@ -2556,21 +2581,24 @@ function wodAiIssueFrontOffensive(unit,job) {
         if(here&&wodIsFriendlyOwner(here.owner,unit.owner)){wodAiStampOrder(unit,true,here,3000);unit.aiOrderPhase=op.phase;unit.aiFrontBound=job.bound;return true;}
     }
     if(op.phase==='gather'){
-        const gathered=army.filter(u=>Math.hypot(u.x-op.anchor.x,u.y-op.anchor.y)<hr*8);
+        const gathered=army.filter(u=>Math.hypot(u.x-op.anchor.x,u.y-op.anchor.y)<hr*Math.max(8,Math.sqrt(army.length)*1.65));
         const foes=wodAiThreats(unit.owner).filter(e=>Math.hypot(e.x-op.goal.x,e.y-op.goal.y)<hr*7);
         if(gathered.length>=Math.max(3,Math.ceil(Math.min(op.initialN,army.length)*.65))&&wodAiForecast(unit.owner,gathered,foes).ratio>=.98){
             op.phase='advance';op.launchedAt=now;wodAiRecord(unit.owner,'front-operation-launch',{id:op.id,troops:gathered.length,mode:op.mode});
         }
     }
-    if(wodAiTacticalFallback(unit,job))return true;
-    let target,holding=false;const members=army.filter(u=>job.members.includes(u.uid));
+    const members=army.filter(u=>job.members.includes(u.uid));
+    const fixing=job.role==='pin'&&op.phase==='advance'&&op.jobs.some(j=>j.route&&j.cursor>=2)&&unit.hp>unit.maxHp*(unit.isGeneral?.85:.72)&&
+        !wodAiCorridorWithdrawal(unit)&&wodAiLocalSituation(unit).forecast.ratio>=.72;
+    if(!fixing&&wodAiTacticalFallback(unit,job))return true;
+    let target,holding=false;
     if(op.phase==='gather'){
         target=wodAiFormationSlot(unit,job,op.anchor,op.goal,army);holding=true;
     }else if(job.route){
         // Each wing advances together through a fixed chain. Behind-the-line
         // recruits catch up; they never move its current bound backwards.
         while(job.cursor<job.route.length-1){
-            const h=gameData.hexes[job.route[job.cursor]],near=members.filter(u=>Math.hypot(u.x-h.x,u.y-h.y)<hr*2.2);
+            const h=gameData.hexes[job.route[job.cursor]],near=members.filter(u=>Math.hypot(u.x-h.x,u.y-h.y)<hr*Math.max(2.2,Math.sqrt(members.length)*1.05));
             const trailing=near.length>=Math.min(2,members.length)&&wodIsFriendlyOwner(h.owner,unit.owner)&&now-(job.boundAt??op.launchedAt??now)>12000;
             if(near.length<Math.max(1,Math.ceil(members.length*.6))&&!trailing)break;job.cursor++;job.bound++;job.boundAt=now;
             op.until=Math.min(op.at+360000,Math.max(op.until,now+45000));
@@ -2579,7 +2607,7 @@ function wodAiIssueFrontOffensive(unit,job) {
         // Preserve the supply trail; no water or hostile-corner route shortcut.
         if(job.slotBound!==job.bound){job.slotBound=job.bound;job.slots={};}
         const foes=wodAiThreats(unit.owner,false),used=new Set(Object.entries(job.slots).filter(([id])=>id!==unit.uid).map(([,k])=>k));
-        const sites=getHexesInRadius(h.q,h.r,2).map(p=>gameData.hexes[p.q+','+p.r]).filter(p=>p&&!used.has(getHexKey(p))&&!isWaterHex(p)&&canUnitEnterHex(unit,p)&&
+        const sites=getHexesInRadius(h.q,h.r,Math.max(2,Math.ceil(Math.sqrt(members.length)/1.5))).map(p=>gameData.hexes[p.q+','+p.r]).filter(p=>p&&!used.has(getHexKey(p))&&!isWaterHex(p)&&canUnitEnterHex(unit,p)&&
             !foes.some(e=>Math.hypot(e.x-p.x,e.y-p.y)<(e.range||50)+hr*.5)&&!isWorldPositionBlockedByUnits(unit,p.x,p.y));
         sites.sort((a,b)=>Math.hypot(a.x-h.x,a.y-h.y)-Math.hypot(b.x-h.x,b.y-h.y));
         target=gameData.hexes[job.slots[unit.uid]]||sites[0]||h;job.slots[unit.uid]=getHexKey(target);
@@ -2589,7 +2617,15 @@ function wodAiIssueFrontOffensive(unit,job) {
         const enemies=wodAiThreats(unit.owner,false).filter(e=>e.owner===op.hostile&&Math.hypot(e.x-op.goal.x,e.y-op.goal.y)<hr*10);
         const close=enemies.slice().sort((a,b)=>Math.hypot(a.x-unit.x,a.y-unit.y)-Math.hypot(b.x-unit.x,b.y-unit.y))[0];
         const safe=!enemies.length||wodAiForecast(unit.owner,members,enemies).ratio>=1;
-        target=close&&safe?wodAiAdvanceHex(unit,getNearestHexToPoint(close.x,close.y),members):wodAiFormationSlot(unit,job,op.anchor,op.goal,members);holding=!safe;
+        if(close&&(safe||fixing)){
+            const at=getNearestHexToPoint(close.x,close.y),reach=wodAiOperationReach(unit),used=job._pinPoints||=( {} );
+            const sites=getHexesInRadius(at.q,at.r,4).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&!isWaterHex(h)&&canUnitEnterHex(unit,h)&&reach.has(getHexKey(h))&&
+                (safe||wodIsFriendlyOwner(h.owner,unit.owner))&&!isWorldPositionBlockedByUnits(unit,h.x,h.y));
+            const score=h=>Math.abs(Math.hypot(h.x-close.x,h.y-close.y)-(unit.range||50)*.85)*3+Math.hypot(h.x-unit.x,h.y-unit.y)*.25+
+                Object.entries(used).filter(([id,k])=>id!==unit.uid&&k===getHexKey(h)).length*hr*12+getTerrainDefenseModifier(unit,h)*hr;
+            sites.sort((a,b)=>score(a)-score(b));target=sites[0];if(target)used[unit.uid]=getHexKey(target);
+        }
+        target||=wodAiFormationSlot(unit,job,op.anchor,op.goal,members);holding=!safe;
     }else{
         if((!op.advanceStructure||!wodIsHostileOwner(op.advanceStructure.hex.owner,unit.owner))&&(op.structureCheckAt==null||now-op.structureCheckAt>=3000)){
             op.structureCheckAt=now;const structure=wodAiStructureObjective(unit.owner,members,op.advanceGoal||op.goal);
