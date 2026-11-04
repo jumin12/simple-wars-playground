@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=pursuit-border-coverage-20261104"></script>
+    <script src="ai-command.js?v=steady-advances-20261104"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-04T22:43:00Z",
+                title:"AI regrouping and steadier advances",
+                items:[
+                    "Understrength ground attack plans release their surviving troops so nearby remnants can regroup into a viable advancing force. Separate two-unit plans no longer reserve each other's reinforcements and stall on an undefended front.",
+                    "Small armies scout with their advancing force instead of permanently dedicating too many infantry to patrols. Unneeded ground scouts rejoin useful groups once an enemy town is discovered; larger armies retain reconnaissance when needed.",
+                    "Town guards, recovery, urgent defense, naval operations and separate enemy-front assignments retain priority. Ground attacks still require support and connected supply."
+                ]
+            },
             {
                 at:"2026-11-04T22:06:31Z",
                 title:"Coordinated pursuit and defense across multiple threats",
@@ -41825,7 +41834,7 @@
                 infantry.sort((a,b)=>(!wodAiCanReach(a,asset)?1e12:0)-(!wodAiCanReach(b,asset)?1e12:0)+(a.type!=='light'?1e10:0)-(b.type!=='light'?1e10:0)+(attacking(a)?1e9:0)+wodAiDist2(a.x,a.y,asset.x,asset.y)-(attacking(b)?1e9:0)-wodAiDist2(b.x,b.y,asset.x,asset.y));
                 if(wodAiCanReach(infantry[0],asset))add('defend',infantry.splice(0,1),null,asset);
             }
-            if(wodFogActive()&&infantry.length>=3){const n=Math.min(2,Math.max(1,Math.floor(infantry.length*.25)));for(const scout of infantry.splice(0,n))add('scout',[scout],sectors[0]);}
+            for(const scout of infantry.splice(0,wodAiDesiredGroundScouts(owner,ready)))add('scout',[scout],sectors[0]);
             const defenseDemand=wodAiDefenseDemand(owner,ready,sectors,strategy,jobs.filter(j=>j.kind==='defend').reduce((n,j)=>n+j.members.length,0));
             const lineN=Math.min(infantry.length,defenseDemand.line);
             for(let i=0;i<lineN;i++)add('hold',infantry.splice(0,1),defenseDemand.ranked[i%Math.max(1,sectors.length)]);

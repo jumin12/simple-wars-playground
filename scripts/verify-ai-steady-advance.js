@@ -1,0 +1,43 @@
+'use strict';
+const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{chromium}=require('playwright');
+const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/ai-steady-advance',process.env.AUDIT_VERSION||'focused');fs.mkdirSync(OUT,{recursive:true});
+const server=http.createServer((req,res)=>{let f=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!f.startsWith(ROOT+path.sep))return res.writeHead(403).end();if(process.env.BASELINE_DIR&&['index.html','ai-command.js'].includes(path.relative(ROOT,f)))f=path.join(ROOT,process.env.BASELINE_DIR,path.basename(f));fs.readFile(f,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.css':'text/css','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(f)]||'application/octet-stream');res.end(b);});});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});
+try{await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks);
+await page.evaluate(()=>{
+ setGameSpeed(0,true);cancelAnimationFrame(animationFrameId);wodDismissChangelogPopup();
+ window.world=()=>{wodPrepareForNewMatch({keepLiveMap:true});WOD.makeBlankMap(36);gameState='PLAYING';gameData.menuAttractMode=false;gameData.mp={enabled:false};gameData._campaignRun=null;gameData._matchReadyForEndChecks=false;gameData.fogOfWar=false;gameData.entities=[];gameData.nextUnitId=1;gameData.cities=[];gameData.forts=[];gameData.hospitals=[];gameData.bridges=[];gameData.constructionJobs=[];gameData.alliances=[];gameData.aiTaskForces={};gameData.aiBattlePlans={};gameData.aiCommanderProfiles={2:'balanced'};gameData._aiEconomyClock=0;gameData.aiTimer=gameData.aiStrategyTimer=gameData.convoyTimer=gameData._transportAiTimer=-1e6;gameData.aiMoneyByOwner={2:0};gameData.aiManpowerByOwner={2:100000};gameData.money=gameData.manpower=100000;gameData._aiFrontOffensives={};gameData._aiFrontOffensiveChecks={};gameData._aiDefenseByOwner={};gameData._aiCombatContexts={};gameData._aiLocalSituation=new WeakMap();for(const h of gameData.hexList){h.type='grass';h.owner=h.q<=0?2:1;h.cityId=null;}};
+ window.h=(q,r=0)=>gameData.hexes[q+','+r];window.town=(q,r,owner,id)=>{const p=h(q,r);p.type='urban';p.cityId=id;p.owner=owner;const c={id,name:id,q,r,x:p.x,y:p.y,owner,hp:1000,maxHp:1000};gameData.cities.push(c);return c;};window.unit=(q,r=0,type='light',owner=2)=>{const p=h(q,r),u=createUnitAt(type,p.x,p.y,owner,{startSpawn:true});u.x=u._drawX=p.x;u.y=u._drawY=p.y;u.isGeneral=false;return u;};
+ window.refresh=()=>{gameData.unitSpatialGrid=buildUnitSpatialGrid();gameData._citySupplyCache=null;gameData._aiArrivalCache=null;gameData._aiCombatContexts={};gameData._aiLocalSituation=new WeakMap();wodInvalidateAiFrontlineHexCache();};
+ window.makePlan=(army,home)=>{const guard=unit(home.q,home.r),jobs=[{id:'guard',kind:'defend',city:home,members:[guard.uid]}],unitJob={[guard.uid]:'guard'};for(const [i,u]of army.entries()){const j={id:'j'+i,kind:'main',role:'breakthrough',members:[u.uid],holdHex:h(-2),attackHex:h(1),objectiveHex:h(1)};jobs.push(j);unitJob[u.uid]=j.id;}const p={jobs,unitJob,sectors:[{holdHex:h(-2),attackHex:h(1)}],readyN:army.length+1};gameData.aiTaskForces[2]=p;return{p,guard};};
+ window.sim=(seconds,orders)=>{for(let i=0;i<Math.round(seconds*20);i++){if(i%10===0){refresh();orders?.();}wodBeginSimPfBudget(gameData.entities.length);gameData._wodPfFrameActive=true;try{update(.05);}finally{gameData._wodPfFrameActive=false;}wodDrainAiMoveQueue();}};
+});
+results.fragments=await page.evaluate(()=>{
+ world();const home=town(-24,0,2,'Home');town(28,0,1,'Enemy');const army=Array.from({length:6},(_,i)=>unit(-3-i%2,(i-2.5)*2,i===0?'heavy':'light')),foes=[];const {p,guard}=makePlan(army,home);
+ for(let slot=0;slot<3;slot++){const ids=army.slice(slot*2,slot*2+2).map(u=>u.uid),op={id:'fragment-'+slot,slot,frontOwner:0,hexes:gameData.hexes,at:0,until:180000,anchor:h(-2),goal:h(3),advanceGoal:h(9),hostile:1,members:ids,initialN:3,capacity:6,phase:'advance',mode:'breakthrough',jobs:[]};op.jobs=[{id:op.id+'-main',kind:'main',role:'breakthrough',response:true,members:ids.slice(),frontOperation:op,holdHex:h(-2),bound:0}];gameData._aiFrontOffensives[slot?'2:group-'+slot:2]=op;}
+ refresh();wodAiPlanFrontOffensive(2,p,[...army,guard]);const initial=wodAiActiveFrontOperations(2).map(o=>o.members.length),start=army.map(u=>u.x),guardStart={x:guard.x,y:guard.y};let maximumAdvanced=0;
+ sim(100,()=>{wodAiPlanFrontOffensive(2,p,[...army,guard]);for(const u of army.filter(u=>u.hp>0)){const j=wodAiGetUnitTaskJob(u);if(!wodAiShouldKeepCurrentOrder(u))wodAiIssueTaskForceOrder(u,j,u.hp/u.maxHp);}maximumAdvanced=Math.max(maximumAdvanced,army.filter((u,i)=>u.x>start[i]+40).length);});
+ return{initial,maximumAdvanced,damage:foes.reduce((n,u)=>n+u.maxHp-u.hp,0),land:gameData.hexList.filter(h=>h.q>0&&h.owner===2).length,guard:Math.hypot(guard.x-guardStart.x,guard.y-guardStart.y)<1,isolated:army.filter(u=>u.hp>0&&wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y))).length,events:wodAiDiagnostics(2).counts};
+});
+await page.evaluate(()=>{UI.mainMenu.classList.add('hidden');UI.panels.forEach(p=>p.classList.add('hidden'));UI.inGameUI.style.display='block';gameData.camera={zoom:1,x:-canvas.clientWidth/2,y:-canvas.clientHeight/2};wodMarkTerrainFullDirty();updateTerrainCache();draw();});await page.screenshot({path:path.join(OUT,'advance.png')});fs.writeFileSync(path.join(OUT,'state.json'),await page.evaluate(()=>render_game_to_text()));
+results.scouts=await page.evaluate(()=>[true,false].map(fog=>{
+ world();const home=town(-24,0,2,'Home'),enemy=town(28,0,1,'Known');const army=Array.from({length:12},(_,i)=>unit(-4-Math.floor(i/6),(i%6-2.5)*2)),{p,guard}=makePlan(army,home),own=[...army,guard];
+ gameData.fogOfWar=fog;gameData._factionIntel={};if(fog)wodFogFactionIntel(2,true).cities.set(enemy.id,{...enemy});
+ for(const u of army.slice(0,2)){const j=p.jobs.find(j=>j.id===p.unitJob[u.uid]);j.kind=j.role='scout';}
+ refresh();wodAiRebalanceGroups(2,p,own);const scouts=army.filter(u=>p.jobs.find(j=>j.id===p.unitJob[u.uid])?.kind==='scout').length;
+ const reassigned=army.slice(0,2).map(u=>p.jobs.find(j=>j.id===p.unitJob[u.uid])?.kind),known=wodAiKnownCities(2).some(c=>c.id==='Known');
+ sim(100,()=>{wodAiPlanFrontOffensive(2,p,own);for(const u of army.filter(u=>u.hp>0)){const j=wodAiGetUnitTaskJob(u);if(!wodAiShouldKeepCurrentOrder(u))wodAiIssueTaskForceOrder(u,j,u.hp/u.maxHp);}});
+ return{fog,known,scouts,reassigned,land:gameData.hexList.filter(h=>h.q>0&&h.owner===2).length,guard:p.unitJob[guard.uid]==='guard',events:wodAiDiagnostics(2).counts};
+}));
+results.scoutBudget=await page.evaluate(()=>{
+ if(typeof wodAiDesiredGroundScouts!=='function')return null;
+ world();town(-24,0,2,'Home');town(28,0,1,'Unknown');gameData.fogOfWar=true;gameData._factionIntel={};
+ const army=Array.from({length:26},(_,i)=>unit(-15-Math.floor(i/9),(i%9-4)*2));refresh();
+ return{hidden:!wodAiKnownCities(2).some(c=>c.id==='Unknown'),counts:[7,8,17,18].map(n=>wodAiDesiredGroundScouts(2,army.slice(0,n)))};
+});
+if(process.env.EXPECT_LEGACY==='1'){assert.deepEqual(results.fragments.initial,[2,2,2]);assert(results.fragments.maximumAdvanced===0&&results.fragments.damage===0);assert(results.scouts.every(c=>c.scouts===2));return;}
+assert(results.fragments.initial.every(n=>n>=3)&&results.fragments.maximumAdvanced>=4&&results.fragments.land>5&&results.fragments.guard&&!results.fragments.isolated,JSON.stringify(results.fragments));
+assert(results.scouts.every(c=>c.known&&c.scouts===0&&c.reassigned.every(k=>k&&k!=='scout')&&c.land>5&&c.guard),JSON.stringify(results.scouts));
+assert(results.scoutBudget.hidden);assert.deepEqual(results.scoutBudget.counts,[0,1,1,2]);assert.deepEqual(errors,[]);console.log(JSON.stringify(results,null,2));
+}finally{fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors));await browser.close();server.close();}
+})().catch(e=>{console.error(e);server.close();process.exitCode=1;});
