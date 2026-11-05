@@ -848,6 +848,25 @@ function wodAiTerritoryThreat(owner,cluster,previous,used) {
         enemies:cluster.count,score:100+cluster.count*12};
 }
 
+// A wide cut's representative cell may be far from the entrance we actually
+// defend. Compare every entrance, so nested warnings do not reserve two armies
+// for the same gate, and distant wings of a real pincer remain separate.
+function wodAiSelectDefenseThreats(threats) {
+    const hr=gameData.hexRadius||20,selected=[];
+    const entrances=t=>t.screenPoints?.length?t.screenPoints:[t.holdHex];
+    const covered=(a,b)=>a.every(p=>b.some(q=>Math.hypot(p.x-q.x,p.y-q.y)<hr*5));
+    for(const t of threats){
+        if(t.kind==='counter'||t.kind==='relief'){selected.push(t);continue;}
+        const duplicate=t.kind==='corridor'&&selected.find(s=>{
+            if(s.kind!=='corridor'||!t.riskUnits?.size||!s.riskUnits?.size)return false;
+            const a=entrances(t),b=entrances(s);
+            return [...t.riskUnits].every(id=>s.riskUnits.has(id))&&covered(a,b)&&covered(b,a);
+        });
+        if(duplicate)t._screenResponse=duplicate;else selected.push(t);
+    }
+    return selected;
+}
+
 // Reserve a nearby screen for each reachable threat before a large battle can
 // spend the entire defense budget. Later reinforcement still favors urgency.
 function* wodAiReserveDefenseScreens(owner,threats,available,plan,budget,previous) {
@@ -2297,7 +2316,7 @@ function wodAiCorridorWithdrawal(unit) {
                     u.hp>u.maxHp*.55&&!u._medicalRecovering&&!u.retreating&&!u.moraleBroken&&Math.hypot(u.x-gate.x,u.y-gate.y)<hr*12&&
                     // A reserve beyond the opposite wing cannot cover both ends.
                     gates.every(p=>p===gate||Math.hypot(u.x-gate.x,u.y-gate.y)<=Math.hypot(u.x-p.x,u.y-p.y)||Math.hypot(p.x-gate.x,p.y-gate.y)<(u.range||50)*1.5)&&
-                    (defense.unitJob?.[u.uid]===cut.id||Math.hypot(u.x-gate.x,u.y-gate.y)<(u.range||50)*.9&&
+                    (defense.unitJob?.[u.uid]===(cut.responseId||cut.id)||Math.hypot(u.x-gate.x,u.y-gate.y)<(u.range||50)*.9&&
                         foes.some(e=>Math.hypot(u.x-e.x,u.y-e.y)<(u.range||50)))&&wodAiArrivalSeconds(u,gate,u.range||50,horizon)<=horizon);
                 return [help.length?wodAiForecast(unit.owner,help,foes).ratio:0];
             });
@@ -3202,8 +3221,10 @@ function wodAiPlanFrontOperation(owner,plan,ready,frontOwner=0,slot=0,capacity=1
         return null;
     }
     if(pool.length<(slot?6:3))return null;
-    // Retain one actual reserve. A town garrison is never in this pool.
-    const reserve=pool.find(u=>base(u)?.kind==='reserve');if(reserve)pool.splice(pool.indexOf(reserve),1);
+    // Retain a reserve when there is enough strength for a viable attack.
+    // Reserving the third available soldier deadlocked an otherwise ready
+    // cohort forever. Garrisons and urgent defense loans are already excluded.
+    const reserve=pool.find(u=>base(u)?.kind==='reserve');if(reserve&&pool.length>3)pool.splice(pool.indexOf(reserve),1);
     if(pool.length<3)return null;
     const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null,choices=[],sectors=(plan.sectors||[]).slice(),engaged=wodAiEngagedContacts(owner,known);
     const otherOps=wodAiActiveFrontOperations(owner).filter(o=>o!==previous&&(o.frontOwner||0)===frontOwner),handled=new Set();

@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=objective-continuity-20261104"></script>
+    <script src="ai-command.js?v=front-commitment-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-05T01:35:20Z",
+                title:"AI front-line commitment",
+                items:[
+                    "Small AI armies can commit their available reserve to form a viable three-regiment attack instead of waiting indefinitely at an open front. Larger forces retain a reserve; garrisons, emergency defenders and combat-strength checks remain in effect.",
+                    "Overlapping supply-cut warnings share defenders when the same entrances protect the same troops, freeing surplus soldiers for the advance. Each cut still retains its own withdrawal warning, and separate flanks receive separate protection."
+                ]
+            },
             {
                 at:"2026-11-05T00:43:00Z",
                 title:"AI momentum after successful attacks",
@@ -41669,7 +41677,7 @@
             }
             threats.push(...wodAiTownDefenseThreats(owner,army));
             threats.sort((a,b)=>b.score-a.score);
-            const selected=[];
+            let selected=[];
             for(const t of threats)if(t.kind==='counter'||t.kind==='relief'||!selected.some(s=>s.kind!=='relief'&&(
                 wodAiDist2(s.holdHex.x,s.holdHex.y,t.holdHex.x,t.holdHex.y)<Math.pow(hr*7,2)||
                 t.kind==='corridor'&&s.kind==='corridor'&&t.riskTileKeys&&s.riskTileKeys&&t.riskTileKeys.filter(k=>s.riskTileKeys.includes(k)).length>=Math.min(t.riskTileKeys.length,s.riskTileKeys.length)*.6)))selected.push(t);
@@ -41694,7 +41702,12 @@
                 cut.riskUnits=new Set(army.filter(u=>positions.get(u.uid)!==undefined&&!safe.has(positions.get(u.uid))&&!blocked.has(positions.get(u.uid))&&
                     !(u.type==='marine'&&marineSafe.has(positions.get(u.uid)))).map(u=>u.uid));
             }
+            // Keep every proven cut for withdrawal safety, but allocate only
+            // one screen where the same entrance protects the same troops.
+            const corridorWarnings=selected.filter(t=>t.kind==='corridor');
+            selected=wodAiSelectDefenseThreats(selected);
             wodAiStabilizeCorridorJobs(selected,old);
+            for(const cut of corridorWarnings)if(cut._screenResponse){cut.responseId=cut._screenResponse.id;delete cut._screenResponse;}
             const trappedIds=new Set(pockets.flatMap(p=>p.trapped));
             const unitJob={}, jobs=[], available=army.filter(u=>!u.moraleBroken&&(trappedIds.has(u.uid)||!u._medicalRecovering&&!u.retreating&&u.hp/u.maxHp>.34)), plan=gameData.aiTaskForces?.[owner];
             const primaryTheater=wodAiDefenseTheater(owner,selected,available,plan);
@@ -41759,7 +41772,7 @@
                 if(job.members.length)jobs.push(job);
             }
             const rec={at:now,hexes:gameData.hexes,cityStamp,topology,jobs,unitJob,pockets,
-                corridors:selected.filter(t=>t.kind==='corridor'),incursions:incursions.length,suppliedHexes:supplied.size,supplyDistance};
+                corridors:corridorWarnings,incursions:incursions.length,suppliedHexes:supplied.size,supplyDistance};
             gameData._aiDefenseByOwner[owner]=rec;
             for(const cut of rec.corridors)wodAiRecord(owner,'corridor-warning',{job:cut.id,width:cut.cutIndices.length,troops:cut.atRisk,predictive:cut.predictive});
             return rec;
