@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=coherent-ai-20261104"></script>
+    <script src="ai-command.js?v=objective-continuity-20261104"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-05T00:43:00Z",
+                title:"AI momentum after successful attacks",
+                items:[
+                    "Victorious armies stop tracing obsolete encirclement routes around cleared or overwhelmed opposition and continue toward reachable towns or territory as a supported force.",
+                    "Capturing a town adds its garrison without rebuilding the surviving army's groups. Losing assets, urgent defense, medical recovery and dangerous opposition still trigger the appropriate response.",
+                    "Quiet territory pushes retain their direction through several cells instead of circling the nearest edge. New objectives use the surviving roster and exclude garrisons and emergency defenders."
+                ]
+            },
             {
                 at:"2026-11-04T23:38:20Z",
                 title:"Coordinated AI armies and purposeful movement",
@@ -41806,7 +41815,13 @@
                 return target&&now-(prev.simBuiltAt||0)<commitment&&wodIsHostileOwner(target.owner,owner)&&
                     ready.filter(u=>prev.unitJob[u.uid]===j.id).length>=Math.max(1,Math.ceil(j.quota*.5));
             });
-            if(prev&&prev.assetSignature===assetSignature&&(now<prev.expireAt||activeMission)) {
+            const assetIds=assets.map(c=>c.id),frontMission=prev&&wodAiActiveFrontOperations(owner).some(op=>
+                op.members.filter(id=>ready.some(u=>u.uid===id&&!prev.jobs.find(j=>j.id===prev.unitJob[id])?.city&&!prev.jobs.find(j=>j.id===prev.unitJob[id])?.fort)).length>=3);
+            const gainedAssets=prev?.assetIds&&prev.assetIds.every(id=>assetIds.includes(id))&&prev.assetSignature.startsWith(wodAiCommander(owner).id+'|');
+            if(prev&&(prev.assetSignature===assetSignature||gainedAssets)&&(now<prev.expireAt||activeMission||frontMission)) {
+                // Capturing a town adds one garrison; it does not dissolve the
+                // surviving assault and send it back through new rally orders.
+                prev.assetSignature=assetSignature;prev.assetIds=assetIds;
                 wodAiRebalanceGroups(owner,prev,ready);
                 prev.readyN=ready.length;wodAiReadDefense(owner,units);wodAiPlanFrontOffensive(owner,prev,ready);return prev;
             }
@@ -41880,7 +41895,7 @@
                 if(operation){operation.jobIds=[marine.id,...(naval?[naval.id]:[])];marine.operation=operation;if(naval)naval.operation=operation;operations.push(operation);}
             }
             for(let i=0;i<ships.length;i+=3)add('naval',ships.slice(i,i+3),attackSectors[0]);
-            const plan={owner,assetSignature,jobs,unitJob,sectors,operations,landOperations:continuedLandOperations,defenseDemand:{line:lineN,reserve:reserveN,frontage:defenseDemand.frontage,armyFloor:defenseDemand.armyFloor},readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+30000};
+            const plan={owner,assetSignature,assetIds,jobs,unitJob,sectors,operations,landOperations:continuedLandOperations,defenseDemand:{line:lineN,reserve:reserveN,frontage:defenseDemand.frontage,armyFloor:defenseDemand.armyFloor},readyN:ready.length,builtAt:now,simBuiltAt:wodAiOperationTime(),expireAt:now+30000};
             gameData.aiTaskForces[owner]=plan;wodAiOrganizeFronts(owner,plan,ready);wodAiCoordinateCampaign(owner,plan,ready);wodAiConcentrateAssaults(owner,plan,ready);wodAiReadDefense(owner,units);wodAiPlanFrontOffensive(owner,plan,ready);return plan;
         }
 
