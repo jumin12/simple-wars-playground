@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=diagonal-retreat-buildings-20261105"></script>
+    <script src="ai-command.js?v=small-supporting-forces-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,7 @@
         };
 
         const WOD_CHANGELOG = [
+            {"at":"2026-11-05T09:54:02Z","title":"Smaller armies, separate objectives and nearby support","items":["AI attacks use several persistent forces, usually three to six units and capped at eight, with separate approach lanes and objectives instead of one oversized army.","Viable groups keep their own missions. Town assaults, land advances and flanking forces no longer all get redirected toward the same city; only small fragments regroup.","One nearby force can temporarily help a neighboring battle without merging their rosters. Other forces keep their objectives, and the helper resumes its mission after combat clears.","Combat support preserves fog of war, arrival checks, supply, garrisons, medical recovery, deliberate flanks and urgent defense duties."]},
             {"at":"2026-11-05T09:01:58Z","title":"Diagonal corridors, steady retreats and building information","items":["Single-cell diagonal land connections now carry movement and city supply for every side. Corner sampling no longer strands a unit on neighboring water; a truly severed land route still loses supply.","Automatic morale retreats use the same short fallback as the Retreat button and keep their destination until arrival. Pursuit can trigger a further short fallback after that bound.","Factories, farms, harbors, forts, hospitals and bridges have information buttons with their own costs, construction times, bonuses and placement/use guidance, including in the city list.","Idle front units cautiously take supplied empty land until they approach actual enemy weapon range. Town guards, medical recovery, active marches and urgent defense retain their duties.","Cached HUD rate lookups and routing flash artwork remove repeated DOM searches and per-frame image filtering from large battles."]},
             {
                 at:"2026-11-05T08:10:16Z",
@@ -42072,8 +42073,8 @@
             const flank=infantry.length>=6?infantry.splice(-Math.max(2,Math.floor(infantry.length*profile.flank))):[];
             const escorts=infantry.length>=8?infantry.splice(-2):[];
             for(let i=0;i<infantry.length;i+=4)add('main',infantry.slice(i,i+4),attackSectors[Math.floor(i/4)%Math.max(1,attackSectors.length)]);
-            if(flank.length) {
-                const job=add('raid',flank,attackSectors[1%Math.max(1,attackSectors.length)]);
+            for(let i=0;i<flank.length;i+=5) {
+                const job=add('raid',flank.slice(i,i+5),attackSectors[(1+Math.floor(i/5))%Math.max(1,attackSectors.length)]);
                 if(job.objectiveHex||job.objectiveCity)job.strikeHex=job.attackHex;
             }
             if(escorts.length){const job=add('support',escorts,sectors[0]);job.escortJobId=jobs.find(j=>j.kind==='armor'||j.kind==='main')?.id;}
