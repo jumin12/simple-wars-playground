@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=group-combat-support-20261105"></script>
+    <script src="ai-command.js?v=front-commitment-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-05T04:37:24Z",
+                title:"AI armies commit to their fronts",
+                items:[
+                    "Routine guard and reserve rebalancing keeps active assault formations together instead of repeatedly dismantling them while they march. Fresh recruits fill defensive gaps.",
+                    "Temporary defense screens now draw from the matching enemy front. Nearby combat, town relief, breakouts and substantial imminent supply cuts retain emergency authority."
+                ]
+            },
             {
                 at:"2026-11-05T03:23:02Z",
                 title:"AI groups support their fighting units",
@@ -41780,7 +41788,7 @@
                 const remainingWeight=responseThreats.slice(threatIndex).filter(s=>s===t||screens.counts.has(s.id)).reduce((n,s)=>n+responseWeight(s),0);
                 const responseBudget=Math.min(Math.max(0,budget-reservedElsewhere),Math.max(screens.counts.get(t.id)||0,Math.ceil(budget*responseWeight(t)/Math.max(1,remainingWeight))));
                 let recruited=0;
-                const candidates=available.filter(u=>!unitJob[u.uid]&&(!screens.byUnit.has(u.uid)||screens.byUnit.get(u.uid)===t.id)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
+                const candidates=available.filter(u=>!unitJob[u.uid]&&wodAiDefenseFrontAvailable(u,t,plan)&&(!screens.byUnit.has(u.uid)||screens.byUnit.get(u.uid)===t.id)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
                     responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24)&&wodAiResponseCanArrive(u,t,responseDistance(u)));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);

@@ -752,9 +752,10 @@ function wodAiRebalanceGroups(owner, plan, ready) {
     }
     const mobilize=(amount,kind)=>{
         let need=amount-freeInf().length;
+        const committed=new Set(wodAiActiveFrontOperations(owner).filter(op=>['gather','advance'].includes(op.phase)).flatMap(op=>op.members));
         const donors=infantry.filter(u=>{
             const job=plan.jobs.find(j=>j.id===plan.unitJob[u.uid]);
-            return ['main','raid','armor','support'].includes(job?.kind)&&(!u._combatEngaged||strategy.intent==='defend')&&
+            return !committed.has(u.uid)&&['main','raid','armor','support'].includes(job?.kind)&&(!u._combatEngaged||strategy.intent==='defend')&&
                 (strategy.intent==='defend'||job.operationState?.stage!=='attack'||!(job.operationState.commitUntil>now));
         });
         donors.sort((a,b)=>Number(!!a._combatEngaged)-Number(!!b._combatEngaged)||Math.min(...sectors.map(s=>wodAiDist2(a.x,a.y,s.holdHex.x,s.holdHex.y)))-Math.min(...sectors.map(s=>wodAiDist2(b.x,b.y,s.holdHex.x,s.holdHex.y))));
@@ -918,6 +919,26 @@ function wodAiSelectDefenseThreats(threats) {
 
 // Reserve a nearby screen for each reachable threat before a large battle can
 // spend the entire defense budget. Later reinforcement still favors urgency.
+function wodAiDefenseFrontAvailable(unit,threat,plan) {
+    // Real town relief and breakout orders retain emergency authority. Routine
+    // screens use their own front, rather than recalling a different invasion.
+    if(threat.kind==='counter'||threat.kind==='relief')return true;
+    const base=plan?.jobs.find(j=>j.id===plan.unitJob[unit.uid]),front=wodAiFrontOwner(unit)||base?.frontOwner;
+    if(!front)return true;
+    const hr=gameData.hexRadius||20,gates=threat.screenPoints||[threat.holdHex];
+    const distance=Math.min(...gates.map(p=>Math.hypot(unit.x-p.x,unit.y-p.y)));
+    if(distance<hr*7)return true;
+    if(!threat._borrowFronts){
+        const contacts=wodAiThreats(unit.owner).filter(e=>threat.contacts?.includes(e.uid)||gates.some(p=>Math.hypot(e.x-p.x,e.y-p.y)<hr*8));
+        threat._borrowFronts=new Set(threat.frontOwner?[threat.frontOwner]:contacts.map(e=>e.owner));
+    }
+    if(threat._borrowFronts.has(front))return true;
+    // A fast, substantial cut can justify crossing theaters when this unit can
+    // actually arrive before closure; an ordinary prediction cannot.
+    return threat.kind==='corridor'&&threat.atRisk>=4&&threat.closureSeconds<30&&
+        gates.some(p=>wodAiArrivalSeconds(unit,p,hr*3,Math.max(5,threat.closureSeconds+3))<=Math.max(5,threat.closureSeconds+3));
+}
+
 function* wodAiReserveDefenseScreens(owner,threats,available,plan,budget,previous) {
     const hr=gameData.hexRadius||20,byUnit=new Map(),counts=new Map();
     const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
@@ -927,7 +948,7 @@ function* wodAiReserveDefenseScreens(owner,threats,available,plan,budget,previou
         if(byUnit.size>=budget)return null;
         const gates=t.screenPoints||[t.holdHex],critical=['counter','corridor','relief'].includes(t.kind);
         const distance=u=>Math.min(...gates.map(p=>Math.hypot(p.x-u.x,p.y-u.y)));
-        const candidates=pool.filter(u=>!byUnit.has(u.uid)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)))&&
+        const candidates=pool.filter(u=>!byUnit.has(u.uid)&&wodAiDefenseFrontAvailable(u,t,plan)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)))&&
             (critical||base(u)?.kind!=='scout')&&distance(u)<hr*(critical?60:24)&&wodAiResponseCanArrive(u,t,distance(u)));
         const score=u=>distance(u)**2/Math.max(.5,wodAiUnitCombatPower(u))+(previous?.unitJob[u.uid]===t.id?-hr*hr*20:0)+
             (t.kind==='corridor'&&t.riskUnits?.has(u.uid)?hr*hr*60:0);
