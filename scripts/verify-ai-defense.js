@@ -69,7 +69,7 @@ const server=http.createServer((req,res)=>{
    gameData.entities=gameData.entities.filter(u=>u.owner===2);refresh();
    result.quietGarrisonNeed=wodAiFortThreatNeed(gameData.forts[0],2);
    gameData.constructionJobs.push({mode:'fort',owner:2,q:8,r:8,x:hex(8,8).x,y:hex(8,8).y,total:60,remaining:60});
-   plan=wodAiEnsureTaskForcePlan(2,army);result.constructionGuard=plan.jobs.some(j=>j.fort?.mode==='fort'&&j.members.length);
+   gameData.aiTaskForces={};plan=wodAiEnsureTaskForcePlan(2,army);result.constructionGuard=plan.jobs.some(j=>j.fort?.mode==='fort'&&j.members.length);
    result.forts.overlap=wodAiScoreFortHex(hex(6,-12),2);
    // Water supplies only the marines of an otherwise trapped coastal formation.
    reset();for(const h of gameData.hexList){h.owner=h.q<0?1:2;if(h.q===8)h.owner=1;if(h.r===10)h.type='water';}

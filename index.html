@@ -11878,7 +11878,7 @@
 
                 <div class="esc-help-block">
                     <h4>Combat and morale</h4>
-                    <p class="esc-help-prose">Units normally fire at the nearest enemy in weapon range. With your units selected, <strong>click, right-click or tap an enemy to make it their preferred target</strong>. Movement orders stay intact. They fight nearer enemies while the preferred target is outside range or vision, then switch back when it enters range. A red reticle marks the target; <strong>Clear target</strong> on the unit card restores normal targeting. Alt-click inspects an enemy without changing targeting. Units can keep marching while firing, at about one third of normal speed.</p>
+                    <p class="esc-help-prose">Units normally fire at the nearest enemy in weapon range. With your units selected, <strong>click, right-click or tap an enemy to attack and pursue it</strong>. Your troops move to firing positions, follow the target while it remains visible and prioritize it in range. While approaching, they can fire at nearer enemies and disengage at 75% movement speed. If the target disappears into fog, they search only its last seen position. A new movement or retreat order cancels pursuit; <strong>Clear target</strong> stops pursuit and restores normal targeting. A red reticle marks the target. Alt-click inspects an enemy without issuing an attack.</p>
                     <p class="esc-help-prose">Damage drains morale at 60 points per full health bar lost, plus 0.5 morale per second while fighting or recently hit. At <strong>20 morale or below</strong>, units <strong>flash white and automatically retreat</strong>, cannot fire and cannot accept new movement orders. They first make the same short fallback as the Retreat button and finish that destination before choosing another. Continued pursuit can trigger another short fallback after arrival. Wounded troops seek safe town or hospital care after rallying. Routing ends at <strong>50 morale or above</strong> after <strong>three seconds clear of pursuers and recent damage</strong>. Morale recovers outside cities: <strong>3 points per second</strong> when not fighting and at least two seconds after damage, or <strong>11 per second</strong> at an eligible safe healing site. A general boosts morale capacity and recovery by 5%. HP and manpower still require a town or hospital.</p>
                 </div>
 
@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=small-supporting-forces-20261105"></script>
+    <script src="ai-command.js?v=attack-pressure-pursuit-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,7 @@
         };
 
         const WOD_CHANGELOG = [
+            {"at":"2026-11-05T16:00:38Z","title":"Attack pursuit and more active AI fronts","items":["Click, right-click or tap an enemy with troops selected to order an attack. Units replace their old march, seek firing positions and follow the visible target; approaching troops can disengage from other fights at 75% movement speed.","Pursuit respects terrain and fog. Hidden enemies are followed only to their last seen position. New movement or retreat orders cancel pursuit; Clear target stops it, and destroyed targets release their attackers. Attack orders synchronize in multiplayer.","The AI keeps a leaner standing screen on quiet fronts and releases excess healthy defenders and reserves into attacking forces. Town garrisons, medical recovery, active combat and urgent defense retain their duties.","Idle troops a few tiles behind an empty front can join safe territorial advances instead of waiting outside the old search range. Separate small forces and nearby combat support remain in place."]},
             {"at":"2026-11-05T09:54:02Z","title":"Smaller armies, separate objectives and nearby support","items":["AI attacks use several persistent forces, usually three to six units and capped at eight, with separate approach lanes and objectives instead of one oversized army.","Viable groups keep their own missions. Town assaults, land advances and flanking forces no longer all get redirected toward the same city; only small fragments regroup.","One nearby force can temporarily help a neighboring battle without merging their rosters. Other forces keep their objectives, and the helper resumes its mission after combat clears.","Combat support preserves fog of war, arrival checks, supply, garrisons, medical recovery, deliberate flanks and urgent defense duties."]},
             {"at":"2026-11-05T09:01:58Z","title":"Diagonal corridors, steady retreats and building information","items":["Single-cell diagonal land connections now carry movement and city supply for every side. Corner sampling no longer strands a unit on neighboring water; a truly severed land route still loses supply.","Automatic morale retreats use the same short fallback as the Retreat button and keep their destination until arrival. Pursuit can trigger a further short fallback after that bound.","Factories, farms, harbors, forts, hospitals and bridges have information buttons with their own costs, construction times, bonuses and placement/use guidance, including in the city list.","Idle front units cautiously take supplied empty land until they approach actual enemy weapon range. Town guards, medical recovery, active marches and urgent defense retain their duties.","Cached HUD rate lookups and routing flash artwork remove repeated DOM searches and per-frame image filtering from large battles."]},
             {
@@ -19690,6 +19691,7 @@
                 range: u.range, attackCooldown: u.attackCooldown, radius: u.radius,
                 morale: u.morale, maxMorale: u.maxMorale, moraleBroken: !!u.moraleBroken, retreating: !!u.retreating,
                 preferredTargetUid:u.preferredTargetUid||null,
+                _wodAttackOrder:u._wodAttackOrder?{uid:u._wodAttackOrder.uid,lastSeen:u._wodAttackOrder.lastSeen}:null,_wodAttackApproaching:!!u._wodAttackApproaching,
                 manpower: u.manpower, maxManpower: u.maxManpower, tanks: u.tanks, maxTanks: u.maxTanks,
                 xp: u.xp || 0, kills: u.kills || 0, losses: u.losses || 0, veteran: !!u.veteran,
                 convoySeaRoute: !!u.convoySeaRoute, tradeValue: u.tradeValue, convoyFromKey:u.convoyFromKey||null,convoyToKey:u.convoyToKey||null,convoyDock:u.convoyDock||null,shake: u.shake || 0,
@@ -20382,6 +20384,7 @@
                         ex.activeCombatVisual = ed.activeCombatVisual != null ? ed.activeCombatVisual : ex.activeCombatVisual;
                         ex.combatTargetUid=ed.combatTargetUid||null;
                         ex.preferredTargetUid=ed.preferredTargetUid||null;
+                        ex._wodAttackOrder=ed._wodAttackOrder?{...ed._wodAttackOrder}:null;ex._wodAttackApproaching=!!ed._wodAttackApproaching;
                         ex.encircledFlash = ed.encircledFlash != null ? ed.encircledFlash : ex.encircledFlash;
                         ex.isGeneral = !!ed.isGeneral;
                         ex.healingFlash = ed.healingFlash != null ? ed.healingFlash : ex.healingFlash;
@@ -32086,6 +32089,7 @@
 
         function wodQueuePlayerMoveOrder(unit, worldPoints, opt) {
             if(!unit || !worldPoints || !worldPoints.length) return;
+            if(!opt?.attackPursuit){unit._wodAttackOrder=null;unit._wodAttackApproaching=false;}
             const epoch=unit._wodPlayerOrderEpoch=(unit._wodPlayerOrderEpoch||0)+1;
             unit._trafficYield=null;unit.target=null;unit.path=null;
             unit._wodKeepLandFormation=!!opt?.keepLandFormation;unit._wodOrderIntoWater=false;
@@ -32812,6 +32816,7 @@
 
         function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
             if(unit?.moraleBroken&&!opt?.retainMoraleBroken&&!opt?.fromLegAdvance&&!opt?.transportInternal)return false;
+            if(unit&&!opt?.attackPursuit&&!opt?.fromLegAdvance&&!opt?.transportInternal&&!unit._trafficMoving){unit._wodAttackOrder=null;unit._wodAttackApproaching=false;}
             if(unit&&!opt?._queuedPlayerOrder&&!opt?.fromLegAdvance&&!opt?.transportInternal)unit._wodPlayerOrderEpoch=(unit._wodPlayerOrderEpoch||0)+1;
             if(unit&&!unit._trafficMoving)unit._trafficYield=null;
             if(unit&&(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute))ensureUnitPixelOnWalkableHex(unit,18);
@@ -35622,12 +35627,62 @@
             if(job.index<job.pairs.length)work.set(key,job);
         }
 
-        function wodSetPreferredTarget(owner,uids,targetUid) {
+        function wodStopAttackMarch(unit) {
+            unit._wodPlayerOrderEpoch=(unit._wodPlayerOrderEpoch||0)+1;
+            unit.target=null;unit.path=null;unit.orderTarget=null;unit.fullMarchWaypoints=null;unit.marchWpCursor=0;
+            unit._trafficYield=null;unit.holding=false;invalidateUnitOrderArrowCache(unit);
+        }
+        // Pursue visible contacts with bounded replanning. Hidden contacts keep
+        // their last seen position, and a new move/retreat cancels pursuit.
+        function wodUpdateUnitAttackOrder(unit,force=false) {
+            const order=unit._wodAttackOrder,now=gameData._aiEconomyClock||0;
+            if(!order||gameData.mp?.enabled&&!gameData.mp.isHost)return;
+            if(unit.moraleBroken||unit.retreating||unit.boardTransportUid){unit._wodAttackOrder=null;unit._wodAttackApproaching=false;return;}
+            if(!force&&now<(order.nextCheck||0))return;order.nextCheck=now+.5;
+            const enemy=gameData.entities.find(e=>e.uid===order.uid&&e.hp>0&&!e.boardTransportUid&&wodIsHostileOwner(e.owner,unit.owner));
+            if(!enemy){wodStopAttackMarch(unit);unit.preferredTargetUid=null;unit._wodAttackOrder=null;unit._wodAttackApproaching=false;return;}
+            const visible=wodOwnerCanSee(unit.owner,enemy),hr=gameData.hexRadius||20,range=(unit.range||50)*wodGeneralStatMultiplier(unit);
+            if(visible)order.lastSeen={x:enemy.x,y:enemy.y};
+            const point=order.lastSeen;if(!point)return;
+            const distance=Math.hypot(point.x-unit.x,point.y-unit.y);
+            unit._wodAttackApproaching=!visible||distance>range*.96;
+            if(visible&&distance<=range*.96||!visible&&distance<hr*1.4){
+                if(unit.target||unit.orderTarget)wodStopAttackMarch(unit);
+                unit._wodAttackApproaching=false;return;
+            }
+            // Keep a useful route until the target moves a meaningful amount.
+            if(unit.target&&order.aim&&Math.hypot(point.x-order.aim.x,point.y-order.aim.y)<hr*.8&&(unit.stuckTimer||0)<1&&(unit.blockedTimer||0)<1)return;
+            if(!wodCanSpendPf()){order.nextCheck=now+.1;return;}
+            const at=getNearestHexToPoint(point.x,point.y),reach=wodAiOperationReach(unit),naval=wodIsNavalUnit(unit);
+            if(!at)return;
+            const used=new Set(gameData.entities.filter(u=>u!==unit&&u._wodAttackOrder?.uid===order.uid&&u.orderTarget).map(u=>getHexKey(getNearestHexToPoint(u.orderTarget.x,u.orderTarget.y))));
+            const desired=visible?range*.78:hr*.6;
+            const sites=getHexesInRadius(at.q,at.r,Math.ceil(range/hr)+2).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&canUnitEnterHex(unit,h)&&reach.has(getHexKey(h))&&
+                (!naval||wodIsOpenWaterHex(h))&&(naval||unit.type==='marine'||!isWaterHex(h))&&!used.has(getHexKey(h))).map(h=>{
+                // A legal shore-edge firing position can reach a ship even
+                // when the land cell's center sits just outside weapon range.
+                const dx=point.x-h.x,dy=point.y-h.y,d=Math.hypot(dx,dy)||1,step=visible?Math.min(hr*.4,Math.max(0,d-range*.86)):0;
+                return {q:h.q,r:h.r,x:h.x+dx/d*step,y:h.y+dy/d*step};
+            }).filter(p=>Math.hypot(p.x-point.x,p.y-point.y)<(visible?range*.94:hr*1.5)&&!isWorldPositionBlockedByUnits(unit,p.x,p.y));
+            const score=h=>Math.hypot(h.x-unit.x,h.y-unit.y)+Math.abs(Math.hypot(h.x-point.x,h.y-point.y)-desired)*1.8;
+            sites.sort((a,b)=>score(a)-score(b));
+            const target=sites[0];if(!target)return;
+            if(assignUnitMoveAlongWaypoints(unit,[target],{attackPursuit:true})){order.aim={...point};unit.holding=false;}
+        }
+        function wodSetPreferredTarget(owner,uids,targetUid,opt={}) {
             const target=targetUid&&gameData.entities.find(e=>e.uid===targetUid&&e.hp>0&&e.type!=='convoy'&&!e.boardTransportUid&&wodIsHostileOwner(e.owner,owner)&&wodOwnerCanSee(owner,e));
             if(targetUid&&!target)return 0;
             const ids=new Set(Array.isArray(uids)?uids.slice(0,500):[]);let count=0;
             for(const u of gameData.entities)if(ids.has(u.uid)&&u.owner===owner&&u.hp>0&&!u.id&&u.type!=='convoy'&&!u.boardTransportUid){
+                if(target&&(u.moraleBroken||!(u.damage>0)))continue;
+                if(u._wodAttackOrder)wodStopAttackMarch(u);
+                u._wodAttackOrder=null;u._wodAttackApproaching=false;
                 u.preferredTargetUid=target?.uid||null;u._combatProxTick=-1;count++;
+                if(target&&opt.pursue!==false){
+                    wodStopAttackMarch(u);u.retreating=false;u._wodOrderedRetreat=false;
+                    u._wodAttackOrder={uid:target.uid,lastSeen:{x:target.x,y:target.y},nextCheck:0};
+                    wodUpdateUnitAttackOrder(u,true);
+                }
             }
             return count;
         }
@@ -35637,7 +35692,7 @@
             const cmd={kind:'focusTarget',uids:units.map(u=>ensureUnitId(u)),targetUid:target?ensureUnitId(target):null};
             if(gameData.mp?.enabled&&!gameData.mp.isHost){if(!wodMpMatchCanPlay())return false;wodMpSendCmd(cmd);}
             else if(!wodSetPreferredTarget(owner,cmd.uids,cmd.targetUid))return false;
-            showNotification(target?'Preferred target selected':'Preferred target cleared','info');syncInfoCardPanel();return true;
+            showNotification(target?'Attack target ordered':'Attack target cleared','info');syncInfoCardPanel();return true;
         }
 
         /** While exchanging fire at weapon range, move at one-third speed (orders are no longer halted). */
@@ -35684,6 +35739,7 @@
             if(!engaged) return 1;
             // Ordered / morale retreats keep 75% march speed instead of the full combat crawl.
             if(unit.retreating) return 0.75;
+            if(unit._wodAttackApproaching) return 0.75;
             return 1 / 3;
         }
 
@@ -41891,9 +41947,7 @@
             const trappedIds=new Set(pockets.flatMap(p=>p.trapped));
             const unitJob={}, jobs=[], available=army.filter(u=>!u.moraleBroken&&(trappedIds.has(u.uid)||!u._medicalRecovering&&!u.retreating&&u.hp/u.maxHp>.34)), plan=gameData.aiTaskForces?.[owner];
             const primaryTheater=wodAiDefenseTheater(owner,selected,available,plan);
-            const townEmergency=selected.some(t=>t.kind==='counter');
-            const majorCut=selected.some(t=>t.kind==='corridor'&&t.atRisk>=Math.max(2,army.length*.25));
-            let budget=Math.max(2,Math.ceil(available.length*((townEmergency||majorCut) ? .85 : pockets.length ? .55 : Math.max(.4,wodAiCommander(owner).defense+.16))));
+            let budget=wodAiDefenseResponseBudget(owner,available,selected,pockets);
             const responseThreats=selected.slice(0,12),screens=yield* wodAiReserveDefenseScreens(owner,responseThreats,
                 available.filter(u=>supplied.has(positions.get(u.uid))),plan,budget,old);
             const responseWeight=t=>Math.max(1,Math.sqrt(t.enemies||t.atRisk||t.neededPower||2))*(t.kind==='counter'?2:t.kind==='corridor'?1.5:1);
@@ -41919,12 +41973,13 @@
                     responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24)&&wodAiResponseCanArrive(u,t,responseDistance(u)));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
                 const critical=t.kind==='corridor'||t.kind==='relief'||t.kind==='counter';
+                const routine=t.kind==='territory'||t.kind==='corridor'&&t.predictive&&t.closureSeconds>60;
                 const hostileFront=new Set(t.frontOwner?[t.frontOwner]:opposition.map(e=>e.owner));
                 const gateFor=u=>responsePoints.slice().sort((a,b)=>Math.hypot(a.x-u.x,a.y-u.y)-Math.hypot(b.x-u.x,b.y-u.y))[0];
                 const gateSaturation=u=>{if(t.kind!=='corridor'||responsePoints.length<2)return 0;const gate=gateFor(u),need=opposition.filter(e=>gateFor(e)===gate).reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*1.4,assigned=available.filter(a=>job.members.includes(a.uid)&&gateFor(a)===gate).reduce((n,a)=>n+wodAiUnitCombatPower(a),0);return assigned>=Math.max(1,need)?hr*hr*1000:0;};
                 const cost=u=>gateSaturation(u)+(wodAiFrontOwner(u)&&hostileFront.size&&!hostileFront.has(wodAiFrontOwner(u))?hr*hr*180:0)+(t.arrivals?.[u.uid]!=null?Math.min(1000,t.arrivals[u.uid])*hr*hr*3:responseDistance(u)**2)/Math.max(.5,wodAiUnitCombatPower(u))+
                     (t.kind==='corridor'&&t.riskUnits?.has(u.uid)?hr*hr*60:0)+
-                    (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main'].includes(base(u)?.kind)?hr*hr*(critical?1:100):0)+
+                    (base(u)?.kind==='defend'?hr*hr*1000:0)+(['armor','main','raid'].includes(base(u)?.kind)?hr*hr*(routine?80:critical?1:100):0)+
                     (t.kind==='counter'?Math.pow(Math.max(0,wodAiUnitCombatPower(u)-neededPower),2)*hr*hr*400+
                         (base(u)?.phase==='assault'&&neededPower<4?hr*hr*150:0):0)+
                     (old?.unitJob[u.uid]===t.id?-hr*hr*(t.kind==='corridor'?100:critical?20:200):0);
@@ -43685,6 +43740,7 @@
                 wodUpdateUnitOverheadPops(unit, dt);
 
                 wodUpdateUnitMorale(unit,dt);
+                wodUpdateUnitAttackOrder(unit);
                 
                 // Movement
                 moveUnitTowardTarget(unit, dt);
@@ -53629,7 +53685,7 @@
                 ['Morale',Math.round(morale)+' / '+Math.round(WOD_MORALE_MAX*command)],['Attack interval',(unit.attackCooldown*WOD_ATTACK_INTERVAL_MULT/command).toFixed(1)+'s']];
             let html=values.map(([label,value])=>'<div class="info-record-item"><span>'+label+'</span><strong>'+value+'</strong></div>').join('');
             if(!preview&&unit.preferredTargetUid){const e=gameData.entities.find(e=>e.uid===unit.preferredTargetUid&&e.hp>0),visible=e&&wodOwnerCanSee(unit.owner,e);
-                const label=visible?wodProductionLabel(e.type):'Outside vision';html+='<div class="info-record-item info-record-item--wide"><span>Preferred target</span><strong>'+wodEscapeEffectInner(label)+'</strong>'+(unit.owner===wodLocalPlayerOwner()?'<button type="button" onclick="wodIssuePreferredTarget(null)" aria-label="Clear preferred target">Clear target</button>':'')+'</div>';
+                const label=visible?wodProductionLabel(e.type):'Outside vision';html+='<div class="info-record-item info-record-item--wide"><span>Attack target</span><strong>'+wodEscapeEffectInner(label)+'</strong>'+(unit.owner===wodLocalPlayerOwner()?'<button type="button" onclick="wodIssuePreferredTarget(null)" aria-label="Clear preferred target">Clear target</button>':'')+'</div>';
             }
             return html;
         }
@@ -58794,7 +58850,7 @@
                 mission:gameData.mission?{title:gameData.mission.title,packId:gameData._selectedMissionEntry?.packId||null,stage:gameData._selectedMissionEntry?.stageIndex!=null?gameData._selectedMissionEntry.stageIndex+1:null,objective:gameData.mission.objective||null,elapsed:Math.floor(gameData._missionRuntime?.elapsed||0),progress:gameData._missionRuntime?.progressText||'',briefing:!!gameData._missionRuntime?.popupOpen}:null,
                 audio: window.wodBattleAudio?.debug(),
                 cities: gameData.cities.filter(wodFogCanSeeCity).map(c => ({id: c.id, owner: c.owner, factory: !!c.hasFactory, harbor: !!c.hasHarbor, farm: !!c.hasFarm})),
-                units: gameData.entities.filter(wodFogCanSeeUnit).map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp, morale:e.morale, moraleCap:e.maxMorale, routing:!!e.moraleBroken, baseSpeed:wodUnitBaseSpeed(e)/WOD_UNIT_BASE_SPEED, speedMultiplier:getUnitSpeedMultiplier(e), preferredTarget:e.preferredTargetUid||null, outOfSupplySeconds:Math.round((e.outOfSupplySeconds||0)*10)/10, group: e.aiTfJobId, role: e.aiTfKind, combatTarget:e.combatTargetUid||null, deployment: e._startDeployment})),
+                units: gameData.entities.filter(wodFogCanSeeUnit).map(e => ({type: e.type, owner: e.owner, x: Math.round(e.x), y: Math.round(e.y), hp: e.hp, morale:e.morale, moraleCap:e.maxMorale, routing:!!e.moraleBroken, baseSpeed:wodUnitBaseSpeed(e)/WOD_UNIT_BASE_SPEED, speedMultiplier:getUnitSpeedMultiplier(e), preferredTarget:e.preferredTargetUid||null, attackOrder:e._wodAttackOrder?.uid||null, approachingTarget:!!e._wodAttackApproaching, outOfSupplySeconds:Math.round((e.outOfSupplySeconds||0)*10)/10, group: e.aiTfJobId, role: e.aiTfKind, combatTarget:e.combatTargetUid||null, deployment: e._startDeployment})),
                 ui: {
                     selectionCount: gameData.selection.length,
                     mobileOrderMode: mobileOrderMode || null,

@@ -35,7 +35,7 @@ const server = http.createServer((req, res) => {
 
 async function isolate(context) {
   // Test profiles must never log into or modify real multiplayer accounts.
-  await context.route('**/*', route => /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(route.request().url()) ? route.continue() : route.abort());
+  await context.route('**/*', route => /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(route.request().url()) ? route.fallback() : route.abort());
   await context.routeWebSocket(/.*/, socket => {
     socket.onMessage(() => {});
     socket.send(JSON.stringify({ t: 'welcome', online: 0, lobbies: [] }));

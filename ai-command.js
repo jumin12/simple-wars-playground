@@ -200,10 +200,22 @@ function wodAiDefenseDemand(owner, ready, sectors, strategy=wodAiBattlePlan(owne
     const spare=Math.max(0,infantry.length-guards),frontage=Math.min(18,Math.ceil(front.length/12));
     const clusters=[];for(const t of ranked.filter(s=>s.defensePriority>2))if(!clusters.some(p=>Math.hypot(p.x-t.holdHex.x,p.y-t.holdHex.y)<hr*10))clusters.push(t.holdHex);
     const contested=clusters.length;
-    const attackFloor=strategy.intent==='defend'?2:Math.max(2,Math.ceil(spare*(strategy.intent==='recover'?.35:.45)));
-    const line=Math.min(Math.max(0,spare-attackFloor),Math.max(ranked.length?1:0,Math.round(spare*strategy.defenseShare),Math.min(frontage,contested*2+Math.ceil(frontage*(strategy.intent==='defend'?.35:.15)))));
-    const reserve=Math.min(Math.max(0,spare-line-2),Math.max(ready.length>=7?1:0,Math.floor(ready.filter(isLandArmyUnit).length*strategy.reserveShare)));
+    const urgent=strategy.intent==='defend',attackFloor=Math.max(2,Math.ceil(spare*(urgent?.35:contested?.5:.65)));
+    const share=contested?Math.min(urgent?.55:.38,strategy.defenseShare):Math.min(.14,strategy.defenseShare);
+    const line=Math.min(Math.max(0,spare-attackFloor),Math.max(contested?1:0,Math.round(spare*share),Math.min(frontage,contested*2)));
+    const reserve=Math.min(Math.max(0,spare-line-attackFloor),Math.floor(ready.filter(isLandArmyUnit).length*strategy.reserveShare));
     return {line,reserve,frontage,contested,ranked,armyFloor:Math.min(140,guards+frontage+Math.max(4,towns.length*2)+Math.ceil(frontage*.2))};
+}
+
+// Distant predictions need a screen, not an army-wide recall. Actual town
+// attacks, pockets and imminent major cuts retain their emergency budgets.
+function wodAiDefenseResponseBudget(owner,available,threats,pockets) {
+    if(!threats.length)return 0;
+    const townEmergency=threats.some(t=>t.kind==='counter');
+    const majorCut=threats.some(t=>t.kind==='corridor'&&(t.riskUnits?.size??t.atRisk)>=Math.max(3,available.length*.3)&&
+        (!t.predictive||Number.isFinite(t.closureSeconds)&&t.closureSeconds<=60&&t.closureSeconds<(t.withdrawSeconds||20)*1.4+8));
+    const share=(townEmergency||majorCut) ? .85 : pockets.length ? .55 : Math.min(.44,Math.max(.3,wodAiCommander(owner).defense+.06));
+    return Math.min(available.length,Math.max(1,Math.ceil(available.length*share)));
 }
 
 // A coast or map edge can close the other side of an enemy's pincer. Bridges
@@ -525,9 +537,9 @@ function wodAiBattlePlan(owner, army, force = false) {
     const danger = pressure.reduce((n,u) => n+wodAiUnitCombatPower(u),0) / Math.max(2,ownPower);
     const intent = danger > .7 ? 'defend' : recovering > ground.length*.35 || lossPressure>Math.max(250,ground.length*18) ? 'recover' :
         advantage < .8 && threats.length ? 'maneuver' : profile.id === 'maneuver' ? 'maneuver' : 'attack';
-    const defenseShare = Math.min(.58, Math.max(.22, profile.defense + (intent==='defend'?.12:0) +
+    const defenseShare = Math.min(.54, Math.max(.16, profile.defense-.08 + (intent==='defend'?.16:0) +
         (intent==='recover'?.08:0) - (advantage>1.7?.04:0)));
-    const reserveShare = ground.length >= 10 ? (profile.id==='defensive' || pressure.length ? .16 : .1) : 0;
+    const reserveShare = ground.length >= 10 ? (profile.id==='defensive' || pressure.length ? .10 : .05) : 0;
     const plan = {owner, at:now, hexes:gameData.hexes, profile:profile.id, intent, advantage, danger,
         ownPower, enemyPower, defenseShare, reserveShare, recovering, pressure:pressure.length, health,
         recentLoss,lossPressure, failures:Object.fromEntries(Object.entries(previous?.failures||{}).filter(([,f])=>now-f.at<180000).slice(-128)), primaryId:previous?.primaryId || null,
@@ -739,13 +751,13 @@ function wodAiRebalanceGroups(owner, plan, ready) {
         release(job,u);u._aiScoutUntil=0;gameData._aiMoveQueue?.delete(u);
         wodAiRecord(owner,'scout-reassign',{unit:u.uid,reason:'reinforce-front'});
     }
-    if(!['defend','recover'].includes(strategy.intent)&&line>desiredLine){
+    if(line>desiredLine){
         const threats=wodAiThreats(owner);
         for(const job of plan.jobs.filter(j=>j.kind==='hold').sort((a,b)=>b.members.length-a.members.length)){
             for(const uid of job.members.slice()){
                 if(line<=desiredLine)break;
                 const u=ready.find(u=>u.uid===uid);
-                if(u&&!u._combatEngaged&&!threats.some(e=>Math.hypot(e.x-u.x,e.y-u.y)<hr*8)){
+                if(u&&!u._combatEngaged&&!wodAiFrontCritical(gameData._aiDefenseByOwner?.[owner]?.jobs.find(j=>j.id===gameData._aiDefenseByOwner[owner].unitJob[u.uid]))&&wodAiQuietFrontSafe(owner,u,threats)){
                     release(job,u);line--;
                 }
             }
@@ -772,10 +784,10 @@ function wodAiRebalanceGroups(owner, plan, ready) {
     }
     const reserveTarget=demand.reserve;
     let reserve=plan.jobs.filter(j=>j.kind==='reserve').reduce((n,j)=>n+j.members.length,0);
-    if(strategy.intent==='attack'&&reserve>reserveTarget)for(const job of plan.jobs.filter(j=>j.kind==='reserve')){
+    if(reserve>reserveTarget)for(const job of plan.jobs.filter(j=>j.kind==='reserve')){
         for(const uid of job.members.slice()){
             if(reserve<=reserveTarget)break;
-            const u=ready.find(u=>u.uid===uid);if(u&&!u._combatEngaged){release(job,u);reserve--;}
+            const u=ready.find(u=>u.uid===uid);if(u&&!u._combatEngaged&&!wodAiFrontCritical(gameData._aiDefenseByOwner?.[owner]?.jobs.find(j=>j.id===gameData._aiDefenseByOwner[owner].unitJob[u.uid]))&&wodAiQuietFrontSafe(owner,u)){release(job,u);reserve--;}
         }
     }
     if(reserve<reserveTarget&&sectors.length)mobilize(reserveTarget-reserve,'reserve');
@@ -954,7 +966,8 @@ function* wodAiReserveDefenseScreens(owner,threats,available,plan,budget,previou
         const distance=u=>Math.min(...gates.map(p=>Math.hypot(p.x-u.x,p.y-u.y)));
         const candidates=pool.filter(u=>!byUnit.has(u.uid)&&wodAiDefenseFrontAvailable(u,t,plan)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)))&&
             (critical||base(u)?.kind!=='scout')&&distance(u)<hr*(critical?60:24)&&wodAiResponseCanArrive(u,t,distance(u)));
-        const score=u=>distance(u)**2/Math.max(.5,wodAiUnitCombatPower(u))+(previous?.unitJob[u.uid]===t.id?-hr*hr*20:0)+
+        const routine=t.kind==='territory'||t.kind==='corridor'&&t.predictive&&t.closureSeconds>60;
+        const score=u=>distance(u)**2/Math.max(.5,wodAiUnitCombatPower(u))+(routine&&['main','armor','raid'].includes(base(u)?.kind)?hr*hr*80:0)+(previous?.unitJob[u.uid]===t.id?-hr*hr*20:0)+
             (t.kind==='corridor'&&t.riskUnits?.has(u.uid)?hr*hr*60:0);
         candidates.sort((a,b)=>score(a)-score(b));
         const u=candidates.slice(0,8).find(u=>gates.some(g=>wodAiCanReach(u,g)));
@@ -1365,7 +1378,7 @@ function wodAiIssueQuietFrontAdvance(unit,job) {
     if(unit._aiQuietCheckAt!=null&&now-unit._aiQuietCheckAt<900)return false;unit._aiQuietCheckAt=now;
     const intel=wodFogActive()?wodFogFactionIntel(owner):null,front=wodAiFrontOwner(unit),seen=new Set([getHexKey(here)]),queue=[{h:here,depth:0}],sites=[];
     for(let i=0;i<queue.length;i++){
-        const {h,depth}=queue[i];if(depth>=4)continue;
+        const {h,depth}=queue[i];if(depth>=6)continue;
         for(const n of getNeighborHexes(h)){
             const key=getHexKey(n);if(seen.has(key)||isWaterHex(n)||!canUnitEnterHex(unit,n)||!wodCanStepBetweenHexes(unit,h,n,true))continue;
             seen.add(key);
