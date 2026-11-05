@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=coordinated-squad-command-20261105"></script>
+    <script src="ai-command.js?v=town-defense-fire-control-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,12 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-05T19:24:43Z",title:"Stronger town defense and coordinated fire",items:[
+                "Observed enemy troops are assigned to one town approach at a time. Reachable secondary towns receive a proper relief force instead of an arbitrary two-unit cap; garrisons and supply screens keep their duties.",
+                "Small or urgently depleted armies release specialist savings to recruit affordable line troops, while upkeep and production restrictions remain enforced.",
+                "AI combat groups coordinate fire against visible enemies in actual weapon range, finish vulnerable targets and spread excess fire. This preserves movement, retreat and naval orders and uses the same combat rules as the player.",
+                "Town counterattacks prefer usable cover within firing range. All commanders retain fog of war and the same resources, damage and supply mechanics as players."
+            ]},
             {at:"2026-11-05T18:02:00Z",title:"Persistent squads and coordinated AI assaults",items:[
                 "Attack squads retain their members while troops heal or answer an emergency. Returning troops and recruits rejoin the same squad; real casualties still allow depleted formations to regroup.",
                 "Two or three neighboring squads can coordinate a shared assault, with a fixing force and separate flanking approaches. They launch together using actual travel times and observed opposition, while preserving their individual rosters.",
@@ -41964,11 +41970,12 @@
                 // Trapped units break outward while a limited relief force attacks the same cut from outside.
                 for(const u of available)if(t.trapped?.includes(u.uid))add(job,u);
                 const trappedCount=job.members.length;
-                let want=t.kind==='counter'?(primaryTheater&&!t.primaryTheater?Math.min(2,Math.max(1,Math.ceil(t.neededPower*.35))):Math.min(24,Math.max(1,Math.ceil(t.neededPower*.85)))):t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(12,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
+                const limitedTown=t.kind==='counter'&&primaryTheater&&!t.primaryTheater&&!t.feasible;
+                let want=t.kind==='counter'?(limitedTown?Math.min(2,Math.max(1,Math.ceil(t.neededPower*.35))):Math.min(24,Math.max(1,Math.ceil(t.neededPower*.85)))):t.kind==='relief'?Math.min(8,Math.max(4,Math.ceil(trappedCount*.5))):Math.min(12,Math.max(2,t.enemies||Math.ceil((t.atRisk||2)/2)));
                 const responsePoints=t.screenPoints||[t.holdHex];
                 const responseDistance=u=>Math.min(...responsePoints.map(p=>Math.hypot(u.x-p.x,u.y-p.y)));
                 const opposition=wodAiThreats(owner).filter(e=>responseDistance(e)<hr*8);
-                const neededPower=t.kind==='counter'&&primaryTheater&&!t.primaryTheater?Math.min(2,t.neededPower):t.neededPower||opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*(t.kind==='corridor'?1.4:1.15);
+                const neededPower=limitedTown?Math.min(2,t.neededPower):t.neededPower||opposition.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*(t.kind==='corridor'?1.4:1.15);
                 let responsePower=available.filter(u=>job.members.includes(u.uid)).reduce((n,u)=>n+wodAiUnitCombatPower(u),0);
                 const reservedElsewhere=[...screens.byUnit].filter(([id,target])=>target!==t.id&&!unitJob[id]).length;
                 const remainingWeight=responseThreats.slice(threatIndex).filter(s=>s===t||screens.counts.has(s.id)).reduce((n,s)=>n+responseWeight(s),0);
@@ -42005,7 +42012,7 @@
                         selected.some(s=>s.id===previousResponse.id)&&u.target&&(u.stuckTimer||0)<3&&
                         now-(u._aiTerritoryAssignedAt??now)<18000)continue;
                     // Keep the sole fort garrison in place. Its line and relief troops can reinforce it.
-                    if(base(u)?.fort||base(u)?.city||t.kind==='counter'&&!t.primaryTheater&&t.arrivals?.[u.uid]>t.deadline)continue;
+                    if(base(u)?.fort||base(u)?.city||limitedTown&&t.arrivals?.[u.uid]>t.deadline)continue;
                     // Routine land skirmishes must not repeatedly recall every
                     // scout. Town emergencies and real supply cuts still can.
                     if(base(u)?.kind==='scout'&&!critical)continue;
@@ -43241,8 +43248,9 @@
                 while(w.ei < ents.length && nExamined < BATCH) {
                     if(nExamined>0&&overBudget())break;
                     let unit = ents[w.ei++];
-                    if(['transport','supply'].includes(unit?.type)||unit?.boardTransportUid||unit?._navalAssaultUntil>wodAiOperationTime()||unit?._navalEscortUntil>wodAiOperationTime()||unit?._aiScoutUntil>wodAiOperationTime()||unit?._aiCareYieldUntil>wodAiOperationTime())continue;
                     nExamined++;
+                    if(unit?.hp>0&&!wodMpIsHumanOwner(unit.owner))wodAiSelectCombatTarget(unit,w.fireControl||=( {} ));
+                    if(['transport','supply'].includes(unit?.type)||unit?.boardTransportUid||unit?._navalAssaultUntil>wodAiOperationTime()||unit?._navalEscortUntil>wodAiOperationTime()||unit?._aiScoutUntil>wodAiOperationTime()||unit?._aiCareYieldUntil>wodAiOperationTime())continue;
                     if(unit.type === 'convoy' || unit.hp <= 0) continue;
                     if(wodMpIsHumanOwner(unit.owner)) continue;
                     if(unit.moraleBroken) continue;
