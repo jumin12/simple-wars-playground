@@ -50,13 +50,13 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
     const veteran=u.speed*getUnitSpeedMultiplier(u,mh(-10));u.speed=999;ensureUnitId(u);
     rows.push({owner,type,ordinary,command,veteran,bonus,restored:u.speed});
    }return rows;
-  });check(results.speed.every(r=>r.ordinary===15&&r.command===15&&r.veteran===15&&r.bonus===1.05&&r.restored===15),'all eight classes share infantry speed; command/veterancy do not alter it and old saved speeds normalize');
+  });check(results.speed.every(r=>{const base=15*({heavy:.9,motorized:1.1}[r.type]||1);return Math.abs(r.ordinary-base)<1e-6&&Math.abs(r.command-base*1.1)<1e-6&&Math.abs(r.veteran-r.command)<1e-6&&r.bonus===1.05&&r.restored===base;}),'class speeds follow infantry 1.0, armor 0.9, motorized 1.1; general grants 10%, veterancy does not and saved speeds normalize');
   results.travel=await page.evaluate(()=>{
    const rows=[];for(const type of ['light','motorized','mountaineer','heavy','ship','transport','supply']){
     marchWorld();for(const h of gameData.hexList){h.type=wodIsNavalType(type)?'water':'grass';h.owner=wodIsNavalType(type)?0:1;}
     const u=mu(-12,0,type,1),start=u.x;u.morale=100;mr();assignUnitMoveAlongWaypoints(u,[mh(12)]);ms(5);rows.push({type,distance:u.x-start});
    }return rows;
-  });check(results.travel.every(r=>Math.abs(r.distance-results.travel[0].distance)<1),'actual dry and ship movement cover the same distance at full morale');
+  });check(results.travel.every(r=>Math.abs(r.distance/results.travel[0].distance-({heavy:.9,motorized:1.1}[r.type]||1))<.02),'actual dry and ship movement follow their class speeds at full morale');
   results.solo=await page.evaluate(()=>{
    marchWorld();const city=mt(-18,0,2,'Home');mt(20,0,1,'Enemy');const u=mu(-2),guard=mu(-18),job=mplan([u],mh(1),mh(-2),'hold');job.objectiveHex=null;
    const p=gameData.aiTaskForces[2];p.jobs.push({id:'guard',kind:'defend',city,members:[guard.uid]});p.unitJob[guard.uid]='guard';mr();const start=u.x;engage([u],job,70);

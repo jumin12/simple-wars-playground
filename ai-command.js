@@ -147,7 +147,7 @@ function wodAiArrivalSeconds(unit, point, contactRange=0, horizon=120) {
     if(!unit||!point)return Infinity;
     const distance=Math.hypot(unit.x-point.x,unit.y-point.y);
     if(distance<=contactRange)return 0;
-    const speed=WOD_UNIT_BASE_SPEED*WOD_MOVE_SPEED_FACTOR*(unit.type==='mountaineer'?1.05:1);
+    const speed=wodUnitBaseSpeed(unit)*WOD_MOVE_SPEED_FACTOR*wodGeneralSpeedMultiplier(unit)*(unit.type==='mountaineer'?1.05:1);
     if((distance-contactRange)/speed>horizon)return Infinity;
     const start=getNearestHexToPoint(unit.x,unit.y),goal=getNearestHexToPoint(point.x,point.y);
     if(!start||!goal)return Infinity;
@@ -472,7 +472,8 @@ function wodAiDpsAgainst(attacker, defender, observer, terrain) {
     const attack = Math.sqrt(getTerrainAttackModifier(attacker, from) * getTerrainAttackModifier(attacker, to));
     const morale = .18 + .82 * Math.max(0, Math.min(1, (attacker.morale ?? 100) / 100));
     return (attacker.damage || 0) * .95 * attack * getTerrainDefenseModifier(defender, to) * morale *
-        wodVeteranStatMult(attacker) * wodAiKnownCommand(attacker, observer) /
+        // Command improves both each hit and firing rate; defender command improves toughness.
+        wodVeteranStatMult(attacker) * Math.pow(wodAiKnownCommand(attacker, observer),2) /
         (Math.max(.05, (attacker.attackCooldown || 2) * WOD_ATTACK_INTERVAL_MULT) * wodAiKnownCommand(defender, observer)) *
         wodAiKnownCover(defender, observer);
 }
