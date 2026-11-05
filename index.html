@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=baited-encirclements-20261105"></script>
+    <script src="ai-command.js?v=group-combat-support-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-05T03:23:02Z",
+                title:"AI groups support their fighting units",
+                items:[
+                    "Healthy nearby regiments now interrupt old rally and march orders to support combat involving their own group, using separate firing positions and actual travel times.",
+                    "Reinforcements finish their approach when the first regiment briefly disengages. Town guards, supply withdrawals, healing troops and planned encirclement wings keep their duties; dangerous fights and hidden enemies do not trigger support attacks."
+                ]
+            },
             {
                 at:"2026-11-05T02:54:51Z",
                 title:"AI feints and baited encirclements",
@@ -41179,12 +41187,26 @@
         function wodAiShouldKeepCurrentOrder(unit) {
             if(unit?._aiPursuitOrderAt!=null&&wodAiOperationTime()-unit._aiPursuitOrderAt>=1500)return false;
             if(unit&&wodAiTacticalFallback(unit,wodAiGetUnitTaskJob(unit),false))return false;
-            if(unit?._trafficYield)return true;
+            if(unit?._trafficYield){
+                const clock=gameData._aiEconomyClock||0,yielding=unit._trafficYield;
+                yielding.supportCheckAfter??=clock+3;
+                const job=wodAiGetUnitTaskJob(unit);
+                if(clock>=yielding.supportCheckAfter&&wodAiIssueGroupCombatSupport(unit,job,false)){
+                    // Give traffic time to clear, then find a fresh firing lane.
+                    // A parked fighter must not reserve this soldier for 25 seconds.
+                    unit._trafficYield=null;unit._aiMoveIntent=null;unit.aiOrderUntil=0;
+                    if(job._combatSupportSlots)delete job._combatSupportSlots[unit.uid];
+                    gameData._aiMoveQueue?.delete(unit);return false;
+                }
+                return true;
+            }
             if(unit?.isGeneral&&wodAiOperationTime()-(unit._aiGeneralAt||0)>3500)return false;
             if(!unit || unit.retreating || unit.moraleBroken) return false;
             // A new job (flank, relief, counterattack) outranks the march already underway.
             if(unit.aiOrderKind && unit.aiTfKind && unit.aiOrderKind !== unit.aiTfKind) return false;
             const job=wodAiGetUnitTaskJob(unit),phase=job?.operation?.phase||job?.phase;
+            if(wodAiIssueGroupCombatSupport(unit,job,false))return false;
+            if(unit._aiCombatSupportAt!=null&&wodAiOperationTime()-unit._aiCombatSupportAt>=2000)return false;
             if(job?.frontOperation){
                 if(unit.aiOrderResponseId!==job.id||unit.aiOrderPhase!==job.frontOperation.phase||unit.aiFrontBound!==job.bound)return false;
                 if((job.frontOperation.ambush||job.role==='bait-relief')&&wodAiOperationTime()-(unit.aiOrderIssuedAt||0)>=750)return false;
@@ -42117,6 +42139,7 @@
 
         function wodAiIssueTaskForceOrder(unit, job, hpRatio) {
             if(!unit || !job) return false;
+            unit._aiCombatSupportAt=null;
             if(unit._aiCareYieldUntil>wodAiOperationTime()||unit._medicalEvacuating||unit._aiScoutUntil>wodAiOperationTime())return true;
             unit.aiTfJobId = job.id;
             unit.aiTfKind = job.kind;
@@ -42128,6 +42151,7 @@
             if(job.frontOperation)return wodAiIssueFrontOffensive(unit,job);
             if(job.kind==='counter'&&wodAiIssueTownDefense(unit,job))return true;
             if(wodAiTacticalFallback(unit,job))return true;
+            if(wodAiIssueGroupCombatSupport(unit,job))return true;
             if(wodAiIssuePursuit(unit,job))return true;
             if(unit.isGeneral&&job.response&&job.kind!=='relief')return wodAiIssueGeneralOrder(unit,job);
             if(job.response)return wodAiIssueDefenseResponse(unit,job);

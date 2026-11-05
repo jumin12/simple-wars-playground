@@ -829,6 +829,55 @@ function wodAiFrontSupportFor(unit,job) {
     return support&&job&&!job.response&&support.job===job.id&&support.hexes===gameData.hexes&&support.until>wodAiOperationTime()?support:null;
 }
 
+// Do not leave a regiment fighting alone while its own formation follows an
+// obsolete rally. Deliberate wings, guards and withdrawals retain their jobs.
+function wodAiIssueGroupCombatSupport(unit,job,issue=true) {
+    const now=wodAiOperationTime(),hr=gameData.hexRadius||20,op=job?.frontOperation;
+    if(!unit||!job||job.city||job.fort||job.route||job.operation||op?.ambush||job.role==='bait-relief'||
+        op?.phase==='consolidate'||job.response&&!op||!['main','armor','raid','hold','reserve','encircle','strike'].includes(job.kind)||
+        job.operationState?.screenIds?.includes(unit.uid)||unit.hp<unit.maxHp*.6||unit._combatEngaged||unit.retreating||unit.moraleBroken||
+        unit._medicalRecovering||unit._medicalEvacuating||unit._aiCareYieldUntil>now||unit._aiScoutUntil>now||unit._aiRegroupUntil>now||
+        unit._navalAssaultUntil>now||unit._navalLanded||unit.boardTransportUid||!isLandArmyUnit(unit)||wodAiCorridorWithdrawal(unit))return false;
+    const here=getNearestHexToPoint(unit.x,unit.y);
+    if(!here||isWaterHex(here)||!wodCurrentSupplyComponent(here,unit.owner).city)return false;
+    const army=gameData.entities.filter(u=>job.members.includes(u.uid)&&u.owner===unit.owner&&u.hp>u.maxHp*.5&&!u.retreating&&!u.moraleBroken&&
+        !u._medicalRecovering&&!u.boardTransportUid&&isLandArmyUnit(u)&&!wodAiFrontCritical(gameData._aiDefenseByOwner?.[unit.owner]?.jobs.find(j=>j.id===gameData._aiDefenseByOwner[unit.owner].unitJob[u.uid])));
+    const recent=job._combatSupportBattle;
+    if(!army.some(u=>u!==unit&&u._combatEngaged)&&!(recent?.hexes===gameData.hexes&&now-recent.at<8000))return false;
+    const known=wodAiThreats(unit.owner,false).filter(e=>!wodIsNavalUnit(e)&&e.type!=='convoy'&&
+        (!op?.hostile||e.owner===op.hostile)&&(!job.frontOwner||e.owner===job.frontOwner));
+    const fighting=army.filter(u=>u!==unit&&u._combatEngaged&&known.some(e=>u.combatTargetUid===e.uid||e.combatTargetUid===u.uid));
+    const contacts=known.filter(e=>(fighting.some(u=>(u.combatTargetUid===e.uid||e.combatTargetUid===u.uid)&&
+        Math.hypot(u.x-unit.x,u.y-unit.y)<hr*10)||recent?.hexes===gameData.hexes&&recent.enemy===e.uid&&now-recent.at<8000)&&
+        wodAiArrivalSeconds(unit,e,unit.range||50,20)<=20);
+    contacts.sort((a,b)=>Math.hypot(a.x-unit.x,a.y-unit.y)-Math.hypot(b.x-unit.x,b.y-unit.y));
+    const previous=job._combatSupportSlots?.[unit.uid];
+    const enemy=contacts.find(e=>previous?.until>now&&previous.enemy===e.uid)||contacts[0];if(!enemy)return false;
+    const foes=known.filter(e=>Math.hypot(e.x-enemy.x,e.y-enemy.y)<hr*7);
+    const support=army.filter(u=>Math.hypot(u.x-enemy.x,u.y-enemy.y)<hr*12&&wodAiArrivalSeconds(u,enemy,u.range||50,20)<=20&&
+        !wodAiCorridorWithdrawal(u)&&wodCurrentSupplyComponent(getNearestHexToPoint(u.x,u.y),unit.owner).city);
+    if(support.length<2||!support.includes(unit)||wodAiForecast(unit.owner,support,foes).ratio<Math.min(1.15,wodAiAttackThreshold(unit.owner,true)))return false;
+    if(fighting.some(u=>u.combatTargetUid===enemy.uid||enemy.combatTargetUid===u.uid))job._combatSupportBattle={hexes:gameData.hexes,enemy:enemy.uid,at:now};
+    const reach=wodAiOperationReach(unit),at=getNearestHexToPoint(enemy.x,enemy.y),range=(unit.range||50)*.88;
+    const slots=job._combatSupportSlots||=( {} ),old=slots[unit.uid],used=new Set(Object.entries(slots).filter(([id,s])=>id!==unit.uid&&s.until>now).map(([,s])=>s.key));
+    const supplied=h=>wodIsFriendlyOwner(h.owner,unit.owner)&&wodCurrentSupplyComponent(h,unit.owner).city;
+    const legal=h=>h&&!isWaterHex(h)&&canUnitEnterHex(unit,h)&&reach.has(getHexKey(h))&&
+        (supplied(h)||getNeighborHexes(h).some(n=>supplied(n)&&wodCanStepBetweenHexes(unit,n,h,true)))&&
+        Math.hypot(h.x-enemy.x,h.y-enemy.y)<=range&&Math.hypot(h.x-enemy.x,h.y-enemy.y)>hr*.7;
+    let target=!unit._trafficYield&&old?.enemy===enemy.uid&&old.until>now&&legal(gameData.hexes[old.key])?gameData.hexes[old.key]:null;
+    if(!target){
+        const sites=getHexesInRadius(at.q,at.r,Math.ceil(range/hr)+1).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>legal(h)&&!used.has(getHexKey(h))&&!isWorldPositionBlockedByUnits(unit,h.x,h.y));
+        const score=h=>Math.hypot(h.x-unit.x,h.y-unit.y)+Math.abs(Math.hypot(h.x-enemy.x,h.y-enemy.y)-range*.85)*1.5+getTerrainDefenseModifier(unit,h)*hr;
+        sites.sort((a,b)=>score(a)-score(b));target=sites.slice(0,8).find(h=>wodAiCanReach(unit,h));
+    }
+    if(!target)return false;
+    if(!issue){const end=unit.orderTarget||unit.target?.finalTarget||unit.target;return !unit.target||unit.holding||!end||Math.hypot(end.x-target.x,end.y-target.y)>hr*1.2||now-(unit._aiCombatSupportAt??-Infinity)>=2000;}
+    if(!wodAiMoveUnitTowardHex(unit,target,false,.08))return false;
+    slots[unit.uid]={key:getHexKey(target),enemy:enemy.uid,until:now+5000};unit._aiCombatSupportAt=now;
+    wodAiStampOrder(unit,false,target,2200);unit.aiOrderPhase=op?.phase||job.phase;unit.aiOrderResponseId=job.response?job.id:null;unit.aiFrontBound=job.bound;
+    wodAiRecord(unit.owner,'group-combat-support',{unit:unit.uid,job:job.id,enemy:enemy.uid,target:getHexKey(target)});return true;
+}
+
 // An observed invading group remains one task as its contact point moves.
 // Changing a tile ID every scan used to cancel whole marches every 2.5 seconds.
 function wodAiTerritoryThreat(owner,cluster,previous,used) {
@@ -3576,6 +3625,7 @@ function wodAiIssueFrontOffensive(unit,job) {
     const fixing=job.role==='pin'&&op.phase==='advance'&&op.jobs.some(j=>j.route&&j.cursor>=2)&&unit.hp>unit.maxHp*(unit.isGeneral?.85:.72)&&
         !wodAiCorridorWithdrawal(unit)&&wodAiLocalSituation(unit).forecast.ratio>=.72;
     if(!fixing&&wodAiTacticalFallback(unit,job))return true;
+    if(wodAiIssueGroupCombatSupport(unit,job))return true;
     if(op.phase==='advance'&&!job.route&&wodAiIssuePursuit(unit,job,members))return true;
     if(op.phase==='advance'&&job.role==='breakthrough'&&wodAiHoldUnsupportedVanguard(unit,job,members,op.advanceGoal||op.goal))return true;
     let target,holding=false;
