@@ -1251,6 +1251,67 @@ function wodAiFrontProbeSafe(owner,goal) {
             wodAiArrivalSeconds(e,goal,e.range||50,8)<=8));
 }
 
+function wodAiQuietFrontSafe(owner,point,contacts=wodAiThreats(owner)) {
+    const hr=gameData.hexRadius||20;
+    return !contacts.some(e=>e.damage>0&&Math.hypot(e.x-point.x,e.y-point.y)<(wodIsNavalUnit(e)?(e.range||50)+hr*2:hr*10)+(e.uncertainty||0)*.35);
+}
+
+// An empty frontier needs a short territorial bound, not a full assault army.
+// Search through supplied friendly ground and finish at its adjacent enemy
+// cell. Never plan a solitary march through several hostile cells or water.
+function wodAiIssueQuietFrontAdvance(unit,job) {
+    const owner=unit.owner,plan=gameData.aiTaskForces?.[owner],now=wodAiOperationTime(),hr=gameData.hexRadius||20;
+    const old=unit._aiQuietAdvance,continuing=old?.hexes===gameData.hexes&&old.job===job.id&&now-old.at<12000;
+    if(!plan||job.city||job.fort||job.response||job.operation||unit.isGeneral||!isLandArmyUnit(unit)||unit.type==='marine'||
+        !['hold','reserve','main','armor','raid'].includes(job.kind)||unit.hp<unit.maxHp*.7||unit.retreating||unit.moraleBroken||unit._medicalRecovering||unit.boardTransportUid||
+        unit._navalAssaultUntil>now||gameData._aiDefenseByOwner?.[owner]?.unitJob[unit.uid]||wodAiCorridorWithdrawal(unit))return false;
+    if(unit._aiFallbackAt!=null&&now-unit._aiFallbackAt<20000)return false;
+    if(!['hold','reserve'].includes(job.kind)&&(!job.waitingForStrength||job.phase==='assault'))return false;
+    if(!continuing&&job.kind!=='hold'&&job.holdHex&&Math.hypot(unit.x-job.holdHex.x,unit.y-job.holdHex.y)>hr*8)return false;
+    const here=getNearestHexToPoint(unit.x,unit.y);
+    const contacts=wodAiThreats(owner).filter(e=>Math.hypot(e.x-unit.x,e.y-unit.y)<hr*16+(e.uncertainty||0)*.35);
+    if(!here||!wodIsFriendlyOwner(here.owner,owner)||!wodCurrentSupplyComponent(here,owner).city||!wodAiQuietFrontSafe(owner,unit,contacts))return false;
+    const goal=old?.hexes===gameData.hexes&&old.job===job.id&&gameData.hexes[old.goal];
+    if(goal&&wodIsHostileOwner(goal.owner,owner)&&now-old.at<12000&&wodAiQuietFrontSafe(owner,goal,contacts)&&unit.target&&(unit.stuckTimer||0)<1&&(unit.blockedTimer||0)<1)return true;
+    // A real assembly march or another useful move keeps authority. Reached
+    // holds and a completed territorial bound can immediately find the next.
+    const end=unit.orderTarget||unit.target?.finalTarget||unit.target;
+    const following=goal&&end&&Math.hypot(end.x-goal.x,end.y-goal.y)<hr*1.5;
+    if(unit.target&&!following&&end&&Math.hypot(end.x-unit.x,end.y-unit.y)>hr*2.5)return false;
+    if(unit._aiQuietCheckAt!=null&&now-unit._aiQuietCheckAt<900)return false;unit._aiQuietCheckAt=now;
+    const intel=wodFogActive()?wodFogFactionIntel(owner):null,front=wodAiFrontOwner(unit),seen=new Set([getHexKey(here)]),queue=[{h:here,depth:0}],sites=[];
+    for(let i=0;i<queue.length;i++){
+        const {h,depth}=queue[i];if(depth>=4)continue;
+        for(const n of getNeighborHexes(h)){
+            const key=getHexKey(n);if(seen.has(key)||isWaterHex(n)||!canUnitEnterHex(unit,n)||!wodCanStepBetweenHexes(unit,h,n,true))continue;
+            seen.add(key);
+            if(wodIsFriendlyOwner(n.owner,owner)){queue.push({h:n,depth:depth+1});continue;}
+            if(!wodIsHostileOwner(n.owner,owner)||front&&n.owner!==front||intel&&!intel.visible.has(key)||!wodAiQuietFrontSafe(owner,n,contacts))continue;
+            const support=getNeighborHexes(n).filter(p=>!isWaterHex(p)&&wodIsFriendlyOwner(p.owner,owner));
+            if(support.length<2||!cardinalHexDirections.some(d=>{const p=gameData.hexes[(n.q+d.q)+','+(n.r+d.r)];return p&&!isWaterHex(p)&&wodIsFriendlyOwner(p.owner,owner)&&wodCurrentSupplyComponent(p,owner).city;}))continue;
+            sites.push({h:n,depth:depth+1,support:support.length});
+        }
+    }
+    if(!sites.length)return false;
+    const reservations=plan.quietFrontReservations||=(new Map());
+    for(const [key,r]of reservations)if(r.until<=now||!wodIsHostileOwner(gameData.hexes[key]?.owner,owner))reservations.delete(key);
+    const objective=job.objectiveCity||job.objectiveHex||job.attackHex;
+    const town=wodAiKnownCities(owner).filter(c=>wodIsHostileOwner(c.owner,owner)&&(!front||c.owner===front)).sort((a,b)=>Math.hypot(a.x-here.x,a.y-here.y)-Math.hypot(b.x-here.x,b.y-here.y))[0];
+    const aim=objective&&wodIsHostileOwner(objective.owner,owner)?objective:town||sites[0].h,bearing=unit._aiQuietBearing;
+    const dx=aim.x-here.x,dy=aim.y-here.y,length=Math.hypot(dx,dy)||1;
+    const direction=bearing?.job===job.id?bearing:unit._aiQuietBearing={job:job.id,x:dx/length,y:dy/length};
+    const score=p=>p.depth*hr*1.5-((p.h.x-here.x)*direction.x+(p.h.y-here.y)*direction.y)*1.2;
+    sites.sort((a,b)=>score(a)-score(b));
+    const target=sites.find(p=>!reservations.has(getHexKey(p.h))||reservations.get(getHexKey(p.h)).unit===unit.uid)?.h;
+    if(!target)return false;
+    if(!wodAiMoveUnitTowardHex(unit,target,false,.05))return false;
+    unit._aiQuietAdvance={hexes:gameData.hexes,job:job.id,goal:getHexKey(target),at:now};unit.aiCaptureHexKey=getHexKey(target);
+    reservations.set(getHexKey(target),{unit:unit.uid,until:now+12000});
+    if(job.kind==='hold'&&job.members.length===1){job.holdHex=here;job.attackHex=target;}
+    wodAiStampOrder(unit,false,target,3000);wodAiRecord(owner,'empty-front-advance',{unit:unit.uid,job:job.id,target:getHexKey(target)});
+    return true;
+}
+
 function wodAiIssueFrontAdvance(unit,job) {
     const owner=unit.owner,hr=gameData.hexRadius||20,now=wodAiOperationTime(),plan=gameData.aiTaskForces?.[owner];
     if(!plan||!job.attackHex||!job.holdHex)return false;

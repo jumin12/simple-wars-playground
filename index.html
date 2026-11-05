@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=front-commitment-20261105"></script>
+    <script src="ai-command.js?v=empty-front-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,14 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-05T01:57:33Z",
+                title:"AI captures undefended border land",
+                items:[
+                    "Idle border troops, reserves and understrength attack groups take short advances onto undefended enemy land instead of waiting for a full assault force. They continue capturing while the route stays connected to a friendly city.",
+                    "Troops choose separate capture cells, retain their direction as the border moves and widen their foothold. Fog advances use visible ground and observed threats; enemy contact, threatened supply, garrisons, recovery and existing movement orders retain priority."
+                ]
+            },
             {
                 at:"2026-11-05T01:35:20Z",
                 title:"AI front-line commitment",
@@ -41174,6 +41182,12 @@
                 return !!(unit.target&&end&&Math.hypot(unit.x-end.x,unit.y-end.y)>(gameData.hexRadius||20)*1.2&&
                     (unit.stuckTimer||0)<3&&(unit.blockedTimer||0)<3&&wodAiOperationTime()-(unit.aiOrderIssuedAt||0)<14000);
             }
+            const quiet=unit._aiQuietAdvance;
+            if(quiet?.hexes===gameData.hexes&&quiet.job===job?.id){
+                const at=wodUnitSupplyHex(unit,getNearestHexToPoint(unit.x,unit.y));
+                if(wodAiOperationTime()-quiet.at>=12000||!at||!wodCurrentSupplyComponent(at,unit.owner).city||
+                    !wodAiQuietFrontSafe(unit.owner,unit)||!wodAiQuietFrontSafe(unit.owner,gameData.hexes[quiet.goal]||unit))return false;
+            }
             const support=wodAiFrontSupportFor(unit,job);
             if(support&&(!unit.orderTarget||Math.hypot(unit.orderTarget.x-support.h.x,unit.orderTarget.y-support.h.y)>(gameData.hexRadius||20)*2))return false;
             if(job?.stage&&unit.aiOperationStage!==job.stage)return false;
@@ -42112,6 +42126,7 @@
                 if(wodAiMoveUnitTowardHex(unit,frontSupport.h,false,.12))wodAiStampOrder(unit,false,frontSupport.h,3500);
                 return true;
             }
+            if(wodAiIssueQuietFrontAdvance(unit,job))return true;
             if(unit.isGeneral&&!(job.objectiveCity||job.objectiveHex))return wodAiIssueGeneralOrder(unit,job);
             if(job.operation)return wodAiIssueCoastalOperation(unit,job);
             if(wodFogActive()&&['marine','naval'].includes(job.kind)&&!job.operation&&!wodAiKnownCities(unit.owner).some(c=>wodIsHostileOwner(c.owner,unit.owner)))return wodAiIssueScoutOrder(unit,job);
