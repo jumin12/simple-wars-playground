@@ -13062,7 +13062,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=empty-front-20261105"></script>
+    <script src="ai-command.js?v=baited-encirclements-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13081,6 +13081,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {
+                at:"2026-11-05T02:54:51Z",
+                title:"AI feints and baited encirclements",
+                items:[
+                    "Commanders can stage two flanking forces in friendly terrain and use a healthy bait unit to draw an approaching enemy into an encirclement. Generals support the maneuver and are never used as bait.",
+                    "Flanks close from their current positions once pursuers enter the trap, while the bait withdraws behind its support. In fog, troops scout a closing lane using ordinary vision.",
+                    "Traps require suitable troops, supply and a favorable fight. Refused bait, dangerous reinforcements, wounded bait, lost flanks or urgent defense cancel the attempt; armies then resume ordinary combat and advances. Retreating enemies remain pursuit targets."
+                ]
+            },
             {
                 at:"2026-11-05T01:57:33Z",
                 title:"AI captures undefended border land",
@@ -41178,6 +41187,7 @@
             const job=wodAiGetUnitTaskJob(unit),phase=job?.operation?.phase||job?.phase;
             if(job?.frontOperation){
                 if(unit.aiOrderResponseId!==job.id||unit.aiOrderPhase!==job.frontOperation.phase||unit.aiFrontBound!==job.bound)return false;
+                if((job.frontOperation.ambush||job.role==='bait-relief')&&wodAiOperationTime()-(unit.aiOrderIssuedAt||0)>=750)return false;
                 const end=unit.orderTarget||unit.target?.finalTarget||unit.target;
                 return !!(unit.target&&end&&Math.hypot(unit.x-end.x,unit.y-end.y)>(gameData.hexRadius||20)*1.2&&
                     (unit.stuckTimer||0)<3&&(unit.blockedTimer||0)<3&&wodAiOperationTime()-(unit.aiOrderIssuedAt||0)<14000);
