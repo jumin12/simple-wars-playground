@@ -25,7 +25,7 @@ await page.evaluate(()=>{gameData.fogOfWar=false;UI.mainMenu.classList.add('hidd
 results.safety=await page.evaluate(()=>{
  const setup=()=>{world();const home=town(-24,0,2,'Home');town(28,0,1,'Enemy');const u=unit(0),{p,guard}=makePlan([u],home),j=p.jobs.find(j=>j.id===p.unitJob[u.uid]);j.kind='hold';j.members=[u.uid];j.holdHex=h(0);j.attackHex=h(1);refresh();return{u,p,j,guard,home};};
  let {u,p,j,guard}=setup();const advance=typeof wodAiIssueQuietFrontAdvance==='function'?wodAiIssueQuietFrontAdvance:()=>false;
- const started=advance(u,j);unit(5,0,'heavy',1);refresh();const released=!wodAiShouldKeepCurrentOrder(u),blocked=!advance(u,j);
+ const started=advance(u,j);unit(2,0,'heavy',1);refresh();const released=!wodAiShouldKeepCurrentOrder(u),blocked=!advance(u,j);
  ({u,p,j,guard}=setup());const guardJob=p.jobs.find(x=>x.city);guard.x=h(0).x;guard.y=h(0).y;const guardKept=!advance(guard,guardJob);
  j.response=true;const responseKept=!advance(u,j);j.response=false;u._medicalRecovering=true;const recoveryKept=!advance(u,j);
  ({u,p,j}=setup());u._aiFallbackAt=wodAiOperationTime();const regroupKept=!advance(u,j);

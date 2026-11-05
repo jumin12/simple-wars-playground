@@ -1331,7 +1331,7 @@ function wodAiFrontProbeSafe(owner,goal) {
 
 function wodAiQuietFrontSafe(owner,point,contacts=wodAiThreats(owner)) {
     const hr=gameData.hexRadius||20;
-    return !contacts.some(e=>e.damage>0&&Math.hypot(e.x-point.x,e.y-point.y)<(wodIsNavalUnit(e)?(e.range||50)+hr*2:hr*10)+(e.uncertainty||0)*.35);
+    return !contacts.some(e=>e.damage>0&&Math.hypot(e.x-point.x,e.y-point.y)<(e.range||50)+hr*1.25+(e.uncertainty||0)*.35);
 }
 
 // An empty frontier needs a short territorial bound, not a full assault army.
@@ -1344,7 +1344,7 @@ function wodAiIssueQuietFrontAdvance(unit,job) {
         !['hold','reserve','main','armor','raid'].includes(job.kind)||unit.hp<unit.maxHp*.7||unit.retreating||unit.moraleBroken||unit._medicalRecovering||unit.boardTransportUid||
         unit._navalAssaultUntil>now||gameData._aiDefenseByOwner?.[owner]?.unitJob[unit.uid]||wodAiCorridorWithdrawal(unit))return false;
     if(unit._aiFallbackAt!=null&&now-unit._aiFallbackAt<20000)return false;
-    if(!['hold','reserve'].includes(job.kind)&&(!job.waitingForStrength||job.phase==='assault'))return false;
+    if(!['hold','reserve'].includes(job.kind)&&job.phase==='assault')return false;
     if(!continuing&&job.kind!=='hold'&&job.holdHex&&Math.hypot(unit.x-job.holdHex.x,unit.y-job.holdHex.y)>hr*8)return false;
     const here=getNearestHexToPoint(unit.x,unit.y);
     const contacts=wodAiThreats(owner).filter(e=>Math.hypot(e.x-unit.x,e.y-unit.y)<hr*16+(e.uncertainty||0)*.35);
@@ -1366,7 +1366,7 @@ function wodAiIssueQuietFrontAdvance(unit,job) {
             if(wodIsFriendlyOwner(n.owner,owner)){queue.push({h:n,depth:depth+1});continue;}
             if(!wodIsHostileOwner(n.owner,owner)||front&&n.owner!==front||intel&&!intel.visible.has(key)||!wodAiQuietFrontSafe(owner,n,contacts))continue;
             const support=getNeighborHexes(n).filter(p=>!isWaterHex(p)&&wodIsFriendlyOwner(p.owner,owner));
-            if(support.length<2||!cardinalHexDirections.some(d=>{const p=gameData.hexes[(n.q+d.q)+','+(n.r+d.r)];return p&&!isWaterHex(p)&&wodIsFriendlyOwner(p.owner,owner)&&wodCurrentSupplyComponent(p,owner).city;}))continue;
+            if(!support.some(p=>wodCurrentSupplyComponent(p,owner).city))continue;
             sites.push({h:n,depth:depth+1,support:support.length});
         }
     }

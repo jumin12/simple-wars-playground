@@ -26,21 +26,22 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
     cornerWorld(owner);cornerTown(6*sx,6*sy,owner);
     for(let i=1;i<=6;i++){cornerHex(i*sx,i*sy).owner=owner;if(i<6)cornerHex((i+1)*sx,i*sy).owner=owner;}
     cornerHex(0,0).owner=owner;const u=cornerUnit(0,0,owner);gameData.unitSpatialGrid=buildUnitSpatialGrid();
+    const diagonalSupplied=!wodGetUnitEncirclementState(u,cornerHex(0,0));setHexOwner(cornerHex(sx,sy),owner===1?2:1);
     const isolated=!!wodGetUnitEncirclementState(u,cornerHex(0,0));cornerScan();
     const flagged=wodHexKeyIsEncircled('0,0'),defense=wodAiReadDefense(owner,[u],true),hp=u.hp;
     cornerSteps(1.9);const noEarlyWarning=!wodUnitSupplyWarningState(u,cornerHex(0,0));cornerSteps(9.9);const gracePreserved=u.hp===hp;
     cornerSteps(1.3);const damage=hp-u.hp,warning=!!wodUnitSupplyWarningState(u,cornerHex(0,0));
     setHexOwner(cornerHex(sx,0),owner);cornerSteps(.1);const reconnected=!wodGetUnitEncirclementState(u,cornerHex(0,0))&&u.outOfSupplySeconds===0;
     setHexOwner(cornerHex(sx,0),owner===1?2:1);const before=u.hp;cornerSteps(1);const recutGrace=u.hp===before&&!wodUnitSupplyWarningState(u,cornerHex(0,0));
-    return{owner,sx,sy,isolated,flagged,pockets:defense.pockets.length,noEarlyWarning,gracePreserved,damage,warning,reconnected,recutGrace};
-   },{owner,sx,sy});assert(row.isolated&&row.flagged&&row.pockets>0&&row.noEarlyWarning&&row.gracePreserved&&row.damage>0&&row.warning&&row.reconnected&&row.recutGrace,JSON.stringify(row));results.generals.push(row);
+    return{owner,sx,sy,diagonalSupplied,isolated,flagged,pockets:defense.pockets.length,noEarlyWarning,gracePreserved,damage,warning,reconnected,recutGrace};
+   },{owner,sx,sy});assert(row.diagonalSupplied&&row.isolated&&row.flagged&&row.pockets>0&&row.noEarlyWarning&&row.gracePreserved&&row.damage>0&&row.warning&&row.reconnected&&row.recutGrace,JSON.stringify(row));results.generals.push(row);
   }
   results.townFootprint=await page.evaluate(()=>{
    cornerWorld(2);cornerTown(0,0,2);const h=cornerHex(1,1);h.type='urban';h.cityId='Home';h.owner=2;cornerUnit(1,1,2,'light');
-   const pointOnly=!wodCurrentSupplyComponent(h,2).city;cornerScan();const pointFlagged=wodHexKeyIsEncircled('1,1');
+   const diagonalConnected=wodCurrentSupplyComponent(h,2).city;cornerScan();const notFlagged=!wodHexKeyIsEncircled('1,1');
    const side=cornerHex(1,0);side.type='urban';side.cityId='Home';delete gameData.cities[0]._urbanHexCache;setHexOwner(side,2);const realRoute=wodCurrentSupplyComponent(h,2).city;
    setHexOwner(cornerHex(0,0),1);const contestedCenter=wodCurrentSupplyComponent(h,2).city;
-   return{pointOnly,pointFlagged,realRoute,contestedCenter};
+   return{diagonalConnected,notFlagged,realRoute,contestedCenter};
   });assert(Object.values(results.townFootprint).every(Boolean),JSON.stringify(results.townFootprint));
   results.cleanup=await page.evaluate(()=>{
    cornerWorld(2);for(let q=0;q<=3;q++)for(let r=0;r<=3;r++)cornerHex(q,r).owner=2;

@@ -1,0 +1,58 @@
+'use strict';
+const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{chromium}=require('playwright');
+const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/diagonal-retreat/focused');fs.mkdirSync(OUT,{recursive:true});
+const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!f.startsWith(ROOT+path.sep))return res.writeHead(403).end();if(process.env.BASELINE_DIR&&['index.html','ai-command.js'].includes(path.relative(ROOT,f))){const base=path.join(ROOT,process.env.BASELINE_DIR,path.basename(f));return fs.readFile(base,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',path.extname(f)==='.html'?'text/html':'text/javascript');res.end(b);});}fs.readFile(f,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg','.css':'text/css'})[path.extname(f)]||'application/octet-stream');res.end(b);});});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960},hasTouch:true}),page=await context.newPage(),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});
+try{await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>typeof gameData!=='undefined'&&gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:60000});
+ await page.evaluate(()=>{
+  setGameSpeed(0,true);cancelAnimationFrame(animationFrameId);wodDismissChangelogPopup();
+  window.h=(q,r=0)=>gameData.hexes[q+','+r];window.town=(q,r,owner,id)=>{const p=h(q,r);p.type='urban';p.cityId=id;p.owner=owner;const c={id,name:id,q,r,x:p.x,y:p.y,owner,hp:1000,maxHp:1000};gameData.cities.push(c);return c;};
+  window.unit=(q,r=0,type='light',owner=1)=>{const p=h(q,r),u=createUnitAt(type,p.x,p.y,owner,{startSpawn:true});u.x=u._drawX=p.x;u.y=u._drawY=p.y;u.isGeneral=false;return u;};
+  window.world=()=>{wodPrepareForNewMatch({keepLiveMap:true});WOD.makeBlankMap(28);gameState='PLAYING';gameData.menuAttractMode=false;gameData.mp={enabled:false};gameData._campaignRun=null;gameData._matchReadyForEndChecks=false;gameData.fogOfWar=false;gameData.entities=[];gameData.nextUnitId=1;gameData.cities=[];gameData.forts=[];gameData.hospitals=[];gameData.bridges=[];gameData.selection=[];gameData.constructionJobs=[];gameData.alliances=[];gameData._generalAuraCache=null;gameData._aiEconomyClock=0;gameData.aiTimer=gameData.aiStrategyTimer=gameData.convoyTimer=gameData._transportAiTimer=-1e6;gameData.aiTaskForces={};gameData._aiDefenseByOwner={};gameData._aiFrontOffensives={};gameData.money=gameData.manpower=100000;for(const p of gameData.hexList){p.type='grass';p.owner=p.q<=0?1:2;p.cityId=null;}town(-20,0,1,'Home');town(20,0,2,'Enemy');};
+  window.refresh=()=>{gameData.unitSpatialGrid=buildUnitSpatialGrid();gameData._generalAuraCache=null;gameData._citySupplyCache=null;};
+  window.sim=seconds=>{for(let i=0;i<seconds*20;i++){wodBeginSimPfBudget(gameData.entities.length);update(.05);wodDrainAiMoveQueue();}};
+  window.renderFixture=()=>{for(const u of gameData.entities){u._drawX=u.x;u._drawY=u.y;}UI.mainMenu.classList.add('hidden');UI.panels.forEach(p=>p.classList.add('hidden'));UI.inGameUI.style.display='block';gameData.camera={zoom:2,x:-720,y:-300};wodMarkTerrainFullDirty();updateTerrainCache();draw();};
+ });
+ results.diagonals=[];
+ for(const owner of [1,2])for(const sx of [-1,1])for(const sy of [-1,1])results.diagonals.push(await page.evaluate(({owner,sx,sy})=>{
+  world();gameData.cities=[];for(const p of gameData.hexList){p.type='water';p.owner=0;}
+  for(let i=0;i<=6;i++){h(i*sx,i*sy).type='grass';h(i*sx,i*sy).owner=owner;}town(0,0,owner,'Source');
+  const u=unit(sx,sy,owner===1?'light':'heavy',owner);refresh();const supplied=wodCurrentSupplyComponent(h(sx,sy),owner).city,linked=wodCanStepBetweenHexes(u,h(sx,sy),h(2*sx,2*sy),true),ordered=assignUnitMoveAlongWaypoints(u,[h(5*sx,5*sy)]);let water=0;
+  for(let i=0;i<1200;i++){sim(.05);if(u.inWater)water++;}
+  const arrived=Math.hypot(u.x-h(5*sx,5*sy).x,u.y-h(5*sx,5*sy).y)<4,alive=u.hp>0,connected=wodCurrentSupplyComponent(h(5*sx,5*sy),owner).city;
+  setHexOwner(h(3*sx,3*sy),3-owner);const cut=!wodCurrentSupplyComponent(h(5*sx,5*sy),owner).city;
+  return{owner,sx,sy,supplied,linked,ordered,arrived,alive,water,connected,cut,x:u.x,y:u.y};
+ },{owner,sx,sy}));
+ results.diagonalColumn=await page.evaluate(()=>{world();gameData.cities=[];for(const p of gameData.hexList){p.type='water';p.owner=0;}for(let q=-8;q<=8;q++){h(q,q).type='grass';h(q,q).owner=1;}town(-8,-8,1,'Source');const army=Array.from({length:4},(_,i)=>unit(-4+i,-4+i));refresh();for(let i=0;i<4;i++)assignUnitMoveAlongWaypoints(army[i],[h(2+i,2+i)]);let water=0;for(let i=0;i<2400;i++){sim(.05);if(army.some(u=>u.inWater))water++;}return{arrived:army.filter((u,i)=>Math.hypot(u.x-h(2+i,2+i).x,u.y-h(2+i,2+i).y)<4).length,water,alive:army.every(u=>u.hp>0),positions:army.map(u=>({x:u.x,y:u.y,goal:u.orderTarget}))};});
+ results.retreat=await page.evaluate(()=>{
+  world();const u=unit(-3),foe=unit(-1,0,'light',2);u.morale=19;foe.damage=.001;refresh();const expected=findOrderedRetreatPoint(u,2);wodUpdateUnitMorale(u,.05);const initial={...u.orderTarget},start={x:u.x,y:u.y};let changes=0;
+  for(let i=0;i<45;i++){foe.x=u.x+65;foe.y=u.y+Math.sin(i/5)*20;refresh();sim(.1);if(u.orderTarget&&Math.hypot(u.orderTarget.x-initial.x,u.orderTarget.y-initial.y)>1)changes++;}
+  return{expected,initial,changes,moved:Math.hypot(u.x-start.x,u.y-start.y),routing:u.moraleBroken,short:Math.hypot(initial.x-start.x,initial.y-start.y)<(gameData.hexRadius||20)*6};
+ });
+ results.pressure=[];
+ for(const fog of [false,true])results.pressure.push(await page.evaluate(fog=>{
+  world();for(const p of gameData.hexList){p.owner=p.q<=0?2:1;if(p.r!==0)p.type='mountain';}gameData.cities=[];const home=town(-20,0,2,'Home');town(20,0,1,'Enemy');const u=unit(0,0,'light',2),guard=unit(-20,0,'light',2),foe=unit(8,0,'light',1);
+  const job={id:'empty-bound',kind:'main',members:[u.uid],holdHex:h(0),attackHex:h(1),objectiveHex:h(5),phase:'assemble',waitingForStrength:false};gameData.aiTaskForces[2]={jobs:[job,{id:'guard',kind:'defend',city:home,members:[guard.uid]}],unitJob:{[u.uid]:job.id,[guard.uid]:'guard'},sectors:[],readyN:2};gameData.fogOfWar=fog;gameData._factionIntel={};refresh();const start=u.x;
+  for(let i=0;i<1200;i++){if(i%10===0){refresh();if(fog)wodFogFactionIntel(2,true);if(!wodAiShouldKeepCurrentOrder(u))wodAiIssueQuietFrontAdvance(u,job);}sim(.05);}
+  return{fog,advanced:u.x-start,captured:gameData.hexList.filter(p=>p.q>0&&p.owner===2).length,guard:Math.hypot(guard.x-home.x,guard.y-home.y)<1,alive:u.hp>0,supplied:!wodGetUnitEncirclementState(u,getNearestHexToPoint(u.x,u.y)),distance:Math.hypot(u.x-foe.x,u.y-foe.y)};
+ },fog));
+ results.buildings=await page.evaluate(()=>{
+  world();renderFixture();wodInitRecruitInfoButtons();if(typeof wodOpenBuildingInfo!=='function')return{available:false};const before=[gameData.money,gameData.manpower,gameData.entities.length,gameData.constructionJobs.length,gameData.buildMode],cards=[];
+  for(const type of ['factory','harbor','farm','fort','hospital','bridge']){wodOpenBuildingInfo(type);const d=document.getElementById('wodRecruitInfo');cards.push({type,title:d.querySelector('h3').textContent,text:d.textContent,valid:d.textContent.includes('60 seconds')&&d.textContent.includes('Using this building')});d.close();}
+  return{available:true,cards,unchanged:JSON.stringify(before)===JSON.stringify([gameData.money,gameData.manpower,gameData.entities.length,gameData.constructionJobs.length,gameData.buildMode]),buttons:document.querySelectorAll('[data-building-type]').length};
+ });
+ if(results.buildings.available){
+  await page.locator('#wodPcProdRoot .wod-pc-prod-tab[data-wod-pc-pane="structures"]').click();await page.locator('#wodPcProdRoot [data-building-type="hospital"]').click();await page.screenshot({path:path.join(OUT,'hospital-info-desktop.png')});await page.locator('#wodRecruitInfo header button').click();
+  await page.evaluate(()=>toggleWodCitiesPanel(true));await page.locator('#citiesMenu [data-building-type="factory"]:visible').first().click();results.buildings.cityList=await page.evaluate(()=>document.getElementById('wodRecruitInfo').open&&document.getElementById('wodRecruitInfoTitle').textContent===wodProductionLabel('factory')&&gameData.money===100000&&gameData.constructionJobs.length===0);await page.locator('#wodRecruitInfo header button').click();await page.evaluate(()=>toggleWodCitiesPanel(false));
+  await page.setViewportSize({width:390,height:844});await page.locator('.wod-m-tab[data-wod-mtab="build"]').click();await page.locator('.wod-m-sheet--build [data-building-type="bridge"]').tap();await page.screenshot({path:path.join(OUT,'bridge-info-mobile.png')});results.buildings.mobile=await page.locator('#wodRecruitInfo').evaluate(d=>{const r=d.getBoundingClientRect();return d.open&&r.width<=innerWidth&&r.height<=innerHeight;});await page.locator('#wodRecruitInfo header button').tap();
+ }
+ results.caches=await page.evaluate(()=>{wodSyncHudCompactRates();const query=document.querySelectorAll;let scans=0;document.querySelectorAll=function(selector){if(selector.includes('ui-economy-net')||selector.includes('ui-manpower-net'))scans++;return query.call(this,selector);};try{for(let i=0;i<20;i++)wodSyncHudCompactRates();}finally{document.querySelectorAll=query;}const u=wodRecruitUnitSpec('light');u.owner=1;u.moraleBroken=true;const c=document.createElement('canvas');c.width=c.height=160;const g=c.getContext('2d');g.translate(80,80);drawUnitSkin(g,u,12,'#2ecc71');const first=wodEnsureUnitBodySprite(u,12,'#2ecc71').routed;drawUnitSkin(g,u,12,'#2ecc71');return{scans,reused:!!first&&first===wodEnsureUnitBodySprite(u,12,'#2ecc71').routed,filter:g.filter};});
+ if(!process.env.OBSERVE_ONLY){assert(results.caches.scans===0&&results.caches.reused&&results.caches.filter==='none',JSON.stringify(results.caches));
+  assert(results.diagonals.every(r=>r.supplied&&r.linked&&r.ordered&&r.arrived&&r.alive&&!r.water&&r.connected&&r.cut),JSON.stringify(results.diagonals));
+  assert(results.diagonalColumn.arrived===4&&!results.diagonalColumn.water&&results.diagonalColumn.alive,JSON.stringify(results.diagonalColumn));
+  assert(results.retreat.changes===0&&results.retreat.moved>10&&results.retreat.short&&results.retreat.routing&&Math.hypot(results.retreat.initial.x-results.retreat.expected.x,results.retreat.initial.y-results.retreat.expected.y)<1,JSON.stringify(results.retreat));
+  assert(results.pressure.every(r=>r.advanced>65&&r.captured>5&&r.guard&&r.alive&&r.supplied),JSON.stringify(results.pressure));
+  assert(results.buildings.available&&results.buildings.unchanged&&results.buildings.mobile&&results.buildings.cityList&&results.buildings.buttons>=12&&results.buildings.cards.every(c=>c.valid),JSON.stringify(results.buildings));assert.deepEqual(errors,[]);
+ }
+ console.log(JSON.stringify(results,null,2));
+}finally{fs.writeFileSync(path.join(OUT,process.env.BASELINE_DIR?'baseline.json':'results.json'),JSON.stringify({results,errors},null,2));await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});
