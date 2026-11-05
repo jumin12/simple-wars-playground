@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=attack-pressure-pursuit-20261105"></script>
+    <script src="ai-command.js?v=coordinated-squad-command-20261105"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,12 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-05T18:02:00Z",title:"Persistent squads and coordinated AI assaults",items:[
+                "Attack squads retain their members while troops heal or answer an emergency. Returning troops and recruits rejoin the same squad; real casualties still allow depleted formations to regroup.",
+                "Two or three neighboring squads can coordinate a shared assault, with a fixing force and separate flanking approaches. They launch together using actual travel times and observed opposition, while preserving their individual rosters.",
+                "A shared command decision controls assembly, attack and recovery. Distant troops, garrisons and patients cannot authorize a fight; nearby allies already fighting the same battle contribute to its strength estimate. Short defense commitments reduce repeated reassignment between towns.",
+                "Victorious forces prioritize reachable towns and exposed structures. Strategic progress checks distinguish meaningful approach and urban capture from small territorial gains. Recruitment follows stable squad requirements and accounts for reinforcements already being built."
+            ]},
             {"at":"2026-11-05T16:00:38Z","title":"Attack pursuit and more active AI fronts","items":["Click, right-click or tap an enemy with troops selected to order an attack. Units replace their old march, seek firing positions and follow the visible target; approaching troops can disengage from other fights at 75% movement speed.","Pursuit respects terrain and fog. Hidden enemies are followed only to their last seen position. New movement or retreat orders cancel pursuit; Clear target stops it, and destroyed targets release their attackers. Attack orders synchronize in multiplayer.","The AI keeps a leaner standing screen on quiet fronts and releases excess healthy defenders and reserves into attacking forces. Town garrisons, medical recovery, active combat and urgent defense retain their duties.","Idle troops a few tiles behind an empty front can join safe territorial advances instead of waiting outside the old search range. Separate small forces and nearby combat support remain in place."]},
             {"at":"2026-11-05T09:54:02Z","title":"Smaller armies, separate objectives and nearby support","items":["AI attacks use several persistent forces, usually three to six units and capped at eight, with separate approach lanes and objectives instead of one oversized army.","Viable groups keep their own missions. Town assaults, land advances and flanking forces no longer all get redirected toward the same city; only small fragments regroup.","One nearby force can temporarily help a neighboring battle without merging their rosters. Other forces keep their objectives, and the helper resumes its mission after combat clears.","Combat support preserves fog of war, arrival checks, supply, garrisons, medical recovery, deliberate flanks and urgent defense duties."]},
             {"at":"2026-11-05T09:01:58Z","title":"Diagonal corridors, steady retreats and building information","items":["Single-cell diagonal land connections now carry movement and city supply for every side. Corner sampling no longer strands a unit on neighboring water; a truly severed land route still loses supply.","Automatic morale retreats use the same short fallback as the Retreat button and keep their destination until arrival. Pursuit can trigger a further short fallback after that bound.","Factories, farms, harbors, forts, hospitals and bridges have information buttons with their own costs, construction times, bonuses and placement/use guidance, including in the city list.","Idle front units cautiously take supplied empty land until they approach actual enemy weapon range. Town guards, medical recovery, active marches and urgent defense retain their duties.","Cached HUD rate lookups and routing flash artwork remove repeated DOM searches and per-frame image filtering from large battles."]},
@@ -41951,7 +41957,7 @@
             const responseThreats=selected.slice(0,12),screens=yield* wodAiReserveDefenseScreens(owner,responseThreats,
                 available.filter(u=>supplied.has(positions.get(u.uid))),plan,budget,old);
             const responseWeight=t=>Math.max(1,Math.sqrt(t.enemies||t.atRisk||t.neededPower||2))*(t.kind==='counter'?2:t.kind==='corridor'?1.5:1);
-            const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);if(job.kind==='territory'&&u._aiTerritoryJob!==job.id){u._aiTerritoryJob=job.id;u._aiTerritoryAssignedAt=now;}};
+            const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);if(u._aiDefenseLease?.id!==job.id)u._aiDefenseLease={id:job.id,until:now+12000};if(job.kind==='territory'&&u._aiTerritoryJob!==job.id){u._aiTerritoryJob=job.id;u._aiTerritoryAssignedAt=now;}};
             for(const [threatIndex,t] of responseThreats.entries()) {
                 yield;
                 const job={...t,members:[],response:true};
@@ -41990,6 +41996,11 @@
                     const u=candidates.shift();
                     if(want<=0&&responsePower>=neededPower||budget<=0||recruited>=responseBudget||t.kind!=='corridor'&&job.members.length>=trappedCount+responseLimit)break;
                     const previousResponse=old?.jobs.find(j=>j.id===old.unitJob[u.uid]);
+                    // Finish a short, still-valid response before changing
+                    // towns again. A real pocket or imminent cut can preempt it.
+                    const lease=u._aiDefenseLease,leased=lease?.until>now&&selected.find(s=>s.id===lease.id);
+                    if(leased&&leased.id!==t.id&&t.kind!=='relief'&&!(t.kind==='corridor'&&(!t.predictive||t.closureSeconds<20))&&
+                        !(t.kind==='counter'&&leased.kind!=='counter'&&t.primaryTheater))continue;
                     if(!critical&&previousResponse?.kind==='territory'&&previousResponse.id!==t.id&&
                         selected.some(s=>s.id===previousResponse.id)&&u.target&&(u.stuckTimer||0)<3&&
                         now-(u._aiTerritoryAssignedAt??now)<18000)continue;
@@ -43120,7 +43131,8 @@
             const unlockHarbor=navalReady&&!coast.some(c=>c.hasHarbor);
             const economyRescue=income-upkeep-committedUpkeep<3||mpShort;
             const farmRescue=manpower()<getUnitCost('light').manpower&&cities.some(c=>!c.hasFarm)&&cash()>=WOD_PRICE_FARM+WOD_PRICE_LIGHT*2;
-            const safeInvestmentTowns=free.filter(c=>!wodAiThreats(owner,false).some(u=>Math.hypot(u.x-c.x,u.y-c.y)<(gameData.hexRadius||20)*10));
+            const reinforcementTowns=new Set((initialDemand.reinforcements||[]).filter(r=>canAffordUnit(owner,r.type)&&getUnitUpkeep({type:r.type})<=income-upkeep-committedUpkeep).map(r=>r.source));
+            const safeInvestmentTowns=free.filter(c=>!reinforcementTowns.has(c.id)&&!wodAiThreats(owner,false).some(u=>Math.hypot(u.x-c.x,u.y-c.y)<(gameData.hexRadius||20)*10));
             // Keep a recruitment town free when investing; one-town owners invest after their current recruit arrives.
             const navalReserve=initialDemand.expedition?.preferred[0]==='ship'&&count('ship')<1;
             let canInvest = (!plan.hospitalRequest||farmRescue) && (!plan.reservation||farmRescue||unlockHarbor||unlockFactory||economyRescue&&cash()>getUnitCost(plan.reservation.type).money+WOD_PRICE_FARM+WOD_PRICE_LIGHT*2) && safeInvestmentTowns.length>0 && !navalReserve && !needGuards && (army.length>=10||navalReady||unlockFactory||economyRescue&&army.length>=4) && clock-plan.lastBuilding >= (unlockHarbor?15:65) &&
@@ -43176,7 +43188,7 @@
                     if(!cityEligibleForBuildPlacementForOwner(city,type,owner)) continue;
                     if(wodApplyBuildAtCityForOwner(city,type,owner)) {
                         const request=procurement.reinforcements?.find(r=>r.type===type&&r.source===city.id);
-                        if(request){const queued=gameData.constructionJobs.at(-1);queued._aiReinforceFor=request.id;queued._aiReinforceGroup=request.group;queued._aiReinforceFront=request.front||request.goal.owner;wodAiRecord(owner,'reinforcement-funded',{job:request.id,city:city.id,type});}
+                        if(request){const queued=gameData.constructionJobs.at(-1);queued._aiReinforceFor=request.id;queued._aiReinforceGroup=request.group;queued._aiReinforceSquad=request.squad;queued._aiReinforceFront=request.front||request.goal.owner;wodAiRecord(owner,'reinforcement-funded',{job:request.id,city:city.id,type});}
                         plan.idleReason=null;plan.savingSince=null;
                         wodAiRecord(owner,'recruit',{city:city.id,type,reason:procurement.missing.length?'town-guard':'army-demand'});
                         if(plan.reservation?.type===type){wodAiRecord(owner,'procurement-filled',{type,wait:Math.round(clock-plan.reservation.since)});plan.reservation=null;plan.savingFor=null;}
@@ -58016,7 +58028,7 @@
                     }
                 } else {
                     const unit=spawnUnit(j.mode, city, j.owner);done=!!unit;
-                    if(unit&&j._aiReinforceFor){unit._aiRequestedGroup=j._aiReinforceGroup;unit._aiFrontAssignment={hexes:gameData.hexes,enemy:j._aiReinforceFront,at:wodAiOperationTime()};}
+                    if(unit&&j._aiReinforceFor){unit._aiRequestedGroup=j._aiReinforceGroup;unit._aiRequestedSquad=j._aiReinforceSquad;unit._aiFrontAssignment={hexes:gameData.hexes,enemy:j._aiReinforceFront,at:wodAiOperationTime()};}
                     if(unit&&j.owner===1&&gameData._campaignRun){unit._campRecruited=true;gameData._campaignRun.recruitsBuilt=(gameData._campaignRun.recruitsBuilt||0)+1;}
                 }
                 // Training waits at zero for a free spawn slot rather than losing paid troops.
