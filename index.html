@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=town-defense-fire-control-20261105"></script>
+    <script src="ai-command.js?v=stable-operations-naval-recruitment-20261107"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,13 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-07T05:13:00Z",title:"Steadier AI operations and naval recruitment",items:[
+                "Committed attack groups keep their missions through routine border alerts. Dedicated screens still defend the countryside, while real town attacks, trapped armies and imminent supply cuts can interrupt an offensive.",
+                "Flanking traps assemble complete wings and allow time for useful staging progress. Temporary collision detours no longer leave a staging wing waiting indefinitely.",
+                "AI troop savings persist through busy production queues. Recruitment and medical replacements share a deliberate manpower budget, with continued treatment and emergency line recruitment; planned naval escorts can now be funded.",
+                "Marine raids receive travel-aware time limits and continue toward their inland objective after landing. Regrouping repairs missing defensive anchors instead of crashing on changing island fronts.",
+                "Archipelago generation spends less time retrying unsuitable coastlines and town placements while retaining equal land, city spacing and strict border validation."
+            ]},
             {at:"2026-11-05T19:24:43Z",title:"Stronger town defense and coordinated fire",items:[
                 "Observed enemy troops are assigned to one town approach at a time. Reachable secondary towns receive a proper relief force instead of an arbitrary two-unit cap; garrisons and supply screens keep their duties.",
                 "Small or urgently depleted armies release specialist savings to recruit affordable line troops, while upkeep and production restrictions remain enforced.",
@@ -16672,10 +16679,10 @@
                 let bio = wodRollIslandStyleBiomeFields('archipelago');
                 return {
                     islandMode: 'blob',
-                    archipelagoCenterClearFrac: 0.4 + Math.random() * 0.22,
+                    archipelagoCenterClearFrac: 0.4 + Math.random() * 0.12,
                     stretchX: 0.94 + Math.random() * 0.2,
                     stretchY: 0.94 + Math.random() * 0.2,
-                    coastNoiseAmp: 0.46 + Math.random() * 0.28,
+                    coastNoiseAmp: 0.4 + Math.random() * 0.18,
                     chainAX: (Math.random() - 0.5) * 0.95,
                     chainAY: (Math.random() - 0.5) * 0.9,
                     chainBX: (Math.random() - 0.5) * 0.95 + 0.06,
@@ -33581,6 +33588,7 @@
                 if(hpMissing > 0.001 || mpMissing > 0) {
                     let healFrac = Math.min(0.03 * dt, 1);
                     let soldiersWant = Math.min(mpMissing, healFrac * mpCap);
+                    if(typeof wodAiReplacementAllowance==='function')soldiersWant=wodAiReplacementAllowance(unit,soldiersWant,dt);
                     let soldiersAdded = wodSpendOwnerManpowerPool(unit.owner, soldiersWant);
                     if(soldiersAdded > 0) {
                         restored=true;wodBattleMetric(unit.owner,'personnelRestored',soldiersAdded);
@@ -38477,7 +38485,10 @@
                         if((++tryTick & wodMapGenLoopYieldMask(31)) === 0) await wodMapGenYieldSlice();
                         let cand = cachedCandidates(ow, lv);
                         let triedCap = f >= 3 ? 280 : 480;
-                        let tried = cand.length > triedCap ? cand.slice(0, triedCap) : cand;
+                        // Fragmented coasts need candidates from every owned
+                        // island. An angle-sorted prefix repeatedly missed the
+                        // only legal second town and discarded valid terrain.
+                        let tried = mapShape === 'archipelago' ? cand : cand.length > triedCap ? cand.slice(0, triedCap) : cand;
                         let hTick = 0;
                         let ideal = wodIdealCitySiteForOwner(ow, lv, kpf, ownersSorted, lcm, phase);
                         let bestHex = null;
@@ -41393,6 +41404,13 @@
                 const clock=gameData._aiEconomyClock||0,yielding=unit._trafficYield;
                 yielding.supportCheckAfter??=clock+3;
                 const job=wodAiGetUnitTaskJob(unit);
+                // A staging wing must resume its assigned flank after a short
+                // sidestep, rather than waiting out an idle blocker's long lease.
+                if(job?.frontOperation?.ambush&&clock>=yielding.supportCheckAfter&&
+                    (!unit.target||clock-(yielding.lastProgressAt??clock)>2)){
+                    unit._trafficYield=null;unit._aiMoveIntent=null;unit.aiOrderUntil=0;
+                    gameData._aiMoveQueue?.delete(unit);return false;
+                }
                 if(clock>=yielding.supportCheckAfter&&wodAiIssueGroupCombatSupport(unit,job,false)){
                     // Give traffic time to clear, then find a fresh firing lane.
                     // A parked fighter must not reserve this soldier for 25 seconds.
