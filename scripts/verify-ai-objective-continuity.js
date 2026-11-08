@@ -124,7 +124,7 @@ const server=http.createServer((req,res)=>{
   emergency.aiOrderUntil=guard.aiOrderUntil=77777;gameData._aiMoveQueue=new Map([[guard,{x:home.x,y:home.y}],[emergency,{x:home.x,y:home.y}]]);
   gameData._aiDefenseByOwner[2]={hexes:gameData.hexes,jobs:[{id:'urgent',kind:'counter',response:true,members:[emergency.uid]}],unitJob:{[emergency.uid]:'urgent'}};
   const op={id:'reserved',hexes:gameData.hexes,anchor:h(-5),goal:h(2),hostile:1,members:[...army,guard,emergency].map(u=>u.uid),initialN:7,phase:'consolidate',mode:'breakthrough',jobs:[]};
-  const changed=wodAiContinueFrontOffensive(2,op,[...army,guard,emergency]);return{changed,protected:[guard,emergency].every(u=>u.aiOrderUntil===77777&&gameData._aiMoveQueue.has(u)&&!op.members.includes(u.uid))};
+  const changed=wodAiContinueFrontOffensive(2,op,[...army,guard,emergency]);return{changed,protected:[guard,emergency].every(u=>u.aiOrderUntil===77777&&gameData._aiMoveQueue.has(u))&&!op.members.includes(guard.uid)&&op.members.includes(emergency.uid)&&wodAiGetUnitTaskJob(emergency)?.id==='urgent'};
  });
  results.autonomous=await page.evaluate(()=>{
   world();town(-26,0,2,'Home');const first=town(3,0,1,'First'),next=town(20,0,1,'Next');unit(-26);
@@ -145,7 +145,7 @@ const server=http.createServer((req,res)=>{
   assert(!results.healthyContact.premature&&results.healthyContact.cleared&&results.healthyContact.goal==='Next','friendly paint alone does not declare victory while a healthy defender remains');
   assert(results.uncertainContact.remembered&&results.uncertainContact.continued&&results.uncertainContact.goal==='Known next','a small last-seen contact does not freeze a superior force after its cleared objective');
   assert(results.rearStructure.changed&&results.rearStructure.goal==='Next'&&!results.rearStructure.structure,'the main victorious force does not reverse toward a distant structure behind its completed objective');
-  assert(results.reservedOrders.changed&&results.reservedOrders.protected,'continuing an offensive preserves queued garrison and emergency defense orders');
+  assert(results.reservedOrders.changed&&results.reservedOrders.protected,'continuing an offensive preserves queued garrison and emergency orders while retaining the loaned regiment for its eventual return');
   assert(results.autonomous.first===2&&results.autonomous.next===2&&results.autonomous.advanced>=3,'the complete autonomous AI captures consecutive undefended towns without manual orders');
  }
  assert.deepEqual(errors,[]);
