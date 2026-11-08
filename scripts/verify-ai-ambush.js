@@ -16,7 +16,7 @@ await page.evaluate(()=>{
 
 await page.evaluate(()=>{
  window.ambushWorld=(fog=false)=>{
-  world();gameData.aiManpowerByOwner={2:0};gameData.money=gameData.manpower=0;
+  world();gameData.aiMoneyByOwner={2:100000};gameData.aiManpowerByOwner={2:100000};gameData.money=gameData.manpower=100000;
   const home=town(-27,0,2,'Home');town(28,0,1,'Enemy');
   for(const hex of gameData.hexList)if(hex.q<0&&Math.abs(hex.r)>3&&Math.abs(hex.r)<9)hex.type='forest';
   const bait=unit(0),army=[bait,unit(-6,0,'heavy'),unit(-4,-5),unit(-3,-4),unit(-2,-6),unit(-4,5),unit(-3,4),unit(-2,6)],{p,guard}=makePlan(army,home);
@@ -67,7 +67,7 @@ for(const fog of [false,true])results.plannerIntegration.push(await page.evaluat
  }
  wodAiRecord=record;return{fog,events:wodAiDiagnostics(2).counts,log,damage:c.foes.reduce((n,e)=>n+e.maxHp-e.hp,0),guard:c.guard.hp>0&&Math.hypot(c.guard.x-h(-27).x,c.guard.y)<50};
 },fog));
-results.refused=await page.evaluate(()=>{ambushWorld();ambushSim(4);const c=ambushCase;for(const e of c.foes){e.target=null;e.path=null;e.orderTarget=null;e.holding=true;}ambushSim(85,false);return{started:c.started,aborted:!!wodAiDiagnostics(2).counts['ambush-abort'],counterattacked:!!wodAiDiagnostics(2).counts['ambush-counterattack'],attempts:wodAiDiagnostics(2).counts['ambush-prepare'],waiting:!!c.op.ambush,forward:c.army.some(u=>u.x>100),trace:c.trace};});
+results.refused=await page.evaluate(()=>{ambushWorld();ambushSim(4);const c=ambushCase;for(const e of c.foes){e.target=null;e.path=null;e.orderTarget=null;e.holding=true;}ambushSim(85,false);return{started:c.started,aborted:!!wodAiDiagnostics(2).counts['ambush-abort'],counterattacked:!!wodAiDiagnostics(2).counts['ambush-counterattack'],adapted:!!wodAiDiagnostics(2).counts['ambush-adapted'],wingAdvanced:c.trace.some(t=>t.wings.some(w=>w.cursor>=3)),unpaidDamage:Object.values(wodBattleLedger().byOwner).reduce((n,l)=>n+(l.unpaidAttritionDamage||0),0),attempts:wodAiDiagnostics(2).counts['ambush-prepare'],waiting:!!c.op.ambush,forward:c.army.some(u=>u.x>100),trace:c.trace};});
 results.safety=await page.evaluate(()=>{
  const start=()=>{ambushWorld();ambushSim(4);return ambushCase;};
  let c=start();const trap=c.op.ambush,covered=wodAiBorderBattleCovered(2,{x:c.foes[0].x,y:c.foes[0].y,contacts:c.foes.map(e=>e.uid)},c.p);
@@ -85,5 +85,5 @@ results.safety=await page.evaluate(()=>{
 console.log(JSON.stringify({...results,physical:results.physical.map(r=>({...r,trace:undefined})),refused:{...results.refused,trace:undefined}},null,2));
 
 if(!process.env.OBSERVE_ONLY)assert(results.physical.every(r=>r.started&&r.events['ambush-lure']&&r.events['ambush-sprung']&&r.baitRetreated&&r.baitAlive&&r.generalNotBait&&r.guard&&r.damage>50&&r.isolated),'a real pursuing force follows the bait and the prepared wings spring an attack in clear and fog');
-if(!process.env.OBSERVE_ONLY){assert(results.plannerIntegration.every(r=>r.events['ambush-prepare']&&r.events['ambush-sprung']&&r.damage>50&&r.guard),'the production front planner chooses and completes the trap for a coherent force without direct lure calls');assert(results.refused.started&&(results.refused.aborted||results.refused.counterattacked)&&results.refused.attempts===1&&!results.refused.waiting&&results.refused.forward,'a refused lure expires once and the force resumes advancing');assert(Object.values(results.safety).every(Boolean),'unsafe traps abort, preserve emergency loans, and never use hidden or static targets');}assert.deepEqual(errors,[]);
+if(!process.env.OBSERVE_ONLY){assert(results.plannerIntegration.every(r=>r.events['ambush-prepare']&&r.events['ambush-sprung']&&r.damage>50&&r.guard),'the production front planner chooses and completes the trap for a coherent force without direct lure calls');assert(results.refused.started&&(results.refused.aborted||results.refused.counterattacked||results.refused.adapted&&results.refused.wingAdvanced)&&results.refused.attempts===1&&!results.refused.waiting&&results.refused.forward&&results.refused.unpaidDamage===0,'a refused lure expires once or becomes a physically advancing flank, with both armies funded');assert(Object.values(results.safety).every(Boolean),'unsafe traps abort, preserve emergency loans, and never use hidden or static targets');}assert.deepEqual(errors,[]);
 }finally{fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({results,errors},null,2));await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

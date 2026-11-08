@@ -83,6 +83,16 @@ const server=http.createServer((req,res)=>{
   return{retained,unsafe,supported};
  });
  assert(Object.values(results.liveFleet).every(Boolean),'live staging keeps ownership; unsupplied infantry cannot land until actual ship support arrives');
+ results.stalledFleetMember=await page.evaluate(()=>{
+  world();for(const p of gameData.hexList)if(Math.abs(p.q)<=8){p.type='water';p.owner=0;}
+  const home=town(-10,0,2,'Home');town(24,0,1,'Enemy');const t=unit(0,0,'transport'),cargo=unit(-12);
+  gameData.aiMoneyByOwner[2]=gameData.aiManpowerByOwner[2]=gameData.money=gameData.manpower=100000;
+  t.cargo=cargo;cargo.boardTransportUid=t.uid;gameData.entities=gameData.entities.filter(u=>u!==cargo);t._aiFleetId='active';
+  gameData.aiNavalPlans={2:{id:'active',hexes:gameData.hexes,phase:'prepare',at:0,progressAt:0}};refresh();wodAiMaintainMissions(2,[t]);
+  gameData._aiEconomyClock=95;gameData.aiNavalPlans[2].progressAt=95000;wodAiMaintainMissions(2,[t]);const returning=t._aiFerryReturning;
+  sim(70,null,[t]);return{returning,unloaded:!t.cargo&&gameData.entities.includes(cargo),home:cargo.x<0,alive:t.hp>0&&cargo.hp>0};
+ });
+ assert(Object.values(results.stalledFleetMember).every(Boolean),'another vessel cannot renew a motionless loaded ferry forever; it returns and physically unloads safely');
 
  results.raidExpiry=await page.evaluate(()=>{
   world();for(const p of gameData.hexList)if(p.r>=1&&p.r<=4){p.type='water';p.owner=0;}
@@ -94,6 +104,43 @@ const server=http.createServer((req,res)=>{
   return{original,expired:!gameData._aiMarineRaids.owners[2],released:!u._aiMarineRaid&&u._navalAssaultUntil===0};
  });
  assert(results.raidExpiry.original===20000&&results.raidExpiry.expired&&results.raidExpiry.released,'reissuing a stalled sea leg never manufactures motion progress or renews an abandoned raid forever');
+ results.newRaidClock=await page.evaluate(()=>{
+  world();for(const p of gameData.hexList)if(p.r>=1&&p.r<=4){p.type='water';p.owner=0;}
+  town(-26,-8,2,'Home');const goal=town(26,-8,1,'Enemy'),u=unit(-4,2,'marine');
+  const raid={id:'new-crossing',at:100000,phase:'crossing',source:h(-10),beach:h(10),town:goal,water:[h(-4,2),h(4,2)],ids:[u.uid]};
+  u._aiMarineRaid=raid.id;u._aiRaidProgress={id:'old-crossing',x:u.x,y:u.y,at:0};
+  gameData._aiMarineRaids={hexes:gameData.hexes,owners:{2:raid},checked:{},blocked:{}};gameData._aiEconomyClock=102;refresh();
+  wodAiPlanMarineRaids(2,[u]);const alive=gameData._aiMarineRaids.owners[2]===raid;
+  const start=u._aiRaidProgress.at,x=u.x;sim(8,null,[u]);
+  return{alive,start,id:u._aiRaidProgress.id,moved:Math.abs(u.x-x),ordered:!!u.target};
+ });
+ assert(results.newRaidClock.alive&&results.newRaidClock.start===102000&&results.newRaidClock.id==='new-crossing'&&results.newRaidClock.moved>10,'a veteran marine starts a new real crossing with a new mission clock and physically moves');
+ results.groundRecovery=await page.evaluate(()=>{
+  world();const home=town(-26,0,2,'Home'),enemy=town(26,0,1,'Enemy'),army=Array.from({length:6},(_,i)=>unit(-10,i));
+  gameData.aiMoneyByOwner[2]=gameData.aiManpowerByOwner[2]=gameData.money=gameData.manpower=100000;
+  const {p,guard}=planArmy(army,home),op={id:'stranded',hexes:gameData.hexes,at:0,until:999999,phase:'advance',anchor:h(-10),goal:enemy,members:army.map(u=>u.uid),jobs:[]};
+  op.jobs=[{id:'stranded-breakthrough',kind:'main',role:'breakthrough',response:true,members:op.members.slice(),frontOperation:op,holdHex:h(-10),bound:0}];
+  gameData._aiFrontOffensives={2:op};refresh();wodAiMaintainGroundWork(2,p,[...army,guard]);gameData._aiEconomyClock=46;wodAiMaintainGroundWork(2,p,[...army,guard]);
+  const recovered=!!wodAiDiagnostics(2).counts['field-mission-recovered'],start=army.reduce((n,u)=>n+u.x,0)/army.length;
+  for(const u of army)wodAiIssueFrontOffensive(u,op.jobs[0]);sim(25,null,army);
+  return{recovered,moved:army.reduce((n,u)=>n+u.x,0)/army.length-start,guard:guard.x===home.x&&guard.y===home.y&&!guard.target,alive:army.every(u=>u.hp>0),dry:army.every(u=>!isWaterHex(getNearestHexToPoint(u.x,u.y)))};
+ });
+ assert(results.groundRecovery.recovered&&results.groundRecovery.moved>80&&results.groundRecovery.guard&&results.groundRecovery.alive&&results.groundRecovery.dry,'a healthy stranded cohort resumes a real advance without recalling its guard or entering water');
+ results.groundWorkSafety=await page.evaluate(()=>{
+  world();const home=town(-26,0,2,'Home');town(26,0,1,'Enemy');const army=Array.from({length:6},(_,i)=>unit(-8,i)),{p,guard}=planArmy(army,home);
+  const op={id:'fixing',hexes:gameData.hexes,at:0,until:999999,phase:'advance',anchor:h(-8),goal:h(1),members:army.map(u=>u.uid),jobs:[],frontageTask:{role:'pin',until:999999}};
+  op.jobs=[{id:'fixing-pin',kind:'hold',role:'pin',members:op.members.slice(),frontOperation:op}];gameData._aiFrontOffensives={2:op};
+  const patient=army[0];patient._medicalRecovering=true;army[1]._combatEngaged=true;refresh();wodAiMaintainGroundWork(2,p,[...army,guard]);gameData._aiEconomyClock=60;wodAiMaintainGroundWork(2,p,[...army,guard]);
+  return{retained:gameData._aiFrontOffensives[2]===op&&op.jobs[0].id==='fixing-pin',patient:patient._medicalRecovering,guard:!guard.target,recovered:wodAiDiagnostics(2).counts['field-mission-recovered']||0};
+ });
+ assert(results.groundWorkSafety.retained&&results.groundWorkSafety.patient&&results.groundWorkSafety.guard&&!results.groundWorkSafety.recovered,'purposeful fixing formations, healing patients and garrisons retain command ownership');
+ results.deepSupplyExit=await page.evaluate(()=>{
+  world();for(const p of gameData.hexList)p.owner=p.q<=-4?2:1;const home=town(-8,0,2,'Home');town(26,0,1,'Enemy');const u=unit(12);h(12).owner=2;u.outOfSupplySeconds=3;
+  gameData.aiMoneyByOwner[2]=gameData.aiManpowerByOwner[2]=gameData.money=gameData.manpower=100000;refresh();
+  const ordered=wodAiSupplyExit(u,{kind:'main'}),target=u.orderTarget,start=u.x;sim(35,null,[u]);
+  return{ordered,home:target&&Math.hypot(target.x-home.x,target.y-home.y)<1,moved:u.x-start,alive:u.hp>0,dry:!isWaterHex(getNearestHexToPoint(u.x,u.y))};
+ });
+ assert(results.deepSupplyExit.ordered&&results.deepSupplyExit.home&&results.deepSupplyExit.moved<-150&&results.deepSupplyExit.alive&&results.deepSupplyExit.dry,'an isolated unit beyond the local scan physically escapes toward its real city through dry terrain');
  results.supplyExit=await page.evaluate(()=>{
   world();town(-26,0,2,'Home');town(26,0,1,'Enemy');const marine=unit(-2,0,'marine');h(-2).owner=1;h(-2).type='grass';marine.outOfSupplySeconds=3;refresh();
   const exited=wodAiSupplyExit(marine,{kind:'main'}),exit=marine.orderTarget;
