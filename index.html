@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=mission-followthrough-20261108"></script>
+    <script src="ai-command.js?v=wide-fronts-20261108"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,12 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-08T09:34:09.841Z",title:"Wider AI fronts and coordinated pincers",items:[
+                "Nearby squads share firing, staging and march reservations with enough room for their actual unit sizes. Large formations deploy across wider lines instead of stacking behind five columns.",
+                "Crowded battles keep a sufficient fixing force while independent squads take safe left and right flanks. Additional squads seek a separate stretch of front when one is available.",
+                "Flanking squads check their real fixing force, current supply routes, visible opposition and known terrain. Town guards, recovering troops and emergency defenders keep their duties.",
+                "A reassigned squad no longer receives commands from an obsolete joint assault. Stalled campaign objectives use actual progress and a retasking cooldown to avoid repeated resets."
+            ]},
             {at:"2026-11-08T18:00:00Z",title:"AI mission recovery and sustained offensives",items:[
                 "Idle marines recover land objectives or return to shore. Abandoned loaded transports retry safe landings or return and unload; active invasion preparations retain their safety checks.",
                 "Repeated orders no longer count as marine-raid progress. Stalled raids and unaffordable specialist savings expire, freeing troops and resources for useful missions.",
@@ -42234,6 +42240,8 @@
             if(!start||wodIsNavalUnit(unit)||Math.hypot(unit.x-goal.x,unit.y-goal.y)<hr*4)return goal;
             const threats=wodAiKnownEntities(unit.owner).filter(e=>e.hp>0&&!e.boardTransportUid&&e.type!=='convoy'&&wodIsHostileOwner(e.owner,unit.owner)&&Math.hypot(e.x-unit.x,e.y-unit.y)<hr*11);
             if(!threats.length)return wodAiRouteAdvance(unit,goal);
+            const assignment=wodAiGetUnitTaskJob(unit),compactResponse=assignment?.response&&!assignment.frontOperation;
+            const neighbors=compactResponse?members:gameData.entities.filter(m=>m!==unit&&m.owner===unit.owner&&m.hp>0&&!m.boardTransportUid&&!wodIsNavalUnit(m)&&Math.hypot(m.x-unit.x,m.y-unit.y)<hr*14);
             const distance=h=>Math.hypot(h.x-goal.x,h.y-goal.y),before=distance(start),queue=[start],seen=new Set([getHexKey(start)]);
             let best=null,bestScore=-Infinity;
             for(let i=0;i<queue.length;i++){
@@ -42245,9 +42253,9 @@
                 const progress=(before-distance(h))/hr;if(progress<.6)continue;
                 const terrain=wodAiUnitCombatPower(unit,h)/Math.max(.1,wodAiUnitCombatPower(unit,{type:'grass'}));
                 const exposed=threats.filter(e=>Math.hypot(e.x-h.x,e.y-h.y)<(e.range||50)+hr).reduce((n,e)=>n+wodAiUnitCombatPower(e),0);
-                const crowd=members.filter(m=>m!==unit&&Math.hypot((m.orderTarget||m).x-h.x,(m.orderTarget||m).y-h.y)<hr*1.4).length;
+                const crowd=neighbors.filter(m=>Math.hypot((m.orderTarget||m).x-h.x,(m.orderTarget||m).y-h.y)<hr*1.4).length;
                 const side=Math.abs((goal.x-start.x)*(h.y-start.y)-(goal.y-start.y)*(h.x-start.x))/Math.max(hr,Math.hypot(goal.x-start.x,goal.y-start.y))/hr;
-                const score=progress*2.2+Math.min(3,terrain)*4-exposed*1.2-crowd*.8-side*.7;
+                const score=progress*2.2+Math.min(3,terrain)*4-exposed*1.2-crowd*(compactResponse?.8:2)-side*.7;
                 if(score>bestScore){best=h;bestScore=score;}
             }
             return best||wodAiRouteAdvance(unit,goal);
