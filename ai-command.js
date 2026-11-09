@@ -18,7 +18,7 @@ function wodAiDiagnostics(owner) {
     const log=gameData._aiDecisionLog?.hexes===gameData.hexes?gameData._aiDecisionLog.owners[owner]:null;
     return {owner,intent:gameData.aiBattlePlans?.[owner]?.intent,
         assignments:gameData.entities.filter(u=>u.owner===owner&&u.hp>0).map(u=>({unit:u.uid,mission:u._aiMission?.id,duty:u._aiWork?.duty,blockedBy:u._aiWork?.blockedBy,idleSeconds:Math.max(0,(wodAiOperationTime()-(u._aiWork?.progressAt??wodAiOperationTime()))/1000),ferry:u.boardTransportUid||u._aiEvacFerry,cargo:u.cargo?.uid})),
-        economy:economy&&{desired:economy.desired,savingFor:economy.savingFor,reservation:economy.reservation&&{type:economy.reservation.type,since:economy.reservation.since},idleReason:economy.idleReason,shortage:economy.shortage},
+        economy:economy&&{desired:economy.desired,savingFor:economy.savingFor,reservation:economy.reservation&&{type:economy.reservation.type,since:economy.reservation.since},opening:economy.openingEconomy,investment:economy.economyReservation,idleReason:economy.idleReason,shortage:economy.shortage},
         defense:plan?.defenseDemand,operations:plan?.jobs.filter(j=>j.stage).map(j=>({id:j.id,stage:j.stage,reason:j.stageReason,members:j.members.length,goal:j.objectiveCity?.id||j.objectiveHex&&getHexKey(j.objectiveHex)})),
         counts:{...log?.counts},events:log?.events.slice()||[]};
 }
@@ -134,9 +134,60 @@ function wodAiForceRequests(owner,cities,army,pending) {
     plan.recruitRequests={at:now,n:army.length,pending:pending.length,requests:requests.slice(0,6)};return plan.recruitRequests.requests;
 }
 
+// Equip every starting town before routine expansion consumes its budget.
+// Capturing another town does not restart the entire opening build order.
+// These are real paid 60-second jobs, never free starting buildings.
+function wodAiEstablishEconomy(owner,cities,army,demand,plan) {
+    const now=gameData._aiEconomyClock||0,hr=gameData.hexRadius||20;
+    if(plan._openingEconomyHexes!==gameData.hexes){
+        plan._openingEconomyHexes=gameData.hexes;
+        plan.openingEconomy={towns:cities.map(c=>c.id),since:now};
+    }
+    const opening=plan.openingEconomy,towns=cities.filter(c=>opening.towns.includes(c.id));
+    const status=(city,type)=>city[type==='factory'?'hasFactory':'hasFarm']?'ready':
+        (gameData.constructionJobs||[]).some(j=>j.owner===owner&&j.mode===type&&city.q===j.cq&&city.r===j.cr)?'building':'missing';
+    const describe=blockedBy=>Object.assign(opening,{cities:towns.map(c=>({city:c.id,factory:status(c,'factory'),farm:status(c,'farm')})),blockedBy});
+    const incomplete=()=>towns.some(c=>status(c,'factory')!=='ready'||status(c,'farm')!=='ready');
+    const previous=plan.economyReservation;
+    plan.economyReservation=null;
+    if(!incomplete()){describe(null);return{incomplete:false};}
+    const ready=army.filter(u=>isLandArmyUnit(u)&&!u.boardTransportUid&&!u.retreating&&!u.moraleBroken&&!u._medicalRecovering&&u.hp>u.maxHp*.55);
+    const threats=wodAiThreats(owner,false).filter(u=>u.damage>0);
+    const threatened=c=>threats.some(e=>Math.hypot(e.x-c.x,e.y-c.y)<(e.range||50)+hr*5);
+    const rescue=army.some(u=>u._medicalEvacuating||u._navalEvacuating||u._navalLanded&&u.type!=='marine'&&!wodIsNavalUnit(u)&&
+        !wodCurrentSupplyComponent(getNearestHexToPoint(u.x,u.y),owner).city&&!wodSupplyShipForUnit(u));
+    const emergency=ready.length<Math.max(3,cities.length*2)||rescue||
+        cities.some(c=>isCitySiegeBlockedForProduction(c)||threatened(c)&&ready.filter(u=>Math.hypot(u.x-c.x,u.y-c.y)<hr*8).length<3);
+    if(emergency){describe(rescue?'naval-rescue':'urgent-defense');return{incomplete:true,emergency:true};}
+    const safe=towns.filter(c=>!demand.missing.some(m=>m.id===c.id)&&!isCitySiegeBlockedForProduction(c)&&!threatened(c));
+    if(!safe.length){describe('no-safe-guarded-town');return{incomplete:true};}
+    // All available starting towns begin their factories on the first pulse.
+    // Farms follow as slots free up, with their cash protected in the meantime.
+    for(let n=0;n<towns.length*2;n++){
+        const choices=safe.flatMap(city=>['factory','farm'].filter(type=>status(city,type)==='missing').map(type=>({city,type})));
+        choices.sort((a,b)=>Number(!!wodCityProductionJob(a.city))-Number(!!wodCityProductionJob(b.city))||
+            Number(a.type==='farm')-Number(b.type==='farm')||
+            Math.min(...threats.map(e=>Math.hypot(b.city.x-e.x,b.city.y-e.y)),1e6)-Math.min(...threats.map(e=>Math.hypot(a.city.x-e.x,a.city.y-e.y)),1e6));
+        const next=choices[0];if(!next)break;
+        const {city:site,type}=next,price=type==='factory'?WOD_PRICE_FACTORY:WOD_PRICE_FARM;
+        const amount=price+WOD_PRICE_LIGHT;
+        plan.economyReservation={type,city:site.id,money:amount,since:previous?.type===type&&previous.city===site.id?previous.since:now};
+        if(wodCityProductionJob(site)){describe('towns-busy');return{incomplete:true};}
+        if(wodPlayerTreasury(owner)<amount){describe('saving-'+type);return{incomplete:true};}
+        if(!cityEligibleForBuildPlacementForOwner(site,type,owner)||!wodApplyBuildAtCityForOwner(site,type,owner)){plan.economyReservation=null;describe('placement-unavailable');return{incomplete:true};}
+        plan.lastBuilding=now;plan.economyReservation=null;
+        wodAiRecord(owner,'investment',{city:site.id,type,reason:'opening-economy'});
+    }
+    describe(null);return{incomplete:incomplete()};
+}
+
 // Savings belong to the faction, not to the next town visited in the purchase
 // loop. A plain infantry town cannot spend a factory's reserved manpower.
 function wodAiProcurementReserve(owner,cities,army,pending,demand,plan,spareUpkeep) {
+    if(plan.economyReservation){
+        if(plan.reservation)wodAiRecord(owner,'procurement-release',{type:plan.reservation.type,reason:'fund-opening-economy'});
+        plan.reservation=null;plan.savingFor=plan.economyReservation.type;return null;
+    }
     const now=gameData._aiEconomyClock||0,count=t=>army.filter(u=>u.type===t).length+pending.filter(j=>j.mode===t).length;
     const ground=army.filter(isLandArmyUnit).length+pending.filter(j=>isLandArmyUnit({type:j.mode})).length;
     const floor=gameData.aiTaskForces?.[owner]?.defenseDemand?.armyFloor||cities.length*4+4;
@@ -196,6 +247,7 @@ function wodAiProcurementReserve(owner,cities,army,pending,demand,plan,spareUpke
 
 function wodAiCanSpendOutsideReserve(owner,type,plan) {
     const cost=getUnitCost(type);
+    if(plan.economyReservation&&wodPlayerTreasury(owner)-cost.money<plan.economyReservation.money)return false;
     if(plan.hospitalRequest&&!plan.reservation&&wodPlayerTreasury(owner)-cost.money<WOD_PRICE_HOSPITAL+WOD_PRICE_LIGHT)return false;
     const reserve=plan.reservation;if(!reserve||reserve.type===type)return true;
     const protectedCost=getUnitCost(reserve.type);
@@ -2083,6 +2135,7 @@ function wodAiManageRecovery(owner) {
     const economy=gameData._aiEconomyPlans?.[owner],request=economy?.hospitalRequest;
     if(request&&wodPlayerTreasury(owner)>=WOD_PRICE_HOSPITAL+WOD_PRICE_LIGHT&&
         army.filter(u=>isLandArmyUnit(u)&&!u._medicalRecovering&&u.hp>u.maxHp*.6).length>=Math.max(4,gameData.cities.filter(c=>c.owner===owner).length*2)){
+        if(economy.economyReservation&&wodPlayerTreasury(owner)-WOD_PRICE_HOSPITAL<economy.economyReservation.money)return;
         if(economy.reservation&&wodPlayerTreasury(owner)-WOD_PRICE_HOSPITAL<getUnitCost(economy.reservation.type).money)return;
         const h=gameData.hexes[request.key],policy=wodAiHospitalPolicy(owner,army);
         if(policy.hospitals.length+policy.pending.length<policy.max&&wodAiHospitalSiteSafe(owner,h,policy,sites)&&!wodHospitalPlacementError(h,owner)&&placeHospitalAtHex(h,owner)){economy.hospitalRequest=null;wodAiRecord(owner,'medical-investment',{site:request.key});}

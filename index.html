@@ -11826,7 +11826,7 @@
                 </div>
                 <div class="esc-help-block">
                     <h4>AI commanders, generals and recovery</h4>
-                    <p class="esc-help-prose">Each enemy receives a hidden, randomly chosen commander. Commanders combine town guards, frontline screens, mobile reserves, scouts and attack groups, and reorganize them as threats and reinforcements change. They keep recruiting whenever a usable town, purchase resources and future upkeep allow it; reaching a preferred army composition never stops recruitment. They may save for a needed unit, invest in useful buildings or pause when resources or upkeep are insufficient. Commanders can recall attackers to defend exposed land and reserves, predict wider closing supply corridors, and coordinate assembly, approach security, flank protection, attack, consolidation and recovery. Attacks assemble most of their assigned troops, count support by actual arrival time, and regroup in supplied cover when locally outmatched. Commanders defend threatened supply corridors, withdraw endangered troops before a pocket closes, and look for exposed enemy supply necks. Under fog, they scout and remember last-seen forces with increasing uncertainty.</p>
+                    <p class="esc-help-prose">Each enemy receives a hidden, randomly chosen commander. In a safe opening, every starting town prioritizes a factory, then a farm as its queue and funds allow; the AI saves construction money before routine army expansion. Urgent defense and naval rescue can override new investment. Commanders combine town guards, frontline screens, mobile reserves, scouts and attack groups, and reorganize them as threats and reinforcements change. They keep recruiting whenever a usable town, purchase resources and future upkeep allow it; reaching a preferred army composition never stops recruitment. They may save for a needed unit, invest in useful buildings or pause when resources or upkeep are insufficient. Commanders can recall attackers to defend exposed land and reserves, predict wider closing supply corridors, and coordinate assembly, approach security, flank protection, attack, consolidation and recovery. Attacks assemble most of their assigned troops, count support by actual arrival time, and regroup in supplied cover when locally outmatched. Commanders defend threatened supply corridors, withdraw endangered troops before a pocket closes, and look for exposed enemy supply necks. Under fog, they scout and remember last-seen forces with increasing uncertainty.</p>
                     <p class="esc-help-prose">Enemy <strong>generals fight as armor</strong> and position their purple command radius to support nearby troops. Wounded troops withdraw to reachable towns, hospitals or harbors and return after recovering. Commanders build useful rear hospitals and coordinate naval assaults with transports, sufficient fighting strength, escorts when threatened, and supply for ordinary troops ashore. They follow the same healing, supply, siege and production rules as you.</p>
                 </div>
                 <div class="esc-help-block">
@@ -11861,7 +11861,7 @@
 
                 <div class="esc-help-block">
                     <h4>Fog of war & scouting</h4><p class="esc-help-prose">When fog is enabled, friendly territory reveals two tiles beyond its edge. Every unit scouts from its actual position: infantry, motorized infantry, mountaineers and marines see five tiles, armor four, warships six, transports five and convoys three. Towns see five tiles and forts four; allies share sight. Moving units expand visibility even away from the frontline. Explored ground remains known after troops leave, but unseen enemy units and structures stay hidden.</p><p class="esc-help-prose">AI factions use the same sight rules. Scouts explore unknown ground and sea routes; the AI can investigate the last known location of a discovered town, but cannot track hidden troops or observe hidden construction. Battle report → Players shows public land totals and spotted enemy forces. Enemy reserves, money, production and losses remain unknown until the battle ends.</p></div><div class="esc-help-block"><h4>Battle report</h4><p class="esc-help-prose">Open Stats for land tiles and land share, economy and spending, unit composition, production, readiness, supply, damage and losses. Reports use the same four tabs on desktop and phones. Mobilization totals exclude opening armies and menu battles; finished reports include every faction.</p></div><div class="esc-help-block"><h4>Structures and income</h4>
-                    <p class="esc-help-prose">A factory is a major investment: it lifts both $ and manpower income and is required to train armor. A farm boosts manpower growth. A harbor raises $ a bit, and it is needed where the urban footprint touches open water so you can build ships from that port.</p>
+                    <p class="esc-help-prose">A factory is a major investment: it lifts both $ and manpower income and is required to train armor and motorized infantry. A farm boosts manpower growth. A harbor raises $ a bit, and it is needed where the urban footprint touches open water so you can build ships from that port.</p>
                     <p class="esc-help-prose">Cities provide the larger economy: each town adds base $ and manpower growth, factories increase both, farms raise manpower further, and harbors add extra $. Manpower growth is separate from $ income and is spent on training infantry, marines, ships, and armor.</p>
                     <p class="esc-help-prose"><strong>Trade convoys</strong> spawn between linked cities and pay a <strong>one-time</strong> bonus when they dock. If your budget stays underwater, <strong>unpaid upkeep</strong> will start chewing down army health until you recover — watch the treasury before you max out every regiment.</p>
                 </div>
@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=retreat-shore-defense-20261109"></script>
+    <script src="ai-command.js?v=opening-economy-20261109"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,11 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-09T20:48:58Z",title:"Infrastructure-first AI openings",items:[
+                "Every AI personality prioritizes factories in both starting towns on its first purchase cycle, then farms as each town and its budget become available.",
+                "Opening construction funds are protected from routine troop spending. Factories unlock armor and motorized infantry, while farms support manpower for continued recruitment.",
+                "Immediate town attacks, critically thin defenses and urgent naval rescue can override new infrastructure spending. Buildings still use normal costs and 60-second construction. Captured towns do not restart the opening build order."
+            ]},
             {at:"2026-11-09T18:53:05Z",title:"Fighting retreats and reliable shore movement",items:[
                 "Retreating and routed troops return fire within range while continuing their withdrawal. Low morale still reduces their damage, and fighting pauses medical treatment.",
                 "Friendly traffic can clear retreating bridge columns. Marines can pass one another in open water and resume their original landing route after a sidestep.",
@@ -43247,7 +43252,8 @@
         }
 
         /** Runs one faction's econ/build/spawn work for a periodic AI pulse (spread across frames). */
-        // Recruit before investing. Pending recruits count against capacity and future upkeep.
+        // Establish the opening economy, then recruit continuously. Pending
+        // recruits count against capacity and future upkeep.
         function wodAiIslandDemand(owner,cities,army) {
             const goals=wodAiNavalAssaultTargets(owner);if(!cities.length||!goals.length)return false;
             const components=cities.map(c=>wodTransportLandingRegion({type:'light',owner},c)).filter(Boolean);
@@ -43289,6 +43295,10 @@
             let limit = gameData.menuAttractMode ? 60 : Infinity;
             const strategy=wodAiBattlePlan(owner,army),mpShort=manpower()<getUnitCost('light').manpower*2;
             const initialDemand=wodAiRecruitPriorities(owner,cities,army,recruits,{islandDemand});
+            plan.desired=initialDemand.desired;plan.commander=initialDemand.profile.id;
+            const opening=wodAiEstablishEconomy(owner,cities,army,initialDemand,plan);
+            pending=(gameData.constructionJobs||[]).filter(j=>j.owner===owner);
+            free=free.filter(c=>!wodCityProductionJob(c));
             wodAiProcurementReserve(owner,cities,army,recruits,initialDemand,plan,income-upkeep-committedUpkeep);
             const unlockFactory=(initialDemand.needsFactory||initialDemand.expedition?.needFactory)&&!pending.some(j=>j.mode==='factory');
             const unlockHarbor=navalReady&&!coast.some(c=>c.hasHarbor);
@@ -43298,7 +43308,7 @@
             const safeInvestmentTowns=free.filter(c=>!reinforcementTowns.has(c.id)&&!wodAiThreats(owner,false).some(u=>Math.hypot(u.x-c.x,u.y-c.y)<(gameData.hexRadius||20)*10));
             // Keep a recruitment town free when investing; one-town owners invest after their current recruit arrives.
             const navalReserve=initialDemand.expedition?.preferred[0]==='ship'&&count('ship')<1;
-            let canInvest = (!plan.hospitalRequest||farmRescue) && (!plan.reservation||farmRescue||unlockHarbor||unlockFactory||economyRescue&&cash()>getUnitCost(plan.reservation.type).money+WOD_PRICE_FARM+WOD_PRICE_LIGHT*2) && safeInvestmentTowns.length>0 && (!navalReserve||farmRescue) && (!needGuards||farmRescue) && (army.length>=10||navalReady||unlockFactory||economyRescue&&army.length>=4) && clock-plan.lastBuilding >= (farmRescue?12:unlockHarbor?15:65) &&
+            let canInvest = (!opening.incomplete||opening.emergency&&unlockHarbor) && (!plan.hospitalRequest||farmRescue) && (!plan.reservation||farmRescue||unlockHarbor||unlockFactory||economyRescue&&cash()>getUnitCost(plan.reservation.type).money+WOD_PRICE_FARM+WOD_PRICE_LIGHT*2) && safeInvestmentTowns.length>0 && (!navalReserve||farmRescue) && (!needGuards||farmRescue) && (army.length>=10||navalReady||unlockFactory||economyRescue&&army.length>=4) && clock-plan.lastBuilding >= (farmRescue?12:unlockHarbor?15:65) &&
                 !pending.some(j => !['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].includes(j.mode)) &&
                 free.length >= (farmRescue||unlockHarbor?1:Math.min(2,cities.length)) && cash() >= (unlockHarbor?WOD_PRICE_HARBOR+WOD_PRICE_LIGHT*2:farmRescue?WOD_PRICE_FARM+WOD_PRICE_LIGHT*2:WOD_PRICE_FACTORY+WOD_PRICE_LIGHT*3);
             if(canInvest) {
