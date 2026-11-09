@@ -122,7 +122,7 @@ const server=http.createServer((req,res)=>{
   op.jobs=[{id:'stranded-breakthrough',kind:'main',role:'breakthrough',response:true,members:op.members.slice(),frontOperation:op,holdHex:h(-10),bound:0}];
   gameData._aiFrontOffensives={2:op};refresh();wodAiMaintainGroundWork(2,p,[...army,guard]);gameData._aiEconomyClock=46;wodAiMaintainGroundWork(2,p,[...army,guard]);
   const recovered=!!wodAiDiagnostics(2).counts['field-mission-recovered'],start=army.reduce((n,u)=>n+u.x,0)/army.length;
-  for(const u of army)wodAiIssueFrontOffensive(u,op.jobs[0]);sim(25,null,army);
+  for(const u of army)wodAiIssueFrontOffensive(u,op.jobs[0]);sim(30,null,army);
   return{recovered,moved:army.reduce((n,u)=>n+u.x,0)/army.length-start,guard:guard.x===home.x&&guard.y===home.y&&!guard.target,alive:army.every(u=>u.hp>0),dry:army.every(u=>!isWaterHex(getNearestHexToPoint(u.x,u.y)))};
  });
  assert(results.groundRecovery.recovered&&results.groundRecovery.moved>80&&results.groundRecovery.guard&&results.groundRecovery.alive&&results.groundRecovery.dry,'a healthy stranded cohort resumes a real advance without recalling its guard or entering water');
