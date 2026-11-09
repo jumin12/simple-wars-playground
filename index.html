@@ -11879,7 +11879,7 @@
                 <div class="esc-help-block">
                     <h4>Combat and morale</h4>
                     <p class="esc-help-prose">Units normally fire at the nearest enemy in weapon range. With your units selected, <strong>click, right-click or tap an enemy to attack and pursue it</strong>. Your troops move to firing positions, follow the target while it remains visible and prioritize it in range. While approaching, they can fire at nearer enemies and disengage at 75% movement speed. If the target disappears into fog, they search only its last seen position. A new movement or retreat order cancels pursuit; <strong>Clear target</strong> stops pursuit and restores normal targeting. A red reticle marks the target. Alt-click inspects an enemy without issuing an attack.</p>
-                    <p class="esc-help-prose">Damage drains morale at 60 points per full health bar lost, plus 0.5 morale per second while fighting or recently hit. At <strong>20 morale or below</strong>, units <strong>flash white and automatically retreat</strong>, cannot fire and cannot accept new movement orders. They first make the same short fallback as the Retreat button and finish that destination before choosing another. Continued pursuit can trigger another short fallback after arrival. Wounded troops seek safe town or hospital care after rallying. Routing ends at <strong>50 morale or above</strong> after <strong>three seconds clear of pursuers and recent damage</strong>. Morale recovers outside cities: <strong>3 points per second</strong> when not fighting and at least two seconds after damage, or <strong>11 per second</strong> at an eligible safe healing site. A general boosts morale capacity and recovery by 5%. HP and manpower still require a town or hospital.</p>
+                    <p class="esc-help-prose">Damage drains morale at 60 points per full health bar lost, plus 0.5 morale per second while fighting or recently hit. At <strong>20 morale or below</strong>, units <strong>flash white and automatically retreat</strong>, cannot fire and cannot accept new movement orders. They first make the same short fallback as the Retreat button and finish that destination before choosing another. Retreating and routed troops still return fire at enemies within weapon range, with their current morale damage penalty; they keep their retreat destination instead of pursuing. Continued pursuit can trigger another short fallback after arrival. Wounded troops seek safe town or hospital care after rallying. Routing ends at <strong>50 morale or above</strong> after <strong>three seconds clear of pursuers and recent damage</strong>. Morale recovers outside cities: <strong>3 points per second</strong> when not fighting and at least two seconds after damage, or <strong>11 per second</strong> at an eligible safe healing site. A general boosts morale capacity and recovery by 5%. HP and manpower still require a town or hospital.</p>
                 </div>
 
                 <div class="esc-help-block">
@@ -13067,7 +13067,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=calculated-assaults-20261109"></script>
+    <script src="ai-command.js?v=retreat-shore-defense-20261109"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13086,6 +13086,12 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-09T18:53:05Z",title:"Fighting retreats and reliable shore movement",items:[
+                "Retreating and routed troops return fire within range while continuing their withdrawal. Low morale still reduces their damage, and fighting pauses medical treatment.",
+                "Friendly traffic can clear retreating bridge columns. Marines can pass one another in open water and resume their original landing route after a sidestep.",
+                "Stranded land troops can reach shore after route rebuilds or interrupted boarding, including beside bridge decks. Dry formations still avoid unintended swimming.",
+                "Viable AI town defenders hold contested urban ground instead of abandoning it for routine recovery. Critically wounded and routed units can still withdraw."
+            ]},
             {"at":"2026-11-09T07:25:22.637Z","title":"Committed attacks and calculated losses","items":["AI commanders accept closer fights for known towns, supply cuts and territorial gains, with their individual caution still affecting decisions.","An assault can keep moderately wounded troops fighting while it makes progress. Critical wounds, routing, excessive losses and threatened supply routes still trigger recovery.","Healthy armies no longer stop solely because recent battles cost troops. Two supplied survivors can finish a nearby weak objective instead of waiting for a third regiment."]},
             {at:"2026-11-09T06:21:15.671Z",title:"Reliable orders and coordinated operations",items:[
                 "Idle marines can return to town-connected coasts. Critically wounded troops receive an escape order when treatment yields to a threatened supply corridor.",
@@ -26763,7 +26769,7 @@
             if(hex.type === 'mountain' && !wodCanClimb(unit)) return false;
             if(isBridgeHex(hex)) return true;
             if(isWaterHex(hex)) {
-                if(unit._wodBoardingNoWater)return false;
+                if(unit._wodBoardingNoWater&&!wodUnitStandingOnOpenWater(unit))return false;
                 const standing=getNearestHexToPoint(unit.x,unit.y);
                 if(!wodMpIsHumanOwner(unit.owner)&&standing&&!isWaterHex(standing))return false;
                 return !!allowOpenWater;
@@ -26778,6 +26784,11 @@
 
         function wodOrderIntoWater(unit, targetHex) {
             if(!wodUnitPrefersLandOnlyPath(unit)) return false;
+            // A stranded swimmer must be able to finish the water part of its
+            // escape, including after a path rebuild or a cancelled boarding.
+            // This permission ends physically at the shore; it grants no new
+            // swimming shortcut to troops already on dry land.
+            if(wodUnitStandingOnOpenWater(unit))return true;
             if(unit.orderTarget && unit.orderTarget.x != null && unit.orderTarget.y != null &&
                 wodBridgeHexAtPoint(unit, unit.orderTarget.x, unit.orderTarget.y))
                 return false;
@@ -26792,13 +26803,16 @@
         /** True when a land army is physically standing on open water (embarked / stranded). */
         function wodUnitStandingOnOpenWater(unit) {
             if(!unit || !wodUnitPrefersLandOnlyPath(unit)) return false;
+            const h = getNearestHexToPoint(unit.x, unit.y);
+            if(!h || !isWaterHex(h) || wodUnitOnBridgeDeck(unit))return false;
             if(wodDiagonalLandLinkAtPoint(unit,unit.x,unit.y))return false;
-            let h = getNearestHexToPoint(unit.x, unit.y);
-            return !!(h && wodIsOpenWaterHex(h));
+            return true;
         }
 
         function wodSetMarchOrderFlags(unit, resolved) {
-            unit._wodOrderIntoWater = !!(resolved && resolved.intoWater);
+            const afloat=wodUnitStandingOnOpenWater(unit);
+            unit._wodOrderIntoWater = !!(resolved && resolved.intoWater) || afloat;
+            if(afloat&&isLandArmyUnit(unit))unit._wodAiRescueWater=true;
         }
 
         function isLandArmyUnit(unit) {
@@ -28940,8 +28954,8 @@
         function wodShipEngagesTown(ship,city,urban=getCityUrbanTerrainHexes(city)) {
             const inside=u=>u&&u.hp>0&&wodIsHostileOwner(u.owner,ship.owner)&&urban.some(h=>wodHexKeysEqual(h,getNearestHexToPoint(u.x,u.y)));
             const target=gameData.entities.find(u=>u.uid===ship.combatTargetUid)||ship._combatEngaged&&ship._combatEnemy;
-            if(inside(target)&&ship.damage>0&&!ship.retreating&&!ship.moraleBroken&&Math.hypot(ship.x-target.x,ship.y-target.y)<=(ship.range||0)*wodGeneralStatMultiplier(ship))return true;
-            return gameData.entities.some(u=>inside(u)&&u.combatTargetUid===ship.uid&&u.damage>0&&!u.retreating&&!u.moraleBroken&&Math.hypot(ship.x-u.x,ship.y-u.y)<=(u.range||0)*wodGeneralStatMultiplier(u));
+            if(inside(target)&&ship.damage>0&&Math.hypot(ship.x-target.x,ship.y-target.y)<=(ship.range||0)*wodGeneralStatMultiplier(ship))return true;
+            return gameData.entities.some(u=>inside(u)&&u.combatTargetUid===ship.uid&&u.damage>0&&Math.hypot(ship.x-u.x,ship.y-u.y)<=(u.range||0)*wodGeneralStatMultiplier(u));
         }
         function isCitySiegeBlockedForProduction(city) {
             if(!city || !city.id) return false;
@@ -29802,7 +29816,7 @@
             if(wodBridgeHexAtPoint(unit, px, py)) return true;
             if(wodPointOnBridgeForUnit(unit, px, py, 1.18)) return true;
             if(h&&isWaterHex(h)&&(isLandArmyUnit(unit)||unit._wodKeepLandFormation)&&!wodOrderIntoWater(unit,h)&&!isWaterHex(getNearestHexToPoint(unit.x,unit.y)))return false;
-            if(h&&isWaterHex(h)&&isLandArmyUnit(unit)&&(unit._wodBoardingNoWater||!wodMpIsHumanOwner(unit.owner)&&!unit._wodAiRescueWater))return false;
+            if(h&&isWaterHex(h)&&isLandArmyUnit(unit)&&!wodUnitStandingOnOpenWater(unit)&&(unit._wodBoardingNoWater||!wodMpIsHumanOwner(unit.owner)&&!unit._wodAiRescueWater))return false;
             if(h && wodUnitUsesLandBridges(unit) && isBridgeHex(h)) return true;
             if(h && wodPathTileWalkable(unit, h, wodOrderIntoWater(unit, h))) return true;
             if(!h) return false;
@@ -30225,9 +30239,10 @@
             return Object.fromEntries(WOD_TRAFFIC_ORDER_FIELDS.map(k=>[k,unit[k]]));
         }
         function wodPlanTrafficDetour(unit,points,record) {
-            // Autonomous logistics uses the active avoidance destination to coordinate
-            // escorts and landing lanes. Human commands are a separate, stable intent.
-            if(!wodMpIsHumanOwner(unit.owner)){
+            // Ships expose their active avoidance destination to fleet logistics.
+            // Ground troops and marines keep stable command intent, just like
+            // human units: a passing sidestep is never a new attack/landing goal.
+            if(!wodMpIsHumanOwner(unit.owner)&&wodIsNavalUnit(unit)){
                 const ok=assignUnitMoveAlongWaypoints(unit,points,{retainRetreat:true,transportInternal:true});
                 if(ok)unit._trafficYield=record;
                 return ok;
@@ -30275,17 +30290,17 @@
                 // Two mutually yielding ships can stop a few pixels short of their
                 // sidesteps. Expired avoidance must not suppress fleet orders forever.
                 if(clock>y.until&&clock-y.lastProgressAt>3&&!unit._combatEngaged){
-                    if(y.idle&&wodMpIsHumanOwner(unit.owner)){wodReturnIdleTraffic(unit,y);return;}
+                    if(y.idle&&y.route){wodReturnIdleTraffic(unit,y);return;}
                     unit._trafficYield=null;
-                    if(wodMpIsHumanOwner(unit.owner)){if(unit.orderTarget)replanUnitOrder(unit);}
-                    else if(isLandArmyUnit(unit)&&!y.idle&&y.points?.length)
+                    if(y.route){if(unit.orderTarget)replanUnitOrder(unit);}
+                    else if(!y.idle&&y.points?.length)
                         assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
                     else wodClearTransportMove(unit);
                 }
                 return;
             }
             if(y.returning){
-                if(y.idle&&wodMpIsHumanOwner(unit.owner))wodReturnIdleTraffic(unit,y);
+                if(y.idle&&y.route)wodReturnIdleTraffic(unit,y);
                 else unit._trafficYield=null;
                 return;
             }
@@ -30302,10 +30317,10 @@
                 return;
             }
             if(y.owner===unit.owner&&y.points.length){
-                if(y.idle&&wodMpIsHumanOwner(unit.owner))wodReturnIdleTraffic(unit,y);
-                // AI detours replace fullMarchWaypoints with the sidestep.
+                if(y.idle&&y.route)wodReturnIdleTraffic(unit,y);
+                // Fleet detours replace fullMarchWaypoints with the sidestep.
                 // The saved points, not that temporary route, are the march.
-                else if(!wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit))
+                else if(!y.route)
                     assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
                 else if(unit.fullMarchWaypoints?.length)assignUnitMoveAlongWaypoints(unit,unit.fullMarchWaypoints,{fromLegAdvance:true,retainRetreat:true,transportInternal:!!y.internal});
                 else assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
@@ -30329,22 +30344,25 @@
                 (u.target.x-u.x)*dx+(u.target.y-u.y)*dy<Math.hypot(u.target.x-u.x,u.target.y-u.y)*.65);
             if(!blocker)return false;
             const supplying=u=>u.type==='supply'&&!wodSupplyParkingSafe(u,{x:u.x+10000,y:u.y});
-            const loser=mover.retreating?blocker:blocker.retreating?mover:blocker._combatEngaged&&!mover._combatEngaged?mover:supplying(blocker)&&!supplying(mover)?mover:supplying(mover)&&!supplying(blocker)?blocker:blocker.target&&(String(ensureUnitId(mover))>String(ensureUnitId(blocker)))?mover:blocker,leader=loser===mover?blocker:mover;
-            if(loser._trafficYield||loser._combatEngaged||loser.moraleBroken||loser.retreating)return false;
+            const loser=mover.retreating&&!blocker.retreating?blocker:blocker.retreating&&!mover.retreating?mover:blocker._combatEngaged&&!mover._combatEngaged?mover:supplying(blocker)&&!supplying(mover)?mover:supplying(mover)&&!supplying(blocker)?blocker:blocker.target&&(String(ensureUnitId(mover))>String(ensureUnitId(blocker)))?mover:blocker,leader=loser===mover?blocker:mover;
+            if(loser._trafficYield||loser._combatEngaged&&!loser.retreating)return false;
             if(loser===mover){dx=-dx;dy=-dy;}
             const center=getNearestHexToPoint(loser.x,loser.y),spacing=(gameData.hexRadius||20)*1.35;if(!center)return false;
             const reserved=gameData.entities.filter(u=>u!==loser&&u.hp>0&&wodIsFriendlyOwner(u.owner,loser.owner)).map(u=>({u,
                 point:u._trafficYield?.idle?u._trafficYield.points?.[0]:u.fullMarchWaypoints?.at(-1)||u.orderTarget})).filter(s=>s.point);
             const sites=[];
+            // Marines already swimming can pass in open water. A landed marine
+            // or an ordinary land formation still yields on dry ground only.
+            const waterYield=wodIsNavalUnit(loser)||loser.type==='marine'&&!loser._wodKeepLandFormation&&isWaterHex(center)&&!wodUnitOnBridgeDeck(loser);
             for(const pt of getHexesInRadius(center.q,center.r,6)) {
-                const h=gameData.hexes[`${pt.q},${pt.r}`];if(!h||!wodPathTileWalkable(loser,h,false)||!wodIsNavalUnit(loser)&&isWaterHex(h)&&!isBridgeHex(h)||isWorldPositionBlockedByUnits(loser,h.x,h.y))continue;
+                const h=gameData.hexes[`${pt.q},${pt.r}`];if(!h||!wodPathTileWalkable(loser,h,false)||!waterYield&&isWaterHex(h)&&!isBridgeHex(h)||isWorldPositionBlockedByUnits(loser,h.x,h.y))continue;
                 if(reserved.some(s=>Math.hypot(h.x-s.point.x,h.y-s.point.y)<(loser.radius||12)+(s.u.radius||12)+4))continue;
                 if(loser.type==='supply'&&(!wodSupplyParkingSafe(loser,h)||!wodOpenWaterChordClear(loser,loser.x,loser.y,h.x,h.y)))continue;
                 if(loser._navalLanded&&loser.type!=='marine'&&!wodCurrentSupplyComponent(h,loser.owner).city&&
                     !gameData.entities.some(s=>s.owner===loser.owner&&s.type==='supply'&&s.hp>0&&Math.hypot(s.x-h.x,s.y-h.y)<wodFortCombatAuraRadiusPx()*.9))continue;
                 const x=h.x-loser.x,y=h.y-loser.y,along=x*dx+y*dy,lateral=Math.abs(x*dy-y*dx);
                 if(along<spacing*.7||lateral<spacing*.8)continue;
-                const open=getNeighborHexes(h).filter(n=>wodPathTileWalkable(loser,n,false)&&(!isWaterHex(n)||wodIsNavalUnit(loser)||isBridgeHex(n))).length;
+                const open=getNeighborHexes(h).filter(n=>wodPathTileWalkable(loser,n,false)&&(!isWaterHex(n)||waterYield||isBridgeHex(n))).length;
                 if(open<5)continue;
                 sites.push({h,score:Math.hypot(x,y)+lateral*.35});
             }
@@ -30352,7 +30370,7 @@
             for(const {h} of sites.slice(0,4)) {
                 const points=wodUnitRemainingMarchPoints(loser).map(p=>({x:p.x,y:p.y})),idle=!points.length;
                 if(idle)points.push({x:loser.x,y:loser.y});
-                const record={points,idle,internal:wodIsNavalUnit(loser),owner:loser.owner,leader:ensureUnitId(leader),x:h.x,y:h.y,ax:dx,ay:dy,until:(gameData._aiEconomyClock||0)+25};
+                const record={points,idle,internal:wodIsNavalUnit(loser)||loser.type==='marine',owner:loser.owner,leader:ensureUnitId(leader),x:h.x,y:h.y,ax:dx,ay:dy,until:(gameData._aiEconomyClock||0)+25};
                 if(wodPlanTrafficDetour(loser,[{x:h.x,y:h.y}],record))return true;
             }
             return false;
@@ -33004,7 +33022,7 @@
                 }
             }
 
-            if(wodUnitGetsLandCorridorPath(unit)&&!destIntoWater&&!opt?.preparedPath) {
+            if(wodUnitGetsLandCorridorPath(unit)&&!destIntoWater&&!standingWater&&!opt?.preparedPath) {
                 let corridorPts = fromAdvance ? marchPts.slice(cursor) : marchPts;
                 if(wodTryAssignPlayerCorridorPath(unit, corridorPts, exactLast, fromAdvance))
                     return true;
@@ -33636,8 +33654,8 @@
             const test=other=>{
                 if(blocked||other===unit||other.hp<=0||other.boardTransportUid||other.type==='convoy'||!wodIsHostileOwner(other.owner,unit.owner))return;
                 if(care?.kind==='city'&&!wodIsNavalUnit(unit)&&wodIsNavalUnit(other)&&!wodShipEngagesTown(other,care.site))return;
-                const own=unit.damage>0&&!unit.retreating&&!unit.moraleBroken?(unit.range||0)*wodGeneralStatMultiplier(unit):0;
-                const incoming=other.damage>0&&!other.retreating&&!other.moraleBroken?(other.range||0)*wodGeneralStatMultiplier(other):0;
+                const own=unit.damage>0?(unit.range||0)*wodGeneralStatMultiplier(unit):0;
+                const incoming=other.damage>0?(other.range||0)*wodGeneralStatMultiplier(other):0;
                 if(Math.hypot(other.x-unit.x,other.y-unit.y)<=Math.max(own,incoming))blocked=true;
             };
             if(gameData.unitSpatialGrid)forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,Math.max(cache.range,(unit.range||0)*1.05),test);
@@ -34141,7 +34159,7 @@
                     : 'Falling back to safety'
             });
             if(unit.holding) effects.push({label: 'Holding', detail: 'Waiting for support'});
-            if(unit.type !== 'convoy' && unit.damage > 0 && !unit.moraleBroken && !unit.retreating && (unit.activeCombatVisual || 0) > 0.04)
+            if(unit.type !== 'convoy' && unit.damage > 0 && (unit.activeCombatVisual || 0) > 0.04)
                 effects.push({
                     label: 'Fighting',
                     stats: 'Active combat stance · Applies terrain/armor morale effects above while firing',
@@ -35807,7 +35825,7 @@
             unit._combatEnemy = null;
             unit._combatEngaged = false;
             unit._combatProxTick = gameData._wodSimTick | 0;
-            if(!unit || unit.type === 'convoy' || !grid || unit.moraleBroken) return;
+            if(!unit || unit.type === 'convoy' || !grid) return;
             let range = (unit.range || 0)*wodGeneralStatMultiplier(unit);
             if(range <= 0) return;
             let minDist2 = range * range;
@@ -35962,7 +35980,7 @@
             if(!yieldOrder||!yieldOrder.route)return wodMoveUnitAlongRoute(unit,dt);
             if(!yieldOrder.route?.target)return;
             // The private avoidance route may change; the issued destination, all
-            // waypoint legs and their arrow remain the player's command throughout.
+            // waypoint legs and their arrow remain the issued command throughout.
             const command=wodCaptureTrafficOrder(unit);
             Object.assign(unit,yieldOrder.route);unit._trafficMoving=true;
             try {wodMoveUnitAlongRoute(unit,dt);}
@@ -43963,7 +43981,9 @@
                 let enemy = unit._combatEnemy || null;
                 
                 unit.combatTargetUid=null;
-                if(enemy && enemy.hp>0 && unit.damage > 0 && !unit.retreating && !unit.moraleBroken) {
+                // Returning fire never changes the retreat destination or starts
+                // pursuit. Routed troops retain their existing morale penalty.
+                if(enemy && enemy.hp>0 && unit.damage > 0) {
                     ensureUnitId(enemy);unit.combatTargetUid=enemy.uid;
                     if(isLandArmyUnit(unit)){unit._aiLastCombatUid=enemy.uid;unit._aiLastCombatAt=wodAiOperationTime();}
                     const modifiers=wodCombatModifiers(unit,enemy),attackerHex=modifiers.from,defenderHex=modifiers.to;
@@ -54143,7 +54163,7 @@
                             infoTanks.setAttribute('aria-hidden', 'true');
                         }
                     }
-                    let fighting = sel.damage > 0 && !sel.moraleBroken && !sel.retreating && (sel.activeCombatVisual || 0) > 0.04;
+                    let fighting = sel.damage > 0 && (sel.activeCombatVisual || 0) > 0.04;
                     els.action.innerText = sel.type === 'convoy'
                         ? (sel.owner === lo ? "Your trade convoy (cannot command)" : "Enemy trade convoy (view only)")
                         : (sel.owner !== lo
@@ -54940,7 +54960,7 @@
 
                     if(unit.type !== 'convoy') {
                         let cvThRow = gfxLite ? 0.04 : 0.06,
-                            combatBurstOn = unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
+                            combatBurstOn = unit.damage > 0 &&
                             (unit.activeCombatVisual || 0) > cvThRow;
                         drawWodUnitOverheadRow(ctx, unit, ur, gfxLite, combatBurstOn);
                     }
@@ -57371,7 +57391,7 @@
             if(!unit || unit.hp <= 0 || unit.type === 'convoy') return;
             if(!unit._ohPop) unit._ohPop = {};
             if(!unit._ohWasActive) unit._ohWasActive = {};
-            let combatOn = unit.damage > 0 && !unit.moraleBroken && !unit.retreating &&
+            let combatOn = unit.damage > 0 &&
                 (unit.activeCombatVisual || 0) > 0.04;
             let active = {};
             if(combatOn) active.combat = true;

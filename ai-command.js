@@ -580,7 +580,7 @@ function wodAiCombatContext(owner) {
 }
 
 function wodAiDpsAgainst(attacker, defender, observer, terrain) {
-    if (!attacker || attacker.hp <= 0 || attacker.moraleBroken || attacker.retreating) return 0;
+    if (!attacker || attacker.hp <= 0) return 0;
     const from = terrain || wodCombatTerrainHex(attacker), to = wodCombatTerrainHex(defender);
     const attack = Math.sqrt(getTerrainAttackModifier(attacker, from) * getTerrainAttackModifier(attacker, to));
     const morale = .18 + .82 * Math.max(0, Math.min(1, (attacker.morale ?? 100) / 100));
@@ -1950,6 +1950,33 @@ function wodAiYieldRecoverySlots(owner,army,sites) {
     }
 }
 
+// A town is both an objective and a supply source. Local disadvantage alone
+// must not send its viable defenders to a rear hospital and concede the town.
+// Critical patients and actual morale/manual retreats retain their escape.
+function wodAiTownHoldContext(unit,job) {
+    if(!unit||wodIsNavalUnit(unit)||unit.type==='convoy'||unit.boardTransportUid||unit.moraleBroken||unit._wodOrderedRetreat||
+        unit.hp/unit.maxHp<(unit.isGeneral?.34:.28)||(unit.manpower??unit.maxManpower)/(unit.maxManpower||1000)<.28||
+        (unit.morale??100)/(unit.maxMorale||100)<.28)return null;
+    const hr=gameData.hexRadius||20,here=getNearestHexToPoint(unit.x,unit.y);
+    const threats=wodAiThreats(unit.owner,false);
+    if(!threats.length)return null;
+    for(const city of gameData.cities){
+        if(city.owner!==unit.owner||Math.hypot(unit.x-city.x,unit.y-city.y)>hr*8||job?.city&&job.city!==city)continue;
+        const urban=getCityUrbanTerrainHexes(city).filter(h=>h.owner===unit.owner);
+        const near=urban.some(h=>Math.hypot(h.x-unit.x,h.y-unit.y)<=hr*2.5);
+        if(!near||!here||isWaterHex(here))continue;
+        if(threats.some(e=>(!wodIsNavalUnit(e)||Math.hypot(e.x-unit.x,e.y-unit.y)<=(e.range||50)+(unit.range||50))&&
+            urban.some(h=>Math.hypot(e.x-h.x,e.y-h.y)<=(e.range||50)+hr*3)))return{city,urban};
+    }
+    return null;
+}
+function wodAiCancelTownWithdrawal(unit) {
+    const withdrawing=unit._medicalRecovering||unit._aiWithdrawal||unit._aiSupplyExit;
+    if(withdrawing){wodClearTransportMove(unit);gameData._aiMoveQueue?.delete(unit);}
+    unit._medicalRecovering=false;unit._medicalWaiting=false;unit._medicalGoal=null;unit._aiRecoveryGroup=null;
+    unit._aiWithdrawal=null;unit._aiSupplyExit=null;unit._aiRegroupUntil=0;
+    if(withdrawing){unit.retreating=false;unit.aiOrderUntil=0;}
+}
 function wodAiManageRecovery(owner) {
     const now=wodAiOperationTime();
     const army=gameData.entities.filter(u=>u.owner===owner&&u.hp>0&&u.type!=='convoy'&&!u.boardTransportUid);
@@ -1964,6 +1991,7 @@ function wodAiManageRecovery(owner) {
     for(const u of army){
         const hp=u.hp/u.maxHp,manpower=(u.manpower??u.maxManpower)/(u.maxManpower||1000),morale=(u.morale??100)/(u.maxMorale||100);
         const groupId=u._aiRecoveryGroup||task?.unitJob[u.uid],job=task?.jobs.find(j=>j.id===groupId);
+        if(wodAiTownHoldContext(u,job)){wodAiCancelTownWithdrawal(u);continue;}
         const group=job?army.filter(a=>job.members.includes(a.uid)||a._aiRecoveryGroup===groupId):[];
         const ready=group.filter(a=>!a._medicalRecovering&&!a.retreating&&a.hp>a.maxHp*.6).length;
         const needsRotation=job&&!job.city&&!job.fort&&group.length>=3&&ready<Math.max(3,Math.ceil(group.length*.6));
@@ -3027,8 +3055,10 @@ function wodAiIssueTownDefense(unit,job) {
             const points=getHexesInRadius(job.city.q,job.city.r,6).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&h.owner===owner&&!isWaterHex(h)&&reach.has(getHexKey(h))&&canUnitEnterHex(lead,h)&&wodCurrentSupplyComponent(h,owner).city);
             const dx=ex-job.city.x,dy=ey-job.city.y,len=Math.hypot(dx,dy)||1,depth=Math.min(hr*3,len*.4);
             const intercept={x:job.city.x+dx/len*depth,y:job.city.y+dy/len*depth};
+            const cityCells=getCityUrbanTerrainHexes(job.city),underAttack=foes.some(e=>cityCells.some(h=>Math.hypot(e.x-h.x,e.y-h.y)<=(e.range||50)+hr*2));
             const score=h=>Math.hypot(h.x-cx,h.y-cy)*.2+Math.hypot(h.x-intercept.x,h.y-intercept.y)*1.2+
                 foes.reduce((n,e)=>n+Math.max(0,(e.range||50)+hr*2-Math.hypot(e.x-h.x,e.y-h.y))*3,0)-
+                (underAttack&&cityCells.includes(h)?hr*14:0)-
                 (1-getTerrainDefenseModifier(lead,h))*hr*4;
             points.sort((a,b)=>score(a)-score(b));anchor=points[0]||job.holdHex;
         }
@@ -3173,6 +3203,7 @@ function wodAiReliefReady(unit,job) {
 
 function wodAiTacticalFallback(unit,job,issue=true) {
     if(!unit||wodIsNavalUnit(unit)||unit.type==='convoy'||unit.boardTransportUid||unit._medicalRecovering)return false;
+    if(wodAiTownHoldContext(unit,job)){if(issue)wodAiCancelTownWithdrawal(unit);return false;}
     if(issue&&wodAiSupplyExit(unit,job))return true;
     const local=wodAiLocalSituation(unit),cut=wodAiCorridorWithdrawal(unit),now=wodAiOperationTime(),hr=gameData.hexRadius||20;
     const recovering=(unit._aiRegroupUntil||0)>now&&local.enemies.length&&local.forecast.ratio<1.12;
