@@ -2079,10 +2079,11 @@ function wodAiManageRecovery(owner) {
         for(const site of sites){
             const cells=gameData.cities.includes(site)?getCityUrbanTerrainHexes(site):getHexesInRadius(site.q,site.r,Math.max(1,Math.floor(radius/(hr*1.35)*.75))).map(p=>gameData.hexes[`${p.q},${p.r}`]);
             let choices=cells;
-            if(wodIsNavalUnit(u))choices=[...new Map(cells.flatMap(h=>getHexesInRadius(h.q,h.r,3).map(p=>gameData.hexes[p.q+','+p.r])).filter(Boolean).map(h=>[getHexKey(h),h])).values()];
+            if(wodIsNavalUnit(u))choices=[...new Map(cells.flatMap(h=>getHexesInHexRadius(h.q,h.r,WOD_SHIP_CITY_REPAIR_TILES).slice().map(p=>gameData.hexes[p.q+','+p.r])).filter(Boolean).map(h=>[getHexKey(h),h])).values()];
             for(const h of choices){
                 if(!h||!reach.has(getHexKey(h))||occupied.has(getHexKey(h)))continue;
                 if(wodIsNavalUnit(u)?!wodIsOpenWaterHex(h):isWaterHex(h)||h.owner!==owner)continue;
+                if(wodIsNavalUnit(u)&&!wodUnitHealingSite({...u,x:h.x,y:h.y},h))continue;
                 if(!gameData.cities.includes(site)&&Math.hypot(h.x-site.x,h.y-site.y)>radius*.85)continue;
                 if(threats.some(e=>Math.hypot(e.x-h.x,e.y-h.y)<Math.max(115,(e.range||50)+hr*2)))continue;
                 if(isWorldPositionBlockedByUnits(u,h.x,h.y))continue;
