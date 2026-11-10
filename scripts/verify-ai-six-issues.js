@@ -1,7 +1,8 @@
 'use strict';
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{chromium}=require('playwright');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/ai-six-issues',process.env.AUDIT_VERSION||'current');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const name=decodeURIComponent(req.url.split('?')[0]),file=path.resolve(ROOT,'.'+(name==='/'?'/index.html':name));if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(file,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
+const ENGINE=process.env.GAME_ENGINE?path.resolve(ROOT,process.env.GAME_ENGINE):ROOT;
+const server=http.createServer((req,res)=>{const name=decodeURIComponent(req.url.split('?')[0]),file=path.resolve(ENGINE,'.'+(name==='/'?'/index.html':name));if(!file.startsWith(ENGINE+path.sep))return res.writeHead(403).end();fs.readFile(file,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};page.setDefaultTimeout(180000);page.on('pageerror',e=>errors.push(String(e.stack)));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});
 const wanted=name=>!process.env.AI_CASE||process.env.AI_CASE===name;
 const snapshot=async name=>{await page.evaluate(()=>{UI.mainMenu.classList.add('hidden');UI.panels.forEach(p=>p.classList.add('hidden'));UI.inGameUI.style.display='block';gameData.layers.territory=true;gameData.camera={zoom:.9,x:-canvas.clientWidth/2,y:-canvas.clientHeight/2};wodMarkTerrainFullDirty();updateTerrainCache();draw();});await page.screenshot({path:path.join(OUT,name+'.png')});fs.writeFileSync(path.join(OUT,name+'-state.json'),await page.evaluate(()=>render_game_to_text()));};
@@ -34,6 +35,9 @@ if(wanted('capture')){
  results.capture=await page.evaluate(()=>{
   world();const home=town(-28,0,2,'Home'),goal=town(18,0,1,'Objective'),army=Array.from({length:6},(_,i)=>unit(-8,i-3)),{p,guard}=makePlan(army,home);
   for(const at of getHexesInRadius(goal.q,goal.r,2)){const cell=h(at.q,at.r);cell.type='urban';cell.cityId=goal.id;cell.owner=1;}
+  // This fixture extends a town after its supply footprint was already read.
+  // Invalidate that fixture cache so the assertion tests all thirteen cells.
+  delete goal._urbanHexCache;gameData._citySupplyCache=null;
   const op={id:'capture-operation',hexes:gameData.hexes,at:0,until:300000,anchor:h(-8),goal,advanceGoal:goal,strategicGoal:goal,phase:'advance',mode:'breakthrough',hostile:1,members:army.map(u=>u.uid),initialN:6,jobs:[]};op.jobs=[{id:'capture-job',kind:'main',role:'breakthrough',members:op.members.slice(),frontOperation:op,holdHex:op.anchor,bound:0}];gameData._aiFrontOffensives[2]=op;
   const distance=army.reduce((n,u)=>n+Math.hypot(u.x-goal.x,u.y-goal.y),0)/army.length;
   op.strategicWatch={key:goal.id,at:0,distance,urban:0,kills:0};op.effect={goal:goal.id,at:0,distance,kills:0,bound:0};gameData._aiEconomyClock=35;refresh();wodAiFrontProgress(2,op,army,[]);const retained=op.advanceGoal?.id===goal.id;

@@ -2,8 +2,9 @@
 const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{spawn}=require('child_process');
 const {chromium}=require('playwright');
 const {WebSocketServer}=require('../server/node_modules/ws');
-const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/coastal-group-movement/final');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(file,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
+const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/coastal-group-movement/'+(process.env.AUDIT_VERSION||'final'));fs.mkdirSync(OUT,{recursive:true});
+const ENGINE=process.env.GAME_ENGINE?path.resolve(ROOT,process.env.GAME_ENGINE):ROOT;
+const server=http.createServer((req,res)=>{const file=path.resolve(ENGINE,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!file.startsWith(ENGINE+path.sep))return res.writeHead(403).end();fs.readFile(file,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
 (async()=>{const relay=new WebSocketServer({port:8080,host:'127.0.0.1'});relay.on('error',()=>{});relay.on('connection',s=>s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]})));await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};
 page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});page.setDefaultTimeout(180000);
 try{
@@ -42,7 +43,7 @@ try{
      if(coastGoals.size===coastArmy.length&&coastArmy.every(u=>!u.target&&!u._trafficYield&&Math.hypot(u.x-coastGoals.get(u).x,u.y-coastGoals.get(u).y)<3))break;
     }
     return{...coastTotals,total:coastArmy.length,arrived:coastArmy.filter(u=>coastGoals.has(u)&&Math.hypot(u.x-coastGoals.get(u).x,u.y-coastGoals.get(u).y)<9).length,
-     settled:coastArmy.every(u=>!u.target&&!u._trafficYield),positions:coastArmy.map(u=>({uid:u.uid,type:u.type,x:u.x,y:u.y,goal:coastGoals.get(u),target:u.target,traffic:u._trafficYield&&{idle:u._trafficYield.idle,returning:u._trafficYield.returning,target:u._trafficYield.route?.target}}))};
+     settled:coastArmy.every(u=>!u.target&&!u._trafficYield),positions:coastArmy.map(u=>({uid:u.uid,type:u.type,radius:u.radius,x:u.x,y:u.y,goal:coastGoals.get(u),target:u.target,goalBlocked:coastGoals.has(u)&&isWorldPositionBlockedByUnits(u,coastGoals.get(u).x,coastGoals.get(u).y),traffic:u._trafficYield&&{idle:u._trafficYield.idle,returning:u._trafficYield.returning,retries:u._trafficYield.returnRetries,target:u._trafficYield.route?.target}}))};
    });
    console.log(kind,JSON.stringify({t:Math.round(row.elapsed),arrived:row.arrived,total:row.total,wet:row.wet,overlaps:row.overlaps,changed:row.goalChanges}));
    if(row.arrived===row.total&&row.settled)break;

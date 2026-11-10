@@ -102,7 +102,7 @@ if(wanted('one-wing-cut')){
 if(wanted('escort-budget')){
  results.escortBudget=await page.evaluate(()=>{
   world();for(const p of gameData.hexList)if(Math.abs(p.q)<=4){p.type='water';p.owner=0;}
-  const home=town(-6,0,2,'Home');home.hasHarbor=true;home.hasFactory=true;const enemy=town(6,0,1,'Enemy');const troops=Array.from({length:18},(_,i)=>unit(-12-i%3,-12+Math.floor(i/3)*4));unit(-6,0);const marines=[unit(-6,-3,'marine'),unit(-6,3,'marine')],ship=unit(-2,2,'ship'),foe=unit(2,2,'ship',1);for(const r of [-3,-1,1,3])unit(12,r,'light',1);refresh();
+  const home=town(-6,0,2,'Home');home.hasHarbor=true;home.hasFactory=true;home.hasFarm=true;const enemy=town(6,0,1,'Enemy');const troops=Array.from({length:18},(_,i)=>unit(-12-i%3,-12+Math.floor(i/3)*4));unit(-6,0);const marines=[unit(-6,-3,'marine'),unit(-6,3,'marine')],ship=unit(-2,2,'ship'),foe=unit(2,2,'ship',1);for(const r of [-3,-1,1,3])unit(12,r,'light',1);refresh();
   const sea=wodAiSeaRegionFrom(2,ship);gameData.aiNavalPlans[2]={id:'blockaded',hexes:gameData.hexes,sea,at:0,goal:enemy,reason:'escort',phase:'prepare',requiredEscorts:2,canSail:false};
   const army=gameData.entities.filter(u=>u.owner===2),demand=wodAiRecruitPriorities(2,[home],army,[],{}),price=getUnitCost('ship');gameData.aiMoneyByOwner[2]=price.money-1;
   const budget=gameData._aiEconomyPlans[2]||=( {} );const reserved=wodAiProcurementReserve(2,[home],army,[],demand,budget,100);gameData.aiMoneyByOwner[2]+=price.money;

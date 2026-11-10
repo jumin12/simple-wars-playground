@@ -13068,7 +13068,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=naval-repair-supply-20261109"></script>
+    <script src="ai-command.js?v=steady-forces-20261110"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13087,6 +13087,15 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-10T12:00:00Z",title:"Steadier armies and purposeful attacks",items:[
+                "AI mission lookups no longer cancel queued movement. Recovery keeps control of wounded troops, and ordinary offensive orders preserve their group while they heal.",
+                "Coherent survivors can occupy nearby weak objectives and continue advancing. Cohesion checks stop unsupported charges into visible opposition without parking units on an empty front.",
+                "Corridor withdrawals require a ground threat that can actually reach the passage. Encircled troops use danger-aware retreat routes and retain the escape until they reach safe ground.",
+                "Loaded invasion forces wait for required supply ships and escorts that are physically approaching, with a bounded recovery window for stalled waves. Marines retain one naval controller at a time.",
+                "Affordable replacements for understrength attacking squads can precede a distant armor purchase. Nearly funded armor, opening infrastructure and required invasion logistics keep their funding.",
+                "Staged ambushes turn refused lures into legal flanking attacks sooner. Leaner intelligence snapshots, shared roster lookup and corridor-search buffers reduce late-game AI work."
+                ,"Troops returning from traffic sidesteps can realign inside their current cell and route around parked units while retaining their original waypoint destination."
+            ]},
             {at:"2026-11-10T03:00:00Z",title:"Two-tile naval repair and reliable supply cutoffs",items:[
                 "Warships, transports and supply ships repair only within two tiles of a friendly-held town cell or inside a friendly hospital radius. Combat and manpower requirements still apply. AI and rallied ships seek water inside those same repair areas.",
                 "Removing the final bridge invalidates its cached city connection. Isolated troops start their warning and attrition sequence; restoring a real corridor clears it. Neutral-land cleanup also refreshes supply connectivity.",
@@ -30261,8 +30270,11 @@
                 blockers.push(u);if(u.boardTransportUid)return;
                 if(!wodIsFriendlyOwner(u.owner,unit.owner)){if(Math.hypot(u.x-nx,u.y-ny)<(unit.radius||12)+(u.radius||12)+6)hostile=true;return;}
                 const goal=u._trafficYield?.route?.target||u.target,dx=goal?goal.x-u.x:0,dy=goal?goal.y-u.y:0,len=Math.hypot(dx,dy)||1;
-                const velocity=goal?(u.speed||15)*WOD_MOVE_SPEED_FACTOR*getUnitSpeedMultiplier(u):0;
                 const recent=goal&&u._wodVelocityAt!=null&&(gameData._aiEconomyClock||0)-u._wodVelocityAt<.3;
+                // Recent measured motion already supplies both components.
+                // Avoid repeating terrain, bridge and general-aura lookups
+                // for every neighboring soldier when that estimate is unused.
+                const velocity=goal&&!recent?(u.speed||15)*WOD_MOVE_SPEED_FACTOR*getUnitSpeedMultiplier(u):0;
                 const vx=recent?u._wodVelocityX:dx/len*velocity,vy=recent?u._wodVelocityY:dy/len*velocity;
                 const reach=(unit.radius||12)+(u.radius||12)+3+(speed+Math.hypot(vx,vy))*3;
                 if((u.x-unit.x)**2+(u.y-unit.y)**2<=reach*reach)friends.push({u,vx,vy});
@@ -30285,11 +30297,11 @@
             },0);
             if(risk(sx/dt,sy/dt)<.1&&!blockedAt(nx,ny))return null;
             let best=null,score=Infinity;
+            const destination=unit.orderTarget&&getNearestHexToPoint(unit.orderTarget.x,unit.orderTarget.y);
             for(const angle of [0,.35,-.35,.7,-.7,1.1,-1.1,1.5,-1.5,2,-2,Math.PI,null]){
                 const c=angle===null?0:Math.cos(angle),s=angle===null?0:Math.sin(angle),dx=sx*c-sy*s,dy=sx*s+sy*c,x=unit.x+dx,y=unit.y+dy;
                 const side=angle==null?0:Math.sign(angle),turn=angle===null?65:(1-c)*25+Math.abs(angle)*2+(side<0?1:0);
                 const preference=unit._wodAvoidUntil>now&&side&&side!==unit._wodAvoidSide?9:0;
-                const destination=unit.orderTarget&&getNearestHexToPoint(unit.orderTarget.x,unit.orderTarget.y);
                 if(angle&&destination&&wodIsFriendlyOwner(destination.owner,unit.owner)&&!wodPassiveDisplacementAllowed(unit,x,y))continue;
                 if(turn+preference>=score||!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,x,y)||blockedAt(x,y))continue;
                 // Avoidance looks ahead, rather than colliding first and forcing
@@ -30336,6 +30348,42 @@
             if(ok)unit._trafficYield=record;
             return ok;
         }
+        function wodIdleTrafficReturnPath(unit,point) {
+            if(wodIsNavalUnit(unit)||unit.type==='convoy')return null;
+            const start=getNearestHexToPoint(unit.x,unit.y),goal=getNearestHexToPoint(point.x,point.y);
+            if(!start||!goal)return null;
+            const hr=gameData.hexRadius||20,queue=[{...start,x:unit.x,y:unit.y,_trafficOrigin:true}],parents=new Map(),seen=new Set(['origin']);
+            const nodeKey=h=>h._trafficOrigin?'origin':getHexKey(h);
+            const blockers=gameData.entities.filter(u=>u!==unit&&u.hp>0&&u.type!=='convoy'&&!u.boardTransportUid&&Math.hypot(u.x-unit.x,u.y-unit.y)<hr*14);
+            const clear=(a,b)=>{
+                if(!wodSegmentClearsTerrainForUnit(unit,a.x,a.y,b.x,b.y))return false;
+                if(blockers.some(u=>{
+                    const radius=(unit.radius||12)+(u.radius||12)+2,old=(a.x-u.x)**2+(a.y-u.y)**2;
+                    const d=distPointToSegmentSquared(u.x,u.y,a.x,a.y,b.x,b.y);
+                    return d<radius*radius-.01&&d<old-.01;
+                }))return false;
+                const steps=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(hr*.4)));
+                for(let i=1;i<=steps;i++)if(!wodPassiveDisplacementAllowed(unit,a.x+(b.x-a.x)*i/steps,a.y+(b.y-a.y)*i/steps))return false;
+                return true;
+            };
+            for(let i=0;i<queue.length&&i<400;i++){
+                const at=queue[i];
+                if(!at._trafficOrigin&&getHexKey(at)===getHexKey(goal)){
+                    const route=[at];let current=at;
+                    while(parents.has(nodeKey(current))){current=parents.get(nodeKey(current));route.push(current);}
+                    return route.reverse().slice(1).map(h=>({x:h.x,y:h.y}));
+                }
+                const neighbors=getNeighborHexes(at).slice();wodForEachBridgePathPortal(unit,at,n=>neighbors.push(n));
+                if(at._trafficOrigin)neighbors.unshift(start);
+                for(const h of neighbors){
+                    const key=getHexKey(h);if(seen.has(key)||Math.abs(h.q-start.q)>9||Math.abs(h.r-start.r)>9||
+                        !(at._trafficOrigin&&key===getHexKey(start))&&!wodCanStepBetweenHexes(unit,at,h,true))continue;
+                    const next=key===getHexKey(goal)?{...h,x:point.x,y:point.y}:h;
+                    if(!clear(at,next))continue;seen.add(key);parents.set(key,at);queue.push(next);
+                }
+            }
+            return null;
+        }
         function wodReturnIdleTraffic(unit,record) {
             const point=record.points?.[0],clock=gameData._aiEconomyClock||0;
             if(!point||Math.hypot(unit.x-point.x,unit.y-point.y)<1){unit._trafficYield=null;return;}
@@ -30347,7 +30395,9 @@
             record.route={target:null};
             if(isWorldPositionBlockedByUnits(unit,point.x,point.y))return;
             record.until=clock+12;record.lastProgressAt=clock;
-            wodPlanTrafficDetour(unit,[point],record);
+            record.returnRetries=(record.returnRetries||0)+1;
+            const route=record.returnRetries>=3?wodIdleTrafficReturnPath(unit,point):null;
+            wodPlanTrafficDetour(unit,route?.length?route:[point],record);
             unit._trafficYield=record;
         }
         function wodResumeTrafficYield(unit) {
@@ -41799,6 +41849,9 @@
 
         /** Keep current AI orders until they arrive, settle on a hold line, or get stuck. */
         function wodAiShouldKeepCurrentOrder(unit) {
+            const escape=unit?._aiSupplyExit;
+            if(escape?.until>wodAiOperationTime()&&unit._wodOrderedRetreat&&unit.target&&
+                (unit.stuckTimer||0)<2&&(unit.blockedTimer||0)<2)return true;
             if(unit&&!wodMpIsHumanOwner(unit.owner)&&(unit.outOfSupplySeconds||0)>=1&&wodAiSupplyExit(unit,wodAiGetUnitTaskJob(unit)))return true;
             if(unit?._aiPursuitOrderAt!=null&&wodAiOperationTime()-unit._aiPursuitOrderAt>=1500)return false;
             if(unit&&wodAiTacticalFallback(unit,wodAiGetUnitTaskJob(unit),false))return false;
@@ -42784,15 +42837,16 @@
 
         function wodAiIssueTaskForceOrder(unit, job, hpRatio) {
             if(!unit || !job) return false;
+            if(unit._medicalRecovering){wodAiCommitMission(unit,null,'recovery');return true;}
             unit._aiCombatSupportAt=null;
             if(unit._aiCareYieldUntil>wodAiOperationTime()||unit._medicalEvacuating||unit._aiScoutUntil>wodAiOperationTime())return true;
+            wodAiCommitMission(unit,job);
             unit.aiTfJobId = job.id;
             unit.aiTfKind = job.kind;
             unit.aiTfRole = job.role;
             unit.aiCaptureHexKey = null;
             let hr = gameData.hexRadius || 20;
             if(job.kind==='scout'&&!wodAiCorridorWithdrawal(unit))return wodAiIssueScoutOrder(unit,job);
-            if(unit._medicalRecovering)return true;
             if(job.frontOperation)return wodAiIssueFrontOffensive(unit,job);
             if(job.kind==='counter'&&wodAiIssueTownDefense(unit,job))return true;
             if(wodAiTacticalFallback(unit,job))return true;
@@ -58736,10 +58790,14 @@
         }
         function wodSupplyShipForUnit(unit) {
             if(!unit||unit.hp<=0||unit.type==='convoy')return null;
+            const tick=gameData._wodSimTick||0;let cache=gameData._supplyShipRoster;
+            if(!cache||cache.entities!==gameData.entities||cache.n!==gameData.entities.length||cache.tick!==tick)
+                cache=gameData._supplyShipRoster={entities:gameData.entities,n:gameData.entities.length,tick,ships:gameData.entities.filter(s=>s.type==='supply')};
+            if(!cache.ships.length)return null;
             const hex=getNearestHexToPoint(unit.x,unit.y);
             if(wodUnitInUnsuppliedWater(unit,hex))return null;
             const radius=wodFortCombatAuraRadiusPx();
-            return gameData.entities.find(s=>s.type==='supply'&&s.hp>0&&wodIsFriendlyOwner(s.owner,unit.owner)&&Math.hypot(s.x-unit.x,s.y-unit.y)<=radius)||null;
+            return cache.ships.find(s=>s.hp>0&&wodIsFriendlyOwner(s.owner,unit.owner)&&Math.hypot(s.x-unit.x,s.y-unit.y)<=radius)||null;
         }
         function wodDrawSupplyMark(ctx,r) {
             ctx.save();ctx.strokeStyle='#243d49';ctx.fillStyle='#e9dba8';ctx.lineWidth=Math.max(1,r*.09);
@@ -59095,12 +59153,13 @@
                     (Math.hypot(h.x-goal.x,h.y-goal.y)<radius*.9||protectedTroops.length&&Math.hypot(h.x-ship.x,h.y-ship.y)<(gameData.hexRadius||20)*4)&&
                     clearsLanding(h));
                 const current=getNearestHexToPoint(ship.x,ship.y);if(protectedTroops.length&&wodIsOpenWaterHex(current)&&!sites.includes(current))sites.push(current);
-                const coverAll=h=>protectedTroops.every(u=>Math.hypot(h.x-u.x,h.y-u.y)<radius*.99);
-                const supplyReach=wodAiSupplyReach(ship,protectedTroops);
+                const dependent=protectedTroops.filter(u=>!wodCurrentSupplyComponent(getNearestHexToPoint(u.x,u.y),owner).city);
+                const coverAll=h=>dependent.every(u=>Math.hypot(h.x-u.x,h.y-u.y)<radius*.99);
+                const supplyReach=wodAiSupplyReach(ship,dependent);
                 const reachableSites=sites.filter(h=>supplyReach.has(getHexKey(h))),screened=reachableSites.filter(h=>wodAiSupplySiteSafe(ship,h));
                 const safeSites=screened.filter(coverAll),choices=safeSites.length?safeSites:screened;
-                if(protectedTroops.length&&!safeSites.length)for(const u of protectedTroops)u._aiSupplyHoldUntil=clock+8000;
-                choices.sort((a,b)=>{const score=h=>wodAiDist2(h.x,h.y,goal.x,goal.y)*2+wodAiDist2(h.x,h.y,ship.x,ship.y)*.15+protectedTroops.reduce((n,u)=>n+Math.max(0,Math.hypot(h.x-u.x,h.y-u.y)-radius*.88)**2*32,0)+threats.reduce((n,e)=>n+Math.max(0,140-Math.hypot(h.x-e.x,h.y-e.y))**2*3,0);return score(a)-score(b);});
+                if(dependent.length&&!safeSites.length)for(const u of dependent)u._aiSupplyHoldUntil=clock+8000;
+                choices.sort((a,b)=>{const score=h=>wodAiDist2(h.x,h.y,goal.x,goal.y)*2+wodAiDist2(h.x,h.y,ship.x,ship.y)*.15+dependent.reduce((n,u)=>n+Math.max(0,Math.hypot(h.x-u.x,h.y-u.y)-radius*.88)**2*32,0)+threats.reduce((n,e)=>n+Math.max(0,140-Math.hypot(h.x-e.x,h.y-e.y))**2*3,0);return score(a)-score(b);});
                 const site=choices.find(h=>wodNavalDestinationClear(ship,h));
                 if(!site&&protectedTroops.length&&wodAiSupplyExposure(ship,ship).length){
                     for(const u of protectedTroops){u._navalEvacuating=true;u._needsTransport=true;u._aiSupplyHoldUntil=clock+8000;}
