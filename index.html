@@ -13068,7 +13068,7 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=steady-forces-20261110"></script>
+    <script src="ai-command.js?v=committed-assaults-20261110"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13087,6 +13087,19 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-10T22:45:00Z",title:"Steadier defense and committed assaults",items:[
+                "Defensive screens keep useful assignments while the threat remains. Remote corridor warnings no longer commandeer unrelated attacking squads; immediate town relief and real supply escapes keep priority.",
+                "Pinning forces choose their next objective when a battle clears. Viable assaults move into the whole town instead of getting caught in nearby skirmishes.",
+                "Firing-position choices place more weight on unit-specific cover and avoiding crossfire. Small seven-unit armies remain coherent, while larger armies retain separate attacking squads.",
+                "AI supply-cut planning recognizes known coastlines around narrow land corridors. Budget-limited flank searches resume on later ticks instead of discarding the maneuver.",
+                "Defended objectives can receive enough nearby independent cohorts for a viable assault. Reserves support the same battle as casualties rotate out, instead of locking themselves into a second weak waiting group."
+            ]},
+            {at:"2026-11-10T20:30:00Z",title:"Wider attacks and less rear-line crowding",items:[
+                "AI squads reserve firing positions across the whole battle and use openings along the visible enemy line, reducing competing orders to the same cell.",
+                "Larger armies form smaller attacking cohorts. Joint attacks stop adding helpers once sufficient strength is committed; unused squads can capture separate open sectors while a viable force holds the contact.",
+                "New pressure orders retain their route long enough to advance instead of immediately rejoining a crowded rally. Winning assault troops can make short forward bounds into firing range.",
+                "Squads opening a new sector keep their town objective and return to attack it from the flank. Town assaults retain attacking strength before releasing extra squads."
+            ]},
             {at:"2026-11-10T12:00:00Z",title:"Steadier armies and purposeful attacks",items:[
                 "AI mission lookups no longer cancel queued movement. Recovery keeps control of wounded troops, and ordinary offensive orders preserve their group while they heal.",
                 "Coherent survivors can occupy nearby weak objectives and continue advancing. Cohesion checks stop unsupported charges into visible opposition without parking units on an empty front.",
@@ -42448,7 +42461,7 @@
             const responseThreats=selected.slice(0,12),screens=yield* wodAiReserveDefenseScreens(owner,responseThreats,
                 available.filter(u=>supplied.has(positions.get(u.uid))),plan,budget,old);
             const responseWeight=t=>Math.max(1,Math.sqrt(t.enemies||t.atRisk||t.neededPower||2))*(t.kind==='counter'?2:t.kind==='corridor'?1.5:1);
-            const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);if(u._aiDefenseLease?.id!==job.id)u._aiDefenseLease={id:job.id,until:now+12000};if(job.kind==='territory'&&u._aiTerritoryJob!==job.id){u._aiTerritoryJob=job.id;u._aiTerritoryAssignedAt=now;}};
+            const add=(job,u)=>{unitJob[u.uid]=job.id;job.members.push(u.uid);if(u._aiDefenseLease?.id!==job.id||u._aiDefenseLease.until<=now)u._aiDefenseLease={id:job.id,until:now+18000};if(job.kind==='territory'&&u._aiTerritoryJob!==job.id){u._aiTerritoryJob=job.id;u._aiTerritoryAssignedAt=now;}};
             for(const [threatIndex,t] of responseThreats.entries()) {
                 yield;
                 const job={...t,owner,members:[],response:true};
@@ -42470,7 +42483,7 @@
                 const remainingWeight=responseThreats.slice(threatIndex).filter(s=>s===t||screens.counts.has(s.id)).reduce((n,s)=>n+responseWeight(s),0);
                 const responseBudget=Math.min(Math.max(0,budget-reservedElsewhere),Math.max(screens.counts.get(t.id)||0,Math.ceil(budget*responseWeight(t)/Math.max(1,remainingWeight))));
                 let recruited=0;
-                const candidates=available.filter(u=>!unitJob[u.uid]&&wodAiDefenseFrontAvailable(u,t,plan)&&(!screens.byUnit.has(u.uid)||screens.byUnit.get(u.uid)===t.id)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
+                const candidates=available.filter(u=>!unitJob[u.uid]&&wodAiDefenseFrontAvailable(u,t,plan)&&wodAiDefenseLeaseAllows(u,t,responseThreats,old)&&(!screens.byUnit.has(u.uid)||screens.byUnit.get(u.uid)===t.id)&&!t.pocketKeys?.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     u.type!=='marine'&&supplied.has(positions.get(u.uid))&&
                     responseDistance(u)<hr*(t.kind==='relief'||t.kind==='corridor'?60:24)&&wodAiResponseCanArrive(u,t,responseDistance(u)));
                 const base=u=>plan?.jobs.find(j=>j.id===plan.unitJob[u.uid]);
@@ -42494,9 +42507,7 @@
                     const previousResponse=old?.jobs.find(j=>j.id===old.unitJob[u.uid]);
                     // Finish a short, still-valid response before changing
                     // towns again. A real pocket or imminent cut can preempt it.
-                    const lease=u._aiDefenseLease,leased=lease?.until>now&&selected.find(s=>s.id===lease.id);
-                    if(leased&&leased.id!==t.id&&t.kind!=='relief'&&!(t.kind==='corridor'&&(!t.predictive||t.closureSeconds<20))&&
-                        !(t.kind==='counter'&&leased.kind!=='counter'&&t.primaryTheater))continue;
+                    if(!wodAiDefenseLeaseAllows(u,t,responseThreats,old))continue;
                     if(!critical&&previousResponse?.kind==='territory'&&previousResponse.id!==t.id&&
                         selected.some(s=>s.id===previousResponse.id)&&u.target&&(u.stuckTimer||0)<3&&
                         now-(u._aiTerritoryAssignedAt??now)<18000)continue;
