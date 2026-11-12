@@ -167,6 +167,9 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // The multiplayer host simulates the match for every player. Chromium pauses a hidden or
+      // minimized window by default, which froze the game for all guests whenever the host alt-tabbed.
+      backgroundThrottling: false,
     },
     show: false,
     title: 'Simple Wars',

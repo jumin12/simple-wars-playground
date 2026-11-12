@@ -13069,6 +13069,7 @@
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
     <script src="ai-command.js?v=committed-assaults-20261110"></script>
+    <script src="ai-ops.js?v=field-command-20261111"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13087,6 +13088,13 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-11T23:00:00Z",title:"Decisive AI, faster simulation, lighter multiplayer",items:[
+                "AI commanders now cut supply lines. When your troops stray from their towns, one enemy unit shadows them while another marches across the ground behind them; a closed pocket starves quickly, so watch your corridors.",
+                "An AI with a clearly stronger army masses it, pins the defenders from cover and sends a wing round the town instead of trickling in small groups. Undefended towns are taken on sight.",
+                "Troops on a connected landmass no longer wait for ferries they do not need.",
+                "Movement and terrain lookups are faster, most noticeably in large battles and at high game speed.",
+                "Multiplayer snapshots are much smaller, and a Steam host that alt-tabs or minimizes no longer freezes the match for everyone else."
+            ]},
             {at:"2026-11-10T22:45:00Z",title:"Steadier defense and committed assaults",items:[
                 "Defensive screens keep useful assignments while the threat remains. Remote corridor warnings no longer commandeer unrelated attacking squads; immediate town relief and real supply escapes keep priority.",
                 "Pinning forces choose their next objective when a battle clears. Viable assaults move into the whole town instead of getting caught in nearby skirmishes.",
@@ -17327,7 +17335,7 @@
             else if(h.type === 'hill') w *= 1.16;
             for(let di = 0; di < cardinalHexDirections.length; di++) {
                 let d = cardinalHexDirections[di];
-                let nb = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                let nb = wodHexAt(h.q + d.q,h.r + d.r);
                 if(nb && isWaterHex(nb)) { w *= 1.12; break; }
             }
             h._wodPolW = w;
@@ -17570,7 +17578,7 @@
             let coord = pixelToHex(wx, wy);
             for(let dq = -1; dq <= 1; dq++) {
                 for(let dr = -1; dr <= 1; dr++) {
-                    let h = gameData.hexes[`${coord.q + dq},${coord.r + dr}`];
+                    let h = wodHexAt(coord.q + dq,coord.r + dr);
                     if(!h || !isWaterHex(h)) continue;
                     let dx = h.x - wx,
                         dy = h.y - wy;
@@ -17712,7 +17720,7 @@
             if(!b) return null;
             let o = Object.assign({}, b);
             if(o.x == null && o.q != null) {
-                let h = gameData.hexes[`${o.q},${o.r}`];
+                let h = wodHexAt(o.q,o.r);
                 if(h) {
                     o.x = h.x;
                     o.y = h.y;
@@ -17935,7 +17943,7 @@
                     for(let dq = -5; dq <= 5; dq++) {
                         for(let dr = -5; dr <= 5; dr++) {
                             if(Math.abs(dq) + Math.abs(dr) > 5) continue;
-                            let h = gameData.hexes[`${bh.q + dq},${bh.r + dr}`];
+                            let h = wodHexAt(bh.q + dq,bh.r + dr);
                             if(!h || isWaterHex(h) || h.type === 'mountain' || isBridgeHex(h)) continue;
                             wodLinkBridgeLandHex(getHexKey(h), bridgeKeys[ki]);
                         }
@@ -18754,7 +18762,7 @@
                     let votes = {};
                     // Prefer real shared land edges over diagonal contacts.
                     for(let dir of cardinalHexDirections) {
-                        let nb = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                        let nb = wodHexAt(h.q + dir.q,h.r + dir.r);
                         if(nb && !isWaterHex(nb) && nb.owner > 0) votes[nb.owner] = (votes[nb.owner] || 0) + 2;
                     }
                     for(let nb of getNeighborHexes(h)) {
@@ -18795,7 +18803,7 @@
                 if(h.owner>0&&h.type!=='mountain'){queue.push(h);seen.add(getHexKey(h));}
             }
             for(let i=0;i<queue.length;i++)for(const d of cardinalHexDirections) {
-                const n=gameData.hexes[`${queue[i].q+d.q},${queue[i].r+d.r}`];
+                const n=wodHexAt(queue[i].q+d.q,queue[i].r+d.r);
                 if(!n||n.type!=='mountain'||seen.has(getHexKey(n)))continue;
                 seen.add(getHexKey(n));
                 if((!preserveLandOwners||n.owner<=0)&&n.owner!==queue[i].owner){n.owner=queue[i].owner;changed=true;}
@@ -18813,7 +18821,7 @@
                 if(!isWaterHex(h) && h.type !== 'mountain') continue;
                 let votes = {};
                 for(let dir of cardinalHexDirections) {
-                    let nb = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                    let nb = wodHexAt(h.q + dir.q,h.r + dir.r);
                     if(!nb || isWaterHex(nb) || nb.owner <= 0) continue;
                     // Prefer abutting land owners when assigning unowned peaks.
                     votes[nb.owner] = (votes[nb.owner] || 0) + (!isWaterHex(nb) ? 3 : 1);
@@ -19045,13 +19053,13 @@
         async function wodCarveStartingFactionPasses(ownerIds) {
             const graph=wodStartingLandGraph();let work=0,changed=false;
             for(const owner of ownerIds) {
-                const roots=gameData.cities.filter(c=>c.owner===owner).map(c=>gameData.hexes[`${c.q},${c.r}`]).filter(h=>h&&h.owner===owner);
+                const roots=gameData.cities.filter(c=>c.owner===owner).map(c=>wodHexAt(c.q,c.r)).filter(h=>h&&h.owner===owner);
                 const distance=new Map(),previous=new Map(),deque=new Map();let head=0,tail=0;
                 for(const h of roots){const k=getHexKey(h);distance.set(k,0);deque.set(tail++,h);}
                 while(head<tail) {
                     const h=deque.get(head);deque.delete(head++);const hk=getHexKey(h),cost=distance.get(hk);
                     for(const d of cardinalHexDirections) {
-                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                        const n=wodHexAt(h.q+d.q,h.r+d.r);
                         if(!n||n.owner!==owner||isWaterHex(n))continue;
                         const nk=getHexKey(n),step=n.type==='mountain'?1:0,next=cost+step;
                         if(next>=(distance.get(nk)??Infinity))continue;
@@ -19178,7 +19186,7 @@
                 const node=politicalGraph.nodes.get(getHexKey(hex));
                 // Peaks on inhabited continents are not offshore holdings. Only
                 // actual townless shores may be reassigned without a land border.
-                return node&&!politicalGraph.inhabited.has(node)&&cardinalHexDirections.some(d=>isWaterHex(gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`]));
+                return node&&!politicalGraph.inhabited.has(node)&&cardinalHexDirections.some(d=>isWaterHex(wodHexAt(hex.q+d.q,hex.r+d.r)));
             });
             const excess = sorted.reduce((n,o)=>n+Math.max(0,counts[o]-target[o]),0);
             // Scan the frontier, not the full map, per move. Routing through several
@@ -19337,7 +19345,7 @@
                 const town=towns[i];
                 // A compact protected town footprint guarantees a safe rear spawn.
                 for(let dq=-1;dq<=1;dq++)for(let dr=-1;dr<=1;dr++) {
-                    const h=gameData.hexes[`${town.q+dq},${town.r+dr}`];
+                    const h=wodHexAt(town.q+dq,town.r+dr);
                     if(!h || isWaterHex(h) || h.type==='mountain')continue;
                     h.type='urban';h.cityId=town.id;h.owner=town.owner;
                     h.baseColor=getUrbanTerrainColor(wodGetGamePeriod());h.renderColor=h.baseColor;
@@ -19358,10 +19366,10 @@
                 if(!city || city.owner <= 0) continue;
                 let urbanList = getCityUrbanTerrainHexes(city);
                 for(let uh of urbanList) {
-                    let hx = gameData.hexes[`${uh.q},${uh.r}`];
+                    let hx = wodHexAt(uh.q,uh.r);
                     if(hx && !isWaterHex(hx)) setHexOwner(hx, city.owner);
                 }
-                let ctr = gameData.hexes[`${city.q},${city.r}`];
+                let ctr = wodHexAt(city.q,city.r);
                 if(ctr && !isWaterHex(ctr)) setHexOwner(ctr, city.owner);
             }
         }
@@ -19369,7 +19377,7 @@
         function wodSyncCityOwnersFromCenterHex() {
             for(let city of gameData.cities) {
                 if(!city) continue;
-                let ch0 = gameData.hexes[`${city.q},${city.r}`];
+                let ch0 = wodHexAt(city.q,city.r);
                 if(ch0 && isClaimableLand(ch0) && ch0.owner > 0) city.owner = ch0.owner;
             }
         }
@@ -19381,10 +19389,10 @@
                 let o = cap.owner;
                 let urbanList = getCityUrbanTerrainHexes(cap);
                 for(let uh of urbanList) {
-                    let hx = gameData.hexes[`${uh.q},${uh.r}`];
+                    let hx = wodHexAt(uh.q,uh.r);
                     if(hx && !isWaterHex(hx)) setHexOwner(hx, o);
                 }
-                let ctr = gameData.hexes[`${cap.q},${cap.r}`];
+                let ctr = wodHexAt(cap.q,cap.r);
                 if(ctr && !isWaterHex(ctr)) setHexOwner(ctr, o);
             }
         }
@@ -19394,7 +19402,7 @@
             let capSet = new Set(startCities);
             for(let city of gameData.cities) {
                 if(!city || capSet.has(city)) continue;
-                let ch0 = gameData.hexes[`${city.q},${city.r}`];
+                let ch0 = wodHexAt(city.q,city.r);
                 if(ch0 && isClaimableLand(ch0) && ch0.owner > 0) city.owner = ch0.owner;
             }
             wodSyncUrbanFootprintOwners();
@@ -19465,7 +19473,7 @@
             function findBorderDonor(rich, poor) {
                 for(let c of gameData.cities) {
                     if(c.owner !== rich || isFixed(c)) continue;
-                    let ch = gameData.hexes[`${c.q},${c.r}`];
+                    let ch = wodHexAt(c.q,c.r);
                     if(!ch) continue;
                     for(let nh of getNeighborHexes(ch)) {
                         if(nh && nh.owner === poor) return c;
@@ -19604,7 +19612,7 @@
             for(const h of gameData.hexList) {
                 if(isWaterHex(h))continue;
                 for(const [dq,dr] of [[1,0],[0,1]]) {
-                    const nb=gameData.hexes[`${h.q+dq},${h.r+dr}`];
+                    const nb=wodHexAt(h.q+dq,h.r+dr);
                     if(nb&&!isWaterHex(nb)&&nb.owner!==h.owner)edges++;
                 }
             }
@@ -19731,7 +19739,7 @@
             let valid = new Set(ownerIds);
             for(let city of gameData.cities) {
                 if(!city || city.owner <= 0 || !valid.has(city.owner)) continue;
-                let ch = gameData.hexes[`${city.q},${city.r}`];
+                let ch = wodHexAt(city.q,city.r);
                 if(ch && isClaimableLand(ch)) setHexOwner(ch, city.owner);
             }
             wodSyncUrbanFootprintOwners();
@@ -19747,10 +19755,10 @@
                     if(city.owner !== owner) continue;
                     let urbanList = getCityUrbanTerrainHexes(city);
                     for(let uh of urbanList) {
-                        let hx = gameData.hexes[`${uh.q},${uh.r}`];
+                        let hx = wodHexAt(uh.q,uh.r);
                         if(hx && !isWaterHex(hx) && hx.type !== 'mountain' && hx.owner === owner) seeds.push(hx);
                     }
-                    let ctr = gameData.hexes[`${city.q},${city.r}`];
+                    let ctr = wodHexAt(city.q,city.r);
                     if(ctr && !isWaterHex(ctr) && ctr.type !== 'mountain' && ctr.owner === owner) seeds.push(ctr);
                 }
                 if(seeds.length === 0) continue;
@@ -20110,7 +20118,7 @@
             gameData.hospitals = (p.hospitals || []).map(h => ({...h}));
             gameData.forts = (p.forts || []).map(f => {
                 let o = Object.assign({}, f);
-                let he = gameData.hexes[`${o.q},${o.r}`];
+                let he = wodHexAt(o.q,o.r);
                 if(he) {
                     o.x = he.x;
                     o.y = he.y;
@@ -20479,8 +20487,16 @@
             gameData._mpDeferredSnap=null;gameData._mpDeferredEnd=null;
             if(s)wodMpApplySnapPayload(s);if(end)wodMpClientApplyMatchEnd(end);
         }
+        function wodMpRetainSnapshotState(payload, previous) {
+            if(previous && previous !== payload) {
+                for(const field of ['hexOwners', 'battleLedger', 'lifetimeStatsByOwner']) {
+                    if(payload[field] === undefined && previous[field] !== undefined) payload[field] = previous[field];
+                }
+            }
+            return payload;
+        }
         function wodMpApplySnapPayload(s) {
-            if(gameData._mpLoadingMatch){gameData._mpDeferredSnap=s;if(s.matchEnd?.final)gameData._mpDeferredEnd=s.matchEnd;return;}
+            if(gameData._mpLoadingMatch){gameData._mpDeferredSnap=wodMpRetainSnapshotState(s,gameData._mpDeferredSnap);if(s.matchEnd?.final)gameData._mpDeferredEnd=s.matchEnd;return;}
             if(Array.isArray(s.eliminatedSlots)&&gameData.mp)gameData.mp.eliminatedSlots=s.eliminatedSlots.slice();
             if(s.battleLedger){gameData._battleLedger=JSON.parse(JSON.stringify(s.battleLedger));gameData._battleLedgerMap=gameData.hexes;}
             gameData._fogVisionTimer=1;
@@ -20515,7 +20531,7 @@
             if(Array.isArray(s.forts)) {
                 gameData.forts = s.forts.map(f => Object.assign({}, f));
                 for(let ft of gameData.forts) {
-                    let hh = gameData.hexes[`${ft.q},${ft.r}`];
+                    let hh = wodHexAt(ft.q,ft.r);
                     if(hh) {
                         ft.x = hh.x;
                         ft.y = hh.y;
@@ -20679,7 +20695,9 @@
         }
         function wodMpScheduleClientSnapApply(payload) {
             if(!payload) return;
-            _wodMpClientSnapPending = payload;
+            // Two snapshots can land in one frame and only the newest is applied. Carry over the
+            // occasional persistent fields (territory and ledgers) so none is dropped.
+            _wodMpClientSnapPending = wodMpRetainSnapshotState(payload, _wodMpClientSnapPending);
             if(_wodMpClientSnapRaf) return;
             _wodMpClientSnapRaf = requestAnimationFrame(() => {
                 _wodMpClientSnapRaf = 0;
@@ -20692,7 +20710,20 @@
         function wodMpHostEmitSnapshot() {
             if(!gameData.mp || !gameData.mp.enabled || !gameData.mp.isHost) return;
             if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.connected) return;
-            let owners = gameData.hexList.length > 14000 ? null : gameData.hexList.map(h => h.owner);
+            // Bandwidth: the territory array and the stat ledgers are the bulk of every snapshot but
+            // change rarely. Send territory when it actually changed (plus a keyframe every second so
+            // late joiners and reconnects converge), and the ledgers twice a second.
+            const netNow = performance.now(), net = gameData._mpSnapNet || (gameData._mpSnapNet = {sum: null, ownersAt: -1e9, statsAt: -1e9});
+            let owners = null;
+            if(gameData.hexList.length <= 14000) {
+                let sum = 0; const list = gameData.hexList;
+                for(let i = 0; i < list.length; i++) sum = (sum * 31 + (list[i].owner | 0) + 7) | 0;
+                if(sum !== net.sum || netNow - net.ownersAt >= 1000 || net.hexes !== gameData.hexes) {
+                    owners = list.map(h => h.owner); net.sum = sum; net.ownersAt = netNow; net.hexes = gameData.hexes;
+                }
+            }
+            const sendStats = netNow - net.statsAt >= 500 || !!gameData._mpMatchEnd;
+            if(sendStats) net.statsAt = netNow;
             let cityWarKeys = [];
             try {
                 let m = new Set();
@@ -20724,11 +20755,11 @@
                 shipKillsByOwner: Object.assign({}, gameData.shipKillsByOwner || {}),
                 sessionIncomeByOwner: Object.assign({}, (gameData._sessionIncomeAcc && gameData._sessionIncomeAcc.byOwner) || {}),
                 sessionCitiesCapturedByOwner: Object.assign({}, gameData.sessionCitiesCapturedByOwner || {}),
-                battleLedger:JSON.parse(JSON.stringify(wodBattleLedger())),
-                lifetimeStatsByOwner: JSON.parse(JSON.stringify(gameData._lifetimeStatsByOwner||{})),
+                battleLedger: sendStats ? JSON.parse(JSON.stringify(wodBattleLedger())) : undefined,
+                lifetimeStatsByOwner: sendStats ? JSON.parse(JSON.stringify(gameData._lifetimeStatsByOwner||{})) : undefined,
                 constructionJobs: gameData.constructionJobs || [],
                 entities: gameData.entities.filter(e => e.hp > 0).map(wodStripEntityForNet),
-                hexOwners: owners,
+                hexOwners: owners || undefined,
                 structureDestructions:(gameData._combatFx||[]).filter(f=>f.kind==='structure').map(f=>({eventId:f.eventId,kind:f.structureKind,structure:f.structure,life:f.life})),
                 cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hasFarm: !!c.hasFarm, hp: c.hp })),
                 hospitals: (gameData.hospitals || []).map(h => ({...h})),
@@ -24442,12 +24473,12 @@
                 } else if(d.cmd.kind === 'build') {
                     let mode = d.cmd.mode;
                     if(mode === 'hospital') {
-                        const hex=gameData.hexes[`${d.cmd.hq},${d.cmd.hr}`];
+                        const hex=wodHexAt(d.cmd.hq,d.cmd.hr);
                         if(hex&&hex.owner===d.fromSlot)placeHospitalAtHex(hex,d.fromSlot);
                         return;
                     }
                     if(mode === 'fort') {
-                        let hex = gameData.hexes[`${d.cmd.hq},${d.cmd.hr}`];
+                        let hex = wodHexAt(d.cmd.hq,d.cmd.hr);
                         if(!hex || hex.owner !== d.fromSlot) return;
                         attemptFortPlacementForOwner(hex, d.fromSlot, true);
                         return;
@@ -26794,7 +26825,7 @@
             if(hex._nbrs) return hex._nbrs;
             let neighbors = [];
             for (let dir of hexDirections) {
-                let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                let nHex = wodHexAt(hex.q + dir.q,hex.r + dir.r);
                 if (nHex) neighbors.push(nHex);
             }
             hex._nbrs = neighbors;
@@ -26906,7 +26937,7 @@
             opt = opt || {};
             let probe = unit;
             let coord = pixelToHex(x, y);
-            let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            let direct = wodHexAt(coord.q,coord.r);
             let nearest = getNearestHexToPoint(x, y);
             let nearestPureLand = !!(nearest && !isWaterHex(nearest) && !isBridgeHex(nearest) && (nearest.type !== 'mountain'||wodCanClimb(unit)));
             let bh = wodBridgeHexAtPoint(probe, x, y);
@@ -26971,7 +27002,7 @@
             let best = null,
                 bestScore = Infinity;
             for(let pt of getHexesInRadius(coord.q, coord.r, 16)) {
-                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                let hex = wodHexAt(pt.q,pt.r);
                 if(!hex || hex.type === 'mountain') continue;
                 if(isWaterHex(hex) && !isBridgeHex(hex)) continue;
                 if(!wodHexWalkableForLandPath(unit, hex, false) && !isBridgeHex(hex)) continue;
@@ -27106,7 +27137,7 @@
             if(!city || defenderOwner == null) return false;
             let tiles = getCityUrbanTerrainHexes(city);
             if(!tiles.length) {
-                let ch = gameData.hexes[`${city.q},${city.r}`];
+                let ch = wodHexAt(city.q,city.r);
                 if(ch) tiles = [ch];
             }
             let tileKeys = new Set(tiles.map(uh => getHexKey(uh)));
@@ -27137,7 +27168,7 @@
                 city.hasFarm = false;
                 destroyed.push('farm');
             }
-            let cityHex = gameData.hexes[`${city.q},${city.r}`];
+            let cityHex = wodHexAt(city.q,city.r);
             if(cityHex) setHexOwner(cityHex, newOwner);
             handleWodTownCaptureAndElimination(prevCityOwner, newOwner);
             for(let uh of getCityUrbanTerrainHexes(city)) {
@@ -27146,7 +27177,7 @@
             }
             let area = getHexesInRadius(city.q, city.r, 2);
             for(let ah of area) {
-                let hex = gameData.hexes[`${ah.q},${ah.r}`];
+                let hex = wodHexAt(ah.q,ah.r);
                 if(isClaimableLand(hex) && (hex.owner === newOwner || hasOwnerNeighbor(hex, newOwner)))
                     setHexOwner(hex, newOwner);
             }
@@ -27213,7 +27244,7 @@
                 if(!city || city.owner <= 0) continue;
                 let urban = getCityUrbanTerrainHexes(city);
                 if(urban.length === 0) {
-                    let ch = gameData.hexes[`${city.q},${city.r}`];
+                    let ch = wodHexAt(city.q,city.r);
                     if(!ch || ch.owner <= 0 || ch.owner === city.owner) continue;
                     if(wodCityUrbanHasDefenderCombat(city, city.owner)) continue;
                     wodExecuteCityCapture(city, ch.owner);
@@ -27238,7 +27269,7 @@
             if(!city || attackerOwner == null) return false;
             let urban = getCityUrbanTerrainHexes(city);
             if(urban.length === 0) {
-                let ch = gameData.hexes[`${city.q},${city.r}`];
+                let ch = wodHexAt(city.q,city.r);
                 return !!(ch && !isWaterHex(ch) && ch.owner === attackerOwner);
             }
             for(let uh of urban) {
@@ -29004,12 +29035,12 @@
             }
             if(list.length === 0) {
                 for(let ch of getHexesInRadius(city.q, city.r, 3)) {
-                    let h = gameData.hexes[`${ch.q},${ch.r}`];
+                    let h = wodHexAt(ch.q,ch.r);
                     if(h && !isWaterHex(h) && h.type === 'urban') list.push(h);
                 }
             }
             if(list.length === 0) {
-                let ctr = gameData.hexes[`${city.q},${city.r}`];
+                let ctr = wodHexAt(city.q,city.r);
                 if(ctr && !isWaterHex(ctr)) list.push(ctr);
             }
             city._urbanHexCache = list;
@@ -29019,7 +29050,7 @@
         /** True when the town hex / urban footprint sits in an encircled pocket. */
         function isCityEncircledForProduction(city) {
             if(!city || !city.id) return false;
-            let ch = gameData.hexes[`${city.q},${city.r}`];
+            let ch = wodHexAt(city.q,city.r);
             if(ch && wodGetHexEncirclementState(ch)) return true;
             let urban = getCityUrbanTerrainHexes(city);
             for(let i = 0, n = urban.length; i < n; i++) {
@@ -29123,11 +29154,11 @@
         function resolveTradeConvoyPathHex(convoy, destCity) {
             if(!destCity) return null;
             if(!convoy.convoySeaRoute)
-                return gameData.hexes[`${destCity.q},${destCity.r}`] || getNearestHexToPoint(destCity.x, destCity.y);
+                return wodHexAt(destCity.q,destCity.r) || getNearestHexToPoint(destCity.x, destCity.y);
             const start=getNearestHexToPoint(convoy.x,convoy.y),sea=wodNavalWaterRegionKeys(convoy,start),choices=[];
             if(!sea)return null;
             for(const p of getHexesInRadius(destCity.q,destCity.r,7)){
-                const h=gameData.hexes[`${p.q},${p.r}`];if(h&&wodIsOpenWaterHex(h)&&sea.has(getHexKey(h))&&
+                const h=wodHexAt(p.q,p.r);if(h&&wodIsOpenWaterHex(h)&&sea.has(getHexKey(h))&&
                     getNeighborHexes(h).some(n=>n&&!isWaterHex(n)&&n.owner===destCity.owner))choices.push(h);
             }
             choices.sort((a,b)=>wodAiDist2(a.x,a.y,destCity.x,destCity.y)-wodAiDist2(b.x,b.y,destCity.x,destCity.y)||
@@ -29137,7 +29168,7 @@
         function wodTradeSeaDockPair(from,to,owner) {
             const origins=[];
             for(const p of getHexesInRadius(from.q,from.r,7)){
-                const h=gameData.hexes[`${p.q},${p.r}`];if(h&&wodIsOpenWaterHex(h)&&getNeighborHexes(h).some(n=>n&&!isWaterHex(n)&&n.owner===owner))origins.push(h);
+                const h=wodHexAt(p.q,p.r);if(h&&wodIsOpenWaterHex(h)&&getNeighborHexes(h).some(n=>n&&!isWaterHex(n)&&n.owner===owner))origins.push(h);
             }
             origins.sort((a,b)=>wodAiDist2(a.x,a.y,from.x,from.y)-wodAiDist2(b.x,b.y,from.x,from.y));
             const tested=new Set();
@@ -29188,7 +29219,7 @@
             }
             urbanCoords.push({q: centerHex.q, r: centerHex.r});
             for(let uh of urbanCoords) {
-                let targetH = gameData.hexes[`${uh.q},${uh.r}`];
+                let targetH = wodHexAt(uh.q,uh.r);
                 if(targetH && !isWaterHex(targetH)) {
                     targetH.type = 'urban';
                     targetH.cityId = city.id;
@@ -29227,7 +29258,7 @@
             urbanCoords.push({ q: centerHex.q, r: centerHex.r });
             let cid = city.id;
             for(let uh of urbanCoords) {
-                let targetH = gameData.hexes[`${uh.q},${uh.r}`];
+                let targetH = wodHexAt(uh.q,uh.r);
                 if(!targetH || isWaterHex(targetH) || targetH.type === 'mountain') continue;
                 if(targetH.owner !== owner) continue;
                 targetH.type = 'urban';
@@ -29507,9 +29538,35 @@
             return true;
         }
 
+        // Flat numeric index over gameData.hexes. Cell lookups are the hottest call in the
+        // simulation; building a "q,r" string for each one dominated movement and AI time.
+        // Hits come from the array; anything else falls back to the keyed object, so maps
+        // that are still being filled or edited always resolve exactly as before.
+        let _wodHexIdx = null;
+        function wodBuildHexIndex(H) {
+            let q0 = Infinity, q1 = -Infinity, r0 = Infinity, r1 = -Infinity, n = 0;
+            for(const k in H) { const h = H[k]; if(!h) continue; n++; if(h.q < q0) q0 = h.q; if(h.q > q1) q1 = h.q; if(h.r < r0) r0 = h.r; if(h.r > r1) r1 = h.r; }
+            if(!n || !Number.isFinite(q0 + q1 + r0 + r1) || (q1 - q0 + 1) * (r1 - r0 + 1) > 4e6) return {src: H, q0: 1, q1: 0, r0: 1, r1: 0, w: 0, a: [], miss: 0};
+            const w = q1 - q0 + 1, a = new Array(w * (r1 - r0 + 1)).fill(null);
+            for(const k in H) { const h = H[k]; if(h && Number.isInteger(h.q) && Number.isInteger(h.r) && k === h.q + ',' + h.r) a[(h.r - r0) * w + (h.q - q0)] = h; }
+            return {src: H, q0, q1, r0, r1, w, a, miss: 0};
+        }
+        function wodHexAt(q, r) {
+            const H = gameData.hexes;
+            let I = _wodHexIdx;
+            if(!I || I.src !== H) I = _wodHexIdx = wodBuildHexIndex(H);
+            const inside = q >= I.q0 && q <= I.q1 && r >= I.r0 && r <= I.r1;
+            if(inside) { const h = I.a[(r - I.r0) * I.w + (q - I.q0)]; if(h) return h; }
+            const h = H[`${q},${r}`];
+            if(h) {
+                if(inside && Number.isInteger(+q) && Number.isInteger(+r)) I.a[(r - I.r0) * I.w + (q - I.q0)] = h;
+                else if(++I.miss > 48) _wodHexIdx = null;
+            }
+            return h;
+        }
         function getNearestHexToPoint(x, y) {
-            let coord = pixelToHex(x, y);
-            return gameData.hexes[`${coord.q},${coord.r}`];
+            const spacing = gameData.hexRadius * 1.35;
+            return wodHexAt(Math.round(x / spacing), Math.round(y / spacing));
         }
 
         function canUseHexForMovement(unit, hex) {
@@ -29534,7 +29591,7 @@
                 }
             }
             let coord = pixelToHex(x, y);
-            let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            let direct = wodHexAt(coord.q,coord.r);
             if(direct && isBridgeHex(direct)&&wodPointOnBridgeForUnit(unit,x,y,1.05))
                 return { hex: direct, exactX: x, exactY: y, intoWater: false };
             if(direct && wodHexWalkableForLandPath(unit, direct, false) && !isBridgeHex(direct) && !isWaterHex(direct))
@@ -29554,7 +29611,7 @@
                 let bestW = null,
                     bestWd = Infinity;
                 for(let pt of getHexesInRadius(coord.q, coord.r, 10)) {
-                    let wh = gameData.hexes[`${pt.q},${pt.r}`];
+                    let wh = wodHexAt(pt.q,pt.r);
                     if(!wh || !isWaterHex(wh) || isBridgeHex(wh) || wh.type === 'mountain') continue;
                     let dx = x - wh.x,
                         dy = y - wh.y;
@@ -29573,7 +29630,7 @@
             let best = null,
                 bestScore = Infinity;
             for(let pt of getHexesInRadius(coord.q, coord.r, 24)) {
-                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                let hex = wodHexAt(pt.q,pt.r);
                 if(!wodHexWalkableForLandPath(unit, hex, false)) continue;
                 let dx = x - hex.x,
                     dy = y - hex.y;
@@ -29722,8 +29779,8 @@
             if(dq !== 0 && dr !== 0) {
                 let bridgeStep = isBridgeHex(fromHex) || isBridgeHex(toHex);
                 if(!bridgeStep) {
-                    let sideA = gameData.hexes[`${fromHex.q + dq},${fromHex.r}`];
-                    let sideB = gameData.hexes[`${fromHex.q},${fromHex.r + dr}`];
+                    let sideA = wodHexAt(fromHex.q + dq,fromHex.r);
+                    let sideB = wodHexAt(fromHex.q,fromHex.r + dr);
                     const blockedA=wodDiagonalCornerBlocksLandStep(unit,sideA,forbidWater),blockedB=wodDiagonalCornerBlocksLandStep(unit,sideB,forbidWater);
                     const dryPinch=Math.abs(dq)===1&&Math.abs(dr)===1&&!isWaterHex(fromHex)&&!isWaterHex(toHex)&&blockedA&&blockedB;
                     // When a side lane exists, use it instead of shaving a
@@ -29816,7 +29873,7 @@
             let bestD = Infinity;
             for(let dq = -ring; dq <= ring; dq++) {
                 for(let dr = -ring; dr <= ring; dr++) {
-                    let h = gameData.hexes[`${center.q + dq},${center.r + dr}`];
+                    let h = wodHexAt(center.q + dq,center.r + dr);
                     if(!wodPathTileWalkable(unit, h, allowWater)) continue;
                     // Prefer pure land over nearby bridge tiles when standing on land.
                     if(primary && !isWaterHex(primary) && !isBridgeHex(primary) && isBridgeHex(h))
@@ -29914,7 +29971,7 @@
                 let dmx = h.x - px, dmy = h.y - py;
                 let dm2 = dmx * dmx + dmy * dmy;
                 for(let d of hexDirections) {
-                    let n = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                    let n = wodHexAt(h.q + d.q,h.r + d.r);
                     if(!n || n.type === 'mountain' || !wodPathTileWalkable(unit, n, allowWater)) continue;
                     let dx = n.x - px, dy = n.y - py;
                     if(dx * dx + dy * dy < dm2) return true;
@@ -29924,7 +29981,7 @@
             let thresh = hr * (waterOnly ? 0.6 : 1.14);
             let thresh2 = thresh * thresh;
             for(let d of hexDirections) {
-                let n = gameData.hexes[`${h.q + d.q},${h.r + d.r}`];
+                let n = wodHexAt(h.q + d.q,h.r + d.r);
                 if(!n || !wodPathTileWalkable(unit, n, allowWater)) continue;
                 let dx = n.x - px, dy = n.y - py;
                 if(dx * dx + dy * dy <= thresh2) return true;
@@ -30126,7 +30183,31 @@
             return wodHexWalkableForLandPath(unit, h0, false) && wodHexWalkableForLandPath(unit, h1, false);
         }
 
+        // Open-country shortcut. A cell is "deep" when it and its eight neighbours are ordinary
+        // dry ground with no mountain, water or bridge. A land unit stepping between deep cells
+        // cannot touch any terrain edge, so the sampled clamp below would accept the full step.
+        function wodHexIsDeepLand(h) {
+            const rev = (gameData._landGeometryRevision | 0) * 4096 + (gameData.landGeometryRevision | 0) * 64 + (gameData._wodPfVer | 0) + (gameData.bridges ? gameData.bridges.length : 0) * 16777216 + ((gameData._wodDeepEpoch | 0) + ((gameData._wodSimTick | 0) / 600 | 0)) * 4294967296;
+            if(h._deepRev === rev) return h._deep;
+            let deep = !isWaterHex(h) && h.type !== 'mountain' && isClaimableLand(h) && !isBridgeHex(h);
+            if(deep) {
+                for(let dq = -1; dq <= 1 && deep; dq++) for(let dr = -1; dr <= 1; dr++) {
+                    if(!dq && !dr) continue;
+                    const n = wodHexAt(h.q + dq, h.r + dr);
+                    if(!n || isWaterHex(n) || n.type === 'mountain' || !isClaimableLand(n) || isBridgeHex(n)) { deep = false; break; }
+                }
+            }
+            h._deepRev = rev; h._deep = deep;
+            return deep;
+        }
         function wodClampStepToWalkableTerrain(unit, ox, oy, nx, ny, subdiv) {
+            if(isLandArmyUnit(unit)) {
+                const dx = nx - ox, dy = ny - oy, lim = (gameData.hexRadius || 20) * 1.3;
+                if(dx * dx + dy * dy < lim * lim) {
+                    const a = getNearestHexToPoint(ox, oy), b = a && getNearestHexToPoint(nx, ny);
+                    if(b && wodHexIsDeepLand(a) && (a === b || wodHexIsDeepLand(b))) return { x: nx, y: ny };
+                }
+            }
             if(wodUnitUsesLandBridges(unit) &&
                 wodPointOnBridgeForUnit(unit, ox, oy, 1.22) &&
                 wodPointOnBridgeForUnit(unit, nx, ny, 1.22))
@@ -30256,10 +30337,10 @@
             const pass=p=>{
                 if(!p||isWaterHex(p)||p.type==='mountain')return false;
                 let open=0,closed=0;
-                for(const d of cardinalHexDirections){const n=gameData.hexes[`${p.q+d.q},${p.r+d.r}`];if(n&&n.type!=='mountain'&&(!isWaterHex(n)||isBridgeHex(n)))open++;else closed++;}
+                for(const d of cardinalHexDirections){const n=wodHexAt(p.q+d.q,p.r+d.r);if(n&&n.type!=='mountain'&&(!isWaterHex(n)||isBridgeHex(n)))open++;else closed++;}
                 return open>=1&&closed>=2;
             };
-            const narrow=pass(h)||cardinalHexDirections.some(d=>pass(gameData.hexes[`${h.q+d.q},${h.r+d.r}`]));
+            const narrow=pass(h)||cardinalHexDirections.some(d=>pass(wodHexAt(h.q+d.q,h.r+d.r)));
             unit._wodLaneMap=gameData.hexes;unit._wodLaneKey=key;unit._wodLaneVersion=version;unit._wodLaneNarrow=narrow;
             return narrow;
         }
@@ -30498,7 +30579,7 @@
             // or an ordinary land formation still yields on dry ground only.
             const waterYield=wodIsNavalUnit(loser)||loser.type==='marine'&&!loser._wodKeepLandFormation&&isWaterHex(center)&&!wodUnitOnBridgeDeck(loser);
             for(const pt of getHexesInRadius(center.q,center.r,6)) {
-                const h=gameData.hexes[`${pt.q},${pt.r}`];if(!h||!wodPathTileWalkable(loser,h,false)||!waterYield&&isWaterHex(h)&&!isBridgeHex(h)||isWorldPositionBlockedByUnits(loser,h.x,h.y))continue;
+                const h=wodHexAt(pt.q,pt.r);if(!h||!wodPathTileWalkable(loser,h,false)||!waterYield&&isWaterHex(h)&&!isBridgeHex(h)||isWorldPositionBlockedByUnits(loser,h.x,h.y))continue;
                 if(!loser.target&&!wodPassiveDisplacementAllowed(loser,h.x,h.y))continue;
                 if(reserved.some(s=>Math.hypot(h.x-s.point.x,h.y-s.point.y)<(loser.radius||12)+(s.u.radius||12)+4))continue;
                 if(loser.type==='supply'&&(!wodSupplyParkingSafe(loser,h)||!wodOpenWaterChordClear(loser,loser.x,loser.y,h.x,h.y)))continue;
@@ -30570,7 +30651,7 @@
                 }
             }
             for(let dir of hexDirections) {
-                let nHex = gameData.hexes[`${currentHex.q + dir.q},${currentHex.r + dir.r}`];
+                let nHex = wodHexAt(currentHex.q + dir.q,currentHex.r + dir.r);
                 consider(nHex, false);
             }
             wodForEachBridgePathPortal(unit, currentHex, (nHex) => consider(nHex, true));
@@ -30582,7 +30663,7 @@
                 let {hex, d} = queue.shift();
                 if(d >= 7) continue;
                 for(let dir of hexDirections) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    let nHex = wodHexAt(hex.q + dir.q,hex.r + dir.r);
                     if(!nHex || seen.has(getHexKey(nHex))) continue;
                     if(!wodCanStepBetweenHexes(unit, hex, nHex, forbidWater)) continue;
                     seen.add(getHexKey(nHex));
@@ -30613,13 +30694,13 @@
             let bh = wodBridgeHexAtPoint(unit, x, y);
             if(bh) return { hex: bh, exactX: x, exactY: y, intoWater: false };
             let targetCoord = pixelToHex(x, y);
-            let targetHex = gameData.hexes[`${targetCoord.q},${targetCoord.r}`];
+            let targetHex = wodHexAt(targetCoord.q,targetCoord.r);
             if(canUseHexForMovement(unit, targetHex)) return {hex: targetHex, exactX: x, exactY: y};
 
             let best = null;
             let bestScore = Infinity;
             for(let pt of getHexesInRadius(targetCoord.q, targetCoord.r, 18)) {
-                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                let hex = wodHexAt(pt.q,pt.r);
                 if(!canUseHexForMovement(unit, hex)) continue;
                 let dx = x - hex.x;
                 let dy = y - hex.y;
@@ -30639,7 +30720,7 @@
         function wodResolveShipMarchHex(unit, x, y) {
             if(!unit || (!wodIsNavalUnit(unit) && !(unit.type === 'convoy' && unit.convoySeaRoute))) return null;
             let coord = pixelToHex(x, y);
-            let direct = gameData.hexes[`${coord.q},${coord.r}`];
+            let direct = wodHexAt(coord.q,coord.r);
             if(direct && wodIsOpenWaterHex(direct) && canUseHexForMovement(unit, direct)) {
                 if(wodSamplePosOnWalkableTerrain(unit, x, y))
                     return { hex: direct, exactX: x, exactY: y };
@@ -30651,7 +30732,7 @@
             let best = null,
                 bestScore = Infinity;
             for(let pt of getHexesInRadius(coord.q, coord.r, 1)) {
-                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                let hex = wodHexAt(pt.q,pt.r);
                 if(!hex || !wodIsOpenWaterHex(hex) || !canUseHexForMovement(unit, hex)) continue;
                 let dx = x - hex.x,
                     dy = y - hex.y;
@@ -30671,7 +30752,7 @@
             let bestScore = Infinity;
             let maxR = Math.min(44, 14 + Math.floor((gameData.hexList && gameData.hexList.length ? gameData.hexList.length : 4000) / 520));
             for(let pt of getHexesInRadius(targetCoord.q, targetCoord.r, maxR)) {
-                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                let hex = wodHexAt(pt.q,pt.r);
                 if(!canUseHexForMovement(unit, hex)) continue;
                 let targetDx = x - hex.x;
                 let targetDy = y - hex.y;
@@ -30709,7 +30790,7 @@
             let best = null;
             let bestScore = Infinity;
             for(let pt of getHexesInRadius(city.q, city.r, maxR)) {
-                let hex = gameData.hexes[`${pt.q},${pt.r}`];
+                let hex = wodHexAt(pt.q,pt.r);
                 if(!canUnitEnterHex(fakeUnit, hex)) continue;
                 if(!wodIsNavalType(type) && hex.type === 'mountain' && type!=='mountaineer') continue;
                 if(!wodIsNavalType(type) && isWaterHex(hex)) continue;
@@ -30816,7 +30897,7 @@
             let tb = ((targetHex.q * 2654435761) ^ (targetHex.r * 1597334677) ^ (cur.q * 2246822519)) >>> 0;
             for(let di = 0; di < hexDirections.length; di++) {
                 let d = hexDirections[di];
-                let nHex = gameData.hexes[`${cur.q + d.q},${cur.r + d.r}`];
+                let nHex = wodHexAt(cur.q + d.q,cur.r + d.r);
                 if(!wodIsOpenWaterHex(nHex)) continue;
                 let dx = targetHex.x - nHex.x,
                     dy = targetHex.y - nHex.y;
@@ -30855,7 +30936,7 @@
             if(!cache||cache.hexes!==gameData.hexes||cache.revision!==revision)cache=gameData._navalWaterRegions={hexes:gameData.hexes,revision,byKey:new Map()};
             const root=getHexKey(start);if(cache.byKey.has(root))return cache.byKey.get(root);
             const keys=new Set([root]),queue=[start];
-            for(let i=0;i<queue.length;i++)for(const d of hexDirections){const h=queue[i],n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!wodIsOpenWaterHex(n)||keys.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,false))continue;keys.add(getHexKey(n));queue.push(n);}
+            for(let i=0;i<queue.length;i++)for(const d of hexDirections){const h=queue[i],n=wodHexAt(h.q+d.q,h.r+d.r);if(!wodIsOpenWaterHex(n)||keys.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,false))continue;keys.add(getHexKey(n));queue.push(n);}
             for(const key of keys)cache.byKey.set(key,keys);return keys;
         }
         function wodWaterBfsPath(unit, fromHex, toHex, maxNodes) {
@@ -30875,7 +30956,7 @@
                 if(++nodes>limit||((nodes&255)===0&&performance.now()-startTime>ceiling))return [];
                 const rec=pop(),h=rec.h,key=getHexKey(h);if(closed.has(key))continue;closed.add(key);
                 if(wodHexKeysEqual(h,toHex)){const route=[h];let cur=h;while(parent.has(getHexKey(cur))){cur=parent.get(getHexKey(cur));route.push(cur);}return smoothGridPath(route.reverse());}
-                for(const d of hexDirections){const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!wodIsOpenWaterHex(n)||closed.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,false))continue;
+                for(const d of hexDirections){const n=wodHexAt(h.q+d.q,h.r+d.r);if(!wodIsOpenWaterHex(n)||closed.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,false))continue;
                     const g=rec.g+Math.hypot(d.q,d.r);if(g>=(cost.get(getHexKey(n))??Infinity))continue;cost.set(getHexKey(n),g);parent.set(getHexKey(n),h);push(n,g);}
             }return [];
         }
@@ -30912,7 +30993,7 @@
                 if(d >= maxRing) continue;
                 for(let di = 0; di < hexDirections.length; di++) {
                     let ddir = hexDirections[di];
-                    let n = gameData.hexes[`${hex.q + ddir.q},${hex.r + ddir.r}`];
+                    let n = wodHexAt(hex.q + ddir.q,hex.r + ddir.r);
                     if(!n) continue;
                     let nk = getHexKey(n);
                     if(seen.has(nk)) continue;
@@ -30936,14 +31017,14 @@
                 bestScore = Infinity;
             let pts = getHexesInRadius(landBiasHex.q, landBiasHex.r, maxRing);
             for(let pi = 0; pi < pts.length; pi++) {
-                let land = gameData.hexes[`${pts[pi].q},${pts[pi].r}`];
+                let land = wodHexAt(pts[pi].q,pts[pi].r);
                 if(!land || isWaterHex(land) || isBridgeHex(land) || land.type === 'mountain') continue;
                 if(!wodHexWalkableForLandPath(unit, land, false)) continue;
                 let waterHex = null,
                     waterScore = Infinity;
                 for(let di = 0; di < hexDirections.length; di++) {
                     let d = hexDirections[di];
-                    let w = gameData.hexes[`${land.q + d.q},${land.r + d.r}`];
+                    let w = wodHexAt(land.q + d.q,land.r + d.r);
                     if(!wodIsOpenWaterHex(w)) continue;
                     let dx = waterBiasHex.x - w.x,
                         dy = waterBiasHex.y - w.y;
@@ -31145,7 +31226,7 @@
                 }
                 for(let di = 0; di < hexDirections.length; di++) {
                     let d = hexDirections[di];
-                    tryStep(gameData.hexes[`${hex.q + d.q},${hex.r + d.r}`], false);
+                    tryStep(wodHexAt(hex.q + d.q,hex.r + d.r), false);
                 }
                 if(usePortals)
                     wodForEachBridgePathPortal(unit, hex, (nHex) => tryStep(nHex, true));
@@ -31862,13 +31943,13 @@
                 const rec=pop(),h=rec.h,k=key(h);if(closed.has(k))continue;closed.add(k);
                 if(h===goal){const path=[h];let cur=h;while(prev.has(key(cur))){cur=prev.get(key(cur));path.push(cur);}return path.reverse();}
                 for(const d of hexDirections) {
-                    const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||n.type==='mountain'&&!wodCanClimb(unit)||closed.has(key(n))||!wodCanStepBetweenHexes(unit,h,n,false))continue;
+                    const n=wodHexAt(h.q+d.q,h.r+d.r);if(!n||n.type==='mountain'&&!wodCanClimb(unit)||closed.has(key(n))||!wodCanStepBetweenHexes(unit,h,n,false))continue;
                     // Rescue takes one continuous water leg followed by land.
                     // Boarding/AI safety correctly forbids another water entry
                     // after landing; don't plan a route that requires one.
                     if(shoreExit&&!isWaterHex(h)&&isWaterHex(n)&&!isBridgeHex(n))continue;
                     if(shoreExit&&isWaterHex(h)&&isWaterHex(n)&&d.q&&d.r&&
-                        (!isWaterHex(gameData.hexes[`${h.q+d.q},${h.r}`])||!isWaterHex(gameData.hexes[`${h.q},${h.r+d.r}`])))continue;
+                        (!isWaterHex(wodHexAt(h.q+d.q,h.r))||!isWaterHex(wodHexAt(h.q,h.r+d.r))))continue;
                     const wet=isWaterHex(n)&&!isBridgeHex(n),terrain=n.type==='swamp'?1.7:n.type==='forest'||n.type==='hill'?1.3:1;
                     const g=rec.g+Math.hypot(d.q,d.r)*(wet?18:terrain);
                     if(g>=(cost.get(key(n))??Infinity))continue;cost.set(key(n),g);prev.set(key(n),h);push(n,g);
@@ -32005,13 +32086,13 @@
                             let touchM = false, nearM = false, ring2Mt = 0;
                             for(let di = 0; di < hexDirections.length; di++) {
                                 let d1 = hexDirections[di];
-                                let nn = gameData.hexes[`${b.q + d1.q},${b.r + d1.r}`];
+                                let nn = wodHexAt(b.q + d1.q,b.r + d1.r);
                                 if(!nn) continue;
                                 if(nn.type === 'mountain') touchM = true;
                                 else {
                                     for(let dj = 0; dj < hexDirections.length; dj++) {
                                         let d2 = hexDirections[dj];
-                                        let nn2 = gameData.hexes[`${nn.q + d2.q},${nn.r + d2.r}`];
+                                        let nn2 = wodHexAt(nn.q + d2.q,nn.r + d2.r);
                                         if(nn2 && nn2.type === 'mountain') {
                                             nearM = true;
                                             ring2Mt++;
@@ -32154,7 +32235,7 @@
 
                     for(let di = 0; di < hexDirections.length; di++) {
                         let dir = hexDirections[di];
-                        let nHex = gameData.hexes[`${current.q + dir.q},${current.r + dir.r}`];
+                        let nHex = wodHexAt(current.q + dir.q,current.r + dir.r);
                         relaxPathNeighbor(nHex, current, currentKey);
                     }
                     wodForEachBridgePathPortal(unit, current, (nHex) => {
@@ -32199,7 +32280,7 @@
             let dirs = waterOnly ? hexDirections : cardinalHexDirections;
             for(let di = 0; di < dirs.length; di++) {
                 let dir = dirs[di];
-                let nHex = gameData.hexes[`${cur.q + dir.q},${cur.r + dir.r}`];
+                let nHex = wodHexAt(cur.q + dir.q,cur.r + dir.r);
                 if(!isWaterHex(nHex) || !canUseHexForMovement(unit, nHex)) continue;
                 if(waterOnly && !wodIsOpenWaterHex(nHex)) continue;
                 let dx = targetHex.x - nHex.x;
@@ -32257,7 +32338,7 @@
                 }
             }
             for(let dir of hexDirections) {
-                let nHex = gameData.hexes[`${curHex.q + dir.q},${curHex.r + dir.r}`];
+                let nHex = wodHexAt(curHex.q + dir.q,curHex.r + dir.r);
                 consider(nHex, false);
             }
             wodForEachBridgePathPortal(unit, curHex, (nHex) => consider(nHex, true));
@@ -32594,7 +32675,7 @@
                     landD = Infinity;
                 let jc = pixelToHex(joinPt.x, joinPt.y);
                 for(let pt of getHexesInRadius(jc.q, jc.r, 4)) {
-                    let h = gameData.hexes[`${pt.q},${pt.r}`];
+                    let h = wodHexAt(pt.q,pt.r);
                     if(!h || h.type === 'mountain' || isWaterHex(h) || isBridgeHex(h)) continue;
                     if(!wodHexWalkableForLandPath(unit, h, false)) continue;
                     let dx = h.x - joinPt.x,
@@ -33763,7 +33844,7 @@
             return city?{kind:'city',site:city}:null;
         }
         function wodEffectiveHospitalOwner(h) {
-            const tile=gameData.hexes[`${h.q},${h.r}`];
+            const tile=wodHexAt(h.q,h.r);
             return tile&&tile.owner===h.owner?h.owner:0;
         }
         function wodGeneralForUnit(unit) {
@@ -33808,7 +33889,7 @@
                 if(!unit){
                     let carrier=gameData.entities.find(u=>u.owner===owner&&u.hp>0&&u.type==='transport'&&!u.cargo&&!u.pickupUid);
                     if(!carrier){const fleet=gameData.entities.find(u=>u.owner===owner&&u.hp>0&&wodIsNavalUnit(u)),at=fleet&&getNearestHexToPoint(fleet.x,fleet.y);
-                        const site=at&&getHexesInRadius(at.q,at.r,5).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(wodIsOpenWaterHex).sort((a,b)=>wodAiDist2(a.x,a.y,at.x,at.y)-wodAiDist2(b.x,b.y,at.x,at.y)).find(h=>wodNavalDestinationClear({type:'transport',owner,radius:16},h));
+                        const site=at&&getHexesInRadius(at.q,at.r,5).map(p=>wodHexAt(p.q,p.r)).filter(wodIsOpenWaterHex).sort((a,b)=>wodAiDist2(a.x,a.y,at.x,at.y)-wodAiDist2(b.x,b.y,at.x,at.y)).find(h=>wodNavalDestinationClear({type:'transport',owner,radius:16},h));
                         if(site)carrier=createUnitAt('transport',site.x,site.y,owner,{startSpawn:true});
                     }
                     if(carrier){unit=createUnitAt('heavy',carrier.x,carrier.y,owner,{startSpawn:true});carrier.cargo=unit;carrier._aiFerryMission=!wodMpIsHumanOwner(owner);gameData.entities=gameData.entities.filter(u=>u!==unit);}
@@ -34375,13 +34456,13 @@
             let regionKeys = new Set(region.map(hex => getHexKey(hex)));
             for(let hex of region) {
                 for(let dir of hexDirections) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    let nHex = wodHexAt(hex.q + dir.q,hex.r + dir.r);
                     if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
                     if(wodIsHostileOwner(nHex.owner, owner))
                         counts[nHex.owner] = (counts[nHex.owner] || 0) + 1;
                     else if(nHex.owner === 0) {
                         for(let dir2 of hexDirections) {
-                            let nn = gameData.hexes[`${nHex.q + dir2.q},${nHex.r + dir2.r}`];
+                            let nn = wodHexAt(nHex.q + dir2.q,nHex.r + dir2.r);
                             if(!nn || isWaterHex(nn) || !isClaimableLand(nn)) continue;
                             if(wodIsHostileOwner(nn.owner, owner) && !regionKeys.has(getHexKey(nn)))
                                 counts[nn.owner] = (counts[nn.owner] || 0) + 1;
@@ -34400,11 +34481,11 @@
             let proxy = {};
             for(let hex of region) {
                 for(let dir of hexDirections) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    let nHex = wodHexAt(hex.q + dir.q,hex.r + dir.r);
                     if(!nHex || isWaterHex(nHex) || !isClaimableLand(nHex)) continue;
                     if(nHex.owner !== 0) continue;
                     for(let dir2 of hexDirections) {
-                        let nn = gameData.hexes[`${nHex.q + dir2.q},${nHex.r + dir2.r}`];
+                        let nn = wodHexAt(nHex.q + dir2.q,nHex.r + dir2.r);
                         if(!nn || isWaterHex(nn) || !isClaimableLand(nn)) continue;
                         if(wodIsHostileOwner(nn.owner, owner) && !regionKeys.has(getHexKey(nn)))
                             proxy[nn.owner] = (proxy[nn.owner] || 0) + 1;
@@ -34449,7 +34530,7 @@
             // Supply follows the same eight-way dry connections as movement.
             // Water cannot relay supply; bridge banks use physical portals below.
             for(const d of hexDirections){
-                const n=gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`];
+                const n=wodHexAt(hex.q+d.q,hex.r+d.r);
                 if(d.q&&d.r&&(isWaterHex(hex)||n&&isWaterHex(n)))continue;
                 if(n){
                     const a=isWaterHex(hex)&&gameData._bridgeByHexKey?.[getHexKey(hex)],b=isWaterHex(n)&&gameData._bridgeByHexKey?.[getHexKey(n)];
@@ -34474,14 +34555,14 @@
             // The town remains a supply source throughout its held urban area
             // until ownership changes. Losing its center during a siege must
             // not disconnect the rest of an otherwise friendly town.
-            const cells=getCityUrbanTerrainHexes(city),keys=new Set(cells.map(getHexKey)),center=gameData.hexes[`${city.q},${city.r}`];
+            const cells=getCityUrbanTerrainHexes(city),keys=new Set(cells.map(getHexKey)),center=wodHexAt(city.q,city.r);
             if(!center||!keys.has(getHexKey(center)))return [];
             // A remote urban fragment carrying an old city ID is not another
             // supply source. Use only the physical urban footprint connected
             // to the town center, regardless of who contests individual cells.
             const queue=[center],seen=new Set([getHexKey(center)]);
             for(let i=0;i<queue.length;i++)for(const d of hexDirections){
-                const h=gameData.hexes[`${queue[i].q+d.q},${queue[i].r+d.r}`],k=h&&getHexKey(h);
+                const h=wodHexAt(queue[i].q+d.q,queue[i].r+d.r),k=h&&getHexKey(h);
                 if(!h||!keys.has(k)||seen.has(k))continue;seen.add(k);queue.push(h);
             }
             return queue.filter(h=>!isWaterHex(h)&&wodIsFriendlyOwner(h.owner,city.owner));
@@ -34577,9 +34658,9 @@
                     if(!hex || isWaterHex(hex) || keys.has(getHexKey(hex))) return;
                     keys.add(getHexKey(hex));queue.push(hex);
                 };
-                for(const city of gameData.cities) if(city.owner>0) seed(gameData.hexes[`${city.q},${city.r}`]);
+                for(const city of gameData.cities) if(city.owner>0) seed(wodHexAt(city.q,city.r));
                 for(let i=0; i<queue.length; i++) for(const d of cardinalHexDirections)
-                    seed(gameData.hexes[`${queue[i].q+d.q},${queue[i].r+d.r}`]);
+                    seed(wodHexAt(queue[i].q+d.q,queue[i].r+d.r));
                 w.cityLandKeys=keys;
                 gameData._cityLandFootprint={hexes:gameData.hexes,signature,revision,keys};
             }
@@ -34588,9 +34669,9 @@
 
         function wodFullyEnclosedLandCaptor(region,owner,keys=new Set(region.map(getHexKey))) {
             const counts={};
-            if(region.some(h=>hexDirections.some(d=>isWaterHex(gameData.hexes[`${h.q+d.q},${h.r+d.r}`]))))return 0;
+            if(region.some(h=>hexDirections.some(d=>isWaterHex(wodHexAt(h.q+d.q,h.r+d.r)))))return 0;
             for(const h of region)for(const d of cardinalHexDirections){
-                const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                const n=wodHexAt(h.q+d.q,h.r+d.r);
                 if(!n||isWaterHex(n))return 0;
                 if(keys.has(getHexKey(n)))continue;
                 if(!wodIsHostileOwner(n.owner,owner))return 0;
@@ -34620,7 +34701,7 @@
             let hasOwnerCity = wodRegionHasOwnerCity(regionKeys, owner);
             // A land connection to a town is genuine supply for every unit type.
             if(hasOwnerCity) return;
-            let waterAccess = region.some(h => cardinalHexDirections.some(dir => isWaterHex(gameData.hexes[`${h.q+dir.q},${h.r+dir.r}`])));
+            let waterAccess = region.some(h => cardinalHexDirections.some(dir => isWaterHex(wodHexAt(h.q+dir.q,h.r+dir.r))));
             if(waterAccess) {
                 if(!w.marineWaterSupplyHexes) w.marineWaterSupplyHexes = new Set();
                 for(let h of region) w.marineWaterSupplyHexes.add(getHexKey(h));
@@ -34751,9 +34832,9 @@
             for(const sx of [-1,1])for(const sy of [-1,1]){
                 const dx=(hex.x+sx*sp/2-unit.x)*sx/radius,dy=(hex.y+sy*sp/2-unit.y)*sy/radius;
                 if(dx<0||dy<0||Math.sqrt(dx)+Math.sqrt(dy)>1)continue;
-                const a=gameData.hexes[`${hex.q+sx},${hex.r}`],b=gameData.hexes[`${hex.q},${hex.r+sy}`],c=gameData.hexes[`${hex.q+sx},${hex.r+sy}`];
+                const a=wodHexAt(hex.q+sx,hex.r),b=wodHexAt(hex.q,hex.r+sy),c=wodHexAt(hex.q+sx,hex.r+sy);
                 if(!a||!b||!c||!wodIsFriendlyOwner(a.owner,unit.owner)||a.owner!==b.owner||c.owner!==a.owner&&c.owner!==hex.owner||isWaterHex(a)||isWaterHex(b)||isWaterHex(c))continue;
-                if(c.owner===hex.owner){const q=Math.min(hex.q,c.q),r=Math.min(hex.r,c.r),cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>gameData.hexes[`${x},${y}`]);if(hex.owner!==wodCornerPinchedOwner(cells,gameData.hexes))continue;}
+                if(c.owner===hex.owner){const q=Math.min(hex.q,c.q),r=Math.min(hex.r,c.r),cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>wodHexAt(x,y));if(hex.owner!==wodCornerPinchedOwner(cells,gameData.hexes))continue;}
                 return a;
             }
             return hex;
@@ -35024,7 +35105,7 @@
             let best = null, bestD = Infinity;
             for(let dq = -ring; dq <= ring; dq++) {
                 for(let dr = -ring; dr <= ring; dr++) {
-                    let h = gameData.hexes[`${center.q + dq},${center.r + dr}`];
+                    let h = wodHexAt(center.q + dq,center.r + dr);
                     if(!isArmyStartSpawnHex(probe, h)) continue;
                     let dx = h.x - x, dy = h.y - y;
                     let d = dx * dx + dy * dy;
@@ -35119,7 +35200,7 @@
                 let searchR = Math.min(18, Math.max(5, Math.ceil(maxBand / hr) + 2 + relaxed));
                 for(let dq = -searchR; dq <= searchR; dq++) {
                     for(let dr = -searchR; dr <= searchR; dr++) {
-                        let hex = gameData.hexes[`${desireCenter.q + dq},${desireCenter.r + dr}`];
+                        let hex = wodHexAt(desireCenter.q + dq,desireCenter.r + dr);
                         if(!hex) continue;
                         if(!isArmyStartSpawnHex(probe, hex)) continue;
                         if(forGameStart && isFrontlineHex(hex, owner)) continue;
@@ -35197,7 +35278,7 @@
             // walkable land frontage. Sampling by edge length also handles bent fronts.
             for(let h of land) {
                 for(let dir of cardinalHexDirections) {
-                    let n = gameData.hexes[`${h.q + dir.q},${h.r + dir.r}`];
+                    let n = wodHexAt(h.q + dir.q,h.r + dir.r);
                     if(!n || !isClaimableLand(n) || isWaterHex(n) || n.type === 'mountain') continue;
                     if(n.owner !== 0 && !wodIsHostileOwner(n.owner, owner)) continue;
                     let key = hexPairBorderKey(h, n);
@@ -35256,7 +35337,7 @@
                     // Start one ordinary infantry in each AI town before distributing
                     // the remaining rear army. Frontage and armor quotas stay intact.
                     if(!front && u.type==='light' && i-frontCount<towns.length && owner>1 && !wodMpIsHumanOwner(owner)) {
-                        const townHex=town&&gameData.hexes[`${town.q},${town.r}`];
+                        const townHex=town&&wodHexAt(town.q,town.r);
                         if(townHex&&pool.includes(townHex))h=townHex;
                     }
                     if(!h) { gameData.entities = gameData.entities.filter(e => e !== u); continue; }
@@ -35346,7 +35427,7 @@
                 if(city.owner !== unit.owner) continue;
                 let dx = city.x - unit.x;
                 let dy = city.y - unit.y;
-                let cityHex = gameData.hexes[`${city.q},${city.r}`];
+                let cityHex = wodHexAt(city.q,city.r);
                 let score = dx * dx + dy * dy;
                 if(isFrontlineHex(cityHex, unit.owner)) score += 500000;
                 if(score < bestCityScore) {
@@ -35399,7 +35480,7 @@
                     const score=along*12-enemy*8-steps*50;if(score>bestScore){bestScore=score;best=h;}
                 }
                 if(steps>=5)continue;
-                for(const d of hexDirections){const h2=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!h2||seen.has(getHexKey(h2))||!wodIsOpenWaterHex(h2)||!wodCanStepBetweenHexes(unit,h,h2,true))continue;seen.add(getHexKey(h2));queue.push({h:h2,steps:steps+1});}
+                for(const d of hexDirections){const h2=wodHexAt(h.q+d.q,h.r+d.r);if(!h2||seen.has(getHexKey(h2))||!wodIsOpenWaterHex(h2)||!wodCanStepBetweenHexes(unit,h,h2,true))continue;seen.add(getHexKey(h2));queue.push({h:h2,steps:steps+1});}
             }
             return best?{x:best.x,y:best.y}:null;
         }
@@ -35630,7 +35711,7 @@
                 if(steps >= maxSteps) continue;
                 for(let di = 0; di < hexDirections.length; di++) {
                     let dir = hexDirections[di];
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    let nHex = wodHexAt(hex.q + dir.q,hex.r + dir.r);
                     // Owned land only — never step onto enemy or neutral tiles.
                     if(!nHex || nHex.owner !== owner || !canUnitEnterHex(unit, nHex) || !wodCanStepBetweenHexes(unit,hex,nHex,true)) continue;
                     let key = `${nHex.q},${nHex.r}`;
@@ -35790,7 +35871,7 @@
                 let cityDefenseBonus = 0;
                 for(let c of wodAiKnownCities(unit.owner)) {
                     if(c.owner !== unit.owner) continue;
-                    let ch = gameData.hexes[`${c.q},${c.r}`];
+                    let ch = wodHexAt(c.q,c.r);
                     if(!ch) continue;
                     if(!getNeighborHexes(hex).some(n => n.q === ch.q && n.r === ch.r)) continue;
                     if(getNeighborHexes(ch).some(n => wodIsHostileOwner(n.owner, unit.owner)))
@@ -36049,7 +36130,7 @@
             const valid=from.owner===owner&&to.owner===owner&&(!sea||from.hasHarbor&&to.hasHarbor)&&!cityCurrentlyHasOutboundConvoy(from,sea);
             if(valid) {
                 const docks=sea?wodTradeSeaDockPair(from,to,owner):null;
-                const origin=sea?docks?.from:from,destination=sea?docks?.to:gameData.hexes[`${to.q},${to.r}`];
+                const origin=sea?docks?.from:from,destination=sea?docks?.to:wodHexAt(to.q,to.r);
                 if(origin&&destination) {
                     const probe={type:'convoy',owner,convoySeaRoute:sea,x:origin.x,y:origin.y},start=getNearestWalkableHexForUnit(probe,origin.x,origin.y);
                     const path=start?findPathAroundTerrain(probe,destination,start):[];
@@ -36757,18 +36838,18 @@
         // corridor, or transfer a cell occupied by a unit/town/structure.
         function wodCleanupTerritoryCorner(hex,protectedKeys) {
             const keepsLinks=(h,owner)=>{
-                const neighbors=hexDirections.map(dir=>gameData.hexes[`${h.q+dir.q},${h.r+dir.r}`]).filter(n=>n&&!isWaterHex(n)&&wodIsFriendlyOwner(n.owner,owner));
+                const neighbors=hexDirections.map(dir=>wodHexAt(h.q+dir.q,h.r+dir.r)).filter(n=>n&&!isWaterHex(n)&&wodIsFriendlyOwner(n.owner,owner));
                 if(neighbors.length<2)return true;
                 const seen=new Set([getHexKey(neighbors[0])]),queue=[neighbors[0]];
                 for(let i=0;i<queue.length;i++)for(const dir of hexDirections){
-                    const n=gameData.hexes[`${queue[i].q+dir.q},${queue[i].r+dir.r}`],k=n&&getHexKey(n);
+                    const n=wodHexAt(queue[i].q+dir.q,queue[i].r+dir.r),k=n&&getHexKey(n);
                     if(!n||n===h||isWaterHex(n)||!wodIsFriendlyOwner(n.owner,owner)||seen.has(k)||Math.abs(n.q-h.q)>3||Math.abs(n.r-h.r)>3)continue;
                     seen.add(k);queue.push(n);
                 }
                 return neighbors.every(n=>seen.has(getHexKey(n)));
             };
             for(const dq of [-1,0])for(const dr of [-1,0]) {
-                const q=hex.q+dq,r=hex.r+dr,cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>gameData.hexes[`${x},${y}`]);
+                const q=hex.q+dq,r=hex.r+dr,cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>wodHexAt(x,y));
                 const [a,b,c,d]=cells;
                 if(cells.some(h=>!h||isWaterHex(h)||h.owner<=0)||a.owner!==d.owner||b.owner!==c.owner||!wodIsHostileOwner(a.owner,b.owner))continue;
                 const choices=[];
@@ -36776,7 +36857,7 @@
                     if(protectedKeys.has(getHexKey(h)))continue;
                     const other=h.owner===a.owner?b.owner:a.owner;
                     let own=0,enemy=0;
-                    for(const dir of cardinalHexDirections){const n=gameData.hexes[`${h.q+dir.q},${h.r+dir.r}`];if(!n||isWaterHex(n))continue;if(n.owner===h.owner)own++;if(n.owner===other)enemy++;}
+                    for(const dir of cardinalHexDirections){const n=wodHexAt(h.q+dir.q,h.r+dir.r);if(!n||isWaterHex(n))continue;if(n.owner===h.owner)own++;if(n.owner===other)enemy++;}
                     const rank=o=>(Math.imul(h.q+503,73856093)^Math.imul(h.r+509,19349663)^Math.imul(o,83492791))>>>0;
                     if(enemy>=2&&enemy>=own&&(enemy>own||rank(other)<rank(h.owner))&&keepsLinks(h,h.owner)&&keepsLinks(h,other))choices.push({h,other,gain:enemy-own});
                 }
@@ -36815,7 +36896,7 @@
                     const h=component[i],k=getHexKey(h);checked.add(k);
                     if(protectedKeys.has(k)){valid=false;break;}
                     for(const d of cardinalHexDirections) {
-                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                        const n=wodHexAt(h.q+d.q,h.r+d.r);
                         if(!n||isWaterHex(n)){coastal=true;continue;}
                         if(n.owner<=0){valid=false;break;}
                         if(n.owner===owner) {
@@ -36939,7 +37020,7 @@
             let px = atX != null ? atX : unit.x;
             let py = atY != null ? atY : unit.y;
             let standingHex = hexOverride
-                ? gameData.hexes[`${hexOverride.q},${hexOverride.r}`]
+                ? wodHexAt(hexOverride.q,hexOverride.r)
                 : getNearestHexToPoint(px, py);
             if(!standingHex) return;
             let uHex = {q: standingHex.q, r: standingHex.r};
@@ -36953,7 +37034,7 @@
             for(let pass = 0; pass < maxPasses; pass++) {
                 for(let ci = 0; ci < claimH.length; ci++) {
                     let ch = claimH[ci];
-                    let h = gameData.hexes[`${ch.q},${ch.r}`];
+                    let h = wodHexAt(ch.q,ch.r);
                     if(!h || (h.q === standingHex.q && h.r === standingHex.r)) continue;
                     if(!wodCanClaimTerritoryHex(unit, h, standingHex)) continue;
                     let onTile = h.q === standingHex.q && h.r === standingHex.r;
@@ -37017,7 +37098,7 @@
                 (!gameData.mp?.enabled||gameData.mp.isHost))wodQueueTerritoryRemnantCheck(hex);
             if(!isWaterHex(hex)) {
                 gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;
-                if(cardinalHexDirections.some(d=>isWaterHex(gameData.hexes[`${hex.q+d.q},${hex.r+d.r}`])))gameData._waterPoliticsDirty=true;
+                if(cardinalHexDirections.some(d=>isWaterHex(wodHexAt(hex.q+d.q,hex.r+d.r))))gameData._waterPoliticsDirty=true;
             }
             hex.renderColor = hex.baseColor;
             if (batchHexOwner) batchHexOwnerDirty = true;
@@ -39044,7 +39125,7 @@
                 let plist = winnerPlan[String(ow)];
                 for(let ti = 0; ti < plist.length; ti++) {
                     let site = plist[ti];
-                    let hx = gameData.hexes[`${site.q},${site.r}`];
+                    let hx = wodHexAt(site.q,site.r);
                     if(!hx) continue;
                     cityIx++;
                     let cid = 'city_' + cityIx;
@@ -39070,7 +39151,7 @@
                     setHexOwner(hx, ow);
                     let near = getHexesInRadius(site.q, site.r, 2);
                     for(let pt of near) {
-                        let gh = gameData.hexes[`${pt.q},${pt.r}`];
+                        let gh = wodHexAt(pt.q,pt.r);
                         if(gh && gh.owner === ow && isClaimableLand(gh)) setHexOwner(gh, ow);
                     }
                 }
@@ -39327,12 +39408,12 @@
                         };
                         gameData.cities.push(startCity);
                         stampUrbanTerrainAroundCity(coastalHex, startCity, owner);
-                        let cityHex = gameData.hexes[`${startCity.q},${startCity.r}`];
+                        let cityHex = wodHexAt(startCity.q,startCity.r);
                         if(cityHex) {
                             setHexOwner(cityHex, owner);
                             let cityArea = getHexesInRadius(startCity.q, startCity.r, 2);
                             for(let pt of cityArea) {
-                                let gh = gameData.hexes[`${pt.q},${pt.r}`];
+                                let gh = wodHexAt(pt.q,pt.r);
                                 if(isClaimableLand(gh)) setHexOwner(gh, owner);
                             }
                         }
@@ -39368,7 +39449,7 @@
                     };
                     gameData.cities.push(startCity);
                     stampUrbanTerrainAroundCity(fallbackHex, startCity, 'fb_' + owner);
-                    let ctr = gameData.hexes[`${startCity.q},${startCity.r}`];
+                    let ctr = wodHexAt(startCity.q,startCity.r);
                     if(ctr && isClaimableLand(ctr)) setHexOwner(ctr, owner);
                 }
 
@@ -39544,7 +39625,7 @@
             for(let pass=0;pass<32;pass++) {
                 let edits=0;
                 for(const h of gameData.hexList) {
-                    const a=gameData.hexes[`${h.q+1},${h.r}`],b=gameData.hexes[`${h.q},${h.r+1}`],c=gameData.hexes[`${h.q+1},${h.r+1}`];
+                    const a=wodHexAt(h.q+1,h.r),b=wodHexAt(h.q,h.r+1),c=wodHexAt(h.q+1,h.r+1);
                     if(!a||!b||!c)continue;
                     if(!isWaterHex(h)&&!isWaterHex(a)&&!isWaterHex(b)&&!isWaterHex(c)&&h.type===c.type&&a.type===b.type&&h.type!==a.type) {
                         // Round terrain in the data too: alternating forest /
@@ -39554,7 +39635,7 @@
                             const type=cell.type===h.type?a.type:h.type;
                             if(cell.type==='urban'||type==='urban')continue;
                             let own=0,other=0;
-                            for(const dir of cardinalHexDirections){const n=gameData.hexes[`${cell.q+dir.q},${cell.r+dir.r}`];if(n?.type===cell.type)own++;if(n?.type===type)other++;}
+                            for(const dir of cardinalHexDirections){const n=wodHexAt(cell.q+dir.q,cell.r+dir.r);if(n?.type===cell.type)own++;if(n?.type===type)other++;}
                             if(other>own||other===own&&type<cell.type)choices.push({cell,type,gain:other-own});
                         }
                         choices.sort((a,b)=>b.gain-a.gain||a.cell.q-b.cell.q||a.cell.r-b.cell.r);
@@ -39563,7 +39644,7 @@
                     }
                     if(isWaterHex(h)!==isWaterHex(c)||isWaterHex(a)!==isWaterHex(b)||isWaterHex(h)===isWaterHex(a))continue;
                     const cells=[h,a,b,c],dry=cells.filter(x=>!isWaterHex(x)),wet=cells.filter(isWaterHex);
-                    const count=x=>cardinalHexDirections.reduce((n,d)=>n+!!(gameData.hexes[`${x.q+d.q},${x.r+d.r}`]&&!isWaterHex(gameData.hexes[`${x.q+d.q},${x.r+d.r}`])),0);
+                    const count=x=>cardinalHexDirections.reduce((n,d)=>n+!!(wodHexAt(x.q+d.q,x.r+d.r)&&!isWaterHex(wodHexAt(x.q+d.q,x.r+d.r))),0);
                     dry.sort((x,y)=>count(x)-count(y)||x.q-y.q||x.r-y.r);
                     wet.sort((x,y)=>count(y)-count(x)||x.q-y.q||x.r-y.r);
                     // Each edit decreases coastline length, or removes a land tip at
@@ -40102,7 +40183,7 @@
                         urbanHexes.push({q: h.q, r: h.r});
 
                         for(let uh of urbanHexes) {
-                            let targetH = gameData.hexes[`${uh.q},${uh.r}`];
+                            let targetH = wodHexAt(uh.q,uh.r);
                             if(targetH && !isWaterHex(targetH)) {
                                 targetH.type = 'urban';
                                 targetH.cityId = 'city_' + i;
@@ -40251,7 +40332,7 @@
                 let q = Math.round(a.q + (b.q - a.q) * t);
                 let r = Math.round(a.r + (b.r - a.r) * t);
                 for(let cell of getHexesInRadius(q, r, 2)) {
-                    let hx = gameData.hexes[`${cell.q},${cell.r}`];
+                    let hx = wodHexAt(cell.q,cell.r);
                     if(hx && hx.type === 'mountain') {
                         hx.type = 'hill';
                         hx.baseColor = getTerrainColor('hill');
@@ -40316,11 +40397,11 @@
                         if(city.owner !== owner) continue;
                         let urbanList = getCityUrbanTerrainHexes(city);
                         for(let uh of urbanList) {
-                            let hx = gameData.hexes[`${uh.q},${uh.r}`];
+                            let hx = wodHexAt(uh.q,uh.r);
                             if(hx && hx.owner === owner && canUnitEnterHex(probeTpl, hx))
                                 seeds.push(hx);
                         }
-                        let ctr = gameData.hexes[`${city.q},${city.r}`];
+                        let ctr = wodHexAt(city.q,city.r);
                         if(ctr && ctr.owner === owner && canUnitEnterHex(probeTpl, ctr))
                             seeds.push(ctr);
                     }
@@ -40377,7 +40458,7 @@
                 if(hex.owner < 1 || !valid.has(hex.owner)) continue;
                 for(let dir of cardinalHexDirections) {
                     if(n >= maxCarves) break;
-                    let oth = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    let oth = wodHexAt(hex.q + dir.q,hex.r + dir.r);
                     if(!oth || oth.owner === hex.owner || oth.owner === 0) continue;
                     if(hex.type === 'mountain' || oth.type === 'mountain') {
                         carveMountainLine(hex, oth);
@@ -40601,6 +40682,7 @@
             wodMpClearTerrainCachesForNewMatch();
         }
         function wodPrepareForNewMatch(opts) {
+            gameData._wodDeepEpoch = (gameData._wodDeepEpoch | 0) + 1;
             gameData._spectator=null;wodSyncSpectatorUi();
             if(!opts?.keepLifetimeMatch){gameData._lifetimeMatch=null;gameData._lifetimeStatsByOwner={};gameData._lifetimeEndReason=null;}
             gameData.controlGroups = {};
@@ -41478,14 +41560,14 @@
         /** Choose reachable cover using the same terrain multipliers as combat. */
         function wodAiDefendStandHex(owner, target, unit) {
             if(!target)return null;
-            const anchor=gameData.hexes[`${target.q},${target.r}`]||target, hr=gameData.hexRadius||20;
+            const anchor=wodHexAt(target.q,target.r)||target, hr=gameData.hexRadius||20;
             if(anchor.x==null)return anchor;
             const defender=unit||{type:'light',owner}, near=wodAiKnownEntities(owner).filter(u=>u.hp>0&&u.type!=='convoy'&&wodIsHostileOwner(u.owner,owner)&&wodAiDist2(u.x,u.y,anchor.x,anchor.y)<Math.pow(hr*12,2));
             near.sort((a,b)=>wodAiDist2(a.x,a.y,anchor.x,anchor.y)-wodAiDist2(b.x,b.y,anchor.x,anchor.y));
             const enemy=near[0], candidates=[anchor], seen=new Set([getHexKey(anchor)]);
             // Expand over friendly walking edges only, so cover across a river or mountain is not selected.
             for(let i=0;i<candidates.length;i++)for(const d of cardinalHexDirections) {
-                const h=candidates[i], n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];
+                const h=candidates[i], n=wodHexAt(h.q+d.q,h.r+d.r);
                 if(!n||seen.has(getHexKey(n))||Math.max(Math.abs(n.q-anchor.q),Math.abs(n.r-anchor.r))>2||
                     n.owner!==owner||isWaterHex(n)||n.type==='mountain'&&!wodCanClimb(defender)||!canUnitEnterHex(defender,n))continue;
                 seen.add(getHexKey(n));candidates.push(n);
@@ -41557,7 +41639,7 @@
                 if(c.owner !== 1) continue;
                 let tiles = getCityUrbanTerrainHexes(c);
                 if(!tiles.length) {
-                    let ch = gameData.hexes[`${c.q},${c.r}`];
+                    let ch = wodHexAt(c.q,c.r);
                     if(ch) tiles = [ch];
                 }
                 for(let ti = 0; ti < tiles.length; ti++) {
@@ -41681,7 +41763,7 @@
                     }
                     continue;
                 }
-                wodAiEnsureFortGuard(ownerId, gameData.hexes[`${ft.q},${ft.r}`] || { q: ft.q, r: ft.r, x: ft.x, y: ft.y });
+                wodAiEnsureFortGuard(ownerId, wodHexAt(ft.q,ft.r) || { q: ft.q, r: ft.r, x: ft.x, y: ft.y });
             }
         }
 
@@ -42035,7 +42117,7 @@
                 let cityDefenseBias = 0;
                 for(let c of wodAiKnownCities(owner)) {
                     if(c.owner !== owner) continue;
-                    let ch = gameData.hexes[`${c.q},${c.r}`];
+                    let ch = wodHexAt(c.q,c.r);
                     if(!ch) continue;
                     if(!getNeighborHexes(ch).some(n => wodIsHostileOwner(n.owner, owner))) continue;
                     let ddx = hex.x - c.x, ddy = hex.y - c.y;
@@ -42105,7 +42187,7 @@
             let bestD = Infinity;
             for(let c of wodAiKnownCities(owner)) {
                 if(c.owner === owner) continue;
-                let ch = gameData.hexes[`${c.q},${c.r}`];
+                let ch = wodHexAt(c.q,c.r);
                 if(!ch || !getNeighborHexes(ch).some(h => isWaterHex(h))) continue;
                 let dx = c.x - fromX, dy = c.y - fromY;
                 let d = dx * dx + dy * dy;
@@ -42149,7 +42231,7 @@
             if(['scout','marine','naval'].includes(job.kind))return true;
             if(job.kind === 'main' && job.attackHex && job.attackHex.owner !== owner) return true;
             if(!job.holdHex) return false;
-            let h = gameData.hexes[`${job.holdHex.q},${job.holdHex.r}`] || job.holdHex;
+            let h = wodHexAt(job.holdHex.q,job.holdHex.r) || job.holdHex;
             if(job.kind === 'reserve') return !!(h && (h.owner === owner || h.owner === 0));
             if(!h || h.owner !== owner) return false;
             // Front jobs die when the hold tile is no longer contested / near enemies.
@@ -42225,7 +42307,7 @@
                 if(!h||h.owner!==owner||isWaterHex(h)||!canUnitEnterHex(lead,h)||!reach.has(getHexKey(h)))break;
                 rally=h;
             }
-            return {objectiveCity:town,attackHex:gameData.hexes[`${town.q},${town.r}`],holdHex:rally,
+            return {objectiveCity:town,attackHex:wodHexAt(town.q,town.r),holdHex:rally,
                 phase:'assemble',phaseAt:wodAiOperationTime(),operationAt:wodAiOperationTime()};
         }
         function wodAiCoastalOperation(owner,marines,ships,sectors) {
@@ -42311,7 +42393,7 @@
                 const component=[i];seen.add(i);
                 for(let ci=0;ci<component.length;ci++){for(const j of edges[component[ci]])if(!seen.has(j)){seen.add(j);component.push(j);}if((ci&255)===255)yield;}
                 const keys=new Set(component.map(j=>getHexKey(tiles[j])));
-                const waterAccess=component.some(j=>cardinalHexDirections.some(d=>isWaterHex(gameData.hexes[`${tiles[j].q+d.q},${tiles[j].r+d.r}`])));
+                const waterAccess=component.some(j=>cardinalHexDirections.some(d=>isWaterHex(wodHexAt(tiles[j].q+d.q,tiles[j].r+d.r))));
                 const trapped=army.filter(u=>keys.has(getHexKey(getNearestHexToPoint(u.x,u.y)||{}))&&
                     !(u.type==='marine'&&waterAccess));
                 if(!trapped.length||!roots.length)continue;
@@ -42320,7 +42402,7 @@
                     if((qi&255)===255)yield;
                     const h=search[qi];
                     for(const d of cardinalHexDirections) {
-                        const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`], k=n&&getHexKey(n);
+                        const n=wodHexAt(h.q+d.q,h.r+d.r), k=n&&getHexKey(n);
                         if(!walk(n)||visited.has(k))continue;
                         visited.add(k);parent.set(k,h);search.push(n);
                         if(supplied.has(index.get(k))){end=n;break;}
@@ -42364,7 +42446,7 @@
             for(let i=0;i<n;i++) {
                 if((i&127)===127)yield;
                 if(!supplied.has(i)||tiles[i].owner!==owner||!closeEnemies(tiles[i]))continue;
-                const exposed=h=>cardinalHexDirections.some(d=>{const x=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];return walk(x)&&wodIsHostileOwner(x.owner,owner);});
+                const exposed=h=>cardinalHexDirections.some(d=>{const x=wodHexAt(h.q+d.q,h.r+d.r);return walk(x)&&wodIsHostileOwner(x.owner,owner);});
                 if(!exposed(tiles[i]))continue;
                 for(const j of edges[i])if(j>i&&supplied.has(j)&&exposed(tiles[j])) {
                     const key=i+','+j;if(pairSeen.has(key))continue;pairSeen.add(key);
@@ -42407,7 +42489,7 @@
             const incursions=[];
             for(const e of enemies) {
                 const h=getNearestHexToPoint(e.x,e.y);if(!h)continue;
-                const near=getHexesInRadius(h.q,h.r,4).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(t=>t&&t.owner===owner&&friendly(t));
+                const near=getHexesInRadius(h.q,h.r,4).map(p=>wodHexAt(p.q,p.r)).filter(t=>t&&t.owner===owner&&friendly(t));
                 if(near.length<2)continue;
                 let cluster=incursions.find(t=>wodAiDist2(t.x,t.y,e.x,e.y)<Math.pow(hr*7,2));
                 if(!cluster){cluster={x:e.x,y:e.y,count:0,near,contacts:[]};incursions.push(cluster);}cluster.count++;cluster.contacts.push(e.uid);
@@ -42668,7 +42750,7 @@
         function wodAiTownAssaultHex(unit,city,members) {
             if(!city)return null;
             const urban=getCityUrbanTerrainHexes(city),remaining=urban.filter(h=>wodIsHostileOwner(h.owner,unit.owner)||h.owner===0);
-            if(!remaining.length)return gameData.hexes[`${city.q},${city.r}`];
+            if(!remaining.length)return wodHexAt(city.q,city.r);
             const counts=new Map();
             const ordered=members.slice().sort((a,b)=>String(a.uid).localeCompare(String(b.uid)));
             for(const member of ordered) {
@@ -42786,7 +42868,7 @@
             } else unit.aiCaptureHexKey=null;
             if(wodIsNavalUnit(unit)&&op.phase!=='assemble') {
                 const threats=wodAiKnownEntities(unit.owner).filter(u=>u.hp>0&&wodIsHostileOwner(u.owner,unit.owner)&&wodAiDist2(u.x,u.y,op.beachHex.x,op.beachHex.y)<Math.pow(hr*10,2));
-                const water=getHexesInRadius(op.beachHex.q,op.beachHex.r,3).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(h=>h&&isWaterHex(h));
+                const water=getHexesInRadius(op.beachHex.q,op.beachHex.r,3).map(p=>wodHexAt(p.q,p.r)).filter(h=>h&&isWaterHex(h));
                 const prey=threats.sort((a,b)=>(a.type==='ship'?0:1)-(b.type==='ship'?0:1))[0];
                 if(prey)target=water.sort((a,b)=>wodAiDist2(a.x,a.y,prey.x,prey.y)-wodAiDist2(b.x,b.y,prey.x,prey.y))[0]||target;
             }
@@ -42902,7 +42984,7 @@
                     if(!anchor || !wodIsFriendlyOwner(anchor.owner,unit.owner) || isWaterHex(anchor)) {
                         anchor=job.holdHex;
                         for(let p of getHexesInRadius(getNearestHexToPoint(x,y)?.q||0,getNearestHexToPoint(x,y)?.r||0,4)) {
-                            let h=gameData.hexes[`${p.q},${p.r}`];
+                            let h=wodHexAt(p.q,p.r);
                             if(h && h.owner===unit.owner && isClaimableLand(h) && (!anchor || wodAiDist2(h.x,h.y,x,y)<wodAiDist2(anchor.x,anchor.y,x,y))) anchor=h;
                         }
                     }
@@ -42934,7 +43016,7 @@
                         for(let c of wodAiKnownCities(unit.owner)) {
                             if(!wodIsHostileOwner(c.owner, unit.owner)) continue;
                             for(let pt of getHexesInRadius(c.q,c.r,6)) {
-                                let h = gameData.hexes[`${pt.q},${pt.r}`];
+                                let h = wodHexAt(pt.q,pt.r);
                                 if(h && isWaterHex(h)) waters.push(h);
                             }
                         }
@@ -42964,8 +43046,8 @@
 
             if(job.kind === 'defend' && (job.city || job.fort)) {
                 let t = job.city || job.fort;
-                let stand = job.city ? gameData.hexes[`${t.q},${t.r}`] : wodAiDefendStandHex(unit.owner,t,unit);
-                stand = stand || gameData.hexes[`${t.q},${t.r}`];
+                let stand = job.city ? wodHexAt(t.q,t.r) : wodAiDefendStandHex(unit.owner,t,unit);
+                stand = stand || wodHexAt(t.q,t.r);
                 if(!stand) stand = { x: t.x, y: t.y, q: t.q, r: t.r };
                 if(job.fort) unit.aiFortGuard = job.fort.id;
                 let near = wodAiDist2(unit.x, unit.y, stand.x, stand.y) < Math.pow(hr * 2.4, 2);
@@ -43150,11 +43232,11 @@
 
         function wodAiCityNeedsFortGuard(city, ownerId) {
             if(!city || city.owner !== ownerId) return false;
-            let cityHex = gameData.hexes[`${city.q},${city.r}`];
+            let cityHex = wodHexAt(city.q,city.r);
             if(!cityHex) return false;
             if(getNeighborHexes(cityHex).some(n => n && wodIsHostileOwner(n.owner, ownerId))) return true;
             for(let pt of getHexesInRadius(city.q, city.r, 2)) {
-                let h = gameData.hexes[`${pt.q},${pt.r}`];
+                let h = wodHexAt(pt.q,pt.r);
                 if(h && isFrontlineHex(h, ownerId)) return true;
             }
             return false;
@@ -43199,12 +43281,12 @@
             }
             for(let h of wodCachedFrontlineHexes(ownerId)) {
                 addHex(h);
-                for(const p of getHexesInRadius(h.q,h.r,4))addHex(gameData.hexes[`${p.q},${p.r}`]);
+                for(const p of getHexesInRadius(h.q,h.r,4))addHex(wodHexAt(p.q,p.r));
             }
             for(let city of wodAiKnownCities(ownerId)) {
                 if(city.owner !== ownerId || !wodAiCityNeedsFortGuard(city, ownerId)) continue;
                 for(let pt of getHexesInRadius(city.q, city.r, 3)) {
-                    addHex(gameData.hexes[`${pt.q},${pt.r}`]);
+                    addHex(wodHexAt(pt.q,pt.r));
                 }
             }
             for(let hex of gameData.hexList) {
@@ -43221,7 +43303,7 @@
             if(sites.some(f=>f.owner===ownerId && wodAiDist2(hex.x,hex.y,f.x,f.y)<spacingSq)) return -1e9;
             if(!wodAiFortHasNearbyDefenders(hex,ownerId)||wodHexKeyIsEncircled(getHexKey(hex)))return -1e9;
             for(const p of getHexesInRadius(hex.q,hex.r,2)) {
-                const h=gameData.hexes[`${p.q},${p.r}`];
+                const h=wodHexAt(p.q,p.r);
                 if(h&&isClaimableLand(h)&&wodIsHostileOwner(h.owner,ownerId))return -1e9;
             }
             if(nearestForeignCombatUnitDistSq(hex.x,hex.y,ownerId)<Math.pow((gameData.hexRadius||20)*7,2))return -1e9;
@@ -43409,7 +43491,7 @@
             for(let city of wodAiKnownCities(ownerId)) {
                 if(city.owner !== ownerId) continue;
                 for(let pt of getHexesInRadius(city.q, city.r, 4))
-                    addOwnCoast(gameData.hexes[`${pt.q},${pt.r}`]);
+                    addOwnCoast(wodHexAt(pt.q,pt.r));
             }
             // Armies can wait at internal rivers far from a town or political
             // frontier. Include those shores and prioritize useful nearby sites.
@@ -43418,7 +43500,7 @@
             for(const unit of waiting) {
                 const h=getNearestHexToPoint(unit.x,unit.y);
                 if(h)for(const pt of getHexesInRadius(h.q,h.r,5))
-                    addOwnCoast(gameData.hexes[`${pt.q},${pt.r}`]);
+                    addOwnCoast(wodHexAt(pt.q,pt.r));
             }
             const proximity=new Map();
             const distance=h=>{if(!proximity.has(h))proximity.set(h,nearestFriendlyLandArmyDistSq(h.x,h.y,ownerId));return proximity.get(h);};
@@ -43759,7 +43841,7 @@
                     let unit = ents[w.ei++];
                     nExamined++;
                     if(unit?.hp>0&&!wodMpIsHumanOwner(unit.owner))wodAiSelectCombatTarget(unit,w.fireControl||=( {} ));
-                    if(['transport','supply'].includes(unit?.type)||unit?.boardTransportUid||unit?._navalAssaultUntil>wodAiOperationTime()||unit?._navalEscortUntil>wodAiOperationTime()||unit?._aiScoutUntil>wodAiOperationTime()||unit?._aiCareYieldUntil>wodAiOperationTime())continue;
+                    if(['transport','supply'].includes(unit?.type)||unit?.boardTransportUid||unit?._navalAssaultUntil>wodAiOperationTime()||unit?._navalEscortUntil>wodAiOperationTime()||unit?._aiScoutUntil>wodAiOperationTime()||unit?._aiCareYieldUntil>wodAiOperationTime()||unit?._opsUntil>wodAiOperationTime())continue;
                     if(unit.type === 'convoy' || unit.hp <= 0) continue;
                     if(wodMpIsHumanOwner(unit.owner)) continue;
                     if(unit.moraleBroken) continue;
@@ -43956,6 +44038,7 @@
             }
 
             for(const owner of Object.keys(aiGroups))wodAiMedicalLogistics(+owner);
+            if(typeof wodOpsCommand==='function')for(const owner of Object.keys(aiGroups))wodOpsCommand(+owner,aiGroups[owner]);
             let mobMemo = wodUsesVisualViewportLayout();
             let formationKeys = Object.keys(aiGroups);
             gameData._aiStratWork = {
@@ -45044,7 +45127,7 @@
             for(const h of list||gameData.hexList) {
                 if(wodDrawHexSet && !wodDrawHexSet.has(getHexKey(h))) continue;
                 for(const sx of [-1,1]) for(const sy of [-1,1]) {
-                    const a=gameData.hexes[`${h.q+sx},${h.r}`],b=gameData.hexes[`${h.q},${h.r+sy}`],c=gameData.hexes[`${h.q+sx},${h.r+sy}`];
+                    const a=wodHexAt(h.q+sx,h.r),b=wodHexAt(h.q,h.r+sy),c=wodHexAt(h.q+sx,h.r+sy);
                     if(!a||!b||!c||a.type===h.type||a.type!==b.type||a.type!==c.type&&c.type!==h.type)continue;
                     if(c.type===h.type) {
                         let winner;
@@ -45053,7 +45136,7 @@
                             let side=0,diagonal=0;
                             const q=Math.min(h.q,c.q),r=Math.min(h.r,c.r);
                             for(let x=q-1;x<=q+2;x++)for(let y=r-1;y<=r+2;y++){
-                                const type=gameData.hexes[`${x},${y}`]?.type;if(type===a.type)side++;if(type===h.type)diagonal++;
+                                const type=wodHexAt(x,y)?.type;if(type===a.type)side++;if(type===h.type)diagonal++;
                             }
                             winner=side===diagonal?[a.type,h.type].sort()[0]:side>diagonal?a.type:h.type;
                         }
@@ -45102,10 +45185,10 @@
             for(const h of list||gameData.hexList){
               if(!h.owner||isWaterHex(h))continue;
               for(const sx of [-1,1])for(const sy of [-1,1]){
-                const a=gameData.hexes[`${h.q+sx},${h.r}`],b=gameData.hexes[`${h.q},${h.r+sy}`],c=gameData.hexes[`${h.q+sx},${h.r+sy}`];
+                const a=wodHexAt(h.q+sx,h.r),b=wodHexAt(h.q,h.r+sy),c=wodHexAt(h.q+sx,h.r+sy);
                 if(!a||!b||!c||!a.owner||!b.owner||!c.owner||h.owner===a.owner||a.owner!==b.owner||c.owner!==a.owner&&c.owner!==h.owner||isWaterHex(a)||isWaterHex(b)||isWaterHex(c))continue;
                 if(c.owner===h.owner){
-                    const q=Math.min(h.q,c.q),r=Math.min(h.r,c.r),cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>gameData.hexes[`${x},${y}`]);
+                    const q=Math.min(h.q,c.q),r=Math.min(h.r,c.r),cells=[[q,r],[q+1,r],[q,r+1],[q+1,r+1]].map(([x,y])=>wodHexAt(x,y));
                     if(h.owner!==wodCornerPinchedOwner(cells,gameData.hexes))continue;
                 }
                 const x=Math.round(h.x+ox+sx*sp/2),y=Math.round(h.y+oy+sy*sp/2);
@@ -45139,7 +45222,7 @@
                 if(wodDrawHexSet && !wodDrawHexSet.has(hex.q + ',' + hex.r)) continue;
                 if(isWaterHex(hex)) continue;
                 for(let dir of hexDirections) {
-                    let nHex = gameData.hexes[`${hex.q + dir.q},${hex.r + dir.r}`];
+                    let nHex = wodHexAt(hex.q + dir.q,hex.r + dir.r);
                     if(nHex && !isWaterHex(nHex)) continue;
                     let mx, my;
                     if(nHex && isWaterHex(nHex)) {
@@ -45216,7 +45299,7 @@
                 let sum = typeBias * 2, wsum = 2;
                 for(let di = 0; di < hexDirections.length; di++) {
                     let dir = hexDirections[di];
-                    let n = gameData.hexes[`${center.q + dir.q},${center.r + dir.r}`];
+                    let n = wodHexAt(center.q + dir.q,center.r + dir.r);
                     if(!n || isWaterHex(n)) continue;
                     sum += terrainElevProxy(n);
                     wsum++;
@@ -52240,7 +52323,7 @@
                     let pts = getHexesInRadius(aq, ar, rad);
                     for(let n = 0; n < pts.length; n++) {
                         let pt = pts[((rng() * pts.length) | 0)];
-                        let h = gameData.hexes[`${pt.q},${pt.r}`];
+                        let h = wodHexAt(pt.q,pt.r);
                         if(!h || h.owner !== owner) continue;
                         if(typeof isArmyStartSpawnHex === 'function') {
                             if(!isArmyStartSpawnHex(probe, h)) continue;
@@ -52521,7 +52604,7 @@
             let coord = pixelToHex(tx, ty);
             let best = null, bd = Infinity;
             for(let pt of getHexesInRadius(coord.q, coord.r, 5)) {
-                let h = gameData.hexes[`${pt.q},${pt.r}`];
+                let h = wodHexAt(pt.q,pt.r);
                 if(!wodCampaignDeployHexOk(unit, h)) continue;
                 let dx = h.x - tx, dy = h.y - ty;
                 let d = dx * dx + dy * dy;
@@ -52690,7 +52773,7 @@
             let coord = pixelToHex(x, y);
             let best = null, bd = Infinity;
             for(let pt of getHexesInRadius(coord.q, coord.r, 16)) {
-                let h = gameData.hexes[`${pt.q},${pt.r}`];
+                let h = wodHexAt(pt.q,pt.r);
                 if(!h || !isWaterHex(h) || isBridgeHex(h)) continue;
                 let dx = h.x - x, dy = h.y - y;
                 let d = dx * dx + dy * dy + idx * 900;
@@ -54672,7 +54755,7 @@
             const visible=new Set(),explored=rec.explored,friendly=o=>wodIsFriendlyOwner(o,owner);
             for(const h of gameData.hexList)if(friendly(h.owner)) {
                 const key=getHexKey(h);visible.add(key);explored.add(key);
-                if(cardinalHexDirections.some(d=>{const n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];return n&&!friendly(n.owner);}))
+                if(cardinalHexDirections.some(d=>{const n=wodHexAt(h.q+d.q,h.r+d.r);return n&&!friendly(n.owner);}))
                     wodFogRevealHexesAround(h.q,h.r,2,visible,explored);
             }
             for(const u of gameData.entities)if(u.hp>0&&friendly(u.owner)) {
@@ -54770,13 +54853,13 @@
         function wodFogCanSeeCity(city) {
             if(!wodFogActive() || !city) return true;
             if(city.owner === wodLocalPlayerOwner()) return true;
-            return wodFogHexVisible(gameData.hexes[`${city.q},${city.r}`]);
+            return wodFogHexVisible(wodHexAt(city.q,city.r));
         }
 
         function wodFogCanSeeFort(fort) {
             if(!wodFogActive() || !fort) return true;
             if(fort.owner === wodLocalPlayerOwner()) return true;
-            return wodFogHexVisible(gameData.hexes[`${fort.q},${fort.r}`]);
+            return wodFogHexVisible(wodHexAt(fort.q,fort.r));
         }
 
         function wodEnsureFogCloudPattern() {
@@ -55885,6 +55968,7 @@
         function wodAiMoveUnitToward(unit, x, y, holdingOpt,fromQueue=false) {
             if(!unit || unit.hp <= 0) return false;
             if(unit._medicalRecovering)return false;
+            if(unit._opsUntil>wodAiOperationTime()&&!gameData._opsIssuing&&!fromQueue)return false;
             if(wodAiKeepMoveIntent(unit,x,y,holdingOpt))return true;
             if(gameData._wodPfFrameActive&&!fromQueue&&!wodMpIsHumanOwner(unit.owner)) {
                 const queue=gameData._aiMoveQueue||(gameData._aiMoveQueue=new Map());
@@ -55912,6 +55996,9 @@
                 if(ferry&&(naval?.canEmbark||friendly)&&wodOrderBoardTransport(unit,ferry)){ferry._aiFleetId=friendly?null:naval.id;ferry.ferryGoal={x,y};ferry._aiFerryMission=true;return true;}
                 return false;
             }
+            // A dry route exists, so an earlier "needs a ferry" verdict is stale. It used to stick for the
+            // rest of the match and left healthy troops waiting for boats on a connected landmass.
+            if(unit._needsTransport&&unit.type!=='marine'&&sh&&!isWaterHex(sh)&&gh&&!isWaterHex(gh)&&!unit._navalEvacuating&&!unit._navalAssaultGoal&&!unit.boardTransportUid&&!unit._medicalEvacuating)unit._needsTransport=false;
             let tx = x, ty = y;
             // Sector jitter / formation slots near rivers must not become intoWater orders
             // when a bridge can carry the march — snap land armies onto land or deck.
@@ -56206,7 +56293,7 @@
                         landD = Infinity;
                     let jc = pixelToHex(px, py);
                     for(let pt of getHexesInRadius(jc.q, jc.r, 2)) {
-                        let lh = gameData.hexes[`${pt.q},${pt.r}`];
+                        let lh = wodHexAt(pt.q,pt.r);
                         if(!lh || lh.type === 'mountain' || isWaterHex(lh) || isBridgeHex(lh)) continue;
                         if(!wodHexWalkableForLandPath(unit, lh, false)) continue;
                         let dx = lh.x - px,
@@ -56421,7 +56508,7 @@
             if(!requested||!isWaterHex(requested)||!slot||isWaterHex(slot))return {x,y};
             let best=null,score=Infinity;
             for(const p of getHexesInRadius(requested.q,requested.r,5)) {
-                const h=gameData.hexes[`${p.q},${p.r}`];if(!h||!wodIsOpenWaterHex(h))continue;
+                const h=wodHexAt(p.q,p.r);if(!h||!wodIsOpenWaterHex(h))continue;
                 const d=(h.x-x)**2+(h.y-y)**2;if(d<score){score=d;best=h;}
             }return best?{x:best.x,y:best.y}:{x:goal.x,y:goal.y};
         }
@@ -57638,7 +57725,7 @@
 
         function wodEffectiveFortOwner(ft) {
             if(!ft) return 0;
-            let h = gameData.hexes[`${ft.q},${ft.r}`];
+            let h = wodHexAt(ft.q,ft.r);
             return h&&h.owner===ft.owner?ft.owner|0:0;
         }
 
@@ -58875,7 +58962,7 @@
             let components=cache.types.get(type);if(!components)cache.types.set(type,components=new Map());
             const rootKey=getHexKey(root);if(components.has(rootKey))return components.get(rootKey);
             const keys=new Set([rootKey]),queue=[root];
-            for(let i=0;i<queue.length;i++)for(const d of hexDirections){const h=queue[i],n=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!n||wodIsOpenWaterHex(n)||n.type==='mountain'&&!wodCanClimb(unit)||keys.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,true))continue;keys.add(getHexKey(n));queue.push(n);}
+            for(let i=0;i<queue.length;i++)for(const d of hexDirections){const h=queue[i],n=wodHexAt(h.q+d.q,h.r+d.r);if(!n||wodIsOpenWaterHex(n)||n.type==='mountain'&&!wodCanClimb(unit)||keys.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,true))continue;keys.add(getHexKey(n));queue.push(n);}
             for(const key of keys)components.set(key,keys);return keys;
         }
         function wodTransportShorePairs(unit,transport,goal,landing=false,nearGoal=false) {
@@ -58887,7 +58974,7 @@
                 if(reachable&&!reachable.has(getHexKey(h)))continue;
                 const gd=(h.x-goal.x)**2+(h.y-goal.y)**2;
                 for(const d of cardinalHexDirections) {
-                    const w=gameData.hexes[`${h.q+d.q},${h.r+d.r}`];if(!w||!wodIsOpenWaterHex(w)||seaRegion&&!seaRegion.has(getHexKey(w)))continue;
+                    const w=wodHexAt(h.q+d.q,h.r+d.r);if(!w||!wodIsOpenWaterHex(w)||seaRegion&&!seaRegion.has(getHexKey(w)))continue;
                     const sea=(w.x-transport.x)**2+(w.y-transport.y)**2;
                     // A player coast click chooses that beach, not the beach closest
                     // to the boat. AI balances actual sailing/walking distances.
@@ -58992,7 +59079,7 @@
             const old=cache.cities.get(city);if(old&&old.stamp===stamp)return old.value;
             const intel=fog?wodFogFactionIntel(owner):null,seen=new Set(),probe={type:'ship',owner,radius:20};let useful=false;
             for(const p of getHexesInRadius(city.q,city.r,3)){
-                const h=gameData.hexes[`${p.q},${p.r}`];if(!wodIsOpenWaterHex(h))continue;
+                const h=wodHexAt(p.q,p.r);if(!wodIsOpenWaterHex(h))continue;
                 const region=wodNavalWaterRegionKeys(probe,h);if(!region||seen.has(region))continue;seen.add(region);
                 if(wodAiKnownEntities(owner).some(u=>wodIsHostileOwner(u.owner,owner)&&wodIsNavalUnit(u)&&region.has(getHexKey(getNearestHexToPoint(u.x,u.y))))){useful=true;break;}
                 if(region.size<24)continue;
@@ -59019,7 +59106,7 @@
                 for(const goal of goals.slice(0,4)){
                     const range=goal.type==='convoy'?0:(ship.range||80)*.85;
                     const center=getNearestHexToPoint(goal.x,goal.y);if(!center)continue;
-                    const sites=getHexesInRadius(center.q,center.r,5).map(p=>gameData.hexes[`${p.q},${p.r}`]).filter(h=>h&&region.has(getHexKey(h))&&wodNavalDestinationClear(ship,h))
+                    const sites=getHexesInRadius(center.q,center.r,5).map(p=>wodHexAt(p.q,p.r)).filter(h=>h&&region.has(getHexKey(h))&&wodNavalDestinationClear(ship,h))
                         .sort((a,b)=>Math.abs(Math.hypot(a.x-goal.x,a.y-goal.y)-range)*4+Math.hypot(a.x-ship.x,a.y-ship.y)*.1-Math.abs(Math.hypot(b.x-goal.x,b.y-goal.y)-range)*4-Math.hypot(b.x-ship.x,b.y-ship.y)*.1);
                     const site=sites[0];if(!site)continue;
                     if(Math.hypot(site.x-ship.x,site.y-ship.y)<(gameData.hexRadius||20)*1.2)break;
@@ -59319,7 +59406,10 @@
                 const current=u.aiCaptureHexKey&&gameData.hexes[u.aiCaptureHexKey];if(current&&current.owner!==u.owner&&u.target)continue;
                 const members=gameData.entities.filter(m=>m.owner===u.owner&&m.hp>0&&!wodIsNavalUnit(m)&&m.type!=='convoy'&&Math.hypot(m.x-city.x,m.y-city.y)<gameData.hexRadius*9);
                 const target=wodAiTownAssaultHex(u,city,members);if(!target||target.owner===u.owner)continue;
-                if(wodAiMoveUnitTowardHex(u,target,false,0)){u.aiCaptureHexKey=getHexKey(target);u.aiOrderUntil=wodAiOperationTime()+2500;u.aiHoldUntil=0;u.aiFormationSerial=-1;}
+                const opsHeld=u._opsUntil>wodAiOperationTime();if(opsHeld&&!u._opsSweep)continue;
+                if(opsHeld)gameData._opsIssuing=true;
+                try{if(wodAiMoveUnitTowardHex(u,target,false,0)){u.aiCaptureHexKey=getHexKey(target);u.aiOrderUntil=wodAiOperationTime()+2500;u.aiHoldUntil=0;u.aiFormationSerial=-1;}}
+                finally{if(opsHeld)gameData._opsIssuing=false;}
             }
         }
 
@@ -59979,7 +60069,7 @@
                 // mountains and got stuck on the smaller mission maps.
                 gameData._loadedMapHexRadius = Number.isFinite(mapData.hexRadius)&&mapData.hexRadius>0?mapData.hexRadius:null;
                 for(let hex of gameData.hexList) {
-                    let nb = gameData.hexes[`${hex.q + 1},${hex.r}`];
+                    let nb = wodHexAt(hex.q + 1,hex.r);
                     if(nb) {
                         let sp = Math.abs(nb.x - hex.x);
                         if(sp > 4) gameData._loadedMapHexRadius = sp / 1.35;

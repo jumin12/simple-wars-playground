@@ -967,7 +967,20 @@ const server = http.createServer((req, res) => {
   res.end();
 });
 
-const wss = new WebSocketServer({ server, maxPayload: MAX_INIT_BYTES });
+// Match snapshots are repetitive JSON sent ten times a second to every player; compressing them
+// cuts relay bandwidth by roughly 85-90%. Browsers and Electron negotiate this automatically.
+// Small control messages stay uncompressed, and no per-connection compression state is retained.
+const wss = new WebSocketServer({
+  server,
+  maxPayload: MAX_INIT_BYTES,
+  perMessageDeflate: {
+    zlibDeflateOptions: { level: 3, memLevel: 7 },
+    clientNoContextTakeover: true,
+    serverNoContextTakeover: true,
+    concurrencyLimit: 8,
+    threshold: 1024,
+  },
+});
 
 wss.on('connection', (ws) => {
   const client = {
@@ -1666,7 +1679,17 @@ wss.on('connection', (ws) => {
       return;
     }
     if (t === 'snap' && client.isHost) {
-      client.room.lastSnap = { payload: msg.payload, seq: msg.seq };
+      // Live clients retain fields omitted by the host's lightweight snapshots.
+      // Rejoins and host transfers need the same complete state from the relay.
+      const cached = msg.payload && typeof msg.payload === 'object' && !Array.isArray(msg.payload)
+        ? { ...msg.payload } : msg.payload;
+      const previous = client.room.lastSnap?.payload;
+      if (cached && previous) {
+        for (const field of ['hexOwners', 'battleLedger', 'lifetimeStatsByOwner']) {
+          if (cached[field] === undefined && previous[field] !== undefined) cached[field] = previous[field];
+        }
+      }
+      client.room.lastSnap = { payload: cached, seq: msg.seq };
       broadcast(client.room, { t: 'snap', payload: msg.payload, seq: msg.seq }, ws);
       return;
     }
