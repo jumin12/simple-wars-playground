@@ -13068,8 +13068,8 @@
     <script src="ancient-civ-emblems.js"></script>
     <script src="music-player.js?v=assault-move-audio-v1"></script>
     <script src="battle-audio.js?v=structure-collapse-v1"></script>
-    <script src="ai-command.js?v=committed-assaults-20261110"></script>
-    <script src="ai-ops.js?v=field-command-20261111"></script>
+    <script src="ai-command.js?v=field-command-20261112"></script>
+    <script src="ai-ops.js?v=field-command-20261112"></script>
     <script src="campaign-ui.js"></script>
     <script>
         // --- Core UI & State ---
@@ -13088,6 +13088,11 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-12T19:18:10Z",title:"Supply-aware assaults and coordinated flanks",items:[
+                "AI commanders account for morale, choose firing positions that can remain supplied, and regroup to reopen supply routes when their forces are cut off.",
+                "Stronger forces can send wings around a battle, pursue retreating enemies and support nearby fighting; commanders adapt their assault estimates after taking or failing to take towns.",
+                "The field commander now operates in authored missions while respecting scripted reinforcement marches."
+            ]},
             {at:"2026-11-11T23:00:00Z",title:"Decisive AI, faster simulation, lighter multiplayer",items:[
                 "AI commanders now cut supply lines. When your troops stray from their towns, one enemy unit shadows them while another marches across the ground behind them; a closed pocket starves quickly, so watch your corridors.",
                 "An AI with a clearly stronger army masses it, pins the defenders from cover and sends a wing round the town instead of trickling in small groups. Undefended towns are taken on sight.",
@@ -57531,8 +57536,10 @@
             } else {
                 units = (gameData.entities || []).filter(u => u && u.owner === owner && u.hp > 0 && u.type !== 'convoy');
             }
-            for(let unit of units)
+            for(let unit of units) {
                 assignUnitMoveAlongWaypoints(unit, [{ x: spec.x, y: spec.y }]);
+                unit._missionMarch = { x: spec.x, y: spec.y, until: (typeof wodAiOperationTime === 'function' ? wodAiOperationTime() : 0) + 150000 };
+            }
         }
         function wodHideMissionPopup() {
             let ov = document.getElementById('wodMissionPopupOverlay');

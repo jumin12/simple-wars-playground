@@ -7,50 +7,71 @@
 //
 // What the commander knows about this game:
 //   - A firefight is slow and a hurt unit can walk away and be refilled, so battles decide little by
-//     themselves. What they cost is manpower: every point of damage has to be bought back.
+//     themselves. What they cost is manpower: every point of damage has to be bought back, and a regiment
+//     that is killed costs twice what healing it would have.
 //   - A town falls when no defender is left standing in its streets, and a town is half an economy.
-//   - Troops in a town take half damage, so storming one at even odds is the worst trade there is.
+//   - Troops in a town take half damage, but a town with an enemy inside gun range neither heals nor recruits.
 //   - The side fighting nearer its own towns and hospitals gets its wounded back first.
-//   - A unit whose land link to a friendly town is cut dies in under a minute.
+//   - A unit whose land link to a friendly town is cut dies in under a minute. A unit standing on a cell that
+//     is not its own side's counts as cut off too, and a cell with an enemy on it or beside it cannot be
+//     claimed: troops that close to short range inside enemy land starve while they fight.
+//   - Fire wears morale down, and troops with no morale left shoot at a fifth of their strength, then run.
+//   - Armour and motor troops outrange infantry.
 //
 // So, every pulse:
-//   1. Each town keeps a guard in its streets (a living defender blocks capture). Enemies at its walls
-//      bring defenders in proportion, from wherever they are: that is not a question of odds.
+//   1. A town keeps a man in its streets only while somebody could walk into them before help would arrive
+//      (always, under fog). Enemies at its walls bring defenders in proportion, from wherever they are.
+//      Everyone else belongs to the field army.
 //   2. Everything the enemy shows becomes a job with a price in fighting strength:
 //        strike  an enemy group in the field or in our land, cheaper to accept near our own towns;
-//        take    a town, stormed with everything: when the enemy's field army is beaten or shut up inside
-//                it, or when we outweigh the town and that army together;
+//        take    a town, stormed with everything. The garrison and what stands beside it are counted in
+//                full; what would have to march there counts for a share that is learnt during the match:
+//                an enemy who lets a town fall is rushed again, one who beats an assault off is respected;
 //        raid    a town held by little more than its guard, when a small party can be there well before
-//                any relief: it goes round the enemy, and if it cannot beat the garrison it blockades
-//                (one hostile unit within reach of a town's streets stops its recruiting and healing);
+//                any relief: it goes round the enemy, and if it cannot beat the garrison it blockades;
 //        cut     a column that has pushed into our land and hangs on the strip it painted behind it.
 //   3. The best battle that can be paid for is the main effort and takes everyone in reach; while there is
-//      one, a raid gets only a small share of the army. A job that cannot be paid for is not started.
-//   4. What is left waits in cover at a forward post with its own field hospital, or stands in the streets
-//      of a town under pressure; a share of it walks into undefended enemy land (income, sight, and bait).
-//   5. Troops on a job gather where most of them already are, march as one body (nobody waits for recruits
-//      a map away), form up short of the objective and fight from cover; the wounded and the running are
-//      pursued, and the moment a town's streets are empty the nearest troops walk in. An attack is called
-//      off before contact if the enemy proves stronger. In contact a battle near home is fought out; under
-//      the enemy's towns, or against a town at even odds, it is broken off. Failures are remembered: the
-//      commander then asks for better odds, and costly failures count double.
+//      one, a raid gets only a small share of the army.
+//   4. Troops on a job gather where the army already waits, march as one body (nobody walks on alone into
+//      an enemy position the column has not reached), form up short of the objective and fight from two
+//      cells off, at the limit of their range, on ground that is theirs or that they can claim, in the best
+//      cover there. A unit caught on ground it cannot hold steps off it before it starts to starve. A force that clearly outweighs its
+//      enemy sends wings round both sides to his rear: they shoot what the frontal fight drives back, stand
+//      between his wounded and their hospital, and the ground they walk over closes behind him, so a force
+//      in the open is cut from its towns and starves. While a fight is being won the wounded stay in the
+//      line; a fight that is being lost is broken off, sooner under the enemy's towns than at home.
+//   5. With no battle it can pay for the army does not go home. It closes up to the enemy, just out of his
+//      reach, at a post chosen for its cover, with a field hospital behind it. From there armour shoots at whatever
+//      it outranges (he must come out or bleed); an army without armour sends one sound unit forward as bait
+//      and falls on whatever follows it back; and a share of the troops walks the enemy's undefended land,
+//      first of all the ground on the road between home and the front, so the army cannot be cut off.
+//
+//   6. Troops whose road home is cut turn round at once, before the twelve seconds of grace run out, and walk
+//      back toward the nearest supplied ground; the cells they cross become theirs again and reopen the road.
+//      Two or more cut off together take their whole force back with them.
 //
 // Each commander draws a doctrine at the start of a match (how big an edge it wants, how much it raids and
 // hunts, how patient it is, which flank it likes), so two matches do not play alike.
 //
 // Safety: commanded units carry a six-second lease (_opsUntil) renewed every pulse. If this code throws, the
 // lease lapses and the original planners take every unit back. WOD_OPS.enabled=false switches it off.
-const WOD_OPS={enabled:true,owners:null,error:null};
+// WOD_OPS.T holds switches used by the test rig (headless/README.md) to play variants against each other.
+// Three ideas are kept behind switches because they lost when measured over 24-match sets: coverStand (waiting
+// troops spread over the best cover cells and only return fire), pullback (a beaten force goes all the way
+// back to its own ground) and wide (a wider marching column). They help against an enemy who cuts roads and
+// cost more than that against one who does not.
+const WOD_OPS={enabled:true,owners:null,error:null,T:{}};
 const WOD_OPS_DOCTRINES=[
-    {name:'blitz',ratio:1.14,sweep:.2,raid:1.3,hunt:.9,patience:70},
-    {name:'methodical',ratio:1.28,sweep:.22,raid:.9,hunt:1.15,patience:140},
-    {name:'raider',ratio:1.2,sweep:.34,raid:1.8,hunt:.9,patience:100},
-    {name:'hunter',ratio:1.2,sweep:.14,raid:1,hunt:1.6,patience:110}
+    {name:'blitz',ratio:1.02,sweep:.4,raid:1.3,hunt:.9,patience:50},
+    {name:'methodical',ratio:1.16,sweep:.4,raid:.9,hunt:1.15,patience:110},
+    {name:'raider',ratio:1.08,sweep:.55,raid:1.8,hunt:.9,patience:80},
+    {name:'hunter',ratio:1.08,sweep:.3,raid:1,hunt:1.6,patience:90}
 ];
-// Authored missions (timed defences, evacuations, landings) were balanced against the original planners and
-// keep them; skirmish, multiplayer and campaign battles use the field command. WOD_OPS.missions=true lifts that.
-function wodOpsActive(owner){return WOD_OPS.enabled&&(!WOD_OPS.owners||WOD_OPS.owners.has(owner))&&!wodMpIsHumanOwner(owner)&&!wodCampaignDeployActive()&&(!gameData.mission||WOD_OPS.missions);}
-function wodOpsDps(u){return (u.damage||0)/(u.attackCooldown||2);}
+// Authored missions use the field command like every other battle; reinforcements a mission script sends
+// marching somewhere finish that march first. WOD_OPS.missions=false gives missions back to the original planners.
+function wodOpsActive(owner){return WOD_OPS.enabled&&(!WOD_OPS.owners||WOD_OPS.owners.has(owner))&&!wodMpIsHumanOwner(owner)&&!wodCampaignDeployActive()&&(!gameData.mission||WOD_OPS.missions!==false);}
+// Worn-down morale cuts a unit's fire to a fraction, so a tired army is weaker than its health shows.
+function wodOpsDps(u){return (u.damage||0)/(u.attackCooldown||2)*(WOD_OPS.T.noMorale?1:.18+.82*Math.min(1,(u.morale??100)/100));}
 // Fighting strength in "fresh infantry regiments": a square-law estimate, so numbers and health both count.
 // With cover, health is weighed by the ground each unit stands on.
 function wodOpsStrength(list,cover){
@@ -121,7 +142,7 @@ function wodOpsNewState(owner,now){
     const doctrine={name:base.name,ratio:base.ratio*(.96+Math.random()*.08),sweep:base.sweep*j(),raid:base.raid*j(),hunt:base.hunt*j(),
         patience:base.patience*j(),side:Math.random()<.5?1:-1,seed:Math.floor(Math.random()*1e9)};
     wodAiRecord(owner,'ops-doctrine',{doctrine:doctrine.name});
-    return {doctrine,born:now,lastPush:now,ts:{},strikes:[],garrison:{},sweep:{},failed:{},cuts:[],counts:{launch:0,raid:0,recall:0,cut:0,pocket:0,taken:0}};
+    return {doctrine,reliefK:{blitz:.5,raider:.6,hunter:.7,methodical:.85}[base.name]||.7,born:now,lastPush:now,ts:{},strikes:[],garrison:{},sweep:{},failed:{},cuts:[],counts:{launch:0,raid:0,recall:0,cut:0,pocket:0,taken:0,flank:0,bait:0,ambush:0}};
 }
 // War economy. Manpower, not money, limits an army here: every point of damage costs manpower to heal, and a
 // new regiment costs twice the manpower of refilling a broken one. The original buyer does the opposite of
@@ -161,6 +182,13 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
         if(site&&wodApplyBuildAtCityForOwner(site,'heavy',owner)){wodAiRecord(owner,'recruit',{city:site.id,type:'heavy',reason:'war-economy'});return;}
         if(!site)return; // factory busy: keep the money for it
     }
+    // Manpower is what is short, so money piles up: put it by for armour (about one in four) rather than
+    // leave it idle. The same manpower gives far more strength as a tank, and its gun outranges infantry.
+    const army=units.filter(u=>u.hp>0&&isLandArmyUnit(u)),armour=army.filter(u=>u.type==='heavy'&&!u.isGeneral).length+pending.filter(j=>j.mode==='heavy').length;
+    if(!WOD_OPS.T.noArmour&&S.calm&&works.length&&cash()>=heavy.money*.5&&armour<Math.max(1,Math.floor(army.length/4))&&spare()>=getUnitUpkeep({type:'heavy'})+3){
+        if(mp()<heavy.manpower)S.saveMp=true;
+        return;
+    }
     const floorCash=S.wantHospital?WOD_PRICE_HOSPITAL:0; // money being put aside for a field hospital is not spent on recruits
     for(const c of free){
         if(spare()<getUnitUpkeep({type:'light'})+1.5||cash()-light.money<floorCash)break;
@@ -171,6 +199,27 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
     }
 }
 
+function wodOpsState(owner,now){
+    const root=gameData._aiOps&&gameData._aiOps.hexes===gameData.hexes?gameData._aiOps:(gameData._aiOps={hexes:gameData.hexes,by:{}});
+    return root.by[owner]||(root.by[owner]=wodOpsNewState(owner,now));
+}
+// The opening. A regiment from every town before the first brick is laid: the starting manpower would
+// otherwise lie idle while the factories go up, and two more regiments in the first minutes are what an
+// early attack is made of. The methodical commander builds first. Called by the original opening planner.
+function wodOpsOpening(owner,cities){
+    if(!wodOpsActive(owner)||WOD_OPS.T.noRush)return false;
+    const now=wodAiOperationTime(),S=wodOpsState(owner,now);
+    if(S.opened||S.doctrine.name==='methodical')return false;
+    S.opened=true;
+    if(now-S.born>20000)return false;
+    const cost=getUnitCost('light');
+    for(const c of cities){
+        if(wodCityProductionJob(c)||isCitySiegeBlockedForProduction(c))continue;
+        if((gameData.aiManpowerByOwner[owner]||0)<cost.manpower||(gameData.aiMoneyByOwner[owner]||0)<cost.money+WOD_PRICE_FACTORY)break;
+        if(cityEligibleForBuildPlacementForOwner(c,'light',owner)&&wodApplyBuildAtCityForOwner(c,'light',owner))wodAiRecord(owner,'recruit',{city:c.id,type:'light',reason:'opening'});
+    }
+    return false;
+}
 function wodOpsCommand(owner,units){
     if(!wodOpsActive(owner))return;
     try{wodOpsRun(owner,units);}
@@ -182,10 +231,9 @@ function wodOpsCommand(owner,units){
 }
 function wodOpsRun(owner,units){
     const now=wodAiOperationTime(),hr=gameData.hexRadius||20,C=hr*1.35;
-    const root=gameData._aiOps&&gameData._aiOps.hexes===gameData.hexes?gameData._aiOps:(gameData._aiOps={hexes:gameData.hexes,by:{}});
-    const S=root.by[owner]||(root.by[owner]=wodOpsNewState(owner,now));
+    const S=wodOpsState(owner,now);
     if(S.disabledUntil>now)return;
-    const D=S.doctrine;
+    const D=S.doctrine,TU=WOD_OPS.T||{};
     const myTowns=gameData.cities.filter(c=>c.owner===owner);
     if(!myTowns.length){S.saveMp=false;return;}
     const dist=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
@@ -201,8 +249,11 @@ function wodOpsRun(owner,units){
     for(const u of units){
         if(!(u.hp>0)||!isLandArmyUnit(u)||u.boardTransportUid||u._medicalRecovering||u._medicalEvacuating||u.moraleBroken||u._navalEvacuating||u._navalLanded||u._navalAssaultUntil>now){u._opsUntil=0;continue;}
         // cut off: the supply-escape logic of the original planners acts at once
-        if((u.outOfSupplySeconds||0)>2||(u.supplyPendingSeconds||0)>1.2){u._opsUntil=0;continue;}
+        // cut off: without the breakout below, the supply-escape logic of the original planners acts
+        if(TU.noBreakout&&((u.outOfSupplySeconds||0)>2||(u.supplyPendingSeconds||0)>1.2)){u._opsUntil=0;continue;}
         if(!wodOpsLandHex(u.x,u.y))continue;
+        // reinforcements a mission script has sent marching somewhere finish that march first
+        if(u._missionMarch){const m=u._missionMarch;if(now<m.until&&Math.hypot(m.x-u.x,m.y-u.y)>C*4&&!u._combatEngaged&&(u.target||u.orderTarget)){u._opsUntil=0;continue;}u._missionMarch=null;}
         elig.push(u);
     }
     const reachCache=new Map();
@@ -228,26 +279,40 @@ function wodOpsRun(owner,units){
     const foes=seen.filter(u=>!wodIsNavalUnit(u)&&wodOpsLandHex(u.x,u.y));
     const ghosts=wodFogActive()?wodAiThreats(owner,true).filter(u=>u._intelMemory&&!wodIsNavalUnit(u)):[];
     const enemyTowns=wodAiKnownCities(owner).filter(c=>c.owner!==owner&&c.owner>0&&wodIsHostileOwner(c.owner,owner));
-    const claim=(u,role)=>{u._opsUntil=now+6000;u._opsRole=role;u._opsSweep=false;if(u._needsTransport)u._needsTransport=false;};
+    const claim=(u,role)=>{u._opsUntil=now+6000;u._opsRole=role;u._opsSweep=false;if(u._needsTransport)u._needsTransport=false;if(u._opsFast){u._opsFast=false;if(!u._wodAttackOrder)u._wodAttackApproaching=false;}};
+    // Disengaging troops keep three quarters of their pace under fire, as a player's ordered retreat does. (The
+    // engine's own retreat state is not used for it: the medical planner would take the unit over.)
+    const hurry=u=>{if(u._combatEngaged&&!u._wodAttackOrder){u._wodAttackApproaching=true;u._opsFast=true;}};
     const pool=new Set(fighters);
     const byUid=new Map(elig.map(u=>[u.uid,u]));
     const taken=[]; // firing positions handed out this pulse
-    // Best covered firing position against a target: inside range, on our side of it, not on top of a comrade.
+    // Ground a unit can stand on and stay supplied: a cell that is ours, or one it will make ours by standing
+    // there. A cell with an enemy on it or beside it cannot be claimed, and a unit on a cell that is not ours
+    // counts as cut off: after twelve seconds it starves faster than two regiments could shoot it. So troops
+    // fight from two cells off, at the limit of their range, and step off bad ground before the clock runs out.
+    const noClaim=new Set();
+    if(!TU.noSupplyPos)for(const e of foes){const h=getNearestHexToPoint(e.x,e.y);if(!h)continue;for(let dq=-1;dq<=1;dq++)for(let dr=-1;dr<=1;dr++)noClaim.add((h.q+dq)+','+(h.r+dr));}
+    const sound=h=>friendlyCell(h)||!noClaim.has(h.q+','+h.r);
+    const starving=u=>!TU.noSupplyPos&&((u.supplyPendingSeconds||0)>0||(u.outOfSupplySeconds||0)>0);
+    // Best covered firing position against a target: inside range, on sound ground, not on top of a comrade.
     const firePos=(u,foe,k)=>{
         // armour stands off at the limit of its longer gun, where infantry cannot answer
-        const range=(u.range||50),reach=range*(range>(foe.range||50)+4?.93:.82),d=dist(u,foe)||1,base=Math.atan2(u.y-foe.y,u.x-foe.x);
-        let best=null,bs=Infinity;
+        const range=(u.range||50),reach=range*(range>(foe.range||50)+4?.93:TU.noSupplyPos?.82:TU.reach??.9),d=dist(u,foe)||1,base=Math.atan2(u.y-foe.y,u.x-foe.x);
+        let best=null,bs=Infinity,bestSound=false;
         const tryAt=(p,extra)=>{
             const h=wodOpsLandHex(p.x,p.y);if(!h||!canUnitEnterHex(u,h))return;
-            let s=getTerrainDefenseModifier(u,h)+extra+dist(p,u)/(hr*40);
+            const ok=sound(h);
+            let s=getTerrainDefenseModifier(u,h)/(TU.noAtkPos?1:Math.sqrt(Math.max(.2,getTerrainAttackModifier(u,h))))+extra+dist(p,u)/(hr*40)+(ok?0:TU.unsound??.35);
             if(taken.some(t=>Math.abs(t.x-p.x)<hr*.9&&Math.abs(t.y-p.y)<hr*.9))s+=.35;
-            if(s<bs){bs=s;best=p;}
+            if(s<bs){bs=s;best=p;bestSound=ok;}
         };
-        if(d<=range*.93)tryAt({x:u.x,y:u.y},-.12); // staying put is worth a little: moving under fire is slow
+        const here=wodOpsLandHex(u.x,u.y);
+        if(d<=range*.93&&!(starving(u)&&here&&!friendlyCell(here)))tryAt({x:u.x,y:u.y},-.12); // staying put is worth a little: moving under fire is slow
         const turn=((k||0)%2?1:-1);
         for(const off of [0,.4,-.4,.8,-.8,1.2,-1.2,1.7,-1.7,2.3,-2.3,3])tryAt({x:foe.x+Math.cos(base+off*turn)*reach,y:foe.y+Math.sin(base+off*turn)*reach},Math.abs(off)*.1);
         if(bs>1.2)for(const off of [.2,-.2,.6,-.6,1,-1,1.5,-1.5])tryAt({x:foe.x+Math.cos(base+off*turn)*reach*.62,y:foe.y+Math.sin(base+off*turn)*reach*.62},.08+Math.abs(off)*.1);
         if(!best)best={x:foe.x+(u.x-foe.x)*reach/d,y:foe.y+(u.y-foe.y)*reach/d};
+        best.sound=bestSound;
         taken.push(best);return best;
     };
     // Attack one enemy unit the way a player's attack order does: close to firing range, follow it if it
@@ -264,17 +329,73 @@ function wodOpsRun(owner,units){
         for(const e of enemies){const s=dist(e,u)/C+(e.hp/(e.maxHp||100))*1.5;if(s<bs){bs=s;foe=e;}}
         if(!foe)return false;
         const outranges=(u.range||50)>(foe.range||50)+4;
-        if(!outranges&&(!dugIn||foe.retreating||foe.hp<(foe.maxHp||100)*.45&&dist(foe,u)>(u.range||50)*.9)){chase(u,foe);return true;}
+        if(TU.noSupplyPos){
+            if(!outranges&&(!dugIn||foe.retreating||foe.hp<(foe.maxHp||100)*.45&&dist(foe,u)>(u.range||50)*.9)){chase(u,foe);return true;}
+            const p=firePos(u,foe,k);
+            if(dist(p,u)<hr*.6)wodOpsHalt(u);else wodOpsMove(u,p.x,p.y,false);
+            return true;
+        }
+        // An attack order is for what runs or is still far off; whoever stands is shot at from chosen ground.
+        if(!outranges&&(foe.retreating||foe.moraleBroken||!dugIn&&dist(foe,u)>(u.range||50)*1.7)){chase(u,foe);return true;}
         const p=firePos(u,foe,k);
-        if(dist(p,u)<hr*.6)wodOpsHalt(u);else wodOpsMove(u,p.x,p.y,false);
+        // Nowhere to shoot from that is ours: it shoots from where it can for as long as the grace lasts, then
+        // steps back onto the nearest supplied cell (which starts the clock afresh) and comes forward again.
+        if((u.outOfSupplySeconds||0)>(TU.outMax??6)){
+            const c=wodOpsLandHex(u.x,u.y);let hop=null,bd=Infinity;
+            if(c)for(const q of getHexesInRadius(c.q,c.r,3)){const h=wodHexAt(q.q,q.r);if(!h||!friendlyCell(h)||isWaterHex(h)&&!isBridgeHex(h)||!canUnitEnterHex(u,h))continue;const dd=dist(h,u);if(dd<bd&&wodCurrentSupplyComponent(h,owner).city){bd=dd;hop=h;}}
+            u._opsRole='resupply';
+            if(hop){wodOpsMove(u,hop.x,hop.y,false);hurry(u);}else breakOut(u);
+            return true;
+        }
+        if(dist(p,u)<hr*.25||dist(p,u)<hr*.6&&dist(u,foe)<=(u.range||50)*.97)wodOpsHalt(u);else{wodOpsMove(u,p.x,p.y,false);hurry(u);}
         return true;
+    };
+    // Troops that wait, wait on the best ground near the place, each on a cell of its own, chosen by what
+    // the ground does for its own kind (infantry in woods and on hills, armour in the open). A fight that
+    // comes to them finds them in cover.
+    const standCells=new Map(),standTaken=new Set();
+    const standAt=(u,p)=>{
+        if(!TU.coverStand)return p;
+        const key=Math.round(p.x)+','+Math.round(p.y);let cells=standCells.get(key);
+        if(!cells){const c=getNearestHexToPoint(p.x,p.y);cells=c?getHexesInRadius(c.q,c.r,3).map(q=>wodHexAt(q.q,q.r)).filter(h=>h&&(!isWaterHex(h)||isBridgeHex(h))&&h.type!=='mountain'&&!anyNear(foes,h,C*4.5)):[];standCells.set(key,cells);}
+        let best=null,bs=Infinity;
+        for(const h of cells){
+            if(standTaken.has(h)||!canUnitEnterHex(u,h))continue;
+            const d=dist(h,u),sc=getTerrainDefenseModifier(u,h)+dist(h,p)/(C*14)+d/(C*50)-(d<hr?.2:0);
+            if(sc<bs){bs=sc;best=h;}
+        }
+        if(!best)return p;
+        standTaken.add(best);return best;
+    };
+    // Attacked where they stand, they shoot from that cover and let him come; only an enemy who shoots from
+    // beyond their reach has to be closed with.
+    const defend=(u,hot,k)=>{
+        if(!TU.coverStand)return engage(u,hot,k);
+        let foe=null,bd=Infinity;for(const e of hot){const d=dist(e,u);if(d<bd){bd=d;foe=e;}}
+        if(!foe)return false;
+        if(bd>(u.range||50)*.98&&(foe.range||50)>(u.range||50)+4&&bd<=(foe.range||50)*1.1){chase(u,foe);return true;}
+        if(foe.retreating||foe.hp<(foe.maxHp||100)*.4){chase(u,foe);return true;}
+        wodOpsHalt(u);return true;
     };
     const fallBack=(u,to)=>{
         const t=to||homeTown(u);
         if(dist(u,t)<C*2.2){wodOpsHalt(u);return;}
-        wodOpsMove(u,t.x,t.y,false);
-        // only the badly hurt take the engine's retreat state (it also books them into hospital)
-        if(u.hp<u.maxHp*.6&&u._combatEngaged)u.retreating=true;
+        let goal=t;
+        if(!TU.noSupplyPos){
+            // With an enemy on top of it a unit first steps straight away from him: bodies block, and the direct
+            // way back may lead past him. It keeps three quarters of its pace while it disengages.
+            let foe=null,bd=hr*2.6;for(const e of foes){const d=dist(e,u);if(d<bd){bd=d;foe=e;}}
+            if(foe){
+                const ax=u.x-foe.x,ay=u.y-foe.y,al=Math.hypot(ax,ay)||1,hx=t.x-u.x,hy=t.y-u.y,hl=Math.hypot(hx,hy)||1;
+                const vx=ax/al*1.3+hx/hl,vy=ay/al*1.3+hy/hl,vl=Math.hypot(vx,vy)||1,p={x:u.x+vx/vl*C*3,y:u.y+vy/vl*C*3},h=wodOpsLandHex(p.x,p.y);
+                if(h&&canUnitEnterHex(u,h))goal=p;
+            }
+        }
+        wodOpsMove(u,goal.x,goal.y,false);
+        if(!TU.noSupplyPos)hurry(u);
+        // Only the badly hurt take the engine's retreat state (it also books them into hospital), and never a
+        // unit that is cut off: the medical planner has no hospital to send it to and would leave it standing.
+        if(u.hp<u.maxHp*.6&&u._combatEngaged&&!starving(u))u.retreating=true;
     };
     // Each enemy town's own guard stays with it; everything else can march.
     const enemyGuard=new Set();
@@ -290,7 +411,12 @@ function wodOpsRun(owner,units){
             if(d<C*13)mid.push(e);else if(d<C*30)far.push(e);else rest.push(e);
         }
         const here=base.concat(near(ghosts,P,C*8));
-        return wodOpsStrength(here,false)*(1-cover)+wodOpsStrength(here,true)*cover+(siege?1:.9)*wodOpsStrength(mid,false)+(siege?.85:.5)*wodOpsStrength(far,false)+(siege?.35:.1)*wodOpsStrength(rest,false);
+        // What is there and what stands beside it is fought at once; what has to march arrives while that
+        // fight is still going, but in the open and one column at a time, so it counts for less. How much
+        // less is learnt from this enemy: every assault he beats off raises it, every town taken lowers it.
+        const first=wodOpsStrength(here,false)*(1-cover)+wodOpsStrength(here,true)*cover+(siege?1:.9)*wodOpsStrength(mid,false);
+        const later=(siege?.8:.5)*wodOpsStrength(far,false)+(siege?.4:.1)*wodOpsStrength(rest,false);
+        return TU.hyp?Math.hypot(first,later):first+later*(siege?TU.K??S.reliefK??.8:.6);
     };
 
     // ---------- enemy groups
@@ -313,6 +439,22 @@ function wodOpsRun(owner,units){
     const frontDist=c=>enemyTowns.length?Math.min(...enemyTowns.map(t=>dist(t,c))):0;
     const towns=myTowns.slice().sort((a,b)=>danger.get(b)-danger.get(a)||frontDist(a)-frontDist(b));
     const guards=new Map();
+    // A town needs a man in its streets only while somebody could walk into them before help would arrive.
+    // Everyone else belongs in the field.
+    const rovers=foes.filter(e=>!enemyGuard.has(e)).concat(ghosts),boats=seen.filter(u=>wodIsNavalUnit(u)&&(u.type==='transport'||u.cargo));
+    const fogOn=wodFogActive();
+    // An enemy with marines or landing craft can put troops ashore beside any town, and under fog anyone can
+    // walk up unseen: then every town keeps its man.
+    const amphibious=seen.some(u=>u.type==='marine'||u.type==='transport');
+    const exposed=c=>{
+        if(fogOn||amphibious||TU.lean===0)return true;
+        let t=Infinity;for(const e of rovers){const d=dist(e,c);if(d<t)t=d;}
+        for(const e of boats){const d=dist(e,c)-C*6;if(d<t)t=d;}
+        if((S.garrison[c.id]||[]).length)return t<C*34; // once posted he stays until the threat has gone
+        if(t<C*15)return true;
+        let m=Infinity;for(const u of fighters){const d=dist(u,c);if(d<m)m=d;}
+        return t<m+C*10;
+    };
     const takeNearest=(p,maxD,pref)=>{
         let g=null,best=maxD;
         for(const u of pool){if(!canReach(u,p))continue;const d=dist(u,p)*(pref&&u.type!=='light'?1.5:1);if(d<best){best=d;g=u;}}
@@ -326,13 +468,37 @@ function wodOpsRun(owner,units){
         // question of odds: the town gets defenders in proportion, from wherever they are, because streets
         // double a defender's worth and a lost town is half an economy.
         const atWalls=wodOpsStrength(near(foes,c,C*7),false);
-        const want=Math.max(1,Math.min(Math.max(d<1.5?1:d<5?2:3,Math.ceil(atWalls*.75)),fighters.length-myTowns.length+1));
+        const want=Math.min(Math.max(exposed(c)?(d<1.5?1:d<5?2:3):0,Math.ceil(atWalls*.75)),Math.max(1,fighters.length-myTowns.length+1));
         // a town under real attack is relieved from anywhere: a town is worth more than any field battle
         while(list.length<want){const g=takeNearest(c,list.length&&d<1.5?C*16:Infinity,!list.length);if(!g)break;list.push(g);}
         while(list.length>want)pool.add(list.pop()); // the first guard stays, the rest return to the field
         S.garrison[c.id]=list.map(u=>u.uid);
     }
     if(general)pool.add(general);
+
+    // ---------- 1b. breakout. A unit whose road home has just been cut has twelve seconds before it starts to
+    // starve, and it starves fastest standing where it is. It turns round at once and walks back toward the
+    // nearest ground that is still supplied: the cells it crosses become ours again and reopen the road.
+    // Troops with it go too (below), so the road they reopen is a wide one.
+    // (A unit that is only standing on a cell it cannot claim is dealt with where it fights: see engage.)
+    const pocketed=TU.noBreakout?[]:elig.filter(u=>((u.outOfSupplySeconds||0)>0||(u.supplyPendingSeconds||0)>.4)&&(TU.noSupplyPos||friendlyCell(wodOpsLandHex(u.x,u.y))||(u.outOfSupplySeconds||0)>8));
+    const linkPoint=p=>{
+        const home=homeTown(p),dx=home.x-p.x,dy=home.y-p.y,d=Math.hypot(dx,dy)||1;
+        for(let k=C;k<d;k+=C){const h=wodOpsLandHex(p.x+dx*k/d,p.y+dy*k/d);if(h&&friendlyCell(h)&&wodCurrentSupplyComponent(h,owner).city){const m=Math.min(d,k+C*3);return {x:p.x+dx*m/d,y:p.y+dy*m/d};}}
+        return home;
+    };
+    const breakOut=u=>{
+        const to=linkPoint(u);
+        claim(u,'breakout');
+        if(dist(u,to)<C*1.5){wodOpsHalt(u);return;}
+        fallBack(u,to);
+    };
+    for(const u of pocketed){
+        if(!pool.has(u))continue; // town guards stay: a town supplies its own streets
+        if(dHome(u)<C*5)continue;
+        pool.delete(u);breakOut(u);
+        if(!u._opsCutAt||now-u._opsCutAt>30000){u._opsCutAt=now;S.counts.breakout=(S.counts.breakout||0)+1;wodAiRecord(owner,'ops-breakout',{unit:u.uid});}
+    }
 
     // ---------- 2. supply cuts already under way are carried through: the same ring, the same troops
     const foeByUid=new Map(foes.map(e=>[e.uid,e])),cutHandled=new Set(),span=C*1.6;
@@ -370,7 +536,8 @@ function wodOpsRun(owner,units){
     // a commander who has waited long enough accepts a thinner edge
     // ... and one whose attacks keep failing asks for a thicker one: the enemy is stronger than he looked
     S.recalls=(S.recalls||[]).filter(t=>now-t<300000);
-    const edge=Math.max(1.02,D.ratio+Math.min(.36,S.recalls.length*.09)-Math.max(0,idle-D.patience)/60*.06);
+    const dom=wodOpsStrength(fighters,false)/Math.max(.5,wodOpsStrength(foes.concat(ghosts),false));
+    const edge=Math.max(.9,D.ratio+Math.min(.3,S.recalls.length*.07)-Math.max(0,idle-D.patience)/60*.06-(TU.noDom?0:dom>=1.5?.12:dom>=1.25?.06:0));
     const bias=id=>{let h=D.seed;for(const ch of String(id))h=(Math.imul(h,31)+ch.charCodeAt(0))|0;return ((h>>>0)%1000)/1000;};
     const failed=key=>{const f=S.failed[key];return f&&now-f.at<240000?f.n:0;};
     const sourcesBy={};
@@ -422,7 +589,7 @@ function wodOpsRun(owner,units){
         const dMine=Math.min(g.home,...myHospitals.map(h=>dist(h,g.c)));
         const dTheirs=enemyTowns.length?Math.min(...enemyTowns.map(t=>dist(t,g.c))):dMine;
         const logistics=Math.max(.82,Math.min(1.2,.8+.4*dMine/Math.max(1,dMine+dTheirs)));
-        let need=oppAt(g.pos,g.units,0)*Math.max(1.02,edge-.06)*logistics-wodOpsStrength(helpers,true)*.8;
+        let need=oppAt(g.pos,g.units,TU.scover??.7)*Math.max(.95,edge-.04)*logistics-wodOpsStrength(helpers,true)*.8;
         if(pocketed)need*=.6; // they are starving: time is on our side
         need=Math.max(.6,need);
         const value=(intruding?(26+12*g.raw)*(g.home<C*8?2:1):8*g.raw*(alone?1.5:1))*D.hunt/(1+failed(key)*.5);
@@ -437,11 +604,12 @@ function wodOpsRun(owner,units){
         const worth=k=>(38+(last?22:0)+bias(c.id)*14)/(1+failed(k)*.6);
         // Storm it with everything. With an enemy army still in the open that is only sound when we outweigh
         // the town and the army together by a margin; otherwise the army is dealt with first.
-        const sk='take:'+c.id,so=S.ts[sk],stormNeed=(oppAt(c,def,1,true)+.35)*edge;
-        const going=!!so&&(so.phase==='advance'||so.phase==='fight')&&now-so.seen<8000;
-        const together=(wodOpsStrength(here,true)+wodOpsStrength(foes.filter(e=>!def.includes(e)&&!enemyGuard.has(e)),false)+.35)*edge*1.1;
-        if(going||atLarge<=fieldStrength*.3||fieldStrength>=together)
-            jobs.push({key:sk,kind:'take',city:c,pos:c,enemies:def,need:stormNeed,value:worth(sk)*(fieldStrength>=together?1.5:1),maxD:Infinity,sDef});
+        // Storm it with everything. The garrison is beaten first, then whatever marches to its help.
+        // A town under our guns cannot heal its defenders; with a hospital or a town of our own close behind the
+        // assault, ours go back into the line again and again. That is worth a good part of his walls.
+        const healNear=!TU.noHosp&&(myHospitals.some(h=>dist(h,c)<C*14)||myTowns.some(t=>dist(t,c)<C*12));
+        const sk='take:'+c.id,stormNeed=(oppAt(c,def,1,true)+.3)*edge*(healNear?.85:1)*(fogOn?1.2:1); // under fog there is more than can be seen
+        jobs.push({key:sk,kind:'take',city:c,pos:c,enemies:def,need:stormNeed,value:worth(sk)*(atLarge<=fieldStrength*.3?1.5:1),maxD:Infinity,sDef});
         // Raid: the town is held by little more than its guard and whatever could come to its help is a
         // long march away. A small party is enough, and it must be quick.
         // It does not have to storm the place: one hostile unit within reach of a town's streets stops all
@@ -515,6 +683,43 @@ function wodOpsRun(owner,units){
         }
         return true;
     };
+    // Wings: when a force clearly outweighs what it is fighting, part of it goes round both sides to the
+    // enemy's rear. There it shoots what the frontal fight drives back and stands between his wounded and
+    // their hospital, and the ground it walks over closes behind him: troops with no land link to a town
+    // starve in under a minute.
+    const wrap=a=>{a%=6.283185;return a<0?a+6.283185:a;};
+    const planWings=(j,M,E,P)=>{
+        const core=j.kind==='take'?near(E,P,C*5.5):j.enemies.filter(e=>e.hp>0);
+        if(!core.length)return null;
+        const ec=j.kind==='take'?P:wodOpsCentroid(core);
+        let er=C*1.5;for(const e of core)er=Math.max(er,dist(e,ec));er=Math.min(er,C*6);
+        const fo=core[0].owner,mc=wodOpsCentroid(M),app=Math.atan2(mc.y-ec.y,mc.x-ec.x);
+        let rear=null,bd=Infinity;
+        for(const t of enemyTowns){if(t===j.city||!wodIsFriendlyOwner(t.owner,fo))continue;const d=dist(t,ec);if(d<bd){bd=d;rear=t;}}
+        const back=rear&&bd>er+C*4?Math.atan2(rear.y-ec.y,rear.x-ec.x):app+Math.PI;
+        const R=er+C*3.4,list={};
+        // only troops already up with the fight: a recruit still on the road is not a wing
+        const cands=M.filter(u=>!u.isGeneral&&u.hp>=u.maxHp*.7&&!anyNear(core,u,C*2.6)&&dist(u,ec)<R+C*8);
+        const per=Math.max(1,Math.floor(near(M,ec,R+C*8).length*.2));
+        for(const side of (M.length>=8?[D.side,-D.side]:[D.side])){
+            const end=wrap(back-side*.5); // the two wings stop either side of his line of retreat
+            const scored=cands.filter(u=>!list[u.uid]).map(u=>({u,sweep:wrap((end-Math.atan2(u.y-ec.y,u.x-ec.x))*side)})).filter(c=>c.sweep<3.9).sort((a,b)=>a.sweep-b.sweep);
+            for(const c of scored.slice(0,per)){
+                const u=c.u,a0=Math.atan2(u.y-ec.y,u.x-ec.x),n=Math.max(1,Math.ceil(c.sweep/.55)),pts=[];
+                for(let i=1;i<=n;i++){
+                    const a=a0+side*c.sweep*i/n;let h=null;
+                    for(const rr of [R,R+C*2,R+C*4]){const q=wodOpsLandHex(ec.x+Math.cos(a)*rr,ec.y+Math.sin(a)*rr);if(q&&canUnitEnterHex(u,q)&&canReach(u,q)&&!anyNear(foes,q,C*2.4)){h=q;break;}}
+                    if(h)pts.push(getHexKey(h));else if(i===n)pts.length=0; // no standing room at the far end: no wing
+                }
+                if(pts.length)list[u.uid]={side,pts,i:0};
+            }
+        }
+        return Object.keys(list).length?{at:now,list}:null;
+    };
+
+    // A unit on the road with enemies ahead that outweigh what is up with it does not walk on alone: it goes
+    // back to the body. One at a time is how a stronger column loses to a weaker post.
+    const alone=(u,M)=>{if(TU.noSupplyPos)return false;const hot=near(foes,u,C*5.5);return hot.length>0&&wodOpsStrength(hot,true)>wodOpsStrength(near(M,u,C*5),true)*1.15;};
     let pushing=false;
     for(const j of runs){
         const M=j.members,P=j.pos;
@@ -535,19 +740,28 @@ function wodOpsRun(owner,units){
         st.ratio=own/opp;st.at={x:mc.x,y:mc.y};
         const hotOf=u=>near(foes,u,C*4.2);
         const recall=why=>{
+            if(why==='cut off'){const to=linkPoint(mc);st.back={x:to.x,y:to.y};st.cut=true;st.phase='fallback';st.until=now+20000;st.wings=null;S.counts.recall++;wodAiRecord(owner,'ops-recall',{target:j.city?.id||j.key,ratio:r1(st.ratio),why});M.forEach(u=>{claim(u,'recall');fallBack(u,st.back);hurry(u);});return;}
             // break off to a point a short march back toward home and gather there; not all the way to town
             const home=homeTown(mc),d=dist(home,mc)||1,k=Math.min(1,C*9/d);
             st.back={x:mc.x+(home.x-mc.x)*k,y:mc.y+(home.y-mc.y)*k};
-            st.phase='fallback';st.until=now+15000;S.counts.recall++;noteFail(j.key);
-            if(j.raid)st.raidCool=now+60000*Math.min(5,failed(j.key)+1);else{S.recalls.push(now);if(st.lost>=3)S.recalls.push(now);}
+            // Switch (off: it tested worse): a beaten force deep in enemy land goes all the way back to supplied
+            // ground and the army keeps to its own ground for a minute.
+            if(TU.pullback&&!j.raid&&why==='beaten'&&!friendlyCell(wodOpsLandHex(st.back.x,st.back.y))){const to=linkPoint(mc);st.back={x:to.x,y:to.y};S.timid=now+60000;S.post=null;}
+            st.phase='fallback';st.until=now+9000;st.wings=null;S.counts.recall++;noteFail(j.key);
+            if(j.raid)st.raidCool=now+60000*Math.min(5,failed(j.key)+1);else{S.recalls.push(now);if(st.lost>=3)S.recalls.push(now);if(j.kind==='take')S.reliefK=Math.min(1.4,(S.reliefK??.8)+(TU.learn??.35));}
             st.lost=0;
             wodAiRecord(owner,'ops-recall',{target:j.city?.id||j.key,ratio:Math.round(st.ratio*100)/100,why});
             M.forEach(u=>{claim(u,'recall');fallBack(u,st.back);});
         };
+        // two or more of this force's troops (or of those beside it) are cut off: the whole force goes back with
+        // them and reopens the road, unless the town in front of it is all but taken (a taken town feeds it)
+        if(st.phase!=='fallback'&&dHome(mc)>C*9&&pocketed.filter(u=>dist(u,mc)<C*10).length>=2&&
+            !(j.kind==='take'&&st.phase==='fight'&&wodOpsStrength(near(E,P,C*5.5),true)<wodOpsStrength(M,true)*.3)){recall('cut off');continue;}
         if(st.phase==='gather'){
             // Assemble where most of the force already is: the member with the shortest total walk for everyone
             // else, a little toward the objective. The point is kept until the force has gathered there.
             let rally=st.rally&&!anyNear(foes,st.rally,C*6)?st.rally:null;
+            if(!TU.noRallyPost&&!rally&&S.post&&now-S.post.at<60000&&!anyNear(foes,S.post,C*6)&&wodOpsStrength(near(M,S.post,C*8),false)>=wodOpsStrength(M,false)*.5)rally=st.rally={x:S.post.x,y:S.post.y};
             if(!rally){
                 let b=null,bs=Infinity;
                 for(const u of M){
@@ -559,7 +773,7 @@ function wodOpsRun(owner,units){
             }
             const gathered=wodOpsStrength(near(M,rally,C*6),false),all=wodOpsStrength(M,false);
             const waited=now-st.since;
-            let go=M.length<=1||gathered>=j.need||gathered>=all*.7||waited>45000&&gathered>=all*.5||contact&&st.ratio>=1;
+            let go=M.length<=1||contact&&st.ratio>=1||(!TU.strict?gathered>=j.need||gathered>=all*.6||waited>25000&&gathered>=all*.4:gathered>=j.need*.95||gathered>=all*.9&&gathered>=j.need*.85);
             if(go&&j.raid){
                 // go round the enemy, not through him
                 const ignore=new Set(j.enemies),from={x:rally.x,y:rally.y};st.via=null;
@@ -576,18 +790,18 @@ function wodOpsRun(owner,units){
             }
             if(!go&&j.raid&&waited>40000){st.since=now;st.coolUntil=now+90000;} // could not get away: the troops are needed elsewhere
             if(go){
-                st.phase='advance';st.since=now;
+                st.phase='advance';st.since=now;st.formAt=0;
                 if(!st.launched){st.launched=true;S.counts[j.raid?'raid':'launch']++;wodAiRecord(owner,'ops-'+role,{target:j.city?.id||j.key,strength:r1(all),need:r1(j.need)});}
             }else{
-                M.forEach((u,i)=>{claim(u,role);const hot=hotOf(u);
-                    if(hot.length){if(wodOpsStrength(hot,true)>wodOpsStrength(near(M,u,C*4.5),true)*1.25)fallBack(u,rally);else engage(u,hot,i);return;}
-                    const s=wodOpsSlot(i,hr*1.1);wodOpsMove(u,rally.x+s.x,rally.y+s.y,true);});
+                M.forEach((u,i)=>{claim(u,'muster');const hot=hotOf(u);
+                    if(hot.length){if(wodOpsStrength(hot,true)>wodOpsStrength(near(M,u,C*4.5),true)*1.25)fallBack(u,rally);else defend(u,hot,i);return;}
+                    const h=standAt(u,rally);wodOpsMove(u,h.x,h.y,true);});
                 continue;
             }
         }
         if(st.phase==='fallback'){
-            if(now>=st.until){st.phase='gather';st.since=now;st.rally=null;st.launched=false;st.coolUntil=now+20000;}
-            M.forEach((u,i)=>{claim(u,'recall');const s=wodOpsSlot(i,hr*1.1);fallBack(u,{x:st.back.x+s.x,y:st.back.y+s.y});});
+            if(now>=st.until){st.phase='gather';st.since=now;st.rally=null;st.launched=false;st.coolUntil=now+8000;st.cut=false;}
+            M.forEach((u,i)=>{claim(u,'recall');const s=wodOpsSlot(i,hr*1.1);fallBack(u,{x:st.back.x+s.x,y:st.back.y+s.y});if(st.cut)hurry(u);});
             continue;
         }
         pushing=true;
@@ -598,24 +812,28 @@ function wodOpsRun(owner,units){
         }
         if(st.phase==='advance'){
             // still free to choose: do not walk into a fight that has turned against us
-            if(!contact&&st.ratio<.85){recall('outnumbered');continue;}
+            if(!contact&&st.ratio<(TU.pre??.8)){recall('outnumbered');continue;}
             // Form up before going in: the head of the column stops short of the objective until most of the
             // force has closed up behind it. Arriving a few at a time is how a stronger army loses.
             const ringD=C*(j.kind==='take'?9.5:8),aimAt=j.kind==='take'?P:(()=>{let b=P,bd=Infinity;for(const e of j.enemies){const d=dist(e,mc);if(d<bd){bd=d;b=e;}}return b;})();
             const head=M.filter(u=>dist(u,aimAt)<ringD+C*5),all=wodOpsStrength(M,false);
             const headS=wodOpsStrength(head,false);
-            const formed=headS>=Math.min(all*.8,j.need*1.2)||st.formAt&&now-st.formAt>25000&&headS>=Math.min(all*.6,j.need);
+            const formed=!TU.strict?headS>=Math.min(all*.7,j.need)||st.formAt&&now-st.formAt>12000&&headS>=Math.min(all*.5,j.need*.8):headS>=j.need*.95||headS>=all*.9&&headS>=j.need*.8;
             const atRing=M.some(u=>dist(u,aimAt)<ringD+C*.5);
             if(atRing&&!st.formAt)st.formAt=now;
+            // waited at his doorstep long enough for the rest: go back and gather properly
+            if(!!TU.strict&&st.formAt&&now-st.formAt>30000&&!formed&&!contact){st.phase='gather';st.since=now;st.rally=null;st.formAt=0;st.launched=false;M.forEach(u=>{claim(u,'muster');fallBack(u,homeTown(mc));});continue;}
             const touching=M.filter(u=>anyNear(E,u,C*3.2));
-            if(wodOpsStrength(touching,false)>=all*.4||atRing&&formed||j.raid&&contact){st.phase='fight';st.since=now;}
+            if(wodOpsStrength(touching,false)>=all*.4||atRing&&formed||j.raid&&contact){st.phase='fight';st.since=now;st.own0=Math.max(own,.1);st.opp0=opp;}
             else if(atRing||touching.length){
                 // the head of the column waits (or gives ground) while the rest closes up
-                M.forEach((u,i)=>{claim(u,role);
+                M.forEach((u,i)=>{claim(u,'form');
                     const hot=hotOf(u);
                     if(hot.length){if(wodOpsStrength(hot,true)>wodOpsStrength(near(M,u,C*4.5),true)*1.1)fallBack(u,mc);else engage(u,hot,i);return;}
-                    if(dist(u,aimAt)<ringD+C*1.5){wodOpsHalt(u);return;}
-                    const s=wodOpsSlot(i,hr*.9);wodOpsMove(u,aimAt.x+s.x,aimAt.y+s.y,false);});
+                    // the head has met the enemy short of the ring: the rest closes up on it, not on the objective
+                    const to=touching.length&&!TU.noGuns?wodOpsCentroid(touching):aimAt;
+                    if(to===aimAt&&dist(u,aimAt)<ringD+C*1.5||to!==aimAt&&dist(u,to)<C*3){wodOpsHalt(u);return;}
+                    const s=wodOpsSlot(i,hr*.9);wodOpsMove(u,to.x+s.x,to.y+s.y,false);});
                 continue;
             }
             else{
@@ -625,9 +843,10 @@ function wodOpsRun(owner,units){
                 // waits for recruits still leaving a town half a map away.
                 const order=M.slice().sort((a,b)=>dist(a,goal)-dist(b,goal));let tail=0,acc=[];
                 for(const u of order){acc.push(u);tail=dist(u,goal);if(wodOpsStrength(acc,false)>=Math.min(all*.9,j.need*1.15))break;}
-                M.forEach((u,i)=>{claim(u,role);
+                M.forEach((u,i)=>{claim(u,'march');
+                    if(!j.raid&&alone(u,M)){fallBack(u,mc);return;}
                     if(!j.raid&&M.length>2&&dist(u,goal)<tail-C*6){wodOpsHalt(u);return;} // wait for the column
-                    const s=wodOpsSlot(i,hr*.9);wodOpsMove(u,goal.x+s.x,goal.y+s.y,false);});
+                    const s=wodOpsSlot(i,hr*(TU.wide&&!j.raid?1.5:.9));wodOpsMove(u,goal.x+s.x,goal.y+s.y,false);});
                 continue;
             }
         }
@@ -665,7 +884,9 @@ function wodOpsRun(owner,units){
         // and it is fought to the end; under the enemy's towns his are, and it is broken off early.
         const hMine=Math.min(dHome(mc),...myHospitals.map(h=>dist(h,mc))),hTheirs=enemyTowns.length?Math.min(...enemyTowns.map(t=>dist(t,mc))):hMine;
         const away=Math.max(0,Math.min(1,(hMine/Math.max(1,hMine+hTheirs)-.3)/.4));
-        const floor=j.kind==='take'&&dist(mc,P)<C*12?1:.5+.35*away; // met in the open on the way there, it is a field battle
+        // A fight that is being won is fought on whatever the odds say: what counts is who is melting faster.
+        const winning=st.own0?(own/st.own0)/Math.max(.05,opp/st.opp0)>1.05:false;
+        const floor=j.kind==='take'&&dist(mc,P)<C*12?(winning?TU.floorWin??.6:TU.floorTake??1):winning?.45:.45+.3*away; // met in the open on the way there, it is a field battle
         // The moment nobody is left in the streets the town can be taken by walking through it: the troops
         // nearest it do that at once while the rest keep the enemy off them.
         const walkers=new Set();
@@ -673,10 +894,31 @@ function wodOpsRun(owner,units){
             const byD=M.filter(u=>!u.isGeneral&&dist(u,P)<C*10).sort((a,b)=>dist(a,P)-dist(b,P));
             for(const u of byD.slice(0,Math.max(2,Math.ceil(M.length/3))))walkers.add(u);
         }
-        if(!contact&&st.ratio<Math.max(.8,floor)||contact&&st.ratio<floor&&now-st.since>(j.kind==='take'?16000:8000)){recall(contact?'beaten':'outnumbered');continue;}
+        if(!contact&&st.ratio<Math.max(.7,floor)||contact&&st.ratio<floor&&now-st.since>(j.kind==='take'?TU.grace??12000:10000)){recall(contact?'beaten':'outnumbered');continue;}
+        if(TU.wings!==0&&!j.raid&&!st.wings&&M.length>=5&&st.ratio>=1.15&&now-(st.wingAt||0)>30000){
+            st.wingAt=now;st.wings=planWings(j,M,E,P);
+            if(st.wings){S.counts.flank++;wodAiRecord(owner,'ops-flank',{target:j.city?.id||j.key,wings:Object.keys(st.wings.list).length});}
+        }
+        const starving=E.filter(e=>(e.outOfSupplySeconds||0)>0||(e.supplyPendingSeconds||0)>.5);
+        if(starving.length&&!(st.pocketAt>now-60000)){st.pocketAt=now;S.counts.pocket++;wodAiRecord(owner,'ops-pocket',{enemy:starving[0].uid,group:starving.length,by:'wings'});}
+        // while a fight is being won the wounded stay in the line: finishing it is worth more than their health
+        const stand=TU.stand!==0&&(winning||st.ratio>=1.25||starving.length>0);
+        const inFight=TU.noGuns?[]:M.filter(u=>anyNear(E,u,C*3.2)),guns=inFight.length&&dist(wodOpsCentroid(inFight),P)>C*6?wodOpsCentroid(inFight):null;
         M.forEach((u,i)=>{
             claim(u,role);
             if(u.isGeneral&&u.hp<u.maxHp*.55){fallBack(u);return;}
+            if(!j.raid&&dist(u,mc)>C*8&&alone(u,M)){fallBack(u,mc);return;} // still on the road to the fight
+            if(stand)u._opsStand=now+5000;
+            const w=st.wings?.list[u.uid];
+            if(w&&!walkers.has(u)){
+                u._opsRole='flank';
+                if(!w.done){
+                    const pts=w.pts.map(k=>gameData.hexes[k]).filter(Boolean),end=pts[pts.length-1],hotW=near(E,u,C*2.7);
+                    if(!end||dist(u,end)<C*1.8)w.done=now;
+                    else if(hotW.length){engage(u,hotW,i,false);return;} // caught on the way round: fight where it stands
+                    else{while(w.i<pts.length-1&&dist(u,pts[w.i])<C*1.7)w.i++;wodOpsRoute(u,pts.slice(w.i),j.key+':w'+w.i);return;}
+                }
+            }
             if(walkers.has(u)&&!anyNear(E,u,C*2.4)){
                 u._opsSweep=true;
                 if(dist(u,P)>C*5||!u.target&&!u.orderTarget){const s=wodOpsSlot(i,hr*.8);wodOpsMove(u,P.x+s.x,P.y+s.y,false);}
@@ -687,6 +929,9 @@ function wodOpsRun(owner,units){
                 let foe=null,bs=Infinity;for(const e of local){const s=dist(e,u);if(s<bs){bs=s;foe=e;}}
                 engage(u,local,i,!!dug&&dug.has(foe));return;
             }
+            // Part of the force is fighting somewhere short of the objective: everyone else goes there, not on
+            // toward the objective by a road of his own.
+            if(guns&&dist(u,guns)>C*4){const s=wodOpsSlot(i,hr*.9);wodOpsMove(u,guns.x+s.x,guns.y+s.y,false);return;}
             if(j.kind==='take'){
                 // nothing left to shoot at: walk the streets until the town changes hands
                 if(dist(u,P)<C*6.5){u._opsSweep=true;if(!u.target&&!u.orderTarget){const s=wodOpsSlot(i,hr*.8);wodOpsMove(u,P.x+s.x,P.y+s.y,false);}}
@@ -696,7 +941,7 @@ function wodOpsRun(owner,units){
     }
     if(pushing)S.lastPush=now;
     for(const k of Object.keys(S.ts))if(now-S.ts[k].seen>60000&&!(S.ts[k].coolUntil>now)&&!(S.ts[k].raidCool>now))delete S.ts[k];
-    for(const c of myTowns)if(S.owned&&!S.owned.has(c.id)){S.counts.taken++;S.lastPush=now;wodAiRecord(owner,'ops-captured',{city:c.id});}
+    for(const c of myTowns)if(S.owned&&!S.owned.has(c.id)){S.counts.taken++;S.lastPush=now;S.reliefK=Math.max(.45,(S.reliefK??.8)-.15);wodAiRecord(owner,'ops-captured',{city:c.id});}
     S.owned=new Set(myTowns.map(c=>c.id));
 
     // ---------- 5. a town with enemies at its gates and no battle to join: the troops nearby stand in its streets
@@ -733,24 +978,28 @@ function wodOpsRun(owner,units){
     const rest=[...pool];
     const aim=blocked?blocked.pos:(enemyTowns.slice().sort((a,b)=>dist(a,pc)-dist(b,pc))[0]||null);
     const base=aim?myTowns.slice().sort((a,b)=>dist(a,aim)-dist(b,aim))[0]:towns[0];
+    if(S.post&&pocketed.filter(u=>dist(u,S.post)<C*10).length>=2){S.post=null;S.timid=now+45000;}
     let post=S.post&&now-S.post.at<60000&&S.post.aim===(aim?.id||'')&&S.post.base===base.id&&!anyNear(foes,S.post,C*6)?S.post:null;
+    const bold=TU.press!==0&&!!aim&&!(S.timid>now)&&fieldStrength>=wodOpsStrength(near(foes,aim,C*14),false)*.7;
     if(!post&&rest.length){
-        // As far toward the enemy as our own ground goes (never more than most of the way), short of anything
-        // that could shoot at it, and on the best cover there. Waiting at the front, not at home, is what
-        // lets the reserve strike at once when a chance appears.
+        // The post: on the way from our nearest town to the objective, short of anything that could shoot at
+        // it, and on the best cover there. Waiting at the front, not at home, is what lets the army strike at
+        // once when a chance appears, and what makes the enemy come out to it.
         post={x:base.x,y:base.y,at:now,aim:aim?.id||'',base:base.id};
         if(aim){
             const dx=aim.x-base.x,dy=aim.y-base.y,d=Math.hypot(dx,dy)||1;let ax=base.x,ay=base.y;
-            for(let s=C*2;s<d*.62;s+=C){
+            // An army that could not face what stands there keeps to its own ground; any other closes up to
+            // the enemy, just out of his reach, where every chance he offers can be taken at once.
+            for(let s=C*2;s<d*(bold?1:.62);s+=C){
                 const p={x:base.x+dx*s/d,y:base.y+dy*s/d},h=wodOpsLandHex(p.x,p.y);
                 if(!h)continue;
-                if(!friendlyCell(h)||!canReach(rest[0],h)||anyNear(foes,p,C*9)||dist(p,aim)<C*11)break;
+                if((!bold||TU.shallow)&&!friendlyCell(h)||!canReach(rest[0],h)||anyNear(foes,p,C*(bold?8:9))||dist(p,aim)<C*(bold?8.5:11))break;
                 ax=p.x;ay=p.y;
             }
             let bs=Infinity;
             for(let dq=-2;dq<=2;dq++)for(let dr=-2;dr<=2;dr++){
                 const h=wodOpsLandHex(ax+dq*C,ay+dr*C);
-                if(!h||!friendlyCell(h)||!canUnitEnterHex(rest[0],h)||!canReach(rest[0],h)||anyNear(foes,h,C*7))continue;
+                if(!h||(!bold||TU.shallow)&&!friendlyCell(h)||!canUnitEnterHex(rest[0],h)||!canReach(rest[0],h)||anyNear(foes,h,C*7))continue;
                 const s=getTerrainDefenseModifier(rest[0],h)+(Math.abs(dq)+Math.abs(dr))*.04;if(s<bs){bs=s;post.x=h.x;post.y=h.y;}
             }
         }
@@ -759,7 +1008,7 @@ function wodOpsRun(owner,units){
     // A field hospital at the forward post. Without one, every wounded attacker walks all the way home while
     // the defenders are refilled next door, and an offensive melts away in a minute however strong it began.
     S.wantHospital=false;
-    if(post&&S.econReady&&fighters.length>=8&&dist(post,base)>C*10&&!anyNear(foes,post,C*10)){
+    if(post&&S.econReady&&fighters.length>=6&&dist(post,base)>C*10&&!anyNear(foes,post,C*7)){
         const have=(gameData.hospitals||[]).filter(h=>wodEffectiveHospitalOwner(h)===owner).concat((gameData.constructionJobs||[]).filter(j=>j.owner===owner&&j.mode==='hospital'));
         if(!have.some(h=>dist(h,post)<C*9)&&have.length<Math.min(3,Math.max(1,Math.floor(fighters.length/8)))){
             S.wantHospital=true;
@@ -767,7 +1016,7 @@ function wodOpsRun(owner,units){
                 const d=dist(base,post)||1,bx=post.x+(base.x-post.x)/d*C*2.5,by=post.y+(base.y-post.y)/d*C*2.5;let site=null,bs=Infinity;
                 for(let dq=-2;dq<=2;dq++)for(let dr=-2;dr<=2;dr++){
                     const h=wodOpsLandHex(bx+dq*C,by+dr*C);
-                    if(!h||!friendlyCell(h)||wodHospitalPlacementError(h,owner)||anyNear(foes,h,C*9)||!wodCurrentSupplyComponent(h,owner).city)continue;
+                    if(!h||!friendlyCell(h)||wodHospitalPlacementError(h,owner)||anyNear(foes,h,C*7)||!wodCurrentSupplyComponent(h,owner).city)continue;
                     const sc=Math.abs(dq)+Math.abs(dr);if(sc<bs){bs=sc;site=h;}
                 }
                 if(site&&placeHospitalAtHex(site,owner)){S.wantHospital=false;wodAiRecord(owner,'ops-hospital',{site:getHexKey(site)});}
@@ -776,34 +1025,36 @@ function wodOpsRun(owner,units){
     }
     // sweeping stops only while a town is in more danger than its guards can answer
     const quiet=!myTowns.some(c=>danger.get(c)>.5&&danger.get(c)>wodOpsStrength(guards.get(c)||[],true));
+    S.calm=quiet&&fighters.length>=8&&fieldStrength>=wodOpsStrength(foes,false)*.8;
     const scouts=rest.filter(u=>!u.isGeneral);
-    let sweepN=quiet&&fighters.length>=5?Math.min(scouts.length,Math.max(1,Math.round(scouts.length*D.sweep))):0;
+    let sweepN=quiet&&fighters.length>=4?Math.min(scouts.length,Math.max(1,Math.round(scouts.length*D.sweep*(TU.sweepK??1)))):0;
     if(quiet&&!enemyTowns.length)sweepN=Math.min(scouts.length,Math.max(sweepN,Math.ceil(scouts.length*.6))); // nothing known to attack: spread out and look
     // keep the same sweepers from pulse to pulse
     scouts.sort((a,b)=>Number(!!S.sweep[b.uid])-Number(!!S.sweep[a.uid])||dHome(b)-dHome(a));
     const sweepers=scouts.slice(0,sweepN);
     const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
     const sweepGoals=[];
+    const front=aim||post||pc,segD=h=>{const vx=front.x-base.x,vy=front.y-base.y,L=vx*vx+vy*vy||1,t=Math.max(0,Math.min(1,((h.x-base.x)*vx+(h.y-base.y)*vy)/L));return Math.hypot(h.x-base.x-vx*t,h.y-base.y-vy*t);};
     for(const u of sweepers){
         pool.delete(u);claim(u,'sweep');
-        const hot=near(foes,u,C*7.5);
+        const hot=near(foes,u,C*(TU.sweepR??5.5));
         if(hot.length){
             // bait: what chases a sweeper is led back onto the reserve (a lone unit does not wait to be caught)
             if(wodOpsStrength(hot,true)>wodOpsStrength(near(fighters,u,C*4.5),true)*.9){S.sweep[u.uid]=null;fallBack(u,post&&dist(u,post)<dHome(u)*1.5?post:null);continue;}
             engage(u,hot,0);continue;
         }
         let g=S.sweep[u.uid],gh=g&&gameData.hexes[g.key];
-        if(!gh||now-g.at>70000||friendlyCell(gh)&&dist(u,gh)<C*1.5||dist(u,gh)<hr||anyNear(foes,gh,C*7.5))gh=null;
+        if(!gh||now-g.at>70000||friendlyCell(gh)&&dist(u,gh)<C*1.5||dist(u,gh)<hr||anyNear(foes,gh,C*(TU.sweepR??5.5)))gh=null;
         if(!gh){
             let best=null,bs=0;
             const a0=(bias(u.uid)+now/1e5)*6.283;
             for(let k=0;k<12;k++)for(const r of [5,8,12]){
                 const a=a0+k*.5236,p={x:u.x+Math.cos(a)*C*r,y:u.y+Math.sin(a)*C*r},h=wodOpsLandHex(p.x,p.y);
                 if(!h||friendlyCell(h)||h.type==='mountain'||!canUnitEnterHex(u,h)||!canReach(u,h))continue;
-                if(anyNear(foes,h,C*9)||anyNear(enemyTowns,h,C*9)||sweepGoals.some(t=>dist(t,h)<C*6))continue;
+                if(anyNear(foes,h,C*((TU.sweepR??5.5)+1))||anyNear(enemyTowns,h,C*((TU.sweepR??5.5)+1))||sweepGoals.some(t=>dist(t,h)<C*5))continue;
                 let gain=0;
                 for(let s=1;s<=r;s++){const c=wodOpsLandHex(u.x+(p.x-u.x)*s/r,u.y+(p.y-u.y)*s/r);if(!c){gain-=1.5;continue;}if(!friendlyCell(c))gain+=explored&&!explored.has(getHexKey(c))?1.6:1;}
-                const score=gain/(r+2)+bias(h.q+':'+h.r)*.08;
+                const score=gain/(r+2)+bias(h.q+':'+h.r)*.08+(!TU.noRoad&&gain>0&&segD(h)<C*5?.3:0);
                 if(score>bs){bs=score;best=h;}
             }
             if(best){gh=best;S.sweep[u.uid]={key:getHexKey(best),at:now};}
@@ -811,19 +1062,68 @@ function wodOpsRun(owner,units){
         if(gh){sweepGoals.push(gh);wodOpsMove(u,gh.x,gh.y,false);}
         else{S.sweep[u.uid]=null;pool.add(u);}
     }
+    // ---------- bait: one sound unit (armour for choice: its gun outranges infantry, so he must come out or
+    // be shot for nothing) goes up to the enemy and fires. When he comes out after it, it runs back onto the
+    // troops waiting in cover at the post.
+    let lured=[];
+    if(post&&bold&&!TU.noAmbush)lured=foes.filter(e=>dist(e,post)<C*8&&!anyNear(enemyTowns,e,C*4.5));
+    if(lured.length&&(S.lure||S.harassAt>now-20000)&&!(S.ambushAt>now-40000)){S.ambushAt=now;if(S.lure)S.lure.sprung=true;S.counts.ambush++;wodAiRecord(owner,'ops-ambush',{enemy:lured[0].uid,group:lured.length});}
+    if(S.lure&&(now>S.lure.until||!post)){
+        S.baitCool=now+(S.lure.sprung?25000:Math.min(240000,60000*(S.baitRefused=(S.baitRefused||0)+1)));if(S.lure.sprung)S.baitRefused=0;
+        S.lure=null;
+    }
+    if(S.bait){
+        const B=S.bait,b=byUid.get(B.uid);
+        let foe=foeByUid.get(B.target);
+        if(b&&!foe){let bd=C*9;for(const e of foes){const d=dist(e,b);if(d<bd){bd=d;foe=e;}}if(foe)B.target=foe.uid;}
+        if(!b||!pool.has(b)||!post||!bold||now>B.until||B.phase==='out'&&!foe||B.phase==='back'&&dist(b,post)<C*2.5){
+            if(B.phase==='out')S.baitCool=now+30000;
+            S.bait=null;
+        }else{
+            pool.delete(b);claim(b,'bait');
+            if(B.phase==='out'){
+                const outranges=(b.range||50)>(foe.range||50)+4;
+                if(dist(b,foe)<=(b.range||50)&&!B.fireAt)B.fireAt=now;
+                const turn=b.hp<b.maxHp*.72||B.fireAt&&now-B.fireAt>(outranges?45000:12000)||outranges&&foes.some(e=>dist(e,b)<(e.range||50)+hr);
+                if(turn){B.phase='back';B.until=now+30000;S.lure={until:now+25000,sprung:false};}
+                else engage(b,[foe],0,true);
+            }
+            if(B.phase==='back'){
+                wodOpsMove(b,post.x,post.y,false);
+                hurry(b); // keeps most of its pace under fire
+            }
+        }
+    }else if(TU.bait!==0&&!S.lure&&post&&bold&&aim&&now>=(S.baitCool||0)&&!pushing){
+        const waiting=near([...pool],post,C*5).filter(u=>!u.isGeneral);
+        if(wodOpsStrength(waiting,true)>=2.6&&!waiting.some(u=>(u.range||50)>54)){
+            let foe=null,bd=C*14;for(const e of foes){const d=dist(e,post);if(d<bd){bd=d;foe=e;}}
+            let b=null,bs=-Infinity;
+            if(foe)for(const u of waiting){if(u.hp<u.maxHp*.85)continue;const sc=((u.range||50)>(foe.range||50)+4?2:0)+u.hp/u.maxHp+(u.speed||15)/30;if(sc>bs){bs=sc;b=u;}}
+            if(b){S.bait={uid:b.uid,target:foe.uid,phase:'out',at:now,until:now+70000};S.counts.bait++;wodAiRecord(owner,'ops-bait',{unit:b.uid,enemy:foe.uid});}
+        }
+    }
     const reserve=[...pool];
+    const waitingS=post?wodOpsStrength(near(reserve,post,C*6),true):0;
     reserve.forEach((u,i)=>{
         claim(u,'reserve');
         const hot=near(foes,u,C*4.2);
         if(hot.length){
-            if(wodOpsStrength(hot,true)>wodOpsStrength(near(elig,u,C*4.5),true)*1.2)fallBack(u);else engage(u,hot,i);
+            if(wodOpsStrength(hot,true)>wodOpsStrength(near(elig,u,C*4.5),true)*1.2)fallBack(u);else defend(u,hot,i);
             return;
+        }
+        // the trap: whatever has followed the bait out of its town is set upon by everyone at the post
+        if(lured.length&&post&&dist(u,post)<C*10&&wodOpsStrength(lured,false)<=wodOpsStrength(near(reserve,post,C*10),false)*1.15){u._opsRole='ambush';engage(u,lured,i,false);return;}
+        // Armour and motor troops outrange infantry. From the limit of their guns they shoot at a town or a
+        // line that cannot answer, and a town under fire neither recruits nor heals: he comes out or he bleeds.
+        if(TU.harass!==0&&bold&&post&&!u.isGeneral&&(u.range||50)>54&&u.hp>=u.maxHp*.7&&dist(u,post)<C*14&&waitingS>=2.6){
+            let tgt=null,bd=C*13;for(const e of foes){if((u.range||50)<=(e.range||50)+4)continue;const d=dist(e,post);if(d<bd){bd=d;tgt=e;}}
+            if(tgt&&!foes.some(e=>(e.range||50)+4>=(u.range||50)&&dist(e,tgt)<C*3.5)){u._opsRole='harass';S.harassAt=now;engage(u,[tgt],i,true);return;}
         }
         // an army in a battle is not left to fight alone: unassigned troops close up behind it
         let b=null,bd=C*28;for(const j of battles){if(j.raid)continue;const at=S.ts[j.key].at,d=dist(u,at);if(d<bd&&canReach(u,at)){bd=d;b=at;}}
         if(b){const s=wodOpsSlot(i+1,hr*1.3);u._opsRole='support';wodOpsMove(u,b.x+s.x,b.y+s.y,false);return;}
         if(!post||!canReach(u,post)){wodOpsHalt(u);return;}
-        const s=wodOpsSlot(i,hr*1.15);wodOpsMove(u,post.x+s.x,post.y+s.y,true);
+        const h=standAt(u,post);wodOpsMove(u,h.x,h.y,true);
     });
 
     // with no enemy ground in walking reach the war is at sea, and the original buyer knows ships and ferries

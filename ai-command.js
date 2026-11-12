@@ -145,6 +145,8 @@ function wodAiForceRequests(owner,cities,army,pending) {
 // These are real paid 60-second jobs, never free starting buildings.
 function wodAiEstablishEconomy(owner,cities,army,demand,plan) {
     const now=gameData._aiEconomyClock||0,hr=gameData.hexRadius||20;
+    // Field command (ai-ops.js) may raise a regiment in each town before the buildings go up.
+    if(typeof wodOpsOpening==='function')wodOpsOpening(owner,cities);
     if(plan._openingEconomyHexes!==gameData.hexes){
         plan._openingEconomyHexes=gameData.hexes;
         plan.openingEconomy={towns:cities.map(c=>c.id),since:now};
@@ -2135,7 +2137,7 @@ function wodAiManageRecovery(owner) {
         }
         const baitActive=u._aiAmbushBaitUntil>now&&wodAiActiveFrontOperations(owner).some(o=>o.ambush?.bait===u.uid);
         const assault=wodAiUnitAssaultBudget(u);
-        const trigger=assault?(u.isGeneral?.52:.35):u.isGeneral?.72:baitActive?.45:u.veteran?.6:.55;
+        const trigger=assault||u._opsStand>now?(u.isGeneral?.52:.35):u.isGeneral?.72:baitActive?.45:u.veteran?.6:.55;
         if(hp>=trigger&&manpower>=trigger&&morale>=.35&&!u._medicalRecovering&&!u.moraleBroken&&!u.retreating&&!u._wodOrderedRetreat)continue;
         // Moderate wounds rotate through treatment; critical patients always
         // withdraw. Keep enough comrades together until their replacement returns.
