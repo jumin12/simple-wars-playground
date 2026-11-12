@@ -32,6 +32,10 @@
 //        cut     any enemy group in the open whose ground narrows behind it, in our land, his or nobody's:
 //                up to four cutters walk the narrowest ring between it and its towns, each his own stretch,
 //                and hold it once it is closed. At even odds a closed ring is worth more than a won fight.
+//        finish  a town that is there for the taking: a town with nobody in its streets is walked, street by
+//                street, by the nearest troops at once; a town held by a few men where we already hold streets
+//                or stand at its edge gets a party sized to beat exactly those men, which stays until the
+//                town has changed hands; and such a town is cheaper for the main effort to accept.
 //   3. The best battle that can be paid for is the main effort and takes everyone in reach; while there is
 //      one, a raid gets only a small share of the army. A commander who has waited accepts thinner odds.
 //   4. Troops on a job gather where the army already waits, march as one body (nobody walks on alone into
@@ -535,6 +539,61 @@ function wodOpsRun(owner,units){
         if(!u._opsCutAt||now-u._opsCutAt>30000){u._opsCutAt=now;S.counts.breakout=(S.counts.breakout||0)+1;wodAiRecord(owner,'ops-breakout',{unit:u.uid});}
     }
 
+    // ---------- 1c. towns that are there for the taking. A town with nobody in its streets falls to whoever
+    // walks every one of them, and a town we already hold part of is half won. The nearest troops finish it
+    // now, whatever else is going on, each heading for the nearest street that is not ours yet.
+    const finishing=new Set(),fronting=new Set();
+    if(!TU.noFinish)for(const c of enemyTowns){
+        const streets=getCityUrbanTerrainHexes(c).filter(h=>h&&!isWaterHex(h)),todo=streets.filter(h=>!friendlyCell(h));
+        if(!todo.length)continue;
+        const partial=todo.length<streets.length;
+        if(partial)finishing.add(c);
+        const holders=foes.filter(e=>streets.some(h=>Math.abs(e.x-h.x)<C*1.5&&Math.abs(e.y-h.y)<C*1.5));
+        const touching=partial||todo.some(h=>getNeighborHexes(h).some(n=>n&&friendlyCell(n)));
+        if(touching)fronting.add(c);
+        if(holders.length){
+            // Held by a few men, and we are already in its streets or at its edge: a party strong enough to
+            // beat exactly those men goes in and stays until the town has changed hands. The main battle,
+            // wherever it is, goes on without them. A real garrison is the main battle's business.
+            if(!touching)continue;
+            const field=[...pool].filter(u=>!u.isGeneral&&canReach(u,c)),want=wodOpsStrength(foes.filter(e=>dist(e,c)<C*6),true)*1.3+.5;
+            if(want>wodOpsStrength(field,false)*.6)continue;
+            field.sort((a,b)=>dist(a,c)-dist(b,c));
+            const party=[];for(const u of field){if(wodOpsStrength(party,true)>=want||party.length>=8)break;if(dist(u,c)>C*30)break;party.push(u);}
+            if(wodOpsStrength(party,true)<want*.8)continue;
+            const around=foes.filter(e=>dist(e,c)<C*7),mine=new Set(),held=new Set(holders);
+            party.forEach((u,i)=>{
+                pool.delete(u);claim(u,'storm');
+                const local=near(around,u,C*6);
+                if(local.length&&wodOpsStrength(near(around,u,C*4.5),true)>wodOpsStrength(near(party,u,C*5),true)*1.5){fallBack(u);return;}
+                // free streets out of the defenders' reach are walked at once; the rest fall when he does
+                let t=null,bd=C*4;for(const h of todo){if(mine.has(h)||!canUnitEnterHex(u,h)||anyNear(around,h,C*2.2))continue;const d=dist(h,u);if(d<bd){bd=d;t=h;}}
+                if(t&&!anyNear(around,u,C*2.4)){mine.add(t);wodOpsMove(u,t.x,t.y,false);return;}
+                if(local.length){let foe=null,fd=Infinity;for(const e of local){const d=dist(e,u);if(d<fd){fd=d;foe=e;}}engage(u,local,i,held.has(foe));return;}
+                const s2=wodOpsSlot(i,hr*.8);wodOpsMove(u,c.x+s2.x,c.y+s2.y,false);
+            });
+            const seenS=S.occupyAt||(S.occupyAt={});
+            if(!(seenS['s'+c.id]>now-60000)){seenS['s'+c.id]=now;S.counts.storm=(S.counts.storm||0)+1;wodAiRecord(owner,'ops-finish',{city:c.id,defenders:holders.length,troops:party.length,streets:todo.length});}
+            continue;
+        }
+        const cands=[...pool].filter(u=>!u.isGeneral&&canReach(u,c)).map(u=>({u,d:dist(u,c)})).filter(o=>touching||o.d<C*16).sort((a,b)=>a.d-b.d);
+        if(!cands.length)continue;
+        const threat=wodOpsStrength(near(foes,c,C*8),true),party=[];
+        for(const o of cands){if(party.length>=(todo.length>6?3:2)&&wodOpsStrength(party,true)>=threat*1.1||party.length>=5)break;party.push(o.u);}
+        if(!partial&&wodOpsStrength(party,true)<threat*.8)continue; // somebody stronger stands right beside it: that is a battle too
+        const mine=new Set();
+        party.forEach((u,i)=>{
+            pool.delete(u);claim(u,'occupy');
+            const hot=near(foes,u,C*3.4);
+            if(hot.length){if(wodOpsStrength(hot,true)>wodOpsStrength(near(party,u,C*5),true)*1.3)fallBack(u);else engage(u,hot,i,false);return;}
+            let t=null,bd=Infinity;for(const h of todo){if(mine.has(h)||!canUnitEnterHex(u,h))continue;const d=dist(h,u);if(d<bd){bd=d;t=h;}}
+            if(!t)t=todo[0];mine.add(t);
+            wodOpsMove(u,t.x,t.y,false);
+        });
+        const seenAt=S.occupyAt||(S.occupyAt={});
+        if(!(seenAt[c.id]>now-60000)){seenAt[c.id]=now;S.counts.occupy=(S.counts.occupy||0)+1;wodAiRecord(owner,'ops-occupy',{city:c.id,streets:todo.length,troops:party.length});}
+    }
+
     // ---------- 2. supply cuts already under way are carried through: the same ring, the same troops
     const foeByUid=new Map(foes.map(e=>[e.uid,e])),cutHandled=new Set(),span=C*1.6;
     S.cuts=S.cuts.filter(op=>{
@@ -654,8 +713,8 @@ function wodOpsRun(owner,units){
         // A town under our guns cannot heal its defenders; with a hospital or a town of our own close behind the
         // assault, ours go back into the line again and again. That is worth a good part of his walls.
         const healNear=!TU.noHosp&&(myHospitals.some(h=>dist(h,c)<C*14)||myTowns.some(t=>dist(t,c)<C*12));
-        const sk='take:'+c.id,stormNeed=(oppAt(c,def,1,true)+.3)*edge*(healNear?.85:1)*(fogOn?1.2:1); // under fog there is more than can be seen
-        jobs.push({key:sk,kind:'take',city:c,pos:c,enemies:def,need:stormNeed,value:worth(sk)*(atLarge<=fieldStrength*.3?1.5:1),maxD:Infinity,sDef});
+        const sk='take:'+c.id,stormNeed=(oppAt(c,def,1,true)+.3)*edge*(healNear?.85:1)*(fogOn?1.2:1)*(finishing.has(c)?.8:fronting.has(c)?.9:1); // under fog there is more than can be seen
+        jobs.push({key:sk,kind:'take',city:c,pos:c,enemies:def,need:stormNeed,value:worth(sk)*(atLarge<=fieldStrength*.3?1.5:1)*(finishing.has(c)?1.6:1),maxD:Infinity,sDef});
         // Raid: the town is held by little more than its guard and whatever could come to its help is a
         // long march away. A small party is enough, and it must be quick.
         // It does not have to storm the place: one hostile unit within reach of a town's streets stops all
