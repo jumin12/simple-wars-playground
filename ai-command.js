@@ -2132,7 +2132,7 @@ function wodAiManageRecovery(owner) {
         const needsRotation=job&&!job.city&&!job.fort&&group.length>=3&&ready<Math.max(3,Math.ceil(group.length*.6));
         const release=u.isGeneral?.94:needsRotation?.85:.92;
         if(hp>=release&&manpower>=release&&morale>=(needsRotation?.8:.9)&&!u.moraleBroken){
-            if(u._medicalRecovering){u.retreating=false;u._medicalRecovering=false;u._medicalGoal=null;u._aiRecoveryGroup=null;u.aiOrderUntil=0;wodAiRecord(owner,'recovery-return',{unit:u.uid,group:groupId,strength:Math.round(hp*100)});}
+            if(u._medicalRecovering||u._medicalGoal){wodReleaseRecoveredUnit(u,true);wodAiRecord(owner,'recovery-return',{unit:u.uid,group:groupId,strength:Math.round(hp*100)});}
             continue;
         }
         const baitActive=u._aiAmbushBaitUntil>now&&wodAiActiveFrontOperations(owner).some(o=>o.ambush?.bait===u.uid);
