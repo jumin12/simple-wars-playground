@@ -2254,6 +2254,7 @@
             <button type="button" class="editor-seg-btn" data-ed-shape="forest">Forest</button>
             <button type="button" class="editor-seg-btn" data-ed-shape="mountain">Mountain</button>
             <button type="button" class="editor-seg-btn" data-ed-shape="desert">Desert</button>
+            <button type="button" class="editor-seg-btn" data-ed-shape="continents">Continents</button>
             </div>
           </div>
 

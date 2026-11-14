@@ -64,6 +64,11 @@
 //   8. A fort goes up where the army waits in front of the enemy and on the threatened side of a town with an
 //      enemy army before it (troops in its ring take a fifth less damage, attackers move slowly through it),
 //      and a hospital behind any battle fought far from another place to heal.
+//   9. Forts and hospitals near the front are defended (section 1a). The enemy destroys one by taking its
+//      tile, which he cannot do while somebody stands on it or beside it. A work he could reach before our
+//      nearest man gets a man on it in good time; once he is at it, the nearest troops in proportion to
+//      what has come stand on it and beside it, and the strike on that enemy group counts them in and goes
+//      in without forming up first. They give it up only at three to one against everything of ours there.
 //
 // Each commander draws a doctrine at the start of a match (how big an edge it wants, how much it raids and
 // hunts, how patient it is, which flank it likes), so two matches do not play alike. All but the methodical
@@ -531,6 +536,51 @@ function wodOpsRun(owner,units){
         while(list.length>want)pool.add(list.pop()); // the first guard stays, the rest return to the field
         S.garrison[c.id]=list.map(u=>u.uid);
     }
+    // ---------- 1a. forts and hospitals near the front. A fort or hospital whose tile the enemy takes is
+    // destroyed, and he cannot take a tile while somebody stands on it or beside it. So a work the enemy could
+    // reach before our nearest man gets a man on it in good time, and once the enemy is at it the nearest
+    // troops in proportion to what has come stand on it and beside it, toward him, inside its ring. They hold
+    // unless everything of ours there is outweighed three to one. The relief (a strike on that enemy group,
+    // section 3) counts them in and does not wait to form up.
+    const works=[];
+    for(const x of gameData.forts||[])if((typeof wodEffectiveFortOwner==='function'?wodEffectiveFortOwner(x):x.owner)===owner)works.push({k:'f'+x.q+','+x.r,x:x.x,y:x.y,fort:true});
+    for(const x of gameData.hospitals||[])if(wodEffectiveHospitalOwner(x)===owner)works.push({k:'h'+x.q+','+x.r,x:x.x,y:x.y});
+    if(!TU.noWorks&&works.length&&foes.length){
+        const WG=S.worksGuard||(S.worksGuard={});let budget=Math.max(2,Math.floor(pool.size*(TU.worksShare??.45)));
+        const ranked=works.map(w=>{let d=Infinity;for(const e of foes){const dd=dist(e,w);if(dd<d)d=dd;}return {w,d};}).sort((a,b)=>a.d-b.d);
+        for(const {w,d} of ranked){
+            if(d>C*20||budget<=0||myTowns.some(c=>dist(c,w)<C*4)){delete WG[w.k];continue;} // out of his reach, or inside a town's own defence
+            const prev=(WG[w.k]||[]).map(id=>byUid.get(id)).filter(u=>u&&pool.has(u)&&dist(u,w)<C*16);
+            let gd=Infinity;for(const u of pool){if(u.isGeneral)continue;const dd=dist(u,w);if(dd<gd)gd=dd;}
+            const attacked=d<=C*7;
+            // the race for the tile: he must not get within two tiles of it before our man is there
+            if(!attacked&&!(d<=gd+C*(TU.worksLead??3.5))){delete WG[w.k];continue;}
+            const close=near(foes,w,C*7),threat=wodOpsStrength(close,false);
+            const want=Math.min(budget,attacked?Math.max(1,Math.ceil(threat*(TU.worksK??.9))):1),list=[];
+            for(const u of prev)if(list.length<want){pool.delete(u);list.push(u);}
+            while(list.length<want){let g=null,bd=C*(list.length?14:24);for(const u of pool){if(u.isGeneral||!canReach(u,w))continue;const dd=dist(u,w);if(dd<bd){bd=dd;g=u;}}if(!g)break;pool.delete(g);list.push(g);}
+            if(!list.length&&attacked&&!TU.noBorrow)for(const [c,gl] of guards){if(gl.length<2||dist(c,w)>C*12)continue;let g=null,bd=C*6;for(const u of gl.slice(1)){const dd=dist(u,w);if(dd<bd){bd=dd;g=u;}}if(g){gl.splice(gl.indexOf(g),1);list.push(g);break;}}
+            WG[w.k]=list.map(u=>u.uid);budget-=list.length;w.guards=list;
+            if(!list.length)continue;
+            // somebody of ours already on the tile (a wounded man the medics have taken over, say) holds it
+            const sitter=gameData.entities.some(u=>u.owner===owner&&u.hp>0&&!list.includes(u)&&Math.hypot(u.x-w.x,u.y-w.y)<hr*.8);
+            const there=near(fighters,w,C*6),own=wodOpsStrength(there.concat(list.filter(u=>!there.includes(u))),true)*(w.fort?1.25:1);
+            const hopeless=wodOpsStrength(close,true)>own*3;
+            let lead=null,ld=Infinity;for(const e of foes){const dd=dist(e,w);if(dd<ld){ld=dd;lead=e;}}
+            // the man nearest the work takes the tile
+            list.sort((p,q)=>dist(p,w)-dist(q,w));
+            list.forEach((u,i)=>{
+                claim(u,'works');if(!TU.noWorksStand)u._opsStand=now+5000;
+                const hot=near(foes,u,C*4.5),k=sitter?i+1:i;
+                if(hot.length&&hopeless){fallBack(u);return;}
+                let px=w.x,py=w.y;
+                if(k>0&&lead){const an=Math.atan2(lead.y-w.y,lead.x-w.x)+(k%2?1:-1)*.8*Math.floor(k/2);px=w.x+Math.cos(an)*C*1.15;py=w.y+Math.sin(an)*C*1.15;const h=wodOpsLandHex(px,py);if(!h||!canUnitEnterHex(u,h)){px=w.x;py=w.y;}}
+                const at=Math.hypot(u.x-px,u.y-py)<hr*.8,firing=hot.some(e=>dist(e,u)<=(u.range||50)*.98);
+                if(at||firing&&k>0&&dist(u,w)<C*3)wodOpsHalt(u);else{wodOpsMove(u,px,py,true);if(dist(u,w)>C*3)hurry(u);}
+            });
+            if(!(WG['t'+w.k]>now-60000)){WG['t'+w.k]=now;S.counts.works=(S.counts.works||0)+1;wodAiRecord(owner,'ops-works',{site:w.k,guards:list.length,threat:r1(threat)});}
+        }
+    }
     if(general)pool.add(general);
 
     // ---------- 1b. breakout. A unit whose road home has just been cut has twelve seconds before it starts to
@@ -713,7 +763,8 @@ function wodOpsRun(owner,units){
         for(const o of oldStrikes){let n=0;for(const id of o.ids)if(ids.has(id))n++;if(n>ov){ov=n;key=o.key;}}
         if(!key||S.strikes.some(s=>s.key===key))key='strike:'+g.units[0].uid;
         S.strikes.push({key,ids});
-        const intruding=g.home<C*11||g.inMine>=.5;
+        const atWorks=!TU.noWorks&&works.some(w=>dist(w,g.c)<C*8);
+        const intruding=g.home<C*11||g.inMine>=.5||atWorks;
         // a column that has pushed into our land hangs on the strip it painted behind it: cut that first
         // The same is done to any group in the open whose ground narrows behind it, in his land or nobody's: at
         // even odds a closed ring is worth more than a won firefight. Wider rings take more cutters.
@@ -754,7 +805,8 @@ function wodOpsRun(owner,units){
         }
         let alone=true;for(const o of groups)if(o!==g&&dist(o.c,g.c)<C*9){alone=false;break;}
         if(alone&&enemyTowns.some(t=>dist(t,g.c)<C*9))alone=false;
-        const home=homeTown(g.c),helpers=g.home<C*8?(guards.get(home)||[]):[];
+        const wk=atWorks&&!TU.noRescue?works.find(w=>w.guards&&w.guards.length&&g.units.some(e=>dist(e,w)<C*6)):null; // a guarded work of ours under attack
+        const home=homeTown(g.c),helpers=g.home<C*8?(guards.get(home)||[]):wk?wk.guards:[];
         const pocketed=g.units.some(e=>(e.outOfSupplySeconds||0)>3);
         // Where the fight is matters as much as its size: the side whose wounded have the shorter walk to a
         // town or hospital gets them back into the line several times while the other side's are still walking.
@@ -764,8 +816,8 @@ function wodOpsRun(owner,units){
         let need=oppAt(g.pos,g.units,TU.scover??.7)*Math.max(.95,edge-.04)*logistics-wodOpsStrength(helpers,true)*.8;
         if(pocketed)need*=.6; // they are starving: time is on our side
         need=Math.max(.6,need);
-        const value=(intruding?(26+12*g.raw)*(g.home<C*8?2:1):8*g.raw*(alone?1.5:1))*D.hunt/(1+failed(key)*.5);
-        jobs.push({key,kind:'strike',g,pos:g.pos,enemies:g.units,need,value,maxD:C*(intruding?34:26)});
+        const value=(intruding?(26+12*g.raw)*(g.home<C*8?2:atWorks?1.5:1):8*g.raw*(alone?1.5:1))*D.hunt/(1+failed(key)*.5);
+        jobs.push({key,kind:'strike',g,pos:g.pos,enemies:g.units,need,value,wk,maxD:C*(intruding?34:26)});
     }
     const atLarge=groups.filter(g=>!g.town).reduce((n,g)=>n+g.raw,0);
     for(const c of enemyTowns){
@@ -910,7 +962,7 @@ function wodOpsRun(owner,units){
         const contact=M.some(u=>anyNear(E,u,C*3.2));
         // the fight as it stands: everyone in it or a few seconds from it
         const front=contact?M.filter(u=>anyNear(E,u,C*13)||dist(u,P)<C*13||dist(u,mc)<C*10):M;
-        const own=wodOpsStrength(front,true)+(j.kind==='strike'&&j.g.home<C*8?wodOpsStrength(guards.get(homeTown(j.g.c))||[],true)*.8:0);
+        const own=wodOpsStrength(front,true)+(j.kind==='strike'&&j.g.home<C*8?wodOpsStrength(guards.get(homeTown(j.g.c))||[],true)*.8:j.wk?wodOpsStrength(j.wk.guards,true)*.8:0);
         const opp=Math.max(.05,wodOpsStrength(E.concat(near(ghosts,P,C*7)),true));
         st.ratio=own/opp;st.at={x:mc.x,y:mc.y};
         const hotOf=u=>near(foes,u,C*4.2);
@@ -948,7 +1000,7 @@ function wodOpsRun(owner,units){
             }
             const gathered=wodOpsStrength(near(M,rally,C*6),false),all=wodOpsStrength(M,false);
             const waited=now-st.since;
-            let go=M.length<=1||contact&&st.ratio>=1||(!TU.strict?gathered>=j.need||gathered>=all*.6||waited>25000&&gathered>=all*.4:gathered>=j.need*.95||gathered>=all*.9&&gathered>=j.need*.85);
+            let go=M.length<=1||contact&&st.ratio>=1||!!j.wk&&st.ratio>=.8||(!TU.strict?gathered>=j.need||gathered>=all*.6||waited>25000&&gathered>=all*.4:gathered>=j.need*.95||gathered>=all*.9&&gathered>=j.need*.85);
             if(go&&j.raid){
                 // go round the enemy, not through him
                 const ignore=new Set(j.enemies),from={x:rally.x,y:rally.y};st.via=null;
@@ -1151,8 +1203,12 @@ function wodOpsRun(owner,units){
         const centre=wodHexAt(c.q,c.r);if(centre&&!streets.includes(centre))streets.unshift(centre);
         const raiders=near(foes,c,C*7);
         const used=new Set();
+        let onWork=null,workAt=null;
+        if(!TU.noWorks&&raiders.length&&list.length>1){let bd=Infinity;for(const w of works){if(dist(w,c)>=C*4)continue;const dd=Math.min(...raiders.map(e=>dist(e,w)));if(dd<bd){bd=dd;workAt=w;}}
+            if(workAt){let gd=Infinity;for(const g of list){const dd=dist(g,workAt);if(dd<gd){gd=dd;onWork=g;}}}}
         list.forEach(g=>{
             claim(g,'guard');
+            if(g===onWork){g._opsStand=now+5000;if(dist(g,workAt)>hr*.8)wodOpsMove(g,workAt.x,workAt.y,true);else wodOpsHalt(g);return;}
             let post=null,bs=Infinity;
             for(const h of streets){
                 if(used.has(h))continue;

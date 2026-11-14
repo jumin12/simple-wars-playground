@@ -29,7 +29,7 @@
     }
 
     function usesRadial(mapShape) {
-        return mapShape === 'island' || mapShape === 'ring' || mapShape === 'archipelago';
+        return mapShape === 'island' || mapShape === 'ring' || mapShape === 'archipelago' || mapShape === 'continents';
     }
     function usesRect(mapShape) {
         return mapShape === 'rectangle' || mapShape === 'forest' || mapShape === 'mountain' || mapShape === 'desert';
@@ -175,6 +175,32 @@
                                 radialWarp * 0.92 +
                                 bandWobble -
                                 ((dist - ri) / Math.max(0.08, ro - ri)) * (0.26 + (coastW - 0.5) * 0.04);
+                    } else if (mapShape === 'continents') {
+                        // Two island masks side by side (one per lobe) and a channel between them
+                        // that always stays sea. Keep in step with generateMap in index.html.
+                        let xs = normX - (gp.contShear || 0) * normY;
+                        let lobes = gp.contLobes || [];
+                        let best = -9,
+                            bestD = 9;
+                        for (let li = 0; li < lobes.length; li++) {
+                            let lb = lobes[li];
+                            let lx = (xs - lb.x) / lb.rx,
+                                ly = (normY - lb.y) / lb.ry;
+                            let ld = Math.sqrt(lx * lx + ly * ly);
+                            let la = Math.atan2(ly, lx);
+                            let lw =
+                                (fbm(Math.cos(la) * 2.4 + seedOffset + 37 * (li + 1), Math.sin(la) * 2.4 + seedOffset + 37 * (li + 1), 4) - 0.5) *
+                                (gp.coastNoiseAmp != null ? gp.coastNoiseAmp : 0.45);
+                            let lm = 1.12 - ld * 0.63 + lw * 0.8;
+                            if (lm > best) {
+                                best = lm;
+                                bestD = ld * 0.63;
+                            }
+                        }
+                        let chanMid =
+                            (gp.contChanX || 0) + (fbm(normY * 1.9 + seedOffset + 611, seedOffset * 0.37 + 11, 3) - 0.5) * 2 * (gp.contChanWave || 0);
+                        mask = best - Math.max(0, (gp.contChanHalf || 0.1) * 0.85 - Math.abs(xs - chanMid)) * 6;
+                        islandRadialDist = bestD;
                     } else if (mapShape === 'archipelago') {
                         let punch = gp.archipelagoCenterClearFrac != null ? gp.archipelagoCenterClearFrac : 0.55;
                         mask -= Math.max(0, punch - dist) * 1.62;
