@@ -13112,6 +13112,11 @@
         };
 
         const WOD_CHANGELOG = [
+            {at:"2026-11-14T02:19:38Z",title:"Retreats around friendly lines",items:[
+                "Retreating and routing troops keep steering around allies even when an enemy is close behind them.",
+                "Blocked retreats plan short routes around nearby troops instead of repeatedly aiming at an occupied cell. Detours keep their corners and resume the original retreat destination.",
+                "Units reconsider blocked detours when other troops move into the route, and take a shorter route when a gap opens."
+            ]},
             {at:"2026-11-14T00:44:07Z",title:"Bridges you draw, continents and mountain passes",items:[
                 "Drag a bridge from bank to bank in any direction, or tap both banks. The preview shows its price and length: $1,000 per water cell, up to four cells, with a 60-second construction time. Existing saved bridges still work.",
                 "Continents maps place two large landmasses across an open sea, with equal land per player and a port town for each side. Generated skirmish and multiplayer maps now offer one to four towns per player.",
@@ -30740,27 +30745,125 @@
             });return blocked;
         }
 
-        /** A retreat that cannot get past comrades standing in a row: step-by-step steering only swings
-         *  from one side of them to the other. Pick a point clear of them to one side and a little
-         *  forward, walk there, then carry on to where the retreat was going. */
+        /** A retreat that cannot get past comrades standing in its way (a line holding the front, a
+         *  crowd round a town): step-by-step steering only swings from one side of them to the other,
+         *  and next to an enemy it does not steer at all. Plan a short way round them: corner points
+         *  just outside the reach of everybody near, joined wherever the straight leg between two is
+         *  clear of terrain and of everybody's body, and the shortest chain of legs from the unit to a
+         *  point some four cells on towards its goal, through a gap a comrade has opened by stepping
+         *  aside or round the end of the line. The unit walks it, then carries on to where the retreat
+         *  was going. Returns true when it set such a route.
+         *  (Until 2026-11-13 this tried fixed points two, three and four and a half cells to the side
+         *  and took the first that a coarse check passed, often the farthest: the unit then walked
+         *  four cells along the line before turning, or into a comrade, and the route was replanned
+         *  back into the line half a second later.) */
         function wodRetreatGoRound(unit) {
             const goal=unit.orderTarget||unit.target?.finalTarget||unit.target;if(!goal)return false;
-            const dx=goal.x-unit.x,dy=goal.y-unit.y,d=Math.hypot(dx,dy);if(d<(gameData.hexRadius||20)*2)return false;
-            const ux=dx/d,uy=dy/d,sp=(gameData.hexRadius||20)*1.35;
-            const sides=unit._wodGoRoundSide?[unit._wodGoRoundSide,-unit._wodGoRoundSide]:[1,-1];
-            // Sideways and a little forward if that is clear; with comrades close on both sides the way round
-            // starts with a step sideways or even back.
-            for(const fwd of [.8,0,-.8])for(const lat of [2,3,4.5])for(const side of sides){
-                const x=unit.x+(-uy*side*lat+ux*fwd)*sp,y=unit.y+(ux*side*lat+uy*fwd)*sp;
-                if(!wodSamplePosOnWalkableTerrain(unit,x,y)||!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,x,y))continue;
-                let clear=true;
-                for(let i=2;i<=6&&clear;i++)if(isWorldPositionBlockedByUnits(unit,unit.x+(x-unit.x)*i/6,unit.y+(y-unit.y)*i/6))clear=false;
-                if(!clear)continue;
-                unit._wodGoRoundSide=side;unit.fullMarchWaypoints=null;unit.marchWpCursor=0;unit.path=null;
-                unit.target={x,y,detour:true,finalTarget:{x:goal.x,y:goal.y}};
-                return true;
+            const sp=(gameData.hexRadius||20)*1.35,r0=unit.radius||12;
+            // The way ahead is where the route runs over the next three cells (the goal itself may lie
+            // round a lake or behind a ridge), or straight at the goal when the unit is on a local
+            // detour (which may point anywhere, even into the comrade in front).
+            let ax=unit.x,ay=unit.y,left=sp*3;
+            if(!unit.target.detour&&unit.path?.length)for(const p of [unit.target,...unit.path]){
+                if(!p)continue;const l=Math.hypot(p.x-ax,p.y-ay);
+                if(l>=left){ax+=(p.x-ax)*left/l;ay+=(p.y-ay)*left/l;left=0;break;}
+                left-=l;ax=p.x;ay=p.y;
             }
-            return false;
+            let dx=ax-unit.x,dy=ay-unit.y,d=Math.hypot(dx,dy);
+            if(left>0||d<sp){dx=goal.x-unit.x;dy=goal.y-unit.y;d=Math.hypot(dx,dy);}
+            if(d<sp)return false;
+            const ux=dx/d,uy=dy/d;
+            // Everybody near, in the unit's own frame: f ahead of it, l to its left, r the distance
+            // their centres must keep from its centre.
+            const near=[];
+            const body=(u,x,y)=>{const ox=x-unit.x,oy=y-unit.y;near.push({x,y,f:ox*ux+oy*uy,l:oy*ux-ox*uy,r:(u.radius||12)+r0+3,friend:wodIsFriendlyOwner(u.owner,unit.owner)});};
+            forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,sp*6,u=>{
+                if(u===unit||u.hp<=0||u.type==='convoy'||u.boardTransportUid)return;
+                body(u,u.x,u.y);
+                // A comrade stepping aside (very likely for this unit) will stand where he is going.
+                const y=u._trafficYield,to=y&&(y.returning?y.points?.[0]:y);
+                if(to&&to.x!=null&&Math.hypot(to.x-unit.x,to.y-unit.y)<sp*6)body(u,to.x,to.y);
+            });
+            // (only for comrades straight in front)
+            if(!near.some(b=>b.friend&&b.f>0&&b.f<sp*2.5&&Math.abs(b.l)<b.r))return false;
+            const clear=(x1,y1,x2,y2,first)=>{
+                for(const b of near){
+                    // (a body the unit stands against does not count while the leg leads away from it)
+                    if(first&&(b.x-x1)*(x2-x1)+(b.y-y1)*(y2-y1)<=0)continue;
+                    if(distPointToSegmentSquared(b.x,b.y,x1,y1,x2,y2)<(b.r-1)**2)return false;
+                }
+                return wodSamplePosOnWalkableTerrain(unit,x2,y2)&&wodSegmentClearsTerrainForUnit(unit,x1,y1,x2,y2);
+            };
+            // Where the way round ends: about four cells on (the goal itself when that is nearer).
+            const gd=Math.hypot(goal.x-unit.x,goal.y-unit.y);let end=null;
+            for(const k of [4.5,3.5,5.5]){
+                const p=gd<=sp*k?{x:goal.x,y:goal.y}:{x:unit.x+ux*sp*k,y:unit.y+uy*sp*k};
+                if(wodSamplePosOnWalkableTerrain(unit,p.x,p.y)&&!near.some(b=>Math.hypot(b.x-p.x,b.y-p.y)<b.r+2)){end=p;break;}
+            }
+            if(!end)return false;
+            // Corner points round the twelve nearest bodies that are not well behind the unit.
+            const pts=[{x:unit.x,y:unit.y}];
+            const around=near.filter(b=>b.f>-sp*1.5&&b.f<sp*5.5&&Math.abs(b.l)<sp*4).sort((p,q)=>p.f*p.f+p.l*p.l-q.f*q.f-q.l*q.l).slice(0,12);
+            for(const b of around)for(let k=0;k<8;k++){
+                const x=b.x+Math.cos(k*Math.PI/4)*(b.r+5),y=b.y+Math.sin(k*Math.PI/4)*(b.r+5);
+                if(!near.some(o=>Math.hypot(o.x-x,o.y-y)<o.r+1)&&wodSamplePosOnWalkableTerrain(unit,x,y))pts.push({x,y});
+            }
+            pts.push(end);
+            // The shortest chain of clear legs (Dijkstra; a leg is checked only when it would shorten a way).
+            const n=pts.length,dist=new Array(n).fill(Infinity),prev=new Array(n).fill(-1),done=new Array(n).fill(false);dist[0]=0;
+            for(;;){
+                let i=-1;for(let k=0;k<n;k++)if(!done[k]&&dist[k]<Infinity&&(i<0||dist[k]<dist[i]))i=k;
+                if(i<0||i===n-1)break;done[i]=true;
+                for(let j=1;j<n;j++){
+                    if(done[j])continue;const w=dist[i]+Math.hypot(pts[j].x-pts[i].x,pts[j].y-pts[i].y);
+                    if(w<dist[j]&&clear(pts[i].x,pts[i].y,pts[j].x,pts[j].y,i===0)){dist[j]=w;prev[j]=i;}
+                }
+            }
+            if(dist[n-1]===Infinity)return false;
+            const route=[];for(let k=n-1;k>0;k=prev[k])route.unshift(pts[k]);
+            unit._wodGoRoundSide=Math.sign((route[0].y-unit.y)*ux-(route[0].x-unit.x)*uy)||1;unit._wodGoRoundBlockT=0;unit._wodGoRoundProgress=null;
+            const legs=route.map((p,k)=>k<route.length-1?{x:p.x,y:p.y,pathPrepared:true,goRound:true}:
+                {x:p.x,y:p.y,pathPrepared:true,detour:true,goRound:true,finalTarget:{x:goal.x,y:goal.y}});
+            unit.target=legs[0];unit.path=legs.slice(1);
+            invalidateUnitOrderArrowCache(unit);
+            return true;
+        }
+        /** Give up a way round that somebody has stepped into, and plan the retreat afresh. */
+        function wodEndRetreatGoRound(unit) {
+            const end=[unit.target,...(unit.path||[])].find(p=>p?.goRound&&p.finalTarget);
+            const goal=unit.orderTarget||end?.finalTarget;
+            unit._wodGoRoundBlockT=0;unit._wodGoRoundProgress=null;unit.path=null;unit.target=goal?{x:goal.x,y:goal.y,pathPrepared:false}:null;
+            unit._wodRetreatReplanAt=0;replanUnitOrder(unit);
+        }
+        /** On the way round: the corner point counts as reached a little short of it, and a way round
+         *  that has brought the unit no nearer its next point for two seconds (by less than half of
+         *  what it walks in that time, at the slowest a fighting retreat goes) is given up: a comrade
+         *  has stepped in beside the point, and body separation holds the unit off it without it ever
+         *  counting as blocked. Returns false when the way round has ended this frame. */
+        function wodRetreatGoRoundHeadway(unit) {
+            const now=gameData._aiEconomyClock||0,sp=(gameData.hexRadius||20)*1.35;
+            let d=Math.hypot(unit.target.x-unit.x,unit.target.y-unit.y);
+            if(!unit.target.detour&&unit.path?.[0]?.goRound&&d<(unit.radius||12)*.75){
+                wodTakeNextPathTarget(unit);d=Math.hypot(unit.target.x-unit.x,unit.target.y-unit.y);
+            }
+            // Once a second: if the comrades have moved off the straight way to the end of the way round
+            // (one has walked away, or stepped aside after all), the corners in between are skipped.
+            const last=unit.path?.length?unit.path[unit.path.length-1]:null;
+            if(last&&now>=(unit._wodGoRoundLookAt||0)){
+                unit._wodGoRoundLookAt=now+1;
+                let open=wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,last.x,last.y);
+                if(open)forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,sp*6,u=>{
+                    if(!open||u===unit||u.hp<=0||u.type==='convoy'||u.boardTransportUid)return;
+                    if((u.x-unit.x)*(last.x-unit.x)+(u.y-unit.y)*(last.y-unit.y)<=0)return;
+                    if(distPointToSegmentSquared(u.x,u.y,unit.x,unit.y,last.x,last.y)<((u.radius||12)+(unit.radius||12)+2)**2)open=false;
+                });
+                if(open){unit.target=last;unit.path=[];d=Math.hypot(last.x-unit.x,last.y-unit.y);}
+            }
+            const p=unit._wodGoRoundProgress,need=Math.min(sp*.25,(unit.speed||15)*WOD_MOVE_SPEED_FACTOR*getUnitSpeedMultiplier(unit)*.75*2*.4);
+            if(!p||p.target!==unit.target||d<p.d-need){unit._wodGoRoundProgress={target:unit.target,d,at:now};return true;}
+            if(now-p.at<=2)return true;
+            wodEndRetreatGoRound(unit);
+            return !!unit.target;
         }
         function wodSteerAroundFriendlyUnits(unit,nx,ny,dt=1/60) {
             const sx=nx-unit.x,sy=ny-unit.y,step=Math.hypot(sx,sy);if(step<.00001)return null;
@@ -30779,7 +30882,10 @@
                 const reach=(unit.radius||12)+(u.radius||12)+3+(speed+Math.hypot(vx,vy))*3;
                 if((u.x-unit.x)**2+(u.y-unit.y)**2<=reach*reach)friends.push({u,vx,vy});
             });
-            if(hostile||!friends.length)return null;
+            // Next to an enemy a unit does not steer round its comrades, so as not to slip out of the fight,
+            // unless it is falling back: an enemy at its heels is no reason to press into the comrades in
+            // front of it. (The candidate steps still keep clear of the enemy's body.)
+            if(hostile&&!(unit._wodRiskRetreat||unit.retreating||unit.moraleBroken)||!friends.length)return null;
             // All steering candidates are one step from this same origin.
             // Reuse one conservative broad phase, then apply the original
             // exact overlap/escaping-overlap predicate to each candidate.
@@ -36941,7 +37047,9 @@
             if(!unit.target) return;
             if(unit._wodRiskRetreat&&unit.retreating&&unit.orderTarget){
                 const now=gameData._aiEconomyClock||0;
-                if(now>=(unit._wodRetreatScanAt||0)){
+                // (not while it walks round comrades: the way round was clear when it was chosen, and
+                // it is planned afresh at the end of it)
+                if(now>=(unit._wodRetreatScanAt||0)&&!unit.target.goRound){
                     unit._wodRetreatScanAt=now+.5;
                     const signature=wodRetreatThreatSignature(unit);
                     if(unit._wodRetreatRouteBlocked||signature!==unit._wodRetreatThreatSignature){
@@ -36962,15 +37070,18 @@
             // Local avoidance points are temporary. Requiring their exact occupied
             // center trapped two friendly AI marchers facing the same detour node.
             if(unit.target.detour&&unit.target.finalTarget&&Math.hypot(unit.x-unit.target.x,unit.y-unit.target.y)<(unit.radius||12)+4) {
-                const final=unit.target.finalTarget;unit.target={x:final.x,y:final.y,pathPrepared:false};
+                const final=unit.target.finalTarget;if(unit.target.goRound)unit._wodRetreatReplanAt=0;
+                unit.target={x:final.x,y:final.y,pathPrepared:false};
                 replanUnitOrder(unit);if(!unit.target)return;
             }
+            if(unit.target.goRound&&!wodRetreatGoRoundHeadway(unit))return;
             // A column need not occupy the exact same corner point to advance. Keep
             // the turn only while it is needed to clear terrain, so friends cannot
             // deadlock on opposite sides of a one-cell entrance waypoint.
             {
                 let turns=0;
-                while(unit.target&&unit.path?.length&&turns++<4) {
+                // (The corner of a way round comrades is kept: cutting it leads into the end of their line.)
+                while(unit.target&&!unit.target.goRound&&unit.path?.length&&turns++<4) {
                     const next=unit.path[0],near=Math.hypot(unit.target.x-unit.x,unit.target.y-unit.y)<Math.max((gameData.hexRadius||20)*1.35*1.2,(unit.radius||12)*2+4);
                     if(!near||!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,next.x,next.y))break;
                     if(unit._wodRiskRetreat&&!wodRetreatShortcutSafe(unit,next))break;
@@ -37161,18 +37272,25 @@
             ny = terrainClamp.y;
             const avoidance=unit.type!=='convoy'&&wodSteerAroundFriendlyUnits(unit,nx,ny,dt);
             if(avoidance){nx=avoidance.x;ny=avoidance.y;}
-            // A retreat that has made no headway for over a second while steering round comrades is
-            // going back and forth in front of them: walk round the lot.
+            // A retreat that has made no headway for a while while steering round comrades is going
+            // back and forth in front of them, or pressing into them: walk round the lot.
             if(unit.type!=='convoy'&&(unit._wodRiskRetreat||unit.retreating||unit.moraleBroken)){
                 const goalR=unit.orderTarget||unit.target.finalTarget||unit.target,dR=Math.hypot(goalR.x-unit.x,goalR.y-unit.y);
-                if(unit.target.detour||unit._wodFleeD==null||dR<unit._wodFleeD-1.5){unit._wodFleeD=dR;unit._wodFleeT=0;}
+                // (Only the way round itself is excused for leading sideways. Other detours are not: the
+                // local detour of a blocked march picks the free neighbouring cell nearest the goal, which
+                // in front of a line is a comrade's cell, and it is picked again and again.)
+                if(unit.target.goRound||unit._wodFleeD==null||dR<unit._wodFleeD-1.5){unit._wodFleeD=dR;unit._wodFleeT=0;}
                 else{
                     // (every frame without headway counts: between two sidesteps the unit takes a free step
                     // forward and is steered back again)
                     unit._wodFleeT=(unit._wodFleeT||0)+dt;
-                    // (four and a half seconds: comrades who are free to step aside have done so by then, and the
-                    // safest-route replanning has had its chance)
-                    if(unit._wodFleeT>2.5&&!((unit._wodGoRoundAt||0)>(gameData._aiEconomyClock||0)-8)){unit._wodFleeT=0;unit._wodFleeD=null;if(wodRetreatGoRound(unit)){unit._wodGoRoundAt=gameData._aiEconomyClock||0;return;}}
+                    // (two and a half seconds: comrades who are free to step aside have begun to by then, and the
+                    // safest-route replanning has had its chance. While some are still stepping aside for this
+                    // unit it waits for them, up to eight seconds: the gap they open is shorter than the way
+                    // round the end of a line.)
+                    const id=unit.uid,sp=(gameData.hexRadius||20)*1.35;
+                    const making=unit._wodFleeT>2.5&&unit._wodFleeT<8&&gameData.entities.some(u=>u.hp>0&&u._trafficYield?.leader===id&&!u._trafficYield.returning&&u._trafficYield.route?.target&&Math.abs(u.x-unit.x)<sp*4&&Math.abs(u.y-unit.y)<sp*4);
+                    if(unit._wodFleeT>2.5&&!making&&!((unit._wodGoRoundAt||0)>(gameData._aiEconomyClock||0)-3)){unit._wodFleeT=0;unit._wodFleeD=null;if(wodRetreatGoRound(unit)){unit._wodGoRoundAt=gameData._aiEconomyClock||0;return;}}
                 }
             }else if(unit._wodFleeD!=null){unit._wodFleeD=null;unit._wodFleeT=0;}
             if(unit.type!=='convoy'&&(isWorldPositionBlockedByUnits(unit,nx,ny)||avoidance&&Math.hypot(nx-unit.x,ny-unit.y)<.001)) {
@@ -37191,6 +37309,13 @@
             if(unit.type !== 'convoy' && (retreatStalled || isWorldPositionBlockedByUnits(unit, nx, ny))) {
                 if(!retreatStalled&&!((unit._trafficBlockT||0)>1.5&&(unit._wodRiskRetreat||unit.retreating||unit.moraleBroken))&&wodYieldFriendlyTraffic(unit))return;
                 const fleeing=unit._wodRiskRetreat||unit.retreating||unit.moraleBroken;
+                if(unit.target.goRound){
+                    // Somebody has stepped into the way round since it was chosen: wait a moment for him,
+                    // then give it up and plan afresh (no headway sends the unit round again).
+                    unit._wodGoRoundBlockT=(unit._wodGoRoundBlockT||0)+dt;
+                    if(unit._wodGoRoundBlockT>1)wodEndRetreatGoRound(unit);
+                    return;
+                }
                 if(unit._wodRiskRetreat){
                     // The safest route is asked for again (the request is rate-limited). A retreat that
                     // still makes no headway is sent round by the no-headway check above.
@@ -37266,6 +37391,10 @@
                     return;
                 }
                 let detour = findLocalDetourHex(unit, unit.target.x, unit.target.y);
+                // (The neighbouring cell nearest the goal is, in front of a line, the cell of the comrade the
+                // unit is stuck behind. A retreating unit is not sent into him: it keeps steering for its goal,
+                // which finds a gap when one opens, and is sent round the line when none does.)
+                if(detour&&fleeing&&isWorldPositionBlockedByUnits(unit,detour.x,detour.y))detour=null;
                 if(detour) {
                     let finalTarget = unit.orderTarget || unit.target.finalTarget || {x: unit.target.x, y: unit.target.y};
                     unit.fullMarchWaypoints = null;
