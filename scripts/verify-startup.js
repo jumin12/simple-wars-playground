@@ -4,43 +4,31 @@
 // the attract battle and therefore cannot catch menu-only startup regressions.
 const assert = require('assert/strict');
 const fs = require('fs');
-const http = require('http');
 const path = require('path');
-const { spawn } = require('child_process');
-const { chromium, _electron } = require('playwright');
-const { WebSocketServer } = require('../server/node_modules/ws');
-const ROOT = path.resolve(__dirname, '..');
-const OUT = path.join(ROOT, 'output/startup-fix');
+const { _electron } = require('playwright');
+const H = require('./lib/harness');
+const ROOT = H.ROOT;
+const OUT = H.outDir('startup-fix');
 const WRAPPER = path.resolve(ROOT, '../simple wars steam');
 const FAULT = 'Injected menu battlefield failure';
-fs.mkdirSync(OUT, { recursive: true });
 const results = [];
-let relay;
 
-const server = http.createServer((req, res) => {
-  const url = new URL(req.url, 'http://localhost');
-  const file = path.resolve(ROOT, '.' + (url.pathname === '/' ? '/index.html' : decodeURIComponent(url.pathname)));
-  if (!file.startsWith(ROOT + path.sep)) return res.writeHead(403).end();
-  fs.readFile(file, (error, bytes) => {
-    if (error) return res.writeHead(404).end();
-    if (url.searchParams.has('startupFault') && file === path.join(ROOT, 'index.html')) {
-      const html = bytes.toString();
-      assert(html.includes('            kickstartMenuAttractSim();'));
-      bytes = Buffer.from(html.replace('            kickstartMenuAttractSim();', '            if(!window._startupFaultInjected){window._startupFaultInjected=true;throw new Error(' + JSON.stringify(FAULT) + ');} kickstartMenuAttractSim();'));
-    }
-    res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg' })[path.extname(file)] || 'application/octet-stream');
-    res.end(bytes);
-  });
+// A second server whose copy of the game throws once while starting the menu battle. The call is a
+// line of its own in js/game.js (or inline in index.html for a pre-split build served via SW_EXTRA_ROOTS).
+const KICKSTART_CALL = /^([ \t]*)kickstartMenuAttractSim\(\);[ \t]*$/m;
+let faultsInjected = 0;
+const server = H.createStaticServer();
+const faultServer = H.createStaticServer({
+  rewrite(pathname, body) {
+    if (!/\.(html|js)$/.test(pathname) || !KICKSTART_CALL.test(String(body))) return undefined;
+    faultsInjected++;
+    return String(body).replace(KICKSTART_CALL, '$1if(!window._startupFaultInjected){window._startupFaultInjected=true;throw new Error(' + JSON.stringify(FAULT) + ');} kickstartMenuAttractSim();');
+  },
 });
 
-async function isolate(context) {
-  // Test profiles must never log into or modify real multiplayer accounts.
-  await context.route('**/*', route => /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(route.request().url()) ? route.fallback() : route.abort());
-  await context.routeWebSocket(/.*/, socket => {
-    socket.onMessage(() => {});
-    socket.send(JSON.stringify({ t: 'welcome', online: 0, lobbies: [] }));
-  });
-}
+// Test profiles must never log into or modify real multiplayer accounts (used for the Electron app;
+// browsers from H.launchBrowser are isolated already).
+const isolate = H.isolateContext;
 
 async function verify(page, name, { navigate, fault = false, play = false, reload = false } = {}) {
   const errors = [], pageErrors = [];
@@ -110,11 +98,12 @@ async function desktop(name, executable, profile, play) {
 
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise(resolve => faultServer.listen(0, '127.0.0.1', resolve));
   const url = 'http://127.0.0.1:' + server.address().port;
-  const browser = await chromium.launch({ headless: true });
+  const faultUrl = 'http://127.0.0.1:' + faultServer.address().port;
+  const browser = await H.launchBrowser();
   try {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    await isolate(context);
     const page = await context.newPage();
     await verify(page, 'browser-cold', { navigate: url, play: true });
     await page.evaluate(() => localStorage.setItem('startup-test-save', 'preserved'));
@@ -122,8 +111,8 @@ async function desktop(name, executable, profile, play) {
     assert.equal(await page.evaluate(() => localStorage.getItem('startup-test-save')), 'preserved');
     await context.close();
     const recovery = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-    await isolate(recovery);
-    await verify(await recovery.newPage(), 'browser-recovery', { navigate: url + '/?startupFault=1', fault: true, play: true });
+    await verify(await recovery.newPage(), 'browser-recovery', { navigate: faultUrl + '/', fault: true, play: true });
+    assert(faultsInjected > 0, 'the menu battle start-up call was found and patched');
     await recovery.close();
   } finally { await browser.close(); }
 
@@ -134,23 +123,9 @@ async function desktop(name, executable, profile, play) {
     await desktop('steam-second-depot', path.join(WRAPPER, 'dist-ship/win-unpacked/Simple Wars.exe'), path.join(OUT, 'ship-profile-' + Date.now()), false);
   }
 
-  // Required visual/action loop against ordinary boot, without the bypass flag.
-  const skill = path.join(require('os').homedir(), '.codex/skills/develop-web-game');
-  const client = path.join(OUT, 'client.mjs');
-  fs.copyFileSync(path.join(skill, 'scripts/web_game_playwright_client.js'), client);
-  relay = new WebSocketServer({ port: 8080 });
-  await new Promise((resolve, reject) => { relay.once('listening', resolve); relay.once('error', reject); });
-  relay.on('connection', socket => socket.send(JSON.stringify({ t: 'welcome', online: 0, lobbies: [] })));
-  const errorFile = path.join(OUT, 'skill/errors-0.json');
-  fs.rmSync(errorFile, { force: true });
-  await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [client, '--url', url, '--actions-file', path.join(skill, 'references/action_payloads.json'),
-      '--iterations', '1', '--pause-ms', '12000', '--screenshot-dir', path.join(OUT, 'skill')], { stdio: 'inherit' });
-    child.on('error', reject);
-    child.on('exit', code => code ? reject(Error('Skill client exited ' + code)) : resolve());
-  });
-  if (fs.existsSync(errorFile)) assert.deepEqual(JSON.parse(fs.readFileSync(errorFile)), [], 'no bundled-client errors');
+  // Independent visual/action loop against ordinary boot, without the bypass flag.
+  await H.smokeClient(url, { dir: path.join(OUT, 'skill'), pauseMs: 12000 });
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => {
   server.close();
-  if (relay) { for (const socket of relay.clients) socket.terminate(); relay.close(); }
+  faultServer.close();
 });

@@ -168,14 +168,16 @@
     if(context?.state==='running')for(let kind of KINDS)load(s.era,kind);
     if(!s.enabled||document.hidden){stopBattle();for(let shot of shots)if(!shot._wodSelection||!s.selectionEnabled||document.hidden)try{shot.stop();}catch(_){}return;}
     let now=performance.now();if(now-lastTick<100)return;lastTick=now;
-    for(let unit of s.units){
+    // units/jobs may be functions so the caller only builds the lists on the ticks that use them.
+    const units=typeof s.units==='function'?s.units():s.units,jobList=typeof s.jobs==='function'?s.jobs():s.jobs;
+    for(let unit of units){
       let pos=spatial(unit);
       if(unit.spawnFx>0&&!seen.has(unit.uid)){
         seen.add(unit.uid);
         if(now-lastCue>450&&pos.gain>0){lastCue=now;oneShot('mobilize',unit);}
       }
     }
-    const pairs=collectEngagements(s.units).map(pair=>({...pair,pos:spatial(pair)})).filter(pair=>pair.pos.gain>0);
+    const pairs=collectEngagements(units).map(pair=>({...pair,pos:spatial(pair)})).filter(pair=>pair.pos.gain>0);
     const desired=new Set(pairs.map(pair=>pair.key));
     for(let[key,bus]of battles)if(!desired.has(key)){battles.delete(key);retireBus(bus,false);}
     let presence=0;
@@ -193,9 +195,9 @@
       }
       duck(presence);
     }else stopBattle();
-    let jobs=new Map(s.jobs.map(j=>[j.key,j]));
+    let jobs=new Map(jobList.map(j=>[j.key,j]));
     for(let[key,j]of oldJobs)if(!jobs.has(key)&&s.completed(j)&&now-lastCue>450){lastCue=now;oneShot('complete',j);}
-    let work=s.jobs.filter(j=>!['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].includes(j.mode)).sort((a,b)=>spatial(b).gain-spatial(a).gain)[0];
+    let work=jobList.filter(j=>!['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].includes(j.mode)).sort((a,b)=>spatial(b).gain-spatial(a).gain)[0];
     if(work&&spatial(work).gain>0&&now-lastWork>9000){lastWork=now;oneShot('construction',work);}
     oldJobs=jobs;
   }

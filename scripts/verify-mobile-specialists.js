@@ -1,13 +1,12 @@
 'use strict';
-const http=require('http'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/mobile-specialists');
 fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!f.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(f,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(f)]||'application/octet-stream');res.end(b);});});
+const server=H.createStaticServer();
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,isMobile:true,deviceScaleFactor:2}),errors=[],results={};
+ const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:390,height:844},hasTouch:true,isMobile:true,deviceScaleFactor:2}),errors=[],results={};
  page.on('pageerror',e=>errors.push(e.stack));
  const capture=async options=>{await page.evaluate(()=>{document.querySelectorAll('.wod-toast-note').forEach(e=>e.remove());if(gameState==='PLAYING'){wodSyncViewportAndCanvas();draw();}});await page.screenshot(options);};
  try{
@@ -110,8 +109,8 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
   await page.evaluate(()=>{closeMapEditor();gameState='MENU';gameData._campaignRun=null;});results.menus=[];
   for(const size of[{width:320,height:568},{width:390,height:844},{width:844,height:390}]){
    await page.setViewportSize(size);
-   for(const panel of['settings','helpGuide','achievements']){
-    await page.evaluate(panel=>showPanel(panel),panel);if(panel==='achievements')await page.locator('#achTabBtnStats').click();
+   for(const panel of['settings','tutorialHelp','helpGuide','achievements']){
+    await page.evaluate(panel=>panel==='helpGuide'?wodOpenHelpGuide('tutorialHelp'):showPanel(panel),panel);if(panel==='achievements')await page.locator('#achTabBtnStats').click();
     const r=await page.evaluate(()=>({width:document.documentElement.scrollWidth,viewport:innerWidth}));assert(r.width<=r.viewport+1,JSON.stringify({size,panel,r}));results.menus.push({size,panel,...r});if(size.width===390)await capture({path:path.join(OUT,panel+'-390.png')});
     if(panel==='settings'){const fits=await page.locator('#settingsPanel .settings-section .menu-btn').evaluateAll(es=>es.map(e=>({text:e.textContent,width:e.getBoundingClientRect().width,parent:e.parentElement.clientWidth})));assert(fits.every(r=>r.width<=r.parent+1),'nested settings buttons fit their cards: '+JSON.stringify({size,fits}));}
    }
@@ -119,5 +118,5 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
   assert.equal(errors.length,0,errors.join('\n'));
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));
   console.log(JSON.stringify({eras:results.eras.length,shopLayouts:results.shopLayouts.length,unitTypes:results.units.length,recruitmentLayouts:results.recruitment.length,reportPages:results.stats.length,campaignLayouts:results.campaign.length,editorLayouts:results.editor.length,errors}));
- }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

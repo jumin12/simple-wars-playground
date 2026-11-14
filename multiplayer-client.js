@@ -133,6 +133,9 @@
         case 'mp_match_end_ack':
           emit('MpMatchEndAck', { updatedPlayerIds: msg.updatedPlayerIds || [] });
           break;
+        case 'mp_result_disputed':
+          emit('MpResultDisputed', { msg: msg.msg || 'The match result was disputed and not recorded.' });
+          break;
         case 'register_failed':
           api.registered=false;
           emit('RegisterFailed', { reason: msg.reason || '', msg: msg.msg || 'Registration failed' });
@@ -280,6 +283,7 @@
           break;
         case 'match_start':
           api.spectating=false;
+          api.matchId = (msg.payload && msg.payload.serverMatchId) || '';
           emit('MatchStart', { payload: msg.payload, fromSlot: msg.fromSlot });
           break;
         case 'player_ready':
@@ -475,6 +479,10 @@
     },
     reportMpMatchEnd(payload) {
       send(Object.assign({ t: 'mp_match_end' }, payload || {}));
+    },
+    /** Guest: confirm or dispute the result the host announced. */
+    sendMpResult(payload) {
+      send(Object.assign({ t: 'mp_result', matchId: api.matchId || '' }, payload || {}));
     },
     sendFriendRequest(targetPlayerId) {
       send({ t: 'friend_request', targetPlayerId: String(targetPlayerId || '') });

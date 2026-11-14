@@ -1,11 +1,11 @@
 'use strict';
-const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{spawn}=require('child_process');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/assault-bridges',process.env.TEST_TAG||'verified');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!f.startsWith(ROOT+path.sep))return res.writeHead(403).end();const selected=process.env.BASELINE_DIR&&['index.html','ai-command.js'].includes(path.relative(ROOT,f))?path.join(ROOT,process.env.BASELINE_DIR,path.basename(f)):f;fs.readFile(selected,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(f)]||'application/octet-stream');res.end(b);});});
+const server=H.createStaticServer({extraRoots:[process.env.BASELINE_DIR&&path.join(ROOT,process.env.BASELINE_DIR)]});
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});relay.on('connection',s=>s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]})));
- await new Promise(r=>server.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+server.address().port,browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),results={},errors=[];
+
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));const url='http://127.0.0.1:'+server.address().port,browser=await H.launchBrowser(),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),results={},errors=[];
  await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});page.on('pageerror',e=>errors.push(e.stack));page.setDefaultTimeout(180000);
  try{
   await page.goto(url+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks);
@@ -65,9 +65,8 @@ const server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+decodeU
   await page.evaluate(()=>{UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='block';gameData.camera={zoom:1.5,x:-450,y:-500};wodMarkTerrainFullDirty();updateTerrainCache();draw();});await page.screenshot({path:path.join(OUT,'formations.png')});check(errors.length===0,'no renderer errors');
   console.log(JSON.stringify({bridgeFailures:results.bridge.filter(r=>r.deckClaim||!r.arrived||r.deck||r.length>r.direct*1.4),assault:results.assault},null,2));
   if(process.env.RUN_SKILL_CLIENT==='1'){
-   const client=path.join(OUT,'skill-client.mjs');fs.writeFileSync(client,fs.readFileSync(path.join(process.env.USERPROFILE,'.codex/skills/develop-web-game/scripts/web_game_playwright_client.js'),'utf8').replace('await page.waitForTimeout(500);',"await page.waitForFunction(()=>typeof gameData!=='undefined'&&gameData.hexList?.length>0&&window.render_game_to_text&&JSON.parse(window.render_game_to_text()).units.length>0,null,{timeout:180000});"));
-   await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[client,'--url',url+'/?autostart=1','--actions-json',JSON.stringify({steps:[{buttons:[],frames:60},{buttons:['a'],frames:12},{buttons:[],frames:15}]}),'--iterations','1','--pause-ms','1000','--screenshot-dir',path.join(OUT,'skill')],{windowsHide:true,stdio:'inherit'});child.on('error',reject);child.on('exit',code=>code?reject(Error('skill client exit '+code)):resolve());});
+await H.smokeClient(url+'/?autostart=1',{dir:path.join(OUT,'skill'),steps:[{buttons:[],frames:60},{buttons:['a'],frames:12},{buttons:[],frames:15}],pauseMs:1000,ready:H.GAME_HAS_UNITS});
   }
   console.log(JSON.stringify(results,null,2));
- }finally{fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

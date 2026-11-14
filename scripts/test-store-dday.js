@@ -1,4 +1,4 @@
-const { chromium } = require('playwright');
+const H = require('./lib/harness');
 const fs = require('fs');
 const path = require('path');
 
@@ -6,7 +6,9 @@ const path = require('path');
   const outDir = path.join(__dirname, '..', 'output');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: true });
+  const server = await H.startServer();
+
+  const browser = await H.launchBrowser();
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -14,7 +16,7 @@ const path = require('path');
     if (msg.type() === 'error') errors.push('console:' + msg.text());
   });
 
-  await page.goto('http://127.0.0.1:8765/index.html', {
+  await page.goto(server.url + '/index.html', {
     waitUntil: 'domcontentloaded',
     timeout: 60000,
   });
@@ -149,6 +151,8 @@ const path = require('path');
   }
 
   await browser.close();
+
+  await server.close();
 })().catch((e) => {
   console.error('FAIL', e);
   process.exit(1);

@@ -1,11 +1,10 @@
 'use strict';
-const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{spawn}=require('child_process');
-const {chromium}=require('playwright');
-const {WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict'),{spawn}=require('child_process');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/coastal-group-movement/'+(process.env.AUDIT_VERSION||'final'));fs.mkdirSync(OUT,{recursive:true});
 const ENGINE=process.env.GAME_ENGINE?path.resolve(ROOT,process.env.GAME_ENGINE):ROOT;
-const server=http.createServer((req,res)=>{const file=path.resolve(ENGINE,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!file.startsWith(ENGINE+path.sep))return res.writeHead(403).end();fs.readFile(file,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
-(async()=>{const relay=new WebSocketServer({port:8080,host:'127.0.0.1'});relay.on('error',()=>{});relay.on('connection',s=>s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]})));await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};
+const server=H.createStaticServer({root:ENGINE});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await H.launchBrowser(),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};
 page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});page.setDefaultTimeout(180000);
 try{
  const url='http://127.0.0.1:'+server.address().port;await page.goto(url+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks);
@@ -54,5 +53,5 @@ try{
   assert(row.arrived===row.total&&row.settled&&!row.wet&&!row.overlaps&&!row.goalChanges,kind+' coastal group must reach all fixed slots on land without overlap');
  }
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({results,errors},null,2));
-}finally{fs.writeFileSync(path.join(OUT,'partial.json'),JSON.stringify({results,errors},null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}
+}finally{fs.writeFileSync(path.join(OUT,'partial.json'),JSON.stringify({results,errors},null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

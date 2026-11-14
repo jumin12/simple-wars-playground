@@ -19,8 +19,8 @@ const rows=ids.map(id=>{
 });
 const totals=key=>({wins:rows.filter(r=>r[key].outcome==='Win').length,losses:rows.filter(r=>r[key].outcome==='Loss').length,draws:rows.filter(r=>r[key].outcome==='Draw').length,completed:rows.filter(r=>r[key].completed).length});
 const sum={at:new Date().toISOString(),capSeconds:CAP,startingStatesEqual:true,baseline:totals('before'),revised:totals('after'),rows,
- matrixSources:Object.fromEntries(['ai-command.js','index.html'].map(f=>[f,crypto.createHash('sha256').update(fs.readFileSync(path.join(BASE,'matrix-source',f))).digest('hex')])),
- releaseSources:Object.fromEntries(['ai-command.js','index.html'].map(f=>[f,crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT,f))).digest('hex')]))};
+ matrixSources:Object.fromEntries(fs.readdirSync(path.join(BASE,'matrix-source'),{recursive:true}).filter(f=>/\.(js|html)$/.test(f)).map(f=>[f.split(path.sep).join('/'),crypto.createHash('sha256').update(fs.readFileSync(path.join(BASE,'matrix-source',f))).digest('hex')])),
+ releaseSources:Object.fromEntries(['index.html',...fs.readdirSync(path.join(ROOT,'js'),{recursive:true}).filter(f=>f.endsWith('.js')).map(f=>'js/'+f.split(path.sep).join('/'))].map(f=>[f,crypto.createHash('sha256').update(fs.readFileSync(path.join(ROOT,f))).digest('hex')]))};
 fs.writeFileSync(path.join(BASE,'comparison.json'),JSON.stringify(sum,null,2));
 const lines=[
  '# AI command comparison','',

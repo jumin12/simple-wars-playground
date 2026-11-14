@@ -1,14 +1,10 @@
-const http=require('http'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/naval-transports');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{
- const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
- if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
-});
+const server=H.createStaticServer();
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
  try{
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
   await page.evaluate(()=>{
@@ -113,7 +109,7 @@ const server=http.createServer((req,res)=>{
    const data=await page.evaluate(era=>{const old=wodGetRenderPeriod;wodGetRenderPeriod=()=>era;try{const c=document.createElement('canvas');c.width=700;c.height=220;const cx=c.getContext('2d');cx.fillStyle='#284d60';cx.fillRect(0,0,700,220);for(let i=0;i<2;i++){cx.save();cx.translate(180+i*330,105);wodDrawTransport(cx,{x:0,y:0,type:'transport',cargo:i?{type:'heavy'}:null},55,'#57b4dc');cx.restore();}return c.toDataURL();}finally{wodGetRenderPeriod=old;}},era);fs.writeFileSync(path.join(OUT,'transport-'+era+'.png'),Buffer.from(data.split(',')[1],'base64'));
   }
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));assert.equal(errors.length,0,errors.join('\n'));console.log('Naval combat, healing, ferry trips, spacing and AI water preferences passed.');
- }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
 
 

@@ -1,5 +1,5 @@
 /* eslint-disable no-restricted-globals */
-/** Off-thread procedural terrain heightmap / biome grid for Simple Wars map generation. */
+/** Procedural terrain heightmap / biome grid for Simple Wars map generation (worker thread or page). */
 (function () {
     function mix(a, b, t) {
         return a * (1 - t) + b * t;
@@ -375,6 +375,15 @@
         return hexList;
     }
 
+    // Loaded as a worker it answers messages; loaded by the page (index.html) it offers the same functions as
+    // WodTerrainGen, so the main thread never needs a copy of this code. A stand-in worker that runs this file
+    // with its own `self` (the headless map test) counts as a worker.
+    const runsAsWorker = typeof window === 'undefined' || (typeof self !== 'undefined' && self !== window)
+        || (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope);
+    if (!runsAsWorker) {
+        globalThis.WodTerrainGen = Object.freeze({ generateTerrainCells, smoothTerrainHexList });
+        return;
+    }
     self.onmessage = function (ev) {
         let d = ev.data;
         if (!d) return;

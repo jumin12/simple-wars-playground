@@ -1,11 +1,12 @@
 'use strict';
-const fs=require('fs'),path=require('path'),http=require('http'),vm=require('vm'),assert=require('assert/strict'),{spawn}=require('child_process');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws'),catalog=require('../store-catalog');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),vm=require('vm'),assert=require('assert/strict');
+const catalog=require('../store-catalog');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/board-packs');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(file,(err,b)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.css':'text/css','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
+const server=H.createStaticServer();
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
  try{
   const url='http://127.0.0.1:'+server.address().port;
   await page.goto(url+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
@@ -74,6 +75,6 @@ const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+(req
   const mod={exports:{}},sandbox={module:mod,exports:mod.exports,require:require('module').createRequire(path.join(ROOT,'server/profiles.js')),console,__dirname:path.join(ROOT,'server'),setTimeout:()=>1,clearTimeout:()=>{}};vm.runInNewContext(fs.readFileSync(path.join(ROOT,'server/profiles.js'),'utf8'),sandbox);const profiles=mod.exports,id='WOD-BORD-TEST',p=profiles.getProfile(id);p.profile.gold=2499;assert(!profiles.shopPurchase(id,{kind:'visual',itemId:'map_chalkboard'}).ok);assert.equal(p.profile.gold,2499);p.profile.gold=5000;
   for(const pack of ['map_chalkboard','map_whiteboard']){assert.equal(catalog.shopItems({kind:'visual',itemId:pack,price:1})[0].price,2500);assert(profiles.shopPurchase(id,{kind:'visual',itemId:pack}).ok);assert(profiles.shopPurchase(id,{kind:'visual',itemId:pack}).alreadyOwned);}assert.equal(p.profile.gold,0);results.server=true;
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify({...results,rendering:{...results.rendering,rows:results.rendering.rows.length}},null,2));
-  const skill=path.join(require('os').homedir(),'.codex/skills/develop-web-game'),client=path.join(OUT,'client.mjs');fs.copyFileSync(path.join(skill,'scripts/web_game_playwright_client.js'),client);await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[client,'--url',url+'/?autostart=1','--actions-file',path.join(skill,'references/action_payloads.json'),'--iterations','1','--pause-ms','500','--screenshot-dir',path.join(OUT,'skill')],{stdio:'inherit'});child.on('exit',code=>code?reject(Error('skill client '+code)):resolve());});
- }finally{fs.writeFileSync(path.join(OUT,'partial.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}
+await H.smokeClient(url+'/?autostart=1',{dir:path.join(OUT,'skill'),pauseMs:500});
+ }finally{fs.writeFileSync(path.join(OUT,'partial.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

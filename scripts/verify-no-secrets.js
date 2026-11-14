@@ -112,7 +112,8 @@ function scanFiles(files, {base = ROOT, checkPaths = true} = {}) {
   return {files: uniqueFiles.length, bytes, findings: [...new Map(findings.map(f => [JSON.stringify(f), f])).values()]};
 }
 function trackedFiles(root = ROOT) {
-  return execFileSync('git', ['ls-files', '-z'], {cwd: root}).toString('utf8').split('\0').filter(Boolean).map(rel => path.join(root, rel));
+  // A tracked file deleted in the working tree cannot ship; --history still scans its committed copies.
+  return execFileSync('git', ['ls-files', '-z'], {cwd: root}).toString('utf8').split('\0').filter(Boolean).map(rel => path.join(root, rel)).filter(file => fs.existsSync(file));
 }
 function steamFiles(root = path.resolve(ROOT, '..', 'simple wars steam')) {
   return ['game', 'dist/win-unpacked', 'dist-ship/win-unpacked', 'electron', 'scripts', 'package.json']

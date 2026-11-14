@@ -1,9 +1,10 @@
+const H=require('./lib/harness');
 // Capture real game frames for the shop; no independently illustrated preview terrain.
 'use strict';
-const fs=require('fs'),path=require('path'),http=require('http'),{chromium}=require('playwright');
+const fs=require('fs'),path=require('path');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'skins/map-packs');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(file,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.ogg':'audio/ogg','.mp3':'audio/mpeg','.webp':'image/webp'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
-(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1600,height:1000}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,socket=>{socket.onMessage(()=>{});socket.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});
+const server=H.createStaticServer();
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await H.launchBrowser(),context=await browser.newContext({viewport:{width:1600,height:1000}}),page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,socket=>{socket.onMessage(()=>{});socket.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});
 try{
  await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
  const metadata=await page.evaluate(()=>{

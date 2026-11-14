@@ -1,12 +1,13 @@
-const { chromium } = require('playwright');
+const H = require('./lib/harness');
 
 (async () => {
-  const browser = await chromium.launch({ headless: true });
+  const server = await H.startServer();
+  const browser = await H.launchBrowser();
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
 
-  await page.goto('http://127.0.0.1:8765/index.html', {
+  await page.goto(server.url + '/index.html', {
     waitUntil: 'domcontentloaded',
     timeout: 60000,
   });
@@ -70,6 +71,7 @@ const { chromium } = require('playwright');
   console.log(hang ? 'TEST FAILED (too slow)' : 'TEST OK');
   process.exitCode = hang || errors.length ? 1 : 0;
   await browser.close();
+  await server.close();
 })().catch((e) => {
   console.error(e);
   process.exit(1);

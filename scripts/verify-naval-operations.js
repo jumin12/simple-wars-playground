@@ -1,14 +1,10 @@
-const http=require('http'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/naval-operations');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{
- const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
- if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
-});
+const server=H.createStaticServer();
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={},lifecycle=[];page.on('pageerror',e=>errors.push(e.stack));page.on('framenavigated',f=>{if(f===page.mainFrame())lifecycle.push({event:'navigation',url:f.url()});});page.on('crash',()=>lifecycle.push({event:'crash'}));
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={},lifecycle=[];page.on('pageerror',e=>errors.push(e.stack));page.on('framenavigated',f=>{if(f===page.mainFrame())lifecycle.push({event:'navigation',url:f.url()});});page.on('crash',()=>lifecycle.push({event:'crash'}));
  try{
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
   const installFixtures=()=>{
@@ -93,6 +89,6 @@ const server=http.createServer((req,res)=>{
   });console.log('obstacles',JSON.stringify(results.obstacles));
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));assert(!errors.length,errors.join('\n'));
   if(!process.env.WOD_PROBE){assert(results.coastClick.planned.distance<=54&&results.coastClick.landed&&!results.coastClick.invalid,'clicked coast must be the landing destination');assert(results.liveAi.landed>=4&&results.liveAi.army.every(u=>u.hp>0&&!u.attrition)&&results.liveAi.support.safe/results.liveAi.support.ticks>.95&&!results.liveAi.invalid,'normal AI must ferry and sustain successive waves');assert(results.routes.every(r=>r.arrived&&!r.invalid&&r.ratio<1.04),'clear routes should be direct and arrive');assert(results.fogScout.initiallyKnown===0&&results.fogScout.discovered&&results.fogScout.loaded&&results.fogScout.landed,'idle fleet must scout, discover and invade without hidden knowledge');assert(results.groupLanding.landed===2&&results.groupLanding.planned.every(r=>r.distance<=54)&&!results.groupLanding.invalid,'selected transports must land together near the clicked coast');assert(results.pointer.key==='24,4'&&results.pointer.arrow>=2,'real right click must set the correct landing and water-route arrow');assert(results.townAssault.loaded&&results.townAssault.landed&&results.townAssault.captured&&results.townAssault.fullTown,'AI must complete a defended coastal town assault');assert(results.obstacles.every(r=>r.arrived&&!r.invalid&&r.length<820),'land and naval units must take clean obstacle detours');}
- }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));fs.writeFileSync(path.join(OUT,'lifecycle.json'),JSON.stringify(lifecycle,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));fs.writeFileSync(path.join(OUT,'lifecycle.json'),JSON.stringify(lifecycle,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});
 

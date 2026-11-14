@@ -1,8 +1,8 @@
-const http=require('http'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/store-refresh');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();fs.readFile(file,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
-(async()=>{const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
+const server=H.createStaticServer();
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
 try{
  const fullManifest=JSON.parse(fs.readFileSync(path.join(ROOT,'custom-maps/manifest.json'),'utf8')),manifest={...fullManifest,missions:fullManifest.missions.filter(m=>!m.stages)};assert.equal(manifest.missions.length,7);assert.equal(new Set(fullManifest.maps.map(m=>m.id)).size,10);
  await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks&&!window._wodBootBusy&&!window._wodMenuBootstrapBusy,null,{timeout:180000});
@@ -54,4 +54,4 @@ try{
  await page.evaluate(()=>{wodHideMissionPopup();setGameSpeed(0,true);gameData.fogOfWar=false;gameData.camera.zoom=.4;const c=gameData.cities.find(c=>c.owner===1);gameData.camera.x=c.x*.4-canvas.clientWidth/2;gameData.camera.y=c.y*.4-canvas.clientHeight/2;wodMarkTerrainFullDirty();updateTerrainCache();draw();});await page.screenshot({path:path.join(OUT,'historical-gameplay.png')});
  results.realLaunch=await page.evaluate(()=>({era:wodGetGamePeriod(),skin:getEffectiveUnitSkin(gameData.entities.find(u=>u.owner===1)),territory:gameData.layers.territory,cities:gameData.layers.cities}));assert(results.realLaunch.era==='ancient'&&results.realLaunch.skin==='ancient'&&!results.realLaunch.territory&&!results.realLaunch.cities);
  fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results,null,2));assert.equal(errors.length,0,errors.join('\n'));
-}finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});
+}finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}})().catch(e=>{console.error(e);server.close();process.exitCode=1;});

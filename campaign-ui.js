@@ -1,8 +1,4 @@
 'use strict';
-function wodCampaignDifficultyCopy(key){
- const d=WOD_ROGUE_DIFF_PRESETS[key]||WOD_ROGUE_DIFF_PRESETS.normal;
- return `${d.label}: ${d.startPoints.toLocaleString()} opening requisition. Enemy opening forces, battle money and manpower ×${d.mult.toFixed(2)}. Battle rewards ×${d.rewardMult.toFixed(2)}. After turn 2, eligible turns have a ${Math.round(d.counterChance*100)}% counterattack chance; ${Math.round(d.blockChance*100)}% of these can block your advance. Defense battles always last 10 minutes. Unit combat stats follow the same rules on every difficulty.`;
-}
 function wodCampaignPaintAtlas(ctx,c,W,H,cells,nodes,edges,cw,ch){
  const palettes={water:[24,66,80],grass:[115,128,90],forest:[57,86,65],hill:[147,141,112],mountain:[175,173,153],sand:[193,172,124],swamp:[80,111,99],urban:[155,153,135]};
  const heights={water:-.2,grass:.1,forest:.18,hill:.58,mountain:1,sand:.04,swamp:0,urban:.12};

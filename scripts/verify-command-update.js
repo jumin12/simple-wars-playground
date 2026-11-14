@@ -1,29 +1,15 @@
-const http = require('http');
+const H=require('./lib/harness');
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert/strict');
-const { chromium } = require('playwright');
-const { spawn } = require('child_process');
-const { WebSocketServer } = require('../server/node_modules/ws');
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'output', 'command-update');
 fs.mkdirSync(OUT, { recursive: true });
-const server = http.createServer((req, res) => {
-  const file = path.resolve(ROOT, '.' + decodeURIComponent(req.url.split('?')[0] === '/' ? '/index.html' : req.url.split('?')[0]));
-  if (!file.startsWith(ROOT + path.sep)) { res.writeHead(403).end(); return; }
-  fs.readFile(file, (err, body) => {
-    if (err) { res.writeHead(404).end(); return; }
-    res.setHeader('Content-Type', ({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)] || 'application/octet-stream');
-    res.end(body);
-  });
-});
+const server = H.createStaticServer();
 (async () => {
-  // The UI probes its local relay on boot; keep that probe local and quiet.
-  const relay = new WebSocketServer({port:8080});
-  relay.on('error',()=>{});
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const url = 'http://127.0.0.1:' + server.address().port;
-  const browser = await chromium.launch({headless:true});
+  const browser = await H.launchBrowser();
   const page = await browser.newPage({viewport:{width:1440,height:900}});
   let errors = [];
   page.on('pageerror', e => errors.push(e.stack));
@@ -622,17 +608,10 @@ const server = http.createServer((req, res) => {
     fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({opening:true,openingEconomy,purchaseBalance,strategy,audio,groups:true,production,structures,ai,multiplayer,emptyTownStarts,campaign,painting,arrivals,authored,frontline,errors},null,2));
     if(process.env.WOD_SKILL_SMOKE === '1') {
       const client=path.join(ROOT,'output','web-game-client.mjs');
-      const skill=process.env.WEB_GAME_SKILL_DIR || path.join(require('os').homedir(),'.codex','skills','develop-web-game');
-      fs.copyFileSync(path.join(skill,'scripts','web_game_playwright_client.js'),client);
-      fs.rmSync(path.join(OUT,'skill','errors-0.json'),{force:true});
-      await new Promise((resolve,reject)=>{
-        let child=spawn(process.execPath,[client,'--url',url+'/?autostart=1','--actions-file',path.join(skill,'references','action_payloads.json'),'--iterations','1','--pause-ms','8000','--screenshot-dir',path.join(OUT,'skill')],{stdio:'inherit',env:process.env});
-        child.on('exit',code=>code===0?resolve():reject(Error('Skill client exited '+code)));
-      });
+await H.smokeClient(url+'/?autostart=1',{dir:path.join(OUT,'skill'),pauseMs:8000});
     }
   } finally {
     fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));
     await browser.close(); server.close();
-    for(const socket of relay.clients)socket.terminate();relay.close();
   }
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

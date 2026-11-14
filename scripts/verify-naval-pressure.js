@@ -1,10 +1,9 @@
 'use strict';
-const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),{spawn}=require('child_process');
-const {chromium}=require('playwright');
-const {WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/naval-pressure',process.env.TEST_TAG||'final');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{const file=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();const selected=process.env.BASELINE_DIR&&['index.html','ai-command.js'].includes(path.relative(ROOT,file))?path.join(ROOT,process.env.BASELINE_DIR,path.basename(file)):file;fs.readFile(selected,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(b);});});
-(async()=>{const relay=new WebSocketServer({port:8080,host:'127.0.0.1'});relay.on('error',()=>{});relay.on('connection',s=>s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]})));await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};
+const server=H.createStaticServer({extraRoots:[process.env.BASELINE_DIR&&path.join(ROOT,process.env.BASELINE_DIR)]});
+(async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await H.launchBrowser(),context=await browser.newContext({viewport:{width:1440,height:960}}),page=await context.newPage(),errors=[],results={};
 page.on('pageerror',e=>errors.push(e.stack));await context.routeWebSocket(/.*/,s=>{s.onMessage(()=>{});s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]}));});page.setDefaultTimeout(180000);
 try{
  const url='http://127.0.0.1:'+server.address().port;await page.goto(url+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks);
@@ -67,8 +66,7 @@ try{
  });check(results.staleMarineOrder.rally&&results.staleMarineOrder.queueCleared,'a new raid replaces stale land orders and queued commands with its actual gathering shore');
  await page.evaluate(()=>{UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');UI.inGameUI.style.display='block';gameData.layers.territory=true;gameData.camera={zoom:1.3,x:-430,y:-410};step(2);wodAiPlanFerryAssaults(2,[]);step(30);wodMarkTerrainFullDirty();updateTerrainCache();draw();});await page.screenshot({path:path.join(OUT,'marine-wave.png')});
  if(process.env.RUN_SKILL_CLIENT==='1'){
-  const client=path.join(OUT,'skill-client.mjs');fs.writeFileSync(client,fs.readFileSync(path.join(process.env.USERPROFILE,'.codex/skills/develop-web-game/scripts/web_game_playwright_client.js'),'utf8').replace('await page.waitForTimeout(500);',"await page.waitForFunction(()=>typeof gameData!=='undefined'&&gameData.hexList?.length>0&&window.render_game_to_text&&JSON.parse(window.render_game_to_text()).units.length>0,null,{timeout:180000});"));
-  await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[client,'--url',url+'/?autostart=1','--actions-json',JSON.stringify({steps:[{buttons:[],frames:60},{buttons:['a'],frames:12},{buttons:[],frames:15}]}),'--iterations','1','--pause-ms','1000','--screenshot-dir',path.join(OUT,'skill')],{windowsHide:true,stdio:'inherit'});child.on('error',reject);child.on('exit',code=>code?reject(Error('skill client exit '+code)):resolve());});
+await H.smokeClient(url+'/?autostart=1',{dir:path.join(OUT,'skill'),steps:[{buttons:[],frames:60},{buttons:['a'],frames:12},{buttons:[],frames:15}],pauseMs:1000,ready:H.GAME_HAS_UNITS});
  }
 
  results.islandBypass=await page.evaluate(()=>{
@@ -81,5 +79,5 @@ try{
  });check(!results.sealedShore.raiding,'marines do not launch through a known warship covering their actual embarkation lane');
  console.log(JSON.stringify(results,null,2));
  fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));assert.deepEqual(errors,[]);
-}finally{fs.writeFileSync(path.join(OUT,'partial.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();}
+}finally{fs.writeFileSync(path.join(OUT,'partial.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

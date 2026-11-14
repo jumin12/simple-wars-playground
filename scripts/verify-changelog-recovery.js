@@ -1,21 +1,12 @@
 'use strict';
-const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict');
-const {chromium}=require('playwright');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/changelog-recovery');
 fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{
-    const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
-    const file=path.resolve(ROOT,'.'+(pathname==='/'?'/index.html':pathname));
-    if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
-    fs.readFile(file,(error,body)=>{
-        if(error)return res.writeHead(404).end();
-        res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)]||'application/octet-stream');
-        res.end(body);
-    });
-});
+const server=H.createStaticServer();
 (async()=>{
     await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-    const browser=await chromium.launch({headless:true}),context=await browser.newContext({viewport:{width:1440,height:960}});
+    const browser=await H.launchBrowser(),context=await browser.newContext({viewport:{width:1440,height:960}});
     const page=await context.newPage(),errors=[],results={};
     page.on('pageerror',e=>errors.push(e.stack));
     await context.route('**/*',route=>/^https?:\/\/(127\.0\.0\.1|localhost)(:|\/)/.test(route.request().url())?route.fallback():route.abort());

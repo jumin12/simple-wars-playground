@@ -1,14 +1,10 @@
-const http=require('http'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/archipelago-logistics');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{
- const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
- if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
-});
+const server=H.createStaticServer();
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
  try{
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
   await page.evaluate(()=>{
@@ -63,5 +59,5 @@ const server=http.createServer((req,res)=>{
   results.fog=await page.evaluate(()=>{gameData.fogOfWar=true;gameData.menuAttractMode=false;gameData._factionIntel={};gameData._factionIntelMap=gameData.hexes;gameData.entities=gameData.entities.filter(u=>u.owner===2&&u.type==='light');for(const u of gameData.entities){u.x=-297;u.y=108;}const own=gameData.cities.filter(c=>c.owner===2),intel=wodFogFactionIntel(2,true),unknown=!wodAiIslandDemand(2,own,gameData.entities),cityHidden=!wodAiKnownCities(2).some(c=>c.owner===1);intel.explored.add('4,0');const discovered=wodAiIslandDemand(2,own,gameData.entities);gameData.fogOfWar=false;return{unknown,cityHidden,discovered};});assert(Object.values(results.fog).every(Boolean),JSON.stringify(results.fog));
   for(const width of[1440,390]){await page.setViewportSize({width,height:900});await page.evaluate(()=>{resetWaterTest();for(const h of gameData.hexList){h.type=h.q<0?'grass':'water';h.owner=h.type==='water'?0:1;}const u=createUnitAt('supply',108,0,1),enemy=createUnitAt('ship',270,0,2);u.x=108;u.y=0;enemy.x=270;enemy.y=0;gameData.selection=[u];u.selected=true;UI.mainMenu.classList.add('hidden');UI.panels.forEach(p=>p.classList.add('hidden'));UI.inGameUI.style.display='flex';_infoCardUiThrottle.s=null;gameData.camera={x:-canvas.clientWidth*.5,y:-canvas.clientHeight*.5,zoom:.75};wodMarkTerrainFullDirty();syncInfoCardPanel();draw();});await page.waitForTimeout(150);await page.screenshot({path:path.join(OUT,'before-retreat-'+width+'.png')});await page.locator('[data-mo="retreat"]').click({timeout:5000});assert(await page.evaluate(()=>!!gameData.selection[0]?.orderTarget));await page.screenshot({path:path.join(OUT,'naval-retreat-'+width+'.png')});}
   results.state=JSON.parse(await page.evaluate(()=>render_game_to_text()));assert(!errors.length,errors.join('\n'));fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));
- }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

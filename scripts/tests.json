@@ -1,0 +1,916 @@
+{
+  "$comment": "Test manifest for scripts/run-tests.js. Each test runs as `node scripts/<script or name>.js [args]` from the playground root and passes by exiting 0. \"all\" runs every tier except all.excludeTiers.",
+  "defaultTimeout": 600,
+  "tiers": {
+    "fast": "npm test: quick, deterministic, high-value checks (about 3-5 minutes on 32 cores)",
+    "ui": "menus, shop, HUD and other interface flows in the browser",
+    "mp": "multiplayer relay, profiles and spectating",
+    "game": "rules and simulation: movement, supply, combat, naval, map generation",
+    "store": "Steam store, commerce and cosmetics",
+    "ai": "AI behaviour checks (owned by the AI-merge agent; slow, not yet on the harness)",
+    "manual": "needs real external services or hardware; run by hand",
+    "stale": "tests that already failed on the shipped game before the 2026-11-14 clean-up; kept for repair, not run by test:all"
+  },
+  "all": {
+    "excludeTiers": [
+      "ai",
+      "manual",
+      "stale"
+    ]
+  },
+  "tests": {
+    "verify-battlefield-geography": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Each authored battlefield is distinct, with its own waterways, town layout, roads and landmarks (no browser)."
+    },
+    "verify-desktop-multiplayer": {
+      "tiers": [
+        "fast",
+        "mp"
+      ],
+      "desc": "Relay URL choice for browser, LAN, Steam and public web builds (--desktop / --live add the packaged app and live relay)."
+    },
+    "verify-no-secrets": {
+      "tiers": [
+        "fast"
+      ],
+      "desc": "Release credential guard: no keys or tokens in the shipped files."
+    },
+    "verify-no-secrets.test": {
+      "tiers": [
+        "fast"
+      ],
+      "desc": "Unit tests of the credential guard (synthetic keys, redaction, UTF-16, ASAR, file names)."
+    },
+    "verify-profile-identity": {
+      "tiers": [
+        "fast",
+        "mp"
+      ],
+      "desc": "Profile store on PGlite, device identity, Steam OpenID linking and the stable desktop origin."
+    },
+    "verify-sound-bank": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "All 60 era sound effects decode with consistent loudness, headroom and length (ffmpeg)."
+    },
+    "store-catalog": {
+      "tiers": [
+        "fast"
+      ],
+      "desc": "Server store catalogs match custom-maps/manifest.json (sync-store-catalog --check).",
+      "script": "sync-store-catalog.js",
+      "args": [
+        "--check"
+      ]
+    },
+    "music-credits": {
+      "tiers": [
+        "fast"
+      ],
+      "desc": "Music playlist, shipped files and credit documents agree (sync-music-credits --check).",
+      "script": "sync-music-credits.js",
+      "args": [
+        "--check"
+      ]
+    },
+    "civ-svgs": {
+      "tiers": [
+        "fast"
+      ],
+      "desc": "Civilisation emblem SVGs are well-formed 512x512 documents.",
+      "script": "validate-civ-svgs.js"
+    },
+    "verify-startup": {
+      "tiers": [
+        "fast",
+        "ui"
+      ],
+      "desc": "Real boot: splash, menu battle, skirmish and back, warm reload, and recovery from an injected menu-battle fault.",
+      "timeout": 600
+    },
+    "verify-changelog-recovery": {
+      "tiers": [
+        "fast",
+        "ui"
+      ],
+      "desc": "The what's-new popup recovers from missing or broken changelog data."
+    },
+    "verify-gold-coin": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Starting gold, the credits gold-coin secret, a shop purchase and the cloud merge.",
+      "staleFrom": [
+        "ui"
+      ],
+      "stale": "Already failed before 2026-11-14: expects 200 starting gold; new profiles start with 100. Fix, then put staleFrom back as tiers."
+    },
+    "verify-gold-rewards": {
+      "tiers": [
+        "fast",
+        "ui"
+      ],
+      "desc": "Match gold rewards, era skin names and the progress reset dialog."
+    },
+    "verify-mobile-specialists": {
+      "tiers": [
+        "ui"
+      ],
+      "desc": "Phone layout: specialist skins, previews and wrapping button rows."
+    },
+    "verify-terrain-ui": {
+      "tiers": [
+        "fast",
+        "ui",
+        "game"
+      ],
+      "desc": "Terrain UI, and hostile regiments keep blocking a mountain pass."
+    },
+    "verify-terrain-hd": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "HD terrain paints every point without gaps; terrain style switches and persists through the shop.",
+      "staleFrom": [
+        "ui"
+      ],
+      "stale": "Already failed before 2026-11-14: expects atlas_hd as the default map pack; the default is now \"default\". Fix, then put staleFrom back as tiers."
+    },
+    "verify-intel-stats-aerial": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Faction intel, scouting, fog reveal, detailed statistics and responsive layouts.",
+      "staleFrom": [
+        "ui"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on an older stats layout. Fix, then put staleFrom back as tiers."
+    },
+    "verify-orders-siege-ui": {
+      "tiers": [
+        "fast",
+        "ui"
+      ],
+      "desc": "Order buttons and the siege UI; map clicks below the unit details; shift adds to the selection."
+    },
+    "verify-store-refresh": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Every catalog mission loads through the launcher; a purchased mission is used up only by a victory.",
+      "staleFrom": [
+        "ui"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on an older store flow. Fix, then put staleFrom back as tiers."
+    },
+    "verify-editor-scenarios": {
+      "tiers": [
+        "ui"
+      ],
+      "desc": "Map editor scenarios: save and load, title and victory settings; live edits leave the library alone."
+    },
+    "verify-board-packs": {
+      "tiers": [
+        "ui"
+      ],
+      "desc": "Map board packs render in every era and class, with safe ownership and cache reuse."
+    },
+    "verify-lifetime-stats": {
+      "tiers": [
+        "fast",
+        "ui"
+      ],
+      "desc": "Lifetime statistics survive a surrender and an immediate reload."
+    },
+    "verify-coasts-menu-garrisons": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Coastal claims, a fresh menu snapshot after a second match, and garrisons.",
+      "staleFrom": [
+        "ui",
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older garrison behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-historical-campaigns": {
+      "tiers": [
+        "ui",
+        "game"
+      ],
+      "desc": "Every authored historical battlefield previews, loads and keeps its objectives."
+    },
+    "test-dev-menu": {
+      "tiers": [
+        "fast",
+        "ui"
+      ],
+      "desc": "The developer menu opens with a triple backtick, grants gold and closes with Escape."
+    },
+    "test-store-dday": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Buy the D-Day mission in the shop, find it in the mission list and start it.",
+      "staleFrom": [
+        "ui"
+      ],
+      "stale": "Already failed before 2026-11-14: the page context is replaced when the mission starts. Fix, then put staleFrom back as tiers."
+    },
+    "test-normandy-v2": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "The Normandy D-Day mission loads with its towns, named units and briefing.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: the page never reaches network idle. Fix, then put staleFrom back as tiers."
+    },
+    "verify-multiplayer-spectating": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Multiplayer spectating and host hand-over, against the real relay (server/index.js).",
+      "timeout": 900,
+      "staleFrom": [
+        "mp"
+      ],
+      "stale": "Already failed before 2026-11-14: timing race; passed 1 of 3 runs on the old build too. Fix, then put staleFrom back as tiers."
+    },
+    "verify-xp-multiplayer-profiles": {
+      "tiers": [
+        "mp"
+      ],
+      "desc": "XP, password retry, host surrender, disputed results, rejoin and relay restart, against the real relay.",
+      "timeout": 900
+    },
+    "verify-spectating": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Spectating the rest of a battle after a single-player defeat."
+    },
+    "verify-archipelago-logistics": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Island logistics: ferry travel windows and supply across water."
+    },
+    "verify-assault-bridges": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Assaults across rivers build bridges and never claim bridge-deck cells."
+    },
+    "verify-assault-commands": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Right-click and group assaults, era move cues, persistent mixed assaults and coastal raids.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: asserts AI assault behaviour and audio cue counts from an older build. Fix, then put staleFrom back as tiers."
+    },
+    "verify-attack-pursuit": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Attack orders keep after a retreating target."
+    },
+    "verify-bridge-water-attrition": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Bridge crossings and water attrition with physical movement."
+    },
+    "verify-build-feedback-performance": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Build orders give feedback in the same frame and are routed without frame spikes.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older build-notice behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-campaign-skirmish-bridges": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Bridges on campaign and skirmish maps work for both sides."
+    },
+    "verify-city-supply": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "City supply: corner contacts cut, stair-step corridors supply, recaptured pockets.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older supply rules. Fix, then put staleFrom back as tiers."
+    },
+    "verify-coastal-combat": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Combat between land units and ships along coasts."
+    },
+    "verify-coastal-group-movement": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Group moves along coasts keep formation and stay on land."
+    },
+    "verify-command-update": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Broad regression: openings, purchases, groups, production, AI, campaign, painting and the 60-clip audio mix.",
+      "timeout": 900,
+      "staleFrom": [
+        "game",
+        "ui"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on an older command HUD. Fix, then put staleFrom back as tiers."
+    },
+    "verify-crossings-traffic-trade": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "River crossings, road traffic and trade convoys."
+    },
+    "verify-diagonal-fronts": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Diagonal fronts: corner-touching pockets need a full ring; thin corridors stay intact.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older frontline rules. Fix, then put staleFrom back as tiers."
+    },
+    "verify-diagonal-retreat-buildings": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Retreats along diagonals and around buildings."
+    },
+    "verify-equipment-orders": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Equipment orders."
+    },
+    "verify-feedback-supply-front": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Supply warnings and front-line feedback.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older supply/idle-reserve behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-frontline-performance": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Rounded political borders, supply transitions and the incremental AI scan without false supply warnings.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: timing budget from an older build. Fix, then put staleFrom back as tiers."
+    },
+    "verify-generation-quality": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Map generation rejects poor layouts before armies or previews are published."
+    },
+    "verify-group-movement": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Large groups reach fixed slots without overlaps, illegal terrain or goal changes.",
+      "timeout": 900
+    },
+    "verify-islands-reports": {
+      "tiers": [
+        "ui",
+        "game"
+      ],
+      "desc": "Island maps, and the match report when the local player is not faction one."
+    },
+    "verify-line-routes": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Line orders: spread, spacing and planning time for up to 160 units.",
+      "timeout": 900
+    },
+    "verify-medical-command": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Hospitals, medics and generals.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older medical AI behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-naval-healing-encirclement": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Naval repair, live topology and attrition ticks in encirclements.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older naval healing rules. Fix, then put staleFrom back as tiers."
+    },
+    "verify-naval-lifecycle": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Ships from production to sinking."
+    },
+    "verify-naval-operations": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Naval pointer and formation orders, and a defended invasion from a fresh match.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older naval AI behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-naval-pressure": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "AI naval pressure and blockades.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older naval AI behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-naval-transports": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Naval combat, healing, ferry trips, spacing and AI water preferences.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older transport behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-ocean-supply": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Supply over ocean routes."
+    },
+    "verify-partitions-movement-supply": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Movement and supply across map partitions and a biome checkerboard."
+    },
+    "verify-preview-coast-borders": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Map preview borders follow the real coastline."
+    },
+    "verify-push-cover": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Hospital combat, wide supply defence and fog."
+    },
+    "verify-retreat-shore-city": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Retreats to shore cities use the native movement and combat."
+    },
+    "verify-specialists-commanders": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Specialists (motorized, mountaineers) and commanders: paths, production, persistence.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: assertion on older commander behaviour. Fix, then put staleFrom back as tiers."
+    },
+    "verify-starting-supply": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Seeded maps start with connected supply and balanced land."
+    },
+    "verify-strategy-rewards-speed": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Strategy rewards and game speed controls."
+    },
+    "verify-support-orders": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Support orders.",
+      "staleFrom": [
+        "game"
+      ],
+      "stale": "Already failed before 2026-11-14: the transport landing step fails the same way on the old build. Fix, then put staleFrom back as tiers."
+    },
+    "verify-targeting-morale-speed": {
+      "tiers": [
+        "fast",
+        "game"
+      ],
+      "desc": "Targeting, morale and speed; the info overlay stays usable."
+    },
+    "verify-water-siege-spacing": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Sieges by water and unit spacing; the AI retries after a search cooldown."
+    },
+    "test-mapgen-speed": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Map generation for one to three AIs finishes inside the hang limits."
+    },
+    "verify-steam-commerce": {
+      "tiers": [
+        "fast",
+        "store"
+      ],
+      "desc": "Steam commerce: orders, entitlements and the retired Supporter Pack (no browser)."
+    },
+    "verify-steam-store-ui": {
+      "tiers": [
+        "store",
+        "ui"
+      ],
+      "desc": "Steam store UI against the commerce API and a fake native bridge, plus a gameplay smoke pass."
+    },
+    "verify-hd-cosmetics": {
+      "tiers": [
+        "fast",
+        "store",
+        "ui"
+      ],
+      "desc": "Atlas HD cosmetics, entitlements and connected terrain/fog visuals."
+    },
+    "verify-campaign-command": {
+      "tiers": [
+        "stale"
+      ],
+      "desc": "Campaign command: roster, recruitment and orders.",
+      "staleFrom": [
+        "game",
+        "ui"
+      ],
+      "stale": "Already failed before 2026-11-14: AI assembly check from an older build fails before the campaign part (which passes). Fix, then put staleFrom back as tiers."
+    },
+    "verify-front-campaign-retreat": {
+      "tiers": [
+        "game"
+      ],
+      "desc": "Front retreats in campaign battles."
+    },
+    "verify-steam-sandbox": {
+      "tiers": [
+        "manual"
+      ],
+      "desc": "Real Steam client and the live sandbox backend; opens a checkout. Run by hand only."
+    },
+    "verify-ai-adaptation": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: adaptation.",
+      "timeout": 1800
+    },
+    "verify-ai-ambush": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: ambush.",
+      "timeout": 1800
+    },
+    "verify-ai-attack-pressure": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: attack pressure.",
+      "timeout": 1800
+    },
+    "verify-ai-casualty-objectives": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: casualty objectives.",
+      "timeout": 1800
+    },
+    "verify-ai-combat-support": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: combat support.",
+      "timeout": 1800
+    },
+    "verify-ai-command-decisions": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: command decisions.",
+      "timeout": 1800
+    },
+    "verify-ai-command-overhaul": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: command overhaul.",
+      "timeout": 1800
+    },
+    "verify-ai-committed-assaults": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: committed assaults.",
+      "timeout": 1800
+    },
+    "verify-ai-coordination": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: coordination.",
+      "timeout": 1800
+    },
+    "verify-ai-corridor-commitment": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: corridor commitment.",
+      "timeout": 1800
+    },
+    "verify-ai-defense": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: defense.",
+      "timeout": 1800
+    },
+    "verify-ai-empty-land": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: empty land.",
+      "timeout": 1800
+    },
+    "verify-ai-encirclement-engagement": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: encirclement engagement.",
+      "timeout": 1800
+    },
+    "verify-ai-encirclement-prevention": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: encirclement prevention.",
+      "timeout": 1800
+    },
+    "verify-ai-expeditions": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: expeditions.",
+      "timeout": 1800
+    },
+    "verify-ai-flank-defense": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: flank defense.",
+      "timeout": 1800
+    },
+    "verify-ai-followthrough": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: followthrough.",
+      "timeout": 1800
+    },
+    "verify-ai-front-commitment": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: front commitment.",
+      "timeout": 1800
+    },
+    "verify-ai-front-engagement": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: front engagement.",
+      "timeout": 1800
+    },
+    "verify-ai-front-expansion": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: front expansion.",
+      "timeout": 1800
+    },
+    "verify-ai-front-initiative": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: front initiative.",
+      "timeout": 1800
+    },
+    "verify-ai-front-pressure-20261110": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: front pressure 20261110.",
+      "timeout": 1800
+    },
+    "verify-ai-front-pressure": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: front pressure.",
+      "timeout": 1800
+    },
+    "verify-ai-front-theaters": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: front theaters.",
+      "timeout": 1800
+    },
+    "verify-ai-frontage": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: frontage.",
+      "timeout": 1800
+    },
+    "verify-ai-hold-stability": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: hold stability.",
+      "timeout": 1800
+    },
+    "verify-ai-judgment": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: judgment.",
+      "timeout": 1800
+    },
+    "verify-ai-march-commitment": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: march commitment.",
+      "timeout": 1800
+    },
+    "verify-ai-mission-integrity": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: mission integrity.",
+      "timeout": 1800
+    },
+    "verify-ai-mission-lifecycle": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: mission lifecycle.",
+      "timeout": 1800
+    },
+    "verify-ai-multiple-groups": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: multiple groups.",
+      "timeout": 1800
+    },
+    "verify-ai-objective-continuity": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: objective continuity.",
+      "timeout": 1800
+    },
+    "verify-ai-opening-economy": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: opening economy.",
+      "timeout": 1800
+    },
+    "verify-ai-pressure-coverage": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: pressure coverage.",
+      "timeout": 1800
+    },
+    "verify-ai-pressure-defense": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: pressure defense.",
+      "timeout": 1800
+    },
+    "verify-ai-pursuit-hospitals": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: pursuit hospitals.",
+      "timeout": 1800
+    },
+    "verify-ai-sim-findings": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: sim findings.",
+      "timeout": 1800
+    },
+    "verify-ai-six-issues": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: six issues.",
+      "timeout": 1800
+    },
+    "verify-ai-small-forces": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: small forces.",
+      "timeout": 1800
+    },
+    "verify-ai-steady-advance": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: steady advance.",
+      "timeout": 1800
+    },
+    "verify-ai-test6-fixes": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: test6 fixes.",
+      "timeout": 1800
+    },
+    "verify-ai-test9-fixes": {
+      "tiers": [
+        "ai"
+      ],
+      "desc": "AI behaviour: test9 fixes.",
+      "timeout": 1800
+    },
+    "cache-stamps": {
+      "tiers": [
+        "fast"
+      ],
+      "desc": "Every script and stylesheet in index.html carries the current content-hash cache stamp (npm run stamp).",
+      "script": "stamp-assets.js",
+      "args": [
+        "--check"
+      ]
+    }
+  }
+}

@@ -1,25 +1,14 @@
-const http = require('http');
+const H=require('./lib/harness');
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert/strict');
-const {chromium} = require('playwright');
-const {WebSocketServer} = require('../server/node_modules/ws');
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'output', 'starting-supply');
 fs.mkdirSync(OUT, {recursive:true});
-const server = http.createServer((req,res)=>{
-  const file = path.resolve(ROOT, '.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
-  if(!file.startsWith(ROOT+path.sep)) return res.writeHead(403).end();
-  fs.readFile(file,(err,body)=>{
-    if(err) return res.writeHead(404).end();
-    res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.png':'image/png','.svg':'image/svg+xml','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)]||'application/octet-stream');
-    res.end(body);
-  });
-});
+const server = H.createStaticServer();
 (async()=>{
-  const relay = new WebSocketServer({port:8080}); relay.on('error',()=>{});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
-  const browser = await chromium.launch({headless:true});
+  const browser = await H.launchBrowser();
   const page = await browser.newPage({viewport:{width:1440,height:900}});
   const errors=[], rows=[];
   page.on('pageerror',e=>errors.push(e.stack));
@@ -196,6 +185,6 @@ const server = http.createServer((req,res)=>{
     console.log(`Passed ${rows.length} seeded maps, independent supply and land-balance audits, with no browser errors.`);
   } finally {
     fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));
-    await browser.close();server.close();for(const s of relay.clients)s.terminate();relay.close();
+    await browser.close();server.close();
   }
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

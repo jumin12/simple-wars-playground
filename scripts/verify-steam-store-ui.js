@@ -1,9 +1,9 @@
 'use strict';
-const fs=require('fs'),path=require('path'),http=require('http'),assert=require('assert/strict'),crypto=require('crypto'),{spawn}=require('child_process');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws'),{PGlite}=require('../server/node_modules/@electric-sql/pglite');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict'),crypto=require('crypto'),H=require('./lib/harness');
+const {PGlite}=require('../server/node_modules/@electric-sql/pglite');
 const {CommerceStore}=require('../server/commerce-store'),{SteamCommerce}=require('../server/steam-commerce'),{createCommerceHttp}=require('../server/commerce-http'),{createDesktopCommerce}=require('../desktop/commerce');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/steam-store-ui');fs.mkdirSync(OUT,{recursive:true});
-let server,router,native,store,browser,relay,origin;const steamId='76561198000000201',orders=new Map(),events=[];
+let server,router,native,store,browser,origin;const steamId='76561198000000201',orders=new Map(),events=[];
 const readBody=async req=>{let body='';for await(const part of req)body+=part;return JSON.parse(body||'{}');};
 (async()=>{
  const db=new PGlite();let tail=Promise.resolve();const pool={query:(...args)=>db.query(...args),on(){},async connect(){const prior=tail;let release;tail=new Promise(r=>release=r);await prior;return{query:(...args)=>db.query(...args),release};},end:()=>db.close()};
@@ -15,20 +15,19 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
   if(method==='GetReport')return{orders:[]};throw Error(method);
  }};
  router=createCommerceHttp({STEAM_MICROTXN_MODE:'sandbox'},new SteamCommerce({store,steam}));
- server=http.createServer(async(req,res)=>{
-  if(req.url.startsWith('/api/steam/'))return router.handle(req,res);
-  if(req.url==='/__events'){res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(events.splice(0)));}
-  if(req.url==='/__native'){
+ // Game files from the harness; the commerce API and the fake native bridge are answered here.
+ server=H.createStaticServer({handle:(req,res)=>{
+  if(req.url.startsWith('/api/steam/')){router.handle(req,res);return true;}
+  if(req.url==='/__events'){res.setHeader('Content-Type','application/json');res.end(JSON.stringify(events.splice(0)));return true;}
+  if(req.url==='/__native'){(async()=>{
    try{const body=await readBody(req),result=await native.action(body.action,body.payload);res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:true,...result}));}
-   catch(error){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:false,error:error.message}));}return;
-  }
-  const file=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));
-  if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
-  fs.readFile(file,(error,data)=>{if(error)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)]||'application/octet-stream');res.end(data);});
- });
+   catch(error){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({ok:false,error:error.message}));}
+  })();return true;}
+  return false;
+ }});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));origin='http://127.0.0.1:'+server.address().port;
  native=createDesktopCommerce({getClient:()=>({localplayer:{getSteamId:()=>({steamId64:BigInt(steamId)})},auth:{getAuthTicketForWebApi:async()=>({getBytes:()=>crypto.randomBytes(128),cancel(){}})}}),notify:message=>events.push(message),request:(url,opts)=>fetch(origin+new URL(url).pathname,opts)});
- browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1440,height:1000}});
+ browser=await H.launchBrowser();const context=await browser.newContext({viewport:{width:1440,height:1000}});
  await context.routeWebSocket(/.*/,socket=>{socket.onMessage(()=>{});setTimeout(()=>socket.send(JSON.stringify({t:'welcome',online:0,lobbies:[]})),30);});
  await context.addInitScript(()=>{
   window.simpleWarsDesktop={quit(){},unlockAchievement(){},store:async(action,payload)=>(await fetch('/__native',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,payload})})).json(),onStoreUpdate(callback){setInterval(async()=>{try{for(const result of await(await fetch('/__events')).json())callback(result);}catch(_){}},80);}};
@@ -41,9 +40,22 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
   async function buy(sku,gold){const before=orders.size;await page.locator('[data-steam-product="'+sku+'"]').click();await page.waitForFunction(()=>!WodSteamStore.state.busy);assert.equal(orders.size,before+1);const order=[...orders.values()].at(-1);assert.equal(await page.evaluate(()=>gameData.gold),gold-require('../store-catalog').products[sku].gold,'no credit before capture');order.status='Approved';await native.onAuthorized({app_id:5043620,order_id:BigInt(order.orderid),authorized:true});await page.waitForFunction(expected=>gameData.gold===expected,gold);}
   await buy('gold1000',1100);
   await page.evaluate(()=>{switchShopTab('mapSkins');void setShopMapSkin('atlas_hd');});await page.waitForFunction(()=>!WodSteamStore.state.busy&&gameData.ownedShopVisuals.map_atlas_hd);assert.equal(await page.evaluate(()=>gameData.gold),600);
-  await page.evaluate(()=>switchShopTab('gold'));await buy('gold6000',6600);await buy('gold15000',21600);await buy('supporter',26600);
-  assert(await page.evaluate(()=>wodHasSupporterPack()&&!wodShopSkinOwned('civRome')),'supporter is exclusive art plus gold, not whole-shop unlock');
-  assert.equal(await page.locator('#supporterPackBtn').innerText(),'Supporter Pack owned');
+  await page.evaluate(()=>switchShopTab('gold'));await buy('gold6000',6600);await buy('gold15000',21600);
+  // The Supporter Pack is no longer sold or advertised; Patron Gold is hidden from non-owners.
+  assert.equal(await page.locator('#supporterPackCard, #supporterPackBtn, [data-steam-product="supporter"]').count(),0,'no Supporter Pack offer');
+  assert(!/Supporter|\$10 pack/.test(await page.evaluate(()=>document.getElementById('shopPanel').textContent)),'no Supporter Pack copy');
+  await page.evaluate(()=>{switchShopTab('troops');updateSkinShop();});
+  assert(await page.locator('#skinSupporterGold').isHidden(),'Patron Gold card is hidden from non-owners');
+  assert(!(await page.evaluate(()=>wodHasSupporterPack()||wodIsPeriodUnlocked('ancient'))),'non-owners get no supporter unlocks');
+  // An existing owner (a supporter order granted before the pack left the catalog) keeps Patron Gold.
+  const legacyId=await store.nextOrderId();
+  await store.transaction(steamId,data=>{data.orders[legacyId]={id:legacyId,requestId:crypto.randomUUID(),sku:'supporter',product:{itemId:100,name:'Supporter Pack',usdCents:1000,gold:5000,supporter:true},steamId,created:Date.now(),status:'Succeeded',granted:true,reversed:false};data.gold+=5000;});
+  orders.set(legacyId,{orderid:legacyId,steamid:steamId,currency:'USD',status:'Succeeded',items:[{itemid:100,qty:1,amount:1000,vat:0,itemstatus:'Succeeded'}]});
+  await page.evaluate(()=>WodSteamStore.refresh(true));await page.waitForFunction(()=>!WodSteamStore.state.busy&&gameData.gold===26600);
+  assert(await page.evaluate(()=>wodHasSupporterPack()&&wodIsPeriodUnlocked('ancient')&&!wodShopSkinOwned('civRome')),'existing owner keeps Patron Gold and era unlocks, not a whole-shop unlock');
+  await page.evaluate(()=>{switchShopTab('troops');updateSkinShop();});
+  assert(await page.locator('#skinSupporterGold').isVisible(),'Patron Gold card shows for existing owners');
+  await page.evaluate(()=>switchShopTab('gold'));
   const products=await page.evaluate(()=>({skin:wodShopSkinCost('napoleonic'),roman:wodShopSkinCost('civRome'),visual:WOD_SHOP_VISUAL_COST,mission:wodShopMapCatalog.find(e=>e.id==='normandy-dday').price}));assert.deepEqual(products,{skin:500,roman:1000,visual:500,mission:1000});
   await page.evaluate(()=>{switchShopTab('command');syncShopVisualOptionsUi();});assert(!/\b100g\b/.test(await page.locator('#shopPanel').innerText()),'no old visual price labels');
   await page.evaluate(()=>{wodProgress.achievements.goldenChipMaster=true;WodSteamStore.queueSync();});await page.waitForFunction(()=>WodSteamStore.state.wallet.ownedSkins.goldenChip);
@@ -68,8 +80,7 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
    await page.setViewportSize(size);await page.evaluate(()=>switchShopTab('gold'));await page.waitForTimeout(200);
    const layout=await page.evaluate(()=>{const p=document.querySelector('#shopPanel .panel');return{width:p.clientWidth,scrollWidth:p.scrollWidth,buttons:[...document.querySelectorAll('[data-steam-product]')].map(e=>{const r=e.getBoundingClientRect();return{width:r.width,height:r.height};})};});
    assert(layout.scrollWidth<=layout.width+2,'no horizontal overflow');assert(layout.buttons.every(b=>b.height>=43),'real touch targets');
-   await page.locator('[data-steam-product="gold6000"]').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(OUT,'gold-'+size.width+'x'+size.height+'.png')});
-   await page.locator('#supporterPackCard').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(OUT,'supporter-'+size.width+'x'+size.height+'.png')});mobile.push({...size,...layout});
+   await page.locator('[data-steam-product="gold6000"]').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(OUT,'gold-'+size.width+'x'+size.height+'.png')});mobile.push({...size,...layout});
   }
   await page.evaluate(()=>WodSteamStore.refresh());await page.waitForFunction(()=>!WodSteamStore.state.busy);assert.equal(await page.evaluate(()=>gameData.gold),26600);
   await page.setViewportSize({width:1440,height:900});await page.goto(origin+'/?autostart=1');
@@ -83,10 +94,8 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
   assert(await page.evaluate(()=>gameData.gold===26600&&wodHasSupporterPack()&&gameData.ownedShopVisuals.map_atlas_hd),'progress reset preserves the Steam wallet and collection');
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify({products,eras,mobile,paidCheckout:true,noCreditBeforeCapture:true,restore:true,errors},null,2));console.log(JSON.stringify({products,eras,mobile:mobile.length,paidCheckout:true,errors}));
  }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();browser=null;await router.close();await store.close();store=null;server.close();}
- // Required browser gameplay smoke uses the bundled action client and local relay.
- relay=new WebSocketServer({port:8080});relay.on('connection',s=>s.send(JSON.stringify({t:'welcome',online:0,lobbies:[]})));
- server=http.createServer((req,res)=>{const f=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));fs.readFile(f,(e,b)=>{if(e)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(f)]||'application/octet-stream');res.end(b);});});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const skill=path.join(require('os').homedir(),'.codex/skills/develop-web-game'),client=path.join(OUT,'client.mjs');fs.copyFileSync(path.join(skill,'scripts/web_game_playwright_client.js'),client);
- try{await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[client,'--url','http://127.0.0.1:'+server.address().port+'/?autostart=1','--actions-file',path.join(skill,'references/action_payloads.json'),'--iterations','1','--pause-ms','5000','--screenshot-dir',path.join(OUT,'skill')],{stdio:'inherit'});child.on('exit',code=>code===0?resolve():reject(Error('Client '+code)));});}
- finally{for(const s of relay.clients)s.terminate();relay.close();server.close();}
+ // Independent gameplay smoke pass on a plain game server.
+ const smoke=await H.startServer();
+ try{await H.smokeClient(smoke.url+'/?autostart=1',{dir:path.join(OUT,'skill'),pauseMs:5000});}
+ finally{await smoke.close();}
 })().catch(async error=>{console.error(error);if(browser)await browser.close();if(store)await store.close();if(server)server.close();if(router)await router.close();process.exitCode=1;});

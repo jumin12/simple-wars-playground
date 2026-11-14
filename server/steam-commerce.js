@@ -14,8 +14,13 @@ function initializeAccount(data) {
   Object.assign(data, { version: 1, gold: 100, revision: 0, ownedSkins: { nato: true }, ownedVisuals: {},
     grants: {}, spends: {}, orders: {}, migrated: false, dlcActive: false, dlcGranted: false });
 }
+// The Supporter Pack is no longer sold, but existing owners keep Patron Gold and
+// the era unlocks: direct owners of DLC 5475970, and anyone with a granted,
+// unreversed supporter order. Orders embed a copy of their product when they are
+// created, so this check and refund/chargeback reversal (applyPaidState) keep
+// working after the product left the catalog.
 function isSupporter(data) {
-  return !!data.dlcActive || Object.values(data.orders).some(o => o.product.supporter && o.granted && !o.reversed);
+  return !!data.dlcActive || Object.values(data.orders || {}).some(o => (o.product?.supporter || o.sku === 'supporter') && o.granted && !o.reversed);
 }
 function wallet(data) {
   if(data.ownedSkins?.atlasUnits)data.ownedVisuals.map_atlas_hd=true;
@@ -128,7 +133,6 @@ class SteamCommerce {
       initializeAccount(data);
       const duplicate = Object.values(data.orders).find(o => o.requestId === requestId);
       if (duplicate) { if (duplicate.sku !== productId) throw new CommerceError('Purchase request does not match.'); return { ...duplicate, existing: true }; }
-      if (product.supporter && isSupporter(data)) throw new CommerceError('You already own the Supporter Pack.');
       if (Object.values(data.orders).filter(o => this.now() - o.created < 60000).length >= 10) throw new CommerceError('Please wait a minute before starting another purchase.', 429);
       const pending = Object.values(data.orders).find(o => !o.granted && !o.reversed && !['Failed', 'Canceled'].includes(o.status) && this.now() - o.created < 30 * 60 * 1000);
       if (pending) throw new CommerceError('Finish or cancel your pending Steam purchase first.');
@@ -141,7 +145,7 @@ class SteamCommerce {
     try {
       await this.steam.microRequest('InitTxn', 3, { orderid: order.id, steamid: session.steamId, itemcount: 1,
         language: 'en', currency: 'USD', usersession: 'client', 'itemid[0]': product.itemId, 'qty[0]': 1,
-        'amount[0]': product.usdCents, 'description[0]': 'Simple Wars — ' + product.name, 'category[0]': product.supporter ? 'Supporter' : 'Gold' }, true);
+        'amount[0]': product.usdCents, 'description[0]': 'Simple Wars — ' + product.name, 'category[0]': 'Gold' }, true);
       await this.store.transaction(session.steamId, data => { if (!data.orders[order.id].granted) data.orders[order.id].status = 'Init'; });
     } catch (error) {
       // No grant on an ambiguous timeout. Query the stored order before any retry.

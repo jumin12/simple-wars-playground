@@ -4,7 +4,7 @@ const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/ai-defense');
 const server=http.createServer((req,res)=>{
  const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
  if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- const selected=process.env.BASELINE_DIR&&['index.html','ai-command.js'].includes(path.relative(ROOT,file))?path.join(ROOT,process.env.BASELINE_DIR,path.basename(file)):file;
+ const base=process.env.BASELINE_DIR&&path.join(ROOT,process.env.BASELINE_DIR,path.relative(ROOT,file)),selected=base&&fs.existsSync(base)?base:file;
  fs.readFile(selected,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
 });
 (async()=>{

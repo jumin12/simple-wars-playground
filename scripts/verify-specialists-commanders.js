@@ -1,14 +1,10 @@
-const http=require('http'),fs=require('fs'),path=require('path'),assert=process.env.WOD_PROBE?()=>{}:require('assert/strict');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=process.env.WOD_PROBE?()=>{}:require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/specialists-commanders');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{
- const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
- if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
-});
+const server=H.createStaticServer();
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
  try{
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
   await page.evaluate(()=>{
@@ -41,9 +37,9 @@ const server=http.createServer((req,res)=>{
   });console.log('paths',JSON.stringify(results.paths));assert(results.paths.every(r=>r.type==='mountaineer'?r.arrived&&r.peaks>0&&!r.bad:r.canMountain===false&&!r.peaks&&!r.arrived));
   results.production=await page.evaluate(()=>{
    const rows=[];for(const owner of[1,2])for(const type of['motorized','mountaineer']){
-    resetWaterTest(owner);const city=testTown(0,0,owner,'Base');city.hasFactory=false;const gate=cityEligibleForBuildPlacementForOwner(city,type,owner);city.hasFactory=true;const before=wodPlayerTreasury(owner),mp=getOwnerManpower(owner);const queued=wodApplyBuildAtCityForOwner(city,type,owner),time=gameData.constructionJobs[0]?.total;
+    resetWaterTest(owner);const city=testTown(0,0,owner,'Base');city.hasFactory=false;const gate=cityEligibleForBuildPlacementForOwner(city,type,owner);city.hasFactory=true;const before=wodPlayerTreasury(owner),mp=wodPlayerMpPool(owner);const queued=wodApplyBuildAtCityForOwner(city,type,owner),time=gameData.constructionJobs[0]?.total;
     const enemy=createUnitAt('light',27,0,3-owner);enemy.x=27;enemy.y=0;const jobs=gameData.constructionJobs;gameData.constructionJobs=[];const siege=!cityEligibleForBuildPlacementForOwner(city,type,owner);gameData.constructionJobs=jobs;gameData.entities=[];gameData._cityCombatStagingKeys=new Set();gameData.cityCombatBlockForProd=new Set();wodUpdateConstruction(time-.1);const waiting=gameData.entities.length===0;wodUpdateConstruction(.2);const u=gameData.entities[0];
-    rows.push({owner,type,gate,queued,time,siege,waiting,built:u?.type===type,hp:u?.maxHp,paid:before-wodPlayerTreasury(owner),mp:mp-getOwnerManpower(owner),stats:wodBattleLedger().byOwner[owner]});
+    rows.push({owner,type,gate,queued,time,siege,waiting,built:u?.type===type,hp:u?.maxHp,paid:before-wodPlayerTreasury(owner),mp:mp-wodPlayerMpPool(owner),stats:wodBattleLedger().byOwner[owner]});
    }return rows;
   });console.log('production',JSON.stringify(results.production));assert(results.production.every(r=>r.queued&&r.time<=30&&r.siege&&r.waiting&&r.built&&(r.type==='motorized'?!r.gate&&r.paid===3000&&r.mp===2400:r.gate&&r.paid===1600&&r.mp===2000)));
   results.persistence=await page.evaluate(()=>{
@@ -90,5 +86,5 @@ const server=http.createServer((req,res)=>{
   await page.evaluate(()=>{document.querySelectorAll('.wod-toast-note').forEach(n=>n.remove());resetWaterTest();const c=testTown(-3,0,1,'Factory town');gameData.selection=[];gameData.camera={zoom:1,x:-195,y:-200};syncInfoCardPanel();draw();});await page.locator('[data-wod-mtab="units"]').click();results.mobileProduction=await page.locator('.wod-m-sheet--units [onclick*="motorized"]').evaluate(e=>{const r=e.getBoundingClientRect();return{visible:r.width>0&&r.y>=0&&r.bottom<=innerHeight,width:r.width};});await page.screenshot({path:path.join(OUT,'specialist-production-mobile.png')});await page.locator('.wod-m-sheet--units [onclick*="motorized"]').click();await page.evaluate(()=>new Promise(requestAnimationFrame));const cp=await page.evaluate(()=>{const c=gameData.cities[0],r=canvas.getBoundingClientRect();return{x:r.left+(c.x*gameData.camera.zoom-gameData.camera.x)*r.width/canvas.clientWidth,y:r.top+(c.y*gameData.camera.zoom-gameData.camera.y)*r.height/canvas.clientHeight};});await page.mouse.click(cp.x,cp.y);results.mobileProduction.queued=await page.evaluate(()=>gameData.constructionJobs.some(j=>j.mode==='motorized'&&j.total===23));console.log('mobileProduction',JSON.stringify(results.mobileProduction));await page.screenshot({path:path.join(OUT,'production-click-mobile.png')});assert(results.mobileProduction.visible&&results.mobileProduction.queued);
   await page.setViewportSize({width:1440,height:900});await page.evaluate(()=>{UI.inGameUI.style.display='none';UI.panels.forEach(p=>p.classList.add('hidden'));UI.mainMenu.classList.add('hidden');document.querySelectorAll('.wod-toast-note').forEach(n=>n.remove());document.getElementById('setupPanel').classList.remove('hidden');document.getElementById('setupAI').value='3';wodSyncSetupOpponentsBrief();});results.hidden=await page.evaluate(()=>({selector:!!document.getElementById('setupCommanderStyle'),text:document.getElementById('setupOpponentsBrief').textContent}));assert(!results.hidden.selector&&!/Traits:|Economical|Balanced|Highland/.test(results.hidden.text));await page.screenshot({path:path.join(OUT,'commander-setup.png')});await page.setViewportSize({width:390,height:844});await page.screenshot({path:path.join(OUT,'commander-setup-mobile.png')});
   assert(!errors.length,errors.join('\n'));fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));
- }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

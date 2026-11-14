@@ -6,7 +6,7 @@ fs.mkdirSync(OUT,{recursive:true});
 const server=http.createServer((req,res)=>{
     let file=path.resolve(ROOT,'.'+decodeURIComponent(req.url.split('?')[0]==='/'?'/index.html':req.url.split('?')[0]));
     if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
-    if(process.env.BASELINE&&['index.html','ai-command.js'].includes(path.relative(ROOT,file)))file=path.join(OUT,'baseline',path.basename(file));
+    if(process.env.BASELINE){const o=path.join(OUT,'baseline',path.relative(ROOT,file));if(fs.existsSync(o))file=o;}
     fs.readFile(file,(error,body)=>{if(error)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'text/javascript','.css':'text/css','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.mp3':'audio/mpeg','.ogg':'audio/ogg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
 });
 (async()=>{

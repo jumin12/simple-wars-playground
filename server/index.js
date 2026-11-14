@@ -14,7 +14,17 @@ const profileHttp = require('./profile-http').createProfileHttp(profiles);
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
+// Only a host inside a room sends big messages (the match start payload and snapshots). Everyone else is
+// limited to small control messages, checked before the message is parsed.
 const MAX_INIT_BYTES = 48 * 1024 * 1024;
+const MAX_CONTROL_BYTES = 2 * 1024 * 1024;
+// Per-connection rate limit (token bucket). A host sends about ten snapshots a second plus commands.
+const RATE_BURST = 240;
+const RATE_PER_SECOND = 120;
+const MAX_QUEUED_MESSAGES = 64;
+const ABUSE_DROPS_BEFORE_CLOSE = 2000;
+// Results reported by the host wait this long for the other players' clients to confirm or dispute them.
+const RESULT_CONFIRM_MS = 15000;
 const DATA_DIR=process.env.WOD_DATA_DIR||__dirname;fs.mkdirSync(DATA_DIR,{recursive:true});
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 const FRIEND_REMOVALS_FILE = path.join(DATA_DIR, 'friend-removals.json');
@@ -645,6 +655,94 @@ function finalizeAbandonedMatch(room) {
   if (result.ok) room._matchEndRecorded = true;
 }
 
+// ---- Host-reported results ----
+// The host runs the simulation, so the relay cannot replay a match. What it can do is give every other
+// player's client the chance to object: each guest reports the result its snapshot showed and whether its
+// own copy of the battle agrees. A report is recorded once every connected guest agrees, or after
+// RESULT_CONFIRM_MS without objection (older clients never answer). One objection drops that report.
+function resolvedOutcomeKey(outcomes) {
+  return Object.keys(outcomes || {})
+    .filter((slot) => outcomes[slot] === 'won' || outcomes[slot] === 'lost')
+    .sort()
+    .map((slot) => slot + ':' + outcomes[slot])
+    .join(',');
+}
+
+function queueHostResult(hostClient, outcomes, participants, alreadyWatching) {
+  const room = hostClient.room;
+  const waiting = new Set();
+  for (const peer of room.clients) {
+    if (peer === hostClient || !peer.playerId || peer.ws.readyState !== 1) continue;
+    if (!isHumanSeat(room.meta, peer.slot)) continue;
+    // A guest who lost earlier and is watching does not answer (its client skips match-end handling).
+    if (alreadyWatching && alreadyWatching.has(peer.slot)) continue;
+    waiting.add(peer.slot);
+  }
+  const pending = { hostClient, outcomes, participants, key: resolvedOutcomeKey(outcomes), waiting, disputed: false, timer: null };
+  room.pendingResults ||= [];
+  room.pendingResults.push(pending);
+  if (!waiting.size) {
+    void commitHostResult(room, pending);
+    return;
+  }
+  pending.timer = setTimeout(() => { void commitHostResult(room, pending); }, RESULT_CONFIRM_MS);
+}
+
+function confirmHostResult(guest, outcomes, agree) {
+  const room = guest.room;
+  const list = room.pendingResults || [];
+  const key = resolvedOutcomeKey(outcomes);
+  // The report this guest is answering: same resolved outcomes, else the newest one it was waiting on.
+  const pending = list.find((p) => p.key === key && p.waiting.has(guest.slot))
+    || [...list].reverse().find((p) => p.waiting.has(guest.slot));
+  if (!pending) return;
+  pending.waiting.delete(guest.slot);
+  if (!agree || pending.key !== key) {
+    pending.disputed = true;
+    clearTimeout(pending.timer);
+    room.pendingResults = list.filter((p) => p !== pending);
+    const notice = JSON.stringify({ t: 'mp_result_disputed', msg: 'A player\'s game disagreed with the reported result, so it was not recorded.' });
+    for (const peer of room.clients) { try { if (peer.ws.readyState === 1) peer.ws.send(notice); } catch (_) {} }
+    console.warn('[mp] result disputed in room', room.id || '?', 'host report', pending.key, 'guest slot', guest.slot, 'saw', key, 'agree', agree);
+    return;
+  }
+  if (!pending.waiting.size) {
+    clearTimeout(pending.timer);
+    void commitHostResult(room, pending);
+  }
+}
+
+async function commitHostResult(room, pending) {
+  if (pending.done || pending.disputed) return;
+  pending.done = true;
+  room.pendingResults = (room.pendingResults || []).filter((p) => p !== pending);
+  const host = pending.hostClient;
+  const result = profiles.recordMpMatchEnd(host.playerId, room, { outcomes: pending.outcomes, participants: pending.participants });
+  if (!result.ok) {
+    try { host.ws.send(JSON.stringify({ t: 'error', msg: result.msg || 'Could not record match' })); } catch (_) {}
+    return;
+  }
+  await profiles.flush();
+  for (const pid of result.updatedPlayerIds || []) {
+    const peer = onlineByPlayerId.get(pid);
+    if (peer) {
+      profiles.attachClientProfile(peer, peer.displayName);
+      updateLeaderboardEntry(peer, peer.combinedStats);
+      try { peer.ws.send(JSON.stringify({ t: 'profile', profile: profiles.exportProfile(pid) })); } catch (_) {}
+    } else {
+      // Player already disconnected: still update their leaderboard row from the profile.
+      const prof = profiles.getProfile(pid);
+      if (prof) {
+        updateLeaderboardEntry(
+          { playerId: pid, displayName: prof.profile.mpDisplayName || 'Player', unitSkin: prof.profile.unitSkin || 'nato' },
+          profiles.computeCombinedStats(prof),
+        );
+      }
+    }
+  }
+  try { host.ws.send(JSON.stringify({ t: 'mp_match_end_ack', updatedPlayerIds: result.updatedPlayerIds || [] })); } catch (_) {}
+}
+
 function countMatchHumanPlayers(room) {
   if (!room || !room.matchStarted) return 0;
   const map = room.seatByPlayerId || {};
@@ -1008,7 +1106,28 @@ wss.on('connection', (ws) => {
   broadcastLobbyList();
 
   let messageQueue=Promise.resolve();
-  ws.on('message',raw=>{messageQueue=messageQueue.then(()=>handleMessage(raw)).catch(()=>{if(ws.readyState===1)ws.send(JSON.stringify({t:'error',msg:'Profile service temporarily unavailable. Please reconnect; saved progress is preserved.'}));});});
+  let queued=0;
+  const bucket={tokens:RATE_BURST,at:Date.now(),drops:0,dropsSince:Date.now()};
+  function admitMessage(raw){
+    const size=Buffer.isBuffer(raw)?raw.length:Array.isArray(raw)?raw.reduce((n,b)=>n+b.length,0):(raw&&raw.byteLength)||0;
+    const limit=client.isHost&&client.room?MAX_INIT_BYTES:MAX_CONTROL_BYTES;
+    if(size>limit)return false;
+    const now=Date.now();
+    bucket.tokens=Math.min(RATE_BURST,bucket.tokens+(now-bucket.at)/1000*RATE_PER_SECOND);bucket.at=now;
+    if(bucket.tokens<1||queued>=MAX_QUEUED_MESSAGES)return false;
+    bucket.tokens-=1;
+    return true;
+  }
+  ws.on('message',raw=>{
+    if(!admitMessage(raw)){
+      const now=Date.now();
+      if(now-bucket.dropsSince>60000){bucket.drops=0;bucket.dropsSince=now;}
+      if(++bucket.drops>ABUSE_DROPS_BEFORE_CLOSE)try{ws.close(1008,'Too many messages');}catch(_){}
+      return;
+    }
+    queued++;
+    messageQueue=messageQueue.then(()=>handleMessage(raw)).catch(()=>{if(ws.readyState===1)ws.send(JSON.stringify({t:'error',msg:'Profile service temporarily unavailable. Please reconnect; saved progress is preserved.'}));}).finally(()=>{queued--;});
+  });
   async function handleMessage(raw) {
     let msg;
     try {
@@ -1100,39 +1219,21 @@ wss.on('connection', (ws) => {
       }
       const outcomes = msg.outcomes && typeof msg.outcomes === 'object' ? msg.outcomes : {};
       const participants = mergeMatchEndParticipants(client.room, msg.participants, outcomes);
-      const result = profiles.recordMpMatchEnd(client.playerId, client.room, {
-        outcomes,
-        participants,
-      });
-      if (!result.ok) {
-        ws.send(JSON.stringify({ t: 'error', msg: result.msg || 'Could not record match' }));
-        return;
-      }
-      await profiles.flush();
       client.room.observerSlots||=new Set();
+      const alreadyWatching=new Set([...client.room.clients].filter(peer=>peer.spectating).map(peer=>peer.slot));
       for(const peer of client.room.clients)if(outcomes[String(peer.slot)]==='lost'){peer.spectating=true;client.room.observerSlots.add(peer.slot);}
-      for (const pid of result.updatedPlayerIds || []) {
-        const peer = onlineByPlayerId.get(pid);
-        if (peer) {
-          profiles.attachClientProfile(peer, peer.displayName);
-          // Refresh the leaderboard with the server-authoritative post-match stats —
-          // previously match results only landed in profiles, so the rankings never moved.
-          updateLeaderboardEntry(peer, peer.combinedStats);
-          try {
-            peer.ws.send(JSON.stringify({ t: 'profile', profile: profiles.exportProfile(pid) }));
-          } catch (_) {}
-        } else {
-          // Player already disconnected — still update their leaderboard row from the profile.
-          const prof = profiles.getProfile(pid);
-          if (prof) {
-            updateLeaderboardEntry(
-              { playerId: pid, displayName: prof.profile.mpDisplayName || 'Player', unitSkin: prof.profile.unitSkin || 'nato' },
-              profiles.computeCombinedStats(prof),
-            );
-          }
-        }
-      }
-      ws.send(JSON.stringify({ t: 'mp_match_end_ack', updatedPlayerIds: result.updatedPlayerIds || [] }));
+      // The host's report is only recorded once the other players' clients have had a chance to dispute it.
+      queueHostResult(client, outcomes, participants, alreadyWatching);
+      return;
+    }
+
+    if (t === 'mp_result') {
+      // A guest's view of a result the host announced: what the host's snapshot said, and whether that
+      // agrees with the guest's own copy of the battle.
+      if (!client.room || client.isHost || !client.room.matchStarted) return;
+      if (msg.matchId && client.room.matchId && msg.matchId !== client.room.matchId) return;
+      const outcomes = msg.outcomes && typeof msg.outcomes === 'object' ? msg.outcomes : {};
+      confirmHostResult(client, outcomes, msg.agree !== false);
       return;
     }
 

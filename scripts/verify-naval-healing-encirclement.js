@@ -1,25 +1,15 @@
 'use strict';
+const H=require('./lib/harness');
 // Native game in Chromium: exercise repair, live topology and actual attrition ticks.
-const fs = require('fs'), path = require('path'), http = require('http');
-const assert = require('assert/strict'), { chromium } = require('playwright');
+const fs = require('fs'), path = require('path');
+const assert = require('assert/strict');
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'output/naval-healing-encirclement');
 fs.mkdirSync(OUT, { recursive: true });
-const server = http.createServer((req, res) => {
-  const url = decodeURIComponent(req.url.split('?')[0]);
-  let file = path.resolve(ROOT, '.' + (url === '/' ? '/index.html' : url));
-  if (!file.startsWith(ROOT + path.sep)) return res.writeHead(403).end();
-  if (process.env.BASELINE && ['index.html', 'ai-command.js'].includes(path.relative(ROOT, file)))
-    file = path.join(OUT, 'baseline', path.basename(file));
-  fs.readFile(file, (err, body) => {
-    if (err) return res.writeHead(404).end();
-    res.setHeader('Content-Type', ({ '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.css': 'text/css', '.ogg': 'audio/ogg', '.mp3': 'audio/mpeg' })[path.extname(file)] || 'application/octet-stream');
-    res.end(body);
-  });
-});
+const server = H.createStaticServer({extraRoots:[process.env.BASELINE&&path.join(OUT,'baseline')]});
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const browser = await chromium.launch({ headless: true });
+  const browser = await H.launchBrowser();
   const context = await browser.newContext({ viewport: { width: 1440, height: 960 } });
   const page = await context.newPage(), errors = [], results = {};
   page.on('pageerror', err => errors.push(err.stack));

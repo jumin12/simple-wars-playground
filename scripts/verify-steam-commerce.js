@@ -45,6 +45,16 @@ async function open() {
   service = new SteamCommerce({ store, steam: new SteamApi(secret, 'sandbox', transport) });
 }
 async function login(progress = { profile: { gold: 100 } }) { return service.authenticate(ticket, progress); }
+// Writes a Supporter Pack order exactly as the retired catalog product stored it.
+async function legacySupporterOrder(steamId, { status, granted }) {
+  const id = await store.nextOrderId(), product = { itemId: 100, name: 'Supporter Pack', usdCents: 1000, gold: 5000, supporter: true };
+  await store.transaction(steamId, data => {
+    data.orders[id] = { id, requestId: crypto.randomUUID(), sku: 'supporter', product, steamId, created: Date.now(), status, granted, reversed: false };
+    if (granted) data.gold += product.gold;
+  });
+  fixture.orders.set(id, { orderid: id, steamid: steamId, currency: 'USD', status, items: [{ itemid: 100, qty: 1, amount: 1000, vat: 0, itemstatus: status }] });
+  return id;
+}
 async function paid(session, sku, { interrupt = false, lostResponse = false, amount, vat } = {}) {
   const order = await service.begin(session, sku, crypto.randomUUID());
   if (amount !== undefined) fixture.orders.get(order.orderId).items[0].amount = amount;
@@ -61,7 +71,10 @@ async function paid(session, sku, { interrupt = false, lostResponse = false, amo
   return service.resolve(session, order.orderId, true);
 }
 (async () => {
-  for (const match of fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8').matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) if (match[1].trim()) new vm.Script(match[1]);
+  // Every game script parses: the inline blocks and each local <script src> file that index.html loads.
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  for (const match of html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/g)) if (match[1].trim()) new vm.Script(match[1]);
+  for (const [, src] of html.matchAll(/<script[^>]*\ssrc="([^"?#]+)[^"]*"/g)) if (!/^[a-z]+:/i.test(src)) new vm.Script(fs.readFileSync(path.join(ROOT, src), 'utf8'), { filename: src });
   directory = fs.mkdtempSync(path.join(OUT, 'postgres-'));
   await open();
   const results = {};
@@ -83,9 +96,16 @@ async function paid(session, sku, { interrupt = false, lostResponse = false, amo
     assert.equal((await service.resolve(session, canceled.orderId, false)).wallet.gold, 1100);
     assert.equal((await paid(session, 'gold6000', { lostResponse: true })).wallet.gold, 7100);
     assert.equal((await paid(session, 'gold15000', { interrupt: true })).wallet.gold, 22100, 'captured payment recovers after SQL rollback');
-    const supporter = await paid(session, 'supporter'); assert.equal(supporter.wallet.gold, 27100); assert(supporter.wallet.supporter);
+    // The Supporter Pack is no longer sold: no catalog product, no checkout path.
+    assert(!Object.hasOwn(catalog.products, 'supporter') && !Object.values(catalog.products).some(p => p.supporter || p.itemId === 100), 'Supporter Pack left the catalog');
+    await assert.rejects(service.begin(session, 'supporter', crypto.randomUUID()), /Unknown purchase/);
+    // An order placed before the pack left the catalog still completes and grants:
+    // stored orders embed their product, so ownership does not depend on the catalog.
+    const legacySupporter = await legacySupporterOrder(A, { status: 'Init', granted: false });
+    fixture.orders.get(legacySupporter).status = 'Approved';
+    const supporter = await service.resolve(session, legacySupporter, true); assert.equal(supporter.wallet.gold, 27100); assert(supporter.wallet.supporter);
     for (const id of catalog.premiumVariants('supporterGold')) assert(supporter.wallet.ownedSkins[id]);
-    await assert.rejects(service.begin(session, 'supporter', crypto.randomUUID()), /already own/);
+    assert.equal((await service.refresh(session)).wallet.gold, 27100, 'legacy supporter order grants once');
     const forged = await service.sync(session, { profile: { gold: 999999999, supporterPack: true } }); assert.equal(forged.wallet.gold, 27100);
     const receipt = { matchGoldGranted: { 'battle-one': 5000 }, achievementGoldGranted: { brokenShield: true, inventedBadge: true }, secrets: { creditsCoin: 3 } };
     const earned = await service.sync(session, receipt); assert.equal(earned.wallet.gold, 27260);
@@ -112,6 +132,18 @@ async function paid(session, sku, { interrupt = false, lostResponse = false, amo
     const restored = await login({profile:{gold:9999999}}); assert.equal(restored.wallet.gold,5100); assert(restored.wallet.supporter);
     fixture.dlc = false; const removed = await login(); assert.equal(removed.wallet.gold,100); assert(!removed.wallet.supporter);
     await login(); assert.equal((await service.getWallet(service.session(removed.session))).gold,100);
+    // Someone who already owned the pack (granted, unreversed order) keeps Patron Gold
+    // and the era unlocks after it left the catalog, across restarts. Chargebacks still reverse it.
+    fixture.steamId = '76561198000000106'; fixture.dlc = false;
+    await login(); const patronOrder = await legacySupporterOrder(fixture.steamId, { status: 'Succeeded', granted: true });
+    await store.close(); await open();
+    const patron = await login(); assert(patron.wallet.supporter, 'existing Supporter Pack owner keeps supporter status'); assert.equal(patron.wallet.gold, 5100);
+    for (const id of catalog.premiumVariants('supporterGold')) assert(patron.wallet.ownedSkins[id], 'existing owner keeps ' + id);
+    const patronSession = service.session(patron.session);
+    assert.equal((await service.refresh(patronSession)).wallet.gold, 5100, 'existing owner is never granted twice');
+    const chargeback = fixture.orders.get(patronOrder); chargeback.status = chargeback.items[0].itemstatus = 'Chargedback'; chargeback.time = '2026-10-31T02:02:02Z';
+    fixture.settle = [chargeback]; await service.reconcile();
+    const charged = await service.getWallet(patronSession); assert(!charged.supporter); assert.equal(charged.gold, 100); assert(!charged.ownedSkins.supporterGold);
     fixture.steamId = A; const again = await login({profile:{gold:9999999}}); assert.equal(again.wallet.gold,19760); assert(again.wallet.ownedVisuals.map_atlas_hd);
     const packSession=service.session(again.session);
     for(const itemId of ['map_chalkboard','map_whiteboard']){const pack=await service.spend(packSession,{kind:'visual',itemId,price:1});assert.equal(pack.cost,2500);assert(pack.wallet.ownedVisuals[itemId]);assert.equal((await service.spend(packSession,{kind:'visual',itemId})).cost,0);}
@@ -141,7 +173,7 @@ async function paid(session, sku, { interrupt = false, lostResponse = false, amo
     await assert.rejects(unrevealing.authenticate(ticket), error=>!error.message.includes(secret)&&!error.message.includes(ticket));
     assert(fixture.calls.filter(c=>['InitTxn','FinalizeTxn','QueryTxn','GetReport'].includes(c.method)).every(c=>c.service==='ISteamMicroTxnSandbox'));
     results.postgres = { rollbackRecovery:true, concurrentSpends:true, coldRestart:true, exactOrderIds:true };
-    results.steam = { verifiedIdentity:true, fourProducts:true, duplicateCallback:true, canceledPurchase:true, receiptDeduplication:true, serverPrices:true, salesTaxAndVat:true, interruptedApprovalRecovery:true, refunds:true, directDlcOwnersOnly:true, secretsRedacted:true, sandboxOnly:true };
+    results.steam = { verifiedIdentity:true, goldProductsOnly:true, supporterGrandfathered:true, duplicateCallback:true, canceledPurchase:true, receiptDeduplication:true, serverPrices:true, salesTaxAndVat:true, interruptedApprovalRecovery:true, refunds:true, directDlcOwnersOnly:true, secretsRedacted:true, sandboxOnly:true };
     const notifications=[];let capturedAction;
     const native=createDesktopCommerce({getClient:()=>({localplayer:{getSteamId:()=>({steamId64:BigInt(A)})},auth:{getAuthTicketForWebApi:async identity=>{assert.equal(identity,'simple-wars-store');return{getBytes:()=>Buffer.from(ticket,'hex'),cancel(){}};}}}),notify:result=>notifications.push(result),request:async(url,options)=>{
       capturedAction=url.split('/').pop();const body=JSON.parse(options.body);

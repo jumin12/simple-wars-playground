@@ -2,54 +2,17 @@
  * Boot Simple Wars, start a real skirmish, hide HUD, and save canvas
  * screenshots of the live front for logo / Steam art compositing.
  */
-const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { chromium } = require('playwright');
+const H = require('./lib/harness');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'output', 'store-captures');
-const PORT = 8765;
-const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-  '.svg': 'image/svg+xml',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
-  '.wav': 'audio/wav',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-};
-
-function startServer() {
-  const server = http.createServer((req, res) => {
-    let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
-    if (urlPath === '/') urlPath = '/index.html';
-    const file = path.normalize(path.join(ROOT, urlPath));
-    if (!file.startsWith(ROOT)) {
-      res.writeHead(403);
-      res.end();
-      return;
-    }
-    fs.readFile(file, (err, data) => {
-      if (err) {
-        res.writeHead(404);
-        res.end('not found');
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
-      res.end(data);
-    });
-  });
-  return new Promise((resolve) => {
-    server.listen(PORT, '127.0.0.1', () => resolve(server));
-  });
+let PORT = 0;
+async function startServer() {
+  const { server, port } = await H.startServer();
+  PORT = port;
+  return server;
 }
 
 async function saveCanvasPng(page, filename) {
@@ -71,7 +34,7 @@ async function saveCanvasPng(page, filename) {
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const server = await startServer();
-  const browser = await chromium.launch({ headless: true });
+  const browser = await H.launchBrowser();
   const page = await browser.newPage({
     viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 2,

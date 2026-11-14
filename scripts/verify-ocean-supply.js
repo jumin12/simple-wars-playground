@@ -1,14 +1,10 @@
-const http=require('http'),fs=require('fs'),path=require('path'),assert=require('assert/strict');
-const {chromium}=require('playwright'),{WebSocketServer}=require('../server/node_modules/ws');
+const H=require('./lib/harness');
+const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/ocean-supply');fs.mkdirSync(OUT,{recursive:true});
-const server=http.createServer((req,res)=>{
- const file=path.resolve(ROOT,'.'+(req.url.split('?')[0]==='/'?'/index.html':decodeURIComponent(req.url.split('?')[0])));
- if(!file.startsWith(ROOT+path.sep))return res.writeHead(403).end();
- fs.readFile(file,(err,body)=>{if(err)return res.writeHead(404).end();res.setHeader('Content-Type',({'.html':'text/html','.js':'application/javascript','.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.ogg':'audio/ogg','.mp3':'audio/mpeg'})[path.extname(file)]||'application/octet-stream');res.end(body);});
-});
+const server=H.createStaticServer();
 (async()=>{
- const relay=new WebSocketServer({port:8080});relay.on('error',()=>{});await new Promise(r=>server.listen(0,'127.0.0.1',r));
- const browser=await chromium.launch({headless:true}),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
  try{
   await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks,null,{timeout:180000});
   await page.evaluate(()=>{
@@ -59,5 +55,5 @@ const server=http.createServer((req,res)=>{
    gameData.camera={zoom:.45,x:-720,y:-430};gameData.layers.units=true;gameData.selection=[supply];supply.selected=true;wodMarkTerrainFullDirty();draw();return{townless,loaded:loaded.size,landed:landed.size,supported,invalid,reboarded,hp,guard:gameData.entities.includes(guard)&&!guard.boardTransportUid,seconds:steps*.1,boats:boats.map(t=>({x:t.x,y:t.y,cargo:t.cargo?.type,pickup:t.pickupUid})),supply:{x:supply.x,y:supply.y},forces:forces.map(u=>({x:u.x,y:u.y,hp:u.hp,goal:u.orderTarget}))};
   },townless));assert(results.ocean.every(r=>r.loaded===2&&r.landed===2&&r.supported&&!r.invalid&&!r.reboarded&&r.guard&&r.hp.every(h=>h>0)),JSON.stringify(results.ocean));await page.screenshot({path:path.join(OUT,'open-ocean-island-assault.png')});
   results.state=JSON.parse(await page.evaluate(()=>render_game_to_text()));assert(!errors.length,errors.join('\n'));fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify({camera:results.camera,grace:results.grace.map(({metrics,...r})=>r),resupply:results.resupply,ocean:results.ocean}));
- }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();for(const c of relay.clients)c.terminate();relay.close();}
+ }finally{fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors,null,2));await browser.close();server.close();}
 })().catch(e=>{console.error(e);server.close();process.exitCode=1;});

@@ -1,9 +1,8 @@
-'use strict';
-// Field command for AI land armies.
+// AI: the field command for land armies.
 //
-// One commander per AI faction decides, every strategy pulse, what each land unit is for. It replaces the
-// stack of cautious planners in ai-command.js for everything that walks; those planners keep the opening
-// build order, the navy, ferries, the wounded and troops that are cut off.
+// One commander per AI faction decides, every strategy pulse, what each land unit is for in a land war. The
+// opening build order, the navy, ferries, the wounded and land units it does not hold are planned by the other
+// parts of the AI (see js/ai/brain.js).
 //
 // What the commander knows about this game:
 //   - A firefight is slow and a hurt unit can walk away and be refilled, so battles decide little by
@@ -75,26 +74,38 @@
 // one raise a regiment in every town before the opening buildings and turn idle manpower into regiments
 // while those buildings go up.
 //
-// Safety: commanded units carry a six-second lease (_opsUntil) renewed every pulse. If this code throws, the
-// lease lapses and the original planners take every unit back. WOD_OPS.enabled=false switches it off.
-// While the lease covers every land unit those planners would plan for and the faction has nothing at sea,
-// they are not run at all (wodOpsCommandsAll): their orders would only be thrown away.
-// WOD_OPS.T holds switches used by the test rig (headless/README.md) to play variants against each other.
+// Leases: a commanded unit carries a six-second lease (_opsUntil) renewed every pulse; while it runs, the other
+// planners leave the unit alone. Units the field command does not claim (no land war within reach, ships, troops
+// aboard or waiting for a ferry, the wounded, routed troops) stay with the land task forces, the navy and the
+// medical service. While the leases cover every land unit and the faction has nothing at sea, the land
+// task-force pass is skipped (wodOpsCommandsAll): its orders would only be thrown away.
+// A throw is caught for this faction and pulse by wodAiFaction and reported; leases are left as they are, so
+// a single failed pulse changes nothing about who holds which unit.
+// WOD_OPS.T holds switches used by the test rig (headless/README.md) to play variants against each other;
+// WOD_OPS.seatT[owner], when set, replaces them for one faction only, so two variants can meet in one match.
 // Three ideas are kept behind switches because they lost when measured over 24-match sets: coverStand (waiting
 // troops spread over the best cover cells and only return fire), pullback (a beaten force goes all the way
 // back to its own ground) and wide (a wider marching column).
-const WOD_OPS={enabled:true,owners:null,error:null,T:{}};
+'use strict';
+const WOD_OPS={T:{},seatT:null};
+
 const WOD_OPS_DOCTRINES=[
     {name:'blitz',ratio:1.02,sweep:.4,raid:1.3,hunt:.9,patience:50},
     {name:'methodical',ratio:1.16,sweep:.4,raid:.9,hunt:1.15,patience:110},
     {name:'raider',ratio:1.08,sweep:.55,raid:1.8,hunt:.9,patience:80},
     {name:'hunter',ratio:1.08,sweep:.3,raid:1,hunt:1.6,patience:90}
 ];
-// Authored missions use the field command like every other battle; reinforcements a mission script sends
-// marching somewhere finish that march first. WOD_OPS.missions=false gives missions back to the original planners.
-function wodOpsActive(owner){return WOD_OPS.enabled&&(!WOD_OPS.owners||WOD_OPS.owners.has(owner))&&!wodMpIsHumanOwner(owner)&&!wodCampaignDeployActive()&&(!gameData.mission||WOD_OPS.missions!==false);}
+
+// Every AI faction is under field command, in authored missions too (reinforcements a mission script sends
+// marching somewhere finish that march first). Human seats and a campaign's deployment phase are not.
+function wodOpsActive(owner){return !wodMpIsHumanOwner(owner)&&!wodCampaignDeployActive();}
+
+// The switches in force for one faction (see WOD_OPS above).
+function wodOpsTune(owner){const seat=WOD_OPS.seatT;return seat&&seat[owner]||WOD_OPS.T;}
+
 // Worn-down morale cuts a unit's fire to a fraction, so a tired army is weaker than its health shows.
 function wodOpsDps(u){return (u.damage||0)/(u.attackCooldown||2)*(WOD_OPS.T.noMorale?1:.18+.82*Math.min(1,(u.morale??100)/100));}
+
 // Fighting strength in "fresh infantry regiments": a square-law estimate, so numbers and health both count.
 // With cover, health is weighed by the ground each unit stands on.
 function wodOpsStrength(list,cover){
@@ -106,9 +117,13 @@ function wodOpsStrength(list,cover){
     }
     return Math.sqrt(hp*dps)/20;
 }
+
 function wodOpsLandHex(x,y){const h=getNearestHexToPoint(x,y);return h&&(!isWaterHex(h)||isBridgeHex(h))?h:null;}
+
 function wodOpsCentroid(list){let x=0,y=0;for(const u of list){x+=u.x;y+=u.y;}const n=Math.max(1,list.length);return {x:x/n,y:y/n};}
+
 function wodOpsSlot(i,r){if(!i)return {x:0,y:0};const a=i*2.39996,d=r*Math.sqrt(i);return {x:Math.cos(a)*d,y:Math.sin(a)*d};}
+
 function wodOpsMove(u,x,y,hold){
     const hr=gameData.hexRadius||20;
     u._opsRoute=null;
@@ -121,6 +136,7 @@ function wodOpsMove(u,x,y,hold){
     gameData._opsIssuing=true;
     try{wodAiMoveUnitToward(u,x,y,!!hold);}finally{gameData._opsIssuing=false;}
 }
+
 function wodOpsHalt(u){
     const hr=gameData.hexRadius||20;
     if(u._wodAttackOrder){u._wodAttackOrder=null;u._wodAttackApproaching=false;u.target=null;u.path=null;u.orderTarget=null;}
@@ -128,6 +144,7 @@ function wodOpsHalt(u){
     const g=u.orderTarget||u.target;
     if(g&&Math.hypot(g.x-u.x,g.y-u.y)>hr*1.5)wodOpsMove(u,u.x,u.y,true);else u.holding=true;
 }
+
 // March through a list of points in order (a supply cut, a flanking route). Re-issued only when the id changes.
 function wodOpsRoute(u,points,id){
     if(u._opsRoute===id&&(u.target||u.orderTarget))return;
@@ -135,6 +152,7 @@ function wodOpsRoute(u,points,id){
     assignUnitMoveAlongWaypoints(u,points.map(h=>({x:h.x,y:h.y})));
     u._opsRoute=id;
 }
+
 // Where can this enemy group's supply be severed? Flood its friendly ground outward from the group; every
 // ring of the flood separates the group from whatever lies beyond, so the narrowest ring short of the first
 // enemy town is the place to cut.
@@ -160,6 +178,7 @@ function wodOpsCutPlan(group,sources,foes,hr,maxRing=7){
     }
     return best?{state:'cut',cells:best.cells,d:best.d}:{state:'open',cells:[]};
 }
+
 function wodOpsNewState(owner,now){
     const base=WOD_OPS_DOCTRINES[Math.floor(Math.random()*WOD_OPS_DOCTRINES.length)],j=()=>.9+Math.random()*.2;
     const doctrine={name:base.name,ratio:base.ratio*(.96+Math.random()*.08),sweep:base.sweep*j(),raid:base.raid*j(),hunt:base.hunt*j(),
@@ -167,10 +186,11 @@ function wodOpsNewState(owner,now){
     wodAiRecord(owner,'ops-doctrine',{doctrine:doctrine.name});
     return {doctrine,reliefK:{blitz:.5,raider:.6,hunter:.7,methodical:.85}[base.name]||.7,born:now,lastPush:now,ts:{},strikes:[],garrison:{},sweep:{},failed:{},cuts:[],counts:{launch:0,raid:0,recall:0,cut:0,pocket:0,taken:0,flank:0,bait:0,ambush:0}};
 }
+
 // War economy. Manpower, not money, limits an army here: every point of damage costs manpower to heal, and a
-// new regiment costs twice the manpower of refilling a broken one. The original buyer does the opposite of
-// what that calls for: it rations healing to protect manpower it is saving for purchases, and stops recruiting
-// for minutes while it saves $8,000 for armour. Under field command:
+// new regiment costs twice the manpower of refilling a broken one. The economy's own buyer (js/ai/economy.js),
+// which runs a war at sea, does the opposite: it rations healing to protect manpower it is saving for purchases,
+// and stops recruiting for minutes while it saves $8,000 for armour. While the field command fights a land war:
 //   - the wounded are refilled first, without rationing (wodOpsHealAllowance);
 //   - spare manpower becomes infantry at once (the most strength for the money);
 //   - only when money piles up unspent, because manpower has run short, is it turned into armour, the one
@@ -179,10 +199,11 @@ function wodOpsHealAllowance(unit,wanted){
     if(!wodOpsActive(unit.owner))return null;
     const S=gameData._aiOps?.hexes===gameData.hexes?gameData._aiOps.by[unit.owner]:null;
     const now=wodAiOperationTime();
-    // only while this faction has a land war on: at sea the original buyer must be able to save manpower for ships
-    if(!S||S.disabledUntil>now||!(now-S.landWarAt<8000))return null;
+    // only while this faction has a land war on: at sea the economy's buyer must be able to save manpower for ships
+    if(!S||!(now-S.landWarAt<8000))return null;
     return S.saveMp?wanted*.35:wanted; // while manpower is being put aside for armour the wounded heal slowly
 }
+
 function wodOpsWarEconomy(owner,S,units,myTowns,now){
     if(now<(S.buyAt||0))return;
     S.buyAt=now+2500;S.saveMp=false;
@@ -235,11 +256,12 @@ function wodOpsState(owner,now){
     const root=gameData._aiOps&&gameData._aiOps.hexes===gameData.hexes?gameData._aiOps:(gameData._aiOps={hexes:gameData.hexes,by:{}});
     return root.by[owner]||(root.by[owner]=wodOpsNewState(owner,now));
 }
+
 // The opening. A regiment from every town before the first brick is laid: the starting manpower would
 // otherwise lie idle while the factories go up, and two more regiments in the first minutes are what an
-// early attack is made of. The methodical commander builds first. Called by the original opening planner.
+// early attack is made of. The methodical commander builds first. Called by the opening build order (wodAiEstablishEconomy).
 function wodOpsOpening(owner,cities){
-    if(!wodOpsActive(owner)||WOD_OPS.T.noRush)return false;
+    if(!wodOpsActive(owner)||wodOpsTune(owner).noRush)return false;
     const now=wodAiOperationTime(),S=wodOpsState(owner,now);
     if(S.opened||S.doctrine.name==='methodical')return false;
     S.opened=true;
@@ -252,13 +274,14 @@ function wodOpsOpening(owner,cities){
     }
     return false;
 }
-// True when the original land planners would only produce orders that the leases throw away: every land
-// unit they would plan for is under field command and the faction has nothing at sea. Skipping them then
-// saves about a quarter of the simulation's time in a land war.
+
+// True when the land task forces would only produce orders that the leases throw away: every land unit they
+// would plan for is under field command and the faction has nothing at sea. Skipping them then saves about
+// a quarter of the simulation's time in a land war (WOD_OPS.T.noSkip runs them anyway, to time the saving).
 function wodOpsCommandsAll(owner,units){
-    if(WOD_OPS.T.noSkip||!wodOpsActive(owner))return false;
+    if(wodOpsTune(owner).noSkip||!wodOpsActive(owner))return false;
     const S=gameData._aiOps?.hexes===gameData.hexes?gameData._aiOps.by[owner]:null,now=wodAiOperationTime();
-    if(!S||S.disabledUntil>now||!(now-S.landWarAt<4000))return false;
+    if(!S||!(now-S.landWarAt<4000))return false;
     for(const u of units){
         if(!(u.hp>0)||u.type==='convoy')continue;
         if(wodIsNavalUnit(u)||u.boardTransportUid||u.cargo||u._needsTransport||u._navalLanded||u._navalEvacuating||u._medicalEvacuating)return false;
@@ -267,19 +290,19 @@ function wodOpsCommandsAll(owner,units){
     }
     return true;
 }
+
+// One faction's turn in a strategy pulse. Called through wodAiFaction, which catches and reports a throw.
 function wodOpsCommand(owner,units){
     if(!wodOpsActive(owner))return;
+    const T=WOD_OPS.T,seat=WOD_OPS.seatT&&WOD_OPS.seatT[owner];
+    if(seat)WOD_OPS.T=seat;
     try{wodOpsRun(owner,units);}
-    catch(e){
-        if(!WOD_OPS.error){WOD_OPS.error=String(e&&e.stack||e);try{console.warn('AI field command paused for 30s:',e);}catch(_){}}
-        const S=gameData._aiOps?.by?.[owner];if(S)S.disabledUntil=wodAiOperationTime()+30000;
-        for(const u of units)u._opsUntil=0;
-    }finally{gameData._opsIssuing=false;}
+    finally{WOD_OPS.T=T;gameData._opsIssuing=false;}
 }
+
 function wodOpsRun(owner,units){
     const now=wodAiOperationTime(),hr=gameData.hexRadius||20,C=hr*1.35;
     const S=wodOpsState(owner,now);
-    if(S.disabledUntil>now)return;
     const D=S.doctrine,TU=WOD_OPS.T||{};
     const myTowns=gameData.cities.filter(c=>c.owner===owner);
     if(!myTowns.length){S.saveMp=false;return;}
@@ -303,8 +326,7 @@ function wodOpsRun(owner,units){
             if(!TU.noLanding&&u._navalLanded&&h&&!isWaterHex(h)&&(u.type==='marine'||!((u.outOfSupplySeconds||0)>0)))landing.push(u);else u._opsUntil=0;
             continue;
         }
-        // cut off: the supply-escape logic of the original planners acts at once
-        // cut off: without the breakout below, the supply-escape logic of the original planners acts
+        // cut off: with noBreakout the supply escape of the land task forces (js/ai/defence.js) acts instead of the breakout below
         if(TU.noBreakout&&((u.outOfSupplySeconds||0)>2||(u.supplyPendingSeconds||0)>1.2)){u._opsUntil=0;continue;}
         if(!wodOpsLandHex(u.x,u.y))continue;
         // reinforcements a mission script has sent marching somewhere finish that march first
@@ -314,7 +336,7 @@ function wodOpsRun(owner,units){
     const reachCache=new Map();
     const reachOf=u=>{let r=reachCache.get(u);if(!r){r=wodAiOperationReach(u);reachCache.set(u,r);}return r;};
     // The field command fights land wars. Troops with no enemy ground they can walk to (an island of our own,
-    // a sea between the armies) stay with the original planners, who know ferries, landings and coast defence.
+    // a sea between the armies) stay with the land task forces and the navy, who know ferries, landings and coast defence.
     const foreign=S.foreign||(S.foreign=new Map());
     const landWar=u=>{
         const r=reachOf(u);let f=foreign.get(r);
@@ -628,7 +650,7 @@ function wodOpsRun(owner,units){
                 P.forEach((u,i)=>{
                     const hot=near(foes,u,C*4.2);claim(u,'landing');
                     if(hot.length){if(wodOpsStrength(hot,true)>wodOpsStrength(near(P,u,C*5),true)*1.5)fallBack(u,wodOpsCentroid(P));else engage(u,hot,i,false);return;}
-                    if(!grab(u,claimed))u._opsUntil=0; // nothing left to take here: the navy's planners decide where next
+                    if(!grab(u,claimed))u._opsUntil=0; // nothing left to take here: the navy decides where next
                 });
                 continue;
             }
@@ -1425,7 +1447,7 @@ function wodOpsRun(owner,units){
         const h=standAt(u,post);wodOpsMove(u,h.x,h.y,true);
     });
 
-    // with no enemy ground in walking reach the war is at sea, and the original buyer knows ships and ferries
+    // (with no enemy ground in walking reach the war is at sea, and the economy's own buyer knows ships and ferries)
     wodOpsWarEconomy(owner,S,units,myTowns,now);
 
     // ---------- watchdog: a commanded unit that has an order and is not moving gets it cleared and reissued
