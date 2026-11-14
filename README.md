@@ -157,7 +157,7 @@ Music credits are generated directly from the playback catalog of 25 shipped rec
 
 ## Production on Render
 
-Steam Wallet purchases are documented in [STEAM-STORE.md](STEAM-STORE.md). Gold bundles are $1/1,000, $5/6,000 and $10/15,000. Cosmetic and mission gold prices are five times their original prices. Existing individually owned items remain owned. The Supporter Pack is no longer sold: existing owners (supporter DLC 5475970 or a granted supporter order) keep the Patron Gold collection and era unlocks, and nobody else sees it in the shop. The developer must delist DLC 5475970 or stop its sales in Steamworks; the code cannot do that. Checkout requires a verified Steam identity, server-only publisher key and persistent PostgreSQL database. Tests default to sandbox and never charge real money.
+Steam Wallet purchases and the $10 supporter offer are documented in [STEAM-STORE.md](STEAM-STORE.md). The supporter offer includes the exclusive Patron Gold collection for all units/eras and 5,000 gold. Gold bundles are $1/1,000, $5/6,000 and $10/15,000. Cosmetic and mission gold prices are five times their original prices. Existing individually owned items remain owned; the supporter offer grants its collection and gold instead of the entire shop. Checkout requires a verified Steam identity, server-only publisher key and persistent PostgreSQL database. Tests default to sandbox and never charge real money. The separate supporter DLC (Steam app 5475970) is being retired; its owners stay supporters.
 
 You need **two** services. They get **two different URLs**:
 

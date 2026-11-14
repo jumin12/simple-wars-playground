@@ -37,7 +37,13 @@
       ? (state.environment === 'sandbox' ? 'Steam test store · no real money is charged' : 'Purchases use Steam Wallet. Prices shown in USD; Steam handles wallet conversion.')
       : native() ? 'Connect to Steam to purchase or restore gold.' : 'Open the Steam version to purchase gold. Earned gold still works here.');
     for (const button of document.querySelectorAll('[data-steam-product]')) button.disabled = state.busy;
+    const owned = !!state.wallet?.supporter;
+    const card = document.getElementById('supporterPackCard');
+    if (card) card.classList.toggle('owned', owned);
+    const btn = document.getElementById('supporterPackBtn');
+    if (btn) { btn.disabled = state.busy; btn.textContent = owned ? 'Supporter Pack owned' : 'Get the Supporter Pack · $10'; }
     const restore = document.getElementById('steamRestorePurchases'); if (restore) restore.disabled = state.busy;
+    drawSupporterPreview();
   }
   async function connect() {
     if (!native() || state.busy) return false;
@@ -94,6 +100,13 @@
     try { apply(await call('refresh')); state.error = ''; if (!silent) showNotification('Steam purchases refreshed.', 'success'); }
     catch (error) { state.error = error.message; }
     finally { state.busy = false; render(); }
+  }
+  function drawSupporterPreview() {
+    const canvas = document.getElementById('supporterPackPreview');
+    if (!canvas || typeof global.wodDrawPremiumChip !== 'function' || typeof gameData !== 'object') return;
+    const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const units = ['light', 'motorized', 'mountaineer', 'marine', 'heavy', 'ship', 'transport', 'supply'];
+    units.forEach((type, i) => { ctx.save(); ctx.translate(37 + i % 4 * 78, 38 + Math.floor(i / 4) * 72); global.wodDrawPremiumChip(ctx, { type, owner: 1, x: 0, y: 0 }, 22, '#69c68c', true); ctx.restore(); });
   }
   global.WodSteamStore = { state, native, apply, connect, buy, spend, refresh, queueSync, render };
   global.addEventListener('DOMContentLoaded', async () => {

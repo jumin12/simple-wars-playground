@@ -35,9 +35,9 @@ const server=H.createStaticServer();
    delete gameData.ownedShopVisuals.map_atlas_hd;gameData.uiSettings.mapSkin='default';wodCloudTryPurchase=async()=>false;
    const rejected=!(await setShopMapSkin('atlas_hd'))&&gameData.uiSettings.mapSkin==='default'&&gameData.gold===1000;
    wodCloudTryPurchase=original;wodCloudCanSync=()=>false;
-   // A stale local supporterPack flag (the pack is no longer sold) never unlocks Atlas HD.
-   gameData.supporterPack=true;gameData.gold=0;const legacyFlag=await setShopMapSkin('atlas_hd');const legacyFlagIgnored=!legacyFlag&&gameData.gold===0&&!wodOwnsShopVisual('map_atlas_hd');gameData.supporterPack=false;gameData.ownedShopVisuals.map_atlas_hd=true;
-   return{success,rejected,legacyFlagIgnored};
+   // The Supporter Pack is its own art and gold: it does not include Atlas HD.
+   gameData.supporterPack=true;gameData.gold=0;const supporter=await setShopMapSkin('atlas_hd');const included=!supporter&&gameData.gold===0&&!wodOwnsShopVisual('map_atlas_hd');gameData.supporterPack=false;gameData.ownedShopVisuals.map_atlas_hd=true;
+   return{success,rejected,included};
   });assert(Object.values(results.cloudPurchases).every(Boolean),JSON.stringify(results.cloudPurchases));
   // Every pack retains its own body; each transport is distinct from its warship.
   results.transports=await page.evaluate(()=>{

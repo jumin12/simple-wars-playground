@@ -274,12 +274,12 @@ function wodTutorialLaunchCounterattack(t) {
     t.wave = [];
     for(let i = 0; i < 3; i++) {
         const p = wodTutorialWorld(T.iron.q - 4, T.iron.r + 2 + i * 1.4);
-        const u = createUnitAt('light', p.x, p.y, WOD_TUTORIAL_ENEMY);
+        const u = createUnitAt('light', p.x, p.y, WOD_TUTORIAL_ENEMY, { startSpawn: true });
         if(!u) continue;
         t.wave.push(u.uid);
         wodTutorialOrder(u, goal.x + (i - 1) * 18, goal.y);
     }
-    t.waveAt = gameData._wodSimTick || 0;
+    t.waveAt = gameData._aiEconomyClock || 0; // game seconds; does not run while paused
 }
 function wodTutorialOrder(u, x, y) {
     try { wodAiMoveUnitToward(u, x, y, false); } catch(err) { wodReportRuntimeError(err, 'tutorial order'); }
@@ -287,9 +287,10 @@ function wodTutorialOrder(u, x, y) {
 function wodTutorialWaveBeaten(t) {
     if(!t.wave) return false;
     const alive = gameData.entities.filter(u => t.wave.includes(u.uid) && u.hp > 0);
-    // Survivors that were driven off count as beaten once the town has held for a minute.
-    const held = ((gameData._wodSimTick || 0) - (t.waveAt || 0)) * 0.05 > 60;
-    return alive.length === 0 || (held && alive.every(u => u.moraleBroken || u.retreating));
+    // The town counts as held once the attackers are dead, or it has stayed ours for 75 seconds of game
+    // time since they set off (whatever is left of them is then beaten off or stuck outside the streets).
+    const held = (gameData._aiEconomyClock || 0) - (t.waveAt || 0) > 75;
+    return alive.length === 0 || held;
 }
 
 // ---------- setup once the match is running ----------
@@ -297,7 +298,8 @@ function wodTutorialWaveBeaten(t) {
 function wodTutorialSetupBattle(t) {
     const T = WOD_TUTORIAL_TOWNS;
     gameData.entities = gameData.entities.filter(u => u.type === 'convoy');
-    const place = (type, owner, q, r) => { const p = wodTutorialWorld(q, r); return createUnitAt(type, p.x, p.y, owner); };
+    // startSpawn: troops already in the field, so no arrival animation and nothing counted as built.
+    const place = (type, owner, q, r) => { const p = wodTutorialWorld(q, r); return createUnitAt(type, p.x, p.y, owner, { startSpawn: true }); };
     for(const [q, r] of [[-14, 0], [-14, 2], [-13, 4], [-15, -2]]) place('light', WOD_TUTORIAL_PLAYER, q, r);
     for(const [q, r] of [[6, 4], [8, 3]]) place('light', WOD_TUTORIAL_ENEMY, q, r);
     for(const [q, r] of [[18, -2], [20, 0], [18, 1]]) place('light', WOD_TUTORIAL_ENEMY, q, r);
@@ -363,6 +365,7 @@ function wodTutorialFrame() {
 function wodTutorialTick(t) {
     if(gameState === 'MENU' && t.ready) { wodEndTutorial(); return; }
     if(gameState !== 'PLAYING') return;
+    wodTutorialSetCovered(wodTutorialCovered());
     if(!t.ready) {
         if(gameData._matchReadyForEndChecks && gameData.cities.some(c => c.id === WOD_TUTORIAL_TOWNS.dawn.id)) {
             wodTutorialSetupBattle(t);
@@ -382,6 +385,17 @@ function wodTutorialTick(t) {
     if(!step.info && step.done && step.done(t)) { wodTutorialGoTo(t, t.index + 1); return; }
     if(typeof step.text === 'function' && (t.textDirty || ((t.frames = (t.frames || 0) + 1) % 30 === 0))) { t.textDirty = false; wodTutorialRenderPanel(t); }
     wodTutorialPlaceSpot(t, step);
+}
+
+/** The pause menu (Esc) and the full-screen report panels cover the battle: the tutorial steps aside. */
+function wodTutorialCovered() {
+    if(wodEscMenuOpen()) return true;
+    for(const id of ['statsMenu', 'citiesMenu'])
+        if(document.getElementById(id)?.classList.contains('hidden') === false) return true;
+    return false;
+}
+function wodTutorialSetCovered(covered) {
+    for(const id of ['wodTutPanel', 'wodTutSpot']) document.getElementById(id)?.classList.toggle('wod-tut-covered', covered);
 }
 
 function wodTutorialGoTo(t, index) {
@@ -476,6 +490,7 @@ function wodTutorialRenderPanel(t) {
     if(t.result) {
         const won = t.result === 'won';
         panel.className = 'wod-tut-panel wod-tut-panel--end';
+        panel.classList.toggle('wod-tut-covered', wodTutorialCovered());
         panel.innerHTML = '<p class="wod-tut-kicker">Tutorial</p>'
             + '<h2 id="wodTutTitle">' + (won ? 'Tutorial complete' : 'Not this time') + '</h2>'
             + '<p class="wod-tut-text">' + (won
@@ -492,6 +507,7 @@ function wodTutorialRenderPanel(t) {
     const body = typeof step.text === 'function' ? step.text(t) : step.text;
     const shown = t.steps.length;
     panel.className = 'wod-tut-panel' + (step.info ? ' wod-tut-panel--info' : '');
+    panel.classList.toggle('wod-tut-covered', wodTutorialCovered());
     panel.innerHTML = '<div class="wod-tut-head"><p class="wod-tut-kicker">Tutorial · step ' + (t.index + 1) + ' of ' + shown + '</p>'
         + '<button type="button" class="wod-tut-exit" onclick="wodTutorialExit()" title="Leave the tutorial">Exit</button></div>'
         + '<h2 id="wodTutTitle">' + step.title + '</h2>'

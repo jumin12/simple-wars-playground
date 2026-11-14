@@ -6,9 +6,8 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const PRICE_MULTIPLIER = 5;
-  // The Supporter Pack (item 100) is no longer sold. Do not reuse item 100:
-  // stored orders embed their product, so existing owners stay recognised.
   const products = Object.freeze({
+    supporter: { itemId: 100, name: 'Supporter Pack', usdCents: 1000, gold: 5000, supporter: true },
     gold1000: { itemId: 101, name: '1,000 Gold', usdCents: 100, gold: 1000 },
     gold6000: { itemId: 102, name: '6,000 Gold', usdCents: 500, gold: 6000 },
     gold15000: { itemId: 103, name: '15,000 Gold', usdCents: 1000, gold: 15000 },

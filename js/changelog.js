@@ -2,11 +2,14 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-14T18:23:48Z",title:"Supporter Pack and tutorial polish",items:[
+        "The $10 in-game Supporter Pack is available in Buy gold, with Patron Gold designs for every unit and era plus 5,000 gold. Existing supporters keep their ownership; the separate Steam DLC is being retired.",
+        "Tutorial prompts step aside when Menu, Stats or Cities is open. Starting troops appear immediately, and holding Redwater for 75 game seconds completes the counterattack step even if an attacker remains outside town."
+    ]},
     {at:"2026-11-14T12:00:00Z",title:"Guided tutorial, a new guide and steadier matches",items:[
         "New players can learn the game in a short guided battle: Tutorial & help on the main menu (shown first until you have played a match) walks you through moving troops, taking towns, recruiting, buildings and supply, pointing at each part of the screen as it comes up.",
         "The guide has been rewritten from scratch for new players, with contents at the top, a close button that stays in view and Esc to close.",
         "The campaign no longer has difficulty levels; every campaign plays at the former Normal settings. Campaigns already in progress keep going.",
-        "The Supporter Pack is no longer sold. Players who own it keep the Patron Gold collection and every era. Gold bundles and the gold shop are unchanged.",
         "If something goes wrong during a battle, the game now reports it and keeps running instead of freezing.",
         "Online results count only when no other player's game disputes them, and the server limits how much and how fast each connection can send."
     ]},

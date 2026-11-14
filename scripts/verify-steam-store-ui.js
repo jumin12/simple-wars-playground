@@ -40,22 +40,9 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
   async function buy(sku,gold){const before=orders.size;await page.locator('[data-steam-product="'+sku+'"]').click();await page.waitForFunction(()=>!WodSteamStore.state.busy);assert.equal(orders.size,before+1);const order=[...orders.values()].at(-1);assert.equal(await page.evaluate(()=>gameData.gold),gold-require('../store-catalog').products[sku].gold,'no credit before capture');order.status='Approved';await native.onAuthorized({app_id:5043620,order_id:BigInt(order.orderid),authorized:true});await page.waitForFunction(expected=>gameData.gold===expected,gold);}
   await buy('gold1000',1100);
   await page.evaluate(()=>{switchShopTab('mapSkins');void setShopMapSkin('atlas_hd');});await page.waitForFunction(()=>!WodSteamStore.state.busy&&gameData.ownedShopVisuals.map_atlas_hd);assert.equal(await page.evaluate(()=>gameData.gold),600);
-  await page.evaluate(()=>switchShopTab('gold'));await buy('gold6000',6600);await buy('gold15000',21600);
-  // The Supporter Pack is no longer sold or advertised; Patron Gold is hidden from non-owners.
-  assert.equal(await page.locator('#supporterPackCard, #supporterPackBtn, [data-steam-product="supporter"]').count(),0,'no Supporter Pack offer');
-  assert(!/Supporter|\$10 pack/.test(await page.evaluate(()=>document.getElementById('shopPanel').textContent)),'no Supporter Pack copy');
-  await page.evaluate(()=>{switchShopTab('troops');updateSkinShop();});
-  assert(await page.locator('#skinSupporterGold').isHidden(),'Patron Gold card is hidden from non-owners');
-  assert(!(await page.evaluate(()=>wodHasSupporterPack()||wodIsPeriodUnlocked('ancient'))),'non-owners get no supporter unlocks');
-  // An existing owner (a supporter order granted before the pack left the catalog) keeps Patron Gold.
-  const legacyId=await store.nextOrderId();
-  await store.transaction(steamId,data=>{data.orders[legacyId]={id:legacyId,requestId:crypto.randomUUID(),sku:'supporter',product:{itemId:100,name:'Supporter Pack',usdCents:1000,gold:5000,supporter:true},steamId,created:Date.now(),status:'Succeeded',granted:true,reversed:false};data.gold+=5000;});
-  orders.set(legacyId,{orderid:legacyId,steamid:steamId,currency:'USD',status:'Succeeded',items:[{itemid:100,qty:1,amount:1000,vat:0,itemstatus:'Succeeded'}]});
-  await page.evaluate(()=>WodSteamStore.refresh(true));await page.waitForFunction(()=>!WodSteamStore.state.busy&&gameData.gold===26600);
-  assert(await page.evaluate(()=>wodHasSupporterPack()&&wodIsPeriodUnlocked('ancient')&&!wodShopSkinOwned('civRome')),'existing owner keeps Patron Gold and era unlocks, not a whole-shop unlock');
-  await page.evaluate(()=>{switchShopTab('troops');updateSkinShop();});
-  assert(await page.locator('#skinSupporterGold').isVisible(),'Patron Gold card shows for existing owners');
-  await page.evaluate(()=>switchShopTab('gold'));
+  await page.evaluate(()=>switchShopTab('gold'));await buy('gold6000',6600);await buy('gold15000',21600);await buy('supporter',26600);
+  assert(await page.evaluate(()=>wodHasSupporterPack()&&!wodShopSkinOwned('civRome')),'supporter is exclusive art plus gold, not whole-shop unlock');
+  assert.equal(await page.locator('#supporterPackBtn').innerText(),'Supporter Pack owned');
   const products=await page.evaluate(()=>({skin:wodShopSkinCost('napoleonic'),roman:wodShopSkinCost('civRome'),visual:WOD_SHOP_VISUAL_COST,mission:wodShopMapCatalog.find(e=>e.id==='normandy-dday').price}));assert.deepEqual(products,{skin:500,roman:1000,visual:500,mission:1000});
   await page.evaluate(()=>{switchShopTab('command');syncShopVisualOptionsUi();});assert(!/\b100g\b/.test(await page.locator('#shopPanel').innerText()),'no old visual price labels');
   await page.evaluate(()=>{wodProgress.achievements.goldenChipMaster=true;WodSteamStore.queueSync();});await page.waitForFunction(()=>WodSteamStore.state.wallet.ownedSkins.goldenChip);
@@ -80,7 +67,8 @@ const readBody=async req=>{let body='';for await(const part of req)body+=part;re
    await page.setViewportSize(size);await page.evaluate(()=>switchShopTab('gold'));await page.waitForTimeout(200);
    const layout=await page.evaluate(()=>{const p=document.querySelector('#shopPanel .panel');return{width:p.clientWidth,scrollWidth:p.scrollWidth,buttons:[...document.querySelectorAll('[data-steam-product]')].map(e=>{const r=e.getBoundingClientRect();return{width:r.width,height:r.height};})};});
    assert(layout.scrollWidth<=layout.width+2,'no horizontal overflow');assert(layout.buttons.every(b=>b.height>=43),'real touch targets');
-   await page.locator('[data-steam-product="gold6000"]').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(OUT,'gold-'+size.width+'x'+size.height+'.png')});mobile.push({...size,...layout});
+   await page.locator('[data-steam-product="gold6000"]').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(OUT,'gold-'+size.width+'x'+size.height+'.png')});
+   await page.locator('#supporterPackCard').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(OUT,'supporter-'+size.width+'x'+size.height+'.png')});mobile.push({...size,...layout});
   }
   await page.evaluate(()=>WodSteamStore.refresh());await page.waitForFunction(()=>!WodSteamStore.state.busy);assert.equal(await page.evaluate(()=>gameData.gold),26600);
   await page.setViewportSize({width:1440,height:900});await page.goto(origin+'/?autostart=1');

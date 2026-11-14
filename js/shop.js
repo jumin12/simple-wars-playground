@@ -19,14 +19,19 @@ function wodEnsureUiShopDefaults() {
     if(!['default','atlas_hd',...Object.keys(WodStoreCatalog.mapPacks)].includes(u.mapSkin)) u.mapSkin = 'default';
 }
 function wodHasSupporterPack() {
-    // The Supporter Pack is no longer sold. Existing owners (Steam DLC or a
-    // granted, unreversed order) keep Patron Gold and the era unlocks; the
-    // Steam wallet reports that ownership as wallet.supporter.
+    // The Steam wallet reports a bought Supporter Pack (or an owned supporter DLC) as wallet.supporter.
     return !!window.WodSteamStore?.state.wallet?.supporter;
 }
 function wodApplySupporterFromLaunch() {
     // Paid ownership is restored by Steam verification, never URL flags.
     gameData.supporterPack = false;
+}
+function wodOpenSupporterPack() {
+    if(wodHasSupporterPack()) { showNotification('Supporter Pack owned. Equip Patron Gold in the army dropdown.'); return; }
+    return WodSteamStore.buy('supporter');
+}
+function wodRefreshSupporterPackCard() {
+    if(window.WodSteamStore) WodSteamStore.render();
 }
 function wodEnsureOwnedShopVisuals() {
     if(!gameData.ownedShopVisuals) gameData.ownedShopVisuals = {};
@@ -1152,10 +1157,8 @@ function updateSkinShop() {
         let st = el.querySelector('.skin-card-state');
         let pr = el.querySelector('.skin-card-price');
         if(skin === 'supporterGold') {
-            // Patron Gold is no longer sold: show the card to existing owners only.
-            el.style.display = owned ? '' : 'none';
-            if(st) st.textContent = 'Unlocked';
-            if(pr) pr.textContent = '';
+            if(st) st.textContent = owned ? 'Unlocked' : 'Supporter exclusive';
+            if(pr) pr.textContent = owned ? '' : '$10 pack';
             continue;
         }
         if(skin === 'goldenChip') {
@@ -1172,7 +1175,7 @@ function updateSkinShop() {
     renderShopArmyCanvases();
     renderSkinShopGridCanvases();
     updateShopPurchaseAllButtons();
-    if(window.WodSteamStore) WodSteamStore.render();
+    wodRefreshSupporterPackCard();
 }
 function updateShopPurchaseAllButtons() {
     let map = { standard: 'shopBuyAllStandard', ancientCiv: 'shopBuyAllAncientCiv', countryballs: 'shopBuyAllCountryballs', ruse: 'shopBuyAllRuse' };

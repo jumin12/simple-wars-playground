@@ -133,7 +133,8 @@ function purchaseUnitSkin(skin) {
     if(skin==='atlasUnits'){switchShopTab('mapSkins');wodPreviewMapPack('atlas_hd');return;}
     if(!gameData.ownedUnitSkins) gameData.ownedUnitSkins = { nato: true };
     if(WodStoreCatalog.premiumBase(skin) === 'supporterGold') {
-        if(wodHasSupporterPack()) showNotification('Patron Gold is yours. Choose its era in the army style dropdown.');
+        if(!wodHasSupporterPack()) { switchShopTab('gold'); document.getElementById('supporterPackCard')?.scrollIntoView({block:'start'}); }
+        else showNotification('Patron Gold is yours. Choose its era in the army style dropdown.');
         return;
     }
     if(skin === 'goldenChip') {
