@@ -996,7 +996,7 @@ window.WOD = {
         }
         mapData=JSON.parse(JSON.stringify(mapData,(key,value)=>key.startsWith('_')?undefined:value));
         gameData.selection=[];gameData.constructionJobs=[];gameData._missionRuntime=null;
-        delete gameData.aiCommanderStyle;gameData.aiCommanderProfiles={};
+        gameData.aiCommanderProfiles={};
         wodApplyMapSizePreset(mapData.mapSize || mapData.mapRadius || gameData.mapRadius || 60);
         gameData.mapShape = mapData.mapShape || gameData.mapShape || 'island';
         gameData.hexList = mapData.hexList || [];
@@ -1074,7 +1074,7 @@ window.WOD = {
             hexRadius: gameData.hexRadius,
             gamePeriod: gameData.gamePeriod||'modern',
             mapShape: gameData.mapShape || 'island',
-            aiCommanderStyle:gameData.aiCommanderStyle||'varied',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
+            aiCommanderProfiles:gameData.aiCommanderProfiles||{},
             hexList: gameData.hexList,
             cities: gameData.cities,
             roads: gameData.roads,

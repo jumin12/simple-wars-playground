@@ -170,7 +170,7 @@ function wodAiMoveUnitToward(unit, x, y, holdingOpt,fromQueue=false) {
         const priority=unit.retreating||unit._aiRegroupUntil>now?4:job?.response?3:['hold','reserve','defend'].includes(job?.kind)?2:1;
         const marineGround=unit.type==='marine'&&unit._navalLanded&&unit._aiMarineGroundUntil>now?
             {goal:unit._navalAssaultGoal,epoch:unit._wodPlayerOrderEpoch||0}:null;
-        queue.set(unit,{unit,owner:unit.owner,x,y,holding:holdingOpt,hexes:gameData.hexes,priority,at:now,marineGround});
+        queue.set(unit,{unit,owner:unit.owner,x,y,holding:holdingOpt,hexes:gameData.hexes,priority,at:now,marineGround,ops:!!gameData._opsIssuing});
         return true;
     }
     if(wodIsNavalUnit(unit)) {
@@ -445,8 +445,11 @@ function wodDrainAiMoveQueue() {
     // Coalesce orders per unit and apply one complete route per frame. Units
     // retain their current route while waiting instead of stopping or losing it.
     const ordered=[...queue.entries()].sort((a,b)=>(b[1].priority||0)-(a[1].priority||0)||(a[1].at||0)-(b[1].at||0));
-    let applied=0;
+    // Up to three routes a frame (one for an easy computer, five for a hard one, per faction).
+    let applied=0,cap=0;const perOwner={},limit=o=>wodAiDifficulty(o).movesPerFrame||3;
+    for(const [,order] of ordered)cap=Math.max(cap,limit(order.owner));
     for(const [unit,order] of ordered) {
+        if((perOwner[order.owner]||0)>=limit(order.owner))continue;
         queue.delete(unit);
         const now=wodAiOperationTime(),ground=order.marineGround;
         // The beachhead planner renews naval ownership after the marine
@@ -457,9 +460,12 @@ function wodDrainAiMoveQueue() {
             (!unit.target||(unit._wodPlayerOrderEpoch||0)===ground.epoch);
         if(order.hexes!==gameData.hexes||unit.owner!==order.owner||unit.hp<=0||wodMpIsHumanOwner(unit.owner)||
             !gameData.entities.includes(unit)||unit.boardTransportUid||unit._trafficYield||unit._navalAssaultUntil>now&&!marineGround||unit._navalEscortUntil>now)continue;
+        // A move another planner queued before the field command took the unit over is stale.
+        if(unit._opsUntil>now&&!order.ops&&wodOpsTune(unit.owner).queueLease!==0)continue;
         // One route per frame made a commander with thirty units take a second and a half to
         // move them all. Apply up to three while this frame's pathfinding budget lasts.
         wodAiMoveUnitToward(unit,order.x,order.y,order.holding,true);
-        if(++applied>=3||!wodCanSpendPf())break;
+        perOwner[order.owner]=(perOwner[order.owner]||0)+1;
+        if(++applied>=cap||!wodCanSpendPf())break;
     }
 }

@@ -2,6 +2,15 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-14T23:54:15Z",title:"AI difficulty, named commanders and fairer opponents",items:[
+        "Choose Easy, Normal or Hard for the AI in skirmish setup, when you begin a campaign (and later in the campaign panel) and in a multiplayer lobby. No level gives the AI extra money, troops or vision: Easy recruits one unit at a time, reacts slowly and never flanks, cuts supply or sets ambushes; Hard reacts faster and accepts thinner odds.",
+        "Each AI opponent is led by one of seven named commanders with their own way of fighting. Pick them in skirmish setup or leave them random; the match opens by naming who you face, and the Players tab of the battle report describes each one.",
+        "AI armies keep their troops on a battle already under way, no longer turn back from a moment's flicker in their supply line and stop acting on outdated orders. One buyer now spends an AI's money in a land war, adding motorized troops on open fronts and mountaineers in the hills, and captured towns get farms and factories. The opening build order is unchanged.",
+        "The AI counts forts, generals, veterans and nearby warships when it judges a fight, sends healed troops back to the line sooner and picks recovery sites by the real road around rivers.",
+        "AI fleets sail with their loaded troopships, go after enemy troopships near their coast, fight enemy fleets they outnumber, are not held back by an old sighting of a ship, pick another beach when defenders gather on theirs and send damaged ships home.",
+        "Fairer AI: computer factions treat every enemy alike instead of preferring to attack you (or the host in multiplayer), their troops suffer unpaid upkeep like yours, and under fog they recognise cut-off troops only by the sign everyone sees.",
+        "AI fort guards rejoin the army when their fort is far from any fighting, and recruits raised for forts respect upkeep."
+    ]},
     {at:"2026-11-14T18:23:48Z",title:"Supporter Pack and tutorial polish",items:[
         "The $10 in-game Supporter Pack is available in Buy gold, with Patron Gold designs for every unit and era plus 5,000 gold. Existing supporters keep their ownership; the separate Steam DLC is being retired.",
         "Tutorial prompts step aside when Menu, Stats or Cities is open. Starting troops appear immediately, and holding Redwater for 75 game seconds completes the counterattack step even if an attacker remains outside town."

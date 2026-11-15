@@ -62,6 +62,13 @@ function wodAiFortThreatNeed(fort, ownerId) {
     if(!fort || fort.owner !== ownerId) return 0;
     let hr = gameData.hexRadius || 20;
     let enemies = countNearbyUnits(ownerId, fort.x, fort.y, Math.max(300, hr * 13), true);
+    // A fort far behind a quiet front needs nobody: its guards go back to the army. (It used to keep one man
+    // forever, so troops parked near rear forts pinned their defenders.)
+    if(!enemies && wodOpsTune(ownerId).fortGuards !== 0) {
+        const fh = wodHexAt(fort.q, fort.r);
+        const exposed = fh && getHexesInRadius(fort.q, fort.r, 6).some(p => {const h = wodHexAt(p.q, p.r);return h && !isWaterHex(h) && wodIsHostileOwner(h.owner, ownerId);});
+        if(!exposed) return 0;
+    }
     return Math.max(1,Math.min(4,enemies+1));
 }
 
@@ -91,6 +98,8 @@ function wodAiEnsureFortGuard(ownerId, fortHex) {
             if(u.aiCityStriker) continue;
             if(u.aiFortGuard && u.aiFortGuard !== fort.id) continue;
             if(u.aiTfKind === 'defend' && u.aiTfJobId) continue;
+            // (the field command guards its own works; a unit it holds would ignore this order and be counted anyway)
+            if(u._opsUntil > wodAiOperationTime() && wodOpsTune(ownerId).fortGuards !== 0) continue;
             let dx = u.x - fort.x, dy = u.y - fort.y;
             let d = dx * dx + dy * dy;
             if(d > pullR2) continue;
@@ -111,6 +120,13 @@ function wodAiEnsureFortGuard(ownerId, fortHex) {
     }
     if(want <= 0 || wodAiCountFortGuards(fort, ownerId) > 0) return;
     if(!canAffordUnit(ownerId, 'light')) return;
+    // A recruit for a fort is paid for like any other: within upkeep, outside the money put by for buildings
+    // or ships, and not while the field command is the one buying land troops.
+    if(wodOpsTune(ownerId).fortGuards !== 0) {
+        const plan = gameData._aiEconomyPlans?.[ownerId];
+        if(wodOpsBuysLand(ownerId) || plan && !wodAiCanSpendOutsideReserve(ownerId, 'light', plan)) return;
+        if(getOwnerIncome(ownerId) - getOwnerExpenses(ownerId) < getUnitUpkeep({type: 'light'}) + 1) return;
+    }
     let spawnCity = null, spawnD = Infinity;
     for(let c of gameData.cities) {
         if(c.owner !== ownerId) continue;
@@ -443,7 +459,8 @@ function wodAiIssueDefenseResponse(unit,job) {
 function wodAiMaintainTownGarrisons(owner,plan,ready) {
     for(const city of gameData.cities.filter(c=>c.owner===owner)) {
         let job=plan.jobs.find(j=>j.kind==='defend'&&j.city?.id===city.id);
-        const assigned=ready.find(u=>u.type==='light'&&plan.unitJob[u.uid]===job?.id&&wodAiCanReach(u,city));
+        // (with no garrison job yet nobody is assigned: an unassigned regiment used to match the missing job's id)
+        const assigned=job&&ready.find(u=>u.type==='light'&&plan.unitJob[u.uid]===job.id&&wodAiCanReach(u,city));
         if(assigned)continue;
         const candidates=ready.filter(u=>u.type==='light'&&!u.isGeneral&&wodAiCanReach(u,city)&&
             !plan.jobs.some(j=>j.id===plan.unitJob[u.uid]&&j.kind==='defend'&&j.city?.id!==city.id));

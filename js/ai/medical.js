@@ -205,7 +205,7 @@ function wodAiCancelTownWithdrawal(unit) {
 }
 
 function wodAiManageRecovery(owner) {
-    const now=wodAiOperationTime();
+    const now=wodAiOperationTime(),TU=wodOpsTune(owner);
     const army=gameData.entities.filter(u=>u.owner===owner&&u.hp>0&&u.type!=='convoy'&&!u.boardTransportUid);
     const radius=wodFortCombatAuraRadiusPx(),hr=gameData.hexRadius||20,threats=wodAiThreats(owner,false);
     const sites=[...(gameData.hospitals||[]).filter(h=>wodEffectiveHospitalOwner(h)===owner),...gameData.cities.filter(c=>c.owner===owner&&!isCitySiegeBlockedForProduction(c))];
@@ -222,8 +222,10 @@ function wodAiManageRecovery(owner) {
         const group=job?army.filter(a=>job.members.includes(a.uid)||a._aiRecoveryGroup===groupId):[];
         const ready=group.filter(a=>!a._medicalRecovering&&!a.retreating&&a.hp>a.maxHp*.6).length;
         const needsRotation=job&&!job.city&&!job.fort&&group.length>=3&&ready<Math.max(3,Math.ceil(group.length*.6));
-        const release=u.isGeneral?.94:needsRotation?.85:.92;
-        if(hp>=release&&manpower>=release&&morale>=(needsRotation?.8:.9)&&!u.moraleBroken){
+        // Back to the line at about four fifths: the last tenth of a refill takes as long as the rest while the
+        // fight goes on without the regiment.
+        const release=u.isGeneral?.94:TU.healBack!==0?.82:needsRotation?.85:.92;
+        if(hp>=release&&manpower>=release&&morale>=(TU.healBack!==0||needsRotation?.8:.9)&&!u.moraleBroken){
             if(u._medicalRecovering||u._medicalGoal){wodReleaseRecoveredUnit(u,true);wodAiRecord(owner,'recovery-return',{unit:u.uid,group:groupId,strength:Math.round(hp*100)});}
             continue;
         }
@@ -249,7 +251,7 @@ function wodAiManageRecovery(owner) {
             }
             continue;
         }
-        let destination=null,bestCost=Infinity;
+        let destination=null,bestCost=Infinity;const ranked=[];
         const reach=wodIsNavalUnit(u)?wodAiOperationReach(u,true):wodAiOperationReach(u);
         for(const site of sites){
             const cells=gameData.cities.includes(site)?getCityUrbanTerrainHexes(site):getHexesInRadius(site.q,site.r,Math.max(1,Math.floor(radius/(hr*1.35)*.75))).map(p=>wodHexAt(p.q,p.r));
@@ -264,6 +266,7 @@ function wodAiManageRecovery(owner) {
                 if(isWorldPositionBlockedByUnits(u,h.x,h.y))continue;
                 const cost=Math.hypot(u.x-h.x,u.y-h.y)+(gameData.cities.includes(site)?0:-hr);
                 if(cost<bestCost){bestCost=cost;destination=h;}
+                if(TU.healRoad!==0)ranked.push({h,cost});
             }
         }
         // Small towns may have one urban cell. Patients wait at separate safe
@@ -288,6 +291,15 @@ function wodAiManageRecovery(owner) {
             if(u._medicalGoal){wodClearTransportMove(u);u._medicalGoal=null;}
             u._medicalRecovering=false;u._medicalWaiting=false;u.retreating=false;u._wodOrderedRetreat=false;u.aiOrderUntil=0;
             continue;
+        }
+        const C=hr*1.35;
+        if(TU.healRoad!==0&&!waiting&&ranked.length>1&&!wodIsNavalUnit(u)&&u.type!=='marine'&&u._medicalGoal!==getHexKey(destination)){
+            // The straight line misleads across a river: of the closest few cells, take the shortest real road.
+            const roadCost=c=>{const r=wodAiNeedsLandDetour(u,c.h)?wodAiLandRoute(u,c.h):null;return r?c.cost-Math.hypot(u.x-c.h.x,u.y-c.h.y)+r.length*C:c.cost;};
+            ranked.sort((a,b)=>a.cost-b.cost);
+            let best=null,bc=Infinity;
+            for(const c of ranked.slice(0,3)){if(occupied.has(getHexKey(c.h)))continue;const rc=roadCost(c);if(rc<bc){bc=rc;best=c.h;}}
+            if(best)destination=best;
         }
         occupied.add(getHexKey(destination));
         if(!u._medicalRecovering&&groupId){u._aiRecoveryGroup=groupId;rotating.set(groupId,(rotating.get(groupId)||0)+1);}

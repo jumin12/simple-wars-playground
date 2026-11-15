@@ -1212,6 +1212,10 @@ function startGame(mode, opts) {
             if(mode === 'ai' && !opts.mission && typeof wodAwaitMapGenIdle === 'function')
                 await wodAwaitMapGenIdle();
             await initGame();
+            // Each computer faction's commander: the one picked in setup, otherwise drawn now. Announced once
+            // the match is under way (not in the tutorial, whose enemy follows a script).
+            wodAiAssignCommanders(gameData._aiCommanderChoices);gameData._aiCommanderChoices=null;
+            setTimeout(wodAnnounceOpponents,1200);
             gameData._campaignEnded = false;
             hideCampaignSummaryOverlay();
             wodResetEndCountdowns();
@@ -1678,6 +1682,10 @@ async function initGame() {
     let aiCount = document.getElementById('setupAI');
     if(aiCount)
         gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiCount.value, 10) || 1));
+    // Computer difficulty (missions too); a campaign battle has set its own. Commanders picked in setup are
+    // given to their seats once the map is made (startGame).
+    if(!launchingCampaign) gameData.aiDifficulty = wodSetupAiDifficulty();
+    gameData._aiCommanderChoices = launchingMission || launchingCampaign ? null : wodSetupCommanderChoices();
 
     let victorySel = document.getElementById('setupVictoryMode');
     if(launchingMission && gameData.mission && gameData.mission.victoryMode)
@@ -1960,9 +1968,8 @@ function wodPrepareForNewMatch(opts) {
     gameData._aiMoveQueue=new Map();gameData._aiLocalSituation=new WeakMap();gameData._aiCombatContexts={};
     gameData._wodPfCache=new Map();gameData._wodPfVer=(gameData._wodPfVer||0)+1;
     gameData._landIncomeCacheDirty=true;
-    gameData.aiCommanderProfiles = {};
+    gameData.aiCommanderProfiles = {};gameData._aiPulseScale = 1;
     gameData.aiBattlePlans = {};gameData.aiNavalPlans = {};
-    delete gameData.aiCommanderStyle;
     gameData._aiDefenseByOwner = {};
     gameData._aiDefenseWork = new Map();
     gameData.marineWaterSupplyHexes = new Set();

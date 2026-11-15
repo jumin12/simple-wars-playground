@@ -547,23 +547,91 @@ function wodSideLabel(owner, opts) {
     }
     return 'AI ' + (o - 1);
 }
+// The computer's commanders. One is drawn for each computer faction at the start of a match (or chosen in
+// setup), and it is the whole of that faction's personality: the planners read its numbers and the field
+// command fights its doctrine (js/ai/field-command.js, WOD_OPS_DOCTRINES). Shown to the player in setup, at the
+// start of the match and in the statistics panel.
 const WOD_AI_COMMANDERS = {
-    balanced:{name:'Field Marshal Rowan',style:'Balanced',line:'Combined arms, guarded fronts and measured advances.',defense:.28,flank:.2,ratio:1.15,motor:.18,mountain:.18,armor:.16,land:.35,traits:['Adaptable','Combined arms']},
-    deliberate:{name:'General Vale',style:'Deliberate offensive',line:'Seeks attacks, concentrates reserves and only pushes with a clear advantage.',defense:.24,flank:.15,ratio:1.4,motor:.22,mountain:.16,armor:.22,land:.3,traits:['Patient','Concentrated assaults']},
-    defensive:{name:'Marshal Stone',style:'Defensive',line:'Strong territory screens, counterattacks and economical reserves.',defense:.44,flank:.12,ratio:1.5,motor:.12,mountain:.24,armor:.12,land:.25,traits:['Entrenched','Economical']},
-    maneuver:{name:'General Swift',style:'Maneuver',line:'Mobile groups seek weak borders, flanks and land away from towns.',defense:.25,flank:.3,ratio:1.12,motor:.34,mountain:.12,armor:.13,land:.75,traits:['Mobile','Opportunistic']},
-    amphibious:{name:'Admiral Keel',style:'Amphibious',line:'Builds fleets for real crossing needs and supports beachheads.',defense:.28,flank:.2,ratio:1.25,motor:.14,mountain:.14,armor:.14,land:.4,traits:['Naval logistics','Coastal flanking']},
-    highland:{name:'General Ridge',style:'Highland',line:'Uses mountaineers, high ground and passes to open new fronts.',defense:.34,flank:.24,ratio:1.25,motor:.1,mountain:.38,armor:.1,land:.6,traits:['Terrain specialist','Patient']}
+    balanced:{name:'Field Marshal Rowan',style:'Balanced',doctrine:'hunter',line:'Combined arms, guarded fronts, and hunts down armies that come out to fight.',defense:.28,flank:.2,ratio:1.15,motor:.18,mountain:.18,armor:.16,land:.35,traits:['Adaptable','Combined arms']},
+    deliberate:{name:'General Vale',style:'Deliberate offensive',doctrine:'methodical',line:'Concentrates reserves and only pushes with a clear advantage.',defense:.24,flank:.15,ratio:1.4,motor:.22,mountain:.16,armor:.22,land:.3,traits:['Patient','Concentrated assaults']},
+    defensive:{name:'Marshal Stone',style:'Defensive',doctrine:'methodical',line:'Strong territory screens, counterattacks and economical reserves.',defense:.44,flank:.12,ratio:1.5,motor:.12,mountain:.24,armor:.12,land:.25,traits:['Entrenched','Economical']},
+    maneuver:{name:'General Swift',style:'Maneuver',doctrine:'raider',line:'Mobile groups raid weak towns and take land away from the fighting.',defense:.25,flank:.3,ratio:1.12,motor:.34,mountain:.12,armor:.13,land:.75,traits:['Mobile','Raider']},
+    amphibious:{name:'Admiral Keel',style:'Amphibious',doctrine:'raider',line:'Builds fleets for real crossings, raids coasts and supports beachheads.',defense:.28,flank:.2,ratio:1.25,motor:.14,mountain:.14,armor:.14,land:.4,traits:['Naval logistics','Coastal raids']},
+    highland:{name:'General Ridge',style:'Highland',doctrine:'hunter',line:'Uses mountaineers, high ground and passes, and falls on armies in the open.',defense:.34,flank:.24,ratio:1.25,motor:.1,mountain:.38,armor:.1,land:.6,traits:['Terrain specialist','Hunter']},
+    blitz:{name:'General Hale',style:'Blitz',doctrine:'blitz',line:'Strikes early and often, before the enemy has dug in.',defense:.22,flank:.26,ratio:1.05,motor:.3,mountain:.12,armor:.2,land:.45,traits:['Aggressive','Early pressure']}
 };
+// Computer difficulty. None of these give the computer money, manpower, vision or rules the player does not
+// have: they change how quickly it reacts, how big an edge it wants before attacking, how much of its bag of
+// tricks it uses and how long it remembers what it saw under fog. Read through wodAiDifficulty (js/ai/brain.js).
+const WOD_AI_DIFFICULTIES = {
+    easy:{label:'Easy',line:'Recruits slowly, reacts slowly, attacks only with a big advantage and keeps to plain attacks: no flanking wings, supply cuts, ambushes or baiting. Forgets what it saw under fog quickly.',
+        pulseEvery:2,edge:.3,tricks:false,memory:20,buyEvery:5000,movesPerFrame:1,recruitGap:12000},
+    normal:{label:'Normal',line:'The full computer opponent.',pulseEvery:1,edge:0,tricks:true,memory:45,buyEvery:2500,movesPerFrame:3},
+    hard:{label:'Hard',line:'Reacts faster, accepts thinner odds and remembers what it saw under fog for longer. Same rules and income as you.',
+        pulseEvery:1,pulseScale:.8,edge:-.06,tricks:true,memory:75,buyEvery:2000,movesPerFrame:5}
+};
+// Skirmish setup: the difficulty and each opponent's commander are remembered between sessions.
+const WOD_AI_DIFFICULTY_KEY = 'simplewarsAiDifficulty', WOD_AI_COMMANDER_PICKS_KEY = 'simplewarsAiCommanderPicks';
+function wodStoredAiDifficulty() {
+    try { const v = localStorage.getItem(WOD_AI_DIFFICULTY_KEY); if(WOD_AI_DIFFICULTIES[v]) return v; } catch(_) {}
+    return 'normal';
+}
+function wodStoreAiDifficulty(id) {
+    if(!WOD_AI_DIFFICULTIES[id]) return;
+    try { localStorage.setItem(WOD_AI_DIFFICULTY_KEY, id); } catch(_) {}
+}
+function wodStoredCommanderPicks() {
+    try { const v = JSON.parse(localStorage.getItem(WOD_AI_COMMANDER_PICKS_KEY) || '[]'); if(Array.isArray(v)) return v; } catch(_) {}
+    return [];
+}
+function wodAiDifficultyLabel(id) {return (WOD_AI_DIFFICULTIES[id] || WOD_AI_DIFFICULTIES.normal).label;}
+function wodSyncSetupAiDifficulty() {
+    const sel = document.getElementById('setupAiDifficulty'), hint = document.getElementById('setupAiDifficultyDetail');
+    if(!sel) return;
+    if(!sel._wodBound) {
+        sel._wodBound = true;
+        sel.value = wodStoredAiDifficulty();
+        sel.addEventListener('change', () => { wodStoreAiDifficulty(sel.value); wodSyncSetupAiDifficulty(); });
+    }
+    if(hint) hint.textContent = (WOD_AI_DIFFICULTIES[sel.value] || WOD_AI_DIFFICULTIES.normal).line;
+}
+// The difficulty chosen in skirmish setup (also used for authored missions).
+function wodSetupAiDifficulty() {
+    const sel = document.getElementById('setupAiDifficulty');
+    return sel && WOD_AI_DIFFICULTIES[sel.value] ? sel.value : wodStoredAiDifficulty();
+}
+// {owner: commander id} for the opponents whose commander was chosen in skirmish setup (owners 2, 3, 4).
+function wodSetupCommanderChoices() {
+    const picks = {};
+    document.querySelectorAll('#setupOpponentsBrief select[data-opp-seat]').forEach(sel => {
+        if(WOD_AI_COMMANDERS[sel.value]) picks[2 + (parseInt(sel.dataset.oppSeat, 10) || 0)] = sel.value;
+    });
+    return picks;
+}
 function wodSyncSetupOpponentsBrief() {
     let el = document.getElementById('setupOpponentsBrief');
     if(!el) return;
+    wodSyncSetupAiDifficulty();
     let n = 1;
     let sel = document.getElementById('setupAI');
     if(sel) n = Math.max(1, Math.min(3, parseInt(sel.value, 10) || 1));
+    const picks = wodStoredCommanderPicks();
+    const options = id => '<option value="random"' + (WOD_AI_COMMANDERS[id] ? '' : ' selected') + '>Random commander</option>' +
+        Object.entries(WOD_AI_COMMANDERS).map(([k, c]) => '<option value="' + k + '"' + (k === id ? ' selected' : '') + '>' +
+            wodEscapeHtml(c.name + ' — ' + c.style) + '</option>').join('');
     let lines = ['<p class="setup-opp-line">You: <strong>' + (wodMatchUsesWorldLore()?WOD_WORLD.player.name:'Player') + '</strong></p>'];
-    for(let i=0;i<n;i++)lines.push('<p class="setup-opp-line">Opponent '+(i+1)+': <strong>'+wodSideLabel(2+i)+'</strong></p>');
+    for(let i=0;i<n;i++){
+        const c = WOD_AI_COMMANDERS[picks[i]];
+        lines.push('<div class="setup-opp-line setup-opp-pick"><span>Opponent '+(i+1)+': <strong>'+wodSideLabel(2+i)+'</strong></span>' +
+            '<select data-opp-seat="' + i + '" aria-label="Commander of opponent ' + (i + 1) + '">' + options(picks[i]) + '</select>' +
+            '<small>' + wodEscapeHtml(c ? c.line : 'A commander is drawn at the start of the match.') + '</small></div>');
+    }
     el.innerHTML = lines.join('');
+    el.querySelectorAll('select[data-opp-seat]').forEach(s => s.addEventListener('change', () => {
+        const next = wodStoredCommanderPicks();next[parseInt(s.dataset.oppSeat, 10) || 0] = s.value;
+        try { localStorage.setItem(WOD_AI_COMMANDER_PICKS_KEY, JSON.stringify(next.slice(0, 3))); } catch(_) {}
+        wodSyncSetupOpponentsBrief();
+    }));
 }
 const WOD_FACTION_COLOR_OPTIONS = [
     { value: '#2ecc71', label: 'Green' },

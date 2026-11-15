@@ -1201,6 +1201,7 @@ function wodAiFrontLegs(lead,points,owner,foes) {
 
 function wodAiFrontEnvelopment(owner,army,foes,anchor,support=army) {
     const searchWork=gameData._aiFlankSearchWork,deferred=searchWork?.deferred||0;
+    if(!wodAiDifficulty(owner).tricks)return null; // an easy computer attacks head on
     const ratio=wodAiForecast(owner,support,foes).ratio;
     if(army.length<(foes.length===1?4:6)||!foes.length||ratio<1.08)return null;
     const hr=gameData.hexRadius||20,cx=foes.reduce((n,e)=>n+e.x,0)/foes.length,cy=foes.reduce((n,e)=>n+e.y,0)/foes.length;
@@ -1315,6 +1316,7 @@ function wodAiAmbushLayout(owner,army,foes,bait) {
 
 function wodAiTryAmbush(owner,op,army,known) {
     const now=wodAiOperationTime(),hr=gameData.hexRadius||20;
+    if(!wodAiDifficulty(owner).tricks)return false;
     if(op.ambush||op.ambushTried||op.pressureUntil>now||op.frontageTask?.until>now||army.length<6||op.jobs.some(j=>j.route&&j.cursor>2))return false;
     const foes=known.filter(e=>!e._intelMemory&&!e.retreating&&!e.moraleBroken&&e.owner===op.hostile&&isLandArmyUnit(e)&&
         Math.hypot(e.x-op.anchor.x,e.y-op.anchor.y)<hr*12);

@@ -418,7 +418,7 @@ function wodMpBuildInitPayload() {
         mapRadius: gameData.mapRadius,
         mapShape: gameData.mapShape,
         hexRadius: gameData.hexRadius,
-        aiCount: gameData.aiCount, aiCommanderStyle:gameData.aiCommanderStyle||'varied',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
+        aiCount: gameData.aiCount, aiDifficulty:gameData.aiDifficulty||'normal',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
         victoryMode: gameData.victoryMode,
         alliances: wodNormalizeAlliances(gameData.alliances),
         humanSlots: hs,
@@ -635,6 +635,7 @@ async function wodMpPrepareHostLaunchPayload(meta) {
     wodClearLiveMapForNewMatch();
     wodMpSyncLaunchSettingsFromMeta(meta);
     if(meta.fogOfWar != null) gameData.fogOfWar = !!meta.fogOfWar;
+    gameData.aiDifficulty = WOD_AI_DIFFICULTIES[meta.aiDifficulty] ? meta.aiDifficulty : 'normal';
     let expected = wodMpGetLobbyFactionSlotsFromMeta(meta);
     gameData._wodMpLaunchFactionSlots = expected.slice();
     let snap = wodMpMatchPayloadSourceSnap(meta);
@@ -1036,7 +1037,7 @@ function wodMpApplySnapPayload(s) {
     if(s.income !== undefined && (!gameData.mp || !gameData.mp.enabled || lo === 1)) gameData.income = s.income;
     if(s.expenses !== undefined && (!gameData.mp || !gameData.mp.enabled || lo === 1)) gameData.expenses = s.expenses;
     if(s.manpowerIncome !== undefined && (!gameData.mp || !gameData.mp.enabled || lo === 1)) gameData.manpowerIncome = s.manpowerIncome;
-    if(s.aiCommanderStyle)gameData.aiCommanderStyle=s.aiCommanderStyle;if(s.aiCommanderProfiles)gameData.aiCommanderProfiles=s.aiCommanderProfiles;
+    if(WOD_AI_DIFFICULTIES[s.aiDifficulty])gameData.aiDifficulty=s.aiDifficulty;if(s.aiCommanderProfiles)gameData.aiCommanderProfiles=s.aiCommanderProfiles;
     if(s.aiMoneyByOwner) Object.assign(gameData.aiMoneyByOwner, s.aiMoneyByOwner);
     if(s.aiManpowerByOwner) Object.assign(gameData.aiManpowerByOwner, s.aiManpowerByOwner);
     if(Array.isArray(s.marineWaterSupplyKeys)) gameData.marineWaterSupplyHexes = new Set(s.marineWaterSupplyKeys);
@@ -2381,6 +2382,7 @@ function wodMpSyncHostCfgFromSetup() {
     wodMpCopyFieldToField('setupCitiesPerPlayer', 'mpCfgCitiesPerPlayer');
     wodMpCopyFieldToField('setupVictoryMode', 'mpCfgVictoryMode');
     wodMpCopyFieldToField('setupFogOfWar', 'mpCfgFogOfWar');
+    wodMpCopyFieldToField('setupAiDifficulty', 'mpCfgAiDifficulty');
     wodMpCopyFieldToField('setupMoney', 'mpCfgMoney');
     wodMpCopyFieldToField('setupPlayerColor', 'mpCfgPlayerColor');
     wodMpCopyFieldToField('setupGamePeriod', 'mpCfgGamePeriod');
@@ -2581,7 +2583,7 @@ function wodMpEmptyLobbyGenBackup() {
         money: gameData.money,
         income: gameData.income,
         manpower: gameData.manpower,
-        aiCount: gameData.aiCount, aiCommanderStyle:gameData.aiCommanderStyle||'varied',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
+        aiCount: gameData.aiCount, aiDifficulty:gameData.aiDifficulty||'normal',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
         mp: gameData.mp,
         selection: [],
         buildMode: gameData.buildMode
@@ -2602,7 +2604,7 @@ function wodMpSnapshotLobbyGenBackup() {
         money: gameData.money,
         income: gameData.income,
         manpower: gameData.manpower,
-        aiCount: gameData.aiCount, aiCommanderStyle:gameData.aiCommanderStyle||'varied',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
+        aiCount: gameData.aiCount, aiDifficulty:gameData.aiDifficulty||'normal',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
         mp: gameData.mp,
         selection: gameData.selection ? gameData.selection.slice() : [],
         buildMode: gameData.buildMode
@@ -3557,6 +3559,7 @@ function wodMpRenderGameLobbyScreen() {
             '<br><strong>AI seats</strong> ' + botN +
             '<br><strong>Victory</strong> ' + wodMpEscapeHtml(meta.victoryLabel || '') +
             '<br><strong>Fog of war</strong> ' + (meta.fogOfWar ? 'On' : 'Off') +
+            '<br><strong>AI difficulty</strong> ' + wodAiDifficultyLabel(meta.aiDifficulty) +
             '<br><strong>Starting $</strong> $' + (meta.money != null ? (meta.money | 0) : '—') +
             '<br><strong>Time period</strong> ' + wodMpEscapeHtml(meta.gamePeriodLabel || meta.gamePeriod || 'Modern');
     }
@@ -3715,6 +3718,7 @@ function wodMpBuildLobbyMetaFromSetup() {
         lobbyMapSeed: window.wodMpRoomMeta.lobbyMapSeed >>> 0,
         victoryMode: vic && vic.value === 'annihilation' ? 'annihilation' : 'domination',
         fogOfWar: !!((document.getElementById('mpCfgFogOfWar') || document.getElementById('setupFogOfWar') || {}).checked),
+        aiDifficulty: WOD_AI_DIFFICULTIES[(document.getElementById('mpCfgAiDifficulty') || {}).value] ? document.getElementById('mpCfgAiDifficulty').value : wodSetupAiDifficulty(),
         money: moneyEl ? (parseInt(moneyEl.value, 10) || 10000) : 10000,
         maxHumans: WOD_MP_MAX_PLAYERS,
         mapSizeLabel: msLab ? msLab.text : '',
@@ -3762,7 +3766,7 @@ function wodMpRenderLobbyList(lobbies) {
     el.innerHTML = lobbies.map(l => {
         let meta = l.meta || {};
         let inProgress = !!(l.inProgress || l.matchInProgress || meta.matchInProgress);
-        let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel, meta.fogOfWar ? 'Fog' : '']
+        let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel, meta.fogOfWar ? 'Fog' : '', meta.aiCount ? wodAiDifficultyLabel(meta.aiDifficulty) + ' AI' : '']
             .filter(Boolean).join(' · ');
         if(!detail) detail = inProgress ? 'Match in progress' : 'Host still configuring map';
         let name = wodMpEscapeHtml(l.name || 'Game');
@@ -4296,6 +4300,7 @@ function wodMpWireLobbyControls() {
         if(wodIsMapPreviewGenerating()) return;
         wodMpCopyFieldToField('mpCfgVictoryMode', 'setupVictoryMode');
         wodMpCopyFieldToField('mpCfgFogOfWar', 'setupFogOfWar');
+        wodMpCopyFieldToField('mpCfgAiDifficulty', 'setupAiDifficulty');
         wodMpCopyFieldToField('mpCfgMoney', 'setupMoney');
         wodMpCopyFieldToField('mpCfgPlayerColor', 'setupPlayerColor');
         wodMpCopyFieldToField('mpCfgGamePeriod', 'setupGamePeriod');

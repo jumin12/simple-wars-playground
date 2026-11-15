@@ -221,6 +221,12 @@ function wodStepAiEconomy(dt, incomeTick, upkeepByOwner, netMoney) {
             playerBrokeByOwner[o] = bal <= 0 && net < 0;
         }
     }
+    // The same rule for computer factions: out of money and still paying more upkeep than comes in, their
+    // troops go unpaid too.
+    for(let o in gameData.aiMoneyByOwner) {
+        if(playerBrokeByOwner[o] != null) continue;
+        playerBrokeByOwner[o] = (gameData.aiMoneyByOwner[o] || 0) <= 0 && (aiIncomeByOwner[o] || 0) - (upkeepByOwner[parseInt(o, 10)] || 0) < 0;
+    }
 
     if(gameState === 'PLAYING' && !gameData.menuAttractMode && !gameData._campaignEnded) {
         if(!gameData._sessionIncomeAcc) gameData._sessionIncomeAcc = { player: 0, ai: 0, byOwner: {} };
@@ -415,7 +421,7 @@ function wodStepUnit(unit, i, dt, playerBrokeByOwner) {
     }
     unit.encircledFlash = encState&&unit.supplyPendingSeconds>=WOD_SUPPLY_CONFIRM_SECONDS ? 0.35 : 0;
 
-    if(wodMpIsHumanOwner(unit.owner) && playerBrokeByOwner[unit.owner] && unit.type !== 'convoy') {
+    if(playerBrokeByOwner[unit.owner] && unit.type !== 'convoy') {
         applyDamage(unit, unit.maxHp * 0.025 * dt, 0,'unpaid');
         unit.unpaidFlash = 0.35;
     } else if(unit.unpaidFlash) {

@@ -21,21 +21,48 @@ function wodCachedFrontlineHexes(owner) {
     return hit;
 }
 
-/** Count player (owner 1) combat units within radius (world px). */
+// Fairness: every hostile faction is the same kind of enemy, human or computer. The old planners preferred to
+// attack player 1 (in a free-for-all every computer came for the human; in multiplayer, for the host).
+// WOD_OPS.T.humanBias=1 brings that preference back, for the test rig only.
+function wodAiIsFoe(observer, owner) {
+    return wodOpsTune(observer).humanBias ? owner === 1 : wodIsHostileOwner(owner, observer);
+}
+
+// Fielded manpower of the strongest hostile faction, as far as this faction can see it.
+function wodAiFoePower(observer) {
+    if(wodOpsTune(observer).humanBias) {
+        const p = wodFogActive() ? wodAiKnownEnemyPower(observer, 1) : gameData._aiStratPowPlayer;
+        return p === undefined ? getOwnerTroopManpower(1) : p;
+    }
+    // once per strategy pulse and faction (asked for every unit the sector planner places)
+    const serial = gameData.aiStrategySerial || 0;
+    let cache = gameData._aiFoePowerCache;
+    if(!cache || cache.serial !== serial || cache.hexes !== gameData.hexes) cache = gameData._aiFoePowerCache = {serial, hexes: gameData.hexes, by: {}};
+    if(cache.by[observer] != null) return cache.by[observer];
+    const by = {};
+    for(const u of wodAiKnownEntities(observer)) {
+        if(u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, observer)) continue;
+        by[u.owner] = (by[u.owner] || 0) + (u.manpower !== undefined ? u.manpower : Math.round((u.hp / u.maxHp) * 1000));
+    }
+    let best = 0;for(const k in by) if(by[k] > best) best = by[k];
+    return cache.by[observer] = best;
+}
+
+/** Count hostile combat units this faction can see within radius (world px). */
 function countPlayerThreatNear(wx, wy, radius, observer=2) {
     let r2 = radius * radius;
     let n = 0;
     let grid = gameData.unitSpatialGrid;
     if(grid && grid.cells) {
         forEachNearbyUnit(grid, wx, wy, radius, (u) => {
-            if(u.owner !== 1 || u.hp <= 0 || u.type === 'convoy' || !wodOwnerCanSee(observer,u)) return;
+            if(!wodAiIsFoe(observer, u.owner) || u.hp <= 0 || u.type === 'convoy' || !wodOwnerCanSee(observer,u)) return;
             let dx = u.x - wx, dy = u.y - wy;
             if(dx * dx + dy * dy <= r2) n++;
         });
         return n;
     }
     for(let u of wodAiKnownEntities(observer)) {
-        if(u.owner !== 1 || u.hp <= 0 || u.type === 'convoy' || !wodOwnerCanSee(observer,u)) continue;
+        if(!wodAiIsFoe(observer, u.owner) || u.hp <= 0 || u.type === 'convoy' || !wodOwnerCanSee(observer,u)) continue;
         let dx = u.x - wx, dy = u.y - wy;
         if(dx * dx + dy * dy <= r2) n++;
     }
@@ -144,8 +171,7 @@ function wodAiSectorFightStats(owner, holdHex) {
     let support = countNearbyUnits(owner, holdHex.x, holdHex.y, 190);
     let enemies = countNearbyUnits(owner, holdHex.x, holdHex.y, 210, true);
     let localRatio = (support + 1) / (enemies + 1);
-    let playerPower = wodFogActive()?wodAiKnownEnemyPower(owner):gameData._aiStratPowPlayer;
-    if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
+    let playerPower = wodAiFoePower(owner);
     let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[owner];
     if(myPower === undefined) myPower = getOwnerTroopManpower(owner);
     let canOverwhelm = myPower / Math.max(1, playerPower) >= 0.9;
@@ -309,11 +335,13 @@ function wodAiComputeThreats(owner, memories = true) {
     if (!memories || !wodFogActive()) return visible.map(u=>wodAiThreatView(u,owner));
     const intel = wodFogFactionIntel(owner), seen = new Set(visible.map(u => u.uid));
     const now = wodAiOperationTime(), result = visible.map(u=>wodAiThreatView(u,owner));
+    // how long a sighting is remembered depends on the difficulty (45 s on normal)
+    const memory = wodAiDifficulty(owner).memory || 45;
     for (const [uid, record] of intel.units || []) {
         if (seen.has(uid)) continue;
         const age = Math.max(0, (now - record.seenAt) / 1000);
-        if (age > 45) continue;
-        const confidence = Math.exp(-age / 18) * (record.vacated ? .65 : 1);
+        if (age > memory) continue;
+        const confidence = Math.exp(-age / (18 * memory / 45)) * (record.vacated ? .65 : 1);
         if (confidence < .12) continue;
         const hr=gameData.hexRadius||20,seconds=Math.min(age,6),vx=record.observedVx||0,vy=record.observedVy||0;
         const scale=Math.min(1,hr*5/Math.max(1,Math.hypot(vx,vy)*seconds)),prediction=getNearestHexToPoint(record.x+vx*seconds*scale,record.y+vy*seconds*scale);
@@ -395,7 +423,7 @@ function wodAiForecast(owner, members, enemies) {
 }
 
 function wodAiAttackThreshold(owner,continuing=false) {
-    const required=.92+(wodAiCommander(owner).ratio-1)*.45;
+    const required=.92+(wodAiCommander(owner).ratio-1)*.45+(wodAiDifficulty(owner).edge||0);
     return continuing?Math.max(.78,required-.16):required;
 }
 

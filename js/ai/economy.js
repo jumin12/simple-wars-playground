@@ -2,15 +2,24 @@
 // recruitment against demand and upkeep, the healing allowance for the wounded, and building forts and bridges.
 'use strict';
 
+// Land troops. In a land war the field command buys these (wodOpsWarEconomy); this file buys them otherwise.
+const WOD_AI_LAND_RECRUITS=['light','motorized','mountaineer','heavy'];
+
 function wodAiRecruitPriorities(owner,cities,army,pending,context) {
     const profile=wodAiCommander(owner),strategy=wodAiBattlePlan(owner,army),count=t=>army.filter(u=>u.type===t).length+pending.filter(j=>j.mode===t).length;
     const hr=gameData.hexRadius||20,known=wodAiThreats(owner).filter(u=>u.hp>0&&u.type!=='convoy'&&wodIsHostileOwner(u.owner,owner));
     const enemyGround=wodAiRecruitThreats(owner,known,army),guards=cities.length;
-    const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
-    const terrain=[];const stride=Math.max(1,Math.ceil(gameData.hexList.length/1200));
-    for(let i=0;i<gameData.hexList.length;i+=stride){const h=gameData.hexList[i];if(!isWaterHex(h)&&(!explored||explored.has(getHexKey(h)))&&(h.owner===owner||isFrontlineHex(h,owner)))terrain.push(h);}
-    const rough=terrain.filter(h=>h.type==='hill'||h.type==='mountain').length/Math.max(1,terrain.length);
-    const open=terrain.filter(h=>h.type==='grass'||h.type==='sand').length/Math.max(1,terrain.length);
+    // Buy for the ground the fighting is on (the fronts), not for the look of our own land; with too little
+    // front to judge by, our own land stands in.
+    let rough=null,open=null;
+    if(wodOpsTune(owner).frontTerrain!==0){const m=wodAiFrontTerrain(owner);if(m.n>=8){rough=m.rough;open=m.open;}}
+    if(rough==null){
+        const explored=wodFogActive()?wodFogFactionIntel(owner).explored:null;
+        const terrain=[];const stride=Math.max(1,Math.ceil(gameData.hexList.length/1200));
+        for(let i=0;i<gameData.hexList.length;i+=stride){const h=gameData.hexList[i];if(!isWaterHex(h)&&(!explored||explored.has(getHexKey(h)))&&(h.owner===owner||isFrontlineHex(h,owner)))terrain.push(h);}
+        rough=terrain.filter(h=>h.type==='hill'||h.type==='mountain').length/Math.max(1,terrain.length);
+        open=terrain.filter(h=>h.type==='grass'||h.type==='sand').length/Math.max(1,terrain.length);
+    }
     const ground=army.filter(isLandArmyUnit).length+pending.filter(j=>isLandArmyUnit({type:j.mode})).length;
     const taskPlan=gameData.aiTaskForces?.[owner];
     const missing=cities.filter(c=>!army.some(u=>u.type==='light'&&!u.boardTransportUid&&wodAiCanReach(u,c)&&(
@@ -141,7 +150,7 @@ function wodAiCollectFortCandidateHexes(ownerId) {
 
 function wodAiScoreFortHex(hex, ownerId) {
     if(!hexEligibleForFortPlacementForOwner(hex, ownerId)) return -1e9;
-    let spacingSq = Math.pow((gameData.hexRadius || 10) * WOD_FORT_DEFENSE_TILES * 2.05, 2);
+    let spacingSq = Math.pow((gameData.hexRadius || 20) * WOD_FORT_DEFENSE_TILES * 2.05, 2);
     let sites = [...wodAiKnownForts(ownerId), ...(gameData.constructionJobs || []).filter(j=>j.mode==='fort')];
     if(sites.some(f=>f.owner===ownerId && wodAiDist2(hex.x,hex.y,f.x,f.y)<spacingSq)) return -1e9;
     if(!wodAiFortHasNearbyDefenders(hex,ownerId)||wodHexKeyIsEncircled(getHexKey(hex)))return -1e9;
@@ -151,7 +160,7 @@ function wodAiScoreFortHex(hex, ownerId) {
     }
     if(nearestForeignCombatUnitDistSq(hex.x,hex.y,ownerId)<Math.pow((gameData.hexRadius||20)*7,2))return -1e9;
     let score = 0;
-    let hr = gameData.hexRadius || 10;
+    let hr = gameData.hexRadius || 20;
     let tilePx = hr * 1.35;
     let fortR2 = wodFortPlacementRingRadiusSq();
 
@@ -216,19 +225,18 @@ function wodAiTryFortForOwner(ownerId, ownerMoneyKey) {
 
     // Scoring is expensive per hex (unit/frontline distance scans) and the candidate set
     // can be thousands of tiles — unbounded this ran ~240ms and was the periodic combat
-    // hitch. Sample a bounded, spread subset and stop at a wall-clock deadline.
-    if(candidates.length > 140) {
+    // hitch. Sample a bounded, spread subset. (A fixed number, not a wall-clock deadline: the site chosen
+    // must not depend on how fast the computer is.)
+    if(candidates.length > 60) {
         let sampled = [];
-        let stride = candidates.length / 140;
-        for(let ci = 0; ci < 140; ci++) sampled.push(candidates[Math.floor(ci * stride)]);
+        let stride = candidates.length / 60;
+        for(let ci = 0; ci < 60; ci++) sampled.push(candidates[Math.floor(ci * stride)]);
         candidates = sampled;
     }
-    let fortT0 = performance.now();
     let bestHex = null,
         bestScore = 0;
     const MIN_SCORE = 52;
     for(let hex of candidates) {
-        if(performance.now() - fortT0 > 5) break;
         let s = wodAiScoreFortHex(hex, ownerId);
         if(s > bestScore) {
             bestScore = s;
@@ -578,13 +586,16 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     let plan = plans[owner] || (plans[owner] = {lastBuilding:-90,lastFort:-90});
     let coast = cities.filter(c=>cityHasWaterNeighbor(c)&&wodAiHarborUseful(c,owner));
     let enemyShips = wodAiKnownEntities(owner).some(u => u.type === 'ship' && u.hp > 0 && wodIsHostileOwner(u.owner,owner));
-    let seaFront = coast.length > 0 && (wodFogActive()&&gameData.hexList.some(h=>isWaterHex(h)&&!wodFogFactionIntel(owner).explored.has(getHexKey(h)))||army.some(u=>u._needsTransport)||enemyShips || wodAiKnownCities(owner).some(c => wodIsHostileOwner(c.owner,owner) && cityHasWaterNeighbor(c)));
+    // (whether any water is still unexplored is a whole-map scan: asked at most every ten seconds)
+    const unexploredWater=()=>{if(!(plan.waterScanAt>clock-10)){plan.waterScanAt=clock;const ex=wodFogFactionIntel(owner).explored;plan.unexploredWater=gameData.hexList.some(h=>isWaterHex(h)&&!ex.has(getHexKey(h)));}return plan.unexploredWater;};
+    let seaFront = coast.length > 0 && (wodFogActive()&&unexploredWater()||army.some(u=>u._needsTransport)||enemyShips || wodAiKnownCities(owner).some(c => wodIsHostileOwner(c.owner,owner) && cityHasWaterNeighbor(c)));
     const islandDemand=wodAiIslandDemand(owner,cities,army),ground=army.filter(isLandArmyUnit).length;
     const navalGroundMin=Math.max(4,cities.length*2),navalReady=islandDemand&&!needGuards&&ground>=navalGroundMin;
     seaFront||=islandDemand&&coast.length>0;
     let total = army.length + recruits.length;
     let limit = gameData.menuAttractMode ? 60 : Infinity;
     const strategy=wodAiBattlePlan(owner,army),mpShort=manpower()<getUnitCost('light').manpower*2;
+    const landByOps=wodOpsBuysLand(owner);plan.landByOps=landByOps;
     const initialDemand=wodAiRecruitPriorities(owner,cities,army,recruits,{islandDemand});
     plan.desired=initialDemand.desired;plan.commander=initialDemand.profile.id;
     const opening=wodAiEstablishEconomy(owner,cities,army,initialDemand,plan);
@@ -605,12 +616,19 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     if(canInvest) {
         let mode = null;
         let mpIncome = cities.reduce((n,c) => n+getCityManpowerIncome(c),0);
+        const develop=wodOpsTune(owner).develop!==0,farmless=safeInvestmentTowns.some(c=>!c.hasFarm);
         if(farmRescue)mode='farm';
         else if(unlockHarbor)mode='harbor';
-        else if(manpower() < getUnitCost('light').manpower*2 && mpIncome < cities.length*44) mode = 'farm';
+        // (a town gives at most about 27 manpower a second, so the old "under 44 a town" test was always true
+        // and a short pool asked for a farm even where every town had one)
+        else if(manpower() < getUnitCost('light').manpower*2 && (develop?farmless:mpIncome < cities.length*44)) mode = 'farm';
         else if(seaFront && !coast.some(c => c.hasHarbor)) mode = 'harbor';
         else if(unlockFactory||!cities.some(c => c.hasFactory)&&strategy.profile!=='highland') mode = 'factory';
         else if(income-upkeep < 9 && cities.filter(c=>c.hasFactory).length < Math.ceil(cities.length/2)) mode = 'factory';
+        // A captured town is worth as much as a starting one once it is built up: a farm first, then a
+        // factory, one building at a time and only in towns out of the enemy's reach.
+        else if(develop&&farmless)mode='farm';
+        else if(develop&&safeInvestmentTowns.some(c=>!c.hasFactory)&&income-upkeep>=6)mode='factory';
         let site = mode && safeInvestmentTowns.slice().reverse().find(c => cityEligibleForBuildPlacementForOwner(c,mode,owner)&&(mode!=='harbor'||wodAiHarborUseful(c,owner)));
         if(site && wodApplyBuildAtCityForOwner(site,mode,owner)) {
             wodAiRecord(owner,'investment',{city:site.id,type:mode,reason:unlockFactory&&mode==='factory'?'unlock-combined-arms':'economy-or-access'});
@@ -621,7 +639,9 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     let bought = 0;
     if(plan.reservation)free.sort((a,b)=>Number(wodAiCityCanTrain(b,plan.reservation.type,owner))-Number(wodAiCityCanTrain(a,plan.reservation.type,owner)));
     for(let city of free) {
-        if(bought >= 2 || total >= limit) break;
+        if(bought >= (wodAiDifficultyId(owner)==='easy'?1:2) || total >= limit) break;
+        // (an easy computer raises one unit at a time, with a pause between them)
+        if(wodAiDifficulty(owner).recruitGap&&clock-(plan.recruitAt??-Infinity)<wodAiDifficulty(owner).recruitGap/1000) break;
         const procurement=wodAiRecruitPriorities(owner,cities,army,recruits,{islandDemand});
         let types=procurement.types.filter(t=>wodAiCityCanTrain(city,t,owner)&&wodAiRecruitTownFits(city,t,procurement)&&getUnitUpkeep({type:t})<=income-upkeep-committedUpkeep);
         const localRequest=procurement.reinforcements?.find(r=>r.source===city.id&&types.includes(r.type));
@@ -629,6 +649,9 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
         const reserved=plan.reservation?.type;
         if(reserved&&types.includes(reserved))types=[reserved,...types.filter(t=>t!==reserved)];
         types=types.filter(t=>wodAiCanSpendOutsideReserve(owner,t,plan));
+        // In a land war the field command is the one buyer of land troops (wodOpsWarEconomy); this buyer
+        // keeps the ships, ferries and marines.
+        if(landByOps)types=types.filter(t=>!WOD_AI_LAND_RECRUITS.includes(t));
         if(!types.length){plan.savingFor=reserved||(plan.hospitalRequest?'hospital':plan.savingFor);plan.idleReason=plan.savingFor?'saving-'+plan.savingFor:'upkeep-unaffordable';continue;}
         let wanted=types[0];
         plan.desired=procurement.desired;plan.commander=procurement.profile.id;
@@ -657,7 +680,7 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
                 plan.idleReason=null;plan.savingSince=null;
                 wodAiRecord(owner,'recruit',{city:city.id,type,reason:procurement.missing.length?'town-guard':'army-demand'});
                 if(plan.reservation?.type===type){wodAiRecord(owner,'procurement-filled',{type,wait:Math.round(clock-plan.reservation.since)});plan.reservation=null;plan.savingFor=null;}
-                total++; bought++; committedUpkeep+=newUpkeep;recruits.push(gameData.constructionJobs[gameData.constructionJobs.length-1]);break;
+                total++; bought++; committedUpkeep+=newUpkeep;plan.recruitAt=clock;recruits.push(gameData.constructionJobs[gameData.constructionJobs.length-1]);break;
             }
         }
     }
@@ -666,9 +689,13 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
         wodAiRecord(owner,'production-idle',{reason:plan.idleReason,army:total,limit});
     }
     // Fortify a threatened corridor only after funding the army; never stack auras.
+    // (a search that found no site waits 20 s before the next whole-map search)
     if(!plan.savingFor && !needGuards && army.length >= 10 && clock-plan.lastFort >= 90 && clock-plan.lastBuilding >= 30 &&
-        cash() >= WOD_PRICE_FORT+WOD_PRICE_LIGHT*4 && manpower() >= getUnitCost('light').manpower && income-upkeep > 4 &&
-        wodAiTryFortForOwner(owner,ownerKey)) { plan.lastFort=clock; plan.lastBuilding=clock; }
+        !(plan.fortMissAt>clock-20) &&
+        cash() >= WOD_PRICE_FORT+WOD_PRICE_LIGHT*4 && manpower() >= getUnitCost('light').manpower && income-upkeep > 4){
+        if(wodAiTryFortForOwner(owner,ownerKey)) { plan.lastFort=clock; plan.lastBuilding=clock; }
+        else plan.fortMissAt=clock;
+    }
     if(!plan.savingFor && !needGuards && (army.length>=10||navalReady) && clock-plan.lastBuilding>=(navalReady?40:65) &&
         cash()>=WOD_PRICE_BRIDGE_PER_CELL+WOD_PRICE_LIGHT*4 && income-upkeep>4 &&
         wodAiTryBridgeForOwner(owner,ownerKey))plan.lastBuilding=clock;
@@ -800,6 +827,8 @@ function wodAiProcurementReserve(owner,cities,army,pending,demand,plan,spareUpke
     const enemyArmor=wodAiRecruitThreats(owner,wodAiThreats(owner),army).filter(u=>u.type==='heavy').length;
     plan.reserveFailures||={};
     const usable=t=>{
+        // land troops are the field command's to buy in a land war, so nothing is put by for them here
+        if(plan.landByOps&&WOD_AI_LAND_RECRUITS.includes(t))return false;
         // The general already fills the opening armor role. Build a viable line
         // before saving for duplicate armor or a large specialist quota.
         if(ground<floor&&((t==='heavy'&&count(t)>0&&enemyArmor<=count(t)+1)||(['motorized','mountaineer'].includes(t)&&count(t)>0)))return false;

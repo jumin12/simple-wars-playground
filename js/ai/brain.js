@@ -69,6 +69,19 @@ function wodAiIsSuspended(owner) {
     return !!rec && rec.hexes === gameData.hexes && rec.owners.has(Number(owner));
 }
 
+// ---------- difficulty
+// The difficulty in force for a computer faction: the match's setting (gameData.aiDifficulty, chosen in skirmish
+// setup, the campaign or a multiplayer lobby), or, for the test rig, WOD_OPS.T.diff (0 easy, 1 normal, 2 hard)
+// for one seat. What each level changes is listed with WOD_AI_DIFFICULTIES (js/core.js); none of it is a bonus.
+function wodAiDifficultyId(owner) {
+    const d = owner != null ? wodOpsTune(owner).diff : undefined;
+    if(typeof d === 'number' && !isNaN(d)) return ['easy','normal','hard'][Math.max(0, Math.min(2, d | 0))];
+    // (the battle behind the main menu always plays Normal, whatever the last match was set to)
+    if(gameData.menuAttractMode) return 'normal';
+    return WOD_AI_DIFFICULTIES[gameData.aiDifficulty] ? gameData.aiDifficulty : 'normal';
+}
+function wodAiDifficulty(owner) {return WOD_AI_DIFFICULTIES[wodAiDifficultyId(owner)];}
+
 // ---------- the strategy pulse
 function updateAiStrategy(dt) {
     if(wodCampaignDeployActive()) {
@@ -85,6 +98,8 @@ function updateAiStrategy(dt) {
     // Slightly slower pulses: task forces are sticky, so units need less retasking.
     let stratEvery = 1.85;
     if(gameData._campaignRun || gameData._campaignAiAggressive) stratEvery *= 0.72;
+    // a hard computer thinks faster (the quickest faction sets the pace; slower ones skip pulses, below)
+    stratEvery *= gameData._aiPulseScale || 1;
     if(gameData.aiStrategyTimer < stratEvery) return;
     gameData.aiStrategyTimer = 0;
 
@@ -105,8 +120,11 @@ function updateAiStrategy(dt) {
         }
     }
 
+    let pulseScale=1;for(const owner of Object.keys(aiGroups))pulseScale=Math.min(pulseScale,wodAiDifficulty(+owner).pulseScale||1);
+    gameData._aiPulseScale=pulseScale;
     for(const owner of Object.keys(aiGroups))wodAiFaction(+owner,'medical',wodAiMedicalLogistics,+owner);
-    for(const owner of Object.keys(aiGroups))wodAiFaction(+owner,'field command',wodOpsCommand,+owner,aiGroups[owner]);
+    // an easy computer's field command acts on every second pulse only: it reacts at half the speed
+    for(const owner of Object.keys(aiGroups))if(gameData.aiStrategySerial%(wodAiDifficulty(+owner).pulseEvery||1)===0)wodAiFaction(+owner,'field command',wodOpsCommand,+owner,aiGroups[owner]);
     let mobMemo = wodUsesVisualViewportLayout();
     let formationKeys = Object.keys(aiGroups);
     gameData._aiStratWork = {
@@ -171,7 +189,12 @@ function wodDrainAiStratFormationAndUnits() {
                     continue;
                 }
                 if(hpRatio < 0.38) {
-                    let wh = findNearestFriendlyWaterHex(unit.owner, unit.x, unit.y);
+                    // The medical service is already taking it to be repaired: leave that order alone.
+                    if(unit._medicalRecovering && wodOpsTune(unit.owner).shipRefuge !== 0) continue;
+                    // Water is never anyone's, so the "nearest friendly water" is where the ship already is:
+                    // a hurt ship falls back toward the nearest coastal town of ours instead.
+                    let wh = wodOpsTune(unit.owner).shipRefuge !== 0 ? wodAiShipRefuge(unit) : null;
+                    if(!wh) wh = findNearestFriendlyWaterHex(unit.owner, unit.x, unit.y);
                     if(wh) {
                         unit.path = null;
                         unit.orderTarget = null;
@@ -370,7 +393,7 @@ function updateAiFrontFocus() {
         for(let hi = 0, hl = frontHexes.length; hi < hl; hi++) {
             let hex = frontHexes[hi];
             let enemyNeighbors = getNeighborHexes(hex).filter(nHex => isClaimableLand(nHex) && wodIsHostileOwner(nHex.owner, owner)).length;
-            let playerAdj = getNeighborHexes(hex).some(nHex => nHex && nHex.owner === 1) ? 22 : 0;
+            let playerAdj = getNeighborHexes(hex).some(nHex => nHex && wodAiIsFoe(owner, nHex.owner)) ? 22 : 0;
             let playerUnits = countPlayerThreatNear(hex.x, hex.y, 200, owner);
             let support = countNearbyUnits(owner, hex.x, hex.y, 260);
             let enemyUnits = countNearbyUnits(owner, hex.x, hex.y, 260, true);
@@ -414,6 +437,28 @@ function wodAiCommander(owner) {
     const variance=seed?((seed%997)/996-.5):0;
     return {id,...base,seed,defense:base.defense+variance*.06,flank:base.flank-variance*.08,
         ratio:base.ratio+variance*.1,land:Math.max(.15,Math.min(.85,base.land+variance*.18))};
+}
+
+// The commanders of a new match's computer factions: the one picked in setup for a seat ({owner: id}),
+// otherwise one is drawn. Called once the map is made, before the first AI step.
+function wodAiAssignCommanders(choices) {
+    const owners=new Set();
+    for(const c of gameData.cities)if(c.owner>0)owners.add(c.owner);
+    for(const u of gameData.entities)if(u.owner>0&&u.hp>0)owners.add(u.owner);
+    const profiles=gameData.aiCommanderProfiles||(gameData.aiCommanderProfiles={});
+    for(const o of owners){
+        if(wodMpIsHumanOwner(o))continue;
+        const want=choices&&choices[o];
+        if(WOD_AI_COMMANDERS[want])profiles[o]={id:want,seed:Math.floor(Math.random()*0x7fffffff)};
+        else wodAiCommander(o);
+    }
+}
+
+// What the player may know of a computer faction's commander (null before one is assigned). Read-only: in a
+// multiplayer client the profiles come from the host.
+function wodAiCommanderInfo(owner) {
+    const record=gameData.aiCommanderProfiles?.[owner],id=typeof record==='string'?record:record?.id;
+    return WOD_AI_COMMANDERS[id]?{id,...WOD_AI_COMMANDERS[id]}:null;
 }
 
 function wodAiObjectivePreference(owner,hex) {

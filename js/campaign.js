@@ -714,6 +714,15 @@ function wodRogueLoad() {
     } catch(e) { console.warn('wodRogueLoad', e); }
     return null;
 }
+// The campaign's AI difficulty (js/core.js WOD_AI_DIFFICULTIES). Campaigns begun before it existed play Normal.
+function wodCampaignAiDifficulty() {
+    const id = wodRogueLoad()?.settings?.aiDifficulty;
+    return WOD_AI_DIFFICULTIES[id] ? id : 'normal';
+}
+function wodCampaignChosenDifficulty() {
+    const sel = document.getElementById('wodCampSetDifficulty');
+    return sel && WOD_AI_DIFFICULTIES[sel.value] ? sel.value : wodStoredAiDifficulty();
+}
 function wodRogueSave() {
     if(!wodRogue) return;
     try { localStorage.setItem(WOD_ROGUE_LS_KEY, JSON.stringify(wodRogue)); }
@@ -744,7 +753,8 @@ function wodRogueBegin() {
         settings: {
             length: d.length,
             startPoints: startPts,
-            gamePeriod: campPeriod
+            gamePeriod: campPeriod,
+            aiDifficulty: wodCampaignChosenDifficulty()
         },
         worldEnc: { W: world.W, H: world.H, cells: wodRogueEncodeCells(world.cells) },
         world: { nodes: world.nodes, edges: world.edges },
@@ -1182,6 +1192,16 @@ function wodRogueWirePanelOnce() {
         wodRogueInvalidateMapCache();
         wodRefreshCampaignPanel();
     });
+    // AI difficulty: chosen with the new war (remembered as the default for the next one) and changeable later.
+    let diffSetup = document.getElementById('wodCampSetDifficulty');
+    if(diffSetup) { diffSetup.value = wodStoredAiDifficulty(); diffSetup.addEventListener('change', () => wodStoreAiDifficulty(diffSetup.value)); }
+    let diffActive = document.getElementById('wodCampActiveDifficulty');
+    if(diffActive) diffActive.addEventListener('change', () => {
+        let c = wodRogueLoad();
+        if(!c || !WOD_AI_DIFFICULTIES[diffActive.value]) return;
+        c.settings = c.settings || {};c.settings.aiDifficulty = diffActive.value;wodRogueSave();
+        showNotification('AI difficulty: ' + wodAiDifficultyLabel(diffActive.value) + ' from the next battle.', 'info');
+    });
     let lenSelect = document.getElementById('wodCampSetLen');
     if(lenSelect) lenSelect.addEventListener('change', () => {
         let d = wodRogueDraft();
@@ -1469,6 +1489,7 @@ function wodRefreshCampaignPanel() {
     let side = document.querySelector('#campaignPanel .wod-camp-side');
     let sideScroll = side ? side.scrollTop : 0;
     if(c.settings && c.settings.gamePeriod) wodSyncPeriodSelectEl(document.getElementById('wodCampActiveGamePeriod'), c.settings.gamePeriod);
+    {const sel=document.getElementById('wodCampActiveDifficulty');if(sel)sel.value=wodCampaignAiDifficulty();}
     if(_wodRogueSelectedNode == null || (!wodRogueNodeTemplate(_wodRogueSelectedNode))) {
         let firstPlayable = null;
         if(wodRogueAdvanceBlocked(c)) {
@@ -2371,6 +2392,7 @@ function wodCampaignOnBattleStart() {
     for(let o = 2; o <= aiN + 1; o++) owners.push(o);
     gameData.aiCount = aiN;
     gameData.alliances = wodNormalizeAlliances(wodRogueAllyAiOwners(aiN));
+    gameData.aiDifficulty = wodCampaignAiDifficulty();
     let diff = node.diff || 0;
     let D = WOD_ROGUE_BALANCE;
     for(let o of owners) {

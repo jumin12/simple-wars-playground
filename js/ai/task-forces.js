@@ -64,8 +64,7 @@ function findAiFrontlineAssignment(unit) {
     let best = null;
     let bestScore = Infinity;
     let focus = gameData.aiFrontFocus && gameData.aiFrontFocus[unit.owner];
-    let playerPower = wodFogActive()?wodAiKnownEnemyPower(unit.owner):gameData._aiStratPowPlayer;
-    if(playerPower === undefined) playerPower = getOwnerTroopManpower(1);
+    let playerPower = wodAiFoePower(unit.owner);
     let myPower = gameData._aiStratPowByOwner && gameData._aiStratPowByOwner[unit.owner];
     if(myPower === undefined) myPower = getOwnerTroopManpower(unit.owner);
     let aggression = myPower / Math.max(1, playerPower);
@@ -81,8 +80,8 @@ function findAiFrontlineAssignment(unit) {
             let friendlyAround = getNeighborHexes(nHex).filter(aHex => wodIsFriendlyOwner(aHex.owner, unit.owner)).length;
             let hostileAround = getNeighborHexes(nHex).filter(aHex => isClaimableLand(aHex) && wodIsHostileOwner(aHex.owner, unit.owner)).length;
             let cityBonus = wodAiKnownCities(unit.owner).some(city => wodIsHostileOwner(city.owner, unit.owner) && city.q === nHex.q && city.r === nHex.r)
-                ? (nHex.owner === 1 ? 140 : 70) : 0;
-            let playerBonus = nHex.owner === 1 ? 95 : 24;
+                ? (wodAiIsFoe(unit.owner, nHex.owner) ? 140 : 70) : 0;
+            let playerBonus = wodAiIsFoe(unit.owner, nHex.owner) ? 95 : 24;
             // Prefer pushing into the weakest enemy: compare our fielded manpower vs theirs.
             if(wodIsHostileOwner(nHex.owner, unit.owner)) {
                 let foePow = wodFogActive()?wodAiKnownEnemyPower(unit.owner,nHex.owner):nHex.owner === 1
@@ -106,7 +105,7 @@ function findAiFrontlineAssignment(unit) {
                 bestAttackScore = attackScore;
                 attackHex = nHex;
             }
-            enemyPressure += nHex.owner === 1 ? 4 : 1;
+            enemyPressure += wodAiIsFoe(unit.owner, nHex.owner) ? 4 : 1;
         }
         if(!attackHex) continue;
 
@@ -135,7 +134,7 @@ function findAiFrontlineAssignment(unit) {
                 cityDefenseBonus -= 420000;
         }
         let playerNearHold = countPlayerThreatNear(hex.x, hex.y, 205, unit.owner);
-        let playerTile = getNeighborHexes(attackHex).some(n => n && n.owner === 1) ? 1 : 0;
+        let playerTile = getNeighborHexes(attackHex).some(n => n && wodAiIsFoe(unit.owner, n.owner)) ? 1 : 0;
         let guardPull = -(playerNearHold * 12000 + playerTile * 15000);
         let mireHold = hexMountainProximityScore(hex) * 2400;
         let score = dx * dx + dy * dy - enemyPressure * 25000 * Math.min(1.15, Math.max(0.55, aggression))
@@ -209,7 +208,7 @@ function wodPickAiSectorForUnit(unit, sectors) {
         let enemies = countNearbyUnits(unit.owner, s.holdHex.x, s.holdHex.y, 210, true);
         let deficit = Math.max(0, (enemies + 1) * 1.25 - (support + 1));
         let cityObj = 0;
-        if(wodAiKnownCities(unit.owner).some(c => c.owner === 1 && c.q === s.attackHex.q && c.r === s.attackHex.r))
+        if(wodAiKnownCities(unit.owner).some(c => wodAiIsFoe(unit.owner, c.owner) && c.q === s.attackHex.q && c.r === s.attackHex.r))
             cityObj = -520000;
         else if(wodAiKnownCities(unit.owner).some(c => wodIsHostileOwner(c.owner, unit.owner) && c.q === s.attackHex.q && c.r === s.attackHex.r))
             cityObj = -180000;
@@ -239,7 +238,7 @@ function buildAiFrontlineSectors(owner, want) {
             if(!canUnitEnterHex(fake, nHex) || wodIsFriendlyOwner(nHex.owner, owner)) continue;
             let enemyWeight = countNearbyUnits(owner, nHex.x, nHex.y, 125, true);
             let isCityTile = wodAiKnownCities(owner).some(city => wodIsHostileOwner(city.owner, owner) && city.q === nHex.q && city.r === nHex.r);
-            let isPlayerCity = wodAiKnownCities(owner).some(city => city.owner === 1 && city.q === nHex.q && city.r === nHex.r);
+            let isPlayerCity = wodAiKnownCities(owner).some(city => wodAiIsFoe(owner, city.owner) && city.q === nHex.q && city.r === nHex.r);
             let weak = enemyWeight * 3 - (isCityTile ? 1.5 : 0) - (isPlayerCity ? 2 : 0);
             if(weak < bestWeak) {
                 bestWeak = weak;
@@ -258,7 +257,7 @@ function buildAiFrontlineSectors(owner, want) {
             if(ddx * ddx + ddy * ddy < Math.pow(gameData.hexRadius * 12, 2)) cityDefenseBias -= 25;
         }
         let playerThreat = countPlayerThreatNear(hex.x, hex.y, 200, owner);
-        let touchesPlayerLand = getNeighborHexes(hex).some(n => n && n.owner === 1);
+        let touchesPlayerLand = getNeighborHexes(hex).some(n => n && wodAiIsFoe(owner, n.owner));
         let guardBias = -playerThreat * 2.4 - (touchesPlayerLand ? 8 : 0);
         candidates.push({holdHex: hex, attackHex, attackScore: bestWeak, score: cityDefenseBias + guardBias - Math.max(0,bestWeak)*.3+proximity(hex)});
     }
@@ -353,7 +352,10 @@ function wodAiAssaultObjective(owner,members,sectors,taken={}) {
 
 function wodAiEnsureTaskForcePlan(owner, units) {
     if(!gameData.aiTaskForces)gameData.aiTaskForces={};
-    const ready=units.filter(u=>u&&u.hp>u.maxHp*.34&&!u._medicalRecovering&&!u.moraleBroken&&!u.retreating&&!u.boardTransportUid&&!(u._navalAssaultUntil>wodAiOperationTime())&&!(u._navalEscortUntil>wodAiOperationTime())&&u.type!=='convoy'&&!['transport','supply'].includes(u.type));
+    // Land units the field command holds are its own: plans made for them here would only be thrown away
+    // (their moves are refused while the lease runs). WOD_OPS.T.planLeased=1 plans for them anyway.
+    const leasedOut=!wodOpsTune(owner).planLeased,leaseNow=wodAiOperationTime();
+    const ready=units.filter(u=>u&&!(leasedOut&&u._opsUntil>leaseNow)&&u.hp>u.maxHp*.34&&!u._medicalRecovering&&!u.moraleBroken&&!u.retreating&&!u.boardTransportUid&&!(u._navalAssaultUntil>wodAiOperationTime())&&!(u._navalEscortUntil>wodAiOperationTime())&&u.type!=='convoy'&&!['transport','supply'].includes(u.type));
     ready.forEach(ensureUnitId);
     const fortSites=(gameData.constructionJobs||[]).filter(j=>j.owner===owner&&j.mode==='fort').map(j=>({...j,id:'fort-site-'+j.q+','+j.r}));
     const assets=[...wodAiKnownCities(owner),...wodAiKnownForts(owner),...fortSites].filter(c=>c.owner===owner);
@@ -692,9 +694,10 @@ function wodAiIssueTaskForceOrder(unit, job, hpRatio) {
                 if(!waters.length) {
                     // Bound quiet-sea patrol search; never sort the whole ocean per ship.
                     let stride = Math.max(1, Math.floor(gameData.hexList.length/180));
+                    const seenCoast = wodFogActive() ? wodFogFactionIntel(unit.owner).explored : null;
                     for(let i=0; i<gameData.hexList.length; i+=stride) {
                         let h = gameData.hexList[i];
-                        if(isWaterHex(h) && getNeighborHexes(h).some(n=>!isWaterHex(n)&&wodIsHostileOwner(n.owner,unit.owner))) waters.push(h);
+                        if(isWaterHex(h) && getNeighborHexes(h).some(n=>!isWaterHex(n)&&(!seenCoast||seenCoast.has(getHexKey(n)))&&wodIsHostileOwner(n.owner,unit.owner))) waters.push(h);
                     }
                 }
                 waters.sort((a,b) => wodAiDist2(unit.x,unit.y,a.x,a.y)-wodAiDist2(unit.x,unit.y,b.x,b.y));
@@ -813,8 +816,9 @@ function assignAiFormationOrders(owner, units, serial) {
     // The field command holds every land unit this pass would plan for: nothing to do.
     if(wodOpsCommandsAll(typeof owner==='number'?owner:parseInt(owner,10),units))return true;
     const setupAt=performance.now();
+    const leasedOut=!wodOpsTune(owner).planLeased,leaseNow=wodAiOperationTime();
     let readyUnits = units
-        .filter(unit => unit.type !== 'convoy' && unit.hp > unit.maxHp * 0.42 && !unit.moraleBroken && !unit.retreating)
+        .filter(unit => unit.type !== 'convoy' && unit.hp > unit.maxHp * 0.42 && !unit.moraleBroken && !unit.retreating && !(leasedOut && unit._opsUntil > leaseNow))
         .sort((a, b) => {
             ensureUnitId(a);
             ensureUnitId(b);

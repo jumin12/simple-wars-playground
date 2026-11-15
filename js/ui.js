@@ -932,8 +932,31 @@ function wodRefreshBattleStats() {
         wodStatSection('Attrition losses',stat(wodMotorizedEquipment().label+' lost',num(m['attrition'+wodMotorizedEquipment().label+'Lost']))+stat(wodSpecialistLabel('mountaineer')+' lost',num(m.attritionMountaineerPersonnelLost))+stat('Personnel lost',num(m.attritionPersonnelLost))+stat('Armor lost',num(m.attritionArmorLost))+stat('Units lost',num(m.attritionUnitsLost))+stat('Vessels lost',num(m.attritionVesselsLost))+stat('Attrition damage',num(m.attritionDamage,1))+stat('Land supply damage',num(m.supplyAttritionDamage,1))+stat('Water attrition damage',num(m.waterAttritionDamage,1))+stat('Unpaid upkeep damage',num(m.unpaidAttritionDamage,1)))+
         wodStatSection('Territory movement',stat('Land tiles gained',num(m.landGained))+stat('Land tiles lost',num(m.landLost))+stat('Current land',num(r.land))+stat('Land share',r.share.toFixed(1)+'%'));
     document.getElementById('playerSummaryBody').innerHTML=wodRenderFactionStats();
+    const opp=document.getElementById('wodStatsOpponents');if(opp)opp.innerHTML=wodAiOpponentsHtml();
 }
 function updatePlayerSummary() {wodRefreshBattleStats();}
+// The computer factions of this match, the commander leading each, and the difficulty.
+function wodAiOpponentOwners() {
+    const owners=new Set();
+    for(const c of gameData.cities)if(c.owner>0)owners.add(c.owner);
+    for(const u of gameData.entities)if(u.owner>0&&u.hp>0&&u.type!=='convoy')owners.add(u.owner);
+    return [...owners].filter(o=>!wodMpIsHumanOwner(o)&&o!==wodLocalPlayerOwner()&&wodAiCommanderInfo(o)).sort((a,b)=>a-b);
+}
+function wodAiOpponentsHtml() {
+    const owners=wodAiOpponentOwners();if(!owners.length)return '';
+    const diff=WOD_AI_DIFFICULTIES[gameData.aiDifficulty]||WOD_AI_DIFFICULTIES.normal;
+    return `<section class="battle-section report-opponents"><h3>Computer opponents</h3>
+        <p class="report-opp-difficulty">Difficulty: <strong>${diff.label}</strong> · ${wodEscapeHtml(diff.line)}</p><ul>${owners.map(o=>{const c=wodAiCommanderInfo(o);
+            return `<li style="--side:${factionColors[o]||'#94a3b8'}"><strong>${wodEscapeHtml(wodBattleOwnerLabel(o))}</strong> led by <strong>${wodEscapeHtml(c.name)}</strong> · ${wodEscapeHtml(c.style)}
+                <span>${wodEscapeHtml(c.line)}</span><span>${wodEscapeHtml(c.traits.join(' · '))}</span></li>`;}).join('')}</ul></section>`;
+}
+// A note at the start of a match: who the player is up against.
+function wodAnnounceOpponents() {
+    if(gameState!=='PLAYING'||gameData.menuAttractMode||typeof wodTutorial!=='undefined'&&wodTutorial)return;
+    const owners=wodAiOpponentOwners();if(!owners.length)return;
+    const names=owners.map(o=>{const c=wodAiCommanderInfo(o);return c.name+' ('+c.style+')';});
+    showNotification((owners.length>1?'Opponents: ':'Your opponent: ')+names.join(', ')+' · '+wodAiDifficultyLabel(gameData.aiDifficulty)+' difficulty','info');
+}
 let _infoCardDomCache = null;
 let _infoCardUiThrottle = { s: null, t: 0 };
 let _infoCardPageIndex = 0;
