@@ -336,6 +336,7 @@ function setHexOwner(hex, owner) {
         (!gameData.mp?.enabled||gameData.mp.isHost))wodQueueTerritoryRemnantCheck(hex);
     if(!isWaterHex(hex)) {
         gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;
+        wodNoteSupplyOwnerChange(hex,prev,owner);
         if(cardinalHexDirections.some(d=>isWaterHex(wodHexAt(hex.q+d.q,hex.r+d.r))))gameData._waterPoliticsDirty=true;
     }
     hex.renderColor = hex.baseColor;

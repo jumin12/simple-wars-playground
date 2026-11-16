@@ -61,7 +61,6 @@ window.showEscSection = showEscSection;
 // --- Game Setup ---
 const canvas = UI.canvas;
 const ctx = canvas.getContext('2d', { alpha: false });
-let wodPowParts = new Array(WOD_POW_PARTS).fill(null);
 loadUiSettingsFromStorage();
 if(window.visualViewport) {
     window.visualViewport.addEventListener('resize', wodQueueVisualViewportBurst);
@@ -848,7 +847,6 @@ window.__wodDebug = function() {
         entities: gameData.entities.length,
         hexes: gameData.hexList.length,
         simTick: gameData._wodSimTick | 0,
-        sepWorker: !!wodSepWorker,
         terrainLastBakeMs: wodTerrainLastBakeCostMs,
         campaignEnded: !!gameData._campaignEnded,
         playerCities: gameData.cities.filter(c => c.owner === 1).length,

@@ -11,11 +11,19 @@ function wodFogVisionRadiusForUnit(unit) {
 }
 // Circular, symmetric vision follows the actual square lattice. All units
 // scout, even in rear areas or while embarked on the open sea.
+// (The offsets of each radius are worked out once, and cells are found through the hex index with their cached
+// keys: building a "q,r" string for every cell looked at was most of the cost of the fog. Same cells, same order.)
+const WOD_FOG_REVEAL_OFFSETS=new Map();
+function wodFogRevealOffsets(R) {
+    let o=WOD_FOG_REVEAL_OFFSETS.get(R);
+    if(!o){o=[];for(let q=-R;q<=R;q++)for(let r=-R;r<=R;r++)if(!(q*q+r*r>R*R+.25))o.push(q,r);WOD_FOG_REVEAL_OFFSETS.set(R,o);}
+    return o;
+}
 function wodFogRevealHexesAround(cq,cr,R,visible,explored) {
-    for(let q=-R;q<=R;q++)for(let r=-R;r<=R;r++) {
-        if(q*q+r*r>R*R+.25)continue;
-        const key=`${cq+q},${cr+r}`;if(!gameData.hexes[key])continue;
-        visible.add(key);explored.add(key);
+    const o=wodFogRevealOffsets(R);
+    for(let i=0;i<o.length;i+=2) {
+        const h=wodHexAt(cq+o[i],cr+o[i+1]);if(!h)continue;
+        const key=getHexKey(h);visible.add(key);explored.add(key);
     }
 }
 function wodFogFactionIntel(owner,force=false) {
@@ -27,12 +35,27 @@ function wodFogFactionIntel(owner,force=false) {
     if(rec&&!force&&now-rec.at<220)return rec;
     if(!rec)rec={visible:new Set(),explored:new Set(),cities:new Map(),forts:new Map(),units:new Map(),revision:0};
     rec.units ||= new Map();rec.hospitals ||= new Map();
-    const visible=new Set(),explored=rec.explored,friendly=o=>wodIsFriendlyOwner(o,owner);
-    for(const h of gameData.hexList)if(friendly(h.owner)) {
-        const key=getHexKey(h);visible.add(key);explored.add(key);
-        if(cardinalHexDirections.some(d=>{const n=wodHexAt(h.q+d.q,h.r+d.r);return n&&!friendly(n.owner);}))
-            wodFogRevealHexesAround(h.q,h.r,2,visible,explored);
+    // (whether an owner is friendly is asked for every cell of the map: answered once per owner)
+    const friendCache=new Map(),friendly=o=>{let v=friendCache.get(o);if(v===undefined){v=wodIsFriendlyOwner(o,owner);friendCache.set(o,v);}return v;};
+    const explored=rec.explored,list=gameData.hexList;
+    // Our own ground is visible, and so is everything within two cells of its border. That part changes only when
+    // cells change hands, so it is kept (in the order it was first worked out) until the set of our cells differs:
+    // two hashes and a count of our cells' places in the map, checked on every refresh, from whatever changed them.
+    let ta=0x811c9dc5,tb=0,tn=0;
+    for(let i=0;i<list.length;i++)if(friendly(list[i].owner)){ta=Math.imul(ta^i,16777619);tb=(tb+Math.imul(i+1,0x9e3779b1))|0;tn++;}
+    let ground=rec.ground;
+    if(!ground||ground.list!==list||ground.length!==list.length||ground.a!==ta||ground.b!==tb||ground.n!==tn){
+        const seen=new Set();
+        for(const h of list)if(friendly(h.owner)) {
+            seen.add(getHexKey(h));
+            if(cardinalHexDirections.some(d=>{const n=wodHexAt(h.q+d.q,h.r+d.r);return n&&!friendly(n.owner);}))
+                wodFogRevealHexesAround(h.q,h.r,2,seen,seen);
+        }
+        ground=rec.ground={list,length:list.length,a:ta,b:tb,n:tn,keys:[...seen],explored:null};
     }
+    const visible=new Set(ground.keys);
+    // (once added, the same cells are already explored: only a new outline, or a new explored set, needs adding)
+    if(ground.explored!==explored){for(const k of ground.keys)explored.add(k);ground.explored=explored;}
     for(const u of gameData.entities)if(u.hp>0&&friendly(u.owner)) {
         const h=getNearestHexToPoint(u.x,u.y);if(h)wodFogRevealHexesAround(h.q,h.r,wodFogVisionRadiusForUnit(u),visible,explored);
     }
@@ -69,14 +92,17 @@ function wodFogFactionIntel(owner,force=false) {
         if(simNow-memory.seenAt>45000){rec.units.delete(uid);continue;}
         if(!seenUnits.has(uid)&&visible.has(getHexKey(getNearestHexToPoint(memory.x,memory.y)||{})))memory.vacated=true;
     }
-    const changed=visible.size!==rec.visible.size||[...visible].some(k=>!rec.visible.has(k));
+    let changed=visible.size!==rec.visible.size;
+    if(!changed)for(const k of visible)if(!rec.visible.has(k)){changed=true;break;}
     rec.visible=visible;rec.at=now;if(changed)rec.revision++;
     gameData._factionIntel[owner]=rec;return rec;
 }
 function wodOwnerCanSee(owner,item) {
     if(!wodFogActive()||!item||wodIsFriendlyOwner(item.owner,owner))return true;
-    const h=item.q!=null?item:getNearestHexToPoint(item.x,item.y);
-    return !!(h&&wodFogFactionIntel(owner).visible.has(`${h.q},${h.r}`));
+    // (a cell found from a position has its key cached; a town or fort passed in is not given one)
+    if(item.q!=null)return wodFogFactionIntel(owner).visible.has(`${item.q},${item.r}`);
+    const h=getNearestHexToPoint(item.x,item.y);
+    return !!(h&&wodFogFactionIntel(owner).visible.has(getHexKey(h)));
 }
 function wodRefreshFogVision(dt,force=false) {
     if(!wodFogActive()){gameData._fogVisible=null;return;}

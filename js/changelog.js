@@ -2,9 +2,36 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-16T09:30:00Z",title:"A stronger AI on water maps",items:[
+        "When the AI fights over an island it shares with you while it also plans a crossing to other islands, it now keeps recruiting troops for the fight in front of it instead of saving every coin for a harbour, troopships and warships. Before, its towns could stand idle for minutes while your army walked in.",
+        "AI towns with no land route to the enemy no longer recruit infantry for a land war they cannot reach, and small AI landing parties no longer go in while a town's garrison waits nearby; they hold on the beach for the next wave."
+    ]},
+    {at:"2026-11-16T02:19:57Z",title:"Supply ships reach twice as far",items:[
+        "Supply ships now keep land units supplied within about six cells, twice a fort's radius (it used to be the same radius as a fort). One ship covers a wider beachhead, and troops landed beside a coastal town can fight in its streets from the ship's cover. The ring shown around a selected supply ship has grown to match.",
+        "AI infantry and tanks put ashore now stay inside their supply ship's cover as they close on a town, instead of walking off it and starving."
+    ]},
+    {at:"2026-11-15T22:46:38Z",title:"AI landings that finish the job",items:[
+        "When the garrison of a town marches out to meet AI troops put ashore, the landing now makes for the town's emptied streets instead of fighting it out in the open far from the town. With the town almost taken and none of your troops left inside, the AI's nearest troops walk onto the last streets even under fire.",
+        "AI troops ashore keep fighting for the town they landed at instead of marching off to another one, and AI marines already on their way no longer turn back to shore when their side buys a troopship."
+    ]},
+    {at:"2026-11-15T18:29:31Z",title:"AI landings that take towns",items:[
+        "When the AI has to cross water to reach you, its marines now form up and sail together, and only once they clearly outnumber the town they are going for. They used to set out as soon as the first few looked strong enough and arrive two or three at a time.",
+        "Troops the AI puts ashore wait for the rest of the landing instead of attacking a town piecemeal, then storm it together, concentrating their fire on one defender at a time. Marines no longer slip away on small raids while a landing is being gathered, and the AI no longer gives up on a beachhead while its troops are still fighting in the town."
+    ]},
+    {at:"2026-11-15T10:40:00Z",title:"Lighter long battles",items:[
+        "The game no longer starts seventeen background threads it barely used, so it takes less memory and leaves more of your processor to the battle. Fog of war is worked out far faster in big games, and a new match no longer carries timers over from the last one. Nothing about the rules or the AI changes."
+    ]},
+    {at:"2026-11-15T03:05:20Z",title:"AI invasions across water",items:[
+        "On maps where the war has to cross water, the AI now saves for a harbour and the ships its crossing needs instead of spending everything on infantry, and it no longer waits forever for escorts it cannot build. On island maps its landings now take towns and can win the match.",
+        "When no enemy town can be reached on foot, AI invasions are led by marines, which swim across without a ferry, with tanks ferried beside them. The marines gather on their own shore and cross together instead of drifting over a few at a time, and troops put ashore go for the town they were landed to take.",
+        "AI commanders are drawn at random for each match and kept secret again: you can no longer pick them. The defensive commander now builds far more forts on the approaches to its towns, and the balanced commander attacks without waiting for perfect odds."
+    ]},
+    {at:"2026-11-15T01:11:13Z",title:"Cut-off troops and smoother big battles",items:[
+        "Troops cut off in a pocket no longer recover their morale or rally while they are cut off. A routed regiment in a pocket now runs for the nearest supplied ground of its side instead of standing still, and recovers once it is out.",
+        "Large battles run faster with fewer stutters: supply networks and the AI's bridge planning are recalculated far less often. Nothing about the battles themselves changes."
+    ]},
     {at:"2026-11-14T23:54:15Z",title:"AI difficulty, named commanders and fairer opponents",items:[
         "Choose Easy, Normal or Hard for the AI in skirmish setup, when you begin a campaign (and later in the campaign panel) and in a multiplayer lobby. No level gives the AI extra money, troops or vision: Easy recruits one unit at a time, reacts slowly and never flanks, cuts supply or sets ambushes; Hard reacts faster and accepts thinner odds.",
-        "Each AI opponent is led by one of seven named commanders with their own way of fighting. Pick them in skirmish setup or leave them random; the match opens by naming who you face, and the Players tab of the battle report describes each one.",
         "AI armies keep their troops on a battle already under way, no longer turn back from a moment's flicker in their supply line and stop acting on outdated orders. One buyer now spends an AI's money in a land war, adding motorized troops on open fronts and mountaineers in the hills, and captured towns get farms and factories. The opening build order is unchanged.",
         "The AI counts forts, generals, veterans and nearby warships when it judges a fight, sends healed troops back to the line sooner and picks recovery sites by the real road around rivers.",
         "AI fleets sail with their loaded troopships, go after enemy troopships near their coast, fight enemy fleets they outnumber, are not held back by an old sighting of a ship, pick another beach when defenders gather on theirs and send damaged ships home.",

@@ -240,7 +240,7 @@ function wodDrawUnitsLayer(ctx, view) {
         for(let ui = 0, ul = uo.length; ui < ul; ui++) {
             let unit = uo[ui];
             if(!wodFogCanSeeUnit(unit)) continue;
-            if(unit.type==='supply'&&unit.selected){ctx.save();ctx.strokeStyle=wodCommandArrowStrokeRgba(unit,.65);ctx.fillStyle='rgba(90,180,210,.08)';ctx.lineWidth=2/(gameData.camera.zoom||1);ctx.setLineDash([7,5]);ctx.beginPath();ctx.arc(unit.x,unit.y,wodFortCombatAuraRadiusPx(),0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();}
+            if(unit.type==='supply'&&unit.selected){ctx.save();ctx.strokeStyle=wodCommandArrowStrokeRgba(unit,.65);ctx.fillStyle='rgba(90,180,210,.08)';ctx.lineWidth=2/(gameData.camera.zoom||1);ctx.setLineDash([7,5]);ctx.beginPath();ctx.arc(unit.x,unit.y,wodSupplyShipRadiusPx(),0,Math.PI*2);ctx.fill();ctx.stroke();ctx.restore();}
             if(shouldDrawPlayerUnitOrderPath(unit) || shouldDrawConvoyMovementPath(unit)) {
                 // Cull against both auth and smooth-draw positions so MP snap
                 // lag cannot hide a unit the moment it is deselected.

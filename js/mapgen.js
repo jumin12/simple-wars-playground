@@ -1641,6 +1641,9 @@ function wodTakeNextPathTarget(unit) {
     unit.target.pathPrepared = true;
     return true;
 }
+// Water cells outside the deck index are tested against every bridge's rectangle. The answer is remembered per
+// cell while the bridge list and its index stay the same (supply floods ask it for every water cell they touch).
+const wodBridgeRectMemo={index:null,list:null,length:-1,hits:new WeakMap()};
 function bridgeAtHex(hex) {
     if(!hex) return null;
     if(!gameData.bridges || !gameData.bridges.length) return null;
@@ -1649,13 +1652,18 @@ function bridgeAtHex(hex) {
         if(br) return br;
     }
     if(!isWaterHex(hex) || !gameData.bridges || !gameData.bridges.length) return null;
-    for(let bi = 0, bl = gameData.bridges.length; bi < bl; bi++) {
-        let br = gameData.bridges[bi];
+    const memo=wodBridgeRectMemo,list=gameData.bridges;
+    if(memo.index!==gameData._bridgeByHexKey||memo.list!==list||memo.length!==list.length){memo.index=gameData._bridgeByHexKey;memo.list=list;memo.length=list.length;memo.hits=new WeakMap();}
+    const known=memo.hits.get(hex);if(known!==undefined&&(known===null||list.includes(known)))return known;
+    let hit=null;
+    for(let bi = 0, bl = list.length; bi < bl; bi++) {
+        let br = list[bi];
         if(!br) continue;
         if(br.x == null) wodSyncBridgeWorldCoords(br);
-        if(wodPointInBridgeRect(hex.x, hex.y, br, 1.48)) return br;
+        if(wodPointInBridgeRect(hex.x, hex.y, br, 1.48)) { hit = br; break; }
     }
-    return null;
+    memo.hits.set(hex,hit);
+    return hit;
 }
 function isBridgeHex(hex) {
     return !!bridgeAtHex(hex);
@@ -2162,7 +2170,7 @@ function wodFillUnownedPoliticalHexes(passes) {
         }
         if(changed) gameData._landIncomeCacheDirty = true;
     }
-    if(changed)gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;
+    if(changed){gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;if(gameData._supplyDirty)gameData._supplyDirty.all=true;}
     return changed;
 }
 /**

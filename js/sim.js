@@ -123,7 +123,6 @@ function update(dt) {
         }
     }
     wodSyncFortOwnershipFromTerrain();
-    wodKickParallelTroopPowIfEligible();
     checkCampaignEndConditions(dt);
     wodUpdateMissionEvents(dt);
     if(gameData.mp && gameData.mp.enabled && gameData.mp.isHost) {

@@ -544,7 +544,7 @@ function wodAiObjectiveCost(owner, members, city) {
 }
 
 function wodAiSupplyReach(ship, troops) {
-    const start=getNearestHexToPoint(ship.x,ship.y),radius=wodFortCombatAuraRadiusPx();
+    const start=getNearestHexToPoint(ship.x,ship.y),radius=wodSupplyShipRadiusPx();
     if(!start)return new Set();
     const protectedNow=troops.filter(u=>Math.hypot(u.x-ship.x,u.y-ship.y)<radius*.99);
     if(!protectedNow.length)return wodNavalWaterRegionKeys(ship,start)||new Set();

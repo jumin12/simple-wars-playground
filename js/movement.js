@@ -1100,7 +1100,7 @@ function wodResumeTrafficYield(unit) {
 }
 function wodSupplyParkingSafe(ship,point) {
     if(ship.type!=='supply')return true;
-    const radius=wodFortCombatAuraRadiusPx();
+    const radius=wodSupplyShipRadiusPx();
     return gameData.entities.every(u=>u.owner!==ship.owner||!u._navalLanded||u.hp<=0||u.type==='marine'||
         Math.hypot(u.x-ship.x,u.y-ship.y)>=radius||Math.hypot(u.x-point.x,u.y-point.y)<radius*.94);
 }
@@ -1155,7 +1155,7 @@ function wodStepAsideForTraffic(mover,blocker,loser,dx,dy) {
         if(reserved.some(s=>Math.hypot(h.x-s.point.x,h.y-s.point.y)<(loser.radius||12)+(s.u.radius||12)+4))continue;
         if(loser.type==='supply'&&(!wodSupplyParkingSafe(loser,h)||!wodOpenWaterChordClear(loser,loser.x,loser.y,h.x,h.y)))continue;
         if(loser._navalLanded&&loser.type!=='marine'&&!wodCurrentSupplyComponent(h,loser.owner).city&&
-            !gameData.entities.some(s=>s.owner===loser.owner&&s.type==='supply'&&s.hp>0&&Math.hypot(s.x-h.x,s.y-h.y)<wodFortCombatAuraRadiusPx()*.9))continue;
+            !gameData.entities.some(s=>s.owner===loser.owner&&s.type==='supply'&&s.hp>0&&Math.hypot(s.x-h.x,s.y-h.y)<wodSupplyShipRadiusPx()*.9))continue;
         const x=h.x-loser.x,y=h.y-loser.y,along=x*dx+y*dy,lateral=Math.abs(x*dy-y*dx);
         if(along<spacing*.7||lateral<spacing*.8||onRoad(h))continue;
         const open=getNeighborHexes(h).filter(n=>wodPathTileWalkable(loser,n,false)&&(!isWaterHex(n)||waterYield||isBridgeHex(n))).length;
@@ -3937,9 +3937,29 @@ function wodMoraleHealingGoal(unit) {
     candidates.sort((a,b)=>Math.hypot(a.x-unit.x,a.y-unit.y)-Math.hypot(b.x-unit.x,b.y-unit.y));
     return candidates.slice(0,12).find(h=>wodAiCanReach(unit,h))||null;
 }
+// The way out of a pocket for a routed unit: the nearest friendly ground that is still supplied, over land it
+// can walk. Returns a cell a few steps along that way (or the ground itself), or null when there is none.
+function wodRoutedSupplyEscapePoint(unit) {
+    const start=getNearestHexToPoint(unit.x,unit.y);
+    if(!start||wodIsNavalUnit(unit)||isWaterHex(start)&&!isBridgeHex(start))return null;
+    const prev=new Map([[start,null]]),queue=[start];let end=null;
+    for(let i=0;i<queue.length&&i<2500;i++){
+        const h=queue[i];
+        if(h!==start&&!isWaterHex(h)&&wodIsFriendlyOwner(h.owner,unit.owner)&&wodCurrentSupplyComponent(h,unit.owner).city){end=h;break;}
+        for(const n of getNeighborHexes(h).concat(wodBridgeLinkedHexes(h)||[])){
+            if(!n||prev.has(n)||isWaterHex(n)&&!isBridgeHex(n)||!canUnitEnterHex(unit,n)||!wodCanStepBetweenHexes(unit,h,n,true))continue;
+            prev.set(n,h);queue.push(n);
+        }
+    }
+    if(!end)return null;
+    const path=[];for(let h=end;h;h=prev.get(h))path.push(h);path.reverse();
+    return path[Math.min(path.length-1,5)];
+}
 function wodUpdateUnitMorale(unit,dt) {
     if(!unit||unit.hp<=0||unit.type==='convoy'||unit.boardTransportUid)return;
     const now=gameData._aiEconomyClock||0,hr=gameData.hexRadius||20;
+    // Cut off from supply (the encircled sign over the unit): troops in a pocket do not get their nerve back.
+    const cut=(unit.encircledFlash||0)>0||(unit.outOfSupplySeconds||0)>0;
     unit.maxMorale=WOD_MORALE_MAX*wodGeneralStatMultiplier(unit);
     unit.morale=Math.min(unit.maxMorale,unit.morale??WOD_MORALE_MAX);
     const underFire=now-(unit._moraleLastHitAt??-Infinity)<2;
@@ -3956,12 +3976,12 @@ function wodUpdateUnitMorale(unit,dt) {
         }else chased=!!unit._moraleChased;
         if(chased||underFire)unit._moraleSafeSince=null;else unit._moraleSafeSince??=now;
     }
-    if(!unit._combatEngaged&&!underFire){
+    if(!unit._combatEngaged&&!underFire&&!cut){
         const care=wodUnitHealingSite(unit),rate=care&&canHealUnit(unit)?11:3;
         unit.morale=Math.min(unit.maxMorale,unit.morale+rate*wodGeneralStatMultiplier(unit)*dt);
     }
     if(!unit.moraleBroken)return;
-    if(unit.morale>=WOD_MORALE_RALLY_AT&&unit._moraleSafeSince!=null&&now-unit._moraleSafeSince>=3){
+    if(!cut&&unit.morale>=WOD_MORALE_RALLY_AT&&unit._moraleSafeSince!=null&&now-unit._moraleSafeSince>=3){
         unit.moraleBroken=false;unit._moraleRetreatGoal=null;
         const care=wodUnitMissingStrength(unit)&&!wodUnitHealingSite(unit)&&wodMoraleHealingGoal(unit);
         if(care){if(assignUnitMoveAlongWaypoints(unit,[care],{forceRetreat:true}))unit._wodRecoveryRetreat=true;}
@@ -3970,6 +3990,16 @@ function wodUpdateUnitMorale(unit,dt) {
     }
     if(now-(unit._moraleRetreatAt??-Infinity)<2)return;
     unit._moraleRetreatAt=now;
+    // A routed unit in a pocket does not stand and wait to starve: it runs for the nearest supplied ground of its
+    // side, a few cells at a time, until it is out (then it can rally and heal as usual).
+    if(cut){
+        const previous=unit._moraleRetreatGoal,arrived=previous&&Math.hypot(unit.x-previous.x,unit.y-previous.y)<hr*.7;
+        if(previous?.escape&&!arrived&&(unit.target||unit.orderTarget)&&(unit.stuckTimer||0)<1.5&&(unit.blockedTimer||0)<1.5)return;
+        const way=wodRoutedSupplyEscapePoint(unit);
+        if(way&&assignUnitMoveAlongWaypoints(unit,[way],{retainMoraleBroken:true,retainRetreat:true,forceRetreat:true})){
+            unit._moraleRetreatGoal={x:way.x,y:way.y,escape:true};return;
+        }
+    }
     if(!chased&&wodUnitHealingSite(unit)&&canHealUnit(unit)){
         unit.target=null;unit.path=null;unit.orderTarget=null;return;
     }

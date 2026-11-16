@@ -1,7 +1,7 @@
 'use strict';
-// AI difficulty and commanders: chosen in skirmish setup and the campaign, applied to the match, announced and
-// shown in the battle report; difficulty settings reach the AI; the AI treats every enemy alike and pays the
-// same upkeep penalty as a player.
+// AI difficulty: chosen in skirmish setup and the campaign, applied to the match and shown in the battle report;
+// commanders are drawn at random and never shown; difficulty settings reach the AI; the AI treats every enemy
+// alike and pays the same upkeep penalty as a player.
 const H=require('./lib/harness');
 const fs=require('fs'),path=require('path'),assert=require('assert/strict');
 const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/ai-difficulty');
@@ -13,34 +13,34 @@ fs.mkdirSync(OUT,{recursive:true});
         for(const viewport of [{width:1280,height:800},{width:390,height:844}]){
             const page=await browser.newPage({viewport}),errors=H.collectErrors(page);
             await H.gotoMenu(page,url);await H.closeChangelog(page);
-            await page.evaluate(()=>{localStorage.removeItem('simplewarsAiDifficulty');localStorage.removeItem('simplewarsAiCommanderPicks');});
+            await page.evaluate(()=>{localStorage.removeItem('simplewarsAiDifficulty');});
             await page.locator('#mainMenu').getByRole('button',{name:'Play vs AI',exact:true}).click();
             await page.getByRole('button',{name:'Skirmish',exact:true}).click();
             await page.waitForFunction(()=>!wodIsMapPreviewGenerating(),null,{timeout:180000});
-            // defaults, then Hard with two opponents, the first led by General Vale
+            // defaults, then Hard with two opponents; no commander can be chosen or seen
             const defaults=await page.evaluate(()=>({value:document.getElementById('setupAiDifficulty').value,hint:document.getElementById('setupAiDifficultyDetail').textContent,
-                picks:[...document.querySelectorAll('#setupOpponentsBrief select[data-opp-seat]')].map(s=>s.value)}));
-            assert.equal(defaults.value,'normal');assert.match(defaults.hint,/full computer opponent/);assert.deepEqual(defaults.picks,['random']);
+                pickers:document.querySelectorAll('#setupOpponentsBrief select').length}));
+            assert.equal(defaults.value,'normal');assert.match(defaults.hint,/full computer opponent/);assert.equal(defaults.pickers,0,'no commander picker');
             await page.selectOption('#setupAI','2');
             await page.evaluate(()=>wodSyncSetupOpponentsBrief());
             await page.selectOption('#setupAiDifficulty','hard');
-            await page.selectOption('#setupOpponentsBrief select[data-opp-seat="0"]','deliberate');
-            const chosen=await page.evaluate(()=>({stored:localStorage.getItem('simplewarsAiDifficulty'),picks:JSON.parse(localStorage.getItem('simplewarsAiCommanderPicks')||'[]'),
-                hint:document.getElementById('setupAiDifficultyDetail').textContent,line:document.querySelector('#setupOpponentsBrief .setup-opp-pick small').textContent}));
-            assert.equal(chosen.stored,'hard');assert.equal(chosen.picks[0],'deliberate');assert.match(chosen.hint,/Same rules and income as you/);assert.match(chosen.line,/clear advantage/);
+            const chosen=await page.evaluate(()=>({stored:localStorage.getItem('simplewarsAiDifficulty'),hint:document.getElementById('setupAiDifficultyDetail').textContent,
+                brief:document.getElementById('setupOpponentsBrief').innerText,pickers:document.querySelectorAll('#setupOpponentsBrief select').length}));
+            assert.equal(chosen.stored,'hard');assert.match(chosen.hint,/Same rules and income as you/);assert.equal(chosen.pickers,0);
             await page.screenshot({path:path.join(OUT,'setup-'+viewport.width+'.png')});
             await page.waitForFunction(()=>!wodIsMapPreviewGenerating(),null,{timeout:180000});
             await page.locator('#setupBtnStartAi').click();
             await H.waitForMatch(page);
             await page.waitForTimeout(1600);
-            const match=await page.evaluate(()=>({difficulty:gameData.aiDifficulty,first:gameData.aiCommanderProfiles[2]?.id,second:gameData.aiCommanderProfiles[3]?.id,secondKnown:!!WOD_AI_COMMANDERS[gameData.aiCommanderProfiles[3]?.id],
-                toast:document.querySelector('.wod-toast-note')?.textContent||'',edge:wodAiDifficulty(2).edge,doctrine:wodOpsState(2,wodAiOperationTime()).doctrine.name}));
-            assert.equal(match.difficulty,'hard');assert.equal(match.first,'deliberate');assert(match.secondKnown,'second opponent has a commander');
-            assert.match(match.toast,/General Vale \(Deliberate offensive\)/);assert.match(match.toast,/Hard difficulty/);
-            assert.equal(match.edge,-.06);assert.equal(match.doctrine,'methodical','the commander decides the doctrine');
+            const match=await page.evaluate(()=>{const names=Object.values(WOD_AI_COMMANDERS).map(c=>c.name);const p=gameData.aiCommanderProfiles;
+                return {difficulty:gameData.aiDifficulty,known:[2,3].every(o=>!!WOD_AI_COMMANDERS[p[o]?.id]),toast:document.querySelector('.wod-toast-note')?.textContent||'',names,
+                    edge:wodAiDifficulty(2).edge,doctrine:wodOpsState(2,wodAiOperationTime()).doctrine.name,expected:WOD_AI_COMMANDERS[p[2].id].doctrine};});
+            assert.equal(match.difficulty,'hard');assert(match.known,'every opponent has a commander drawn at random');
+            assert(!match.names.some(n=>match.toast.includes(n)),'no commander is announced');
+            assert.equal(match.edge,-.06);assert.equal(match.doctrine,match.expected,'the commander decides the doctrine');
             await page.evaluate(()=>toggleWodStatsPanel(true));
             const report=await page.locator('#wodStatsOpponents').innerText();
-            assert.match(report,/General Vale/);assert.match(report,/Difficulty: Hard/);
+            assert.match(report,/Difficulty: Hard/);assert(!match.names.some(n=>report.includes(n)),'the battle report names no commander');
             await page.locator('#wodStatsOpponents').scrollIntoViewIfNeeded();
             await page.screenshot({path:path.join(OUT,'report-'+viewport.width+'.png')});
             results[viewport.width]={defaults,chosen,match,report:report.slice(0,160)};

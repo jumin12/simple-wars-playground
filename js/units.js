@@ -509,7 +509,7 @@ function getUnitEffects(unit) {
         if(terrCombat) effects.push(terrCombat);
         let fortFx = getFortDefenseEffect(unit);
         if(fortFx) effects.push(fortFx);
-        if(wodSupplyShipForUnit(unit))effects.push({label:'Naval supply',stats:'In supply · Nearby supply ship',detail:'A friendly supply ship provides supply within the same radius as a fort. Ordinary infantry and armor swimming without a transport remain out of supply. This aura does not grant healing in water.',block:true});
+        if(wodSupplyShipForUnit(unit))effects.push({label:'Naval supply',stats:'In supply · Nearby supply ship',detail:'A friendly supply ship provides supply within twice the radius of a fort (about six cells). Ordinary infantry and armor swimming without a transport remain out of supply. This aura does not grant healing in water.',block:true});
         const supplyState=wodUnitSupplyWarningState(unit,hex);
         if(supplyState) {
             let relief = supplyState.relief;
@@ -693,6 +693,22 @@ function wodCitySupplySourceHexes(city) {
     }
     return queue.filter(h=>!isWaterHex(h)&&wodIsFriendlyOwner(h.owner,city.owner));
 }
+// The cached neighbour list of a cell for supply (the same links, in the same order, wodSupplyNeighbors visits).
+function wodSupplyLinks(hex) {
+    const cached=wodSupplyNeighborCache.get(hex);
+    if(cached?.hexes===gameData.hexes&&cached.revision===(gameData._wodPfVer||0))return cached.links;
+    wodSupplyNeighbors(hex,()=>{});
+    return wodSupplyNeighborCache.get(hex).links;
+}
+// Cells that changed hands since the supply cache was last brought up to date (see setHexOwner): only the factions
+// on either side of a change, and their allies, can find their supply network different.
+function wodNoteSupplyOwnerChange(hex,from,to) {
+    const d=gameData._supplyDirty;if(!d)return;
+    // a town's own cells are supply sources: changing them rebuilds everything
+    if(hex.cityId||hex.type==='urban'){d.all=true;return;}
+    d.owners.add(from);d.owners.add(to);
+}
+let wodSupplyFloodStamp=0;
 function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
     if(!hex||owner<=0||isWaterHex(hex)&&!isBridgeHex(hex))return {city:false,water:false};
     wodEnsureBridgePathIndex();
@@ -700,7 +716,17 @@ function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
     let allySig=0;for(const pair of gameData.alliances||[])for(const owner of pair)allySig=(Math.imul(allySig,31)+owner)|0;
     let cache=gameData._citySupplyCache;
     const citiesChanged=!cache||cache.cities.length!==gameData.cities.length||gameData.cities.some((c,i)=>{const old=cache.cities[i];return old.city!==c||old.owner!==c.owner||old.q!==c.q||old.r!==c.r;});
-    if(!cache||cache.hexes!==gameData.hexes||cache.version!==version||cache.pfVersion!==pfVersion||citiesChanged||cache.allySig!==allySig) {
+    let rebuild=!cache||cache.hexes!==gameData.hexes||cache.pfVersion!==pfVersion||citiesChanged||cache.allySig!==allySig;
+    if(!rebuild&&cache.version!==version){
+        // Only ordinary cells changed hands since the cache was made: forget the networks of the factions on either
+        // side of those changes (and of their allies) and keep everyone else's.
+        const d=gameData._supplyDirty;
+        if(d&&!d.all&&d.from===cache.version&&version>cache.version){
+            for(const o of [...cache.owners.keys()])for(const x of d.owners)if(x>0&&(o===x||wodIsFriendlyOwner(o,x))){cache.owners.delete(o);cache.sourcesBy?.delete(o);break;}
+            cache.version=version;gameData._supplyDirty={from:version,owners:new Set(),all:false};
+        }else rebuild=true;
+    }
+    if(rebuild) {
         const sources=new Map();
         for(const c of gameData.cities) {
             if(c.owner<=0)continue;
@@ -709,7 +735,8 @@ function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
                 const key=getHexKey(h),list=sources.get(key)||[];list.push(c.owner);sources.set(key,list);
             }
         }
-        cache=gameData._citySupplyCache={hexes:gameData.hexes,version,pfVersion,cities:gameData.cities.map(city=>({city,owner:city.owner,q:city.q,r:city.r})),allySig,sources,owners:new Map()};
+        cache=gameData._citySupplyCache={hexes:gameData.hexes,version,pfVersion,cities:gameData.cities.map(city=>({city,owner:city.owner,q:city.q,r:city.r})),allySig,sources,owners:new Map(),sourcesBy:new Map()};
+        gameData._supplyDirty={from:version,owners:new Set(),all:false};
     }
     if(!wodSupplyPassable(hex,owner)) {
         const result={city:false,water:false};
@@ -719,17 +746,27 @@ function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
     }
     if(!cache.owners.has(owner))cache.owners.set(owner,new Map());
     const known=cache.owners.get(owner),start=getHexKey(hex);if(known.has(start))return known.get(start);
-    const queue=[hex],seen=new Set([start]),result={city:false,water:false};
+    // The cells that supply this faction: town cells whose town is on its side.
+    let mine=cache.sourcesBy.get(owner);
+    if(!mine){mine=new Set();for(const [key,list] of cache.sources)if(list.some(o=>wodIsFriendlyOwner(o,owner)))mine.add(key);cache.sourcesBy.set(owner,mine);}
+    // Flood the faction's connected ground (the same cells and links as wodSupplyPassable/wodSupplyNeighbors),
+    // marking visited cells on the cells themselves rather than in a set of text keys.
+    const stamp=wodSupplyFloodStamp=(wodSupplyFloodStamp+1)|0||1,friendly=new Map();
+    const friend=o=>{let v=friendly.get(o);if(v===undefined){v=wodIsFriendlyOwner(o,owner);friendly.set(o,v);}return v;};
+    const queue=[hex],result={city:false,water:false};hex._supplyStamp=stamp;
     for(let i=0;i<queue.length;i++) {
-        const h=queue[i],key=getHexKey(h);
-        if(cache.sources.get(key)?.some(o=>wodIsFriendlyOwner(o,owner)))result.city=true;
-        wodSupplyNeighbors(h,n=>{
-            if(isWaterHex(n)&&!isBridgeHex(n)){result.water=true;return;}
-            const k=getHexKey(n);if(!wodSupplyPassable(n,owner)||seen.has(k))return;
-            seen.add(k);queue.push(n);
-        });
+        const h=queue[i];
+        if(!result.city&&mine.has(getHexKey(h)))result.city=true;
+        const links=wodSupplyLinks(h);
+        for(let j=0;j<links.length;j++){
+            const n=links[j],water=isWaterHex(n);
+            if(water&&!isBridgeHex(n)){result.water=true;continue;}
+            if(n._supplyStamp===stamp)continue;
+            if(!(isBridgeHex(n)||!water&&isClaimableLand(n)&&friend(n.owner)))continue;
+            n._supplyStamp=stamp;queue.push(n);
+        }
     }
-    for(const key of seen)known.set(key,result);return result;
+    for(const h of queue)known.set(getHexKey(h),result);return result;
 }
 function wodUnitInsideRegion(unit, regionKeys) {
     if(!unit || unit.hp <= 0 || unit.type === 'convoy' || unit.owner <= 0) return false;

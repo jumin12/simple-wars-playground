@@ -7,14 +7,11 @@ let wodUnitsDrawOrderScratch = [];
 let wodMobileUiStatTimer = 0;
 let wodWheelZoomRaf = 0;
 let wodWheelBatch = null;
-const WOD_POW_PARTS = 16;
 const WOD_MAP_GEN_POOL = 4;
-let wodPowWorkers = [];
-let wodPowWUrl = null;
-let wodSepWorker = null;
-let wodSepWUrl = null;
-let wodSepBusy = false;
-let wodSepGen = 0;
+// (The troop-power tally for the AI and unit separation used to have Web Worker versions: sixteen threads
+// to add up a few hundred numbers, posted a copy of the arrays every few ticks, and a separation worker
+// nothing sent work to. Their results arrived whenever the threads got round to them, so two runs of one
+// match differed. Both are worked out inline, as they always were where Web Workers are unavailable.)
 let wodPfBudgetMs = 4.5;
 let wodPfSpentMs = 0;
 let wodMapGenWorker = null;
@@ -137,112 +134,6 @@ function wodGenerateTerrainCellsInWorker(payload) {
         } catch(e) { finish(e); }
     });
 }
-function wodTerminatePowWorkers() {
-    for(let i = 0; i < wodPowWorkers.length; i++) {
-        if(wodPowWorkers[i]) { try { wodPowWorkers[i].terminate(); } catch(_) {} }
-    }
-    wodPowWorkers = [];
-    if(wodPowWUrl) { try { URL.revokeObjectURL(wodPowWUrl); } catch(_) {} wodPowWUrl = null; }
-    wodPowParts = new Array(WOD_POW_PARTS).fill(null);
-}
-function wodOnPowWorkerPart(ev) {
-    let d = ev.data;
-    if(!d || !d.acc) return;
-    wodPowParts[d.part] = d.acc;
-    for(let i = 0; i < WOD_POW_PARTS; i++) {
-        if(!wodPowParts[i]) return;
-    }
-    let merged = new Float64Array(16);
-    for(let p = 0; p < WOD_POW_PARTS; p++) {
-        let ap = wodPowParts[p];
-        for(let i = 0; i < 16; i++) merged[i] += ap[i];
-    }
-    gameData._wodWorkerTroopMerged = merged;
-    for(let i = 0; i < WOD_POW_PARTS; i++) wodPowParts[i] = null;
-}
-function wodEnsurePowWorkers() {
-    if(wodPowWorkers.length > 0 || typeof Worker === 'undefined') return;
-    try {
-        let code = 'self.onmessage=function(e){var d=e.data;var acc=new Float64Array(16);var o=d.o,m=d.m,a=d.a,b=d.b;for(var i=a;i<b;i++){var w=o[i]|0;if(w>0&&w<16)acc[w]+=m[i];}postMessage({part:d.part,acc:acc});};';
-        wodPowWUrl = URL.createObjectURL(new Blob([code], {type: 'application/javascript'}));
-        wodPowParts = new Array(WOD_POW_PARTS).fill(null);
-        for(let i = 0; i < WOD_POW_PARTS; i++) {
-            let w = new Worker(wodPowWUrl);
-            w.onmessage = wodOnPowWorkerPart;
-            wodPowWorkers.push(w);
-        }
-    } catch(_) {
-        wodTerminatePowWorkers();
-    }
-}
-function wodKickParallelTroopPowIfEligible() {
-    if(gameState !== 'PLAYING' || gameData.menuAttractMode) return;
-    if(wodDeferHeavySimDuringMarch()) return;
-    wodEnsurePowWorkers();
-    if(wodPowWorkers.length === 0) return;
-    let ents = gameData.entities;
-    let n = ents.length;
-    if(n < 64) return;
-    if(n < 220 && ((gameData._wodSimTick | 0) % 4)) return;
-    let maxP = Math.max(512, n + 64);
-    if(!gameData._wodPowOwnPacked || gameData._wodPowOwnPacked.length < maxP) {
-        gameData._wodPowOwnPacked = new Uint16Array(maxP);
-        gameData._wodPowManPacked = new Float32Array(maxP);
-    }
-    let o = gameData._wodPowOwnPacked;
-    let m = gameData._wodPowManPacked;
-    let k = 0;
-    for(let i = 0; i < n; i++) {
-        let u = ents[i];
-        if(u.hp <= 0 || u.type === 'convoy') continue;
-        o[k] = u.owner;
-        m[k] = u.manpower !== undefined ? u.manpower : Math.round((u.hp / u.maxHp) * 1000);
-        k++;
-    }
-    if(k < 48) return;
-    let bounds = [];
-    for(let j = 0; j <= WOD_POW_PARTS; j++)
-        bounds[j] = ((k * j) / WOD_POW_PARTS) | 0;
-    for(let i = 0; i < WOD_POW_PARTS; i++) wodPowParts[i] = null;
-    try {
-        for(let p = 0; p < WOD_POW_PARTS; p++) {
-            wodPowWorkers[p].postMessage({ o: o, m: m, a: bounds[p], b: bounds[p + 1], part: p });
-        }
-    } catch(_) {}
-}
-function wodTerminateSepWorker() {
-    if(wodSepWorker) {
-        try { wodSepWorker.terminate(); } catch(_) {}
-        wodSepWorker = null;
-    }
-    if(wodSepWUrl) {
-        try { URL.revokeObjectURL(wodSepWUrl); } catch(_) {}
-        wodSepWUrl = null;
-    }
-    wodSepBusy = false;
-    if(gameData) {
-        gameData._wodSepApply = null;
-        gameData._wodSepPending = null;
-    }
-}
-function wodOnSepWorkerResult(ev) {
-    wodSepBusy = false;
-    let d = ev.data;
-    if(!d || !d.idx || !d.xs || !d.ys) return;
-    if(d.gen !== gameData._wodSepGen) return;
-    gameData._wodSepApply = d;
-}
-function wodEnsureSepWorker() {
-    if(wodSepWorker || typeof Worker === 'undefined') return;
-    try {
-        let code = 'self.onmessage=function(e){var d=e.data,n=d.n,xs=d.xs,ys=d.ys,rs=d.rs,own=d.own,idx=d.idx,cellSize=d.cellSize,sepPad=d.sepPad,ox=new Float32Array(n),oy=new Float32Array(n),i,j,bi,bucket,ddx,ddy,dist,minDist,overlap,px,py,cx,cy,dx,dy,key,cells={};for(i=0;i<n;i++){ox[i]=xs[i];oy[i]=ys[i];}function ck(x,y){return((x/cellSize)|0)+\',\'+((y/cellSize)|0);}for(i=0;i<n;i++){key=ck(xs[i],ys[i]);if(!cells[key])cells[key]=[];cells[key].push(i);}for(i=0;i<n;i++){cx=(ox[i]/cellSize)|0;cy=(oy[i]/cellSize)|0;for(dx=-1;dx<=1;dx++){for(dy=-1;dy<=1;dy++){bucket=cells[(cx+dx)+\',\'+(cy+dy)];if(!bucket)continue;for(bi=0;bi<bucket.length;bi++){j=bucket[bi];if(j<=i)continue;ddx=ox[j]-ox[i];ddy=oy[j]-oy[i];dist=Math.sqrt(ddx*ddx+ddy*ddy);minDist=rs[i]+rs[j]+6;if(dist<minDist&&dist>0){overlap=minDist-dist;px=(ddx/dist)*overlap*(own[i]===own[j]?0.42:0.48);py=(ddy/dist)*overlap*(own[i]===own[j]?0.42:0.48);ox[i]-=px;oy[i]-=py;ox[j]+=px;oy[j]+=py;}}}}}postMessage({idx:idx,xs:ox,ys:oy,gen:d.gen},[ox.buffer,oy.buffer]);};';
-        wodSepWUrl = URL.createObjectURL(new Blob([code], {type: 'application/javascript'}));
-        wodSepWorker = new Worker(wodSepWUrl);
-        wodSepWorker.onmessage = wodOnSepWorkerResult;
-    } catch(_) {
-        wodTerminateSepWorker();
-    }
-}
 function wodPassiveDisplacementAllowed(unit,x,y) {
     if(!wodSamplePosOnWalkableTerrain(unit,x,y))return false;
     if(wodIsNavalUnit(unit)||unit.type==='convoy')return true;
@@ -268,47 +159,6 @@ function wodPassiveDisplacementAllowed(unit,x,y) {
     // A shove off a bridge must not turn a withdrawal into a swim.
     if(wodUnitOnBridgeDeck(unit)&&isWaterHex(next))return false;
     return true;
-}
-function wodApplySepWorkerResult(d) {
-    let idx = d.idx,
-        xs = d.xs,
-        ys = d.ys;
-    // Identity guard: results are index-based and computed a frame or two ago. If a unit
-    // died (splice shifts indices) or a new match replaced the entity list, blind index
-    // application teleports the wrong units (this once flung fresh spawns into the ocean).
-    let pend = gameData._wodSepPending;
-    let uids = pend && pend.gen === d.gen ? pend.uids : null;
-    gameData._wodSepPending = null;
-    if(!uids) return;
-    let sx = pend.sx, sy = pend.sy;
-    let maxPush = (gameData.hexRadius || 20) * 0.9;
-    let maxPush2 = maxPush * maxPush;
-    for(let j = 0, jl = idx.length; j < jl; j++) {
-        let u = gameData.entities[idx[j]];
-        if(!u || u.hp <= 0 || u.uid !== uids[j]) continue;
-        if(wodUnitNearNarrowLandLane(u))continue;
-        // Apply the worker's separation as a RELATIVE push from the position we sent it,
-        // not an absolute snap — units kept simulating while the worker ran, and snapping
-        // back to a stale absolute position caused a visible pop/stutter during movement.
-        let ddx = xs[j] - sx[j], ddy = ys[j] - sy[j];
-        if(ddx === 0 && ddy === 0) continue;
-        let m2 = ddx * ddx + ddy * ddy;
-        if(m2 > maxPush2) {
-            let m = Math.sqrt(m2);
-            ddx = (ddx / m) * maxPush;
-            ddy = (ddy / m) * maxPush;
-        }
-        // Marching units still separate (lighter push) so player/AI columns cannot stack.
-        let sepScale = (u.target && !u.retreating) ? 0.28 : 0.55;
-        if(u.target && !u.retreating && wodMpIsHumanOwner(u.owner)) sepScale = 0.32;
-        else if(u.target && (u._wodAiFriendBlockT || 0) > 3) sepScale = 0.24;
-        let snx = u.x + ddx * sepScale, sny = u.y + ddy * sepScale;
-        // Terrain-validated: separation must not push units onto mountains/water.
-        if(wodPassiveDisplacementAllowed(u, snx, sny)) {
-            u.x = snx;
-            u.y = sny;
-        }
-    }
 }
 function wodRunUnitSeparationSync(sepPad,cellSize) {
     const units=gameData.entities,cs=cellSize||96;
@@ -359,9 +209,8 @@ function wodPfChargeMs(ms) {
     wodPfSpentMs += ms;
 }
 function wodRunUnitSeparation(wodSkipSep,sepPad,cellSize) {
-    // The same current-frame constraints apply to every owner. A stale worker
-    // result and the old narrow-lane ghosting both allowed visible stacks.
-    gameData._wodSepApply=null;
+    // The same current-frame constraints apply to every owner (the old worker result and
+    // narrow-lane ghosting both allowed visible stacks).
     wodRunUnitSeparationSync(sepPad,cellSize);
 }
 let gameData = {

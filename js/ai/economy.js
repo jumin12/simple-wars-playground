@@ -41,6 +41,12 @@ function wodAiRecruitPriorities(owner,cities,army,pending,context) {
         marine:0,ship:0,transport:0,supply:0};
     const expedition=wodAiExpeditionDemand(owner,cities,army,pending);
     Object.assign(desired,expedition.desired);
+    // In a war that can only be won across water the army beyond the town guards is marines (wodAiMarineArmy):
+    // infantry would need a ferry seat and a supply ship to reach the fighting, marines swim.
+    const marineArmy=!!expedition.goal&&wodAiMarineArmy(owner,cities);
+    // (and armour, ferried across, wodAiNavalWave: one tank for about three marines)
+    if(marineArmy){desired.light=Math.min(desired.light,guards*2);desired.marine=Math.max(desired.marine,Math.ceil(desiredGround*.5));
+        if(hasFactory&&wodOpsTune(owner).armourLift!==0)desired.heavy=Math.max(desired.heavy,Math.ceil(desired.marine/3));}
     const reinforcements=wodAiForceRequests(owner,cities,army,pending);
     for(const request of reinforcements)desired[request.type]=Math.max(desired[request.type]||0,count(request.type)+request.n);
     const rescue=army.some(u=>u._navalEvacuating),waiting=expedition.firstWaveSlots;
@@ -54,6 +60,8 @@ function wodAiRecruitPriorities(owner,cities,army,pending,context) {
     if(missing.length||lineDeficit>0||ground<Math.max(4,guards*2)&&!(rescue&&hasHarbor))return {types:['light'],desired,missing,atRisk,profile,lineMinimum,lineDeficit,desiredGround};
     // Composition targets select the next useful recruit; they never stop
     // a solvent army from recruiting. Keep an affordable basic fallback.
+    // (at sea the basic recruit is the marine)
+    if(marineArmy&&!choices.includes('marine'))choices.push('marine');
     if(!choices.includes('light'))choices.push('light');
     const specialistCore=profile.id!=='highland'||rough<.25||count('mountaineer')>=guards*2&&ground>=Math.max(12,guards*4);
     return {types:choices,desired,missing,atRisk,profile,desiredGround,lineMinimum,lineDeficit,expedition,reinforcements,needsFactory:!hasFactory&&open>.18&&ground>=Math.max(4,guards*2)&&specialistCore};
@@ -407,29 +415,47 @@ function wodAiCollectBridgeCandidateSites(ownerId) {
 }
 
 /** A crossing must connect landmasses or remove a substantial dry-land detour. */
+// The answer depends only on terrain and bridges (never on who owns the ground), so it is remembered per pair of
+// shores until either changes: the search re-ranks the same sites every few seconds on a river map.
+const wodAiBridgeBenefitMemo={hexes:null,revision:'',values:new Map()};
 function wodAiBridgeTravelBenefit(site,owner) {
-    const a=site?.shoreA,b=site?.shoreB;if(!a||!b||a.owner!==owner||!wodAiWaterSeparatesShores(a,b))return null;
+    const a=site?.shoreA,b=site?.shoreB;if(!a||!b||a.owner!==owner)return null;
+    const memo=wodAiBridgeBenefitMemo,revision=(gameData.landGeometryRevision||0)+'|'+(gameData._wodPfVer||0)+'|'+(gameData.bridges?.length||0);
+    if(memo.hexes!==gameData.hexes||memo.revision!==revision){memo.hexes=gameData.hexes;memo.revision=revision;memo.values=new Map();}
+    const key=getHexKey(a)+'>'+getHexKey(b);
+    if(memo.values.has(key))return memo.values.get(key);
+    const result=wodAiBridgeTravelBenefitSearch(a,b,owner);
+    if(memo.values.size>=4096)memo.values.clear();
+    memo.values.set(key,result);return result;
+}
+function wodAiBridgeTravelBenefitSearch(a,b,owner) {
+    if(!wodAiWaterSeparatesShores(a,b))return null;
     const unit={type:'light',owner},sp=(gameData.hexRadius||20)*1.35;
     const region=wodTransportLandingRegion(unit,a);if(!region)return null;
     const span=Math.hypot(a.x-b.x,a.y-b.y)/sp;
     if(!region.has(getHexKey(b)))return {island:true,saved:Infinity};
     // Bounded Dijkstra proves whether simply walking along this coast is cheaper.
     // If no route fits the maximum useful detour, the crossing has a real purpose.
-    const limit=Math.max(span*2.6,span+8),dist=new Map([[getHexKey(a),0]]),open=[{h:a,cost:0}];
+    // (A binary heap ordered by cost, then by when the entry was added: the same order in which the earlier
+    // scan-and-splice list handed them out, so the same cells are visited within the same budget.)
+    const limit=Math.max(span*2.6,span+8),dist=new Map([[getHexKey(a),0]]),heap=[];let seq=0;
+    const before=(x,y)=>x.cost<y.cost||x.cost===y.cost&&x.seq<y.seq;
+    const push=row=>{heap.push(row);let i=heap.length-1;while(i){const p=(i-1)>>1;if(!before(row,heap[p]))break;heap[i]=heap[p];i=p;}heap[i]=row;};
+    const pop=()=>{const top=heap[0],last=heap.pop();if(heap.length){let i=0;for(;;){let c=i*2+1;if(c>=heap.length)break;if(c+1<heap.length&&before(heap[c+1],heap[c]))c++;if(!before(heap[c],last))break;heap[i]=heap[c];i=c;}heap[i]=last;}return top;};
+    push({h:a,cost:0,seq:seq++});
     let visited=0;
-    while(open.length&&visited++<1800){
-        let best=0;for(let i=1;i<open.length;i++)if(open[i].cost<open[best].cost)best=i;
-        const row=open.splice(best,1)[0],h=row.h;if(row.cost!==dist.get(getHexKey(h)))continue;
+    while(heap.length&&visited++<1800){
+        const row=pop(),h=row.h;if(row.cost!==dist.get(getHexKey(h)))continue;
         if(h===b)return null; // The existing coast/bridge route is already convenient.
         for(const n of [...getNeighborHexes(h),...wodBridgeLinkedHexes(h)]){
             if(!region.has(getHexKey(n))||!wodCanStepBetweenHexes(unit,h,n,true))continue;
             const cost=row.cost+Math.hypot(n.x-h.x,n.y-h.y)/sp,key=getHexKey(n);
             if(cost>limit||cost>=(dist.get(key)??Infinity))continue;
-            dist.set(key,cost);open.push({h:n,cost});
+            dist.set(key,cost);push({h:n,cost,seq:seq++});
         }
     }
     // A budget stop is uncertainty, never permission to waste resources.
-    return open.length?null:{island:false,saved:limit-span};
+    return heap.length?null:{island:false,saved:limit-span};
 }
 
 function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
@@ -590,6 +616,7 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     const unexploredWater=()=>{if(!(plan.waterScanAt>clock-10)){plan.waterScanAt=clock;const ex=wodFogFactionIntel(owner).explored;plan.unexploredWater=gameData.hexList.some(h=>isWaterHex(h)&&!ex.has(getHexKey(h)));}return plan.unexploredWater;};
     let seaFront = coast.length > 0 && (wodFogActive()&&unexploredWater()||army.some(u=>u._needsTransport)||enemyShips || wodAiKnownCities(owner).some(c => wodIsHostileOwner(c.owner,owner) && cityHasWaterNeighbor(c)));
     const islandDemand=wodAiIslandDemand(owner,cities,army),ground=army.filter(isLandArmyUnit).length;
+    plan.islandDemand=islandDemand; // (enemy towns to win across water: wodOpsFrontTowns, js/ai/field-command.js)
     const navalGroundMin=Math.max(4,cities.length*2),navalReady=islandDemand&&!needGuards&&ground>=navalGroundMin;
     seaFront||=islandDemand&&coast.length>0;
     let total = army.length + recruits.length;
@@ -602,15 +629,31 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     pending=(gameData.constructionJobs||[]).filter(j=>j.owner===owner);
     free=free.filter(c=>!wodCityProductionJob(c));
     wodAiProcurementReserve(owner,cities,army,recruits,initialDemand,plan,income-upkeep-committedUpkeep);
+    // A war that has to cross water (troops waiting for a boat, or targets on another landmass): its harbour and
+    // then the ferries, supply ships and escorts it lacks are paid for before more infantry. The field command,
+    // which buys the land troops, keeps this money too (wodAiCanSpendOutsideReserve). Without it the land buyer
+    // spent every dollar on infantry, no harbour was ever built and water maps never ended.
+    plan.navalReservation=null;
+    if(wodOpsTune(owner).navalFund!==0&&islandDemand&&coast.length&&ground>=navalGroundMin){
+        if(!coast.some(c=>c.hasHarbor))plan.navalReservation={type:'harbor',money:WOD_PRICE_HARBOR+WOD_PRICE_LIGHT*2,manpower:0};
+        else{
+            const d=initialDemand.desired,next=['transport','supply','ship'].find(t=>(d[t]||0)>count(t));
+            if(next){const c=getUnitCost(next);plan.navalReservation={type:next,money:c.money,manpower:c.manpower};}
+        }
+    }
     const unlockFactory=(initialDemand.needsFactory||initialDemand.expedition?.needFactory)&&!pending.some(j=>j.mode==='factory');
     const unlockHarbor=navalReady&&!coast.some(c=>c.hasHarbor);
+    // On a contested island every town has the enemy nearby; a harbour is still built in a coastal town that is
+    // not under siege (the crossing is how that front is won).
+    const harborTowns=unlockHarbor&&wodOpsTune(owner).navalFund!==0?free.filter(c=>coast.includes(c)&&!isCitySiegeBlockedForProduction(c)):[];
     const economyRescue=income-upkeep-committedUpkeep<3||mpShort;
     const farmRescue=manpower()<getUnitCost(plan.reservation?.type||'light').manpower&&cities.some(c=>!c.hasFarm)&&cash()>=WOD_PRICE_FARM+WOD_PRICE_LIGHT*2;
     const reinforcementTowns=new Set((initialDemand.reinforcements||[]).filter(r=>canAffordUnit(owner,r.type)&&getUnitUpkeep({type:r.type})<=income-upkeep-committedUpkeep).map(r=>r.source));
     const safeInvestmentTowns=free.filter(c=>!reinforcementTowns.has(c.id)&&!wodAiThreats(owner,false).some(u=>Math.hypot(u.x-c.x,u.y-c.y)<(gameData.hexRadius||20)*10));
     // Keep a recruitment town free when investing; one-town owners invest after their current recruit arrives.
     const navalReserve=initialDemand.expedition?.preferred[0]==='ship'&&count('ship')<1;
-    let canInvest = (!opening.incomplete||opening.emergency&&unlockHarbor) && (!plan.hospitalRequest||farmRescue) && (!plan.reservation||farmRescue||unlockHarbor||unlockFactory||economyRescue&&cash()>getUnitCost(plan.reservation.type).money+WOD_PRICE_FARM+WOD_PRICE_LIGHT*2) && safeInvestmentTowns.length>0 && (!navalReserve||farmRescue) && (!needGuards||farmRescue) && (army.length>=10||navalReady||unlockFactory||economyRescue&&army.length>=4) && clock-plan.lastBuilding >= (farmRescue?12:unlockHarbor?15:65) &&
+    const harborFirst=harborTowns.length>0;
+    let canInvest = (!opening.incomplete||opening.emergency&&unlockHarbor) && (!plan.hospitalRequest||farmRescue||harborFirst) && (!plan.reservation||farmRescue||unlockHarbor||unlockFactory||economyRescue&&cash()>getUnitCost(plan.reservation.type).money+WOD_PRICE_FARM+WOD_PRICE_LIGHT*2) && (safeInvestmentTowns.length>0||harborFirst) && (!navalReserve||farmRescue||harborFirst) && (!needGuards||farmRescue) && (army.length>=10||navalReady||unlockFactory||economyRescue&&army.length>=4) && clock-plan.lastBuilding >= (farmRescue?12:unlockHarbor?15:65) &&
         !pending.some(j => !['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].includes(j.mode)) &&
         free.length >= (farmRescue||unlockHarbor?1:Math.min(2,cities.length)) && cash() >= (unlockHarbor?WOD_PRICE_HARBOR+WOD_PRICE_LIGHT*2:farmRescue?WOD_PRICE_FARM+WOD_PRICE_LIGHT*2:WOD_PRICE_FACTORY+WOD_PRICE_LIGHT*3);
     if(canInvest) {
@@ -629,7 +672,9 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
         // factory, one building at a time and only in towns out of the enemy's reach.
         else if(develop&&farmless)mode='farm';
         else if(develop&&safeInvestmentTowns.some(c=>!c.hasFactory)&&income-upkeep>=6)mode='factory';
-        let site = mode && safeInvestmentTowns.slice().reverse().find(c => cityEligibleForBuildPlacementForOwner(c,mode,owner)&&(mode!=='harbor'||wodAiHarborUseful(c,owner)));
+        // (the search runs from the end of the list: safe towns are tried first, then the other coastal ones)
+        const towns=mode==='harbor'&&harborFirst?[...harborTowns.filter(c=>!safeInvestmentTowns.includes(c)),...safeInvestmentTowns]:safeInvestmentTowns;
+        let site = mode && towns.slice().reverse().find(c => cityEligibleForBuildPlacementForOwner(c,mode,owner)&&(mode!=='harbor'||wodAiHarborUseful(c,owner)));
         if(site && wodApplyBuildAtCityForOwner(site,mode,owner)) {
             wodAiRecord(owner,'investment',{city:site.id,type:mode,reason:unlockFactory&&mode==='factory'?'unlock-combined-arms':'economy-or-access'});
             plan.lastBuilding=clock; free=free.filter(c=>c!==site);
@@ -651,8 +696,11 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
         types=types.filter(t=>wodAiCanSpendOutsideReserve(owner,t,plan));
         // In a land war the field command is the one buyer of land troops (wodOpsWarEconomy); this buyer
         // keeps the ships, ferries and marines.
+        const landOnly=landByOps&&types.length>0;
         if(landByOps)types=types.filter(t=>!WOD_AI_LAND_RECRUITS.includes(t));
-        if(!types.length){plan.savingFor=reserved||(plan.hospitalRequest?'hospital':plan.savingFor);plan.idleReason=plan.savingFor?'saving-'+plan.savingFor:'upkeep-unaffordable';continue;}
+        // (with only land troops wanted and the field command buying them, nothing is waiting: say so, rather than
+        // report upkeep, which made the lab's production-wait figures read as an upkeep limit)
+        if(!types.length){plan.savingFor=reserved||(plan.hospitalRequest?'hospital':plan.savingFor);plan.idleReason=plan.savingFor?'saving-'+plan.savingFor:landOnly?'field-command-buys-land':'upkeep-unaffordable';continue;}
         let wanted=types[0];
         plan.desired=procurement.desired;plan.commander=procurement.profile.id;
         if(wanted&&!canAffordUnit(owner,wanted)){
@@ -690,7 +738,9 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     }
     // Fortify a threatened corridor only after funding the army; never stack auras.
     // (a search that found no site waits 20 s before the next whole-map search)
-    if(!plan.savingFor && !needGuards && army.length >= 10 && clock-plan.lastFort >= 90 && clock-plan.lastBuilding >= 30 &&
+    // (a fortifying commander, the defensive one, builds forts twice as often)
+    const fortEvery=90/(wodOpsTune(owner).fortBias??(wodAiCommander(owner).forts||1));
+    if(!plan.savingFor && !needGuards && army.length >= 10 && clock-plan.lastFort >= fortEvery && clock-plan.lastBuilding >= 30 &&
         !(plan.fortMissAt>clock-20) &&
         cash() >= WOD_PRICE_FORT+WOD_PRICE_LIGHT*4 && manpower() >= getUnitCost('light').manpower && income-upkeep > 4){
         if(wodAiTryFortForOwner(owner,ownerKey)) { plan.lastFort=clock; plan.lastBuilding=clock; }
@@ -891,11 +941,19 @@ function wodAiProcurementReserve(owner,cities,army,pending,demand,plan,spareUpke
     return reservation;
 }
 
-function wodAiCanSpendOutsideReserve(owner,type,plan) {
+// (seaSavings false: the money put by for the crossing, navalReservation, and for a ship, ferry or marine the economy is
+// saving for, does not hold this purchase back; the field command's troops in a land war, wodOpsWarEconomy)
+function wodAiCanSpendOutsideReserve(owner,type,plan,seaSavings=true) {
     const cost=getUnitCost(type);
+    // the money and manpower put by for the harbour and ferries of a war across water (see navalReservation)
+    // (while it is the harbour being saved for, nothing else spends that money, marines included; afterwards ships
+    // and marines may be bought from it)
+    const naval=seaSavings?plan.navalReservation:null;
+    if(naval&&type!==naval.type&&(naval.type==='harbor'||!wodIsNavalType(type)&&type!=='marine')&&
+        (wodPlayerTreasury(owner)-cost.money<naval.money||naval.manpower&&wodPlayerMpPool(owner)-cost.manpower<naval.manpower))return false;
     if(plan.economyReservation&&wodPlayerTreasury(owner)-cost.money<plan.economyReservation.money)return false;
     if(plan.hospitalRequest&&!plan.reservation&&wodPlayerTreasury(owner)-cost.money<WOD_PRICE_HOSPITAL+WOD_PRICE_LIGHT)return false;
-    const reserve=plan.reservation;if(!reserve||reserve.type===type)return true;
+    const reserve=plan.reservation;if(!reserve||reserve.type===type||!seaSavings&&(wodIsNavalType(reserve.type)||reserve.type==='marine'))return true;
     const protectedCost=getUnitCost(reserve.type);
     return wodPlayerTreasury(owner)-cost.money>=protectedCost.money&&wodPlayerMpPool(owner)-cost.manpower>=protectedCost.manpower;
 }

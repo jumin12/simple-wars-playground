@@ -348,16 +348,6 @@ function wodDrainAiStratFormationAndUnits() {
 }
 
 function wodBuildAiStratTroopPow() {
-    let merged = gameData._wodWorkerTroopMerged;
-    if(merged) {
-        gameData._aiStratPowPlayer = merged[1] || 0;
-        gameData._aiStratPowByOwner = {};
-        for(let o = 2; o < 16; o++) {
-            if(merged[o] > 0) gameData._aiStratPowByOwner[o] = merged[o];
-        }
-        gameData._wodWorkerTroopMerged = null;
-        return;
-    }
     if(gameData._aiStratPowCacheTick != null && (gameData._wodSimTick | 0) - gameData._aiStratPowCacheTick < 12)
         return;
     let p = 0;
@@ -439,26 +429,13 @@ function wodAiCommander(owner) {
         ratio:base.ratio+variance*.1,land:Math.max(.15,Math.min(.85,base.land+variance*.18))};
 }
 
-// The commanders of a new match's computer factions: the one picked in setup for a seat ({owner: id}),
-// otherwise one is drawn. Called once the map is made, before the first AI step.
-function wodAiAssignCommanders(choices) {
+// The commanders of a new match's computer factions, drawn at random when the map is made (before the first AI
+// step) and kept secret from the players. The simulation lab sets them itself.
+function wodAiAssignCommanders() {
     const owners=new Set();
     for(const c of gameData.cities)if(c.owner>0)owners.add(c.owner);
     for(const u of gameData.entities)if(u.owner>0&&u.hp>0)owners.add(u.owner);
-    const profiles=gameData.aiCommanderProfiles||(gameData.aiCommanderProfiles={});
-    for(const o of owners){
-        if(wodMpIsHumanOwner(o))continue;
-        const want=choices&&choices[o];
-        if(WOD_AI_COMMANDERS[want])profiles[o]={id:want,seed:Math.floor(Math.random()*0x7fffffff)};
-        else wodAiCommander(o);
-    }
-}
-
-// What the player may know of a computer faction's commander (null before one is assigned). Read-only: in a
-// multiplayer client the profiles come from the host.
-function wodAiCommanderInfo(owner) {
-    const record=gameData.aiCommanderProfiles?.[owner],id=typeof record==='string'?record:record?.id;
-    return WOD_AI_COMMANDERS[id]?{id,...WOD_AI_COMMANDERS[id]}:null;
+    for(const o of owners)if(!wodMpIsHumanOwner(o))wodAiCommander(o);
 }
 
 function wodAiObjectivePreference(owner,hex) {

@@ -196,12 +196,15 @@ function wodOpsCutPlan(group,sources,foes,hr,maxRing=7,explored=null){
 function wodOpsNewState(owner,now){
     // The doctrine is the commander's (js/core.js WOD_AI_COMMANDERS): one personality per faction, not two drawn
     // apart. The numbers still vary a little from match to match.
-    const named=WOD_OPS_DOCTRINES.find(d=>d.name===wodAiCommander(owner).doctrine);
+    const commander=wodAiCommander(owner),named=WOD_OPS_DOCTRINES.find(d=>d.name===commander.doctrine);
     const base=named||WOD_OPS_DOCTRINES[Math.floor(Math.random()*WOD_OPS_DOCTRINES.length)],j=()=>.9+Math.random()*.2;
-    const doctrine={name:base.name,ratio:base.ratio*(.96+Math.random()*.08),sweep:base.sweep*j(),raid:base.raid*j(),hunt:base.hunt*j(),
-        patience:base.patience*j(),side:Math.random()<.5?1:-1,seed:Math.floor(Math.random()*1e9)};
+    // A commander's aggression adjusts its doctrine: a smaller edge before attacking, less patience before it
+    // accepts thinner odds, a lower guess at the help an enemy town gets (the balanced commander).
+    const adj=wodOpsTune(owner).noAggression?{}:commander.aggression||{};
+    const doctrine={name:base.name,ratio:(base.ratio+(adj.edge||0))*(.96+Math.random()*.08),sweep:base.sweep*j(),raid:base.raid*j(),hunt:base.hunt*j(),
+        patience:base.patience*(adj.patience||1)*j(),side:Math.random()<.5?1:-1,seed:Math.floor(Math.random()*1e9)};
     wodAiRecord(owner,'ops-doctrine',{doctrine:doctrine.name});
-    return {doctrine,reliefK:{blitz:.5,raider:.6,hunter:.7,methodical:.85}[base.name]||.7,born:now,lastPush:now,ts:{},strikes:[],garrison:{},sweep:{},failed:{},cuts:[],counts:{launch:0,raid:0,recall:0,cut:0,pocket:0,taken:0,flank:0,bait:0,ambush:0}};
+    return {doctrine,reliefK:adj.relief??({blitz:.5,raider:.6,hunter:.7,methodical:.85}[base.name]||.7),born:now,lastPush:now,ts:{},strikes:[],garrison:{},sweep:{},failed:{},cuts:[],counts:{launch:0,raid:0,recall:0,cut:0,pocket:0,taken:0,flank:0,bait:0,ambush:0}};
 }
 
 // War economy. Manpower, not money, limits an army here: every point of damage costs manpower to heal, and a
@@ -232,7 +235,11 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
     const pending=(gameData.constructionJobs||[]).filter(j=>j.owner===owner);
     const spare=()=>getOwnerIncome(owner)-getOwnerExpenses(owner)-pending.reduce((n,j)=>n+(isUnit(j.mode)?getUnitUpkeep({type:j.mode}):0),0);
     const cash=()=>gameData.aiMoneyByOwner[owner]||0,mp=()=>gameData.aiManpowerByOwner[owner]||0;
-    const free=myTowns.filter(c=>!wodCityProductionJob(c)&&!isCitySiegeBlockedForProduction(c)&&!isCityEncircledForProduction(c));
+    // Recruits for a land war come only from towns that can walk to an enemy town (WOD_OPS.T.reachBuy=0 turns it off; only
+    // with towns to win across water too): on continents a ferried party that had cleared its beach made the war look as if
+    // it were on foot, and every town at home raised infantry that could never reach it (20-25 regiments idle at home).
+    const reach=wodOpsTune(owner).reachBuy!==0&&plan?.islandDemand?wodOpsFrontTowns(owner,S,myTowns,now):null;
+    const free=myTowns.filter(c=>(!reach||reach.has(c.id))&&!wodCityProductionJob(c)&&!isCitySiegeBlockedForProduction(c)&&!isCityEncircledForProduction(c));
     let wounded=0;for(const u of units)if(u.hp>0&&u.hp<u.maxHp*.9&&!wodIsNavalUnit(u))wounded+=(1-u.hp/u.maxHp)*(u.maxManpower||1000);
     const heavy=getUnitCost('heavy'),light=getUnitCost('light');
     // An easy computer raises one unit at a time, with a pause between them (WOD_AI_DIFFICULTIES.easy.recruitGap).
@@ -247,14 +254,24 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
         }
         return;
     }
+    // In a war that has to cross water the economy (js/ai/economy.js) buys: harbours, ferries, supply ships,
+    // escorts and marines come before more infantry, and it buys infantry too when it is short of it.
+    if(S.seaWar)return;
     // One buyer, one budget: while the field command fights a land war it is the only one recruiting land
     // troops (economy.js leaves them to it), and it keeps the money the economy has put by for buildings,
     // a hospital or ships (wodAiCanSpendOutsideReserve).
     const one=WOD_OPS.T.oneBuyer!==0;
-    const allowed=t=>!one||!plan||wodAiCanSpendOutsideReserve(owner,t,plan);
+    // The land war comes first (WOD_OPS.T.landFirst: 1, the default, money put by for the crossing does not hold its
+    // regiments back; 2, no saving does; 0, every saving does, as before): on a shared island with enemy towns on others
+    // too (archipelago) the money put by for a harbour held every recruit back for minutes while the enemy walked in.
+    // Head to head 1 beat 0 by 62-34 towns on water maps; 2 was level with 1 on water maps and, over 96 matches, on land.
+    const lf=wodOpsTune(owner).landFirst??1;
+    const allowed=t=>!one||!plan||lf>=2||wodAiCanSpendOutsideReserve(owner,t,plan,!lf);
     // armour: only with money that would otherwise lie idle
-    const works=myTowns.filter(c=>c.hasFactory&&!isCitySiegeBlockedForProduction(c)&&!isCityEncircledForProduction(c));
-    if(works.length&&cash()>=heavy.money&&spare()>=getUnitUpkeep({type:'heavy'})+3&&allowed('heavy')){
+    const works=myTowns.filter(c=>(!reach||reach.has(c.id))&&c.hasFactory&&!isCitySiegeBlockedForProduction(c)&&!isCityEncircledForProduction(c));
+    // a fortifying commander that is putting the price of a fort aside (S.wantFort, set by wodOpsRun) keeps it
+    const fortCash=S.wantFort&&S.calm?WOD_PRICE_FORT+1000:0;
+    if(works.length&&cash()-fortCash>=heavy.money&&spare()>=getUnitUpkeep({type:'heavy'})+3&&allowed('heavy')){
         if(mp()<heavy.manpower){S.saveMp=true;return;}
         const site=works.find(c=>!wodCityProductionJob(c)&&cityEligibleForBuildPlacementForOwner(c,'heavy',owner));
         if(site&&wodApplyBuildAtCityForOwner(site,'heavy',owner)){S.recruitAt=now;wodAiRecord(owner,'recruit',{city:site.id,type:'heavy',reason:'war-economy'});return;}
@@ -280,7 +297,7 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
         if(site&&wodApplyBuildAtCityForOwner(site,'motorized',owner)){S.recruitAt=now;wodAiRecord(owner,'recruit',{city:site.id,type:'motorized',reason:'war-economy'});return;}
         if(!one||eta<=25||!free.length){if(mp()<heavy.manpower)S.saveMp=true;return;}
     }
-    const floorCash=S.wantHospital?WOD_PRICE_HOSPITAL:0; // money being put aside for a field hospital is not spent on recruits
+    const floorCash=(S.wantHospital?WOD_PRICE_HOSPITAL:0)+fortCash; // money being put aside for a field hospital or a fort is not spent on recruits
     for(const c of free){
         const type=wantClimbers&&cash()>=climber.money&&mp()>=climber.manpower+Math.min(600,wounded)&&allowed('mountaineer')&&cityEligibleForBuildPlacementForOwner(c,'mountaineer',owner)?'mountaineer':'light';
         const cost=type==='light'?light:climber;
@@ -292,12 +309,29 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
     }
 }
 
+// Our towns on a landmass that also holds an enemy town (refreshed every twelve seconds): where recruits for a land war
+// can walk to it (wodOpsWarEconomy).
+function wodOpsFrontTowns(owner,S,towns,now){
+    const old=S.frontTowns;if(old&&now-old.at<12000&&old.n===towns.length)return old.set;
+    const set=new Set(),enemy=gameData.cities.filter(c=>c.owner>0&&c.owner!==owner&&wodIsHostileOwner(c.owner,owner));
+    for(const t of towns){const r=wodTransportLandingRegion({type:'light',owner},t);if(r&&enemy.some(c=>{const h=getNearestHexToPoint(c.x,c.y);return h&&r.has(getHexKey(h));}))set.add(t.id);}
+    S.frontTowns={at:now,n:towns.length,set};return set;
+}
+
 // True while the field command is this faction's only buyer of land troops: it fights a land war and the
 // opening buildings are done (until then the opening's own rules hold, js/ai/economy.js).
 function wodOpsBuysLand(owner){
     if(!wodOpsActive(owner)||wodOpsTune(owner).oneBuyer===0)return false;
     const S=gameData._aiOps?.hexes===gameData.hexes?gameData._aiOps.by[owner]:null;
-    return !!S&&!!S.econReady&&wodAiOperationTime()-S.landWarAt<8000;
+    return !!S&&!!S.econReady&&!S.seaWar&&wodAiOperationTime()-S.landWarAt<8000;
+}
+
+// True while this faction's war can only be won across water: it knows enemy towns and none can be reached on
+// foot by any of its troops (S.seaWar, set by wodOpsRun).
+function wodOpsSeaWar(owner){
+    if(!wodOpsActive(owner))return false;
+    const S=gameData._aiOps?.hexes===gameData.hexes?gameData._aiOps.by[owner]:null;
+    return !!S?.seaWar;
 }
 
 // Share of rough (hill, mountain) and open (grass, sand) ground along this faction's fronts, refreshed twice a
@@ -411,10 +445,17 @@ function wodOpsRun(owner,units){
         }
         return f.v;
     };
+    const judged=elig.length;
     for(let i=elig.length-1;i>=0;i--)if(!landWar(elig[i])){elig[i]._opsUntil=0;elig.splice(i,1);}
     // The general fights with the main body, but is never a guard, a raider or a scout.
     const general=elig.find(u=>u.isGeneral),fighters=elig.filter(u=>!u.isGeneral);
-    if(!fighters.length&&!landing.length){S.saveMp=false;return;}
+    if(!fighters.length&&!landing.length){
+        S.saveMp=false;
+        // None of our troops can walk to enemy ground: with enemy towns known, the war is at sea (wodOpsSeaWar).
+        // (with no troops to judge by, the last answer stands)
+        if(judged&&!elig.length)S.seaWar=TU.seaWar!==0&&wodAiKnownCities(owner).some(c=>c.owner>0&&c.owner!==owner&&wodIsHostileOwner(c.owner,owner));
+        return;
+    }
     S.landWarAt=now;
     const canReach=(u,p)=>{const h=p.q!=null&&p.r!=null&&!p.uid?p:wodOpsLandHex(p.x,p.y);return !!h&&reachOf(u).has(h.q+','+h.r);};
     const seen=wodAiKnownEntities(owner).filter(u=>u.hp>0&&wodIsHostileOwner(u.owner,owner)&&u.type!=='convoy'&&!u.boardTransportUid);
@@ -428,6 +469,11 @@ function wodOpsRun(owner,units){
     const shipsAt=(P,pad)=>navalFoes.length?navalFoes.filter(s=>Math.hypot(s.x-P.x,s.y-P.y)<(s.range||80)+pad):[];
     const ghosts=wodFogActive()?wodAiThreats(owner,true).filter(u=>u._intelMemory&&!wodIsNavalUnit(u)):[];
     const enemyTowns=wodAiKnownCities(owner).filter(c=>c.owner!==owner&&c.owner>0&&wodIsHostileOwner(c.owner,owner));
+    // A war that can only be won across water: enemy towns are known and none can be reached on foot by any of
+    // our troops. Skirmishes over shared islands go on, but the money belongs to the navy (economy.js buys).
+    // (marines swim, and troops already put ashore are a landing party: neither makes it a war on foot)
+    const walkers=fighters.filter(u=>u.type!=='marine'&&!u._navalLanded);
+    S.seaWar=TU.seaWar!==0&&enemyTowns.length>0&&!enemyTowns.some(c=>walkers.some(u=>canReach(u,c)));
     const claim=(u,role)=>{u._opsUntil=now+6000;u._opsRole=role;u._opsSweep=false;if(u._needsTransport)u._needsTransport=false;if(u._opsFast){u._opsFast=false;if(!u._wodAttackOrder)u._wodAttackApproaching=false;}};
     // Disengaging troops keep three quarters of their pace under fire, as a player's ordered retreat does. (The
     // engine's own retreat state is not used for it: the medical planner would take the unit over.)
@@ -681,8 +727,25 @@ function wodOpsRun(owner,units){
     // fallen they take the land round it until the island is theirs.
     if(landing.length){
         const parties=new Map(),LS=S.landings||(S.landings={});
+        // The town the navy landed them for comes first (WOD_OPS.T.landGoal): each going for the town nearest to
+        // where it stepped ashore split a landing between two towns into two parties, each too weak to go in.
+        // (Only in a war at sea, S.seaWar: on shared islands the nearest town did better.)
+        const navalGoal=TU.landGoal!==0&&S.seaWar?gameData.aiNavalPlans?.[owner]?.goal:null,goalTown=navalGoal&&enemyTowns.find(c=>c.id===navalGoal.id);
+        // (WOD_OPS.T.landKeep=0 turns it off) A party keeps the town it is fighting for while that town is still his and
+        // near: the navy plans each sea apart, and when another sea's plan became the current one a party holding a
+        // street of one town, at three to one, walked thirty cells to a town held by twelve.
+        const keep=S.seaWar&&TU.landKeep!==0;
+        // (shipCover, below: our supply ships and the reach of their supply)
+        const cover=S.seaWar&&TU.shipCover!==0,ships=cover?gameData.entities.filter(s=>s.owner===owner&&s.type==='supply'&&s.hp>0&&!s.retreating):[];
+        const coverR=wodSupplyShipRadiusPx()*.9;
+        const covered=p=>{for(const s of ships)if(Math.abs(s.x-p.x)<coverR&&Math.abs(s.y-p.y)<coverR&&Math.hypot(s.x-p.x,s.y-p.y)<coverR)return true;
+            const h=wodOpsLandHex(p.x,p.y);return !!h&&friendlyCell(h)&&!!wodCurrentSupplyComponent(h,owner).city;};
         for(const u of landing){
-            let town=null,bd=C*45;for(const c of enemyTowns){const d=dist(u,c);if(d<bd&&canReach(u,c)){bd=d;town=c;}}
+            let town=null;
+            if(keep&&u._opsLandTown){const t=enemyTowns.find(c=>c.id===u._opsLandTown);if(t&&dist(u,t)<C*20&&canReach(u,t))town=t;}
+            if(!town)town=goalTown&&dist(u,goalTown)<C*45&&canReach(u,goalTown)?goalTown:null;let bd=C*45;
+            if(!town)for(const c of enemyTowns){const d=dist(u,c);if(d<bd&&canReach(u,c)){bd=d;town=c;}}
+            if(keep)u._opsLandTown=town?town.id:null;
             const k=town?town.id:'land';if(!parties.has(k))parties.set(k,{town,list:[]});parties.get(k).list.push(u);
         }
         const grab=(u,claimed)=>{ // the nearest ground that is not ours yet
@@ -704,21 +767,79 @@ function wodOpsRun(owner,units){
             const around=foes.filter(e=>dist(e,c)<C*7||anyNear(P,e,C*5)),held=new Set(foes.filter(e=>streets.some(h=>Math.abs(e.x-h.x)<C*1.5&&Math.abs(e.y-h.y)<C*1.5)));
             const ratio=wodOpsStrength(P,true)/Math.max(.05,wodOpsStrength(around,true));
             const st=LS[k]||(LS[k]={at:now});
-            if(!st.in&&ratio>=(TU.landIn??.6)){st.in=now;S.counts.landing=(S.counts.landing||0)+1;wodAiRecord(owner,'ops-landing',{city:c.id,troops:P.length,ratio:r1(ratio)});}
-            else if(st.in&&ratio<(TU.landOut??.4))st.in=0;
+            // In a war at sea (WOD_OPS.T.landHold=0 turns it off) a landing party waits on its beach for the next waves until it
+            // outweighs the town (and pulls back off it below .7): going in at .6 against a town held by its whole
+            // army threw marines away two or three at a time, and on continents no town ever fell.
+            const hold=S.seaWar&&TU.landHold!==0,landIn=TU.landIn??(hold?1:.6),landOut=TU.landOut??(hold?.7:.4);
+            // In a war at sea (WOD_OPS.T.wideOdds=0 turns it off) a party goes in only when it also outweighs everything of his
+            // within fifteen cells of the town: weighed against the men round the town alone, parties of two or three went in
+            // while the garrison stood a little way off, and were overrun (a dozen such landings a game on continents).
+            const wide=S.seaWar&&TU.wideOdds!==0&&!st.in?wodOpsStrength(P,true)/Math.max(.05,wodOpsStrength(foes.filter(e=>dist(e,c)<C*15),true)):Infinity;
+            if(!st.in&&ratio>=landIn&&wide>=landIn){st.in=now;S.counts.landing=(S.counts.landing||0)+1;wodAiRecord(owner,'ops-landing',{city:c.id,troops:P.length,ratio:r1(ratio)});}
+            else if(st.in&&ratio<landOut)st.in=0;
+            // (a party that waits closes up, so the next wave lands beside one body of troops)
+            const mid=TU.landGoal!==0&&S.seaWar&&P.length>1?wodOpsLandHex(wodOpsCentroid(P).x,wodOpsCentroid(P).y):null;
+            // In a war at sea (WOD_OPS.T.landStorm=0 turns it off) a party that has the odds closes in and fires on one defender at a
+            // time, the nearest and most worn (not one already running: chasing it led the party out of the town).
+            // Told the town's defenders were dug in, each man looked for ground to shoot from, most stood out of
+            // range, and the few firing could not outshoot men healing in their own town.
+            let focus=null;
+            if(S.seaWar&&TU.landStorm!==0&&st.in&&around.length){const pc=wodOpsCentroid(P);let bs=Infinity;for(const e of around){if(e.retreating||e.moraleBroken)continue;const s=dist(e,pc)/C+(e.hp/(e.maxHp||100))*3;if(s<bs){bs=s;focus=e;}}}
+            // In a war at sea (WOD_OPS.T.landStreets=0 turns it off) the streets come before the field. When the garrison marches
+            // out to meet a landing, the few men left in the town are what stands between the party and its cover: it goes
+            // for the streets, and the men who came out must then take the town back from it. (A party that met them
+            // fifteen cells out fought there for minutes, unhealed, while one regiment held the town.) A party that waits
+            // for the next wave waits on the navy's beach, nearer the town and where that wave will land, if it is clear.
+            const streetsFirst=S.seaWar&&TU.landStreets!==0,pStr=streetsFirst?wodOpsStrength(P,true):0;
+            const streetsOpen=streetsFirst&&todo.length>0&&pStr>=Math.max(.05,wodOpsStrength([...held],true))*2.5&&pStr>=wodOpsStrength(around,true)*.7&&dist(wodOpsCentroid(P),c)>C*5;
+            const beach=streetsFirst?gameData.aiNavalPlans?.[owner]?.landing:null;
+            const wait=beach&&gameData.aiNavalPlans[owner].goal?.id===c.id&&mid&&dist(beach,c)<dist(mid,c)-C*2&&!anyNear(around,beach,C*3.6)&&P.some(u=>canReach(u,beach))?beach:mid;
+            // In a war at sea (WOD_OPS.T.lastStreet=0 turns it off) the last streets are walked under fire. A town falls the moment
+            // every street is ours and none of his men stands in one; streets within his reach were left "to fall when he
+            // does", and a party holding seventeen of eighteen streets, with nobody of his inside, fought round the last
+            // one for half a minute until the defenders took the town back. When no defender stands in the streets and
+            // only a few are left, the nearest man goes onto each of them.
+            const finishers=new Map();
+            if(S.seaWar&&TU.lastStreet!==0&&(st.in||streetsOpen)&&todo.length&&todo.length<=Math.max(2,Math.ceil(streets.length*.25))){
+                const keys=new Set(streets.map(getHexKey));
+                if(!foes.some(e=>keys.has(getHexKey(getNearestHexToPoint(e.x,e.y)))))for(const h of todo){
+                    let best=null,bd=C*9;for(const u of P){if(finishers.has(u)||!canUnitEnterHex(u,h))continue;const d=dist(h,u);if(d<bd){bd=d;best=u;}}
+                    if(best){finishers.set(best,h);claimed.add(h);}
+                }
+            }
+            // In a war at sea (WOD_OPS.T.shipCover=0 turns it off) infantry and tanks ashore keep inside a supply ship's cover: ground
+            // off it starves them within seconds (marines draw supply from the water). A street or a waiting place beyond
+            // every ship's reach is approached to the edge of the nearest ship's cover instead, and a defender out there
+            // is not chased. (Streets that would finish the town are walked regardless: the town supplies them.)
+            const go=(u,x,y)=>{
+                if(u.type==='marine'||!cover||covered({x,y})){wodOpsMove(u,x,y,false);return;}
+                // (only a ship covering this man now, or about to: one in a home port is not the beach's cover)
+                let s=null,sd=Infinity;for(const v of ships){if(Math.hypot(v.x-u.x,v.y-u.y)>coverR*1.3)continue;const d=Math.hypot(v.x-x,v.y-y);if(d<sd){sd=d;s=v;}}
+                if(!s){wodOpsMove(u,x,y,false);return;}
+                const k=coverR*.92/Math.max(1,sd),h=wodOpsLandHex(s.x+(x-s.x)*k,s.y+(y-s.y)*k);
+                if(h&&canUnitEnterHex(u,h))wodOpsMove(u,h.x,h.y,false);else wodOpsHalt(u);
+            };
             P.forEach((u,i)=>{
                 claim(u,'landing');
+                const fin=finishers.get(u);if(fin){u._opsStand=now+5000;wodOpsMove(u,fin.x,fin.y,false);return;}
                 const local=near(around,u,C*6);
-                if(!st.in){ // hopeless for now: keep out of his reach and wait for the next wave
+                if(!st.in&&!streetsOpen){ // hopeless for now: keep out of his reach and wait for the next wave
                     const e=local.find(e=>dist(e,u)<C*3.6);
-                    if(e){const d=dist(e,u)||1;fallBack(u,{x:u.x+(u.x-e.x)/d*C*5,y:u.y+(u.y-e.y)/d*C*5});}else wodOpsHalt(u);
+                    if(e){const d=dist(e,u)||1;fallBack(u,{x:u.x+(u.x-e.x)/d*C*5,y:u.y+(u.y-e.y)/d*C*5});}
+                    else if(wait&&dist(u,wait)>C*3&&canReach(u,wait)&&!anyNear(around,wait,C*3.6))go(u,wait.x,wait.y);
+                    else wodOpsHalt(u);
                     return;
                 }
                 u._opsStand=now+5000; // the wounded stay in the line
                 let t=null,bd=C*4;for(const h of todo){if(claimed.has(h)||!canUnitEnterHex(u,h)||anyNear(around,h,C*2.2))continue;const d=dist(h,u);if(d<bd){bd=d;t=h;}}
-                if(t&&!anyNear(around,u,C*2.4)){claimed.add(t);wodOpsMove(u,t.x,t.y,false);return;}
+                if(t&&!anyNear(around,u,C*2.4)){claimed.add(t);go(u,t.x,t.y);return;}
+                if(streetsOpen&&!anyNear(around,u,C*2.4)){ // out of contact: on to the nearest street not yet ours
+                    let h=null,hd=Infinity;for(const x of todo){if(claimed.has(x)||!canUnitEnterHex(u,x))continue;const d=dist(x,u);if(d<hd){hd=d;h=x;}}
+                    if(h){claimed.add(h);go(u,h.x,h.y);return;}
+                }
+                if(focus&&dist(focus,u)<C*8&&(u.type==='marine'||!cover||covered(focus))){chase(u,focus);return;}
                 if(local.length){let foe=null,fd=Infinity;for(const e of local){const d=dist(e,u);if(d<fd){fd=d;foe=e;}}engage(u,local,i,held.has(foe));return;}
-                if(todo.length){let h=null,hd=Infinity;for(const x of todo){if(claimed.has(x))continue;const d=dist(x,u);if(d<hd){hd=d;h=x;}}h=h||todo[0];claimed.add(h);wodOpsMove(u,h.x,h.y,false);return;}
+                if(todo.length){let h=null,hd=Infinity;for(const x of todo){if(claimed.has(x))continue;const d=dist(x,u);if(d<hd){hd=d;h=x;}}h=h||todo[0];claimed.add(h);go(u,h.x,h.y);return;}
                 if(!grab(u,claimed))wodOpsHalt(u);
             });
         }
@@ -1366,22 +1487,41 @@ function wodOpsRun(owner,units){
     // Forts. Troops inside a fort's ring take a fifth less damage and an attacker moves slowly through it. One
     // goes up where the army waits in front of the enemy (that is where it will be attacked), and one on the
     // threatened side of any town of ours that has an enemy army in front of it.
-    if(!TU.noForts&&S.econReady&&now>=(S.fortAt||0)&&wodPlayerTreasury(owner)>=WOD_PRICE_FORT+(S.wantHospital?WOD_PRICE_HOSPITAL:0)+1000){
-        S.fortAt=now+15000;
+    // A fortifying commander (WOD_AI_COMMANDERS forts, the defensive one) looks twice as often, keeps twice as many,
+    // fortifies a town at the first sign of an enemy, and also covers each town's approach from the nearest enemy
+    // town (however far off) and the ground its army waits on, whether or not the enemy is there yet. In quiet
+    // spells (S.calm: no town in danger, the army a match for the enemy's) it also puts the price of a fort aside
+    // (S.wantFort: the war economy above keeps it unspent) instead of waiting for money that its own recruiting
+    // would always spend first. (Saving at any time starved its army: it lost far more ground than it held.)
+    const fortBias=TU.fortBias??(wodAiCommander(owner).forts||1);
+    const fortFloor=WOD_PRICE_FORT+(S.wantHospital?WOD_PRICE_HOSPITAL:0)+1000;
+    if(!TU.noForts&&S.econReady&&now>=(S.fortAt||0)){
         const forts=(gameData.forts||[]).filter(x=>x.owner===owner).concat((gameData.constructionJobs||[]).filter(x=>x.owner===owner&&x.mode==='fort'));
-        if(forts.length<myTowns.length+1){
-            const sites=[];
-            for(const c of myTowns)if(danger.get(c)>=2){const e=near(foes,c,C*11)[0];if(e){const d=dist(e,c)||1;sites.push({x:c.x+(e.x-c.x)/d*C*2.5,y:c.y+(e.y-c.y)/d*C*2.5});}}
-            if(post&&bold&&now-post.at>30000&&near(rest,post,C*5).length>=3)sites.push(post);
-            for(const p of sites){
-                if(forts.some(x=>dist(x,p)<C*6))continue;
-                let site=null,bs=Infinity;
-                for(let dq=-2;dq<=2;dq++)for(let dr=-2;dr<=2;dr++){
-                    const h=wodOpsLandHex(p.x+dq*C,p.y+dr*C);
-                    if(!h||h.owner!==owner||wodFortPlacementError(h,owner)||anyNear(foes,h,C*4)||!wodCurrentSupplyComponent(h,owner).city)continue;
-                    const sc=Math.abs(dq)+Math.abs(dr);if(sc<bs){bs=sc;site=h;}
+        const room=forts.length<(myTowns.length+1)*fortBias;
+        if(wodPlayerTreasury(owner)<fortFloor)S.wantFort=fortBias>1&&room&&!!S.calm&&TU.fortSave!==0&&!(S.fortNoSite>now);
+        else{
+            S.fortAt=now+15000/fortBias;S.wantFort=false;
+            if(room){
+                const sites=[];
+                for(const c of myTowns)if(danger.get(c)>=(fortBias>1?1:2)){const e=near(foes,c,C*11)[0];if(e){const d=dist(e,c)||1;sites.push({x:c.x+(e.x-c.x)/d*C*2.5,y:c.y+(e.y-c.y)/d*C*2.5});}}
+                if(post&&bold&&now-post.at>30000&&near(rest,post,C*5).length>=3)sites.push(post);
+                if(fortBias>1){
+                    for(const c of myTowns){let t=null,bd=Infinity;for(const e of enemyTowns){const d=dist(e,c);if(d<bd){bd=d;t=e;}}if(t){const d=dist(t,c)||1;sites.push({x:c.x+(t.x-c.x)/d*C*3,y:c.y+(t.y-c.y)/d*C*3});}}
+                    if(post&&now-post.at>20000&&near(rest,post,C*5).length>=2)sites.push(post);
                 }
-                if(site&&placeFortAtHex(site,owner,{suppressNotes:true})){S.counts.fort=(S.counts.fort||0)+1;wodAiRecord(owner,'ops-fort',{site:getHexKey(site)});break;}
+                let placed=false;
+                for(const p of sites){
+                    if(forts.some(x=>dist(x,p)<C*6))continue;
+                    let site=null,bs=Infinity;
+                    for(let dq=-2;dq<=2;dq++)for(let dr=-2;dr<=2;dr++){
+                        const h=wodOpsLandHex(p.x+dq*C,p.y+dr*C);
+                        if(!h||h.owner!==owner||wodFortPlacementError(h,owner)||anyNear(foes,h,C*4)||!wodCurrentSupplyComponent(h,owner).city)continue;
+                        const sc=Math.abs(dq)+Math.abs(dr);if(sc<bs){bs=sc;site=h;}
+                    }
+                    if(site&&placeFortAtHex(site,owner,{suppressNotes:true})){placed=true;S.counts.fort=(S.counts.fort||0)+1;wodAiRecord(owner,'ops-fort',{site:getHexKey(site)});break;}
+                }
+                // nowhere to build: stop putting money aside for a minute
+                if(!placed)S.fortNoSite=now+60000;
             }
         }
     }

@@ -336,18 +336,21 @@ function wodHdRegionGeometry() {
     const rec={hexes:gameData.hexes,signature,land:wodCellRegionLoops(land),types:new Map([...byType].map(([type,keys])=>[type,wodCellRegionLoops(keys)]))};
     gameData._hdRegionGeometry=rec;return rec;
 }
+// (neighbours are found through the hex index and their cached keys instead of building a "q,r" string for each
+// of the four neighbours of every visible cell; the same cells are filled, in the same order)
 function wodCloseTinyVisionHoles(visible,explored) {
-    const candidates=new Set();
-    for(const key of visible){const h=gameData.hexes[key];if(!h)continue;for(const d of cardinalHexDirections){const k=`${h.q+d.q},${h.r+d.r}`;if(gameData.hexes[k]&&!visible.has(k))candidates.add(k);}}
+    const candidates=new Set(),D=cardinalHexDirections;
+    for(const key of visible){const h=gameData.hexes[key];if(!h)continue;for(const d of D){const n=wodHexAt(h.q+d.q,h.r+d.r);if(!n)continue;const k=getHexKey(n);if(!visible.has(k))candidates.add(k);}}
     const visited=new Set();
     for(const seed of candidates) {
         if(visited.has(seed))continue;
         const component=[seed],seen=new Set(component);let open=false;
         for(let i=0;i<component.length&&!open;i++) {
             const h=gameData.hexes[component[i]];
-            for(const d of cardinalHexDirections) {
-                const k=`${h.q+d.q},${h.r+d.r}`;
-                if(!gameData.hexes[k]){open=true;break;}
+            for(const d of D) {
+                const n=wodHexAt(h.q+d.q,h.r+d.r);
+                if(!n){open=true;break;}
+                const k=getHexKey(n);
                 if(visible.has(k)||seen.has(k))continue;
                 seen.add(k);component.push(k);if(component.length>2){open=true;break;}
             }

@@ -30,7 +30,7 @@ function wodAiRequestMedicalFerry(unit) {
 
 function wodAiPlanMedicalFerries(owner,transports) {
     const hr=gameData.hexRadius||20,now=wodAiOperationTime(),threats=wodAiThreats(owner,false);
-    const supplyRadius=wodFortCombatAuraRadiusPx();
+    const supplyRadius=wodSupplyShipRadiusPx();
     for(const s of gameData.entities.filter(s=>s.owner===owner&&s.type==='supply'&&s._aiMedicalSupplyFor)){
         const patient=gameData.entities.find(u=>u.uid===s._aiMedicalSupplyFor&&u.hp>0&&u._medicalEvacuating);
         if(patient&&!wodCurrentSupplyComponent(getNearestHexToPoint(patient.x,patient.y),owner).city)s._aiMedicalSupplyUntil=now+3000;
@@ -71,7 +71,7 @@ function wodAiPlanMedicalFerries(owner,transports) {
             continue;
         }
         const region=wodTransportLandingRegion({type:'light',owner},here);if(!region)continue;
-        const radius=wodFortCombatAuraRadiusPx(),support=gameData.entities.filter(s=>s.owner===owner&&s.type==='supply'&&s.hp>0&&!s.retreating);
+        const radius=wodSupplyShipRadiusPx(),support=gameData.entities.filter(s=>s.owner===owner&&s.type==='supply'&&s.hp>0&&!s.retreating);
         const shores=[...region].map(k=>gameData.hexes[k]).filter(h=>h&&h.type!=='mountain'&&getNeighborHexes(h).some(wodIsOpenWaterHex)&&
             (u.type==='marine'||wodCurrentSupplyComponent(h,owner).city||support.some(s=>Math.hypot(s.x-h.x,s.y-h.y)<radius*.96)));
         const risk=h=>threats.reduce((n,e)=>n+Math.max(0,(e.range||50)+hr*3-Math.hypot(e.x-h.x,e.y-h.y))**2,0);

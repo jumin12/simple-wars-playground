@@ -61,6 +61,10 @@ function hexEligibleForFortPlacementForOwner(hex, owner) {
 function wodFortCombatAuraRadiusPx() {
     return (gameData.hexRadius || 10) * WOD_FORT_DEFENSE_TILES;
 }
+/** How far a supply ship's supply reaches (twice a fort's aura). */
+function wodSupplyShipRadiusPx() {
+    return wodFortCombatAuraRadiusPx() * WOD_SUPPLY_SHIP_RADIUS_MULT;
+}
 function wodEffectiveFortOwner(ft) {
     if(!ft) return 0;
     let h = wodHexAt(ft.q,ft.r);
@@ -1253,7 +1257,7 @@ function wodOpenBuildingInfo(mode) {
 function wodOpenRecruitInfo(type) {
     if(!['light','motorized','mountaineer','marine','heavy','ship','transport','supply'].includes(type))return;
     const dialog=wodProductionInfoDialog();
-    const unit=wodRecruitUnitSpec(type),cost=getUnitCost(type),role={light:'Flexible infantry for holding ground and towns.',motorized:'Stronger than infantry, faster on open ground; rough ground slows it.',mountaineer:'A light specialist that crosses mountains and excels on hills and mountains.',marine:'Amphibious infantry: no water attrition, but vulnerable afloat and unable to heal in water.',heavy:'Heavy armor for breakthroughs; vulnerable in rough terrain.',ship:'Warship with armor-like toughness. Repairs near friendly towns or hospitals.',transport:'Fragile landing craft carrying one land unit safely across water.',supply:'Fragile support ship supplying landed troops in a fort-sized radius; cannot supply ordinary swimmers.'}[type];
+    const unit=wodRecruitUnitSpec(type),cost=getUnitCost(type),role={light:'Flexible infantry for holding ground and towns.',motorized:'Stronger than infantry, faster on open ground; rough ground slows it.',mountaineer:'A light specialist that crosses mountains and excels on hills and mountains.',marine:'Amphibious infantry: no water attrition, but vulnerable afloat and unable to heal in water.',heavy:'Heavy armor for breakthroughs; vulnerable in rough terrain.',ship:'Warship with armor-like toughness. Repairs near friendly towns or hospitals.',transport:'Fragile landing craft carrying one land unit safely across water.',supply:'Fragile support ship supplying landed troops within twice a fort\'s radius (about six cells); cannot supply ordinary swimmers.'}[type];
     const rows=['grass','sand','forest','hill','mountain','swamp','urban','water'].map(type=>{const h={type},blocked=wodIsNavalUnit(unit)?!isWaterHex(h):type==='mountain'&&!wodCanClimb(unit),probe={...unit,inWater:isWaterHex(h)&&!wodIsNavalUnit(unit),amphibInWater:isWaterHex(h)&&unit.type==='marine'};return '<tr><th>'+terrainLabel(type)+'</th><td>'+(blocked?'Blocked':Math.round(getTerrainAttackModifier(probe,h)*100)+'%')+'</td><td>'+(blocked?'—':Math.round(getTerrainDefenseModifier(probe,h)*100)+'%')+'</td><td>'+(blocked?'—':(getUnitSpeedMultiplier(probe,h)*wodUnitBaseSpeed(probe)/WOD_UNIT_BASE_SPEED).toFixed(2)+'×')+'</td></tr>';}).join('');
     dialog.innerHTML='<header><h3 id="wodRecruitInfoTitle">'+wodEscapeEffectInner(wodProductionLabel(type))+'</h3><button type="button" onclick="this.closest(\'dialog\').close()" aria-label="Close unit information">×</button></header><p>'+role+'</p><p class="recruit-cost">$'+cost.money.toLocaleString()+' · '+formatPeople(cost.manpower)+' manpower · '+WOD_PRODUCTION_SECONDS[type]+'s mobilization</p><div class="info-record-grid">'+wodUnitCombatStatsMarkup(unit,true)+'</div><p>Speed is relative to infantry on open ground. Morale, terrain, combat, enemy forts and a general can change current speed. General command: +5% attack, firing rate, toughness, range and morale capacity/recovery; +10% speed.</p><div class="recruit-terrain"><table><thead><tr><th>Terrain</th><th>Attack</th><th>Damage taken</th><th>Speed</th></tr></thead><tbody>'+rows+'</tbody></table></div><p>HP and manpower recover only at a supplied, safe town or hospital. Morale can recover away from towns when out of combat.</p>';
     if(!dialog.open)dialog.showModal();
@@ -1304,7 +1308,7 @@ function wodSupplyShipForUnit(unit) {
     if(!cache.ships.length)return null;
     const hex=getNearestHexToPoint(unit.x,unit.y);
     if(wodUnitInUnsuppliedWater(unit,hex))return null;
-    const radius=wodFortCombatAuraRadiusPx();
+    const radius=wodSupplyShipRadiusPx();
     return cache.ships.find(s=>s.hp>0&&wodIsFriendlyOwner(s.owner,unit.owner)&&Math.hypot(s.x-unit.x,s.y-unit.y)<=radius)||null;
 }
 function wodDrawSupplyMark(ctx,r) {
@@ -1427,7 +1431,7 @@ function wodOrderUnloadTransport(transport,goal) {
     const region=transport._aiFerryMission?wodTransportLandingRegion(transport.cargo,goal):null;
     const beachhead=region&&gameData.entities.some(u=>u.owner===transport.owner&&u._navalLanded&&region.has(getHexKey(getNearestHexToPoint(u.x,u.y))));
     const pairs=wodTransportShorePairs(transport.cargo,transport,goal||transport,true,!!beachhead);
-    if(beachhead){const covered=p=>gameData.entities.some(s=>s.owner===transport.owner&&s.type==='supply'&&s.hp>0&&!s.retreating&&Math.hypot(s.x-p.land.x,s.y-p.land.y)<wodFortCombatAuraRadiusPx()*.93);
+    if(beachhead){const covered=p=>gameData.entities.some(s=>s.owner===transport.owner&&s.type==='supply'&&s.hp>0&&!s.retreating&&Math.hypot(s.x-p.land.x,s.y-p.land.y)<wodSupplyShipRadiusPx()*.93);
         pairs.sort((a,b)=>Number(!covered(a))-Number(!covered(b))||a.score-b.score);}
     for(const p of pairs) {
         if(!wodNavalDestinationClear(transport,p.water))continue;
@@ -1444,7 +1448,7 @@ function wodOrderUnloadTransport(transport,goal) {
 function wodTryUnloadTransport(t) {
     const cargo=t.cargo,land=gameData.hexes[t.unloadHexKey];if(!cargo||!land)return false;
     if(t._aiFerryMission&&cargo.type!=='marine'&&!wodCurrentSupplyComponent(land,t.owner).city&&
-        !gameData.entities.some(s=>s.owner===t.owner&&s.type==='supply'&&s.hp>0&&!s.retreating&&Math.hypot(s.x-land.x,s.y-land.y)<wodFortCombatAuraRadiusPx()*.93))return false;
+        !gameData.entities.some(s=>s.owner===t.owner&&s.type==='supply'&&s.hp>0&&!s.retreating&&Math.hypot(s.x-land.x,s.y-land.y)<wodSupplyShipRadiusPx()*.93))return false;
     const sp=gameData.hexRadius*1.35,sea=getNearestHexToPoint(t.x,t.y);
     for(const h of [land,...getNeighborHexes(land)]) {
         if(!sea||!cardinalHexDirections.some(d=>h.q===sea.q+d.q&&h.r===sea.r+d.r))continue;

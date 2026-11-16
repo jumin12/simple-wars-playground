@@ -399,6 +399,9 @@ const WOD_MANPOWER_ARMOR_DIV = 1000;
 const WOD_ARMOR_DIV_TANKS = 500;
 /** Radius in tiles (fractional × hexSpacing) fort aura for +20% defense (damage × 0.8). */
 const WOD_FORT_DEFENSE_TILES = 4.95;
+/** A supply ship supplies troops within this many fort-aura radii (2: about six cells, so a landing can fight a coastal
+ *  town's streets from the ship's cover). A `let` so lab batches can compare against the old rule (1). */
+let WOD_SUPPLY_SHIP_RADIUS_MULT = 2;
 function hideCampaignSummaryOverlay() {
     let el = document.getElementById('campaignSummaryOverlay');
     if(el) el.classList.add('hidden');
@@ -1212,10 +1215,8 @@ function startGame(mode, opts) {
             if(mode === 'ai' && !opts.mission && typeof wodAwaitMapGenIdle === 'function')
                 await wodAwaitMapGenIdle();
             await initGame();
-            // Each computer faction's commander: the one picked in setup, otherwise drawn now. Announced once
-            // the match is under way (not in the tutorial, whose enemy follows a script).
-            wodAiAssignCommanders(gameData._aiCommanderChoices);gameData._aiCommanderChoices=null;
-            setTimeout(wodAnnounceOpponents,1200);
+            // Each computer faction's commander is drawn now, at random, and kept secret.
+            wodAiAssignCommanders();
             gameData._campaignEnded = false;
             hideCampaignSummaryOverlay();
             wodResetEndCountdowns();
@@ -1682,10 +1683,8 @@ async function initGame() {
     let aiCount = document.getElementById('setupAI');
     if(aiCount)
         gameData.aiCount = Math.max(1, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(aiCount.value, 10) || 1));
-    // Computer difficulty (missions too); a campaign battle has set its own. Commanders picked in setup are
-    // given to their seats once the map is made (startGame).
+    // Computer difficulty (missions too); a campaign battle has set its own.
     if(!launchingCampaign) gameData.aiDifficulty = wodSetupAiDifficulty();
-    gameData._aiCommanderChoices = launchingMission || launchingCampaign ? null : wodSetupCommanderChoices();
 
     let victorySel = document.getElementById('setupVictoryMode');
     if(launchingMission && gameData.mission && gameData.mission.victoryMode)
@@ -1834,8 +1833,6 @@ function stopGame() {
     wodFlushPendingPinchCamera();
     touchCamGesture = null;
     if(gameData) gameData._encircWork = null;
-    wodTerminatePowWorkers();
-    wodTerminateSepWorker();
     wodSetMpMatchUiFlag(false);
 }
 function wodOwnersListActiveForProcgen() {
@@ -1966,6 +1963,10 @@ function wodPrepareForNewMatch(opts) {
     gameData._aiEconomyClock = 0;
     gameData._aiDecisionLog=null;gameData._aiArrivalCache=null;
     gameData._aiMoveQueue=new Map();gameData._aiLocalSituation=new WeakMap();gameData._aiCombatContexts={};
+    // Per-match timers start afresh (a new match used to inherit them from the last one, or from the frames the
+    // previous game ran, so its first AI pulses and supply scans fell at different moments; the AI pulse timer also
+    // draws its random offset only when it is unset).
+    for(const k of ['aiTimer','encirclementTimer','_townSweepTimer','_transportAiTimer','_aiFortGuardTimer','_cityCapTimer'])delete gameData[k];
     gameData._wodPfCache=new Map();gameData._wodPfVer=(gameData._wodPfVer||0)+1;
     gameData._landIncomeCacheDirty=true;
     gameData.aiCommanderProfiles = {};gameData._aiPulseScale = 1;
@@ -1974,7 +1975,7 @@ function wodPrepareForNewMatch(opts) {
     gameData._aiDefenseWork = new Map();
     gameData.marineWaterSupplyHexes = new Set();
     gameData._citySupplyCache = null;
-    gameData._supplyTopologyVersion = 0;
+    gameData._supplyTopologyVersion = 0;gameData._supplyDirty = null;
     gameData._aiEconomyPlans = {};
     gameData.aiTaskForces = {};
     gameData.aiBattlePlans = {};gameData.aiNavalPlans = {};
@@ -1993,10 +1994,6 @@ function wodPrepareForNewMatch(opts) {
     gameData._campaignEnded = false;
     wodResetEndCountdowns();
     gameData._enemyDistField = null;
-    gameData._wodSepApply = null;
-    gameData._wodSepPending = null;
-    wodSepGen++;
-    gameData._wodSepGen = wodSepGen;
     gameData.aiFrontFocus = {};
     gameData.aiTaskForces = {};
     gameData.aiStrategyTimer = 0;
@@ -2321,8 +2318,6 @@ function wodRunInitialBootToMenu() {
             await bootStage('Loading interface…', 48, null, 16);
             await bootStage('Starting worker pool…', 54, () => {
                 wodEnsureMapGenWorkerPool();
-                wodEnsurePowWorkers();
-                wodEnsureSepWorker();
                 try { if(wodProgress) flushGameProfileToWod(); } catch(_) {}
             }, 16);
             await bootStage('Terrain palettes…', 58, () => {
