@@ -2,6 +2,18 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-16T21:00:00Z",title:"Troops that get out of the water, and a sharper AI",items:[
+        "Land units in the water can be ordered back out again: orders to dry land used to be refused for a unit standing in the sea, so troops pushed in during a fight, or sent in, could not leave and drowned. A land unit left in the water with no order now wades back to the nearest shore by itself; one you send into the water on purpose stays there.",
+        "Routed units keep losing morale while they are shot at or chased, and slowly while cut off, instead of their bar stopping at the red where they broke.",
+        "Order lines show only where a unit is going, never the ground it has already crossed. A unit that is not selected shows only the leg to its next waypoint; select it to see the whole route.",
+        "The AI sends its idle troops to help any of its units fighting outnumbered, pulls units back before they are surrounded, and builds bridges between islands on archipelago maps."
+    ]},
+    {at:"2026-11-16T15:00:00Z",title:"Smoother multiplayer, a Stop order, AI that holds passes",items:[
+        "An AI army waiting on its own ground now waits at a choke point on the way to the enemy when there is one, a bridge or a pass or causeway hemmed in by mountains or water, on its own side of it, where attackers have to come through a few at a time.",
+        "Multiplayer guests now see units march smoothly instead of moving in small jerks, and units they recruit finish their build animation instead of staying half-built for the rest of the match. Each update from the host is about half the size, which helps on slower connections.",
+        "When a player quits a multiplayer match, or the host leaves, their army, towns and ground no longer vanish: the computer takes command of them and the others must still defeat it. The player who left still loses the match. Surrendering works as before: the faction leaves the map.",
+        "New Stop order: press Stop on the unit card, or H, and the selected units drop their orders and hold where they stand, still firing at enemies in reach."
+    ]},
     {at:"2026-11-16T09:30:00Z",title:"A stronger AI on water maps",items:[
         "When the AI fights over an island it shares with you while it also plans a crossing to other islands, it now keeps recruiting troops for the fight in front of it instead of saving every coin for a harbour, troopships and warships. Before, its towns could stand idle for minutes while your army walked in.",
         "AI towns with no land route to the enemy no longer recruit infantry for a land war they cannot reach, and small AI landing parties no longer go in while a town's garrison waits nearby; they hold on the beach for the next wave."

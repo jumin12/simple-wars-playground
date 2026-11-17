@@ -3955,6 +3955,24 @@ function wodRoutedSupplyEscapePoint(unit) {
     const path=[];for(let h=end;h;h=prev.get(h))path.push(h);path.reverse();
     return path[Math.min(path.length-1,5)];
 }
+// A land unit left standing in open water with no order (pushed off the shore in a fight, or a march that ended there)
+// wades back to the nearest dry ground after a moment and a half; it used to stay put until it drowned. One the player
+// sent into the water on purpose stays where he put it; routed, fighting and boarding units are left to their own logic.
+function wodWadeAshoreIfIdle(unit,dt){
+    if(!isLandArmyUnit(unit)||unit.hp<=0||unit.target||unit.orderTarget||unit.boardTransportUid||unit.moraleBroken||unit._combatEngaged||unit._wodChoseWater||!wodUnitStandingOnOpenWater(unit)){unit._wodWetIdle=0;return;}
+    unit._wodWetIdle=(unit._wodWetIdle||0)+dt;if(unit._wodWetIdle<1.5)return;unit._wodWetIdle=0;
+    const shore=wodNearestDryCell(unit);if(shore)assignUnitMoveAlongWaypoints(unit,[{x:shore.x,y:shore.y}],{retainRetreat:true});
+}
+/** The nearest cell of dry ground (or a bridge) a land unit in the water can wade to, within ten cells. */
+function wodNearestDryCell(unit){
+    const start=getNearestHexToPoint(unit.x,unit.y);if(!start)return null;
+    const seen=new Set([start]),queue=[{h:start,d:0}];let best=null,bd=Infinity;
+    for(let i=0;i<queue.length;i++){const {h,d}=queue[i];
+        for(const nb of getNeighborHexes(h)){if(!nb||seen.has(nb))continue;seen.add(nb);
+            if(!isWaterHex(nb)||isBridgeHex(nb)){if(canUnitEnterHex(unit,nb)){const dd=Math.hypot(nb.x-unit.x,nb.y-unit.y);if(dd<bd){bd=dd;best=nb;}}}
+            else if(d<10&&!best)queue.push({h:nb,d:d+1});}}
+    return best;
+}
 function wodUpdateUnitMorale(unit,dt) {
     if(!unit||unit.hp<=0||unit.type==='convoy'||unit.boardTransportUid)return;
     const now=gameData._aiEconomyClock||0,hr=gameData.hexRadius||20;
@@ -3975,6 +3993,10 @@ function wodUpdateUnitMorale(unit,dt) {
             unit._moraleThreatAt=now;unit._moraleChased=chased;
         }else chased=!!unit._moraleChased;
         if(chased||underFire)unit._moraleSafeSince=null;else unit._moraleSafeSince??=now;
+        // A routed unit keeps losing heart while it is shot at, caught in a fight or chased (twice the rate of a unit
+        // still standing), and slowly while it is cut off in a pocket: its bar used to stop at the red where it broke.
+        if(unit._combatEngaged||underFire||chased)unit.morale=Math.max(0,unit.morale-dt);
+        else if(cut)unit.morale=Math.max(0,unit.morale-.3*dt);
     }
     if(!unit._combatEngaged&&!underFire&&!cut){
         const care=wodUnitHealingSite(unit),rate=care&&canHealUnit(unit)?11:3;
@@ -4500,6 +4522,33 @@ function wodIssueRetreatOrder() {
     if(n > 0) {
         if(typeof setMobileOrderMode === 'function') setMobileOrderMode(null);
         if(typeof wodOpenInfoOverviewPage === 'function') wodOpenInfoOverviewPage();
+        _infoCardUiThrottle.s = null;
+        if(typeof syncInfoCardPanel === 'function') syncInfoCardPanel();
+    }
+    return n;
+}
+/** Stop (the unit card's Stop button, or H): the unit drops its march, waypoints and attack order and holds where it
+ *  stands, still firing at enemies in reach. A routed unit keeps running until it rallies. */
+function wodStopUnit(unit) {
+    if(!unit || unit.hp <= 0 || unit.moraleBroken || unit.type === 'convoy' || unit.id) return false;
+    wodPlayerOrderQueue = wodPlayerOrderQueue.filter(j => j.unit !== unit);
+    wodClearUnitOrdersInstant(unit);
+    unit._wodAttackOrder = null; unit._wodAttackApproaching = false; unit.preferredTargetUid = null;
+    unit._wodOrderedRetreat = false; unit._wodRiskRetreat = false;
+    unit._routeArrowFrozenPts = null; unit._routeArrowFrozenReady = false;
+    unit.holding = true;
+    return true;
+}
+function wodIssueStopOrder() {
+    if(gameState !== 'PLAYING') return 0;
+    const lo = wodLocalPlayerOwner(), units = (gameData.selection || []).filter(u => u && !u.id && u.owner === lo && u.hp > 0 && u.type !== 'convoy' && !u.moraleBroken);
+    if(!units.length) return 0;
+    let n = 0;
+    if(gameData.mp?.enabled && !gameData.mp.isHost) { if(wodMpSendCmd({ kind: 'stop', uids: units.map(u => ensureUnitId(u)) })) n = units.length; }
+    else for(const u of units) if(wodStopUnit(u)) n++;
+    if(n > 0) {
+        gameData.playerShiftWaypoints = [];
+        if(typeof setMobileOrderMode === 'function') setMobileOrderMode(null);
         _infoCardUiThrottle.s = null;
         if(typeof syncInfoCardPanel === 'function') syncInfoCardPanel();
     }

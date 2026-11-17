@@ -84,6 +84,7 @@ window.persistWodProgressNow = persistWodProgressNow;
 window.wodExportSaveDownload = wodExportSaveDownload;
 window.wodImportSaveFromInput = wodImportSaveFromInput;
 window.wodIssueRetreatOrder = wodIssueRetreatOrder;
+window.wodIssueStopOrder = wodIssueStopOrder;
 if(typeof window !== 'undefined') {
     window.addEventListener('beforeunload', function() {
         try {
@@ -786,6 +787,11 @@ window.addEventListener('keydown', e => {
             setGameSpeed(gameData.speed === 0 ? 1 : 0);
             return;
         }
+    }
+    // H: stop the selected units where they stand (the unit card's Stop button)
+    if(e.code === 'KeyH' && gameState === 'PLAYING' && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        let tag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
+        if(!(tag === 'input' || tag === 'textarea' || tag === 'select' || (e.target && e.target.isContentEditable)) && wodIssueStopOrder()) { e.preventDefault(); return; }
     }
     keys[e.key.toLowerCase()] = true;
 });

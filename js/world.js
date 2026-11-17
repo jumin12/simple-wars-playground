@@ -99,6 +99,8 @@ function wodSetMarchOrderFlags(unit, resolved) {
     unit._wodOrderIntoWater = !!(resolved && resolved.intoWater) || afloat;
     const goal=unit.orderTarget&&getNearestHexToPoint(unit.orderTarget.x,unit.orderTarget.y);
     unit._wodShoreExitRouting=!!(afloat&&isLandArmyUnit(unit)&&goal&&!isWaterHex(goal));
+    // (a player who sends land troops into the water means them to stay there: wodWadeAshoreIfIdle leaves them be)
+    unit._wodChoseWater=!!(resolved&&resolved.intoWater&&goal&&isWaterHex(goal)&&!isBridgeHex(goal)&&wodMpIsHumanOwner(unit.owner));
     if(afloat&&isLandArmyUnit(unit))unit._wodAiRescueWater=true;
 }
 function isLandArmyUnit(unit) {
@@ -811,6 +813,18 @@ function wodUnitSmoothDrawXY(unit, simDt) {
         unit._drawX = unit.x;
         unit._drawY = unit.y;
         return { x: unit.x, y: unit.y };
+    }
+    // A multiplayer guest knows each unit only where the host's last snapshot put it, every 100-180 ms. Easing to each
+    // snapshot within a tenth of a second made marching units move and stop several times a second; a guest glides each
+    // unit from where it was drawn to the snapshot's position over one snapshot gap instead (snapshot interpolation).
+    if(unit._netAt != null && gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
+        const fx = unit._netFromX, fy = unit._netFromY;
+        // (a snapshot a little late: keep gliding along the same line for up to a third of a gap; the next one corrects
+        // from wherever the unit is drawn)
+        const t = Math.min(1.35, (performance.now() - unit._netAt) / (gameData._mpNetGap || 150));
+        unit._drawX = fx + (unit.x - fx) * t;
+        unit._drawY = fy + (unit.y - fy) * t;
+        return { x: unit._drawX, y: unit._drawY };
     }
     let dx = unit.x - unit._drawX;
     let dy = unit.y - unit._drawY;

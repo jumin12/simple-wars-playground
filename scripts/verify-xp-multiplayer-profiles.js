@@ -20,7 +20,7 @@ async function protocolChecks(){
   for(const p of [b,c]){p.send({t:'join_lobby',id:lobby,password:'protected',playerId:p.id});await p.wait('joined');}
   const duplicate=await peer(4);duplicate.send({t:'register_player',profileToken:'0'.repeat(64),playerId:a.id,displayName:'Identity spoof'});assert((await duplicate.wait('register_failed')).reason==='identity_required');
   a.send({t:'start',payload:{hexList:[{q:0,r:0,owner:1},{q:1,r:0,owner:2},{q:2,r:0,owner:3}],entities:[{id:1,owner:1},{id:2,owner:2},{id:3,owner:3}],cities:[{id:1,owner:1},{id:2,owner:2},{id:3,owner:3}],factionSlots:[1,2,3],humanSlots:[1,2,3]}});await a.wait('match_start');
-  a.send({t:'forfeit'});await a.wait('left');const takeover=await b.wait('host_takeover');assert.deepEqual(takeover.forfeitedSlots,[1]);assert(!takeover.payload.entities.some(u=>u.owner===1));assert.equal((await rpc('profile',{playerId:a.id})).multiplayer.losses,1);
+  a.send({t:'forfeit'});await a.wait('left');const takeover=await b.wait('host_takeover');assert.deepEqual(takeover.forfeitedSlots,[1]);assert(takeover.payload.entities.some(u=>u.owner===1),'a player who leaves keeps his forces on the map for the AI');assert(!(takeover.payload.eliminatedSlots||[]).includes(1),'a player who leaves is not eliminated');assert.equal((await rpc('profile',{playerId:a.id})).multiplayer.losses,1);
   a.send({t:'join_lobby',id:lobby,password:'protected',playerId:a.id,rejoin:true});await a.wait('error');
   // A dropped peer can rejoin its authenticated seat without retyping the password.
   c.socket.close();await b.wait('player_link_lost');const rejoined=await peer(3,c.secret);rejoined.send({t:'join_lobby',id:lobby,playerId:c.id,rejoin:true});await rejoined.wait('rejoin_match');

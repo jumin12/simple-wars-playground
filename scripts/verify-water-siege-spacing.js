@@ -58,6 +58,7 @@ const server=H.createStaticServer();
    for(const owner of [1,2])for(const type of ['light','heavy','convoy']) {
     resetWaterTest(owner);testTown(-8,0,owner,'Supply town');const h=gameData.hexes['0,0'];h.type='water';h.owner=0;
     const u=createUnitAt(type,h.x,h.y,owner);u.x=h.x;u.y=h.y;u.hp=u.maxHp*.75;u.range=0;
+    u._wodChoseWater=true; // left in the water on purpose: otherwise a land unit with no order wades ashore (wodWadeAshoreIfIdle)
     if(type==='convoy'){u.convoySeaRoute=false;u._convoyRetryAt=Infinity;}
     const hp=u.hp;for(let i=0;i<119;i++)update(.1);const at49=u.hp;
     update(.1);const at5=u.hp;update(.25);const after=u.hp;

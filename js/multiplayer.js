@@ -77,6 +77,7 @@ function wodMpIsHumanOwner(owner) {
     if(!gameData.mp || !gameData.mp.enabled) return owner === 1;
     if(!wodMpSeatTypeIsHuman(owner)) return false;
     if(wodMpIsSlotEliminated(owner)) return false;
+    if(gameData.mp.forfeitedSlots && gameData.mp.forfeitedSlots.indexOf(owner) >= 0) return false; // left the match: the AI plays it
     let localSlot = gameData.mp.localSlot | 0;
     if(localSlot > 0 && owner === localSlot && wodMpMatchCanPlay()) return true;
     let conn = gameData.mp.connectedSlots;
@@ -324,6 +325,33 @@ function wodStripEntityForNet(u) {
         healingFlash: u.healingFlash || 0, waterFlash: u.waterFlash || 0, waterExposureSeconds:u.waterExposureSeconds||0,supplyPendingSeconds:u.supplyPendingSeconds||0,outOfSupplySeconds:u.outOfSupplySeconds||0,attritionLosses:u.attritionLosses||0,attritionTankLosses:u.attritionTankLosses||0,attritionHpLost:u.attritionHpLost||0, unpaidFlash: u.unpaidFlash || 0,
         target: tgt, orderTarget: ot, path: pth, fullMarchWaypoints: fmw, marchWpCursor: u.marchWpCursor || 0, _wodKeepLandFormation:!!u._wodKeepLandFormation, _wodShoreExitRouting:!!u._wodShoreExitRouting, _wodRiskRetreat:!!u._wodRiskRetreat
     };
+}
+// Live snapshots leave out a unit's fields that hold their empty value (no cargo, no flash, not retreating...) and round
+// positions to a tenth of a pixel: field names were most of a snapshot (about 1 KB a unit, 60 KB six or seven times a
+// second for 48 units), more upload than many home connections give a host. The guest puts the empty values back
+// before merging (wodNetUnpackEntity), so everything downstream reads the same object as before.
+const WOD_NET_ENTITY_DEFAULTS=Object.freeze({
+    xp:0,kills:0,losses:0,shake:0,spawnFx:0,activeCombatVisual:0,encircledFlash:0,healingFlash:0,waterFlash:0,waterExposureSeconds:0,
+    supplyPendingSeconds:0,outOfSupplySeconds:0,attritionLosses:0,attritionTankLosses:0,attritionHpLost:0,unpaidFlash:0,marchWpCursor:0,
+    isGeneral:false,moraleBroken:false,retreating:false,_wodAttackApproaching:false,veteran:false,convoySeaRoute:false,
+    _wodKeepLandFormation:false,_wodShoreExitRouting:false,_wodRiskRetreat:false,
+    cargo:null,pickupUid:null,pickupLandKey:null,boardTransportUid:null,unloadHexKey:null,unloadGoal:null,ferryGoal:null,
+    preferredTargetUid:null,_wodAttackOrder:null,convoyFromKey:null,convoyToKey:null,convoyDock:null,combatTargetUid:null,
+    target:null,orderTarget:null,path:null,fullMarchWaypoints:null
+});
+function wodNetRound(v){return typeof v==='number'?Math.round(v*10)/10:v;}
+function wodNetPackEntity(d) {
+    for(const k in WOD_NET_ENTITY_DEFAULTS){const v=d[k];if(v===WOD_NET_ENTITY_DEFAULTS[k]||v===undefined)delete d[k];}
+    d.x=wodNetRound(d.x);d.y=wodNetRound(d.y);
+    for(const k of ['target','orderTarget'])if(d[k]){d[k].x=wodNetRound(d[k].x);d[k].y=wodNetRound(d[k].y);}
+    for(const k of ['path','fullMarchWaypoints'])if(d[k])for(const p of d[k]){p.x=wodNetRound(p.x);p.y=wodNetRound(p.y);}
+    if(d.cargo)wodNetPackEntity(d.cargo);
+    return d;
+}
+function wodNetUnpackEntity(d) {
+    for(const k in WOD_NET_ENTITY_DEFAULTS)if(!(k in d))d[k]=WOD_NET_ENTITY_DEFAULTS[k];
+    if(d.cargo)wodNetUnpackEntity(d.cargo);
+    return d;
 }
 function wodEntityFromNet(d) {
     let u = Object.assign({}, d);
@@ -613,7 +641,7 @@ async function wodMpApplyMatchStartPayload(p, opts) {
     gameData._wodTerrainPoliticsBaseFp = '';
     if(p.mapGenSeed != null) gameData._mapGenSeed = p.mapGenSeed >>> 0;
     gameData.menuAttractMode=false;gameData._matchReadyForEndChecks=true;
-    for(const slot of p.forfeitedSlots||[])wodMpApplyForfeitSlot(slot,false);
+    for(const slot of p.forfeitedSlots||[]){if((p.surrenderedSlots||[]).includes(slot))wodMpApplyForfeitSlot(slot,false);else wodMpHandSlotToAi(slot);}
     if(opts.bake !== false) wodMpRefreshMatchViewportAndTerrain();
     } finally {gameData._mpLoadingMatch=false;}
     if(!opts.resumeMatch)wodMpApplyDeferredSnapshot();
@@ -885,6 +913,21 @@ function wodMpApplyForfeitSlot(slot,emit=true) {
     gameData.mp.connectedSlots=(gameData.mp.connectedSlots||[]).filter(s=>s!==slot);gameData.mp.aiControlledSlots=(gameData.mp.aiControlledSlots||[]).filter(s=>s!==slot);
     if(emit&&gameData.mp.isHost&&!gameData._campaignEnded){wodMpCheckEndConditionsHost(.1);wodMpHostEmitSnapshot();}
 }
+// A seat whose player left the match (forfeited) is played by the computer from then on: its troops, towns and ground
+// stay, and the others must still beat it (they used to vanish with the player, and a match of two ended at once).
+// The player still loses the match (server/index.js). Called for every snapshot's list of forfeited seats, so it is
+// idempotent; eliminations (no town, no army) still go through wodMpApplyForfeitSlot.
+function wodMpHandSlotToAi(slot) {
+    if(!slot || !gameData.mp) return;
+    if(!gameData.mp.forfeitedSlots) gameData.mp.forfeitedSlots = [];
+    const fresh = gameData.mp.forfeitedSlots.indexOf(slot) < 0;
+    if(fresh) gameData.mp.forfeitedSlots.push(slot);
+    gameData.mp.connectedSlots = (gameData.mp.connectedSlots || gameData.mp.humanSlots || []).filter(s => s !== slot);
+    if(!gameData.mp.aiControlledSlots) gameData.mp.aiControlledSlots = [];
+    if(gameData.mp.aiControlledSlots.indexOf(slot) < 0) gameData.mp.aiControlledSlots.push(slot);
+    if(fresh && slot !== gameData.mp.localSlot && !wodMpIsSlotEliminated(slot) && gameData.entities.some(u => u.owner === slot))
+        showNotification(wodMpDisplayNameForSlot(slot) + ' left the battle — the AI has taken command of their forces.');
+}
 function wodMpMarkSlotEliminated(slot) {
     if(!gameData.mp) return;
     if(!gameData.mp.eliminatedSlots) gameData.mp.eliminatedSlots = [];
@@ -1077,11 +1120,23 @@ function wodMpApplySnapPayload(s) {
     if(s.entities) {
         let byUid = new Map(gameData.entities.map(e => [e.uid, e]));
         let next = [];
+        // (the gap between snapshots, smoothed: units glide over one gap between snapshots, wodUnitSmoothDrawXY)
+        const netNow = performance.now();
+        if(gameData._mpNetLastAt){const gap=Math.max(40,Math.min(400,netNow-gameData._mpNetLastAt));gameData._mpNetGap=gameData._mpNetGap?gameData._mpNetGap*.8+gap*.2:gap;}
+        gameData._mpNetLastAt = netNow;
         for(let ed of s.entities) {
+            wodNetUnpackEntity(ed);
             let ex = byUid.get(ed.uid);
             if(ex) {
                 let jumpX = ed.x - ex.x, jumpY = ed.y - ex.y;
+                // glide from where the unit is drawn now to where the host says it is (wodUnitSmoothDrawXY)
+                ex._netFromX = ex._drawX != null ? ex._drawX : ex.x; ex._netFromY = ex._drawY != null ? ex._drawY : ex.y; ex._netAt = netNow;
                 ex.x = ed.x; ex.y = ed.y; ex.hp = ed.hp; ex.owner = ed.owner;
+                // The build animation runs down on the host; a guest that kept the value it first saw showed every unit
+                // it recruited half-built for the rest of the match. Stats change with veterancy and are shown in the unit card.
+                ex.spawnFx = ed.spawnFx || 0;
+                for(const key of ['speed','damage','range','attackCooldown','radius','tradeValue'])if(ed[key] != null) ex[key] = ed[key];
+                ex.convoySeaRoute = !!ed.convoySeaRoute; ex._wodKeepLandFormation = !!ed._wodKeepLandFormation;
                 if(ed.maxHp != null) ex.maxHp = ed.maxHp;
                 if(ed.manpower != null) ex.manpower = ed.manpower;
                 if(ed.maxManpower != null) ex.maxManpower = ed.maxManpower;
@@ -1123,6 +1178,7 @@ function wodMpApplySnapPayload(s) {
                 if(jumpX * jumpX + jumpY * jumpY > 64 * 64 || ex._drawX == null) {
                     ex._drawX = ex.x;
                     ex._drawY = ex.y;
+                    ex._netFromX = ex.x; ex._netFromY = ex.y;
                 }
                 next.push(ex);
             } else {
@@ -1191,7 +1247,7 @@ function wodMpApplySnapPayload(s) {
     if(s.matchEnd) wodMpClientApplyMatchEnd(s.matchEnd);
     if(s.allReady && gameData.mp && gameData.mp.enabled && !gameData.mp.allReady)
         wodMpFinalizeMatchStart();
-    for(const slot of s.forfeitedSlots||[])wodMpApplyForfeitSlot(slot,false);
+    for(const slot of s.forfeitedSlots||[]){if((s.surrenderedSlots||[]).includes(slot))wodMpApplyForfeitSlot(slot,false);else wodMpHandSlotToAi(slot);}
     if(gameData.mp?.eliminatedSlots?.includes(gameData.mp.localSlot)&&!gameData._spectator&&!gameData._campaignEnded)
         wodMpClientApplyMatchEnd({outcomes:{[gameData.mp.localSlot]:'lost'},message:'Defeat — your faction has been eliminated.'});
 }
@@ -1288,7 +1344,7 @@ function wodMpHostEmitSnapshot() {
         battleLedger: sendStats ? JSON.parse(JSON.stringify(wodBattleLedger())) : undefined,
         lifetimeStatsByOwner: sendStats ? JSON.parse(JSON.stringify(gameData._lifetimeStatsByOwner||{})) : undefined,
         constructionJobs: gameData.constructionJobs || [],
-        entities: gameData.entities.filter(e => e.hp > 0).map(wodStripEntityForNet),
+        entities: gameData.entities.filter(e => e.hp > 0).map(e => wodNetPackEntity(wodStripEntityForNet(e))),
         hexOwners: owners || undefined,
         structureDestructions:(gameData._combatFx||[]).filter(f=>f.kind==='structure').map(f=>({eventId:f.eventId,kind:f.structureKind,structure:f.structure,life:f.life})),
         cities: gameData.cities.map(c => ({ q: c.q, r: c.r, owner: c.owner, hasFactory: !!c.hasFactory, hasHarbor: !!c.hasHarbor, hasFarm: !!c.hasFarm, hp: c.hp })),
@@ -4467,6 +4523,7 @@ function wodMpHostHandleRemoteCmd(ev) {
     }
     if(d.cmd.kind==='focusTarget'){wodSetPreferredTarget(d.fromSlot,d.cmd.uids,d.cmd.targetUid);return;}
     if(d.cmd.kind==='retreat'){for(const u of wodMpOwnedUnitsForCmd(d))wodRetreatUnit(u);return;}
+    if(d.cmd.kind==='stop'){for(const u of wodMpOwnedUnitsForCmd(d))wodStopUnit(u);return;}
     if(d.cmd.kind === 'move') {
         let units = wodMpOwnedUnitsForCmd(d);
         if(units.length === 0) return;
@@ -4902,7 +4959,7 @@ function wodMpWireNetworkEvents() {
         let grace = (ev.detail && ev.detail.graceMs) ? Math.round(ev.detail.graceMs / 1000) : 45;
         showNotification('Seat ' + slot + ' connection lost — ' + grace + 's to reconnect before AI takes over.');
     });
-    addEventListener('wod-mp-PlayerForfeited',ev=>{if(gameData.mp?.enabled&&gameState==='PLAYING')wodMpApplyForfeitSlot(ev.detail.slot);});
+    addEventListener('wod-mp-PlayerForfeited',ev=>{if(gameData.mp?.enabled&&gameState==='PLAYING'){if(ev.detail.surrender){wodMpApplyForfeitSlot(ev.detail.slot);return;}wodMpHandSlotToAi(ev.detail.slot);if(gameData.mp.isHost){wodMpCheckEndConditionsHost(.1);wodMpHostEmitSnapshot();}}});
     addEventListener('wod-mp-PlayerDisconnected', (ev) => {
         let slot = ev.detail && ev.detail.slot | 0;
         if(!gameData.mp || !gameData.mp.enabled || gameState !== 'PLAYING' || !slot) return;
@@ -4974,6 +5031,8 @@ function wodMpWireNetworkEvents() {
         gameData.mp.localSlot = WodMultiplayer.api.slot;
         gameData.mp.allReady = true;
         if(d.snap && d.snap.payload) wodMpApplySnapPayload(d.snap.payload);
+        // (seat 1's treasury lives in gameData.money, which a guest never kept: the old host's seat, now the AI's, takes it over)
+        if(d.snap && d.snap.payload) for(const k of ['money', 'manpower']) if(d.snap.payload[k] != null) gameData[k] = d.snap.payload[k];
         wodMpEnsureLocalSlotConnected();
         wodMpHostEmitSnapshot();
         wodMpFreezeSeatPlayerMap();

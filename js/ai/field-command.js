@@ -309,6 +309,32 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
     }
 }
 
+// A choke cell for unit u: a bridge, or land whose ring of eight neighbours is open to u in two or more separate arcs
+// with blocked ground (water, or mountains for troops that cannot climb) between them: a pass, a causeway, a bridgehead.
+const WOD_OPS_RING=[{q:1,r:0},{q:1,r:1},{q:0,r:1},{q:-1,r:1},{q:-1,r:0},{q:-1,r:-1},{q:0,r:-1},{q:1,r:-1}];
+function wodOpsChokeCell(h,u){
+    if(!h)return false;if(isBridgeHex(h))return true;if(isWaterHex(h)||!canUnitEnterHex(u,h))return false;
+    const ring=WOD_OPS_RING.map(d=>{const n=wodHexAt(h.q+d.q,h.r+d.r);return !!n&&(isBridgeHex(n)||!isWaterHex(n)&&canUnitEnterHex(u,n));});
+    let flips=0,blocked=0;for(let i=0;i<8;i++){if(!ring[i])blocked++;if(ring[i]!==ring[(i+1)%8])flips++;}
+    return blocked>=3&&flips>=4;
+}
+// The choke nearest the enemy on the way from our town 'base' towards 'aim' (within three cells of that line, short of
+// three quarters of the way) that passes ok(h); the post is the cell just on our side of it, the best cover first.
+function wodOpsChokePost(u,base,aim,d,C,ok){
+    const dx=(aim.x-base.x)/d,dy=(aim.y-base.y)/d;let best=null,bt=-Infinity;const seen=new Set();
+    for(let s=C*2;s<d*.75;s+=C)for(let o=-3;o<=3;o++){
+        const h=wodOpsLandHex(base.x+dx*s-dy*o*C,base.y+dy*s+dx*o*C)||getNearestHexToPoint(base.x+dx*s-dy*o*C,base.y+dy*s+dx*o*C);
+        if(!h||seen.has(h))continue;seen.add(h);
+        if(!wodOpsChokeCell(h,u))continue;
+        const t=(h.x-base.x)*dx+(h.y-base.y)*dy;if(t<=bt)continue;
+        // the near side: a cell of land next to it, nearer our town, that we may stand on
+        let stand=null,ss=Infinity;
+        for(const n of [h,...getNeighborHexes(h)]){if(!n||isWaterHex(n)||isBridgeHex(n)||!canUnitEnterHex(u,n)||!ok(n))continue;const nt=(n.x-base.x)*dx+(n.y-base.y)*dy;if(nt>t+1)continue;const sc=getTerrainDefenseModifier(u,n)+(t-nt)/C*.05;if(sc<ss){ss=sc;stand=n;}}
+        if(stand){bt=t;best=stand;}
+    }
+    return best;
+}
+
 // Our towns on a landmass that also holds an enemy town (refreshed every twelve seconds): where recruits for a land war
 // can walk to it (wodOpsWarEconomy).
 function wodOpsFrontTowns(owner,S,towns,now){
@@ -719,6 +745,18 @@ function wodOpsRun(owner,units){
         if(dHome(u)<C*5)continue;
         pool.delete(u);breakOut(u);
         if(!u._opsCutAt||now-u._opsCutAt>30000){u._opsCutAt=now;S.counts.breakout=(S.counts.breakout||0)+1;wodAiRecord(owner,'ops-breakout',{unit:u.uid});}
+    }
+    // (WOD_OPS.T.pincer=0 turns it off) A unit about to be closed in pulls back before the ring shuts: enemies within six
+    // cells on two sides of it (more than 130 degrees apart), stronger there than we are, and our town more than five
+    // cells off. The breakout above only begins once the ring has closed and the unit is already starving.
+    if(TU.pincer!==0)for(const u of [...pool]){
+        if(u.isGeneral||u._combatEngaged&&!u.retreating||dHome(u)<C*5)continue;
+        const around=near(foes,u,C*6);if(around.length<2)continue;
+        const angs=around.map(e=>Math.atan2(e.y-u.y,e.x-u.x));let spread=0;
+        for(let a=0;a<angs.length;a++)for(let b=a+1;b<angs.length;b++){let d=Math.abs(angs[a]-angs[b]);if(d>Math.PI)d=2*Math.PI-d;if(d>spread)spread=d;}
+        if(spread<2.27||wodOpsStrength(around,true)<=wodOpsStrength(near(elig,u,C*6),true))continue;
+        pool.delete(u);claim(u,'pullback');fallBack(u,linkPoint(u));
+        if(!u._opsPincerAt||now-u._opsPincerAt>30000){u._opsPincerAt=now;S.counts.pullback=(S.counts.pullback||0)+1;wodAiRecord(owner,'ops-pullback',{unit:u.uid});}
     }
 
     // ---------- 1d. landing parties. Troops put ashore are there to take a town. They go for the nearest enemy
@@ -1443,6 +1481,10 @@ function wodOpsRun(owner,units){
                 if(!h||!bold&&!friendlyCell(h)||!canUnitEnterHex(rest[0],h)||!canReach(rest[0],h)||anyNear(foes,h,C*7))continue;
                 const s=getTerrainDefenseModifier(rest[0],h)+(Math.abs(dq)+Math.abs(dr))*.04;if(s<bs){bs=s;post.x=h.x;post.y=h.y;}
             }
+            // (WOD_OPS.T.chokeHold=0 turns it off) An army that waits on its own ground waits at a choke when there is one on
+            // the way: a bridge, or a pass or causeway hemmed in by mountains or water on two sides. It stands on our side of
+            // it, where the enemy must come through a few at a time (and a fortifying commander builds its fort there).
+            if(!bold&&TU.chokeHold!==0){const ch=wodOpsChokePost(rest[0],base,aim,d,C,h=>friendlyCell(h)&&canReach(rest[0],h)&&!anyNear(foes,h,C*7));if(ch){post.x=ch.x;post.y=ch.y;post.choke=true;}}
         }
         S.post=post;
     }
@@ -1612,6 +1654,10 @@ function wodOpsRun(owner,units){
     }
     const reserve=[...pool];
     const waitingS=post?wodOpsStrength(near(reserve,post,C*6),true):0;
+    // (WOD_OPS.T.helpOut=0 turns it off) Any of ours fighting outnumbered calls the reserve within fourteen cells to it,
+    // not only a planned battle: a sweeper, a lone guard or a picket that ran into the enemy fought alone while the
+    // reserve stood at its post.
+    const distress=TU.helpOut===0||!reserve.length?[]:elig.filter(u=>{if(!u._combatEngaged||u.moraleBroken||u.retreating)return false;const ef=near(foes,u,C*4.5);return ef.length>0&&wodOpsStrength(ef,true)>wodOpsStrength(near(elig,u,C*4.5),true)*.85;});
     reserve.forEach((u,i)=>{
         claim(u,'reserve');
         const hot=near(foes,u,C*4.2);
@@ -1627,6 +1673,8 @@ function wodOpsRun(owner,units){
             let tgt=null,bd=C*13;for(const e of foes){if((u.range||50)<=(e.range||50)+4)continue;const d=dist(e,post);if(d<bd){bd=d;tgt=e;}}
             if(tgt&&!foes.some(e=>(e.range||50)+4>=(u.range||50)&&dist(e,tgt)<C*3.5)){u._opsRole='harass';S.harassAt=now;engage(u,[tgt],i,true);return;}
         }
+        if(distress.length){let d=null,dd=C*14;for(const x of distress){if(x===u)continue;const k=dist(u,x);if(k<dd&&canReach(u,x)){dd=k;d=x;}}
+            if(d){u._opsRole='support';const ef=near(foes,d,C*5);if(ef.length)engage(u,ef,i);else wodOpsMove(u,d.x,d.y,false);return;}}
         // an army in a battle is not left to fight alone: unassigned troops close up behind it
         let b=null,bd=C*28;for(const j of battles){if(j.raid)continue;const at=S.ts[j.key].at,d=dist(u,at);if(d<bd&&canReach(u,at)){bd=d;b=at;}}
         if(b){const s=wodOpsSlot(i+1,hr*1.3);u._opsRole='support';wodOpsMove(u,b.x+s.x,b.y+s.y,false);return;}

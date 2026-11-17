@@ -1101,7 +1101,7 @@ function confirmSurrender() {
         if(!gameData._lifetimeMatch?.mpOutcomeRecorded){if(gameData._lifetimeMatch)gameData._lifetimeMatch.mpOutcomeRecorded=true;wodMpRecordLocalMultiplayerOutcome('lost');}
         if(wodCloudCanSync())WodMultiplayer.syncProgress(wodEnsurePlayerId(),wodBuildCloudSyncPayload());
         const watch=wodSpectatorSurvivors(true).length>1;
-        WodMultiplayer.forfeitMatch({spectate:watch});if(!watch)wodMpClearSession();triggerSurrenderDefeat();return;
+        WodMultiplayer.forfeitMatch({spectate:watch,surrender:true});if(!watch)wodMpClearSession();triggerSurrenderDefeat();return;
     }
     if(gameData.menuAttractMode)return;
     toggleEscMenu(false);

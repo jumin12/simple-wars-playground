@@ -506,26 +506,27 @@ function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
     return score;
 }
 
-function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey) {
+function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey, islandWar=false) {
     if(!gameData.hexList || !gameData.hexList.length) return false;
     // Keep a cash cushion so bridges don't starve unit production. A bridge costs
     // $1,000 per water cell, so this gate is the cheapest span; each site is then
     // checked against its own price below.
-    const cushion = WOD_PRICE_LIGHT*4;
+    // (in a war across water the bridges are the crossing itself: a smaller cushion, and up to one per town, 2-4)
+    const cushion = WOD_PRICE_LIGHT*(islandWar?2:4);
     if(wodPlayerTreasury(ownerId) < WOD_PRICE_BRIDGE_PER_CELL + cushion) return false;
     if((gameData.constructionJobs||[]).some(j=>j.owner===ownerId&&j.mode==='bridge'))return false;
     let aiCities = gameData.cities.filter(c => c && c.owner === ownerId).length;
     let aiBridges = (gameData.bridges || []).filter(b => b && b.owner === ownerId).length;
     // Tight cap — bridges are situational, not a spam build.
-    let bridgeCap = Math.max(1, Math.min(3, Math.floor(aiCities * 0.35) + 1));
+    let bridgeCap = islandWar ? Math.max(2, Math.min(4, aiCities)) : Math.max(1, Math.min(3, Math.floor(aiCities * 0.35) + 1));
     if(aiBridges >= bridgeCap) return false;
     let now = wodAiOperationTime();
     if(!gameData._aiBridgeCooldown) gameData._aiBridgeCooldown = {};
     if(gameData._aiBridgeSearches?.has(ownerId))return false;
     // First useful crossing can start immediately; later attempts are spaced.
-    if(gameData._aiBridgeCooldown[ownerId]&&now-gameData._aiBridgeCooldown[ownerId]<65000)return false;
-    // Cheap gate before the site search (still rare, but more often when useful).
-    if(Math.random() > 0.55) return false;
+    if(gameData._aiBridgeCooldown[ownerId]&&now-gameData._aiBridgeCooldown[ownerId]<(islandWar?30000:65000))return false;
+    // Cheap gate before the site search (still rare, but more often when useful; every time in a war across water).
+    if(!islandWar && Math.random() > 0.55) return false;
     let sites = wodAiCollectBridgeCandidateSites(ownerId);
     if(!sites.length) return false;
     // Cheap strategic ranking first. Footprint checks used to run twice for
@@ -534,7 +535,7 @@ function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey) {
     const ranked=sites.filter(site=>cash>=site.cost+cushion).map(site=>({site,score:wodAiScoreBridgeSite(site,ownerId,true)})).filter(v=>v.score>=96).sort((a,b)=>b.score-a.score);
     if(!ranked.length){gameData._aiBridgeCooldown[ownerId]=now-60000;return false;}
     const searches=gameData._aiBridgeSearches||(gameData._aiBridgeSearches=new Map());
-    searches.set(ownerId,{owner:ownerId,hexes:gameData.hexes,revision:gameData._wodPfVer||0,ranked,index:0});
+    searches.set(ownerId,{owner:ownerId,hexes:gameData.hexes,revision:gameData._wodPfVer||0,ranked,index:0,cushion});
     return false;
 }
 
@@ -548,7 +549,7 @@ function wodStepAiBridgeSearches() {
 }
 
 function wodAiBridgeSearchStep(owner,work,searches) {
-    const cushion=WOD_PRICE_LIGHT*4;
+    const cushion=work.cushion??WOD_PRICE_LIGHT*4;
     if(work.hexes!==gameData.hexes||work.revision!==(gameData._wodPfVer||0)||wodPlayerTreasury(owner)<WOD_PRICE_BRIDGE_PER_CELL+cushion||
         (gameData.constructionJobs||[]).some(j=>j.owner===owner&&j.mode==='bridge'))return false;
     const start=performance.now(),budget=wodUsesVisualViewportLayout()?1.2:2;
@@ -746,9 +747,13 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
         if(wodAiTryFortForOwner(owner,ownerKey)) { plan.lastFort=clock; plan.lastBuilding=clock; }
         else plan.fortMissAt=clock;
     }
-    if(!plan.savingFor && !needGuards && (army.length>=10||navalReady) && clock-plan.lastBuilding>=(navalReady?40:65) &&
+    // (WOD_OPS.T.islandBridges=0 turns it off) With towns to win across water, a bridge to the next island is part of the
+    // crossing: it is looked for even while money is put by for ships or marines (on water maps the economy was always
+    // saving for something, and in 25-minute archipelago games no bridge was ever built though dozens of sites qualified).
+    const bridgeWar=islandDemand&&wodOpsTune(owner).islandBridges!==0;
+    if((!plan.savingFor||bridgeWar) && !needGuards && (army.length>=10||navalReady||bridgeWar) && clock-plan.lastBuilding>=(bridgeWar?25:navalReady?40:65) &&
         cash()>=WOD_PRICE_BRIDGE_PER_CELL+WOD_PRICE_LIGHT*4 && income-upkeep>4 &&
-        wodAiTryBridgeForOwner(owner,ownerKey))plan.lastBuilding=clock;
+        wodAiTryBridgeForOwner(owner,ownerKey,bridgeWar))plan.lastBuilding=clock;
     return true;
 }
 

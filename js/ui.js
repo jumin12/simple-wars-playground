@@ -619,6 +619,12 @@ function wodSliceFrozenOrderArrowPath(unit, frozenPts) {
         if(dx * dx + dy * dy > closeR2) break;
         idx++;
     }
+    // A unit that cut a corner or stepped round traffic never comes that close to the point it passed, and the arrow
+    // went on reaching back to it: the unit is on whichever of the next stretches of the route it is nearest.
+    {const seg=(a,b)=>{const vx=b.x-a.x,vy=b.y-a.y,L=vx*vx+vy*vy||1,t=Math.max(0,Math.min(1,((unit.x-a.x)*vx+(unit.y-a.y)*vy)/L));return Math.hypot(unit.x-a.x-vx*t,unit.y-a.y-vy*t);};
+     let best=idx,bd=seg(frozenPts[idx],frozenPts[idx+1]);
+     for(let j=idx+1;j<Math.min(frozenPts.length-1,idx+10);j++){const d=seg(frozenPts[j],frozenPts[j+1]);if(d<bd-1){bd=d;best=j;}}
+     idx=best;}
     unit._routeArrowProgressIdx = idx;
     if(idx >= frozenPts.length - 1) {
         let end = frozenPts[frozenPts.length - 1];
@@ -720,11 +726,20 @@ function computePathfindingOrderArrowPoints(unit) {
     }
 }
 function getDisplayedUnitOrderPathPoints(unit) {
+    let pts = null;
     if(gameData.uiSettings && gameData.uiSettings.orderArrowsUsePathfinding) {
         let alt = computePathfindingOrderArrowPoints(unit);
-        if(alt && alt.length >= 2) return alt;
+        if(alt && alt.length >= 2) pts = alt;
     }
-    return getUnitPathPoints(unit);
+    if(!pts) pts = getUnitPathPoints(unit);
+    // Unless the unit is selected, only the leg it is on: up to its next waypoint (select it to see the whole route).
+    const wps = unit && unit.fullMarchWaypoints, cursor = (unit && unit.marchWpCursor) || 0;
+    if(unit && !unit.selected && pts.length > 2 && wps && wps.length - cursor > 1) {
+        const wp = wps[cursor];let k = -1, bd = Infinity;
+        for(let i = 1; i < pts.length; i++) {const d = Math.hypot(pts[i].x - wp.x, pts[i].y - wp.y);if(d < bd) {bd = d;k = i;}}
+        if(k > 0) pts = pts.slice(0, k + 1);
+    }
+    return pts;
 }
 function drawStrokePreviewArrows(ctx, previewPts, units) {
     if(!previewPts || previewPts.length < 2 || !units || units.length === 0) return;

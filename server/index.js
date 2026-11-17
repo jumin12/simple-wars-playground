@@ -848,7 +848,7 @@ function disconnectClientFromMatch(client, immediate) {
   }
 
   if (immediate) {
-    if(room.forfeitedSlots?.has(leftSlot))broadcastAll(room,{t:'player_forfeited',slot:leftSlot,count:room.clients.length});else markSlotDisconnectedInMatch(room, leftSlot);
+    if(room.forfeitedSlots?.has(leftSlot))broadcastAll(room,{t:'player_forfeited',slot:leftSlot,count:room.clients.length,surrender:!!room.surrenderedSlots?.has(leftSlot)});else markSlotDisconnectedInMatch(room, leftSlot);
     if (room.clients.length === 0) maybeEndMatchWhenEmpty(room);
     client.room = null;
     client.slot = 0;
@@ -880,16 +880,19 @@ function disconnectClientFromMatch(client, immediate) {
   broadcastLobbyList();
 }
 
-async function forfeitClientFromMatch(client, spectate=false) {
+async function forfeitClientFromMatch(client, spectate=false, surrender=false) {
   const room=client.room;if(!room?.matchStarted){leaveRoom(client);return;}
-  const slot=client.slot;room.forfeitedSlots||=new Set();room.forfeitedSlots.add(slot);
+  const slot=client.slot;room.forfeitedSlots||=new Set();room.forfeitedSlots.add(slot);if(surrender){room.surrenderedSlots||=new Set();room.surrenderedSlots.add(slot);}
   const outcomes=Object.fromEntries(Object.values(room.seatByPlayerId||{}).map(s=>[s,s===slot?'lost':'ongoing']));
   const result=profiles.recordMpMatchEnd(client.playerId,room,{outcomes,participants:[{slot,playerId:client.playerId}]});
   await profiles.flush();
   if(result.ok){profiles.attachClientProfile(client,client.displayName);updateLeaderboardEntry(client,client.combinedStats);if(client.ws.readyState===1)client.ws.send(JSON.stringify({t:'profile',profile:profiles.exportProfile(client.playerId)}));}
-  const patch=payload=>{if(!payload)return;payload.forfeitedSlots=[...room.forfeitedSlots];payload.eliminatedSlots=[...new Set([...(payload.eliminatedSlots||[]),slot])];if(payload.entities)payload.entities=payload.entities.filter(u=>u.owner!==slot);if(payload.cities)for(const c of payload.cities)if(c.owner===slot)c.owner=0;if(payload.hexOwners)payload.hexOwners=payload.hexOwners.map(o=>o===slot?0:o);if(payload.hexList)for(const h of payload.hexList)if(h.owner===slot)h.owner=0;};
+  // A player who surrenders concedes: his faction leaves the map and counts as beaten. One who leaves any other way (quits
+  // the match, closes the game) loses the match too, but his faction stays: its towns, ground and troops pass to the
+  // computer, which the others must still beat (the game hands such seats to the AI, wodMpHandSlotToAi). They used to vanish.
+  const patch=payload=>{if(!payload)return;payload.forfeitedSlots=[...room.forfeitedSlots];payload.surrenderedSlots=[...(room.surrenderedSlots||[])];if(!surrender)return;payload.eliminatedSlots=[...new Set([...(payload.eliminatedSlots||[]),slot])];if(payload.entities)payload.entities=payload.entities.filter(u=>u.owner!==slot);if(payload.cities)for(const c of payload.cities)if(c.owner===slot)c.owner=0;if(payload.hexOwners)payload.hexOwners=payload.hexOwners.map(o=>o===slot?0:o);if(payload.hexList)for(const h of payload.hexList)if(h.owner===slot)h.owner=0;};
   patch(room.matchInitPayload);patch(room.lastSnap?.payload);
-  if(spectate){client.spectating=true;room.observerSlots||=new Set();room.observerSlots.add(slot);cancelMatchReconnectGrace(room,slot);broadcastAll(room,{t:'player_forfeited',slot,count:room.clients.length});return;}
+  if(spectate){client.spectating=true;room.observerSlots||=new Set();room.observerSlots.add(slot);cancelMatchReconnectGrace(room,slot);broadcastAll(room,{t:'player_forfeited',slot,count:room.clients.length,surrender:!!room.surrenderedSlots?.has(slot)});return;}
   disconnectClientFromMatch(client,true);
 }
 
@@ -1733,7 +1736,7 @@ wss.on('connection', (ws) => {
       return;
     }
 
-    if(t==='forfeit'){if(client.room?.matchStarted)await forfeitClientFromMatch(client,!!msg.spectate);else leaveRoom(client);if(!msg.spectate)ws.send(JSON.stringify({t:'left'}));return;}
+    if(t==='forfeit'){if(client.room?.matchStarted)await forfeitClientFromMatch(client,!!msg.spectate,!!msg.surrender);else leaveRoom(client);if(!msg.spectate)ws.send(JSON.stringify({t:'left'}));return;}
     if (t === 'leave') {
       if (client.room && client.room.matchStarted) await forfeitClientFromMatch(client);
       else leaveRoom(client);
@@ -1759,7 +1762,7 @@ wss.on('connection', (ws) => {
       client.room.lobbyPreview = null;
       client.room._matchEndRecorded = false;
       client.room.pendingReconnect = new Map();
-      client.room.matchId=require('crypto').randomUUID();client.room.forfeitedSlots=new Set();client.room.observerSlots=new Set();
+      client.room.matchId=require('crypto').randomUUID();client.room.forfeitedSlots=new Set();client.room.surrenderedSlots=new Set();client.room.observerSlots=new Set();
       const payload = {...msg.payload,serverMatchId:client.room.matchId};
       client.room.matchInitPayload = payload;
       client.room.lastSnap = null;

@@ -393,6 +393,7 @@ function wodStepUnit(unit, i, dt, playerBrokeByOwner) {
     wodUpdateUnitOverheadPops(unit, dt);
 
     wodUpdateUnitMorale(unit,dt);
+    wodWadeAshoreIfIdle(unit,dt);
     wodUpdateUnitAttackOrder(unit);
 
     // Movement

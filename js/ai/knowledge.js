@@ -199,8 +199,21 @@ function wodAiDist2(ax, ay, bx, by) {
     return dx * dx + dy * dy;
 }
 
+// A land unit standing in the water (pushed in by a fight, or ordered in) stands on no land region of its own, so the
+// ground it could reach came out empty and every order to dry land was refused (no group slot): it stayed in the water
+// until it drowned. It can wade back to any shore of that water within eight cells: the land it touches is its reach.
+function wodWadingReach(unit) {
+    const start=getNearestHexToPoint(unit.x,unit.y),keys=new Set();if(!start||!isWaterHex(start))return keys;
+    const seen=new Set([start]),queue=[{h:start,d:0}],shores=[];
+    for(let i=0;i<queue.length;i++){const {h,d}=queue[i];
+        for(const nb of getNeighborHexes(h)){if(!nb||seen.has(nb))continue;seen.add(nb);
+            if(!isWaterHex(nb)||isBridgeHex(nb)){if(nb.type!=='mountain'||wodCanClimb(unit))shores.push(nb);}
+            else if(d<8)queue.push({h:nb,d:d+1});}}
+    for(const s of shores){if(keys.has(getHexKey(s)))continue;const r=wodTransportLandingRegion(unit,s);if(r)for(const k of r)keys.add(k);else keys.add(getHexKey(s));}
+    return keys;
+}
 function wodAiOperationReach(unit, waterOnly=false) {
-    if(!waterOnly&&isLandArmyUnit(unit))return wodTransportLandingRegion(unit,unit)||new Set();
+    if(!waterOnly&&isLandArmyUnit(unit))return wodTransportLandingRegion(unit,unit)||wodWadingReach(unit);
     if(waterOnly||wodIsNavalUnit(unit))return wodNavalWaterRegionKeys(unit,getNearestHexToPoint(unit.x,unit.y))||new Set();
     const start=getNearestHexToPoint(unit.x,unit.y), keys=new Set(), queue=[];
     const valid=h=>h && (h.type!=='mountain'||wodCanClimb(unit)) && (waterOnly?isWaterHex(h):unit.type==='marine'||!isWaterHex(h)||isBridgeHex(h));

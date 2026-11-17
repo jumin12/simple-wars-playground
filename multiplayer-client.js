@@ -231,7 +231,7 @@
             count: msg.count,
           });
           break;
-        case 'player_forfeited':emit('PlayerForfeited',{slot:msg.slot|0,count:msg.count});break;
+        case 'player_forfeited':emit('PlayerForfeited',{slot:msg.slot|0,count:msg.count,surrender:!!msg.surrender});break;
         case 'player_disconnected':
           emit('PlayerDisconnected', { slot: msg.slot | 0, count: msg.count, canRejoin: !!msg.canRejoin });
           break;
@@ -509,7 +509,7 @@
     kickPlayer(slot) {
       send({ t: 'kick_player', slot: slot | 0 });
     },
-    forfeitMatch(options){send({t:'forfeit',spectate:!!options?.spectate});if(options?.spectate){api.spectating=true;return;}api.spectating=false;api.code='';api.slot=0;api.isHost=false;api.connected=false;},
+    forfeitMatch(options){send({t:'forfeit',spectate:!!options?.spectate,surrender:!!options?.surrender});if(options?.spectate){api.spectating=true;return;}api.spectating=false;api.code='';api.slot=0;api.isHost=false;api.connected=false;},
     leaveLobby() {
       api.spectating=false;
       if (ws && ws.readyState === 1) send({ t: 'leave' });
