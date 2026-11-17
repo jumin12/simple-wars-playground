@@ -458,6 +458,27 @@ function wodAiBridgeTravelBenefitSearch(a,b,owner) {
     return heap.length?null:{island:false,saved:limit-span};
 }
 
+// The enemy towns this faction is going for: its navy's landing goal, its field command's objective, and otherwise the
+// two known enemy towns nearest its own.
+function wodAiAssaultTargets(owner){
+    const hostile=c=>c&&c.owner>0&&c.owner!==owner&&wodIsHostileOwner(c.owner,owner),out=[];
+    const goal=gameData.aiNavalPlans?.[owner]?.goal,aim=gameData._aiOps?.by?.[owner]?.post?.aim;
+    for(const id of [goal?.id,aim]){const c=id&&gameData.cities.find(c=>c.id===id);if(hostile(c)&&!out.includes(c))out.push(c);}
+    if(!out.length){const mine=gameData.cities.filter(c=>c.owner===owner);
+        const near=c=>Math.min(...mine.map(m=>Math.hypot(m.x-c.x,m.y-c.y)),Infinity);
+        out.push(...wodAiKnownCities(owner).filter(hostile).sort((a,b)=>near(a)-near(b)).slice(0,2));}
+    return out;
+}
+function wodAiBridgeLeadsToTarget(near,far,owner){
+    const targets=wodAiAssaultTargets(owner);if(!targets.length||!far)return false;
+    const region=wodTransportLandingRegion({type:'light',owner},far),cell=(gameData.hexRadius||20)*1.35;
+    for(const c of targets){
+        const h=getNearestHexToPoint(c.x,c.y);if(region&&h&&region.has(getHexKey(h)))return true;
+        const dFar=Math.hypot(far.x-c.x,far.y-c.y),dNear=near?Math.hypot(near.x-c.x,near.y-c.y):Infinity;
+        if(dFar<cell*12&&dFar<dNear-cell*4)return true;
+    }
+    return false;
+}
 function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
     if(!site) return -1e9;
     if(!rankOnly&&!wodAiBridgeTravelBenefit(site,ownerId))return -1e9;
@@ -474,6 +495,10 @@ function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
         (gameData.aiFrontFocus?.[ownerId]&&Math.hypot(gameData.aiFrontFocus[ownerId].x-far.x,gameData.aiFrontFocus[ownerId].y-far.y)<tilePx*18)||
         wodAiKnownEntities(ownerId).some(u=>u.hp>0&&u.owner===ownerId&&u.target&&Math.hypot((u.orderTarget||u.target).x-far.x,(u.orderTarget||u.target).y-far.y)<tilePx*10);
     if(!usefulFar)return -1e9;
+    // (WOD_OPS.T.bridgePurpose=0 turns it off) A bridge goes only where the army means to attack: the land across it holds a
+    // town it is going for (wodAiAssaultTargets), or it is a stepping stone at least four cells nearer one, within twelve.
+    // A nearby town of our own, or any unit's order, used to be reason enough, and bridges went up to empty islands.
+    if(wodOpsTune(ownerId).bridgePurpose!==0&&!wodAiBridgeLeadsToTarget(near,far,ownerId))return -1e9;
     if(site.kind === 'assault') score += 88;
     else if(site.kind === 'expand') score += 48;
     else score += 28;

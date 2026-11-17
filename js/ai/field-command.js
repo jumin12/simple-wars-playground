@@ -309,30 +309,81 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
     }
 }
 
-// A choke cell for unit u: a bridge, or land whose ring of eight neighbours is open to u in two or more separate arcs
-// with blocked ground (water, or mountains for troops that cannot climb) between them: a pass, a causeway, a bridgehead.
+// A choke cell for unit u: a bridge; land whose ring of eight neighbours is open to u in two or more separate arcs with
+// blocked ground (water, or mountains for troops that cannot climb) between them (a one-cell pass or causeway); or
+// (WOD_OPS.T.chokeWide=0 turns this off) a strip at most three cells across: along one of the four lines through the cell
+// the ground u can walk ends in water or mountain within a width of three, while square to it the strip runs on for at
+// least two cells each way (a corridor, not a nook in the shore).
 const WOD_OPS_RING=[{q:1,r:0},{q:1,r:1},{q:0,r:1},{q:-1,r:1},{q:-1,r:0},{q:-1,r:-1},{q:0,r:-1},{q:1,r:-1}];
 function wodOpsChokeCell(h,u){
     if(!h)return false;if(isBridgeHex(h))return true;if(isWaterHex(h)||!canUnitEnterHex(u,h))return false;
-    const ring=WOD_OPS_RING.map(d=>{const n=wodHexAt(h.q+d.q,h.r+d.r);return !!n&&(isBridgeHex(n)||!isWaterHex(n)&&canUnitEnterHex(u,n));});
+    const open=(q,r)=>{const n=wodHexAt(q,r);return !!n&&(isBridgeHex(n)||!isWaterHex(n)&&canUnitEnterHex(u,n));};
+    const ring=WOD_OPS_RING.map(d=>open(h.q+d.q,h.r+d.r));
     let flips=0,blocked=0;for(let i=0;i<8;i++){if(!ring[i])blocked++;if(ring[i]!==ring[(i+1)%8])flips++;}
-    return blocked>=3&&flips>=4;
+    if(blocked>=3&&flips>=4)return true;
+    if(wodOpsTune(u.owner).chokeWide===0)return false;
+    for(const [aq,ar] of [[1,0],[0,1],[1,1],[1,-1]]){
+        let a=0;while(a<3&&open(h.q+aq*(a+1),h.r+ar*(a+1)))a++;
+        let b=0;while(b<3&&open(h.q-aq*(b+1),h.r-ar*(b+1)))b++;
+        if(a+b+1>3)continue;
+        const pq=-ar,pr=aq;let c=0;while(c<2&&open(h.q+pq*(c+1),h.r+pr*(c+1)))c++;let e=0;while(e<2&&open(h.q-pq*(e+1),h.r-pr*(e+1)))e++;
+        if(c>=2&&e>=2)return true;
+    }
+    return false;
 }
-// The choke nearest the enemy on the way from our town 'base' towards 'aim' (within three cells of that line, short of
-// three quarters of the way) that passes ok(h); the post is the cell just on our side of it, the best cover first.
-function wodOpsChokePost(u,base,aim,d,C,ok){
+// The walking route for u from 'from' to 'to' (cells, from first to last), found by a breadth-first search over ground u can
+// cross, at most limit cells explored; null when there is none.
+function wodOpsWalkRoute(u,from,to,limit=7000){
+    const a=wodOpsLandHex(from.x,from.y)||getNearestHexToPoint(from.x,from.y),b=wodOpsLandHex(to.x,to.y)||getNearestHexToPoint(to.x,to.y);if(!a||!b)return null;
+    const pass=n=>!!n&&(isBridgeHex(n)||!isWaterHex(n)&&canUnitEnterHex(u,n));
+    const prev=new Map([[a,null]]),queue=[a];
+    for(let i=0;i<queue.length&&queue.length<limit;i++){const h=queue[i];if(h===b)break;for(const n of getNeighborHexes(h))if(pass(n)&&!prev.has(n)){prev.set(n,h);queue.push(n);}}
+    if(!prev.has(b))return null;
+    const route=[];for(let h=b;h;h=prev.get(h))route.push(h);return route.reverse();
+}
+// Where to stand to hold the choke on the enemy's road from 'aim' to our town 'base': the choke nearest him on that road that
+// passes ok(h), and on it the cell just on our side (the best cover first). The road is the real walking route; if none
+// is found, cells within three of the straight line out to three quarters of the way.
+function wodOpsChokePost(u,base,aim,d,C,ok,S){
+    let route=null;
+    if(S){const key=(aim.id||Math.round(aim.x)+','+Math.round(aim.y))+'>'+(base.id||Math.round(base.x));const c=S.chokeRoute;
+        if(c&&c.key===key&&wodAiOperationTime()-c.at<30000&&c.hexes===gameData.hexes)route=c.route;
+        else{route=wodOpsWalkRoute(u,aim,base);S.chokeRoute={key,at:wodAiOperationTime(),route,hexes:gameData.hexes};}}
+    const stand=(h,toward)=>{let best=null,bs=Infinity;for(const n of [h,...getNeighborHexes(h)]){if(!n||isWaterHex(n)||isBridgeHex(n)||!canUnitEnterHex(u,n)||!ok(n))continue;
+        const back=Math.hypot(n.x-toward.x,n.y-toward.y)-Math.hypot(h.x-toward.x,h.y-toward.y);if(back>1)continue;const sc=getTerrainDefenseModifier(u,n)+(-back)/C*.05;if(sc<bs){bs=sc;best=n;}}return best;};
+    if(route&&route.length>2){
+        // walk the road from his end towards ours: the first choke we can hold is the one nearest him
+        for(let i=1;i<route.length-1;i++){const h=route[i];if(!wodOpsChokeCell(h,u))continue;const st=stand(h,base);if(st)return st;}
+        return null;
+    }
     const dx=(aim.x-base.x)/d,dy=(aim.y-base.y)/d;let best=null,bt=-Infinity;const seen=new Set();
     for(let s=C*2;s<d*.75;s+=C)for(let o=-3;o<=3;o++){
         const h=wodOpsLandHex(base.x+dx*s-dy*o*C,base.y+dy*s+dx*o*C)||getNearestHexToPoint(base.x+dx*s-dy*o*C,base.y+dy*s+dx*o*C);
         if(!h||seen.has(h))continue;seen.add(h);
         if(!wodOpsChokeCell(h,u))continue;
         const t=(h.x-base.x)*dx+(h.y-base.y)*dy;if(t<=bt)continue;
-        // the near side: a cell of land next to it, nearer our town, that we may stand on
-        let stand=null,ss=Infinity;
-        for(const n of [h,...getNeighborHexes(h)]){if(!n||isWaterHex(n)||isBridgeHex(n)||!canUnitEnterHex(u,n)||!ok(n))continue;const nt=(n.x-base.x)*dx+(n.y-base.y)*dy;if(nt>t+1)continue;const sc=getTerrainDefenseModifier(u,n)+(t-nt)/C*.05;if(sc<ss){ss=sc;stand=n;}}
-        if(stand){bt=t;best=stand;}
+        const st=stand(h,base);if(st){bt=t;best=st;}
     }
     return best;
+}
+
+// The town side of a choke on the road by which an enemy force within fourteen cells of one of our towns would come to it
+// (two to ten cells from the town, passing ok(h)); the nearest threatened town first. Routes are kept for eight seconds.
+function wodOpsTownChoke(u,towns,foes,C,S,now,ok){
+    const cache=S.townChoke||(S.townChoke=new Map());
+    const threats=towns.map(c=>{let foe=null,bd=C*14;for(const e of foes){const d=Math.hypot(e.x-c.x,e.y-c.y);if(d<bd){bd=d;foe=e;}}return {c,foe,bd};}).filter(t=>t.foe&&t.bd>C*4).sort((a,b)=>a.bd-b.bd);
+    for(const {c,foe} of threats){
+        const key=Math.round(foe.x/C)+','+Math.round(foe.y/C);let entry=cache.get(c.id);
+        if(!entry||entry.key!==key||now-entry.t>8000||entry.hexes!==gameData.hexes){
+            let spot=null;const route=wodOpsWalkRoute(u,foe,c,4000);
+            if(route)for(let i=1;i<route.length-1&&!spot;i++){const h=route[i],dc=Math.hypot(h.x-c.x,h.y-c.y);
+                if(dc>C*10||dc<C*2||!wodOpsChokeCell(h,u))continue;
+                const n=route[i+1];const st=n&&!isWaterHex(n)&&!isBridgeHex(n)&&canUnitEnterHex(u,n)?n:(isBridgeHex(h)?null:h);if(st&&ok(st))spot=st;}
+            entry={key,t:now,spot,hexes:gameData.hexes};cache.set(c.id,entry);
+        }
+        if(entry.spot)return entry.spot;
+    }
+    return null;
 }
 
 // Our towns on a landmass that also holds an enemy town (refreshed every twelve seconds): where recruits for a land war
@@ -745,6 +796,29 @@ function wodOpsRun(owner,units){
         if(dHome(u)<C*5)continue;
         pool.delete(u);breakOut(u);
         if(!u._opsCutAt||now-u._opsCutAt>30000){u._opsCutAt=now;S.counts.breakout=(S.counts.breakout||0)+1;wodAiRecord(owner,'ops-breakout',{unit:u.uid});}
+    }
+    // (WOD_OPS.T.joinFight=0 turns it off) A fight going on beside a unit is joined when it would win it: one of ours is
+    // exchanging fire within six cells, and with this unit added our troops there outweigh the enemy standing in it (not
+    // those already running) by 1.3 to 1. The unit shoots from position like the rest of the line and does not chase
+    // runners. In AI games 61-82% of fights it could easily win were left alone while the troops walked to a rally point
+    // or waited for their column. (Chasing every weaker enemy within five cells instead lost 72-120 towns: units ran
+    // after retreating enemies into his ground and were beaten one at a time.) Guards, landing parties, troops breaking
+    // out, resting or pulling back, and those closing a ring round the enemy keep to their task.
+    if(TU.joinFight!==0){
+        const keep=new Set(['guard','works','landing','breakout','pullback','rest','regroup','resupply','cut','seal','blockade']);
+        const fights=elig.filter(f=>f._combatEngaged&&!f.moraleBroken&&!f.retreating);
+        let k=0;
+        if(fights.length)for(const u of [...pool]){
+            if(u.isGeneral||u.moraleBroken||u._medicalRecovering||u.retreating||u._combatEngaged)continue;
+            if(u._opsUntil>now&&keep.has(u._opsRole))continue; // (its task from the last pulse)
+            let f=null,bd=C*6;for(const x of fights){if(x===u)continue;const d=dist(x,u);if(d<bd&&canReach(u,x)){bd=d;f=x;}}
+            if(!f)continue;
+            const standing=near(foes,f,C*4.5).filter(e=>!e.retreating&&!e.moraleBroken);if(!standing.length)continue;
+            const ours=near(elig,f,C*5);if(!ours.includes(u))ours.push(u);
+            if(wodOpsStrength(ours,true)<wodOpsStrength(near(foes,f,C*4.5),true)*1.3)continue;
+            pool.delete(u);claim(u,'join');engage(u,standing,k++);
+            if(u._opsJoin!==f.uid){u._opsJoin=f.uid;S.counts.join=(S.counts.join||0)+1;}
+        }
     }
     // (WOD_OPS.T.pincer=0 turns it off) A unit about to be closed in pulls back before the ring shuts: enemies within six
     // cells on two sides of it (more than 130 degrees apart), stronger there than we are, and our town more than five
@@ -1484,7 +1558,14 @@ function wodOpsRun(owner,units){
             // (WOD_OPS.T.chokeHold=0 turns it off) An army that waits on its own ground waits at a choke when there is one on
             // the way: a bridge, or a pass or causeway hemmed in by mountains or water on two sides. It stands on our side of
             // it, where the enemy must come through a few at a time (and a fortifying commander builds its fort there).
-            if(!bold&&TU.chokeHold!==0){const ch=wodOpsChokePost(rest[0],base,aim,d,C,h=>friendlyCell(h)&&canReach(rest[0],h)&&!anyNear(foes,h,C*7));if(ch){post.x=ch.x;post.y=ch.y;post.choke=true;}}
+            // (WOD_OPS.T.chokeGuard=0 turns it off) An enemy force within fourteen cells of one of our towns whose road to it
+            // passes a choke two to ten cells out, on our ground and not yet within three cells of him: the army waits on the
+            // town's side of that choke, where he must come through a few at a time. This comes before the choke on the way to
+            // our own objective (below).
+            let held=false;
+            if(!bold&&TU.chokeGuard!==0){const spot=wodOpsTownChoke(rest[0],myTowns,foes,C,S,now,h=>friendlyCell(h)&&canReach(rest[0],h)&&!anyNear(foes,h,C*3));
+                if(spot){post.x=spot.x;post.y=spot.y;post.choke=true;post.town=true;held=true;if(!(S.chokeGuardAt>now-30000)){S.chokeGuardAt=now;S.counts.chokeGuard=(S.counts.chokeGuard||0)+1;wodAiRecord(owner,'ops-chokeguard',{x:Math.round(spot.x),y:Math.round(spot.y)});}}}
+            if(!held&&!bold&&TU.chokeHold!==0){const ch=wodOpsChokePost(rest[0],base,aim,d,C,h=>friendlyCell(h)&&canReach(rest[0],h)&&!anyNear(foes,h,C*7),TU.chokeRoute===0?null:S);if(ch){post.x=ch.x;post.y=ch.y;post.choke=true;}}
         }
         S.post=post;
     }

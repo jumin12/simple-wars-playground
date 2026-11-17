@@ -2,6 +2,14 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-17T16:00:00Z",title:"AI that holds passes and narrows",items:[
+        "The AI now recognises narrow ground up to three cells across, not only single-cell passes: mountain passes, land bridges between lakes or seas, and bridges.",
+        "When an enemy force comes toward one of its towns along a road that passes through such a narrow, the AI army waits on the town's side of it. When it is not strong enough to attack, it waits at the narrow nearest the enemy on the road he would really take, not just along a straight line."
+    ]},
+    {at:"2026-11-17T12:00:00Z",title:"AI that joins the fight",items:[
+        "AI troops near a fight their side is in now join it when their help would win it, instead of walking past to a rally point or waiting for their column. They fight from position with the rest of the line and do not chase enemies that are already running.",
+        "The AI builds bridges only toward towns it is going to attack, not to empty islands or its own ground."
+    ]},
     {at:"2026-11-16T21:00:00Z",title:"Troops that get out of the water, and a sharper AI",items:[
         "Land units in the water can be ordered back out again: orders to dry land used to be refused for a unit standing in the sea, so troops pushed in during a fight, or sent in, could not leave and drowned. A land unit left in the water with no order now wades back to the nearest shore by itself; one you send into the water on purpose stays there.",
         "Routed units keep losing morale while they are shot at or chased, and slowly while cut off, instead of their bar stopping at the red where they broke.",
