@@ -139,7 +139,9 @@ const server=H.createStaticServer();
   });
   await page.screenshot({path:path.join(OUT,'whole-town-capture.png')});
   fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results,null,2));
-  assert(results.repeatGeneration.identical&&results.repeatGeneration.reports.every(r=>r.units===28&&r.cities>=8),'unsafe tiny seed retries reproducibly into an even map with complete armies');
+  // (since 2026-11-17 an archipelago start must also be fair island by island, wodArchipelagoIslandsFair: this tiny
+  // four-player seed finds no fair split with two towns each and settles on one town each, an even map all the same)
+  assert(results.repeatGeneration.identical&&results.repeatGeneration.reports.every(r=>r.units===28&&r.cities>=4&&r.cities%4===0),'unsafe tiny seed retries reproducibly into an even map with complete armies');
   assert(results.ridge.changedOwnership===0&&results.ridge.carved===2&&results.ridge.unsupplied===0,'two narrow mountain passes supply compact regions without distorting the frontier');
   assert(results.partitions.every(r=>Object.values(r.components).every(n=>n===1)&&Math.max(...Object.values(r.counts))-Math.min(...Object.values(r.counts))<=3),'compact even contiguous partitions across 24 seeded biome layouts');
   assert(results.routes.every(r=>r.valid&&r.endDistance<1));assert(results.routes.filter(r=>['open','forest'].includes(r.kind)).every(r=>r.points===2&&r.length<r.direct*1.01),'clear terrain follows a direct route');

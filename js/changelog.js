@@ -2,6 +2,12 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-17T22:00:00Z",title:"Fair archipelagos, troops that cross water on command",items:[
+        "Archipelago maps now start fair island by island. No player begins with a lone town on an island where an opponent has two, and no player has every town on shared islands while another has an island to itself. On small maps with three or four players this sometimes means one town each instead of two.",
+        "Land troops ordered to dry land across water now go. The order used to be refused (“No reachable formation space”) and they stood still. They take a land route when there is one and swim when there is not. Troops still lose strength after ten seconds in the water, so a long swim is costly: marines and transports remain the way across open sea.",
+        "A unit held up by a comrade standing still in its road, on a shore or in a town by the sea, now walks round him instead of shuffling on the spot. A long crossing the route planner gave up on is planned again with more time, instead of the unit hopping back and forth along the shore.",
+        "The AI builds bridges from its own islands to an island where its troops are fighting, so reinforcements and supply can walk over."
+    ]},
     {at:"2026-11-17T16:00:00Z",title:"AI that holds passes and narrows",items:[
         "The AI now recognises narrow ground up to three cells across, not only single-cell passes: mountain passes, land bridges between lakes or seas, and bridges.",
         "When an enemy force comes toward one of its towns along a road that passes through such a narrow, the AI army waits on the town's side of it. When it is not strong enough to attack, it waits at the narrow nearest the enemy on the road he would really take, not just along a straight line."

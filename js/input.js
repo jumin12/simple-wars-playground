@@ -338,7 +338,10 @@ function wodUnitRemainingMarchPoints(unit) {
 }
 function wodReserveGroupPoint(unit,desired,used,selected,reference=desired,strict=false) {
     const hr=gameData.hexRadius||20,requested=getNearestHexToPoint(reference.x,reference.y),water=wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute;
-    const wet=water||requested&&isWaterHex(requested)&&!isBridgeHex(requested),reach=wodAiOperationReach(unit,water);
+    const wet=water||requested&&isWaterHex(requested)&&!isBridgeHex(requested);let reach=wodAiOperationReach(unit,water);
+    // A land army sent to dry ground across water swims there (the order path takes the land route when there is one):
+    // its slots go on the island that was clicked. Only the unit's own island counted, so every such order was refused.
+    if(!wet&&requested&&isLandArmyUnit(unit)&&!reach.has(getHexKey(requested))){const there=wodTransportLandingRegion(unit,requested);if(there)reach=there;}
     const legal=p=>{
         const h=getNearestHexToPoint(p.x,p.y);if(!h||!canUnitEnterHex(unit,h)||(water||!wet)&&!reach.has(getHexKey(h))||(!wet||water)&&!wodSamplePosOnWalkableTerrain(unit,p.x,p.y))return false;
         if(water?!wodIsOpenWaterHex(h):!wet&&isWaterHex(h)&&!isBridgeHex(h)||wet&&!water&&!isWaterHex(h)&&!isBridgeHex(h))return false;

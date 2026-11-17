@@ -2922,6 +2922,39 @@ function wodVerifyCityPlacementSymmetry(ownerIds) {
     return spread <= Math.max(lcm.maxR * tolFrac, (gameData.hexRadius || 20) * (sorted.length >= 3 ? 11 : 8));
 }
 /** Reject procgen layouts where land or city totals are not within ±1 of perfect split. */
+/** Archipelago starts are fair island by island: on an island that holds towns of more than one player every one of them
+ *  has as many towns there as the others, and every player has the same number of towns on islands shared with an enemy.
+ *  (Splitting the map by straight lines across the sea gave half of all archipelago maps a lone town on an island beside
+ *  two of an enemy's, or one player a quiet islet while another had none.) */
+function wodArchipelagoIslandsFair(owners) {
+    // islands as infantry sees them, searched afresh (terrain is still changing while a map is made)
+    const islandOf = new Map(), walk = h => !!h && (isBridgeHex(h) || !isWaterHex(h) && h.type !== 'mountain');
+    let next = 0;
+    const label = start => {
+        if(islandOf.has(start)) return islandOf.get(start);
+        const id = ++next, queue = [start]; islandOf.set(start, id);
+        for(let i = 0; i < queue.length; i++) for(const nb of getNeighborHexes(queue[i])) if(walk(nb) && !islandOf.has(nb)) { islandOf.set(nb, id); queue.push(nb); }
+        return id;
+    };
+    const islands = new Map();
+    for(const c of gameData.cities) {
+        if(!c || !owners.includes(c.owner)) continue;
+        const h = wodHexAt(c.q, c.r) || getNearestHexToPoint(c.x, c.y);
+        const key = h ? label(h) : ('city:' + c.id);
+        if(!islands.has(key)) islands.set(key, {});
+        const row = islands.get(key); row[c.owner] = (row[c.owner] || 0) + 1;
+    }
+    const exposure = {};for(const o of owners) exposure[o] = 0;
+    for(const row of islands.values()) {
+        const present = Object.keys(row);
+        if(present.length < 2) continue;
+        const n = Object.values(row);
+        if(Math.max(...n) !== Math.min(...n)) return false;
+        for(const o of present) exposure[o] += row[o];
+    }
+    const e = owners.map(o => exposure[o]);
+    return Math.max(...e) === Math.min(...e);
+}
 function wodVerifyFairFactionStart(ownerIds) {
     if(!ownerIds || ownerIds.length < 2) return true;
     let sorted = [...ownerIds].sort((a, b) => a - b);
@@ -2949,6 +2982,7 @@ function wodVerifyFairFactionStart(ownerIds) {
         if((counts[o] || 0) !== target[o]) return false;
     }
     if(sorted.length === 2 && !wodVerifyCityPlacementSymmetry(sorted)) return false;
+    if(gameData.mapShape === 'archipelago' && !wodArchipelagoIslandsFair(sorted)) { gameData._wodIslandsUnfair = true; return false; }
     const supplied=wodStartingTownSupply();
     for(const owner of sorted) {
         const pool=gameData.hexList.filter(h=>h.owner===owner&&supplied.get(owner)?.has(getHexKey(h)));
@@ -4081,8 +4115,9 @@ async function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapSha
 
     gameData._startingBorderQuality=wodValidateStartingBorders(ownersSorted,referenceFrontier);
     if(!gameData._startingBorderQuality.ok)return false;
+    gameData._wodIslandsUnfair = false;
     if(!wodVerifyFairFactionStart(ownersSorted)) {
-        gameData._startingBorderQuality={...gameData._startingBorderQuality,ok:false,reason:'unbalanced-start'};
+        gameData._startingBorderQuality={...gameData._startingBorderQuality,ok:false,reason:gameData._wodIslandsUnfair?'island-balance':'unbalanced-start'};
         return false;
     }
 
@@ -4752,7 +4787,9 @@ async function generateMap() {
     if(wantCities && wantTerritory) {
         // Retry borders/cities on the same terrain before discarding it (3+ AI used to
         // burn minutes regenerating islands when city packing/fair-start failed).
-        let politicsTries = factionSlots >= 3 ? 3 : 2;
+        // Archipelago: towns placed but split unevenly between shared islands (wodArchipelagoIslandsFair) earn up to six
+        // more split angles on the same islands. They do not count as failed town placements, so they never cost towns.
+        let politicsTries = factionSlots >= 3 ? 3 : 2, islandRetries = mapShape === 'archipelago' ? 6 : 0;
         let procOk = false;
         for(let pt = 0; pt < politicsTries; pt++) {
             if(pt > 0) {
@@ -4774,12 +4811,17 @@ async function generateMap() {
             {
                 const fails = validation.rejections['town-placement'] || 0, asked = wodCitiesPerPlayerSetting();
                 let towns = Math.max(Math.min(asked, 2), asked - Math.floor(fails / 6));
-                if(towns === 2 && fails - (asked - 2) * 6 >= 24) towns = 1;
+                // (archipelago: once two towns each have fitted, only to be split unevenly between islands, two towns
+                // fit this size of map; the step down to one waits twice as long, 48 failures)
+                const fitted = (validation.rejections['island-balance'] || 0) > 0 ? 48 : 24;
+                if(towns === 2 && fails - (asked - 2) * 6 >= fitted) towns = 1;
                 gameData._wodCityCountRelax = asked - towns;
             }
             procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
             if(procOk) break;
-            recordRejection(gameData._startingBorderQuality?.reason||'town-placement');
+            const why = gameData._startingBorderQuality?.reason||'town-placement';
+            recordRejection(why);
+            if(why === 'island-balance' && islandRetries-- > 0) politicsTries++;
             await wodMapGenYieldSlice();
         }
         if(procOk) {

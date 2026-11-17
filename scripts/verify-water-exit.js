@@ -1,7 +1,8 @@
 'use strict';
 // Land units in the water (pushed in by a fight, or ordered in) can walk back out: ordered ashore from 1-6 cells out, in a
 // group, from a one-cell channel and from the middle of a lake; left in the water with no order they wade to the nearest
-// shore; sent into the water on purpose they stay. Coast: land at q<0, sea at q>=0; also a narrow inlet and a small lake.
+// shore, a routed one too; sent into the water on purpose they stay. Coast: land at q<0, sea at q>=0; also a narrow inlet and
+// a small lake.
 const H=require('./lib/harness'),assert=require('assert/strict');
 const fs=require('fs'),path=require('path');
 const ROOT=path.resolve(__dirname,'..');
@@ -40,6 +41,7 @@ try{
   ['inlet','in a one-cell channel, ordered back up it',()=>{const u=unit(6,0);refresh();order([u],-5,0);return [u];}],
   ['lake','in the middle of a lake, ordered out',()=>{const u=unit(0,0);refresh();order([u],6,0);return [u];}],
   ['lake','at a lake edge, no order',()=>{const u=unit(2,1);refresh();return [u];}],
+  ['coast','routed in the water with no order (broke while swimming)',()=>{const u=unit(2,-10);u.morale=4;u.moraleBroken=true;refresh();return [u];}],
   ['coast','KEEP: sent into the water on purpose, no further order',()=>{const u=unit(-3,-8);refresh();order([u],3,-8);return [u];}]
  ];
  const out=[];

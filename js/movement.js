@@ -1504,7 +1504,7 @@ function wodWaterBfsPath(unit, fromHex, toHex, maxNodes) {
     if(wodOpenWaterChordClear(unit,fromHex.x,fromHex.y,toHex.x,toHex.y))return [fromHex,toHex];
     // A* explores the useful sea corridor instead of flooding a whole ocean
     // before reaching a distant island. Keep the existing bounded budget.
-    const startTime=performance.now(),ceiling=unit?._wodPfRelaxUntil>startTime?22:(gameState==='PLAYING'&&!gameData.menuAttractMode?7:26);
+    const startTime=performance.now(),ceiling=unit?._wodPfDeepUntil>0?150:unit?._wodPfRelaxUntil>startTime?22:(gameState==='PLAYING'&&!gameData.menuAttractMode?7:26);
     const heap=[],cost=new Map([[getHexKey(fromHex),0]]),parent=new Map(),closed=new Set();
     const heuristic=h=>{const x=Math.abs(h.q-toHex.q),y=Math.abs(h.r-toHex.r);return Math.max(x,y)+(Math.SQRT2-1)*Math.min(x,y);};
     const push=(h,g)=>{const rec={h,g,f:g+heuristic(h)};let i=heap.length;heap.push(rec);while(i){const j=(i-1)>>1;if(heap[j].f<=rec.f)break;heap[i]=heap[j];i=j;}heap[i]=rec;};
@@ -1570,10 +1570,15 @@ function wodFindAmphibiousShoreCrossing(unit, landBiasHex, waterBiasHex, maxRing
     maxRing = maxRing == null ? 18 : maxRing;
     let best = null,
         bestScore = Infinity;
+    // The shore must lie on the land it is the shore of. The nearest beach to the other side could belong to another
+    // landmass (the one the march starts from, curving round a bay); the land leg from it to the goal never existed, the
+    // whole route failed, and a player's troops ordered to that island never set off.
+    const landmass = wodTransportLandingRegion(unit, landBiasHex);
     let pts = getHexesInRadius(landBiasHex.q, landBiasHex.r, maxRing);
     for(let pi = 0; pi < pts.length; pi++) {
         let land = wodHexAt(pts[pi].q,pts[pi].r);
         if(!land || isWaterHex(land) || isBridgeHex(land) || land.type === 'mountain') continue;
+        if(landmass && !landmass.has(getHexKey(land))) continue;
         if(!wodHexWalkableForLandPath(unit, land, false)) continue;
         let waterHex = null,
             waterScore = Infinity;
@@ -1728,7 +1733,7 @@ function wodLandBfsPath(unit, fromHex, toHex, maxNodes, usePortals, outMeta) {
     // maps once the AI got busy. Treat timeout like node exhaustion (callers fall back).
     let bfsT0 = performance.now();
     let bfsRelaxed = unit && unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
-    let bfsCeil = bfsRelaxed ? 22 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26);
+    let bfsCeil = unit && unit._wodPfDeepUntil > 0 ? 150 : bfsRelaxed ? 22 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26);
     let sk = getHexKey(fromHex);
     let q = [fromHex];
     let qi = 0;
@@ -2366,14 +2371,14 @@ function findAmphibiousMarchPath(unit, startHex, targetHex) {
         return unit._wodAmpPath.slice();
     // Failure cooldown: without it every blocked-unit replan re-ran the full
     // shore-crossing + BFS compose (~30-50ms worst) several times a second.
-    if(unit._wodAmpFailKey === cacheKey && performance.now() < (unit._wodAmpFailUntil || 0))
+    if(unit._wodAmpFailKey === cacheKey && performance.now() < (unit._wodAmpFailUntil || 0) && !(unit._wodPfDeepUntil > 0))
         return [];
     // Deadline across the whole compose: shore searches + land legs + water BFS can
     // stack to 40ms+ in one frame; aborting behaves like a failed pathfind (callers
     // fall back to greedy hops and the fail cooldown stops immediate retries).
     let ampT0 = performance.now();
     let ampRelaxed = unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
-    let ampCeil = ampRelaxed ? 26 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 9 : 30);
+    let ampCeil = unit._wodPfDeepUntil > 0 ? 200 : ampRelaxed ? 26 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 9 : 30);
     function ampOverBudget() {
         return performance.now() - ampT0 > ampCeil;
     }
@@ -2724,7 +2729,7 @@ function findPathAroundTerrain(unit, targetHex, startHexOpt, skipBridgeCompose, 
         let astRelaxed = unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
         // Slightly higher ceilings so long marches on large maps keep real corridors
         // instead of truncating into straight-line / greedy hops mid-route.
-        let astCeilMs = (allowOverBudget || astRelaxed) ? 16 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 8 : 24);
+        let astCeilMs = unit._wodPfDeepUntil > 0 ? 150 : (allowOverBudget || astRelaxed) ? 16 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 8 : 24);
         let visitTick = 0;
         while(open.length > 0 && maxVisits-- > 0) {
             if((++visitTick & 255) === 0 && performance.now() - astT0 > astCeilMs) break;
@@ -3657,7 +3662,11 @@ function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
         }
     }
 
-    if(wodUnitGetsLandCorridorPath(unit)&&!destIntoWater&&!standingWater&&!opt?.preparedPath) {
+    // (not to another landmass: the corridor composes its crossing from the shore nearest the unit; see crossing below.
+    // A unit already in the water keeps its shore-exit routing, one swim and then land, as does one about to board.)
+    const crossLand=!opt?.preparedPath&&wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit)&&!standingWater&&!unit._wodBoardingNoWater&&!!reachNext.hex&&!isWaterHex(reachNext.hex)&&
+        !wodTransportLandingRegion(unit,getNearestWalkableHexForUnit(unit,unit.x,unit.y)||reachNext.hex)?.has(getHexKey(reachNext.hex));
+    if(wodUnitGetsLandCorridorPath(unit)&&!destIntoWater&&!standingWater&&!opt?.preparedPath&&!crossLand) {
         let corridorPts = fromAdvance ? marchPts.slice(cursor) : marchPts;
         if(wodTryAssignPlayerCorridorPath(unit, corridorPts, exactLast, fromAdvance))
             return true;
@@ -3671,11 +3680,30 @@ function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
         wodIsNavalUnit(unit) ||
         (unit.type === 'convoy' && unit.convoySeaRoute) ||
         !!(wodUnitPrefersLandOnlyPath(unit) && gameData.bridges && gameData.bridges.length);
-    let path = opt?.preparedPath || findPathAroundTerrain(unit, reachNext.hex, startHex, false, 'auto', allowOver);
+    // A player's land troops sent to another landmass: the crossing with the least swimming, walking as far as the land
+    // goes (wodFindExplicitWaterRoute prices a cell of water at eighteen of land). The shore crossing nearest where they
+    // stood had them swim along the coast for many cells, and lose most of their strength, to a gap they could have
+    // walked to. (Water steps are allowed only while the route is searched; the march sets its own flags from it.)
+    let crossing=null;
+    if(crossLand&&startHex){
+        const saved=unit._wodOrderIntoWater;unit._wodOrderIntoWater=true;
+        try{crossing=wodFindExplicitWaterRoute(unit,startHex,reachNext.hex);}finally{unit._wodOrderIntoWater=saved;}
+        if(!(crossing?.length>1))crossing=null;
+    }
+    let path = opt?.preparedPath || crossing || findPathAroundTerrain(unit, reachNext.hex, startHex, false, 'auto', allowOver);
+    // (a player's land troops sent to another landmass: the crossing, whatever the land check says)
+    const otherLand=path.length<=1&&wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit)&&reachNext.hex&&startHex&&!isWaterHex(reachNext.hex)&&
+        !wodTransportLandingRegion(unit,startHex)?.has(getHexKey(reachNext.hex));
     if(path.length <= 1 && wodUnitPrefersLandOnlyPath(unit) && reachNext.hex && startHex &&
-        (wodOrderIntoWater(unit, reachNext.hex) || wodIsOpenWaterHex(startHex) ||
+        (otherLand || wodOrderIntoWater(unit, reachNext.hex) || wodIsOpenWaterHex(startHex) ||
             wodMarchBlockedWithoutBridge(unit, startHex, reachNext.hex))) {
         let ampPath = findAmphibiousMarchPath(unit, startHex, reachNext.hex);
+        // A long crossing can outrun the bounded search (more so on a busy machine); the order then fell back to greedy
+        // land steps that re-queued it, and the unit hopped to and fro along the shore for good. One search with a far
+        // larger budget (wodPfDeep), at most every three seconds for a unit.
+        if(wodHexPathLength(ampPath)<=1&&otherLand){const now=performance.now();
+            if(!(unit._wodPfDeepAt>now-3000)){unit._wodPfDeepAt=now;unit._wodPfDeepUntil=1;
+                try{ampPath=findAmphibiousMarchPath(unit,startHex,reachNext.hex);}finally{unit._wodPfDeepUntil=0;}}}
         if(wodHexPathLength(ampPath) > 1) path = ampPath;
     }
     // First-order bridge rescue (parity with replanUnitOrder): try portal/composed
@@ -3957,11 +3985,13 @@ function wodRoutedSupplyEscapePoint(unit) {
 }
 // A land unit left standing in open water with no order (pushed off the shore in a fight, or a march that ended there)
 // wades back to the nearest dry ground after a moment and a half; it used to stay put until it drowned. One the player
-// sent into the water on purpose stays where he put it; routed, fighting and boarding units are left to their own logic.
+// sent into the water on purpose stays where he put it; fighting and boarding units are left to their own logic. A routed
+// unit goes too once it stands idle: one that broke while swimming across lost its order a cell or two from the far shore
+// and sat in the water, its retreat finding no way, until it drowned.
 function wodWadeAshoreIfIdle(unit,dt){
-    if(!isLandArmyUnit(unit)||unit.hp<=0||unit.target||unit.orderTarget||unit.boardTransportUid||unit.moraleBroken||unit._combatEngaged||unit._wodChoseWater||!wodUnitStandingOnOpenWater(unit)){unit._wodWetIdle=0;return;}
+    if(!isLandArmyUnit(unit)||unit.hp<=0||unit.target||unit.orderTarget||unit.boardTransportUid||unit._combatEngaged||unit._wodChoseWater||!wodUnitStandingOnOpenWater(unit)){unit._wodWetIdle=0;return;}
     unit._wodWetIdle=(unit._wodWetIdle||0)+dt;if(unit._wodWetIdle<1.5)return;unit._wodWetIdle=0;
-    const shore=wodNearestDryCell(unit);if(shore)assignUnitMoveAlongWaypoints(unit,[{x:shore.x,y:shore.y}],{retainRetreat:true});
+    const shore=wodNearestDryCell(unit);if(shore)assignUnitMoveAlongWaypoints(unit,[{x:shore.x,y:shore.y}],{retainRetreat:true,retainMoraleBroken:!!unit.moraleBroken});
 }
 /** The nearest cell of dry ground (or a bridge) a land unit in the water can wade to, within ten cells. */
 function wodNearestDryCell(unit){
@@ -4609,6 +4639,19 @@ function wodRepairTerrainMarch(unit) {
     unit._wodTerrainStallT=0;unit.blockedTimer=0;unit.stuckTimer=0;
     invalidateUnitOrderArrowCache(unit);return true;
 }
+// A comrade with no orders of his own standing in this unit's road (within two and a half cells straight ahead, toward
+// its next point) while the unit still has more than three and a half cells to go.
+function wodParkedComradeAhead(unit) {
+    const sp=(gameData.hexRadius||20)*1.35,goal=unit.orderTarget,t=unit.target;if(!goal||!t)return false;
+    if(Math.hypot(goal.x-unit.x,goal.y-unit.y)<=sp*3.5)return false;
+    const dx=t.x-unit.x,dy=t.y-unit.y,len=Math.hypot(dx,dy);if(len<1)return false;const ux=dx/len,uy=dy/len;let found=false;
+    forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,sp*3,v=>{
+        if(found||v===unit||v.hp<=0||v.type==='convoy'||v.target||v._trafficYield||v.boardTransportUid||!wodIsFriendlyOwner(v.owner,unit.owner))return;
+        const ox=v.x-unit.x,oy=v.y-unit.y,f=ox*ux+oy*uy,l=Math.abs(oy*ux-ox*uy);
+        if(f>0&&f<sp*2.5&&l<(v.radius||12)+(unit.radius||12)+3)found=true;
+    });
+    return found;
+}
 function moveUnitTowardTarget(unit,dt) {
     const beforeX=unit.x,beforeY=unit.y;
     try {
@@ -4622,6 +4665,12 @@ function moveUnitTowardTarget(unit,dt) {
             // the zero-motion blocked timer. Yield only after that local
             // avoidance has failed to make forward progress.
             if(wodYieldFriendlyTraffic(unit))unit._wodTrafficProgress=null;
+            // A player's march held up by a comrade parked in its road who has nowhere to step to (on a shore, or in a
+            // town by the sea, the free cells all lie behind him) waited there for good, jostling on the spot: after
+            // three seconds without headway it walks round him, as a retreat does (wodRetreatGoRound). Not within three
+            // and a half cells of where it is going: there a group is settling into its places, and waits for them.
+            else if(now-progress.at>3&&!unit.target.goRound&&wodIsPlayerMarchOrder(unit)&&!unit._wodRiskRetreat&&!unit.retreating&&
+                !unit.moraleBroken&&!((unit._wodGoRoundAt||0)>now-3)&&wodParkedComradeAhead(unit)&&wodRetreatGoRound(unit)){unit._wodGoRoundAt=now;unit._wodTrafficProgress=null;}
         }
     }
     const yieldOrder=unit._trafficYield;
@@ -4667,8 +4716,12 @@ function wodMoveUnitAlongRoute(unit, dt) {
     // center trapped two friendly AI marchers facing the same detour node.
     if(unit.target.detour&&unit.target.finalTarget&&Math.hypot(unit.x-unit.target.x,unit.y-unit.target.y)<(unit.radius||12)+4) {
         const final=unit.target.finalTarget;if(unit.target.goRound)unit._wodRetreatReplanAt=0;
-        unit.target={x:final.x,y:final.y,pathPrepared:false};
-        replanUnitOrder(unit);if(!unit.target)return;
+        // (a player's march that walked round a parked comrade takes up its own route again, waypoints and all:
+        // replanUnitOrder leaves player orders alone, and the bare goal would skip the waypoints still ahead)
+        if(unit.target.goRound&&wodIsPlayerMarchOrder(unit)&&!unit._wodRiskRetreat&&!unit.retreating&&unit.fullMarchWaypoints?.length&&
+            assignUnitMoveAlongWaypoints(unit,unit.fullMarchWaypoints,{fromLegAdvance:true})){if(!unit.target)return;}
+        else{unit.target={x:final.x,y:final.y,pathPrepared:false};
+        replanUnitOrder(unit);if(!unit.target)return;}
     }
     if(unit.target.goRound&&!wodRetreatGoRoundHeadway(unit))return;
     // A column need not occupy the exact same corner point to advance. Keep

@@ -401,6 +401,24 @@ function wodAiCollectBridgeCandidateSites(ownerId) {
             kind: kind || 'link'
         });
     }
+    // A fight on another island: from our shore on an island with one of our towns to that island's coast across the water
+    // (within five cells), so the reinforcements and the supply walk over. Anywhere along that coast (the town's own
+    // island may lie well away from the fight); the nearest to the fight first, eighty at most (scored in wodAiScoreBridgeSite).
+    if(wodOpsTune(ownerId).fightBridges!==0){
+        const unit={type:'light',owner:ownerId},towns=new Set();
+        for(const c of gameData.cities)if(c.owner===ownerId){const r=wodTransportLandingRegion(unit,c);if(r)towns.add(r);}
+        const wet=h=>getNeighborHexes(h).some(n=>n&&isWaterHex(n)&&!isBridgeHex(n)),dry=h=>h&&!isWaterHex(h)&&h.type!=='mountain'&&h.type!=='urban';
+        for(const fight of wodAiFightIslands(ownerId)){
+            if(fight.n<2||towns.has(fight.region)&&towns.size<2)continue;
+            const pairs=[];
+            for(const n of gameData.hexList){if(n.owner!==ownerId||!dry(n)||fight.region.has(getHexKey(n))||!wet(n))continue;
+                const r=wodTransportLandingRegion(unit,n);if(!r||!towns.has(r))continue;
+                for(const pt of getHexesInRadius(n.q,n.r,5)){const f=wodHexAt(pt.q,pt.r);if(!dry(f)||!fight.region.has(getHexKey(f))||!wet(f))continue;
+                    pairs.push({n,f,d:Math.hypot(f.x-fight.x,f.y-fight.y)});}}
+            pairs.sort((a,b)=>a.d-b.d);
+            for(const {n,f} of pairs.slice(0,80)){const before=out.length;pushPair(n,f,'reinforce');if(out.length>before)out[out.length-1].fight={x:fight.x,y:fight.y};}
+        }
+    }
     // Offensive / river-crossing: own shore → enemy/neutral shore.
     for(let i = 0; i < ownCoast.length; i++) {
         for(let j = 0; j < farCoast.length; j++)
@@ -458,6 +476,23 @@ function wodAiBridgeTravelBenefitSearch(a,b,owner) {
     return heap.length?null:{island:false,saved:limit-span};
 }
 
+// (WOD_OPS.T.fightBridges=0 turns it off) The islands where this faction's land troops are fighting: in combat, or within six
+// cells of enemy land troops (two or more of them make a fight worth a bridge). One row per island, the biggest fights first (three at most), with the fight's middle and
+// whether a town of ours stands on that island. Remembered for four seconds of AI time.
+function wodAiFightIslands(owner){
+    const memo=gameData._aiFightIslands||(gameData._aiFightIslands={}),now=wodAiOperationTime(),m=memo[owner];
+    if(m&&m.hexes===gameData.hexes&&now-m.at>=0&&now-m.at<4000)return m.list;
+    const unit={type:'light',owner},C=(gameData.hexRadius||20)*Math.sqrt(3),known=wodAiKnownEntities(owner);
+    const troops=u=>u&&u.hp>0&&!u.boardTransportUid&&(isLandArmyUnit(u)||u.type==='marine');
+    const foes=known.filter(u=>troops(u)&&wodIsHostileOwner(u.owner,owner)),rows=new Map();
+    for(const u of known){if(u.owner!==owner||!troops(u))continue;
+        if(!u._combatEngaged&&!foes.some(f=>Math.hypot(f.x-u.x,f.y-u.y)<C*6))continue;
+        const region=wodTransportLandingRegion(unit,u);if(!region)continue;
+        const row=rows.get(region)||{region,x:0,y:0,n:0};row.x+=u.x;row.y+=u.y;row.n++;rows.set(region,row);}
+    const list=[...rows.values()].sort((a,b)=>b.n-a.n).slice(0,3).map(r=>({region:r.region,x:r.x/r.n,y:r.y/r.n,n:r.n,
+        ownTown:gameData.cities.some(c=>c.owner===owner&&r.region.has(getHexKey(getNearestHexToPoint(c.x,c.y)||{q:c.q,r:c.r})))}));
+    memo[owner]={hexes:gameData.hexes,at:now,list};return list;
+}
 // The enemy towns this faction is going for: its navy's landing goal, its field command's objective, and otherwise the
 // two known enemy towns nearest its own.
 function wodAiAssaultTargets(owner){
@@ -487,28 +522,33 @@ function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
     let hr = gameData.hexRadius || 20;
     let tilePx = hr * 1.35;
     let score = 36;
-    let far = site.shoreB && site.shoreB.owner !== ownerId ? site.shoreB : site.shoreA;
+    // (a 'reinforce' site runs from an island with one of our towns to a fight on another: its far end is the fight's coast,
+    // wherever the front line has put the border, and the army it serves stands over there)
+    const reinforce=site.kind==='reinforce';
+    let far = reinforce ? site.shoreB : site.shoreB && site.shoreB.owner !== ownerId ? site.shoreB : site.shoreA;
     let near = far === site.shoreB ? site.shoreA : site.shoreB;
-    const nearby=nearestFriendlyLandArmyDistSq(near.x,near.y,ownerId);
-    if(nearby>Math.pow(tilePx*12,2))return -1e9;
+    const nearby=nearestFriendlyLandArmyDistSq(reinforce?far.x:near.x,reinforce?far.y:near.y,ownerId);
+    if(!reinforce&&nearby>Math.pow(tilePx*12,2))return -1e9;
     const usefulFar=wodAiKnownCities(ownerId).some(c=>Math.hypot(c.x-far.x,c.y-far.y)<tilePx*18)||
         (gameData.aiFrontFocus?.[ownerId]&&Math.hypot(gameData.aiFrontFocus[ownerId].x-far.x,gameData.aiFrontFocus[ownerId].y-far.y)<tilePx*18)||
         wodAiKnownEntities(ownerId).some(u=>u.hp>0&&u.owner===ownerId&&u.target&&Math.hypot((u.orderTarget||u.target).x-far.x,(u.orderTarget||u.target).y-far.y)<tilePx*10);
-    if(!usefulFar)return -1e9;
+    if(!usefulFar&&!reinforce)return -1e9;
     // (WOD_OPS.T.bridgePurpose=0 turns it off) A bridge goes only where the army means to attack: the land across it holds a
     // town it is going for (wodAiAssaultTargets), or it is a stepping stone at least four cells nearer one, within twelve.
     // A nearby town of our own, or any unit's order, used to be reason enough, and bridges went up to empty islands.
-    if(wodOpsTune(ownerId).bridgePurpose!==0&&!wodAiBridgeLeadsToTarget(near,far,ownerId))return -1e9;
-    if(site.kind === 'assault') score += 88;
+    if(!reinforce&&wodOpsTune(ownerId).bridgePurpose!==0&&!wodAiBridgeLeadsToTarget(near,far,ownerId))return -1e9;
+    // (the nearer the fight the better: within twelve cells of it a further 40)
+    if(reinforce) score += 120 + (site.fight&&Math.hypot(far.x-site.fight.x,far.y-site.fight.y)<tilePx*12*1.28?40:0);
+    else if(site.kind === 'assault') score += 88;
     else if(site.kind === 'expand') score += 48;
     else score += 28;
     if(isFrontlineHex(near, ownerId)) score += 64;
     if(far && far.owner > 0 && far.owner !== ownerId) score += 52;
     // Units waiting on the near shore make the bridge useful now.
-    let armyNear = nearestFriendlyLandArmyDistSq(near.x, near.y, ownerId);
+    let armyNear = nearby;
     if(armyNear <= Math.pow(tilePx * 7, 2)) score += 70;
     else if(armyNear <= Math.pow(tilePx * 12, 2)) score += 28;
-    else score -= 70;
+    else if(!reinforce) score -= 70;
     // Prefer sites that open a path toward the current front focus.
     let focus = gameData.aiFrontFocus && gameData.aiFrontFocus[ownerId];
     if(focus && far) {
@@ -525,7 +565,8 @@ function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
         nearestBridgeSq = Math.min(nearestBridgeSq, dx * dx + dy * dy);
     }
     // Hard anti-spam: refuse sites too close to an existing bridge.
-    if(nearestBridgeSq < Math.pow(tilePx * 14, 2)) score -= 260;
+    // (a reinforce site already passed the travel check: no walk over an existing bridge comes near it)
+    if(nearestBridgeSq < Math.pow(tilePx * 14, 2)) score -= reinforce ? 40 : 260;
     else if(nearestBridgeSq < Math.pow(tilePx * 22, 2)) score -= 70;
     score -= site.span * 0.02;
     return score;
@@ -775,7 +816,9 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     // (WOD_OPS.T.islandBridges=0 turns it off) With towns to win across water, a bridge to the next island is part of the
     // crossing: it is looked for even while money is put by for ships or marines (on water maps the economy was always
     // saving for something, and in 25-minute archipelago games no bridge was ever built though dozens of sites qualified).
-    const bridgeWar=islandDemand&&wodOpsTune(owner).islandBridges!==0;
+    // (and so does a fight on an island where none of our towns stand, unless fightBridges=0: see wodAiFightIslands)
+    const fightAcross=wodOpsTune(owner).fightBridges!==0&&wodAiFightIslands(owner).some(f=>!f.ownTown&&f.n>=2);
+    const bridgeWar=(islandDemand||fightAcross)&&wodOpsTune(owner).islandBridges!==0;
     if((!plan.savingFor||bridgeWar) && !needGuards && (army.length>=10||navalReady||bridgeWar) && clock-plan.lastBuilding>=(bridgeWar?25:navalReady?40:65) &&
         cash()>=WOD_PRICE_BRIDGE_PER_CELL+WOD_PRICE_LIGHT*4 && income-upkeep>4 &&
         wodAiTryBridgeForOwner(owner,ownerKey,bridgeWar))plan.lastBuilding=clock;
