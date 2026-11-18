@@ -15,18 +15,19 @@ fs.mkdirSync(OUT,{recursive:true});
             setGameSpeed(0,true);cancelAnimationFrame(animationFrameId);wodDismissChangelogPopup();wodCloudCanSync=()=>false;
             updateAiStrategy=()=>{};wodAiMedicalLogistics=()=>{};wodRunAiSpawnBurstForOwner=()=>{};
             window.h=(q,r=0)=>wodHexAt(q,r);
-            // Own land in the west with a town (supplied); a three-by-three pocket of own land three cells east of
-            // it, with enemy land between.
+            // Own land in the far west with a town (supplied); a three-by-three pocket of own land 26 cells east of it,
+            // with enemy land between: beyond the 24 cells a unit's supply reaches over open ground (since 2026-11-17 bare
+            // enemy ground no longer cuts supply on its own, only a cordon of enemy troops or that distance does).
             window.world=owner=>{
-                wodPrepareForNewMatch({keepLiveMap:true});WOD.makeBlankMap(18);gameState='PLAYING';gameData.menuAttractMode=false;
+                wodPrepareForNewMatch({keepLiveMap:true});WOD.makeBlankMap(36);gameState='PLAYING';gameData.menuAttractMode=false;
                 gameData.mp={enabled:false};gameData._campaignRun=null;gameData._spectator=null;gameData._matchReadyForEndChecks=false;gameData.fogOfWar=false;
                 gameData.entities=[];gameData.nextUnitId=1;gameData.cities=[];gameData.forts=[];gameData.hospitals=[];gameData.bridges=[];gameData.roads=[];gameData.constructionJobs=[];gameData.selection=[];gameData.alliances=[];
                 gameData._aiEconomyClock=0;gameData.aiTimer=gameData.aiStrategyTimer=gameData.convoyTimer=gameData._transportAiTimer=-1e6;
                 gameData.money=gameData.manpower=100000;gameData.aiMoneyByOwner={[owner]:100000,9:100000};gameData.aiManpowerByOwner={[owner]:100000,9:100000};gameData._wodClaimBatch=new Map();
                 const foe=owner===1?2:9;
-                for(const hex of gameData.hexList){hex.type='grass';hex.cityId=null;hex.owner=hex.q<=-3?owner:foe;
+                for(const hex of gameData.hexList){hex.type='grass';hex.cityId=null;hex.owner=hex.q<=-26?owner:foe;
                     if(hex.q>=1&&hex.q<=3&&Math.abs(hex.r)<=1)hex.owner=owner;}
-                const at=h(-10);at.type='urban';at.cityId='home';gameData.cities.push({id:'home',name:'Home',q:at.q,r:at.r,x:at.x,y:at.y,owner,hp:1000,maxHp:1000});
+                const at=h(-30);at.type='urban';at.cityId='home';gameData.cities.push({id:'home',name:'Home',q:at.q,r:at.r,x:at.x,y:at.y,owner,hp:1000,maxHp:1000});
                 const fat=h(12,-6);fat.type='urban';fat.cityId='theirs';fat.owner=foe;gameData.cities.push({id:'theirs',name:'Theirs',q:fat.q,r:fat.r,x:fat.x,y:fat.y,owner:foe,hp:1000,maxHp:1000});
                 gameData._supplyTopologyVersion=(gameData._supplyTopologyVersion||0)+1;gameData._citySupplyCache=null;
             };

@@ -2,6 +2,16 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-18T06:00:00Z",title:"Fair maps of every kind, supply at the front, and fixes",items:[
+        "Generated maps now start fair on every map type, for two to four players. A river runs between every pair of neighbouring players or between none, never between two players only. Each player gets the same share of forest, hills, swamp, sand and mountains to within a few points, and each player's nearest enemy town is about as far away as everyone else's.",
+        "Supply follows the front. A unit that pushes into enemy land stays supplied while it has a way back to your towns that enemy troops do not hold. Units used to go out of supply two cells past the border. A unit surrounded by enemy troops is cut off, and so is a pocket of your land closed off by them.",
+        "Marines on a coast are always supplied while they touch the open sea. Some showed as out of supply.",
+        "A town stops working under siege only when an enemy has taken one of its cells, is fighting your troops on one of them, or is shelling it from a ship. It used to stop whenever enemy troops came within a few cells.",
+        "In multiplayer, players who join a game now see gunfire. Before, only the host saw the shots.",
+        "Multiplayer lobbies: when the host changes or regenerates the map after others have joined, everyone gets the new map and the match starts for all. Guests used to get a black screen. A guest whose map still fails to load goes back to the menu with a message, and the AI takes their place.",
+        "The screen no longer stays black when the computer resets the graphics during a long match, for example when graphics memory runs short. The map is drawn again. If the desktop app's game window crashes, it reloads by itself.",
+        "Bridges can be built on every diagonal. Some diagonal bridges were refused as too long even though they crossed no more water than a straight one."
+    ]},
     {at:"2026-11-17T22:00:00Z",title:"Fair archipelagos, troops that cross water on command",items:[
         "Archipelago maps now start fair island by island. No player begins with a lone town on an island where an opponent has two, and no player has every town on shared islands while another has an island to itself. On small maps with three or four players this sometimes means one town each instead of two.",
         "Land troops ordered to dry land across water now go. The order used to be refused (“No reachable formation space”) and they stood still. They take a land route when there is one and swim when there is not. Troops still lose strength after ten seconds in the water, so a long swim is costly: marines and transports remain the way across open sea.",

@@ -3971,7 +3971,7 @@ function wodRoutedSupplyEscapePoint(unit) {
     const start=getNearestHexToPoint(unit.x,unit.y);
     if(!start||wodIsNavalUnit(unit)||isWaterHex(start)&&!isBridgeHex(start))return null;
     const prev=new Map([[start,null]]),queue=[start];let end=null;
-    for(let i=0;i<queue.length&&i<2500;i++){
+    for(let i=0;i<queue.length&&i<6000;i++){ // (a 2500-cell search reached only about 24 cells out: deeper pockets never found home)
         const h=queue[i];
         if(h!==start&&!isWaterHex(h)&&wodIsFriendlyOwner(h.owner,unit.owner)&&wodCurrentSupplyComponent(h,unit.owner).city){end=h;break;}
         for(const n of getNeighborHexes(h).concat(wodBridgeLinkedHexes(h)||[])){

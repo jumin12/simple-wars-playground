@@ -795,6 +795,35 @@ function wodEmitCombatShot(attacker, target) {
     tr.color = col; tr.width = width; tr.heavy = heavy;
     if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
 }
+// A multiplayer guest runs no simulation, so the shots the host's fights fire (wodEmitCombatShot, from the combat step)
+// were never drawn there: guests saw the armies fight without gunfire, and no effect ever aged. The host's snapshots carry
+// each unit's target and how hot its fighting is (combatTargetUid, activeCombatVisual, which fades within a second of the
+// last shot); the guest fires the same tracers from them, at each unit's own shot rate, from where the units are drawn.
+function wodGuestCombatFx(dt) {
+    // (the view rectangle shots are culled to is refreshed by update(), which a guest never runs: without this it kept
+    // the camera of the last game this page simulated, and fights outside that old view drew no shots)
+    wodRefreshCombatCamBounds();
+    wodUpdateCombatFx(dt);
+    const ents = gameData.entities;
+    if(!(dt > 0) || !ents || !ents.length) return;
+    const byUid = new Map();
+    for(const e of ents) if(e && e.uid != null && e.hp > 0) byUid.set(e.uid, e);
+    const drawn = u => { const p = Object.create(u); p.x = u._drawX != null ? u._drawX : u.x; p.y = u._drawY != null ? u._drawY : u.y; return p; };
+    let budget = WOD_COMBAT_SHOTS_PER_FRAME;
+    for(const u of ents) {
+        if(!u || u.hp <= 0 || u.type === 'convoy' || u.combatTargetUid == null || (u.activeCombatVisual || 0) < .25) { if(u) u._guestShotTimer = null; continue; }
+        const t = byUid.get(u.combatTargetUid);
+        if(!t || Math.hypot(t.x - u.x, t.y - u.y) > (u.range || 50) * wodGeneralStatMultiplier(u) * 1.5 + (gameData.hexRadius || 20)) continue;
+        const interval = wodCombatShotVisualInterval(u);
+        if(u._guestShotTimer == null) u._guestShotTimer = wodCombatShotPhase(u) * interval;
+        u._guestShotTimer += dt;
+        if(u._guestShotTimer >= interval && budget > 0) {
+            u._guestShotTimer = Math.min(u._guestShotTimer - interval, interval);
+            budget--;
+            wodEmitCombatShot(drawn(u), drawn(t));
+        }
+    }
+}
 function wodDeferHeavySimDuringMarch() {
     // NOTE: this must NOT trip on the AI's own marches. It previously returned true
     // whenever 8+ units were moving in total, which froze the AI's strategy/spawn/
@@ -1370,14 +1399,14 @@ function isCitySiegeBlockedForProduction(city) {
     const urban=getCityUrbanTerrainHexes(city);
     // Occupation/capture is an attack even when no defender is firing.
     if(urban.some(h=>wodIsHostileOwner(h.owner,city.owner)))return true;
-    let bounds=city._siegeUrbanBounds;
-    if(bounds?.urban!==urban){bounds={urban,minX:Infinity,minY:Infinity,maxX:-Infinity,maxY:-Infinity};for(const h of urban){bounds.minX=Math.min(bounds.minX,h.x);bounds.maxX=Math.max(bounds.maxX,h.x);bounds.minY=Math.min(bounds.minY,h.y);bounds.maxY=Math.max(bounds.maxY,h.y);}city._siegeUrbanBounds=bounds;}
-    return gameData.entities.some(u=>{
-        if(u.hp<=0||u.type==='convoy'||!wodIsHostileOwner(u.owner,city.owner))return false;
-        if(wodIsNavalUnit(u))return wodShipEngagesTown(u,city,urban);
-        const reach=(u.range||50)+gameData.hexRadius*.5;
-        return u.x>=bounds.minX-reach&&u.x<=bounds.maxX+reach&&u.y>=bounds.minY-reach&&u.y<=bounds.maxY+reach&&urban.some(h=>(u.x-h.x)**2+(u.y-h.y)**2<=reach*reach);
-    });
+    // An enemy standing on a town cell is taking it (the cell turns his as soon as none of ours stands there).
+    const keys=new Set(urban.map(getHexKey));
+    if(gameData.entities.some(u=>u.hp>0&&u.type!=='convoy'&&!wodIsNavalUnit(u)&&wodIsHostileOwner(u.owner,city.owner)&&
+        Math.abs(u.x-city.x)<(gameData.hexRadius||20)*12&&Math.abs(u.y-city.y)<(gameData.hexRadius||20)*12&&keys.has(getHexKey(getNearestHexToPoint(u.x,u.y)))))return true;
+    // Otherwise only a fight with our troops standing in the town stops it: a land fight on a town cell marks the town as
+    // it is fought (wodStagingMarkCombatOnCityUrbanTile, above), and a ship counts while it exchanges fire with troops in
+    // the town. An enemy merely within firing range of a town cell used to stop it too, with nobody fighting.
+    return gameData.entities.some(u=>u.hp>0&&wodIsNavalUnit(u)&&wodIsHostileOwner(u.owner,city.owner)&&wodShipEngagesTown(u,city,urban));
 }
 function citySiegeShowsCombatIndicator(city) {
     if(!city || !city.id) return false;

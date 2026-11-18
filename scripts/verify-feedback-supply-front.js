@@ -24,8 +24,12 @@ const server=H.createStaticServer();
     const u=feedbackUnit(6,6,'light',owner);feedbackRefresh();gameData.encircledHexes=new Set(['6,6']);
     const supplied=!wodGetUnitEncirclementState(u,feedbackHex(6,6)),flagCleared=!wodHexKeyIsEncircled('6,6');feedbackScan();
     const scanSupplied=!wodGetUnitEncirclementState(u,feedbackHex(6,6)),preserved=Array.from({length:7},(_,i)=>feedbackHex(i,i).owner).every(o=>o===owner);
-    const ai=wodAiReadDefense(owner,[u],true);setHexOwner(feedbackHex(3,3),owner===1?2:1);const cut=!!wodGetUnitEncirclementState(u,feedbackHex(6,6));
-    setHexOwner(feedbackHex(3,3),owner);const restored=!wodGetUnitEncirclementState(u,feedbackHex(6,6));
+    // (since 2026-11-17 a bare enemy cell across the line no longer cuts it: an enemy ring of troops round the unit does)
+    const ai=wodAiReadDefense(owner,[u],true),enemy=owner===1?2:1;setHexOwner(feedbackHex(3,3),enemy);setHexOwner(feedbackHex(3,2),enemy);
+    const ring=gameData.hexList.filter(p=>Math.max(Math.abs(p.q-6),Math.abs(p.r-6))===2&&(p.q+p.r)%2===0).map(p=>feedbackUnit(p.q,p.r,'light',enemy));
+    feedbackRefresh();wodRebuildHexCombatOccupancy();gameData._frontSupplyMemo=null;const cut=!!wodGetUnitEncirclementState(u,feedbackHex(6,6));
+    gameData.entities=gameData.entities.filter(x=>!ring.includes(x));setHexOwner(feedbackHex(3,3),owner);setHexOwner(feedbackHex(3,2),owner);feedbackRefresh();wodRebuildHexCombatOccupancy();gameData._frontSupplyMemo=null;
+    const restored=!wodGetUnitEncirclementState(u,feedbackHex(6,6));
     return{owner,supplied,flagCleared,scanSupplied,preserved,pockets:ai.pockets.length,cut,restored};
    },owner);assert(row.supplied&&row.flagCleared&&row.scanSupplied&&row.preserved&&row.cut&&row.restored&&row.pockets===0);results.supply.push(row);
   }
@@ -39,7 +43,20 @@ const server=H.createStaticServer();
     return{owner,supplied,sources,pockets:defense.pockets.length,lostTown,recaptured};
    },owner);assert(row.supplied&&row.sources===2&&row.pockets===0&&row.lostTown&&row.recaptured);results.towns.push(row);
   }
-  results.waterGap=await page.evaluate(()=>{feedbackWorld(1);feedbackTown(0,0,1,'Home');feedbackHex(1,1).owner=1;feedbackHex(1,0).type=feedbackHex(0,1).type='water';feedbackRefresh();return !wodCurrentSupplyComponent(feedbackHex(1,1),1).city;});assert(results.waterGap,'diagonal water gaps do not become land corridors');
+  results.waterGap=await page.evaluate(()=>{
+   feedbackWorld(1);
+   feedbackTown(0,0,1,'Home');
+   feedbackHex(1,0).type=feedbackHex(0,1).type='water';
+   const corner=feedbackHex(1,1), far=feedbackHex(2,2);
+   corner.owner=far.owner=1;
+   feedbackRefresh();
+   const dryDiagonal=wodCurrentSupplyComponent(far,1).city;
+   corner.type='water';
+   gameData._wodPfVer=(gameData._wodPfVer||0)+1;
+   feedbackRefresh();
+   return {dryDiagonal,waterBlocks:!wodCurrentSupplyComponent(far,1).city};
+  });
+  assert(results.waterGap.dryDiagonal&&results.waterGap.waterBlocks,'dry diagonal neighbors relay supply, but open water does not');
   results.front=await page.evaluate(()=>{
    feedbackWorld();for(const h of gameData.hexList)h.owner=h.q<=0?2:1;const c=feedbackTown(-18,0,2,'Home');feedbackTown(18,0,1,'Target');
    const guard=feedbackUnit(-18),main=[feedbackUnit(0,-2),feedbackUnit(0,0),feedbackUnit(0,2),feedbackUnit(-2,4,'heavy')],reserves=[feedbackUnit(-10,-5),feedbackUnit(-10,-2),feedbackUnit(-10,2),feedbackUnit(-10,5)],line=[feedbackUnit(-8,10),feedbackUnit(-8,12)];
@@ -52,7 +69,24 @@ const server=H.createStaticServer();
    for(let i=0;i<800;i++){wodBeginSimPfBudget(gameData.entities.length);gameData._wodPfFrameActive=true;try{update(.1);}finally{gameData._wodPfFrameActive=false;}wodDrainAiMoveQueue();}
    return{borrowed:borrowed.length,ordered,guardStays,reserveHeld,lineHeld,advanced:borrowed.filter((u,i)=>u.x>start[i]+gameData.hexRadius*3).length};
   });assert(results.front.borrowed>=2&&results.front.ordered>=2&&results.front.guardStays&&results.front.reserveHeld>=1&&results.front.lineHeld>=1&&results.front.advanced>=2,JSON.stringify(results.front));
-  results.merge=await page.evaluate(()=>{feedbackWorld();for(const h of gameData.hexList)h.owner=h.q<0?2:1;feedbackTown(-18,0,2,'Home');const army=Array.from({length:8},(_,i)=>feedbackUnit(-8,i-4));feedbackRefresh();const a={id:'a',kind:'main',members:army.slice(0,4).map(u=>u.uid),waitingForStrength:true,objectiveHex:feedbackHex(18,-10),holdHex:feedbackHex(-6,-2)},b={id:'b',kind:'main',members:army.slice(4).map(u=>u.uid),waitingForStrength:true,objectiveHex:feedbackHex(18,10),holdHex:feedbackHex(-6,2)},p={jobs:[a,b],unitJob:Object.fromEntries(army.map((u,i)=>[u.uid,i<4?'a':'b']))};wodAiConcentrateAssaults(2,p,army);return{groups:p.jobs.length,members:p.jobs[0].members.length};});assert(results.merge.groups===1&&results.merge.members===8);
+  results.assaultGroups=await page.evaluate(()=>{
+   const groups=(first,second)=>{
+    feedbackWorld();
+    for(const h of gameData.hexList)h.owner=h.q<0?2:1;
+    feedbackTown(-18,0,2,'Home');
+    const army=Array.from({length:first+second},(_,i)=>feedbackUnit(-8,i-4));
+    feedbackRefresh();
+    const jobs=[
+     {id:'a',kind:'main',members:army.slice(0,first).map(u=>u.uid),waitingForStrength:true,objectiveHex:feedbackHex(18,-10),holdHex:feedbackHex(-6,-2)},
+     {id:'b',kind:'main',members:army.slice(first).map(u=>u.uid),waitingForStrength:true,objectiveHex:feedbackHex(18,10),holdHex:feedbackHex(-6,2)}
+    ];
+    const plan={jobs,unitJob:Object.fromEntries(jobs.flatMap(job=>job.members.map(id=>[id,job.id])))};
+    wodAiConcentrateAssaults(2,plan,army);
+    return plan.jobs.map(job=>job.members.length);
+   };
+   return {viable:groups(4,4),understrength:groups(4,2)};
+  });
+  assert.deepEqual(results.assaultGroups,{viable:[4,4],understrength:[6]});
   await page.evaluate(()=>{feedbackWorld(1);for(const h of gameData.hexList)h.owner=1;feedbackTown(-10,0,1,'Home');placeFortAtHex(feedbackHex(-4,0),1,{editor:true});placeHospitalAtHex(feedbackHex(0,0),1,{editor:true});const g=feedbackUnit(5,0,'heavy',1);g.isGeneral=true;UI.mainMenu.classList.add('hidden');UI.panels.forEach(p=>p.classList.add('hidden'));UI.inGameUI.style.display='block';gameData.camera={zoom:1.8,x:-canvas.clientWidth/2,y:-canvas.clientHeight/2};feedbackRefresh();wodMarkTerrainFullDirty();updateTerrainCache();draw();});
   await page.screenshot({path:path.join(OUT,'hospital-fort-purple-command.png')});assert.deepEqual(errors,[]);console.log(JSON.stringify(results,null,2));
  }finally{fs.writeFileSync(path.join(OUT,'results.json'),JSON.stringify(results,null,2));fs.writeFileSync(path.join(OUT,'errors.json'),JSON.stringify(errors));await browser.close();server.close();}

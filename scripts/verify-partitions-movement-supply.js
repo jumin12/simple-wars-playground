@@ -105,6 +105,9 @@ const server=H.createStaticServer();
     for(const h of gameData.hexList){h.owner=h.q>10?owner:enemy;if(ground==='own'&&Math.abs(h.q)<=2&&Math.abs(h.r)<=2)h.owner=owner;}
     fixtureTown(17,0,owner,'Own supply');fixtureTown(-17,0,enemy,'Hostile supply');
     const h=gameData.hexes['0,0'],u=createUnitAt('light',h.x,h.y,owner,{startSpawn:true});u.x=h.x;u.y=h.y;u.hp=90;
+    // a cordon of enemy troops four cells out (every other cell): bare enemy ground alone no longer cuts supply
+    for(const c of gameData.hexList)if(Math.max(Math.abs(c.q),Math.abs(c.r))===4&&(c.q+c.r)%2===0){const e=createUnitAt('light',c.x,c.y,enemy,{startSpawn:true});e.x=c.x;e.y=c.y;}
+    gameData.unitSpatialGrid=buildUnitSpatialGrid();wodRebuildHexCombatOccupancy();
     gameData._wodPlayerMovingN=80;let ticks=0;
     for(;ticks<100;ticks++){gameData._wodSimTick=ticks*2;updateEncirclements(.1);if(!gameData._encircWork&&gameData.encircledHexes.size)break;}
     u.outOfSupplySeconds=10;const state=wodGetUnitEncirclementState(u,h),before=u.hp,old=updateAiStrategy;updateAiStrategy=()=>{};update(.2);updateAiStrategy=old;

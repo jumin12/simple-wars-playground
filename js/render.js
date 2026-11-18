@@ -457,7 +457,38 @@ function wodSyncHudDom() {
         syncInfoCardPanelThrottled();
 }
 
+// A canvas the system takes back (graphics memory short, the GPU process restarted: more likely on large maps, whose map
+// layers hold some 250 MB) is blank until it is given back, and afterwards every cached layer is still blank: the map
+// stayed black for the rest of the match. Drawing waits while any of the main canvases is lost, then every cached layer
+// is made again.
+let wodCanvasLossSeen = false, wodCanvasLossWatched = false;
+function wodCanvasesLost() {
+    if(!wodCanvasLossWatched) {
+        // (here, not at load: the canvases are made by js/main.js, which loads after this file)
+        wodCanvasLossWatched = true;
+        for(const c of [canvas, terrainCanvas, terrainBaseCanvas]) {
+            c.addEventListener('contextlost', () => { wodCanvasLossSeen = true; console.warn('[Simple Wars] a canvas lost its graphics context'); });
+            c.addEventListener('contextrestored', () => { wodCanvasLossSeen = true; });
+        }
+    }
+    const lost = !!(ctx.isContextLost?.() || terrainCtx.isContextLost?.() || terrainBaseCtx.isContextLost?.());
+    if(lost) { wodCanvasLossSeen = true; return true; }
+    if(wodCanvasLossSeen) { wodCanvasLossSeen = false; wodRebuildCanvasCaches(); }
+    return false;
+}
+function wodRebuildCanvasCaches() {
+    try {
+        wodMarkTerrainFullDirty();
+        gameData._unitSpriteCache = null;
+        wodCityNameSpriteCache.clear();
+        gameData._fogCanvasDirty = true;
+        gameData._topoShadeCanvas = null;
+        updateTerrainCache();
+        showNotification('The system reset the graphics; the map has been redrawn.');
+    } catch(err) { wodReportRuntimeError(err, 'graphics reset'); }
+}
 function draw() {
+    if(wodCanvasesLost()) return;
     if(wodFogActive()&&performance.now()>(gameData._fogViewNextAt||0)) {
         gameData._fogViewNextAt=performance.now()+220;wodRefreshFogVision(.23);
     }

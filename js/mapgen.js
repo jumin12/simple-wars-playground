@@ -788,6 +788,8 @@ async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
     let riverTargets = rivShape ? 1 + ((Math.random() > 0.52) ? 1 : 0) : 2 + ((Math.random() > 0.38) ? 1 : 0);
     let oceanKeys = rivShape ? wodBuildOceanConnectedWaterKeys(colM, rowM) : null;
     let carved = 0;
+    // (river cells are marked, _river, so the start balancer can tell a river from a sea, a strait or a lake)
+    for(const h of gameData.hexList) if(h._river) delete h._river;
     let attempt = 0;
     while(carved < riverTargets && attempt < riverTargets + 5) {
         attempt++;
@@ -873,6 +875,7 @@ async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
             if(!hx || isWaterHex(hx)) continue;
             backup.push({ hex: hx, type: hx.type, baseColor: hx.baseColor, renderColor: hx.renderColor });
             wodSetGeneratedTerrainType(hx, 'water');
+            hx._river = true;
         }
         let after = wodCountPassableLandComponents();
         if(after > before) {
@@ -880,6 +883,7 @@ async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
                 bk.hex.type = bk.type;
                 bk.hex.baseColor = bk.baseColor;
                 bk.hex.renderColor = bk.renderColor;
+                delete bk.hex._river;
             }
         } else {
             carved++;
@@ -1996,7 +2000,7 @@ function wodBridgeSpanLayout(aq, ar, bq, br) {
     const start = wodHexAt(aq, ar), end = wodHexAt(bq, br);
     if(!start || !end) return fail('The bridge must stay on the map.');
     if(start === end) return fail(isWaterHex(start) ? 'Start the bridge on land, then drag across the water.' : 'Drag across the water to the other bank.');
-    const tooLong = 'Too long: a bridge spans at most ' + WOD_BRIDGE_MAX_CELLS + ' cells of water, fewer on a slant.';
+    const tooLong = 'Too long: a bridge spans at most ' + WOD_BRIDGE_MAX_CELLS + ' cells of water.';
     if(Math.max(Math.abs(bq - aq), Math.abs(br - ar)) > 40) return fail(tooLong);
     let line = wodBridgeLineCells(aq, ar, bq, br).map(c => wodHexAt(c.q, c.r));
     if(line.some(h => !h)) return fail('The bridge must stay on the map.');
@@ -2019,11 +2023,14 @@ function wodBridgeSpanLayout(aq, ar, bq, br) {
     plan.count = water.length;
     plan.cost = plan.count * WOD_PRICE_BRIDGE_PER_CELL;
     if(!water.length || water.some(h => !isWaterHex(h))) return fail('Land is in the way: a bridge crosses one stretch of water.');
-    const sp = (gameData.hexRadius || 20) * 1.35, len = Math.hypot(b.x - a.x, b.y - a.y);
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
     // The deck runs from the centre of one bank cell to the centre of the other.
     plan.record = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, angle: Math.atan2(b.y - a.y, b.x - a.x), w: len, h: wodBridgeDefaultDims().h,
         cells: plan.count, aq: a.q, ar: a.r, bq: b.q, br: b.r };
-    if(plan.count > WOD_BRIDGE_MAX_CELLS || len > sp * WOD_BRIDGE_MAX_BANK_TILES + 0.01) return fail(tooLong);
+    // The span is limited by the water it crosses, the same in every direction: the line between the banks puts one
+    // cell on each step, so four cells of water is four steps whether straight or slanted. A cap on the deck's length as
+    // well (5.4 cells) refused a 45-degree crossing of a river three cells wide, which a straight one of four passed.
+    if(plan.count > WOD_BRIDGE_MAX_CELLS) return fail(tooLong);
     if(a.type === 'mountain' || b.type === 'mountain') return fail('Bridge ends must rest on open land, not on mountains.');
     return plan;
 }
@@ -2926,6 +2933,143 @@ function wodVerifyCityPlacementSymmetry(ownerIds) {
  *  has as many towns there as the others, and every player has the same number of towns on islands shared with an enemy.
  *  (Splitting the map by straight lines across the sea gave half of all archipelago maps a lone town on an island beside
  *  two of an enemy's, or one player a quiet islet while another had none.) */
+// A river along the border between some players and not others is unfair: those two each have a moat on one side, the
+// rest meet their neighbours over open ground. Each river cell (marked _river when carved) with land of two or more
+// players within two cells is a border river cell; the pairs of players who are neighbours (by land or across a river)
+// are found, and unless every such pair meets across a river, the border river cells are filled with grass and given
+// to the nearest player. Rivers inside one player's land stay. Land counts are evened out again afterwards.
+// Returns the number of cells filled.
+function wodBalanceStartingRivers(owners) {
+    if(!owners || owners.length < 2) return 0;
+    const set = new Set(owners), land = h => h && !isWaterHex(h) && set.has(h.owner);
+    const key = (a, b) => a < b ? a + '-' + b : b + '-' + a;
+    const neighbours = new Set(), riverPairs = new Set(), border = [];
+    for(const h of gameData.hexList) {
+        if(land(h)) { for(const n of getNeighborHexes(h)) if(land(n) && n.owner !== h.owner) neighbours.add(key(h.owner, n.owner)); continue; }
+        if(!h || !h._river || !isWaterHex(h) || isBridgeHex(h)) continue;
+        const near = new Set();
+        for(const p of getHexesInRadius(h.q, h.r, 2)) { const n = wodHexAt(p.q, p.r); if(land(n)) near.add(n.owner); }
+        if(near.size < 2) continue;
+        const list = [...near];
+        for(let i = 0; i < list.length; i++) for(let j = i + 1; j < list.length; j++) { riverPairs.add(key(list[i], list[j])); neighbours.add(key(list[i], list[j])); }
+        border.push(h);
+    }
+    if(!border.length || [...neighbours].every(k => riverPairs.has(k))) return 0;
+    for(const h of border) {
+        let best = null, bd = Infinity;
+        for(const p of getHexesInRadius(h.q, h.r, 3)) { const n = wodHexAt(p.q, p.r); if(!land(n)) continue; const d = Math.hypot(n.x - h.x, n.y - h.y); if(d < bd) { bd = d; best = n; } }
+        wodSetGeneratedTerrainType(h, 'grass');
+        delete h._river;
+        if(best) setHexOwner(h, best.owner);
+    }
+    gameData._wodPfVer = (gameData._wodPfVer || 0) + 1;
+    gameData.landGeometryRevision = (gameData.landGeometryRevision || 0) + 1;
+    return border.length;
+}
+// Every player gets the same ground: for forest, hills, swamp and sand in turn, a player with more cells of it than the
+// average share turns the ones at the edge of its patches into grass, and a player with fewer turns grass beside its patches
+// (or anywhere, with none) into it, until each is within two cells of the average. Towns, mountains, water and bridges
+// are left alone; mountains are evened out too (see below), only where no way between two cells is shut, so supply,
+// routes and land counts stay as they are. Returns the number of cells changed.
+function wodBalanceStartingTerrain(owners) {
+    if(!owners || owners.length < 2) return 0;
+    const set = new Set(owners);
+    const open = h => h && !isWaterHex(h) && !isBridgeHex(h) && h.type !== 'mountain' && h.type !== 'urban' && !h.cityId && set.has(h.owner);
+    const cellsOf = {};
+    for(const o of owners) cellsOf[o] = [];
+    for(const h of gameData.hexList) if(open(h)) cellsOf[h.owner].push(h);
+    let changed = 0;
+    const like = (h, type) => getNeighborHexes(h).filter(n => n && n.type === type).length;
+    // Mountains first: they count as land but cannot be used, so a player with more of them has less ground to move and
+    // fight on. One above the average share turns the mountain cells at the edge of its ranges into hills; one below grows
+    // its ranges at their edges, only where no way is shut (blockable). The hills join its open ground below.
+    {
+        const dry = o => gameData.hexList.filter(h => h && !isWaterHex(h) && !isBridgeHex(h) && h.type !== 'urban' && !h.cityId && h.owner === o);
+        const lists = {}; for(const o of owners) lists[o] = dry(o);
+        const mShare = owners.reduce((s, o) => s + lists[o].filter(h => h.type === 'mountain').length, 0) / Math.max(1, owners.reduce((s, o) => s + lists[o].length, 0));
+        // A cell can become a mountain without shutting any way only when the ground round it that can be walked is one
+        // unbroken arc of its eight neighbours (or all of them): then those neighbours still reach each other round it.
+        const RING = [[1,0],[1,1],[0,1],[-1,1],[-1,0],[-1,-1],[0,-1],[1,-1]];
+        const walk = h => !!h && !isWaterHex(h) && h.type !== 'mountain';
+        const blockable = h => {
+            const r = RING.map(([dq, dr]) => walk(wodHexAt(h.q + dq, h.r + dr)));
+            let flips = 0; for(let i = 0; i < 8; i++) if(r[i] !== r[(i + 1) % 8]) flips++;
+            return flips <= 2 && r.some(Boolean);
+        };
+        const nearTown = h => gameData.cities.some(c => Math.max(Math.abs(c.q - h.q), Math.abs(c.r - h.r)) <= 2);
+        for(const o of owners) {
+            const peaks = lists[o].filter(h => h.type === 'mountain'), target = Math.round(mShare * lists[o].length);
+            let n = peaks.length;
+            if(n > target + 2) {
+                peaks.sort((a, b) => like(a, 'mountain') - like(b, 'mountain') || a.q - b.q || a.r - b.r);
+                for(const h of peaks) { if(n <= target) break; wodSetGeneratedTerrainType(h, 'hill'); cellsOf[o].push(h); n--; changed++; }
+            } else if(n < target - 2) {
+                // below the average: ranges grow at their edges (cells beside a mountain first), never across a way
+                const pool = cellsOf[o].filter(h => (h.type === 'hill' || h.type === 'grass' || h.type === 'forest') && !nearTown(h))
+                    .sort((a, b) => like(b, 'mountain') - like(a, 'mountain') || a.q - b.q || a.r - b.r);
+                for(const h of pool) {
+                    if(n >= target) break;
+                    if(!blockable(h)) continue;
+                    wodSetGeneratedTerrainType(h, 'mountain');
+                    cellsOf[o].splice(cellsOf[o].indexOf(h), 1);
+                    n++; changed++;
+                }
+            }
+        }
+    }
+    // (shares of each player's own ground, not counts: land is evened out only afterwards)
+    const total = owners.reduce((s, o) => s + cellsOf[o].length, 0);
+    // (up to three passes: a player short of forest may have no grass to turn until its surplus swamp or sand has been
+    // turned into grass later in the same pass)
+    for(let pass = 0, before = -1; pass < 3 && changed !== before; pass++) { before = changed;
+    for(const type of ['forest', 'hill', 'swamp', 'sand']) {
+        const count = o => cellsOf[o].filter(h => h.type === type).length;
+        const share = owners.reduce((s, o) => s + count(o), 0) / Math.max(1, total);
+        for(const o of owners) {
+            const target = Math.round(share * cellsOf[o].length);
+            let n = count(o);
+            if(n > target + 2) {
+                // patch edges first (fewest neighbours of the same ground), in a fixed order
+                const pool = cellsOf[o].filter(h => h.type === type).sort((a, b) => like(a, type) - like(b, type) || a.q - b.q || a.r - b.r);
+                for(const h of pool) { if(n <= target) break; wodSetGeneratedTerrainType(h, 'grass'); n--; changed++; }
+            } else if(n < target - 2) {
+                const pool = cellsOf[o].filter(h => h.type === 'grass').sort((a, b) => like(b, type) - like(a, type) || a.q - b.q || a.r - b.r);
+                for(const h of pool) { if(n >= target) break; wodSetGeneratedTerrainType(h, type); n++; changed++; }
+            }
+        }
+    }
+    }
+    return changed;
+}
+// No river between some players only (what wodBalanceStartingRivers leaves): either no river cell has two players' land
+// within two cells, or every pair of neighbouring players meets across one.
+function wodStartingRiversFair(owners) {
+    const set = new Set(owners), land = h => h && !isWaterHex(h) && set.has(h.owner), key = (a, b) => a < b ? a + '-' + b : b + '-' + a;
+    const neighbours = new Set(), riverPairs = new Set();
+    let border = 0;
+    for(const h of gameData.hexList) {
+        if(land(h)) { for(const n of getNeighborHexes(h)) if(land(n) && n.owner !== h.owner) neighbours.add(key(h.owner, n.owner)); continue; }
+        if(!h || !h._river || !isWaterHex(h) || isBridgeHex(h)) continue;
+        const near = new Set();
+        for(const p of getHexesInRadius(h.q, h.r, 2)) { const n = wodHexAt(p.q, p.r); if(land(n)) near.add(n.owner); }
+        if(near.size < 2) continue;
+        border++;
+        const l = [...near];
+        for(let i = 0; i < l.length; i++) for(let j = i + 1; j < l.length; j++) { riverPairs.add(key(l[i], l[j])); neighbours.add(key(l[i], l[j])); }
+    }
+    return !border || [...neighbours].every(k => riverPairs.has(k));
+}
+// The nearest enemy town is about as far for every player: no more than a third further for one than for another.
+function wodStartingTownDistancesFair(owners) {
+    if(!owners || owners.length < 2) return true;
+    const near = owners.map(o => {
+        let best = Infinity;
+        for(const c of gameData.cities) if(c.owner === o) for(const e of gameData.cities) if(e.owner > 0 && e.owner !== o) best = Math.min(best, Math.hypot(c.x - e.x, c.y - e.y));
+        return best;
+    });
+    if(near.some(d => !Number.isFinite(d) || d <= 0)) return true;
+    return Math.max(...near) <= Math.min(...near) * 1.35;
+}
 function wodArchipelagoIslandsFair(owners) {
     // islands as infantry sees them, searched afresh (terrain is still changing while a map is made)
     const islandOf = new Map(), walk = h => !!h && (isBridgeHex(h) || !isWaterHex(h) && h.type !== 'mountain');
@@ -2983,6 +3127,8 @@ function wodVerifyFairFactionStart(ownerIds) {
     }
     if(sorted.length === 2 && !wodVerifyCityPlacementSymmetry(sorted)) return false;
     if(gameData.mapShape === 'archipelago' && !wodArchipelagoIslandsFair(sorted)) { gameData._wodIslandsUnfair = true; return false; }
+    if(!wodStartingTownDistancesFair(sorted)) { gameData._wodTownsFarApart = true; return false; }
+    if(!wodStartingRiversFair(sorted)) return false;
     const supplied=wodStartingTownSupply();
     for(const owner of sorted) {
         const pool=gameData.hexList.filter(h=>h.owner===owner&&supplied.get(owner)?.has(getHexKey(h)));
@@ -4102,12 +4248,19 @@ async function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapSha
     if(!pathSplit) await wodEqualizePoliticsBiasedVoronoi(ownersSorted, seedObjs, ownersSorted.length >= 3 ? 12 : 18);
     wodSyncUrbanFootprintOwners();
     await wodCarveStartingFactionPasses(ownersSorted);
+    // Even starts: no river between some players only (filled along those borders, before the land counts are evened
+    // out: filled river cells are new land; and once more after, since evening the land moves borders onto rivers), and
+    // the same ground for everyone (last: it changes no owner, while evening the land moves border cells between players).
+    wodBalanceStartingRivers(ownersSorted);
     wodRepairStartingLandSupply(ownersSorted);
-    await wodExactEqualizePoliticalLandCounts(
+    const equalizeLand = () => wodExactEqualizePoliticalLandCounts(
         ownersSorted,
         gameData.cities,
         ownersSorted.length >= 3 ? Math.min(360, gameData.hexList.length) : Math.min(600, gameData.hexList.length)
     );
+    await equalizeLand();
+    if(wodBalanceStartingRivers(ownersSorted)) { wodRepairStartingLandSupply(ownersSorted); await equalizeLand(); }
+    wodBalanceStartingTerrain(ownersSorted);
     // Retry a constrained layout instead of moving its capitals into
     // another faction's region and carving long protected corridors.
     wodAssignAllWaterFromNearestLand(true);
@@ -4115,9 +4268,9 @@ async function wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapSha
 
     gameData._startingBorderQuality=wodValidateStartingBorders(ownersSorted,referenceFrontier);
     if(!gameData._startingBorderQuality.ok)return false;
-    gameData._wodIslandsUnfair = false;
+    gameData._wodIslandsUnfair = false;gameData._wodTownsFarApart = false;
     if(!wodVerifyFairFactionStart(ownersSorted)) {
-        gameData._startingBorderQuality={...gameData._startingBorderQuality,ok:false,reason:gameData._wodIslandsUnfair?'island-balance':'unbalanced-start'};
+        gameData._startingBorderQuality={...gameData._startingBorderQuality,ok:false,reason:gameData._wodIslandsUnfair?'island-balance':gameData._wodTownsFarApart?'town-distance':'unbalanced-start'};
         return false;
     }
 
@@ -4789,7 +4942,7 @@ async function generateMap() {
         // burn minutes regenerating islands when city packing/fair-start failed).
         // Archipelago: towns placed but split unevenly between shared islands (wodArchipelagoIslandsFair) earn up to six
         // more split angles on the same islands. They do not count as failed town placements, so they never cost towns.
-        let politicsTries = factionSlots >= 3 ? 3 : 2, islandRetries = mapShape === 'archipelago' ? 6 : 0;
+        let politicsTries = factionSlots >= 3 ? 3 : 2, islandRetries = mapShape === 'archipelago' ? 6 : 0, distanceRetries = 4;
         let procOk = false;
         for(let pt = 0; pt < politicsTries; pt++) {
             if(pt > 0) {
@@ -4822,6 +4975,8 @@ async function generateMap() {
             const why = gameData._startingBorderQuality?.reason||'town-placement';
             recordRejection(why);
             if(why === 'island-balance' && islandRetries-- > 0) politicsTries++;
+            // (towns placed but one player's nearest enemy town much nearer than another's: a few more split angles too)
+            if(why === 'town-distance' && distanceRetries-- > 0) politicsTries++;
             await wodMapGenYieldSlice();
         }
         if(procOk) {

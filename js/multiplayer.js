@@ -2566,11 +2566,15 @@ function wodMpApplyLayoutCounts(humanCount, botCount, opts) {
     window.wodMpRoomMeta.seatTypes = wodMpBuildSeatTypesFromCounts(humanCount, botCount);
     gameData.aiCount = window.wodMpRoomMeta.seatTypes.filter(t => t === 'bot').length;
     wodMpSyncLayoutCountFieldsFromMeta(window.wodMpRoomMeta);
-    wodMpPushLobbyMetaFromCurrentUi();
-    let nextFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
+    // (A new map's seed is chosen before the room settings go out. Chosen after, the relay's echo of the settings just
+    // sent put the old seed back, so the regenerated preview never matched the room and Launch stayed refused.)
     if(opts.forceRegen) {
         window.wodMpRoomMeta.lobbyMapSeed = (Math.imul(Date.now() >>> 0, 2246822519) ^ (window.wodMpRoomMeta.lobbyMapSeed || 0) ^ 0x9e3779b9) >>> 0;
         if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x6a09e667;
+    }
+    wodMpPushLobbyMetaFromCurrentUi();
+    let nextFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
+    if(opts.forceRegen) {
         wodMpRefreshLobbyMapPreviewAfterMetaChange(window.wodMpRoomMeta, { force: true });
         return;
     }
@@ -3935,8 +3939,20 @@ function wodMpSyncMpCfgVictoryDetail() {
     let mode = sel.value === 'annihilation' ? 'annihilation' : 'domination';
     span.textContent = WOD_VICTORY_MODE_DETAIL_TEXT[mode] || '';
 }
+// The map dialog shows the room's applied settings. Launch reads the dialog, so values changed there and never applied (the
+// dialog closed with Close) made the room's settings disagree with its committed map, and Launch refused ("Lobby map is not
+// ready") while the old map showed.
+function wodMpSyncHostMapDlgFromMeta() {
+    const meta = window.wodMpRoomMeta;
+    if(!meta || typeof meta !== 'object') return;
+    const size = document.getElementById('mpCfgMapSize'), shape = document.getElementById('mpCfgMapShape'), towns = document.getElementById('mpCfgCitiesPerPlayer');
+    if(size && meta.mapSize != null) size.value = String(meta.mapSize);
+    if(shape && meta.mapShape) shape.value = meta.mapShape;
+    if(towns) towns.value = String(wodMpCitiesPerPlayerFromMeta(meta));
+}
 function wodMpOpenHostMapDlg() {
     if(wodIsMapPreviewGenerating()) return;
+    wodMpSyncHostMapDlgFromMeta();
     let d = document.getElementById('mpHostMapDlg');
     if(d) { d.classList.remove('hidden'); d.setAttribute('aria-hidden', 'false'); }
     wodRefreshMapPreviewGeneratingUi();
@@ -4329,22 +4345,26 @@ function wodMpWireLobbyControls() {
         showPanel('mapLibrary', { libContext: 'setup', fromMpHost: true });
     };
     if(mpCfgMapApply) mpCfgMapApply.onclick = () => {
-        if(wodIsMapPreviewGenerating()) return;
+        // (Applied even while a preview is still being made: that one is dropped and the new settings queued. Ignoring the
+        // click left the new values in this dialog, which Launch reads, so Launch then refused with "Lobby map is not
+        // ready" while the old map showed. The single-player preview is not made here any more: it ran at the same time
+        // as the lobby's own, on the same map, and the lobby could commit a half-made map or one from another seed.)
         wodMpCopyFieldToField('mpCfgMapSize', 'setupMapSize');
         wodMpCopyFieldToField('mpCfgMapShape', 'setupMapShape');
         wodMpCopyFieldToField('mpCfgCitiesPerPlayer', 'setupCitiesPerPlayer');
         if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
         window.wodMpRoomMeta.lobbyMapSeed = (Math.imul(Date.now() >>> 0, 2246822519) ^ (window.wodMpRoomMeta.lobbyMapSeed || 0) ^ 0x9e3779b9) >>> 0;
         if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x6a09e667;
-        previewMap();
+        const built = wodMpBuildLobbyMetaFromSetup();
+        Object.assign(window.wodMpRoomMeta, built);
         if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendLobbyMeta)
-            WodMultiplayer.sendLobbyMeta(wodMpBuildLobbyMetaFromSetup());
+            WodMultiplayer.sendLobbyMeta(built);
         wodMpCloseHostMapDlg();
         showNotification('Map settings updated.');
         wodMpRenderGameLobbyScreen();
         requestAnimationFrame(() => wodMpRefreshLobbyMapPreview({ force: true }));
     };
-    if(mpCfgMapClose) mpCfgMapClose.onclick = () => wodMpCloseHostMapDlg();
+    if(mpCfgMapClose) mpCfgMapClose.onclick = () => { wodMpSyncHostMapDlgFromMeta(); wodMpCloseHostMapDlg(); };
     let mpCfgRulesApply = document.getElementById('mpCfgRulesApply');
     let mpCfgRulesClose = document.getElementById('mpCfgRulesClose');
     let mpCfgVictoryModeEl = document.getElementById('mpCfgVictoryMode');
@@ -4625,6 +4645,24 @@ function wodMpHostHandleRemoteCmd(ev) {
     }
 }
 
+// A guest that could not load the host's map: everything had been switched over to the battle screen before the load, and
+// only the game state was put back, so the guest sat on a black screen with no menu and no way out. Leave the match (the
+// host's AI takes the seat over, as for anyone who leaves) and go back to the main menu with the reason.
+function wodMpGuestMatchLoadFailed(err) {
+    console.error('Multiplayer map load failed', err);
+    try { if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.forfeitMatch) WodMultiplayer.forfeitMatch({ spectate: false }); } catch(e) { console.warn(e); }
+    try { wodMpClearSession(); } catch(e) { console.warn(e); }
+    gameData.mp = null;
+    try { wodSetMpMatchUiFlag(false); } catch(e) { console.warn(e); }
+    gameState = 'MENU'; // (no lost match is recorded: it never started here)
+    try { returnToMenu(); } catch(e) {
+        console.warn(e);
+        gameState = 'MENU';
+        UI.inGameUI.style.display = 'none';
+        UI.mainMenu.classList.remove('hidden');
+    }
+    showNotification('Could not load the host’s map, so you have left the match. Join the lobby again for the next one.');
+}
 /** Relay event wod-mp-MatchStart. */
 function wodMpOnMatchStart(ev) {
     if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.isHost) return;
@@ -4677,17 +4715,22 @@ function wodMpOnMatchStart(ev) {
         wodMpRefreshSyncOverlay();
         let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
         if(syncMsg) syncMsg.textContent = 'Loading host map…';
-        try {
-            await wodMpApplyMatchStartPayload(pl, { asyncHexes: true });
-        } catch(err) {
-            console.error(err);
-            showNotification('Failed to load host map.');
-            gameState = 'MENU';
-            return;
+        // Any map making still running on this page (a preview) would go on writing over the host's map once installed:
+        // let it finish first, and try a second time before giving up.
+        let loaded = false, loadErr = null;
+        for(let attempt = 0; attempt < 2 && !loaded; attempt++) {
+            try {
+                await wodAwaitMapGenIdle();
+                await wodMpApplyMatchStartPayload(pl, { asyncHexes: true });
+                loaded = !!(gameData.hexList && gameData.hexList.length);
+                if(!loaded) loadErr = new Error('Host map data was empty');
+            } catch(err) {
+                loadErr = err;
+                console.error(err);
+            }
         }
-        if(!gameData.hexList || !gameData.hexList.length) {
-            showNotification('Host map data was empty — cannot start.');
-            gameState = 'MENU';
+        if(!loaded) {
+            wodMpGuestMatchLoadFailed(loadErr);
             return;
         }
         wodTerrainBakeNextMs = 0;

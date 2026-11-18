@@ -836,7 +836,7 @@ function wodEncirclementApplyPocket(region, owner, w) {
     let hasOwnerCity = wodRegionHasOwnerCity(regionKeys, owner);
     // A land connection to a town is genuine supply for every unit type.
     if(hasOwnerCity) return;
-    let waterAccess = region.some(h => cardinalHexDirections.some(dir => isWaterHex(wodHexAt(h.q+dir.q,h.r+dir.r))));
+    let waterAccess = region.some(h => wodTouchesOpenSea(h)); // (across a corner too: see wodTouchesOpenSea)
     if(waterAccess) {
         if(!w.marineWaterSupplyHexes) w.marineWaterSupplyHexes = new Set();
         for(let h of region) w.marineWaterSupplyHexes.add(getHexKey(h));
@@ -845,6 +845,9 @@ function wodEncirclementApplyPocket(region, owner, w) {
     // island with a town must be captured normally from the beachhead.
     if(waterAccess)return;
     if(region.some(h=>wodCurrentSupplyComponent(h,owner).city))return;
+    // Not a ring while a way out to supplied ground passes no enemy troops (wodFrontlineSupplyTouch, the test a unit's
+    // own supply uses): the patch a unit claims under its feet as it pushes into enemy land showed as a pocket.
+    if(wodFrontlineSupplyTouch(region[0],owner))return;
     let hasOwnerFort = false;
     let fortList = gameData.forts;
     if(fortList && fortList.length) {
@@ -972,21 +975,61 @@ function wodUnitSupplyHex(unit,hex) {
     }
     return hex;
 }
-/** Supplied friendly land within two land tiles of a tile the unit has not captured. */
+function wodHexOccupiedByFriendlyCombat(hex, owner) {
+    if(!hex) return false;
+    const map = gameData._hexCombatOcc;
+    if(map && map.size) {
+        const rec = map.get(getHexKey(hex));
+        return !!rec && rec.some(o => wodIsFriendlyOwner(o, owner));
+    }
+    if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return false;
+    let occ = false;
+    forEachNearbyUnit(gameData.unitSpatialGrid, hex.x, hex.y, (gameData.hexRadius || 20) * 1.55, u => {
+        if(u.hp <= 0 || u.type === 'convoy' || !wodIsFriendlyOwner(u.owner, owner)) return;
+        const uh = getNearestHexToPoint(u.x, u.y);
+        if(uh && uh.q === hex.q && uh.r === hex.r) { occ = true; return true; }
+    });
+    return occ;
+}
+/** A cell the enemy holds against this faction's supply: an enemy unit stands on it, or beside it with none of ours on or
+ *  beside it to contest it (a column of ours walking between two enemy units keeps its road open). */
+function wodSupplyCellHeldByEnemy(hex, owner) {
+    if(wodHexOccupiedByEnemyCombat(hex, owner)) return true;
+    let enemy = false, friend = wodHexOccupiedByFriendlyCombat(hex, owner);
+    for(const nb of getNeighborHexes(hex)) {
+        if(!nb) continue;
+        if(!enemy && wodHexOccupiedByEnemyCombat(nb, owner)) enemy = true;
+        if(!friend && wodHexOccupiedByFriendlyCombat(nb, owner)) friend = true;
+        if(enemy && friend) break;
+    }
+    return enemy && !friend;
+}
+/** Whether a unit on a cell it has not captured (or on a patch of its side's ground cut off from its towns) is still in
+ *  touch with its supplied lines: supplied friendly land it can reach overland, however far it has pushed in, without
+ *  passing ground the enemy's troops hold (wodSupplyCellHeldByEnemy) or a mountain. A cordon of enemy units cuts it off
+ *  however thin; bare ground the enemy has painted does not. Searched up to 24 cells out (a deeper raid has outrun its
+ *  supply). Only two cells used to be searched, so troops pushed three cells into enemy land, standing on the one cell
+ *  they claim underfoot, counted as encircled. The answer is kept a quarter second of game time per cell and faction. */
 function wodFrontlineSupplyTouch(hex,owner) {
     if(!hex||owner<=0)return false;
-    let found=false;const start=getHexKey(hex),seen=new Set([start]),ring=[];
-    const visit=(n,next)=>{
-        if(found||!n||isWaterHex(n)&&!isBridgeHex(n))return;
-        const k=getHexKey(n);if(seen.has(k))return;seen.add(k);
-        if(wodSupplyPassable(n,owner)){if(wodCurrentSupplyComponent(n,owner).city)found=true;return;}
-        // The gap may be a bare tile the enemy has repainted, not one his troops stand on or beside:
-        // a cordon of units between a force and its lines is an encirclement, however thin.
-        if(next&&!wodHexNearActiveEnemyCombat(n,owner))next.push(n);
-    };
-    wodSupplyNeighbors(hex,n=>visit(n,ring));
-    for(let i=0;i<ring.length&&!found;i++)wodSupplyNeighbors(ring[i],n=>visit(n,null));
-    return found;
+    const now=gameData._aiEconomyClock||0;let memo=gameData._frontSupplyMemo;
+    if(!memo||memo.hexes!==gameData.hexes||now<memo.at||now-memo.at>=.25)memo=gameData._frontSupplyMemo={hexes:gameData.hexes,at:now,map:new Map()};
+    const key=owner+'|'+getHexKey(hex);if(memo.map.has(key))return memo.map.get(key);
+    let found=false;const seen=new Set([getHexKey(hex)]),queue=[hex],depth=new Map([[hex,0]]);
+    for(let i=0;i<queue.length&&!found;i++){const h=queue[i],d=depth.get(h);
+        wodSupplyNeighbors(h,n=>{
+            if(found||!n||isWaterHex(n)&&!isBridgeHex(n))return;
+            const k=getHexKey(n);if(seen.has(k))return;seen.add(k);
+            if(wodSupplyPassable(n,owner)&&wodCurrentSupplyComponent(n,owner).city){found=true;return;}
+            if(d<24&&n.type!=='mountain'&&!wodSupplyCellHeldByEnemy(n,owner)){depth.set(n,d+1);queue.push(n);}
+        });
+    }
+    memo.map.set(key,found);return found;
+}
+// A cell touching open water, straight or across a corner. The supply links into water are straight only, so a beach
+// that met the sea at a corner counted as dry ground and the marines on it as cut off.
+function wodTouchesOpenSea(hex) {
+    return !!hex&&getNeighborHexes(hex).some(n=>n&&isWaterHex(n)&&!isBridgeHex(n));
 }
 function wodGetUnitEncirclementState(unit, hex) {
     if(!unit||!hex||wodIsNavalUnit(unit)||unit.type==='convoy'&&(!isWaterHex(hex)||unit.convoySeaRoute))return null;
@@ -1002,7 +1045,7 @@ function wodGetUnitEncirclementState(unit, hex) {
     hex=wodUnitSupplyHex(unit,hex);
     if(!wodIsFriendlyOwner(hex.owner,unit.owner)) {
         const supply=wodCurrentSupplyComponent(hex,unit.owner);
-        if(supply.city||unit.type==='marine'&&supply.water)return null;
+        if(supply.city||unit.type==='marine'&&(supply.water||wodTouchesOpenSea(hex)))return null;
         // A unit at the front stands on ground it has not taken yet: an enemy on the
         // next tile blocks the claim. It is still in touch with its own lines, not cut
         // off, so supplied friendly land within two tiles supplies it.
@@ -1014,7 +1057,7 @@ function wodGetUnitEncirclementState(unit, hex) {
     // Territory on a townless island is captured locally, but ordinary
     // troops there still need a land-connected city for actual supply.
     const supply=wodCurrentSupplyComponent(hex,unit.owner);
-    if(supply.city||unit.type==='marine'&&supply.water)return null;
+    if(supply.city||unit.type==='marine'&&(supply.water||wodTouchesOpenSea(hex)))return null;
     // The tile under a front-line unit is its own even when the tiles round it are not yet:
     // it is in touch with its lines while supplied friendly land lies within two tiles.
     if(wodFrontlineSupplyTouch(hex,unit.owner))return null;

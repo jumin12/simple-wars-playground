@@ -1208,3 +1208,8 @@ if (new URLSearchParams(window.location.search).get('autostart') === '1') {
 } else {
     wodRunInitialBootToMenu();
 }
+// The desktop app reloads the game when its page process died (out of memory, a graphics driver fault): say so on the menu.
+{
+    const why = new URLSearchParams(window.location.search).get('recovered');
+    if(why) setTimeout(() => { try { showNotification('The game display stopped (' + why + ') and was restarted. The match in progress could not be kept.'); } catch(e) {} }, 1500);
+}

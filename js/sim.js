@@ -625,6 +625,8 @@ function gameLoopFrame(time) {
             gameData._wodMovingN = mn;
             gameData._wodPlayerMovingN = pn;
         }
+        // (gunfire: the host's shots are not in its snapshots; see wodGuestCombatFx)
+        try { wodGuestCombatFx(simDt > 0 ? simDt : 0); } catch(err) { wodReportRuntimeError(err, 'guest combat fx'); }
         wodDevMark('draw');
         draw();
         animationFrameId = requestAnimationFrame(gameLoop);

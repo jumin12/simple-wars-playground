@@ -191,6 +191,23 @@ function createWindow() {
     if (/^https?:\/\//i.test(target)) shell.openExternal(target);
   });
 
+  // The game's page process can die (out of memory, a graphics driver fault). The window then showed only its dark
+  // background colour and never came back: a black screen until the game was restarted. Reload the game instead (at most
+  // three times in five minutes, so a page that dies on start cannot loop), and tell the page why it is back.
+  const recoveries = [];
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+    console.error('Simple Wars page process gone:', details && details.reason, details && details.exitCode);
+    if (!details || details.reason === 'clean-exit' || !mainWindow || mainWindow.isDestroyed()) return;
+    const now = Date.now();
+    while (recoveries.length && now - recoveries[0] > 5 * 60 * 1000) recoveries.shift();
+    if (recoveries.length >= 3) return;
+    recoveries.push(now);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.loadURL(`http://127.0.0.1:${localPort}/index.html?recovered=${encodeURIComponent(details.reason || 'crashed')}`);
+    }, 400);
+  });
+  mainWindow.on('unresponsive', () => console.warn('Simple Wars window is not responding'));
   mainWindow.loadURL(`http://127.0.0.1:${localPort}/index.html`);
 }
 
@@ -222,6 +239,12 @@ ipcMain.on('simple-wars-achievement', (event, id) => {
   } catch (err) {
     console.warn('Steam achievement skipped:', err && err.message ? err.message : err);
   }
+});
+
+// A crashed graphics process is restarted by Chromium; the page then gets its canvases back blank and redraws them
+// (wodCanvasesLost in js/render.js). Logged so a player's crash report says which process went.
+app.on('child-process-gone', (_event, details) => {
+  console.warn('Simple Wars helper process gone:', details && details.type, details && details.reason);
 });
 
 app.whenReady().then(boot).catch((err) => {
