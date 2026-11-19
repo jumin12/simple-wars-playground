@@ -4544,6 +4544,7 @@ function wodMpHostHandleRemoteCmd(ev) {
     if(d.cmd.kind==='focusTarget'){wodSetPreferredTarget(d.fromSlot,d.cmd.uids,d.cmd.targetUid);return;}
     if(d.cmd.kind==='retreat'){for(const u of wodMpOwnedUnitsForCmd(d))wodRetreatUnit(u);return;}
     if(d.cmd.kind==='stop'){for(const u of wodMpOwnedUnitsForCmd(d))wodStopUnit(u);return;}
+    if(d.cmd.kind==='disband'){for(const u of wodMpOwnedUnitsForCmd(d))wodDisbandUnit(u);return;}
     if(d.cmd.kind === 'move') {
         let units = wodMpOwnedUnitsForCmd(d);
         if(units.length === 0) return;

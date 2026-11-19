@@ -1941,7 +1941,7 @@ function wodBridgeRectsOverlap(a, b, padScale) {
 }
 // Two decks may share an end, a bank cell both rest on: bridges end to end across an island, or fanning out from one
 // landing at 35 degrees or more. Round that cell they may meet as far as two decks parting at that angle must; anywhere
-// else they may not: not crossing over the water, not side by side (routing gives each water cell to one deck), and not
+// else they may not: not crossing over the water, not touching side by side, and not
 // fanning out so narrowly that they lie on top of each other. Any deck within about three cells of another, or touching
 // a cell another had claimed, used to count as in the way, so no two bridges could share a landing.
 const WOD_BRIDGE_FAN_MIN_ANGLE = 35 * Math.PI / 180;
@@ -1966,26 +1966,20 @@ function wodBridgeDecksConflict(a, b, keysA, keysB) {
         shared.push({ x: ea.cell.x, y: ea.cell.y, r: ((a.h || 0) + (b.h || 0)) * 0.55 / Math.sin(Math.min(angle, Math.PI / 2)) + sp * 0.6 });
     }
     const away = (x, y) => !shared.some(j => Math.hypot(x - j.x, y - j.y) <= j.r);
+    // Decks that share no landing keep a quarter of a deck's width clear of each other (two parallel bridges two rows
+    // apart may stand, one row apart they would touch). They may share the water each claims beside it for routing: a
+    // second crossing at the narrows to the same island lies that close to the first, and was refused as "in the way".
     for(const [p, q] of [[a, b], [b, a]]) {
         const c = Math.cos(p.angle || 0), s = Math.sin(p.angle || 0), hw = (p.w || 0) / 2, hh = (p.h || 0) / 2;
         const steps = Math.max(4, Math.ceil((p.w || 0) / (sp * 0.25)));
+        const across = shared.length ? [-hh, 0, hh] : [-hh * 1.25, -hh, 0, hh, hh * 1.25];
         for(let i = 0; i <= steps; i++) {
             const t = -hw + (2 * hw * i) / steps;
-            for(const l of [-hh, 0, hh]) {
+            for(const l of across) {
                 const x = p.x + t * c - l * s, y = p.y + t * s + l * c;
                 if(wodPointInBridgeRect(x, y, q, 1.04) && away(x, y)) return true;
             }
         }
-    }
-    // Decks sharing a landing may share the water each claims beside it (two decks parting at under ninety degrees
-    // claim common cells most of their length; supply links them, their decks touching at the shared cell). Decks
-    // that share no landing may not: side by side, a cell between them would belong to one deck only.
-    if(shared.length) return false;
-    const setA = new Set(keysA || a.hexKeys || wodBridgeFootprintHexKeys(a));
-    for(const k of (keysB || b.hexKeys || wodBridgeFootprintHexKeys(b))) {
-        if(!setA.has(k)) continue;
-        const h = gameData.hexes[k];
-        if(h && isWaterHex(h)) return true;
     }
     return false;
 }

@@ -2,6 +2,12 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-19T04:00:00Z",title:"Disband button, second bridges, routed units that run, raiders that starve",items:[
+        "Disband a unit with the little skull beside its name on the unit card. Click it once and it turns red, then click again within three seconds to disband. The unit leaves the field and its men go home, so they do not count as losses.",
+        "You can now build a second bridge close to the first at the same narrows, as long as the two decks do not touch. Bridges two rows apart used to be refused as in the way.",
+        "Routed units always run. With enemies on several sides they could find no safe ground, so they stood where they broke, flashing. Now they make for their nearest town or hospital, or at least away from the enemy.",
+        "Troops deep in enemy land with none of their own nearby run out of supply and take attrition again. Supply now reaches eight cells into enemy land (it reached 24, so raiding parties far behind your lines never starved). Troops pushed a few cells past the front stay supplied."
+    ]},
     {at:"2026-11-18T22:00:00Z",title:"Own waypoints, shared bridge landings, ships that stay at sea, an AI that fights to the end",items:[
         "Waypoints stay with the units you gave them to. When you selected another unit that was already marching and added a waypoint, it could take the waypoints you had given a different unit and march along that route instead.",
         "Bridges can share their ends. Two bridges can leave the same landing at an angle, meet at the same far bank, or run end to end across an island. Bridges that would lie on top of each other, cross over the water or run side by side are still refused.",

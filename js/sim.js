@@ -352,7 +352,8 @@ function wodStepUnits(dt, playerBrokeByOwner) {
 
 /** Books a dead unit's losses, clears it from the selection and swaps it out of the entity list. */
 function wodRemoveDeadUnitAt(unit, i) {
-    if(unit.type !== 'convoy' && (unit.manpower || 0) > 0) {
+    // (a disbanded unit, wodDisbandUnit, sent its men home: no casualties)
+    if(unit.type !== 'convoy' && !unit._disbanded && (unit.manpower || 0) > 0) {
         addCasualties(unit.owner, unit.manpower, 0, unit.type === 'marine' ? 'marine' : 'light');
         if(unit.type === 'heavy' && (unit.tanks || 0) > 0) addTankCasualties(unit.owner, unit.tanks);
     }

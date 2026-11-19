@@ -427,6 +427,17 @@ function wodClearRetreatFlags(unit) {
     unit._wodRecoveryRetreat=false;unit._wodRecoveredRetreatWatch=null;
     unit._wodFleeD=null;unit._wodFleeT=0;unit._wodRetreatJamT=0;
 }
+/** Disbands a unit (the skull on the unit card, js/ui.js; a guest's 'disband' command on the host): it leaves the field at
+ *  the next step, its men sent home, so no casualties are booked and nobody is credited with a kill. A transport with a
+ *  regiment aboard, a convoy or a town cannot be disbanded. */
+function wodDisbandUnit(unit) {
+    if(!unit || unit.hp <= 0 || unit.id || unit.type === 'convoy' || unit.cargo) return false;
+    unit._disbanded = true;
+    unit.hp = 0;
+    unit.target = null; unit.path = null; unit.orderTarget = null; unit.fullMarchWaypoints = null; unit.marchWpCursor = 0;
+    gameData._aiMoveQueue?.delete(unit);
+    return true;
+}
 function wodReleaseRecoveredUnit(unit, stopRecoveryOrder=false) {
     wodClearRetreatFlags(unit);
     unit._medicalRecovering=false;unit._medicalWaiting=false;unit._medicalGoal=null;

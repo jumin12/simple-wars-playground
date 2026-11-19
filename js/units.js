@@ -1005,11 +1005,13 @@ function wodSupplyCellHeldByEnemy(hex, owner) {
     return enemy && !friend;
 }
 /** Whether a unit on a cell it has not captured (or on a patch of its side's ground cut off from its towns) is still in
- *  touch with its supplied lines: supplied friendly land it can reach overland, however far it has pushed in, without
- *  passing ground the enemy's troops hold (wodSupplyCellHeldByEnemy) or a mountain. A cordon of enemy units cuts it off
- *  however thin; bare ground the enemy has painted does not. Searched up to 24 cells out (a deeper raid has outrun its
- *  supply). Only two cells used to be searched, so troops pushed three cells into enemy land, standing on the one cell
- *  they claim underfoot, counted as encircled. The answer is kept a quarter second of game time per cell and faction. */
+ *  touch with its supplied lines: supplied friendly land it can reach overland within WOD_FRONT_SUPPLY_REACH cells,
+ *  without passing ground the enemy's troops hold (wodSupplyCellHeldByEnemy) or a mountain. A cordon of enemy units cuts it
+ *  off however thin; bare ground the enemy has painted does not, near its lines. Only two cells used to be searched, so
+ *  troops pushed three cells into enemy land, standing on the one cell they claim underfoot, counted as encircled; then
+ *  24, so a raiding party could sit twenty cells deep in enemy land, far from its own, and never starve. The answer is
+ *  kept a quarter second of game time per cell and faction. */
+const WOD_FRONT_SUPPLY_REACH=8;
 function wodFrontlineSupplyTouch(hex,owner) {
     if(!hex||owner<=0)return false;
     const now=gameData._aiEconomyClock||0;let memo=gameData._frontSupplyMemo;
@@ -1021,7 +1023,7 @@ function wodFrontlineSupplyTouch(hex,owner) {
             if(found||!n||isWaterHex(n)&&!isBridgeHex(n))return;
             const k=getHexKey(n);if(seen.has(k))return;seen.add(k);
             if(wodSupplyPassable(n,owner)&&wodCurrentSupplyComponent(n,owner).city){found=true;return;}
-            if(d<24&&n.type!=='mountain'&&!wodSupplyCellHeldByEnemy(n,owner)){depth.set(n,d+1);queue.push(n);}
+            if(d<WOD_FRONT_SUPPLY_REACH&&n.type!=='mountain'&&!wodSupplyCellHeldByEnemy(n,owner)){depth.set(n,d+1);queue.push(n);}
         });
     }
     memo.map.set(key,found);return found;

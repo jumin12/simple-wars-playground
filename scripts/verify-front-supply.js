@@ -5,7 +5,9 @@
 //  gap     - an enemy line from edge to edge with one gap, one of ours standing in the gap and another three cells beyond
 //            the line: supplied (our man in the gap holds the road open); with nobody in the gap: cut off.
 //  ring    - enemy troops all round ours, three cells out: cut off.
-//  deep    - thirty cells into enemy land with nothing about: cut off (beyond the 24 cells supply reaches).
+//  raid    - twelve cells into enemy land with nothing about: cut off (beyond the eight cells supply reaches; it used
+//            to reach 24, so a raiding party deep in enemy land never starved).
+//  deep    - thirty cells into enemy land with nothing about: cut off.
 //  pocket  - a three-by-three patch of our land in enemy land: marked encircled on the map only with an enemy ring round it.
 //  corner  - inside an enemy ring on a cell that touches the sea only at a corner: a marine is supplied, infantry is not.
 const H=require('./lib/harness');
@@ -30,6 +32,7 @@ try{
   const line=(gapQ,keepGap)=>{world();for(let r=-29;r<=29;r+=2)unit(-3,r,2);const tip=unit(0,0,1);if(keepGap)unit(-3,0,1);settle();return cut(tip);};
   out.gapHeld=line(-3,true);out.gapOpen=line(-3,false);
   world();u=unit(0,0,1);for(const p of gameData.hexList)if(Math.max(Math.abs(p.q),Math.abs(p.r))===3&&(p.q+p.r)%2===0)unit(p.q,p.r,2);settle();out.ring=cut(u);
+  world(-12);u=unit(0,0,1);settle();out.raid=cut(u);
   world(-20);u=unit(10,0,1);settle();out.deep=cut(u);
   const pocket=ringed=>{world();for(const p of gameData.hexList)if(Math.abs(p.q)<=1&&Math.abs(p.r)<=1)p.owner=1;
    if(ringed)for(const p of gameData.hexList)if(Math.max(Math.abs(p.q),Math.abs(p.r))===3&&(p.q+p.r)%2===0)unit(p.q,p.r,2);
@@ -47,6 +50,7 @@ try{
  assert(!res.gapHeld,'with one of ours holding the gap in the enemy line, the man beyond it is supplied');
  assert(res.gapOpen,'with nobody in the gap, the enemy line cuts him off');
  assert(res.ring,'an enemy ring round a unit cuts it off');
+ assert(res.raid,'twelve cells into enemy land with nobody about is beyond supply');
  assert(res.deep,'thirty cells into enemy land is beyond supply');
  assert(!res.pocketBare.marked&&!res.pocketBare.cut,'a patch of our land in bare enemy land is not a pocket: '+JSON.stringify(res.pocketBare));
  assert(res.pocketRinged.marked&&res.pocketRinged.cut,'with enemy troops round it, it is an encircled pocket: '+JSON.stringify(res.pocketRinged));

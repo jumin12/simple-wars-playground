@@ -4065,13 +4065,18 @@ function wodUpdateUnitMorale(unit,dt) {
         unit.target=null;unit.path=null;unit.orderTarget=null;return;
     }
     // Finish the same short retreat as the manual button. A pursuer
-    // authorizes the next bound after arrival, never a new goal mid-leg.
+    // authorizes the next bound after arrival, never a new goal mid-leg...
     const previous=unit._moraleRetreatGoal,arrived=previous&&Math.hypot(unit.x-previous.x,unit.y-previous.y)<hr*.7;
-    if(previous&&!arrived&&(unit.target||unit.orderTarget))return;
+    // ...unless the leg is getting nowhere: a unit chased or under fire that has not moved half a cell in four seconds
+    // (held by bodies, or stepping to and fro) takes a new one.
+    if(!unit._routCheck||Math.hypot(unit.x-unit._routCheck.x,unit.y-unit._routCheck.y)>hr*.5||now<unit._routCheck.at)unit._routCheck={x:unit.x,y:unit.y,at:now};
+    const stalled=(chased||underFire)&&now-unit._routCheck.at>=4;
+    if(previous&&!arrived&&(unit.target||unit.orderTarget)&&!stalled)return;
     if(previous&&!chased&&!underFire)return;
     if(!previous||chased||underFire){
-        const goal=findOrderedRetreatPoint(unit,2);
-        if(goal&&assignUnitMoveAlongWaypoints(unit,[goal],{retainMoraleBroken:true,retainRetreat:true,forceRetreat:true}))unit._moraleRetreatGoal={x:goal.x,y:goal.y};
+        // (with enemies on more than one side the careful retreat finds nowhere: wodRoutFallbackGoal)
+        const goal=findOrderedRetreatPoint(unit,2)||wodRoutFallbackGoal(unit);
+        if(goal&&assignUnitMoveAlongWaypoints(unit,[goal],{retainMoraleBroken:true,retainRetreat:true,forceRetreat:true})){unit._moraleRetreatGoal={x:goal.x,y:goal.y};unit._routCheck={x:unit.x,y:unit.y,at:now};}
     }
 }
 function preparePathTarget(unit) {
@@ -4406,6 +4411,37 @@ function wodFindEmergencyRetreatPoint(unit,minCells=2) {
         }
     }
     return pick?{x:pick.x,y:pick.y}:null;
+}
+/** Where a routed unit runs when the careful retreat finds nowhere (wodFindEmergencyRetreatPoint wants a cell that takes
+ *  it farther from every enemy, and with enemies on more than one side there is none): the friendly cell within four
+ *  steps farthest from the enemy, if that gains at least a third of a cell; else its nearest town or hospital it can
+ *  reach; else any friendly cell within four steps away from the enemy's middle. Without it the unit stood where it
+ *  broke, flashing, until it was shot to pieces. */
+function wodRoutFallbackGoal(unit) {
+    const start=getNearestHexToPoint(unit.x,unit.y);if(!start||wodIsNavalUnit(unit))return null;
+    const hr=gameData.hexRadius||20;
+    const threats=gameData.entities.filter(e=>e!==unit&&e.hp>0&&e.damage>0&&!e.boardTransportUid&&wodIsHostileOwner(e.owner,unit.owner)&&wodOwnerCanSee(unit.owner,e)&&Math.hypot(e.x-unit.x,e.y-unit.y)<hr*14);
+    const clearance=p=>threats.reduce((d,e)=>Math.min(d,Math.hypot(p.x-e.x,p.y-e.y)),Infinity),initial=clearance(unit);
+    let cx=0,cy=0;for(const e of threats){cx+=e.x;cy+=e.y;}if(threats.length){cx/=threats.length;cy/=threats.length;}
+    const queue=[{h:start,steps:0}],seen=new Set([getHexKey(start)]),cells=[];
+    for(let i=0;i<queue.length&&i<600;i++){const {h,steps}=queue[i];
+        if(steps>0&&!isWaterHex(h)&&wodIsFriendlyOwner(h.owner,unit.owner)&&!isWorldPositionBlockedByUnits(unit,h.x,h.y))cells.push(h);
+        if(steps>=4)continue;
+        for(const n of getNeighborHexes(h).concat(wodBridgeLinkedHexes(h)||[])){
+            if(!n||seen.has(getHexKey(n))||!canUnitEnterHex(unit,n)||isWaterHex(n)&&!isBridgeHex(n)||!wodCanStepBetweenHexes(unit,h,n,true))continue;
+            seen.add(getHexKey(n));queue.push({h:n,steps:steps+1});
+        }
+    }
+    let best=null,bc=-Infinity;for(const h of cells){const c=clearance(h);if(c>bc){bc=c;best=h;}}
+    if(best&&bc>=initial+hr*.3&&Math.hypot(best.x-unit.x,best.y-unit.y)>=hr*.65)return {x:best.x,y:best.y};
+    const home=wodMoraleHealingGoal(unit);
+    if(home&&Math.hypot(home.x-unit.x,home.y-unit.y)>=hr*1.5)return {x:home.x,y:home.y};
+    if(threats.length){
+        let pick=null,bs=-Infinity;
+        for(const h of cells){const s=(h.x-unit.x)*(unit.x-cx)+(h.y-unit.y)*(unit.y-cy);if(s>bs){bs=s;pick=h;}}
+        if(pick&&bs>0)return {x:pick.x,y:pick.y};
+    }
+    return null;
 }
 function findOrderedRetreatPoint(unit, minCells) {
     if(wodIsNavalUnit(unit))return findNavalRetreatPoint(unit,minCells);

@@ -1273,6 +1273,7 @@ function wodSyncUnitExperienceCard(unit) {
     document.getElementById('infoUnitXpNote').textContent=e.next?Math.max(0,Math.ceil(e.next.xp-e.xp))+' XP to '+e.next.name+' · Combat earns experience':'+10% damage · Maximum rank';
 }
 function syncInfoCardPanel() {
+    wodSyncDisbandButton(gameData.selection.length===1?gameData.selection[0]:null);
     wodSyncUnitCombatStats(gameData.selection.length===1?gameData.selection[0]:null);
     wodSyncUnitExperienceCard(gameData.selection.length===1?gameData.selection[0]:null);
     const tip=document.getElementById('wodFxTip');
@@ -1505,6 +1506,46 @@ function showNotification(msg,tone='warning') {
     if(!el){el=document.createElement('div');el.className='wod-toast-note';document.body.appendChild(el);}
     el.dataset.tone=tone;el.setAttribute('role',tone==='warning'?'alert':'status');el.textContent=msg;
     clearTimeout(wodToastTimer);wodToastTimer=setTimeout(()=>el.remove(),3500);
+}
+// The skull beside a unit's name on its card disbands it: a first press arms it (red for three seconds), a second press
+// disbands. Only the player's own units, not convoys or a loaded transport.
+let _wodDisbandArm = null;
+function wodDisbandableUnit(u) {
+    return !!u && !u.id && u.hp > 0 && u.type !== 'convoy' && u.owner === wodLocalPlayerOwner() && !gameData._spectator && gameState === 'PLAYING';
+}
+function wodDisarmDisband() {
+    if(_wodDisbandArm) { clearTimeout(_wodDisbandArm.timer); _wodDisbandArm = null; }
+    const b = document.getElementById('infoDisband');
+    if(b) { b.classList.remove('is-armed'); b.title = 'Disband this unit'; b.setAttribute('aria-label', 'Disband unit'); }
+}
+function wodSyncDisbandButton(sel) {
+    const b = document.getElementById('infoDisband');
+    if(!b) return;
+    const ok = gameData.selection.length === 1 && wodDisbandableUnit(sel);
+    b.hidden = !ok;
+    if(!ok || (_wodDisbandArm && _wodDisbandArm.uid !== sel.uid)) wodDisarmDisband();
+}
+function wodDisbandSelected() {
+    if(gameData.selection.length !== 1) return;
+    const u = gameData.selection[0];
+    if(!wodDisbandableUnit(u)) return;
+    if(u.cargo) { showNotification('Unload the transport before disbanding it.'); return; }
+    const uid = ensureUnitId(u), name = u.name || 'Unit';
+    if(!_wodDisbandArm || _wodDisbandArm.uid !== uid) {
+        wodDisarmDisband();
+        _wodDisbandArm = { uid, timer: setTimeout(wodDisarmDisband, 3000) };
+        const b = document.getElementById('infoDisband');
+        if(b) { b.classList.add('is-armed'); b.title = 'Click again to disband'; b.setAttribute('aria-label', 'Confirm: disband unit'); }
+        showNotification('Click the skull again to disband ' + name + '.');
+        return;
+    }
+    wodDisarmDisband();
+    if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
+        if(gameData.mp.enabled && !wodMpMatchCanPlay()) return;
+        if(wodMpSendCmd({ kind: 'disband', uids: [uid] })) showNotification(name + ' disbanded.');
+        return;
+    }
+    if(wodDisbandUnit(u)) { showNotification(name + ' disbanded.'); _infoCardUiThrottle.s = null; }
 }
 function renameSelected() {
     if(gameData.selection.length !== 1) { showNotification("Select one unit or town to rename."); return; }
