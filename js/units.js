@@ -985,7 +985,7 @@ function wodHexOccupiedByFriendlyCombat(hex, owner) {
     if(!gameData.unitSpatialGrid || !gameData.unitSpatialGrid.cells) return false;
     let occ = false;
     forEachNearbyUnit(gameData.unitSpatialGrid, hex.x, hex.y, (gameData.hexRadius || 20) * 1.55, u => {
-        if(u.hp <= 0 || u.type === 'convoy' || !wodIsFriendlyOwner(u.owner, owner)) return;
+        if(u.hp <= 0 || u.type === 'convoy' || wodIsNavalUnit(u) || !wodIsFriendlyOwner(u.owner, owner)) return;
         const uh = getNearestHexToPoint(u.x, u.y);
         if(uh && uh.q === hex.q && uh.r === hex.r) { occ = true; return true; }
     });

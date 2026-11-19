@@ -766,10 +766,19 @@ function wodUnitNearNarrowLandLane(unit) {
     unit._wodLaneMap=gameData.hexes;unit._wodLaneKey=key;unit._wodLaneVersion=version;unit._wodLaneNarrow=narrow;
     return narrow;
 }
+/** Whether two units' bodies can touch. A ship and a unit on dry land (or on a bridge deck) never do: the ship is out on
+ *  the water, so it neither holds troops back from the beach nor pushes them inland, and troops at the shore never hold
+ *  a ship off. Troops in the water (wading, swimming, marines afloat) still meet ships. (ax, ay): where a is, or would be. */
+function wodBodiesMeet(a,b,ax,ay) {
+    const na=wodIsNavalUnit(a),nb=wodIsNavalUnit(b);
+    if(na===nb)return true;
+    const land=na?b:a,x=land===a&&ax!=null?ax:land.x,y=land===a&&ay!=null?ay:land.y,h=getNearestHexToPoint(x,y);
+    return !!h&&isWaterHex(h)&&!isBridgeHex(h)&&!wodPointOnBridgeForUnit(land,x,y,1.05);
+}
 function isWorldPositionBlockedByUnits(mover,wx,wy,gapExtra=2) {
     let blocked=false;
     forEachNearbyUnit(gameData.unitSpatialGrid,wx,wy,(mover.radius||10)+65,u=>{
-        if(u===mover||u.hp<=0||u.type==='convoy')return;
+        if(u===mover||u.hp<=0||u.type==='convoy'||!wodBodiesMeet(mover,u,wx,wy))return;
         const min=(mover.radius||10)+(u.radius||10)+Math.max(1,gapExtra);
         const d2=(u.x-wx)**2+(u.y-wy)**2,old2=(u.x-mover.x)**2+(u.y-mover.y)**2;
         if(old2<min*min&&d2>old2+.0001)return;
@@ -809,7 +818,7 @@ function wodRetreatGoRound(unit) {
     const near=[];
     const body=(u,x,y)=>{const ox=x-unit.x,oy=y-unit.y;near.push({x,y,f:ox*ux+oy*uy,l:oy*ux-ox*uy,r:(u.radius||12)+r0+3,friend:wodIsFriendlyOwner(u.owner,unit.owner)});};
     forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,sp*6,u=>{
-        if(u===unit||u.hp<=0||u.type==='convoy'||u.boardTransportUid)return;
+        if(u===unit||u.hp<=0||u.type==='convoy'||u.boardTransportUid||!wodBodiesMeet(unit,u))return;
         body(u,u.x,u.y);
         // A comrade stepping aside (very likely for this unit) will stand where he is going.
         const y=u._trafficYield,to=y&&(y.returning?y.points?.[0]:y);
@@ -884,7 +893,7 @@ function wodRetreatGoRoundHeadway(unit) {
         unit._wodGoRoundLookAt=now+1;
         let open=wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,last.x,last.y);
         if(open)forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,sp*6,u=>{
-            if(!open||u===unit||u.hp<=0||u.type==='convoy'||u.boardTransportUid)return;
+            if(!open||u===unit||u.hp<=0||u.type==='convoy'||u.boardTransportUid||!wodBodiesMeet(unit,u))return;
             if((u.x-unit.x)*(last.x-unit.x)+(u.y-unit.y)*(last.y-unit.y)<=0)return;
             if(distPointToSegmentSquared(u.x,u.y,unit.x,unit.y,last.x,last.y)<((u.radius||12)+(unit.radius||12)+2)**2)open=false;
         });
@@ -900,7 +909,7 @@ function wodSteerAroundFriendlyUnits(unit,nx,ny,dt=1/60) {
     const sx=nx-unit.x,sy=ny-unit.y,step=Math.hypot(sx,sy);if(step<.00001)return null;
     const speed=step/Math.max(.001,dt),friends=[],blockers=[];let hostile=false;
     forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,(unit.radius||12)+100,u=>{
-        if(u===unit||u.hp<=0||u.type==='convoy')return;
+        if(u===unit||u.hp<=0||u.type==='convoy'||!wodBodiesMeet(unit,u,nx,ny))return;
         blockers.push(u);if(u.boardTransportUid)return;
         if(!wodIsFriendlyOwner(u.owner,unit.owner)){if(Math.hypot(u.x-nx,u.y-ny)<(unit.radius||12)+(u.radius||12)+6)hostile=true;return;}
         const goal=u._trafficYield?.route?.target||u.target,dx=goal?goal.x-u.x:0,dy=goal?goal.y-u.y:0,len=Math.hypot(dx,dy)||1;
@@ -4646,7 +4655,7 @@ function wodParkedComradeAhead(unit) {
     if(Math.hypot(goal.x-unit.x,goal.y-unit.y)<=sp*3.5)return false;
     const dx=t.x-unit.x,dy=t.y-unit.y,len=Math.hypot(dx,dy);if(len<1)return false;const ux=dx/len,uy=dy/len;let found=false;
     forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,sp*3,v=>{
-        if(found||v===unit||v.hp<=0||v.type==='convoy'||v.target||v._trafficYield||v.boardTransportUid||!wodIsFriendlyOwner(v.owner,unit.owner))return;
+        if(found||v===unit||v.hp<=0||v.type==='convoy'||v.target||v._trafficYield||v.boardTransportUid||!wodIsFriendlyOwner(v.owner,unit.owner)||!wodBodiesMeet(unit,v))return;
         const ox=v.x-unit.x,oy=v.y-unit.y,f=ox*ux+oy*uy,l=Math.abs(oy*ux-ox*uy);
         if(f>0&&f<sp*2.5&&l<(v.radius||12)+(unit.radius||12)+3)found=true;
     });
@@ -5078,6 +5087,8 @@ function wodMoveUnitAlongRoute(unit, dt) {
         unit.stuckTimer = 0;
     }
 }
+// Who stands on each land cell, for territory claims and supply. Ships are left out: they hold no land, so a warship off
+// the coast neither stops our troops taking the shore beside it nor cuts their supply along it.
 function wodRebuildHexCombatOccupancy() {
     let map = gameData._hexCombatOcc;
     if(!map) map = gameData._hexCombatOcc = new Map();
@@ -5085,7 +5096,7 @@ function wodRebuildHexCombatOccupancy() {
     let ents = gameData.entities;
     for(let i = 0, n = ents.length; i < n; i++) {
         let u = ents[i];
-        if(!u || u.hp <= 0 || u.type === 'convoy') {
+        if(!u || u.hp <= 0 || u.type === 'convoy' || wodIsNavalUnit(u)) {
             if(u) u._occHexKey = '';
             continue;
         }

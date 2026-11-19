@@ -215,7 +215,15 @@ function wodAiManageRecovery(owner) {
     for(const u of army.filter(u=>u._medicalRecovering)){
         const id=u._aiRecoveryGroup||task?.unitJob[u.uid];if(id)rotating.set(id,(rotating.get(id)||0)+1);
     }
+    // In a last stand (wodAiLastStand) the troops that can walk to the last town fight for it, wounded or not: none is
+    // booked in for treatment and those being treated are let go (the field command takes them; a town's streets
+    // still heal whoever stands in them).
+    const stand=wodAiLastStand(owner);
     for(const u of army){
+        if(stand&&isLandArmyUnit(u)&&!u._medicalEvacuating&&!u.pickupUid&&!u.cargo&&wodAiCanReach(u,stand.town)){
+            if(u._medicalRecovering||u._medicalGoal)wodReleaseRecoveredUnit(u,false);
+            continue;
+        }
         const hp=u.hp/u.maxHp,manpower=(u.manpower??u.maxManpower)/(u.maxManpower||1000),morale=(u.morale??100)/(u.maxMorale||100);
         const groupId=u._aiRecoveryGroup||task?.unitJob[u.uid],job=task?.jobs.find(j=>j.id===groupId);
         if(wodAiTownHoldContext(u,job)){wodAiCancelTownWithdrawal(u);continue;}

@@ -2,7 +2,7 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 function wodNoteUnitOccupancyHex(unit, hex) {
-    if(!unit || unit.type === 'convoy' || unit.hp <= 0) return;
+    if(!unit || unit.type === 'convoy' || unit.hp <= 0 || wodIsNavalUnit(unit)) return;
     let map = gameData._hexCombatOcc;
     if(!map) return;
     let newK = hex ? getHexKey(hex) : '';
@@ -45,7 +45,7 @@ function wodHexOccupiedByEnemyCombat(hex, friendlyOwner) {
     let occ = false;
     let pad = (gameData.hexRadius || 20) * 1.55;
     forEachNearbyUnit(gameData.unitSpatialGrid, hex.x, hex.y, pad, (u) => {
-        if(u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, friendlyOwner)) return;
+        if(u.hp <= 0 || u.type === 'convoy' || wodIsNavalUnit(u) || !wodIsHostileOwner(u.owner, friendlyOwner)) return;
         let uh = getNearestHexToPoint(u.x, u.y);
         if(uh && uh.q === hex.q && uh.r === hex.r) {
             occ = true;

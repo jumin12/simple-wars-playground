@@ -1939,20 +1939,63 @@ function wodBridgeRectsOverlap(a, b, padScale) {
         dy = a.y - b.y;
     return dx * dx + dy * dy < Math.pow(hr * 2.75, 2);
 }
+// Two decks may share an end, a bank cell both rest on: bridges end to end across an island, or fanning out from one
+// landing at 35 degrees or more. Round that cell they may meet as far as two decks parting at that angle must; anywhere
+// else they may not: not crossing over the water, not side by side (routing gives each water cell to one deck), and not
+// fanning out so narrowly that they lie on top of each other. Any deck within about three cells of another, or touching
+// a cell another had claimed, used to count as in the way, so no two bridges could share a landing.
+const WOD_BRIDGE_FAN_MIN_ANGLE = 35 * Math.PI / 180;
+function wodBridgeEnds(br) {
+    const c = Math.cos(br.angle || 0), s = Math.sin(br.angle || 0), hw = (br.w || 0) / 2;
+    return [-1, 1].map(k => {
+        const x = br.x + k * c * hw, y = br.y + k * s * hw, cell = getNearestHexToPoint(x, y);
+        return { x, y, cell, dx: -k * c, dy: -k * s };     // (dx, dy): from this end into the deck
+    });
+}
+/** True when two decks meet anywhere but round a bank cell they share. keysA/keysB: the cells each claims (optional). */
+function wodBridgeDecksConflict(a, b, keysA, keysB) {
+    if(!a || !b || a.x == null || b.x == null) return false;
+    const sp = (gameData.hexRadius || 20) * 1.35;
+    if(Math.hypot(a.x - b.x, a.y - b.y) > ((a.w || 0) + (b.w || 0) + (a.h || 0) + (b.h || 0)) / 2 + sp * 2) return false;
+    const shared = [];
+    for(const ea of wodBridgeEnds(a)) for(const eb of wodBridgeEnds(b)) {
+        if(!ea.cell || ea.cell !== eb.cell) continue;
+        const angle = Math.acos(Math.max(-1, Math.min(1, ea.dx * eb.dx + ea.dy * eb.dy)));
+        if(angle < WOD_BRIDGE_FAN_MIN_ANGLE) return true;
+        // two decks of these widths parting at this angle overlap this far from the shared cell
+        shared.push({ x: ea.cell.x, y: ea.cell.y, r: ((a.h || 0) + (b.h || 0)) * 0.55 / Math.sin(Math.min(angle, Math.PI / 2)) + sp * 0.6 });
+    }
+    const away = (x, y) => !shared.some(j => Math.hypot(x - j.x, y - j.y) <= j.r);
+    for(const [p, q] of [[a, b], [b, a]]) {
+        const c = Math.cos(p.angle || 0), s = Math.sin(p.angle || 0), hw = (p.w || 0) / 2, hh = (p.h || 0) / 2;
+        const steps = Math.max(4, Math.ceil((p.w || 0) / (sp * 0.25)));
+        for(let i = 0; i <= steps; i++) {
+            const t = -hw + (2 * hw * i) / steps;
+            for(const l of [-hh, 0, hh]) {
+                const x = p.x + t * c - l * s, y = p.y + t * s + l * c;
+                if(wodPointInBridgeRect(x, y, q, 1.04) && away(x, y)) return true;
+            }
+        }
+    }
+    // Decks sharing a landing may share the water each claims beside it (two decks parting at under ninety degrees
+    // claim common cells most of their length; supply links them, their decks touching at the shared cell). Decks
+    // that share no landing may not: side by side, a cell between them would belong to one deck only.
+    if(shared.length) return false;
+    const setA = new Set(keysA || a.hexKeys || wodBridgeFootprintHexKeys(a));
+    for(const k of (keysB || b.hexKeys || wodBridgeFootprintHexKeys(b))) {
+        if(!setA.has(k)) continue;
+        const h = gameData.hexes[k];
+        if(h && isWaterHex(h)) return true;
+    }
+    return false;
+}
 function wodBridgeOverlapsExisting(br) {
     let probe = wodNormalizeBridgeRecord(Object.assign({}, br));
     if(!probe) return false;
     wodEnsureBridgePathIndex();
-    let keys = wodBridgeFootprintHexKeys(probe);
-    for(let ki = 0; ki < keys.length; ki++) {
-        if(gameData._bridgeByHexKey && gameData._bridgeByHexKey[keys[ki]]) return true;
-    }
-    let list = gameData.bridges || [];
-    for(let bi = 0; bi < list.length; bi++) {
-        let other = list[bi];
-        if(!other) continue;
-        if(wodBridgeRectsOverlap(probe, other)) return true;
-    }
+    const keys = wodBridgeFootprintHexKeys(probe);
+    for(const other of (gameData.bridges || []))
+        if(other && wodBridgeDecksConflict(probe, other, keys, other.hexKeys)) return true;
     return false;
 }
 function wodUnitOnBridgeDeck(unit) {
@@ -2038,13 +2081,9 @@ function wodBridgeSpanLayout(aq, ar, bq, br) {
 function wodBridgePendingJobConflict(br) {
     const jobs = (gameData.constructionJobs || []).filter(j => j.mode === 'bridge');
     if(!jobs.length) return false;
-    let mine = null;
-    for(const j of jobs) {
-        if(wodBridgeRectsOverlap(br, j)) return true;
-        // Decks also claim the water beside them for routing; two decks may not share it.
-        mine = mine || new Set(wodBridgeFootprintHexKeys(br));
-        if(wodBridgeFootprintHexKeys(j).some(k => mine.has(k))) return true;
-    }
+    // (the same rule as for built bridges: ends may be shared, decks and the water beside them may not)
+    const mine = wodBridgeFootprintHexKeys(br);
+    for(const j of jobs) if(wodBridgeDecksConflict(br, j, mine, null)) return true;
     return false;
 }
 /** The one set of rules for a dragged bridge, used by the player's preview and release,
@@ -2076,11 +2115,12 @@ function wodBridgePlacementError(br, owner, skipCost=false, cost=null) {
         if(isWaterHex(h)) water++;
         if(h.type === 'mountain' || h.type === 'urban') blocked++;
     }
-    if(wodBridgeOverlapsExisting(probe)) return 'Another bridge is in the way.';
+    // (the site's own ground first: another bridge nearby used to be named even when a town or mountain was in the way)
     if(water < 1) return 'Bridges must cross water.';
     if(!wodBridgeBothEndsTouchLand(probe)) return 'Both bridge ends must touch land.';
     if(owner>0&&!wodBridgeEndTouchesLand(probe,-1,owner)&&!wodBridgeEndTouchesLand(probe,1,owner))return 'At least one bridge bank must be in your territory.';
     if(blocked > 0) return 'Cannot build on mountains or city tiles.';
+    if(wodBridgeOverlapsExisting(probe)) return 'Another bridge is in the way.';
     // Priced by the water crossed; a caller that already counted the cells passes the price.
     if(owner && !skipCost && wodPlayerTreasury(owner) < (cost != null ? cost : wodBridgeRecordCells(probe) * WOD_PRICE_BRIDGE_PER_CELL)) return 'Not enough money for a bridge.';
     return null;

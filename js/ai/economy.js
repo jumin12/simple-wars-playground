@@ -318,30 +318,34 @@ function wodAiCollectBridgeCandidateSites(ownerId) {
         farSeen.add(k);
         farCoast.push(h);
     }
+    // Walk a short water corridor from a water cell beside our shore to the opposite shore (rivers can be 2–4 tiles wide).
+    const walked=new Set();
+    function walkAcross(n) {
+        if(!n || !isWaterHex(n) || isBridgeHex(n) || walked.has(getHexKey(n))) return;
+        let waterQ = [n];
+        let waterSeen = new Set([getHexKey(n)]);
+        for(let wi = 0; wi < waterQ.length && wi < 18; wi++) {
+            let wh = waterQ[wi];
+            walked.add(getHexKey(wh));
+            for(let nn of getNeighborHexes(wh)) {
+                if(!nn) continue;
+                if(isWaterHex(nn) && !isBridgeHex(nn)) {
+                    let wk = getHexKey(nn);
+                    if(waterSeen.has(wk)) continue;
+                    waterSeen.add(wk);
+                    if(waterQ.length < 18) waterQ.push(nn);
+                } else {
+                    addFarCoast(nn);
+                    addOwnCoast(nn);
+                }
+            }
+        }
+    }
     for(let h of wodCachedFrontlineHexes(ownerId)) {
         addOwnCoast(h);
         for(let n of getNeighborHexes(h)) {
             addOwnCoast(n);
-            // Walk a short water corridor to the opposite shore (rivers can be 2–4 tiles wide).
-            if(n && isWaterHex(n) && !isBridgeHex(n)) {
-                let waterQ = [n];
-                let waterSeen = new Set([getHexKey(n)]);
-                for(let wi = 0; wi < waterQ.length && wi < 18; wi++) {
-                    let wh = waterQ[wi];
-                    for(let nn of getNeighborHexes(wh)) {
-                        if(!nn) continue;
-                        if(isWaterHex(nn) && !isBridgeHex(nn)) {
-                            let wk = getHexKey(nn);
-                            if(waterSeen.has(wk)) continue;
-                            waterSeen.add(wk);
-                            if(waterQ.length < 18) waterQ.push(nn);
-                        } else {
-                            addFarCoast(nn);
-                            addOwnCoast(nn);
-                        }
-                    }
-                }
-            }
+            walkAcross(n);
         }
     }
     for(let city of wodAiKnownCities(ownerId)) {
@@ -361,6 +365,10 @@ function wodAiCollectBridgeCandidateSites(ownerId) {
     const proximity=new Map();
     const distance=h=>{if(!proximity.has(h))proximity.set(h,nearestFriendlyLandArmyDistSq(h.x,h.y,ownerId));return proximity.get(h);};
     ownCoast.sort((a,b)=>distance(a)-distance(b));
+    // (WOD_OPS.T.landBridges=0 turns it off) ...and across the water from the shores nearest our army: where a river is the
+    // whole border between us and the enemy there is no frontline cell to walk across from, and the far bank of the river
+    // the army stands at was never looked at.
+    if(wodOpsTune(ownerId).landBridges!==0)for(const h of ownCoast.slice(0,24))for(const n of getNeighborHexes(h))walkAcross(n);
     // Also keep own-to-own river links (internal channels).
     let ownLinkCoast = ownCoast.slice();
     if(ownCoast.length > 48) ownCoast.length = 48;
@@ -572,27 +580,55 @@ function wodAiScoreBridgeSite(site, ownerId, rankOnly=false) {
     return score;
 }
 
-function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey, islandWar=false) {
+// Tight cap — bridges are situational, not a spam build. (In a war across water the bridges are the crossing itself: up
+// to one per town, 2-4.)
+function wodAiBridgeCapReached(ownerId, islandWar) {
+    const aiCities = gameData.cities.filter(c => c && c.owner === ownerId).length;
+    const aiBridges = (gameData.bridges || []).filter(b => b && b.owner === ownerId).length;
+    return aiBridges >= (islandWar ? Math.max(2, Math.min(4, aiCities)) : Math.max(1, Math.min(3, Math.floor(aiCities * 0.35) + 1)));
+}
+// (WOD_OPS.T.landBridges=0 turns it off) A bridge the army has good use for, on any map and in any mode: a site that passes
+// every test a bridge must (wodAiScoreBridgeSite: it saves a long walk round the water or reaches other land, it leads
+// toward a town the army is going for, our troops stand near it, no other deck is in the way). Looked for every fifteen
+// seconds of AI time; returns {site, cost, since} or null. On land maps such a site was there in a fifth to two fifths of
+// the AI's turns, yet it built next to none: the field command spent every dollar on troops, and the economy only looked
+// with four regiments' price to spare and nothing put by for anything else (3-player self-play, two maps of each shape:
+// no bridge in six matches on rectangle, ring and forest maps). Now the field command keeps the price while the front is
+// quiet (wodOpsWarEconomy) and the economy builds it first (wodAiEconomyStep).
+function wodAiPrudentBridge(owner) {
+    if(wodOpsTune(owner).landBridges===0||!wodOpsActive(owner))return null;
+    const now=wodAiOperationTime(),memo=gameData._aiPrudentBridge?.hexes===gameData.hexes?gameData._aiPrudentBridge:(gameData._aiPrudentBridge={hexes:gameData.hexes});
+    const m=memo[owner];if(m&&now-m.at>=0&&now-m.at<15000)return m.found;
+    let found=null;
+    if(!(gameData.constructionJobs||[]).some(j=>j.owner===owner&&j.mode==='bridge')&&!wodAiBridgeCapReached(owner,false)){
+        const ranked=wodAiCollectBridgeCandidateSites(owner).map(site=>({site,score:wodAiScoreBridgeSite(site,owner,true)})).filter(v=>v.score>=96).sort((a,b)=>b.score-a.score).slice(0,6);
+        const same=(x,y)=>!!x&&!!y&&x.aq===y.aq&&x.ar===y.ar&&x.bq===y.bq&&x.br===y.br;
+        for(const {site} of ranked)if(wodAiScoreBridgeSite(site,owner,false)>=96){found={site,cost:site.cost,since:same(m?.found?.site,site)?m.found.since:now};break;}
+        // A site stays the one for its minute while it can still be built: whether our troops stand near enough to it
+        // changes from one look to the next as they move, and the money put by for it went back to recruits each time.
+        const prev=m?.found;
+        if(!found&&prev&&now-prev.since<60000&&!wodBridgePlacementError({x:prev.site.x,y:prev.site.y,angle:prev.site.angle,w:prev.site.w,h:prev.site.h},owner,true))found=prev;
+    }
+    memo[owner]={at:now,found};return found;
+}
+function wodAiTryBridgeForOwner(ownerId, ownerMoneyKey, islandWar=false, prudent=false) {
     if(!gameData.hexList || !gameData.hexList.length) return false;
     // Keep a cash cushion so bridges don't starve unit production. A bridge costs
     // $1,000 per water cell, so this gate is the cheapest span; each site is then
     // checked against its own price below.
-    // (in a war across water the bridges are the crossing itself: a smaller cushion, and up to one per town, 2-4)
-    const cushion = WOD_PRICE_LIGHT*(islandWar?2:4);
+    // (in a war across water a smaller cushion; for a bridge the army has good use for (wodAiPrudentBridge), one regiment's)
+    const cushion = WOD_PRICE_LIGHT*(prudent?1:islandWar?2:4);
     if(wodPlayerTreasury(ownerId) < WOD_PRICE_BRIDGE_PER_CELL + cushion) return false;
     if((gameData.constructionJobs||[]).some(j=>j.owner===ownerId&&j.mode==='bridge'))return false;
-    let aiCities = gameData.cities.filter(c => c && c.owner === ownerId).length;
-    let aiBridges = (gameData.bridges || []).filter(b => b && b.owner === ownerId).length;
-    // Tight cap — bridges are situational, not a spam build.
-    let bridgeCap = islandWar ? Math.max(2, Math.min(4, aiCities)) : Math.max(1, Math.min(3, Math.floor(aiCities * 0.35) + 1));
-    if(aiBridges >= bridgeCap) return false;
+    if(wodAiBridgeCapReached(ownerId, islandWar)) return false;
     let now = wodAiOperationTime();
     if(!gameData._aiBridgeCooldown) gameData._aiBridgeCooldown = {};
     if(gameData._aiBridgeSearches?.has(ownerId))return false;
     // First useful crossing can start immediately; later attempts are spaced.
-    if(gameData._aiBridgeCooldown[ownerId]&&now-gameData._aiBridgeCooldown[ownerId]<(islandWar?30000:65000))return false;
-    // Cheap gate before the site search (still rare, but more often when useful; every time in a war across water).
-    if(!islandWar && Math.random() > 0.55) return false;
+    if(gameData._aiBridgeCooldown[ownerId]&&now-gameData._aiBridgeCooldown[ownerId]<(islandWar||prudent?30000:65000))return false;
+    // Cheap gate before the site search (still rare, but more often when useful; every time in a war across water, or
+    // when a site the army has good use for is known).
+    if(!islandWar && !prudent && Math.random() > 0.55) return false;
     let sites = wodAiCollectBridgeCandidateSites(ownerId);
     if(!sites.length) return false;
     // Cheap strategic ranking first. Footprint checks used to run twice for
@@ -688,6 +724,21 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     seaFront||=islandDemand&&coast.length>0;
     let total = army.length + recruits.length;
     let limit = gameData.menuAttractMode ? 60 : Infinity;
+    // Last stand (wodAiLastStand, js/ai/field-command.js): about to be wiped out, the treasury buys troops in every town
+    // that can still raise them (armour where there is a factory and the money, else infantry), and nothing is put by
+    // for buildings, forts, bridges, a hospital or ships. (The field command's own land buying stands aside meanwhile.)
+    if(wodAiLastStand(owner)){
+        let bought=0;const gap=wodAiDifficulty(owner).recruitGap||0;
+        for(const city of free){
+            if(total>=limit||gap&&clock-(plan.recruitAt??-Infinity)<gap/1000)break;
+            const type=['heavy','light'].find(t=>(t!=='heavy'||city.hasFactory)&&canAffordUnit(owner,t)&&getUnitUpkeep({type:t})<=income-upkeep-committedUpkeep&&cityEligibleForBuildPlacementForOwner(city,t,owner));
+            if(!type||!wodApplyBuildAtCityForOwner(city,type,owner))continue;
+            committedUpkeep+=getUnitUpkeep({type});total++;bought++;plan.recruitAt=clock;
+            wodAiRecord(owner,'recruit',{city:city.id,type,reason:'last-stand'});
+        }
+        plan.savingFor=null;plan.reservation=null;plan.shortage=null;plan.idleReason=bought?null:'last-stand';
+        return true;
+    }
     const strategy=wodAiBattlePlan(owner,army),mpShort=manpower()<getUnitCost('light').manpower*2;
     const landByOps=wodOpsBuysLand(owner);plan.landByOps=landByOps;
     const initialDemand=wodAiRecruitPriorities(owner,cities,army,recruits,{islandDemand});
@@ -819,9 +870,15 @@ function wodAiEconomyStep(ownerKey, aiCitiesByOwner, aiIncomeByOwner, upkeepByOw
     // (and so does a fight on an island where none of our towns stand, unless fightBridges=0: see wodAiFightIslands)
     const fightAcross=wodOpsTune(owner).fightBridges!==0&&wodAiFightIslands(owner).some(f=>!f.ownTown&&f.n>=2);
     const bridgeWar=(islandDemand||fightAcross)&&wodOpsTune(owner).islandBridges!==0;
-    if((!plan.savingFor||bridgeWar) && !needGuards && (army.length>=10||navalReady||bridgeWar) && clock-plan.lastBuilding>=(bridgeWar?25:navalReady?40:65) &&
-        cash()>=WOD_PRICE_BRIDGE_PER_CELL+WOD_PRICE_LIGHT*4 && income-upkeep>4 &&
-        wodAiTryBridgeForOwner(owner,ownerKey,bridgeWar))plan.lastBuilding=clock;
+    // (a bridge the army has good use for, wodAiPrudentBridge, comes before what the economy is saving for, with eight
+    // units in the field rather than ten; and a town without a man in its streets does not hold it back while the field
+    // command posts the guards, which it does only where a town could be walked into, or while there is no manpower to
+    // raise one: a guard missing on those terms blocked every such bridge)
+    const prudent=!bridgeWar?wodAiPrudentBridge(owner):null;
+    const guardsWait=needGuards&&!(prudent&&(landByOps||manpower()<getUnitCost('light').manpower));
+    if((!plan.savingFor||bridgeWar||prudent) && !guardsWait && (army.length>=10||navalReady||bridgeWar||prudent&&army.length>=8) && clock-plan.lastBuilding>=(bridgeWar||prudent?25:navalReady?40:65) &&
+        cash()>=(prudent?prudent.cost+WOD_PRICE_LIGHT:WOD_PRICE_BRIDGE_PER_CELL+WOD_PRICE_LIGHT*4) && income-upkeep>4 &&
+        wodAiTryBridgeForOwner(owner,ownerKey,bridgeWar,!!prudent))plan.lastBuilding=clock;
     return true;
 }
 

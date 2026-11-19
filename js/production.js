@@ -1216,7 +1216,7 @@ function wodRecruitUnitSpec(type) {
     const mp=type==='ship'?5000:['transport','supply'].includes(type)?500:1000;
     return {type,owner:-1,x:1e9,y:1e9,hp,maxHp:hp,manpower:mp,maxManpower:mp,morale:100,maxMorale:100,xp:0,
         damage:({heavy:18,ship:14,transport:4,supply:4})[type]||8,range:({heavy:60,ship:80})[type]||50,
-        attackCooldown:({heavy:2.8,ship:2.4})[type]||2,radius:({heavy:16,ship:20,transport:16,supply:16})[type]||12,
+        attackCooldown:({heavy:2.8,ship:2.4})[type]||2,radius:({heavy:16,ship:16,transport:16,supply:16})[type]||12,
         tanks:type==='heavy'?500:0,maxTanks:type==='heavy'?500:0,...(wodSpecialistStats(type)||{}),speed:wodUnitBaseSpeed({type})};
 }
 function wodInitRecruitInfoButtons(root) {
@@ -1295,6 +1295,9 @@ function snapUnitApartFromNeighbors(unit) {
 }
 function wodNormalizeNavalStats(u) {
     if(u?.type==='ship'&&u.maxHp===200){u.hp=u.hp*1.5;u.maxHp=300;}
+    // (warships are the size of armour, 16; saves and mission files from before 2026-11-18 have them at 20, a card a
+    // quarter larger)
+    if(u?.type==='ship'&&u.radius===20)u.radius=16;
     if(u?.cargo)wodNormalizeNavalStats(u.cargo);
 }
 function wodSupplyShipLabel() {
@@ -1546,7 +1549,7 @@ function createUnitAt(type, x, y, owner, opts) {
         unit.hp = 300; unit.maxHp = 300; unit.speed = WOD_UNIT_BASE_SPEED; unit.damage = 18; unit.range = 60; unit.attackCooldown = 2.8; unit.radius = 16;
         unit.manpower = 1000; unit.maxManpower = 1000; unit.tanks = 500; unit.maxTanks = 500;
     } else if(['ship','transport','supply'].includes(type)) {
-        unit.hp = 300; unit.maxHp = 300; unit.speed = WOD_UNIT_BASE_SPEED; unit.damage = 14; unit.range = 80; unit.attackCooldown = 2.4; unit.radius = 20;
+        unit.hp = 300; unit.maxHp = 300; unit.speed = WOD_UNIT_BASE_SPEED; unit.damage = 14; unit.range = 80; unit.attackCooldown = 2.4; unit.radius = 16;
         unit.manpower = 5000; unit.maxManpower = 5000;
     }
     unit.morale = WOD_MORALE_MAX;

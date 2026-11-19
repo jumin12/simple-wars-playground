@@ -167,7 +167,7 @@ function wodRunUnitSeparationSync(sepPad,cellSize) {
         for(let i=0;i<units.length;i++) {
             const a=units[i];if(a.hp<=0||a.type==='convoy')continue;
             forEachNearbyUnit(gameData.unitSpatialGrid,a.x,a.y,(a.radius||10)+65,b=>{
-                if(b===a||b.hp<=0||b.type==='convoy'||b._gridIndex<=i)return;
+                if(b===a||b.hp<=0||b.type==='convoy'||b._gridIndex<=i||!wodBodiesMeet(a,b))return;
                 let dx=b.x-a.x,dy=b.y-a.y,d=Math.hypot(dx,dy),min=(a.radius||10)+(b.radius||10)+2;
                 if(d>=min-.001)return;overlaps++;
                 if(d<.0001){const hash=String(ensureUnitId(a)+ensureUnitId(b)).split('').reduce((n,c)=>n*31+c.charCodeAt(0),0)>>>0;const angle=(hash%360)*Math.PI/180;dx=Math.cos(angle);dy=Math.sin(angle);d=1;}

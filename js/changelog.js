@@ -2,6 +2,15 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-18T22:00:00Z",title:"Own waypoints, shared bridge landings, ships that stay at sea, an AI that fights to the end",items:[
+        "Waypoints stay with the units you gave them to. When you selected another unit that was already marching and added a waypoint, it could take the waypoints you had given a different unit and march along that route instead.",
+        "Bridges can share their ends. Two bridges can leave the same landing at an angle, meet at the same far bank, or run end to end across an island. Bridges that would lie on top of each other, cross over the water or run side by side are still refused.",
+        "When a bridge cannot be built because a town is in the way, the message now says so, instead of saying that another bridge is in the way.",
+        "An AI about to lose its last town now throws everything into the fight for it: troops from far away, the wounded and those in hospital all come, and all its money goes on troops instead of buildings.",
+        "Warship cards are now the same size as tank cards. They were a quarter larger.",
+        "Ships stay on the water. A ship off the coast no longer stops your troops taking the shore beside it or cuts their supply along it, and it no longer blocks or pushes troops walking along the beach or stepping onto it. Troops in the water still bump into ships.",
+        "The AI now builds bridges on every kind of map when one would save its army a long march toward a town it is attacking. Before, it hardly ever built one on land maps, because it spent all its money on troops and only looked for a bridge with plenty to spare. It now looks across any river its army is waiting at, and when its front is calm it keeps the money for the bridge aside."
+    ]},
     {at:"2026-11-18T06:00:00Z",title:"Fair maps of every kind, supply at the front, and fixes",items:[
         "Generated maps now start fair on every map type, for two to four players. A river runs between every pair of neighbouring players or between none, never between two players only. Each player gets the same share of forest, hills, swamp, sand and mountains to within a few points, and each player's nearest enemy town is about as far away as everyone else's.",
         "Supply follows the front. A unit that pushes into enemy land stays supplied while it has a way back to your towns that enemy troops do not hold. Units used to go out of supply two cells past the border. A unit surrounded by enemy troops is cut off, and so is a pocket of your land closed off by them.",

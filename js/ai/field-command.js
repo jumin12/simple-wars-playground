@@ -225,6 +225,7 @@ function wodOpsHealAllowance(unit,wanted){
 }
 
 function wodOpsWarEconomy(owner,S,units,myTowns,now){
+    if(wodAiLastStand(owner)){S.saveMp=false;return;} // (js/ai/economy.js buys for a last stand)
     if(now<(S.buyAt||0))return;
     S.buyAt=now+(wodAiDifficulty(owner).buyEvery||2500);S.saveMp=false;
     const plan=gameData._aiEconomyPlans?.[owner],opening=plan?.openingEconomy;
@@ -270,7 +271,14 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
     // armour: only with money that would otherwise lie idle
     const works=myTowns.filter(c=>(!reach||reach.has(c.id))&&c.hasFactory&&!isCitySiegeBlockedForProduction(c)&&!isCityEncircledForProduction(c));
     // a fortifying commander that is putting the price of a fort aside (S.wantFort, set by wodOpsRun) keeps it
-    const fortCash=S.wantFort&&S.calm?WOD_PRICE_FORT+1000:0;
+    // ...and so is the price of a bridge the army has good use for (wodAiPrudentBridge, js/ai/economy.js builds it), for a
+    // minute at most, while the front is calm as for the fort (WOD_OPS.T.landBridgeReserve: 0 never, 1 whenever no town of
+    // ours is in more danger than its guards can answer). Lab h2h on land maps, the version that kept it whenever quiet
+    // against the AI without land bridges: 134-113 towns on one set of seeds, 101-136 on another, and in every batch it
+    // lost it ended with a fifth fewer units: the price kept back is regiments not raised while the war goes badly.
+    const reserve=wodOpsTune(owner).landBridgeReserve??2;
+    const pb=reserve&&(reserve===1?S.quiet:S.calm)&&!wodAiLastStand(owner)?wodAiPrudentBridge(owner):null;
+    const fortCash=(S.wantFort&&S.calm?WOD_PRICE_FORT+1000:0)+(pb&&now-pb.since<60000?pb.cost+WOD_PRICE_LIGHT:0);
     if(works.length&&cash()-fortCash>=heavy.money&&spare()>=getUnitUpkeep({type:'heavy'})+3&&allowed('heavy')){
         if(mp()<heavy.manpower){S.saveMp=true;return;}
         const site=works.find(c=>!wodCityProductionJob(c)&&cityEligibleForBuildPlacementForOwner(c,'heavy',owner));
@@ -307,6 +315,44 @@ function wodOpsWarEconomy(owner,S,units,myTowns,now){
         if(!cityEligibleForBuildPlacementForOwner(c,type,owner))continue;
         if(wodApplyBuildAtCityForOwner(c,type,owner)){pending.push({mode:type});S.recruitAt=now;wodAiRecord(owner,'recruit',{city:c.id,type,reason:'war-economy'});if(gap)break;}
     }
+}
+
+// (WOD_OPS.T.lastStand=0 turns it off) A faction about to be wiped out throws everything into the fight for its last
+// town: its only town is under attack in its streets, or has enemy troops within eight cells worth half its whole army
+// (a scout near the one town of a one-town start is not that); or it is down to two towns, having held more, or one of
+// them is under attack in its streets, and one has enemies at its walls while the enemy troops round them outweigh its
+// whole army. (At the start of a two-town game on a shared island the enemy's first regiments stand that close and
+// outweigh a young army: that is no last stand.) Then every unit that can walk there fights for that town (wodOpsRun, stage 0), the wounded and
+// those in hospital too (js/ai/medical.js lets them go), nothing is kept back elsewhere, and the treasury buys troops in
+// any town that can still raise them, not buildings, forts or bridges (js/ai/economy.js). Before, the field command sent
+// defenders in proportion to the attackers and kept the rest on its other tasks, and the medical service took the
+// wounded off to heal while the last town fell. Returns {town, foes} or null; asked once per strategy pulse.
+function wodAiLastStand(owner){
+    if(!wodOpsActive(owner)||wodOpsTune(owner).lastStand===0)return null;
+    const serial=gameData.aiStrategySerial||0,memo=gameData._aiLastStand||(gameData._aiLastStand={}),m=memo[owner];
+    if(m&&m.serial===serial&&m.hexes===gameData.hexes)return m.stand;
+    let stand=null;
+    const towns=gameData.cities.filter(c=>c.owner===owner);
+    const peaks=gameData._aiTownPeak?.hexes===gameData.hexes?gameData._aiTownPeak:(gameData._aiTownPeak={hexes:gameData.hexes});
+    const peak=peaks[owner]=Math.max(peaks[owner]||0,towns.length);
+    if(towns.length===1||towns.length===2&&(peak>2||towns.some(c=>isCitySiegeBlockedForProduction(c)))){
+        const C=(gameData.hexRadius||20)*1.35;
+        const foes=wodAiKnownEntities(owner).filter(u=>u.hp>0&&wodIsHostileOwner(u.owner,owner)&&!wodIsNavalUnit(u)&&u.type!=='convoy'&&!u.boardTransportUid&&(u.damage||0)>0);
+        const army=wodOpsStrength(gameData.entities.filter(u=>u.owner===owner&&u.hp>0&&isLandArmyUnit(u)),false);
+        let best=null,bs=0;
+        for(const c of towns){
+            const at=foes.filter(e=>Math.hypot(e.x-c.x,e.y-c.y)<C*8),s=wodOpsStrength(at,false);
+            if(!at.length||!(isCitySiegeBlockedForProduction(c)||s>=army*.5||towns.length>1))continue;
+            if(s>bs){bs=s;best={town:c,foes:at};}
+        }
+        if(best&&towns.length>1){
+            const round=foes.filter(e=>towns.some(c=>Math.hypot(e.x-c.x,e.y-c.y)<C*14));
+            if(wodOpsStrength(round,false)<army)best=null;
+        }
+        stand=best;
+    }
+    memo[owner]={serial,hexes:gameData.hexes,stand};
+    return stand;
 }
 
 // A choke cell for unit u: a bridge; land whose ring of eight neighbours is open to u in two or more separate arcs with
@@ -491,10 +537,12 @@ function wodOpsRun(owner,units){
     const r1=x=>Math.round(x*10)/10;
 
     // ---------- who is under command this pulse
+    // (in a last stand the wounded in a town or hospital are commanded too; those being ferried away are not)
+    const stand=wodAiLastStand(owner);
     const elig=[],landing=[];
     for(const u of units){
         // (marines are not "land army" to the engine: ashore after a landing they are)
-        if(!(u.hp>0)||!isLandArmyUnit(u)&&!(u.type==='marine'&&u._navalLanded)||u.boardTransportUid||u._medicalRecovering||u._medicalEvacuating||u.moraleBroken||u._navalEvacuating){u._opsUntil=0;continue;}
+        if(!(u.hp>0)||!isLandArmyUnit(u)&&!(u.type==='marine'&&u._navalLanded)||u.boardTransportUid||u._medicalRecovering&&!stand||u._medicalEvacuating||u.moraleBroken||u._navalEvacuating){u._opsUntil=0;continue;}
         if(u._navalLanded||u._navalAssaultUntil>now){
             // Put ashore by the navy. Once it stands on dry land it is a landing party (1d); marines draw supply
             // from the water, other troops only count while they are supplied.
@@ -687,6 +735,21 @@ function wodOpsRun(owner,units){
         }
     }
 
+    // ---------- 0. last stand (wodAiLastStand): every unit that can walk to the last town fights for it, the
+    // general and the wounded included; nothing is left for the stages below but troops that cannot get there.
+    const standing=new Set();
+    if(stand){
+        const T=stand.town,enemies=near(foes,T,C*10).filter(e=>!e.moraleBroken);
+        let k=0,n=0;
+        for(const u of [...pool,...(general?[general]:[])]){
+            if(!canReach(u,T))continue;
+            pool.delete(u);claim(u,'laststand');standing.add(u);n++;
+            if(u._medicalRecovering||u._medicalGoal)wodReleaseRecoveredUnit(u,false);
+            if(u.retreating){u.retreating=false;u._wodOrderedRetreat=false;}
+            if(!(enemies.length&&engage(u,enemies,k++)))wodOpsMove(u,T.x,T.y,false);
+        }
+        if(n&&(!S.standAt||now-S.standAt>30000)){S.standAt=now;S.counts.laststand=(S.counts.laststand||0)+1;wodAiRecord(owner,'ops-laststand',{town:T.id,units:n,foes:enemies.length});}
+    }
     // ---------- 1. town guards: the minimum that keeps each town from being walked into
     const danger=new Map(myTowns.map(c=>[c,wodOpsStrength(near(foes,c,C*11),false)]));
     const frontDist=c=>enemyTowns.length?Math.min(...enemyTowns.map(t=>dist(t,c))):0;
@@ -772,7 +835,7 @@ function wodOpsRun(owner,units){
             if(!(WG['t'+w.k]>now-60000)){WG['t'+w.k]=now;S.counts.works=(S.counts.works||0)+1;wodAiRecord(owner,'ops-works',{site:w.k,guards:list.length,threat:r1(threat)});}
         }
     }
-    if(general)pool.add(general);
+    if(general&&!standing.has(general))pool.add(general);
 
     // ---------- 1b. breakout. A unit whose road home has just been cut has twelve seconds before it starts to
     // starve, and it starves fastest standing where it is. It turns round at once and walks back toward the
@@ -1650,6 +1713,7 @@ function wodOpsRun(owner,units){
     }
     // sweeping stops only while a town is in more danger than its guards can answer
     const quiet=!myTowns.some(c=>danger.get(c)>.5&&danger.get(c)>wodOpsStrength(guards.get(c)||[],true));
+    S.quiet=quiet;
     S.calm=quiet&&fighters.length>=8&&fieldStrength>=wodOpsStrength(foes,false)*.8;
     const scouts=rest.filter(u=>!u.isGeneral);
     // With no battle running the army improves its position instead of standing: most of it takes ground

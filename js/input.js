@@ -347,7 +347,7 @@ function wodReserveGroupPoint(unit,desired,used,selected,reference=desired,stric
         if(water?!wodIsOpenWaterHex(h):!wet&&isWaterHex(h)&&!isBridgeHex(h)||wet&&!water&&!isWaterHex(h)&&!isBridgeHex(h))return false;
         if(used.some(s=>Math.hypot(s.point.x-p.x,s.point.y-p.y)<(unit.radius||12)+(s.unit.radius||12)+4))return false;
         let blocked=false;forEachNearbyUnit(gameData.unitSpatialGrid,p.x,p.y,(unit.radius||12)+65,u=>{
-            if(u!==unit&&!selected.has(u)&&u.hp>0&&!u.boardTransportUid&&Math.hypot(u.x-p.x,u.y-p.y)<(unit.radius||12)+(u.radius||12)+4)blocked=true;
+            if(u!==unit&&!selected.has(u)&&u.hp>0&&!u.boardTransportUid&&wodBodiesMeet(unit,u,p.x,p.y)&&Math.hypot(u.x-p.x,u.y-p.y)<(unit.radius||12)+(u.radius||12)+4)blocked=true;
         });return !blocked;
     };
     if(legal(desired))return {x:desired.x,y:desired.y};
@@ -636,7 +636,11 @@ function seedPlayerShiftWaypointsFromActiveMarch(units) {
 function wodPrepareShiftWaypointQueue(units) {
     let allIdle = units.every(u => !u.target && (!u.path || u.path.length === 0)
         && !(u.fullMarchWaypoints && u.fullMarchWaypoints.length));
-    if(allIdle) gameData.playerShiftWaypoints = [];
+    // The queue belongs to the units it was built for. Another selection starts from its own marches: a moving unit
+    // used to pick up the waypoints left by the previous selection and march along them.
+    const key = units.map(u => ensureUnitId(u)).sort().join('|');
+    if(allIdle || gameData._playerShiftWaypointsKey !== key) gameData.playerShiftWaypoints = [];
+    gameData._playerShiftWaypointsKey = key;
     if(!gameData.playerShiftWaypoints) gameData.playerShiftWaypoints = [];
     seedPlayerShiftWaypointsFromActiveMarch(units);
 }
