@@ -4282,6 +4282,31 @@ function wodNearestHostileLandHex(fromHex, owner, maxR) {
     }
     return best;
 }
+/** Transports and supply ships carry no guns and do not fight: one within reach of an enemy warship's guns runs for safer
+ *  water (findNavalRetreatPoint, away from the nearest threats, two to five cells at a time, looked at again each second
+ *  while the danger lasts). The computer's vessels run whatever their orders, unless a transport is putting troops ashore
+ *  within two cells of its landing; a player's vessel with an order keeps to it. Enemy troops on shore with the vessel in
+ *  range send it off only when it has no order. They used to sail up to warships and trade shots with them. */
+function wodVesselEvade(unit) {
+    if(!unit||(unit.type!=='transport'&&unit.type!=='supply')||unit.hp<=0||unit.boardTransportUid||!gameData.unitSpatialGrid)return;
+    const now=gameData._aiEconomyClock||0;
+    if(now>=(unit._evadeAt??-Infinity)&&now-(unit._evadeAt??-Infinity)<1)return;
+    unit._evadeAt=now;
+    const cell=(gameData.hexRadius||20)*1.35,ordered=!!(unit.target||unit.orderTarget),human=wodMpIsHumanOwner(unit.owner);
+    let ship=false,shore=false;
+    forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,cell*10,e=>{
+        if(e===unit||e.hp<=0||!(e.damage>0)||e.boardTransportUid||!wodIsHostileOwner(e.owner,unit.owner)||!wodOwnerCanSee(unit.owner,e))return;
+        if(Math.hypot(e.x-unit.x,e.y-unit.y)>(e.range||50)*wodGeneralStatMultiplier(e)+cell*1.5)return;
+        if(e.type==='ship')ship=true;else shore=true;
+    });
+    const landing=!!unit.cargo&&!!unit.orderTarget&&Math.hypot(unit.orderTarget.x-unit.x,unit.orderTarget.y-unit.y)<cell*2;
+    const flee=ship?(human?!ordered:!landing):shore&&!ordered;
+    if(!flee)return;
+    // (a leg already running away is kept for three seconds: setting a new one every second restarted the move)
+    const leg=unit._evadeLeg;if(leg&&unit.orderTarget&&Math.hypot(unit.orderTarget.x-leg.x,unit.orderTarget.y-leg.y)<1&&now-leg.at<3&&now>=leg.at)return;
+    const pt=findNavalRetreatPoint(unit,2);
+    if(pt&&assignUnitMoveAlongWaypoints(unit,[pt],{forceRetreat:true})){unit.holding=false;unit._evadeLeg={x:unit.orderTarget?.x??pt.x,y:unit.orderTarget?.y??pt.y,at:now};}
+}
 function findNavalRetreatPoint(unit,minCells=2) {
     ensureUnitPixelOnWalkableHex(unit,18);
     const start=getNearestHexToPoint(unit.x,unit.y);if(!start||!wodIsOpenWaterHex(start))return null;

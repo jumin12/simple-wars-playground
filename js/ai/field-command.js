@@ -652,6 +652,9 @@ function wodOpsRun(owner,units){
         wodSetPreferredTarget(owner,[u.uid],foe.uid,{pursue:true});
     };
     // dug-in defenders are shot at from the best cover in range; anything moving, wounded or running is chased
+    // (breakOut is defined with the breakout stage, below; until then, the last stand before it, a starving unit falls
+    // back toward its nearest town instead: calling breakOut there threw, and the faction's whole pulse was lost)
+    let breakOutFn=null;
     const engage=(u,enemies,k,dugIn)=>{
         let foe=null,bs=Infinity;
         for(const e of enemies){const s=dist(e,u)/C+(e.hp/(e.maxHp||100))*1.5;if(s<bs){bs=s;foe=e;}}
@@ -672,7 +675,7 @@ function wodOpsRun(owner,units){
             const c=wodOpsLandHex(u.x,u.y);let hop=null,bd=Infinity;
             if(c)for(const q of getHexesInRadius(c.q,c.r,3)){const h=wodHexAt(q.q,q.r);if(!h||!friendlyCell(h)||isWaterHex(h)&&!isBridgeHex(h)||!canUnitEnterHex(u,h))continue;const dd=dist(h,u);if(dd<bd&&wodCurrentSupplyComponent(h,owner).city){bd=dd;hop=h;}}
             u._opsRole='resupply';
-            if(hop){wodOpsMove(u,hop.x,hop.y,false);hurry(u);}else breakOut(u);
+            if(hop){wodOpsMove(u,hop.x,hop.y,false);hurry(u);}else if(breakOutFn)breakOutFn(u);else fallBack(u,homeTown(u));
             return true;
         }
         if(dist(p,u)<hr*.25||dist(p,u)<hr*.6&&dist(u,foe)<=(u.range||50)*.97)wodOpsHalt(u);else{wodOpsMove(u,p.x,p.y,false);hurry(u);}
@@ -750,8 +753,32 @@ function wodOpsRun(owner,units){
         }
         if(n&&(!S.standAt||now-S.standAt>30000)){S.standAt=now;S.counts.laststand=(S.counts.laststand||0)+1;wodAiRecord(owner,'ops-laststand',{town:T.id,units:n,foes:enemies.length});}
     }
+    // (WOD_OPS.T.threatAhead: 0 off, 1 everywhere, 2 the default: at the walls and works only) Enemies on their way. Each
+    // enemy unit the commander sees is followed from
+    // pulse to pulse; one that has closed on a town or work of ours by a quarter of a cell or more in the last two to four
+    // seconds, heading for it, is coming (only what is seen counts, never where he was ordered). A town counts what is
+    // coming from up to 22 cells off as danger and from up to 14 as at its walls, so guards and relief set out before he
+    // arrives; a fort or hospital he is coming at is held as if attacked. Before, only enemies already within 11 cells
+    // counted, and the troops sent arrived after him. Lab h2h against the AI without it (two seed sets, 120 matches of 40
+    // min each, six map shapes): counted everywhere (1) it pulled so many troops home that it lost 228-269 towns (and
+    // 106-134 again in a third batch); at the walls and works only (2) it is level, 241-241 towns, kills 2592-2593.
+    const track=S.foeTrack||(S.foeTrack=new Map());
+    for(const e of foes){const t=track.get(e.uid);
+        if(!t||now<t.at||now-t.at>6000)track.set(e.uid,{x:e.x,y:e.y,at:now,px:e.x,py:e.y,pat:now});
+        else if(now-t.at>=1500){t.px=t.x;t.py=t.y;t.pat=t.at;t.x=e.x;t.y=e.y;t.at=now;}}
+    if(track.size>300)for(const [k,t] of track)if(now-t.at>8000)track.delete(k);
+    const TA=TU.threatAhead??2,wallsOnly=TA===2;
+    const incoming=(P,r)=>!TA?[]:foes.filter(e=>{
+        const t=track.get(e.uid);if(!t||t.at===t.pat||now-t.at>4000||e.retreating||e.moraleBroken)return false;
+        const d=dist(e,P);if(d>r||d<=C*7)return false;
+        if(Math.hypot(t.px-P.x,t.py-P.y)-Math.hypot(t.x-P.x,t.y-P.y)<C*.25)return false; // (infantry closes about a third of a cell a pulse)
+        const vx=t.x-t.px,vy=t.y-t.py,px=P.x-t.x,py=P.y-t.y;
+        return (vx*px+vy*py)/((Math.hypot(vx,vy)||1)*(Math.hypot(px,py)||1))>.75;
+    });
+    const coming=new Map(myTowns.map(c=>[c,incoming(c,C*22)]));
+    if(TA&&TU.threatPulse!==0&&myTowns.some(c=>coming.get(c).length)){S.alertAt=now;gameData._aiAlertAt=now;}
     // ---------- 1. town guards: the minimum that keeps each town from being walked into
-    const danger=new Map(myTowns.map(c=>[c,wodOpsStrength(near(foes,c,C*11),false)]));
+    const danger=new Map(myTowns.map(c=>[c,wodOpsStrength(near(foes,c,C*11),false)+(wallsOnly?0:.8*wodOpsStrength(coming.get(c),false))]));
     const frontDist=c=>enemyTowns.length?Math.min(...enemyTowns.map(t=>dist(t,c))):0;
     const towns=myTowns.slice().sort((a,b)=>danger.get(b)-danger.get(a)||frontDist(a)-frontDist(b));
     const guards=new Map();
@@ -763,7 +790,7 @@ function wodOpsRun(owner,units){
     // walk up unseen: then every town keeps its man.
     const amphibious=seen.some(u=>u.type==='marine'||u.type==='transport');
     const exposed=c=>{
-        if(fogOn||amphibious||TU.lean===0)return true;
+        if(fogOn||amphibious||TU.lean===0||!wallsOnly&&coming.get(c)?.length)return true;
         let t=Infinity;for(const e of rovers){const d=dist(e,c);if(d<t)t=d;}
         for(const e of boats){const d=dist(e,c)-C*6;if(d<t)t=d;}
         if((S.garrison[c.id]||[]).length)return t<C*34; // once posted he stays until the threat has gone
@@ -783,7 +810,7 @@ function wodOpsRun(owner,units){
         // Enemies hovering in the neighbourhood are the field army's business. Enemies at the walls are not a
         // question of odds: the town gets defenders in proportion, from wherever they are, because streets
         // double a defender's worth and a lost town is half an economy.
-        const atWalls=wodOpsStrength(near(foes,c,C*7),false);
+        const atWalls=wodOpsStrength(near(foes,c,C*7),false)+.8*wodOpsStrength(coming.get(c).filter(e=>dist(e,c)<C*14),false);
         const want=Math.min(Math.max(exposed(c)?(d<1.5?1:d<5?2:3):0,Math.ceil(atWalls*.75)),Math.max(1,fighters.length-myTowns.length+1));
         // a town under real attack is relieved from anywhere: a town is worth more than any field battle
         while(list.length<want){const g=takeNearest(c,list.length&&d<1.5?C*16:Infinity,!list.length);if(!g)break;list.push(g);}
@@ -806,10 +833,10 @@ function wodOpsRun(owner,units){
             if(d>C*20||budget<=0||myTowns.some(c=>dist(c,w)<C*4)){delete WG[w.k];continue;} // out of his reach, or inside a town's own defence
             const prev=(WG[w.k]||[]).map(id=>byUid.get(id)).filter(u=>u&&pool.has(u)&&dist(u,w)<C*16);
             let gd=Infinity;for(const u of pool){if(u.isGeneral)continue;const dd=dist(u,w);if(dd<gd)gd=dd;}
-            const attacked=d<=C*7;
+            const comingAt=incoming(w,C*14),attacked=d<=C*7||comingAt.length>0;
             // the race for the tile: he must not get within two tiles of it before our man is there
             if(!attacked&&!(d<=gd+C*(TU.worksLead??3.5))){delete WG[w.k];continue;}
-            const close=near(foes,w,C*7),threat=wodOpsStrength(close,false);
+            const close=near(foes,w,C*7).concat(comingAt),threat=wodOpsStrength(close,false);
             const want=Math.min(budget,attacked?Math.max(1,Math.ceil(threat*(TU.worksK??.9))):1),list=[];
             for(const u of prev)if(list.length<want){pool.delete(u);list.push(u);}
             while(list.length<want){let g=null,bd=C*(list.length?14:24);for(const u of pool){if(u.isGeneral||!canReach(u,w))continue;const dd=dist(u,w);if(dd<bd){bd=dd;g=u;}}if(!g)break;pool.delete(g);list.push(g);}
@@ -854,6 +881,7 @@ function wodOpsRun(owner,units){
         if(dist(u,to)<C*1.5){wodOpsHalt(u);return;}
         fallBack(u,to);
     };
+    breakOutFn=breakOut;
     for(const u of pocketed){
         if(!pool.has(u))continue; // town guards stay: a town supplies its own streets
         if(dHome(u)<C*5)continue;

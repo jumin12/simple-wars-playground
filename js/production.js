@@ -1215,7 +1215,7 @@ function wodRecruitUnitSpec(type) {
     const hp=type==='heavy'||type==='ship'?300:['transport','supply'].includes(type)?50:100;
     const mp=type==='ship'?5000:['transport','supply'].includes(type)?500:1000;
     return {type,owner:-1,x:1e9,y:1e9,hp,maxHp:hp,manpower:mp,maxManpower:mp,morale:100,maxMorale:100,xp:0,
-        damage:({heavy:18,ship:14,transport:4,supply:4})[type]||8,range:({heavy:60,ship:80})[type]||50,
+        damage:({heavy:18,ship:14,transport:0,supply:0})[type]??8,range:({heavy:60,ship:80})[type]||50,
         attackCooldown:({heavy:2.8,ship:2.4})[type]||2,radius:({heavy:16,ship:16,transport:16,supply:16})[type]||12,
         tanks:type==='heavy'?500:0,maxTanks:type==='heavy'?500:0,...(wodSpecialistStats(type)||{}),speed:wodUnitBaseSpeed({type})};
 }
@@ -1298,6 +1298,8 @@ function wodNormalizeNavalStats(u) {
     // (warships are the size of armour, 16; saves and mission files from before 2026-11-18 have them at 20, a card a
     // quarter larger)
     if(u?.type==='ship'&&u.radius===20)u.radius=16;
+    // (transports and supply ships carry no guns since 2026-11-19: they ran up to warships and traded shots)
+    if((u?.type==='transport'||u?.type==='supply')&&u.damage>0)u.damage=0;
     if(u?.cargo)wodNormalizeNavalStats(u.cargo);
 }
 function wodSupplyShipLabel() {
@@ -1540,7 +1542,7 @@ function createUnitAt(type, x, y, owner, opts) {
     if(WOD_SPECIALIST_UNITS[type]) {
         Object.assign(unit,wodSpecialistStats(type));
     } else if(type === 'transport'||type === 'supply') {
-        unit.hp=unit.maxHp=50;unit.manpower=unit.maxManpower=500;unit.speed=WOD_UNIT_BASE_SPEED;unit.damage=4;unit.range=50;unit.attackCooldown=2;unit.radius=16;
+        unit.hp=unit.maxHp=50;unit.manpower=unit.maxManpower=500;unit.speed=WOD_UNIT_BASE_SPEED;unit.damage=0;unit.range=50;unit.attackCooldown=2;unit.radius=16;
     } else if(type === 'light') {
         unit.speed = WOD_UNIT_BASE_SPEED; unit.damage = 8; unit.range = 50; unit.attackCooldown = 2.0; unit.radius = 12;
     } else if(type === 'marine') {

@@ -1005,13 +1005,15 @@ function wodSupplyCellHeldByEnemy(hex, owner) {
     return enemy && !friend;
 }
 /** Whether a unit on a cell it has not captured (or on a patch of its side's ground cut off from its towns) is still in
- *  touch with its supplied lines: supplied friendly land it can reach overland within WOD_FRONT_SUPPLY_REACH cells,
- *  without passing ground the enemy's troops hold (wodSupplyCellHeldByEnemy) or a mountain. A cordon of enemy units cuts it
- *  off however thin; bare ground the enemy has painted does not, near its lines. Only two cells used to be searched, so
- *  troops pushed three cells into enemy land, standing on the one cell they claim underfoot, counted as encircled; then
- *  24, so a raiding party could sit twenty cells deep in enemy land, far from its own, and never starve. The answer is
- *  kept a quarter second of game time per cell and faction. */
-const WOD_FRONT_SUPPLY_REACH=8;
+ *  touch with its supplied lines: supplied friendly land lies within WOD_FRONT_SUPPLY_REACH cells of it, over ground the
+ *  enemy's troops do not hold (wodSupplyCellHeldByEnemy) and no mountain. A unit at the front, fighting from the tile it
+ *  stands on with the tiles round it still contested, is in touch; one whose way back the enemy has taken, or that has
+ *  run on beyond its lines, is cut off (troops marching into enemy land claim the ground they cross, so a column that
+ *  advances keeps its road). History: two cells, but the single tile claimed under a front-line unit was judged as a
+ *  pocket before this was asked, so troops two tiles out counted as encircled; then 24 and 8 cells over any ground no
+ *  enemy troops stood on, so units near the front never starved however they were cut off. (The search also checked one
+ *  cell further than its limit.) The answer is kept a quarter second of game time per cell and faction. */
+const WOD_FRONT_SUPPLY_REACH=1; // (2 until 2026-11-19: the player asked for one cell)
 function wodFrontlineSupplyTouch(hex,owner) {
     if(!hex||owner<=0)return false;
     const now=gameData._aiEconomyClock||0;let memo=gameData._frontSupplyMemo;
@@ -1023,7 +1025,7 @@ function wodFrontlineSupplyTouch(hex,owner) {
             if(found||!n||isWaterHex(n)&&!isBridgeHex(n))return;
             const k=getHexKey(n);if(seen.has(k))return;seen.add(k);
             if(wodSupplyPassable(n,owner)&&wodCurrentSupplyComponent(n,owner).city){found=true;return;}
-            if(d<WOD_FRONT_SUPPLY_REACH&&n.type!=='mountain'&&!wodSupplyCellHeldByEnemy(n,owner)){depth.set(n,d+1);queue.push(n);}
+            if(d+1<WOD_FRONT_SUPPLY_REACH&&n.type!=='mountain'&&!wodSupplyCellHeldByEnemy(n,owner)){depth.set(n,d+1);queue.push(n);}
         });
     }
     memo.map.set(key,found);return found;
@@ -1050,7 +1052,7 @@ function wodGetUnitEncirclementState(unit, hex) {
         if(supply.city||unit.type==='marine'&&(supply.water||wodTouchesOpenSea(hex)))return null;
         // A unit at the front stands on ground it has not taken yet: an enemy on the
         // next tile blocks the claim. It is still in touch with its own lines, not cut
-        // off, so supplied friendly land within two tiles supplies it.
+        // off, so supplied friendly land on the next tile supplies it.
         if(wodFrontlineSupplyTouch(hex,unit.owner))return null;
         const relief=(gameData.forts||[]).some(f=>wodIsFriendlyOwner(f.owner,unit.owner)&&
             Math.hypot(f.x-unit.x,f.y-unit.y)<(gameData.hexRadius||20)*3);
@@ -1061,7 +1063,7 @@ function wodGetUnitEncirclementState(unit, hex) {
     const supply=wodCurrentSupplyComponent(hex,unit.owner);
     if(supply.city||unit.type==='marine'&&(supply.water||wodTouchesOpenSea(hex)))return null;
     // The tile under a front-line unit is its own even when the tiles round it are not yet:
-    // it is in touch with its lines while supplied friendly land lies within two tiles.
+    // it is in touch with its lines while supplied friendly land lies on the next tile.
     if(wodFrontlineSupplyTouch(hex,unit.owner))return null;
     const relief=wodHexKeyEncirclementRelief(getHexKey(hex))||(gameData.forts||[]).some(f=>
         wodIsFriendlyOwner(f.owner,unit.owner)&&Math.hypot(f.x-unit.x,f.y-unit.y)<(gameData.hexRadius||20)*3);

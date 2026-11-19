@@ -2,6 +2,13 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-19T10:00:00Z",title:"Cut-off troops starve, transports run, an AI that sees threats coming",items:[
+        "Cut-off troops starve again, yours and the enemy's. A unit is in touch with its lines only while your supplied land lies on the very next tile, one enemy troops do not hold. Troops pushed a little past the front stay supplied, and an army that advances keeps the ground it crosses as its road back. Before, any unit within several tiles of the front never took attrition, however it was cut off.",
+        "A patch of your land cut off by enemy land is encircled again, with or without enemy troops round it.",
+        "Transports and supply ships no longer fight: they carry no guns and run from enemy warships. Your idle ones sail out of reach, one you have given an order keeps to it, and a transport landing troops stays to put them ashore.",
+        "The AI sees enemies coming. It follows the enemy units it can see, and when a column heads for one of its towns, forts or hospitals it sends defenders from twice as far out as before and thinks faster until the threat has passed.",
+        "Fixed: a computer player making a last stand could stop giving its troops orders for a moment when one of them was starving."
+    ]},
     {at:"2026-11-19T04:00:00Z",title:"Disband button, second bridges, routed units that run, raiders that starve",items:[
         "Disband a unit with the little skull beside its name on the unit card. Click it once and it turns red, then click again within three seconds to disband. The unit leaves the field and its men go home, so they do not count as losses.",
         "You can now build a second bridge close to the first at the same narrows, as long as the two decks do not touch. Bridges two rows apart used to be refused as in the way.",

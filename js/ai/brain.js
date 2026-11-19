@@ -100,6 +100,10 @@ function updateAiStrategy(dt) {
     if(gameData._campaignRun || gameData._campaignAiAggressive) stratEvery *= 0.72;
     // a hard computer thinks faster (the quickest faction sets the pace; slower ones skip pulses, below)
     stratEvery *= gameData._aiPulseScale || 1;
+    // (WOD_OPS.T.threatAhead) while enemies are on their way to a town of an AI faction, every faction thinks 40% more
+    // often for the next four seconds of AI time
+    const alertAt=gameData._aiAlertAt,opsNow=wodAiOperationTime();
+    if(alertAt!=null&&opsNow>=alertAt&&opsNow-alertAt<4000)stratEvery*=.6;
     if(gameData.aiStrategyTimer < stratEvery) return;
     gameData.aiStrategyTimer = 0;
 
