@@ -490,7 +490,12 @@ function wodMpRebuildHexesFromList(list) {
     gameData.hexList = hexList;
     wodMpNormalizeHexListTerrainColors(hexList);
 }
-async function wodMpRebuildHexesFromListAsync(list) {
+// A guest's map load. On a poor connection the socket can drop while the match's map is still coming in, and the rejoin
+// that follows starts a second load: the first, resumed after one of its pauses, then wrote its map over the second's
+// (terrain from one, towns from the other) and the game fell over. Each load takes a number; one that a newer load has
+// overtaken stops at its next pause and leaves everything alone.
+let _wodMpLoadGen = 0;
+async function wodMpRebuildHexesFromListAsync(list, stale) {
     if(!list || !list.length) {
         gameData.hexes = {};
         gameData.hexList = [];
@@ -503,7 +508,7 @@ async function wodMpRebuildHexesFromListAsync(list) {
         let h = list[i];
         hexList[i] = h;
         hexes[h.q + ',' + h.r] = h;
-        if(i > 0 && (i % chunk) === 0) await new Promise(r => requestAnimationFrame(r));
+        if(i > 0 && (i % chunk) === 0) {await new Promise(r => requestAnimationFrame(r));if(stale && stale()) return;}
     }
     gameData.hexes = hexes;
     gameData.hexList = hexList;
@@ -581,10 +586,11 @@ function wodMpTryPaintLobbyPreviewCanvas(meta) {
 async function wodMpApplyMatchStartPayload(p, opts) {
     opts = opts || {};
     if(!p || !p.hexList || !p.hexList.length) throw new Error('Match start payload has no map');
+    const stale=()=>opts.gen!=null&&opts.gen!==_wodMpLoadGen;
     gameData._mpLoadingMatch=true;
     try {
     wodMpNormalizeHexListTerrainColors(p.hexList);
-    if(opts.asyncHexes) await wodMpRebuildHexesFromListAsync(p.hexList);
+    if(opts.asyncHexes) {await wodMpRebuildHexesFromListAsync(p.hexList, stale);if(stale()) return;}
     else wodMpRebuildHexesFromList(p.hexList);
     gameData.cities = (p.cities || []).map(c => Object.assign({}, c));
     if(!opts.resumeMatch)wodNormalizeStartingCityEconomy();
@@ -643,7 +649,7 @@ async function wodMpApplyMatchStartPayload(p, opts) {
     gameData.menuAttractMode=false;gameData._matchReadyForEndChecks=true;
     for(const slot of p.forfeitedSlots||[]){if((p.surrenderedSlots||[]).includes(slot))wodMpApplyForfeitSlot(slot,false);else wodMpHandSlotToAi(slot);}
     if(opts.bake !== false) wodMpRefreshMatchViewportAndTerrain();
-    } finally {gameData._mpLoadingMatch=false;}
+    } finally {if(!stale())gameData._mpLoadingMatch=false;}
     if(!opts.resumeMatch)wodMpApplyDeferredSnapshot();
 }
 async function wodMpPrepareHostLaunchPayload(meta) {
@@ -903,6 +909,16 @@ function wodMpClientApplyMatchEnd(me) {
 function wodMpIsSlotEliminated(slot) {
     let es = gameData.mp && gameData.mp.eliminatedSlots;
     return Array.isArray(es) && es.indexOf(slot) >= 0;
+}
+// A player who surrenders while the battle would go on without them hands their faction to the computer, as one who
+// leaves does (wodMpHandSlotToAi): its towns, ground and troops stay, for the others to fight for. The surrender button
+// is the only way out of a match, and a faction vanishing from the middle of the map left a hole the rest walked into.
+// Only a surrender that ends the battle (all that are left are on one side, and not on ours) removes the faction, and
+// the others win at once. The player loses the match either way.
+function wodMpSurrenderConcedes() {
+    const lo=wodLocalPlayerOwner(),rest=wodSpectatorSurvivors(true);
+    if(rest.some(o=>!wodIsHostileOwner(o,lo)))return false;
+    return !rest.some(a=>rest.some(b=>a!==b&&wodIsHostileOwner(a,b)));
 }
 function wodMpApplyForfeitSlot(slot,emit=true) {
     if(!slot||!gameData.mp)return;wodMpMarkSlotEliminated(slot);
@@ -2494,30 +2510,186 @@ function wodMpSyncSeatsToLobbyPopulation(meta) {
     return changed;
 }
 function wodMpEnsureDefaultSeatTypes(meta) { wodMpNormalizeLobbyMeta(meta); }
-function wodMpBuildSeatTypesFromCounts(humanCount, botCount) {
-    let humans = Math.max(1, Math.min(WOD_MP_MAX_PLAYERS, humanCount | 0));
+// Four seats at most, players and AI together (three players leave room for one AI). Seats taken by players already in
+// the lobby stay theirs, whatever the counts say (they used to be handed to the AI or closed under them, and the relay
+// refused the layout); the other player seats come next, then the AI, then closed. A match needs two sides: one player
+// alone gets an AI.
+function wodMpClampSeatCounts(humanCount, botCount, occupiedCount) {
+    let humans = Math.max(1, occupiedCount | 0, Math.min(WOD_MP_MAX_PLAYERS, humanCount | 0));
     let bots = Math.max(0, Math.min(WOD_MP_MAX_PLAYERS - humans, botCount | 0));
-    let st = [];
-    for(let i = 0; i < humans; i++) st.push('human');
-    for(let i = 0; i < bots; i++) st.push('bot');
-    while(st.length < WOD_MP_MAX_PLAYERS) st.push('closed');
+    if(humans + bots < 2) bots = Math.min(WOD_MP_MAX_PLAYERS - humans, 1);
+    return { humans, bots };
+}
+function wodMpBuildSeatTypesFromCounts(humanCount, botCount, occupied) {
+    const occ = new Set((occupied || []).map(s => s | 0).filter(s => s >= 1 && s <= WOD_MP_MAX_PLAYERS));
+    const { humans, bots } = wodMpClampSeatCounts(humanCount, botCount, occ.size);
+    const st = new Array(WOD_MP_MAX_PLAYERS).fill('closed');
+    for(const s of occ) st[s - 1] = 'human';
+    let h = occ.size, b = 0;
+    for(let i = 0; i < WOD_MP_MAX_PLAYERS && h < humans; i++) if(st[i] === 'closed') { st[i] = 'human'; h++; }
+    for(let i = 0; i < WOD_MP_MAX_PLAYERS && b < bots; i++) if(st[i] === 'closed') { st[i] = 'bot'; b++; }
     return st;
 }
 function wodMpReadHostLayoutCounts() {
     let hEl = document.getElementById('mpHostHumanSeats');
     let bEl = document.getElementById('mpHostBotSeats');
     let humans = hEl ? (parseInt(hEl.value, 10) || 2) : 2;
-    let bots = bEl ? (parseInt(bEl.value, 10) || 1) : 1;
-    if(humans + bots > WOD_MP_MAX_PLAYERS) bots = Math.max(0, WOD_MP_MAX_PLAYERS - humans);
-    return { humans, bots };
+    let bots = bEl ? (parseInt(bEl.value, 10) || 0) : 1;
+    return wodMpClampSeatCounts(humans, bots, 1);
 }
 function wodMpReadGlLayoutCounts() {
     let hEl = document.getElementById('mpGlHumanCount');
     let bEl = document.getElementById('mpGlBotCount');
     let humans = hEl ? (parseInt(hEl.value, 10) || 2) : 2;
-    let bots = bEl ? (parseInt(bEl.value, 10) || 1) : 1;
-    if(humans + bots > WOD_MP_MAX_PLAYERS) bots = Math.max(0, WOD_MP_MAX_PLAYERS - humans);
-    return { humans, bots };
+    let bots = bEl ? (parseInt(bEl.value, 10) || 0) : 1;
+    return wodMpClampSeatCounts(humans, bots, (window.wodMpRoomMeta?.occupiedSlots || []).length);
+}
+const WOD_MP_SEAT_ICONS = {
+    human: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6.4" r="3.6"/><path d="M3.2 17.4c.7-3.9 3.4-6 6.8-6s6.1 2.1 6.8 6z"/></svg>',
+    bot: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M9.2 2.2h1.6v3H9.2z"/><rect x="3.6" y="5.6" width="12.8" height="10.6" rx="2.6"/><circle cx="7.6" cy="10.6" r="1.4" fill="#10141b"/><circle cx="12.4" cy="10.6" r="1.4" fill="#10141b"/><path d="M1.6 9.2h1.4v3.4H1.6zM17 9.2h1.4v3.4H17z"/></svg>',
+    closed: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.6a7.4 7.4 0 1 0 0 14.8 7.4 7.4 0 0 0 0-14.8zm0 2a5.4 5.4 0 0 1 4.3 8.7L6.7 5.7A5.3 5.3 0 0 1 10 4.6zm0 10.8a5.4 5.4 0 0 1-4.3-8.7l7.6 7.6a5.3 5.3 0 0 1-3.3 1.1z"/></svg>',
+    invite: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8" cy="6.6" r="3.3"/><path d="M2 16.6c.6-3.5 3-5.4 6-5.4s5.4 1.9 6 5.4zM15 6h1.8v2.6h2.6v1.8h-2.6V13H15v-2.6h-2.6V8.6H15z"/></svg>',
+    kick: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.2 3.8 10 8.6l4.8-4.8 1.4 1.4-4.8 4.8 4.8 4.8-1.4 1.4-4.8-4.8-4.8 4.8-1.4-1.4L8.6 10 3.8 5.2z"/></svg>',
+    profile: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1zm6 3a2.4 2.4 0 1 0 0 4.8A2.4 2.4 0 0 0 10 6zm-4.2 9h8.4c-.4-2-2-3.2-4.2-3.2S6.2 13 5.8 15z"/></svg>'
+};
+const WOD_MP_SEAT_KINDS = [
+    { v: 'human', label: 'Player', sub: 'Open for a friend to join' },
+    { v: 'bot', label: 'AI', sub: 'A computer opponent' },
+    { v: 'closed', label: 'Closed', sub: 'Nobody plays this seat' }
+];
+// The Players / AI counters with the four-seat bar, for the host form (which) 'host' and the game lobby 'gl'. The hidden
+// selects stay the record of the counts (everything else reads them); a counter that would break the four-seat limit,
+// leave a match of one side, or take a seat from a player already in the lobby is greyed out.
+function wodMpRenderSeatCounters(which) {
+    const ids = which === 'host' ? ['mpHostHumanSeats', 'mpHostBotSeats', 'mpHostSeatCounters'] : ['mpGlHumanCount', 'mpGlBotCount', 'mpGlSeatCounters'];
+    const hSel = document.getElementById(ids[0]), bSel = document.getElementById(ids[1]), box = document.getElementById(ids[2]);
+    if(!hSel || !bSel || !box) return;
+    const occupied = which === 'gl' ? Math.max(1, (window.wodMpRoomMeta?.occupiedSlots || []).length) : 1;
+    const c = wodMpClampSeatCounts(parseInt(hSel.value, 10) || 1, parseInt(bSel.value, 10) || 0, occupied);
+    hSel.value = String(c.humans); bSel.value = String(c.bots);
+    const N = WOD_MP_MAX_PLAYERS, seg = (kind, val, min, max, from, to, label) => {
+        let s = '';
+        for(let n = from; n <= to; n++) {
+            const off = n < min || n > max;
+            s += '<button type="button" class="mp-seg-btn' + (n === val ? ' on' : '') + '" data-kind="' + kind + '" data-n="' + n + '" aria-pressed="' + (n === val) + '"' +
+                (off ? ' disabled' : '') + ' aria-label="' + n + ' ' + label + '">' + n + '</button>';
+        }
+        return s;
+    };
+    let pips = '';
+    for(let i = 0; i < N; i++) {
+        const k = i === 0 ? 'you' : i < c.humans ? 'player' : i < c.humans + c.bots ? 'bot' : 'empty';
+        pips += '<span class="mp-seatbar-pip mp-seatbar-pip--' + k + '">' + (k === 'you' ? 'You' : k === 'player' ? 'Player' : k === 'bot' ? 'AI' : 'Empty') + '</span>';
+    }
+    const room = N - c.humans;
+    const note = which === 'gl' && _wodMpGlApplyTimer ? 'Updating the seats once the map preview is ready…' : room === 0 ? 'All four seats are players: no room for an AI.' :
+        c.humans === 1 ? 'Just you: add at least one AI, or open seats for friends.' :
+        'With ' + c.humans + ' players there is room for ' + (room === 1 ? 'one AI' : 'up to ' + room + ' AI') + '.';
+    box.innerHTML = '<div class="mp-seatbar" aria-hidden="true">' + pips + '<span class="mp-seatbar-label">' + (c.humans + c.bots) + ' / ' + N + ' seats</span></div>' +
+        '<div class="mp-seg-row"><span class="mp-seg-label">Players <small style="font-weight:400;opacity:.7">(with you)</small></span><div class="mp-seg" role="group" aria-label="Player seats">' +
+        seg('h', c.humans, occupied, N, 1, N, 'players') + '</div></div>' +
+        '<div class="mp-seg-row"><span class="mp-seg-label">AI opponents</span><div class="mp-seg" role="group" aria-label="AI seats">' +
+        seg('b', c.bots, c.humans < 2 ? 1 : 0, N - c.humans, 0, N - 1, 'AI') + '</div></div>' +
+        '<p class="mp-seg-note">' + note + '</p>';
+    box.querySelectorAll('.mp-seg-btn').forEach(btn => {
+        btn.onclick = () => {
+            if(btn.disabled) return;
+            const n = parseInt(btn.getAttribute('data-n'), 10);
+            let h = parseInt(hSel.value, 10) || 1, b = parseInt(bSel.value, 10) || 0;
+            if(btn.getAttribute('data-kind') === 'h') h = n; else b = n;
+            const next = wodMpClampSeatCounts(h, b, occupied);
+            hSel.value = String(next.humans); bSel.value = String(next.bots);
+            if(which === 'gl') wodMpQueueGlLayoutApply();
+            wodMpRenderSeatCounters(which);
+            const again = document.querySelector('#' + ids[2] + ' .mp-seg-btn[data-kind="' + btn.getAttribute('data-kind') + '"][data-n="' + n + '"]');
+            if(again) again.focus();
+        };
+    });
+}
+// The lobby's counters take effect at once (there was an Apply button). Changes made while the map preview is still being
+// drawn wait for it.
+let _wodMpGlApplyTimer = 0;
+function wodMpQueueGlLayoutApply() {
+    clearTimeout(_wodMpGlApplyTimer);
+    _wodMpGlApplyTimer = setTimeout(() => {
+        if(typeof WodMultiplayer === 'undefined' || !WodMultiplayer.api.isHost) { _wodMpGlApplyTimer = 0; return; }
+        if(wodIsMapPreviewGenerating()) { wodMpQueueGlLayoutApply(); return; }
+        _wodMpGlApplyTimer = 0;
+        const layout = wodMpReadGlLayoutCounts();
+        wodMpApplyLayoutCounts(layout.humans, layout.bots, {});
+        wodMpRenderGameLobbyScreen();
+    }, 220);
+}
+// One seat's kind, chosen from its dropdown in the lobby (the host only).
+function wodMpSetSeatType(slot, v) {
+    if(!window.wodMpRoomMeta || slot < 1 || slot > WOD_MP_MAX_PLAYERS) return;
+    wodMpNormalizeLobbyMeta(window.wodMpRoomMeta);
+    if(window.wodMpRoomMeta.seatTypes[slot - 1] === v) return;
+    let prevFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
+    window.wodMpRoomMeta.seatTypes[slot - 1] = v;
+    wodMpPushLobbyMetaFromCurrentUi();
+    let nextFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
+    if(prevFactionFp === nextFactionFp) {
+        requestAnimationFrame(() => wodMpRefreshLobbyMapPreviewAfterMetaChange(window.wodMpRoomMeta, { repaintOnly: true }));
+    } else {
+        requestAnimationFrame(() => wodMpRefreshLobbyMapPreviewAfterMetaChange(window.wodMpRoomMeta, {
+            politicsOnly: _wodMpLobbyPreviewLastTerrainFp === wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta)
+        }));
+    }
+    wodMpRenderGameLobbyScreen();
+}
+function wodMpSeatDropdownHtml(slot, seatT, activeFactions) {
+    const cur = WOD_MP_SEAT_KINDS.find(k => k.v === seatT) || WOD_MP_SEAT_KINDS[0];
+    let opts = '';
+    for(const k of WOD_MP_SEAT_KINDS) {
+        // (a match needs two sides: the last but one active seat cannot be closed)
+        const off = k.v === 'closed' && seatT !== 'closed' && activeFactions <= 2;
+        opts += '<button type="button" role="option" class="wod-dd-opt" data-value="' + k.v + '" aria-selected="' + (k.v === seatT) + '"' + (off ? ' disabled data-locked="1" title="A match needs at least two sides"' : '') + '>' +
+            WOD_MP_SEAT_ICONS[k.v] + '<span><b>' + k.label + '</b><small>' + k.sub + '</small></span></button>';
+    }
+    return '<div class="wod-dd mp-gl-seat-dd" data-slot="' + slot + '">' +
+        '<button type="button" class="wod-dd-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Seat ' + slot + ': ' + cur.label + '">' +
+        WOD_MP_SEAT_ICONS[cur.v] + '<span class="wod-dd-val">' + cur.label + '</span><span class="wod-dd-chev"></span></button>' +
+        '<div class="wod-dd-menu" role="listbox">' + opts + '</div></div>';
+}
+function wodMpCloseSeatDropdowns(except) {
+    document.querySelectorAll('.wod-dd.open').forEach(dd => {
+        if(dd === except) return;
+        dd.classList.remove('open');
+        const b = dd.querySelector('.wod-dd-btn'); if(b) b.setAttribute('aria-expanded', 'false');
+    });
+}
+function wodMpWireSeatDropdowns(root) {
+    root.querySelectorAll('.mp-gl-seat-dd').forEach(dd => {
+        const btn = dd.querySelector('.wod-dd-btn'), slot = parseInt(dd.getAttribute('data-slot'), 10);
+        btn.onclick = (e) => {
+            e.stopPropagation();
+            const open = !dd.classList.contains('open');
+            wodMpCloseSeatDropdowns(dd);
+            dd.classList.toggle('open', open);
+            btn.setAttribute('aria-expanded', String(open));
+            if(open) { const sel = dd.querySelector('.wod-dd-opt[aria-selected="true"]') || dd.querySelector('.wod-dd-opt:not(:disabled)'); if(sel) sel.focus(); }
+        };
+        dd.querySelectorAll('.wod-dd-opt').forEach(opt => {
+            opt.onclick = (e) => {
+                e.stopPropagation();
+                if(opt.disabled) return;
+                wodMpCloseSeatDropdowns();
+                wodMpSetSeatType(slot, opt.getAttribute('data-value'));
+            };
+        });
+        dd.onkeydown = (e) => {
+            const opts = [...dd.querySelectorAll('.wod-dd-opt:not(:disabled)')], i = opts.indexOf(document.activeElement);
+            if(e.key === 'Escape') { wodMpCloseSeatDropdowns(); btn.focus(); e.preventDefault(); }
+            else if(dd.classList.contains('open') && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && opts.length) {
+                opts[(i + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length].focus(); e.preventDefault();
+            }
+        };
+    });
+    if(!document._wodMpSeatDdBound) {
+        document._wodMpSeatDdBound = true;
+        document.addEventListener('click', (e) => { if(!e.target.closest || !e.target.closest('.wod-dd')) wodMpCloseSeatDropdowns(); });
+    }
 }
 function wodMpSyncLayoutCountFieldsFromMeta(meta) {
     if(!meta || !meta.seatTypes) return;
@@ -2535,6 +2707,8 @@ function wodMpSyncLayoutCountFieldsFromMeta(meta) {
     if(bHost) bHost.value = String(bots);
     if(hGl) hGl.value = String(Math.max(1, humans));
     if(bGl) bGl.value = String(bots);
+    wodMpRenderSeatCounters('gl');
+    wodMpRenderSeatCounters('host');
 }
 function wodMpBuildInitialHostMeta() {
     let layout = wodMpReadHostLayoutCounts();
@@ -2563,7 +2737,7 @@ function wodMpApplyLayoutCounts(humanCount, botCount, opts) {
     wodMpNormalizeLobbyMeta(window.wodMpRoomMeta);
     let prevFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
     let prevTerrainFp = wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta);
-    window.wodMpRoomMeta.seatTypes = wodMpBuildSeatTypesFromCounts(humanCount, botCount);
+    window.wodMpRoomMeta.seatTypes = wodMpBuildSeatTypesFromCounts(humanCount, botCount, window.wodMpRoomMeta.occupiedSlots);
     gameData.aiCount = window.wodMpRoomMeta.seatTypes.filter(t => t === 'bot').length;
     wodMpSyncLayoutCountFieldsFromMeta(window.wodMpRoomMeta);
     // (A new map's seed is chosen before the room settings go out. Chosen after, the relay's echo of the settings just
@@ -3321,7 +3495,8 @@ function wodRefreshMapPreviewGeneratingUi() {
         wodSetElementDisabled(document.getElementById(id), on);
     }
     let slotsEl = document.getElementById('mpGlSlots');
-    if(slotsEl) slotsEl.querySelectorAll('select, button').forEach(el => wodSetElementDisabled(el, on));
+    // (a seat option locked for a rule of its own, as the last seat but one that may not close, stays locked)
+    if(slotsEl) slotsEl.querySelectorAll('select, button').forEach(el => wodSetElementDisabled(el, on || el.hasAttribute('data-locked')));
 }
 function wodMpRefreshLobbyMapPreviewAfterMetaChange(meta, opts) {
     opts = opts || {};
@@ -3595,7 +3770,11 @@ function wodMpRenderGameLobbyScreen() {
         if((st[i] || 'human') !== 'closed') activeFactions++;
     }
     let capEl = document.getElementById('mpGlSeatCapLabel');
-    if(capEl) capEl.textContent = '(active factions: ' + activeFactions + ')';
+    if(capEl) {
+        let players = 0, bots = 0;
+        for(let i = 0; i < WOD_MP_MAX_PLAYERS; i++) { if(st[i] === 'bot') bots++; else if((st[i] || 'human') === 'human') players++; }
+        capEl.textContent = activeFactions + ' of ' + WOD_MP_MAX_PLAYERS + ' seats · ' + players + (players === 1 ? ' player' : ' players') + ' · ' + bots + ' AI';
+    }
     let sub = document.getElementById('mpGlSub');
     if(sub) {
         let code = api.code ? 'Code: ' + api.code : '';
@@ -3639,80 +3818,47 @@ function wodMpRenderGameLobbyScreen() {
         let html = '';
         for(let s = 1; s <= WOD_MP_MAX_PLAYERS; s++) {
             let seatT = (st[s - 1] || 'human');
-            let isOcc = occ.has(s);
-            let rowClass = 'mp-gl-slot';
-            let status = '';
-            if(seatT === 'closed') status = '<em>Closed</em> — not playing';
-            else if(seatT === 'bot') status = '<strong>AI</strong> occupies this seat';
-            else if(isOcc) {
-                let nm = wodMpEscapeHtml(wodMpDisplayNameForSlot(s, { meta }));
-                status = '<strong>' + nm + '</strong> (human)';
-            }
-            else if(api.isHost && seatT === 'human') {
-                rowClass += ' mp-gl-slot--invite';
-                status = '<strong>Open seat</strong> — tap Invite friend';
-            }
-            else status = 'Open human seat — waiting for join';
-
-            let typeCell = '';
-            if(api.isHost) {
-                let selH = seatT === 'human' ? ' selected' : '';
-                let selB = seatT === 'bot' ? ' selected' : '';
-                let selC = seatT === 'closed' ? ' selected' : '';
-                typeCell = '<select class="mp-gl-seat-type" data-slot="' + s + '" style="flex:0 0 auto;max-width:120px;font-size:12px">' +
-                    '<option value="human"' + selH + '>Human</option>' +
-                    '<option value="bot"' + selB + '>AI bot</option>' +
-                    '<option value="closed"' + selC + '>Closed</option></select>';
+            let isOcc = occ.has(s), mine = s === (api.slot | 0);
+            let kind = seatT === 'closed' ? 'closed' : seatT === 'bot' ? 'bot' : isOcc ? 'player' : 'open';
+            let name = '', sub = '', tags = '';
+            if(kind === 'player') {
+                name = wodMpEscapeHtml(wodMpDisplayNameForSlot(s, { meta }));
+                if(mine) tags += '<span class="mp-gl-seat-tag mp-gl-seat-tag--you">You</span>';
+                if((meta.hostSlot | 0) === s || (mine && api.isHost)) tags += '<span class="mp-gl-seat-tag">Host</span>';
+                sub = 'Player';
+            } else if(kind === 'open') {
+                name = 'Open seat';
+                sub = api.isHost ? 'Waiting for a player: invite a friend' : 'Waiting for a player to join';
+            } else if(kind === 'bot') {
+                name = 'AI opponent';
+                sub = wodAiDifficultyLabel(meta.aiDifficulty) + ' computer player';
             } else {
-                typeCell = '<span style="font-size:12px;opacity:0.85">' + (seatT === 'bot' ? 'AI' : (seatT === 'closed' ? 'Closed' : 'Human')) + '</span>';
+                name = 'Closed';
+                sub = 'Nobody plays this seat';
             }
-
             let myHex = pc[String(s)] || factionColors[s] || '#999999';
-            let colorCell = '';
-            if(seatT === 'closed') {
-                colorCell = '<span style="opacity:0.55;font-size:12px">—</span>';
-            } else {
-                let canPickColor = api.isHost || (isOcc && s === api.slot);
-                colorCell = wodMpBuildColorPickerHtml(s, meta, WOD_MP_MAX_PLAYERS, myHex, canPickColor);
-            }
-
-            let kickCell = '';
-            if(api.isHost && isOcc && seatT === 'human' && s !== api.slot) {
-                kickCell = '<button type="button" class="build-btn mp-gl-kick" data-slot="' + s + '" style="font-size:11px;padding:4px 8px">Kick</button>';
-            } else if(api.isHost && seatT === 'human' && !isOcc) {
-                kickCell = '<button type="button" class="build-btn mp-gl-invite" data-slot="' + s + '" style="font-size:11px;padding:4px 8px">Invite friend</button>';
-            } else kickCell = '<span style="width:48px"></span>';
-
-            let profileCell = '';
-            if(seatT !== 'closed')
-                profileCell = '<button type="button" class="build-btn mp-gl-profile" data-slot="' + s + '" style="font-size:11px;padding:4px 8px">Profile</button>';
-
-            html += '<div class="' + rowClass + '" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)">' +
-                '<span class="mp-gl-slot-num" style="min-width:1.2em">' + s + '</span>' +
-                '<div style="flex:1;min-width:140px">' + status + '</div>' +
-                typeCell + colorCell + profileCell + kickCell + '</div>';
+            let colorCell = kind === 'closed' ? '<span class="mp-gl-swatch mp-gl-swatch--lg" style="background:transparent;border-style:dashed"></span>' :
+                wodMpBuildColorPickerHtml(s, meta, WOD_MP_MAX_PLAYERS, myHex, api.isHost || (isOcc && mine));
+            let typeCell = '';
+            // (the host picks a kind for any seat no player is sitting in; a player's seat is theirs until kicked)
+            if(api.isHost && !isOcc) typeCell = wodMpSeatDropdownHtml(s, seatT, activeFactions);
+            else typeCell = '<span class="mp-gl-type-chip">' + WOD_MP_SEAT_ICONS[seatT === 'bot' ? 'bot' : seatT === 'closed' ? 'closed' : 'human'] +
+                (seatT === 'bot' ? 'AI' : seatT === 'closed' ? 'Closed' : 'Player') + '</span>';
+            let extra = '';
+            if(kind !== 'closed' && kind !== 'open')
+                extra += '<button type="button" class="mp-gl-icon-btn mp-gl-profile" data-slot="' + s + '" title="Profile" aria-label="Profile, seat ' + s + '">' + WOD_MP_SEAT_ICONS.profile + '</button>';
+            if(api.isHost && isOcc && seatT === 'human' && !mine)
+                extra += '<button type="button" class="mp-gl-icon-btn mp-gl-icon-btn--kick mp-gl-kick" data-slot="' + s + '" title="Remove this player from the lobby">' + WOD_MP_SEAT_ICONS.kick + 'Kick</button>';
+            else if(api.isHost && kind === 'open')
+                extra += '<button type="button" class="mp-gl-icon-btn mp-gl-icon-btn--invite mp-gl-invite" data-slot="' + s + '" title="Invite a friend to this seat">' + WOD_MP_SEAT_ICONS.invite + 'Invite</button>';
+            html += '<div class="mp-gl-seat mp-gl-seat--' + kind + '" data-slot="' + s + '" style="--seat:' + wodMpEscapeHtml(kind === 'closed' ? '#6b7280' : myHex) + '">' +
+                '<div class="mp-gl-seat-color">' + colorCell + '</div>' +
+                '<div class="mp-gl-seat-main"><div class="mp-gl-seat-name"><span class="mp-gl-seat-text">' + name + '</span>' + tags + '</div>' +
+                '<div class="mp-gl-seat-sub">Seat ' + s + ' · ' + sub + '</div></div>' +
+                '<div class="mp-gl-seat-actions">' + typeCell + extra + '</div></div>';
         }
         slotsEl.innerHTML = html;
-        slotsEl.querySelectorAll('.mp-gl-seat-type').forEach(sel => {
-            sel.onchange = () => {
-                let slot = parseInt(sel.getAttribute('data-slot'), 10);
-                let v = sel.value;
-                wodMpNormalizeLobbyMeta(window.wodMpRoomMeta);
-                let prevFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
-                if(slot >= 1 && slot <= WOD_MP_MAX_PLAYERS) {
-                    window.wodMpRoomMeta.seatTypes[slot - 1] = v;
-                }
-                wodMpPushLobbyMetaFromCurrentUi();
-                let nextFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta);
-                if(prevFactionFp === nextFactionFp) {
-                    requestAnimationFrame(() => wodMpRefreshLobbyMapPreviewAfterMetaChange(window.wodMpRoomMeta, { repaintOnly: true }));
-                } else {
-                    requestAnimationFrame(() => wodMpRefreshLobbyMapPreviewAfterMetaChange(window.wodMpRoomMeta, {
-                        politicsOnly: _wodMpLobbyPreviewLastTerrainFp === wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta)
-                    }));
-                }
-            };
-        });
+        wodMpWireSeatDropdowns(slotsEl);
         wodMpWireLobbyColorPickers(slotsEl);
         slotsEl.querySelectorAll('.mp-gl-kick').forEach(btn => {
             btn.onclick = () => {
@@ -3728,6 +3874,7 @@ function wodMpRenderGameLobbyScreen() {
             btn.onclick = () => wodMpOpenSeatInviteDlg(parseInt(btn.getAttribute('data-slot'), 10));
         });
     }
+    if(api.isHost) wodMpRenderSeatCounters('gl');
     if(api.isHost) wodMpQueryFriendPresence();
     else wodMpRenderGuestLobbyPreviewPlaceholder();
     let h2 = document.getElementById('mpGlHeading');
@@ -4297,6 +4444,7 @@ function wodMpWireLobbyControls() {
     let mpGlRules = document.getElementById('mpBtnGlRules');
     if(mpGlMap) mpGlMap.onclick = () => wodMpOpenHostMapDlg();
     if(mpGlRules) mpGlRules.onclick = () => wodMpOpenHostRulesDlg();
+    wodMpRenderSeatCounters('host');
     let mpBtnGlApplyLayout = document.getElementById('mpBtnGlApplyLayout');
     let mpBtnGlRegenMap = document.getElementById('mpBtnGlRegenMap');
     if(mpBtnGlApplyLayout) mpBtnGlApplyLayout.onclick = () => {
@@ -4669,6 +4817,7 @@ function wodMpOnMatchStart(ev) {
     if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.isHost) return;
     if(!ev.detail || !ev.detail.payload) return;
     void (async function() {
+        const gen = ++_wodMpLoadGen;
         wodMpAbortLobbyPreviewJobs();
         let pl = ev.detail.payload;
         let expectedReady = Array.isArray(pl.expectedReady) ? pl.expectedReady.slice() : (pl.connectedSlots || pl.humanSlots || [1]).slice();
@@ -4719,10 +4868,15 @@ function wodMpOnMatchStart(ev) {
         // Any map making still running on this page (a preview) would go on writing over the host's map once installed:
         // let it finish first, and try a second time before giving up.
         let loaded = false, loadErr = null;
+        // (snapshots that come in while this page is still finishing a map of its own wait for the host's map: applied
+        // to the emptied map they put the host's troops on nothing)
+        gameData._mpLoadingMatch = true;
         for(let attempt = 0; attempt < 2 && !loaded; attempt++) {
             try {
                 await wodAwaitMapGenIdle();
-                await wodMpApplyMatchStartPayload(pl, { asyncHexes: true });
+                if(gen !== _wodMpLoadGen) return;
+                await wodMpApplyMatchStartPayload(pl, { asyncHexes: true, gen });
+                if(gen !== _wodMpLoadGen) return;
                 loaded = !!(gameData.hexList && gameData.hexList.length);
                 if(!loaded) loadErr = new Error('Host map data was empty');
             } catch(err) {
@@ -4731,6 +4885,7 @@ function wodMpOnMatchStart(ev) {
             }
         }
         if(!loaded) {
+            gameData._mpLoadingMatch = false;
             wodMpGuestMatchLoadFailed(loadErr);
             return;
         }
@@ -4761,6 +4916,7 @@ function wodMpOnRejoinMatch(ev) {
     let d = ev && ev.detail;
     if(!d || !d.payload || typeof WodMultiplayer === 'undefined') return;
     void (async function() {
+        const gen = ++_wodMpLoadGen;
         wodMpAbortLobbyPreviewJobs();
         let pl = d.payload;
         let conn = Array.isArray(pl.connectedSlots) ? pl.connectedSlots.slice() : (pl.humanSlots || [1]).slice();
@@ -4815,7 +4971,8 @@ function wodMpOnRejoinMatch(ev) {
         const observer=!!WodMultiplayer.api.spectating,saved=observer?wodReadSpectatorReport():null;
         if(observer){gameData._restoringSpectator=true;gameData._lifetimeMatch={...(saved?.match||{}),mode:'multiplayer',finished:true,mpOutcomeRecorded:true,outcome:'defeat',reason:saved?.match?.reason||'eliminated',applied:{}};}
         try {
-            await wodMpApplyMatchStartPayload(pl, { asyncHexes: true, resumeMatch: true });
+            await wodMpApplyMatchStartPayload(pl, { asyncHexes: true, resumeMatch: true, gen });
+            if(gen !== _wodMpLoadGen) return;
         } catch(err) {
             console.error(err);
             gameData._restoringSpectator=false;showNotification('Failed to load host map on rejoin.');
@@ -5099,7 +5256,7 @@ function wodMpWireNetworkEvents() {
         wodMpFinalizeMatchStart();
     });
     addEventListener('wod-mp-Snap', (ev) => {
-        if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost) return;
+        if(!gameData.mp || !gameData.mp.enabled || gameData.mp.isHost || gameState !== 'PLAYING') return;
         if(ev.detail && ev.detail.payload) wodMpScheduleClientSnapApply(ev.detail.payload);
     });
     addEventListener('wod-mp-RemoteCmd', (ev) => wodMpHostHandleRemoteCmd(ev));

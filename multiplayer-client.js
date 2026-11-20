@@ -241,6 +241,7 @@
         case 'pong':
           break;
         case 'rejoin_match':
+          api.lastSeq = 0;
           api.spectating=!!msg.spectating;
           api.code = msg.code || '';
           api.slot = msg.slot | 0;
@@ -260,6 +261,9 @@
           });
           break;
         case 'host_migrated':
+          // (a new host numbers its snapshots from where it likes: one lower than the last of the old host's was
+          // dropped as stale, and the game stood still for everyone left)
+          api.lastSeq = 0;
           if (msg.slot != null) api.isHost = (api.slot | 0) === (msg.slot | 0);
           emit('HostMigrated', { slot: msg.slot | 0, isHost: api.isHost });
           break;

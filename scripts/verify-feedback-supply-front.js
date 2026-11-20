@@ -46,7 +46,9 @@ const server=H.createStaticServer();
   results.waterGap=await page.evaluate(()=>{
    feedbackWorld(1);
    feedbackTown(0,0,1,'Home');
-   feedbackHex(1,0).type=feedbackHex(0,1).type='water';
+   // Keep both diagonal steps clear of hostile land so this case tests the
+   // water gap itself rather than stepping between two enemy cells.
+   for(const [q,r] of [[1,0],[0,1],[2,1],[1,2]])feedbackHex(q,r).type='water';
    const corner=feedbackHex(1,1), far=feedbackHex(2,2);
    corner.owner=far.owner=1;
    feedbackRefresh();

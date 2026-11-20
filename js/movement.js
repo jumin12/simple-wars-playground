@@ -58,12 +58,15 @@ function wodResolveLandMarchHex(unit, x, y, startHexOpt) {
     if(nearestLand && !isWaterHex(nearestLand) && !isBridgeHex(nearestLand) &&
         (nearestLand.type !== 'mountain'||wodCanClimb(unit)) && wodHexWalkableForLandPath(unit, nearestLand, false))
         return { hex: nearestLand, exactX: x, exactY: y, intoWater: false };
-    if(direct&&isWaterHex(direct)&&!wodPointOnBridgeForUnit(unit,x,y,1.05))return {hex:direct,exactX:x,exactY:y,intoWater:true};
+    // (only a player means a point in the water as a swim: an AI march to a point just off the shore, or beside a
+    // bridge deck, is to the dry ground or deck nearest it; taken as a swim it waded out along the coast)
+    const aiLand=!wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit);
+    if(!aiLand&&direct&&isWaterHex(direct)&&!wodPointOnBridgeForUnit(unit,x,y,1.05))return {hex:direct,exactX:x,exactY:y,intoWater:true};
     let bridgeHex = wodBridgeHexAtPoint(unit, x, y);
     if(bridgeHex && (wodPointOnBridgeForUnit(unit, x, y, 1.05) ||
         (nearestLand && (wodIsOpenWaterHex(nearestLand) || isBridgeHex(nearestLand)))))
         return { hex: bridgeHex, exactX: x, exactY: y, intoWater: false };
-    if(direct && isWaterHex(direct) && !isBridgeHex(direct) && direct.type !== 'mountain') {
+    if(!aiLand && direct && isWaterHex(direct) && !isBridgeHex(direct) && direct.type !== 'mountain') {
         let bestW = null,
             bestWd = Infinity;
         for(let pt of getHexesInRadius(coord.q, coord.r, 10)) {
@@ -359,7 +362,7 @@ function wodSamplePosOnWalkableTerrain(unit, px, py) {
     if(wodBridgeHexAtPoint(unit, px, py)) return true;
     if(wodPointOnBridgeForUnit(unit, px, py, 1.18)) return true;
     if(h&&isWaterHex(h)&&(isLandArmyUnit(unit)||unit._wodKeepLandFormation)&&!wodOrderIntoWater(unit,h)&&!isWaterHex(getNearestHexToPoint(unit.x,unit.y)))return false;
-    if(h&&isWaterHex(h)&&isLandArmyUnit(unit)&&!wodUnitStandingOnOpenWater(unit)&&(unit._wodBoardingNoWater||!wodMpIsHumanOwner(unit.owner)&&!unit._wodAiRescueWater))return false;
+    if(h&&isWaterHex(h)&&isLandArmyUnit(unit)&&!wodUnitAfloatForLeave(unit)&&(unit._wodBoardingNoWater||!wodMpIsHumanOwner(unit.owner)&&!unit._wodAiRescueWater))return false;
     if(h && wodUnitUsesLandBridges(unit) && isBridgeHex(h)) return true;
     if(h && wodPathTileWalkable(unit, h, wodOrderIntoWater(unit, h))) return true;
     if(!h) return false;
@@ -1045,6 +1048,10 @@ function wodReturnIdleTraffic(unit,record) {
     wodPlanTrafficDetour(unit,route?.length?route:[point],record);
     unit._trafficYield=record;
 }
+// Taking up the march again after a sidestep is not a new order (transportInternal): it keeps an attack order on an
+// enemy, a transport the unit is walking to board, its recovery and the player's order count. Land units resumed as if
+// newly ordered, so a unit told to attack an enemy that stepped aside for a comrade walked on to where the enemy had
+// been and stopped chasing, and one on its way to a boat forgot it.
 function wodResumeTrafficYield(unit) {
     const y=unit._trafficYield;if(!y)return;
     // A passenger may have landed after this sidestep was planned.
@@ -1075,7 +1082,7 @@ function wodResumeTrafficYield(unit) {
             unit._trafficYield=null;
             if(y.route){if(unit.orderTarget)replanUnitOrder(unit);}
             else if(!y.idle&&y.points?.length)
-                assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
+                assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:true});
             else wodClearTransportMove(unit);
         }
         return;
@@ -1102,9 +1109,9 @@ function wodResumeTrafficYield(unit) {
         // Fleet detours replace fullMarchWaypoints with the sidestep.
         // The saved points, not that temporary route, are the march.
         else if(!y.route)
-            assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
-        else if(unit.fullMarchWaypoints?.length)assignUnitMoveAlongWaypoints(unit,unit.fullMarchWaypoints,{fromLegAdvance:true,retainRetreat:true,transportInternal:!!y.internal});
-        else assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:!!y.internal});
+            assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:true});
+        else if(unit.fullMarchWaypoints?.length)assignUnitMoveAlongWaypoints(unit,unit.fullMarchWaypoints,{fromLegAdvance:true,retainRetreat:true,transportInternal:true});
+        else assignUnitMoveAlongWaypoints(unit,y.points,{retainRetreat:true,transportInternal:true});
     }
 }
 function wodSupplyParkingSafe(ship,point) {
@@ -3593,7 +3600,8 @@ function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
         unit._wodRetreatScanAt=(gameData._aiEconomyClock||0)+.5;
     }
     if(!fromAdvance&&!unit._trafficMoving)unit._wodKeepLandFormation=!!opt?.keepLandFormation;
-    if(!fromAdvance&&!wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit))unit._wodAiRescueWater=isWaterHex(getNearestHexToPoint(unit.x,unit.y));
+    // (afloat, not merely on a water cell: a bridge deck is one, and every AI order given on a bridge granted leave to swim)
+    if(!fromAdvance&&!wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit))unit._wodAiRescueWater=wodUnitAfloatForLeave(unit);
     if(!fromAdvance) invalidateUnitOrderArrowCache(unit);
     unit.blockedTimer = 0;
     unit.stuckTimer = 0;
@@ -3652,7 +3660,7 @@ function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
     let exactLast = reachLast ? {x: reachLast.exactX, y: reachLast.exactY} : {x: lastWp.x, y: lastWp.y};
     // Land army already afloat ordering onto land: keep embark flags so pathfinding
     // and drowning clamps treat the march as amphibious (water→land).
-    let standingWater = wodUnitStandingOnOpenWater(unit);
+    let standingWater = wodUnitAfloatForLeave(unit);
     let destIntoWater = !!(reachLast && reachLast.intoWater);
     let embarkFromWater = standingWater && !destIntoWater;
     unit.orderTarget = reachLast
@@ -4757,6 +4765,26 @@ function moveUnitTowardTarget(unit,dt) {
         unit._wodVelocityX=vx*Math.min(1,cap/Math.max(.001,length));unit._wodVelocityY=vy*Math.min(1,cap/Math.max(.001,length));unit._wodVelocityAt=gameData._aiEconomyClock||0;
     }
 }
+function wodAiRoutePointWet(unit,p) {
+    const h=p&&getNearestHexToPoint(p.x,p.y);
+    return !!h&&isWaterHex(h)&&!isBridgeHex(h)&&!wodPointOnBridgeForUnit(unit,p.x,p.y,1.05)&&!wodDiagonalLandLinkAtPoint(unit,p.x,p.y);
+}
+// An AI soldier is let into the water only to get out of it (wodSetMarchOrderFlags): the leave ends at the shore. The
+// route it was given while afloat was searched with water allowed the whole way, and took it on across the next bay or
+// strait to where it was going (through the water rather than round by land, or to another landmass with no boat). On
+// dry ground what is left of the route is planned again over land; where no land way leads there it halts on the shore,
+// and its general finds it a boat or another task.
+function wodAiEndSwimLeave(unit) {
+    const clear=()=>{unit._wodAiRescueWater=false;unit._wodOrderIntoWater=false;unit._wodShoreExitRouting=false;if(unit.orderTarget)unit.orderTarget.intoWater=false;};
+    clear();
+    const wet=()=>[unit.target,...(unit.path||[])].some(p=>wodAiRoutePointWet(unit,p));
+    if(!unit.target||!wet())return;
+    // (stepping aside for a comrade: that short way round ends here, and the unit's own order is planned again when it
+    // takes it up; the order's leave goes with this one, wodCaptureTrafficOrder having kept it apart)
+    if(unit._trafficMoving){unit.target=null;unit.path=null;return;}
+    if(replanUnitOrder(unit)&&unit.target&&!wet()){clear();return;}
+    clear();unit.target=null;unit.path=null;unit.orderTarget=null;unit.fullMarchWaypoints=null;unit.marchWpCursor=0;
+}
 function wodMoveUnitAlongRoute(unit, dt) {
     if(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute)ensureUnitPixelOnWalkableHex(unit,18);
     if(!unit.target) return;
@@ -4775,6 +4803,11 @@ function wodMoveUnitAlongRoute(unit, dt) {
     }
     // Older saves and rebuilt routes derive this from the actual order.
     // Path/arrow previews must never change the active movement flags.
+    if(isLandArmyUnit(unit)&&!unit.boardTransportUid&&!wodMpIsHumanOwner(unit.owner)&&
+        (unit._wodAiRescueWater||unit._wodOrderIntoWater||unit.orderTarget?.intoWater)&&!wodUnitAfloatForLeave(unit)){
+        wodAiEndSwimLeave(unit);
+        if(!unit.target)return;
+    }
     if(isLandArmyUnit(unit)&&wodUnitStandingOnOpenWater(unit)&&unit.orderTarget) {
         const goal=getNearestHexToPoint(unit.orderTarget.x,unit.orderTarget.y);
         unit._wodShoreExitRouting=!!(goal&&!isWaterHex(goal));

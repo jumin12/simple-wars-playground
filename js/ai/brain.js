@@ -213,7 +213,14 @@ function wodDrainAiStratFormationAndUnits() {
                 if(unit.retreating && hpRatio > 0.72) unit.retreating = false;
                 if(unit.aiFormationSerial === w.serial) continue;
                 let prey = findBestAiShipPrey(unit);
-                if(prey) {
+                // (troops ashore: a firing position off the coast for them, not a course straight at them that ran
+                // the ship aground short of its guns' reach, wodAiNavalFirePosition)
+                const site=prey&&!wodIsNavalUnit(prey)&&wodOpsTune(unit.owner).shipSupport!==0?wodAiNavalFirePosition(unit,prey):null;
+                if(site) {
+                    const at=unit.orderTarget||unit.target;
+                    if(!at||Math.hypot(at.x-site.x,at.y-site.y)>(gameData.hexRadius||20)*1.5)assignUnitMoveAlongWaypoints(unit,[{x:site.x,y:site.y}],{transportInternal:true});
+                    unit.holding = false;
+                } else if(prey) {
                     unit.path = null;
                     unit.orderTarget = null;
                     unit.fullMarchWaypoints = null;

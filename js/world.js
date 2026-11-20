@@ -71,7 +71,7 @@ function wodOrderIntoWater(unit, targetHex) {
     // escape, including after a path rebuild or a cancelled boarding.
     // This permission ends physically at the shore; it grants no new
     // swimming shortcut to troops already on dry land.
-    if(wodUnitStandingOnOpenWater(unit))return true;
+    if(wodUnitAfloatForLeave(unit))return true;
     const goal=unit.orderTarget&&getNearestHexToPoint(unit.orderTarget.x,unit.orderTarget.y);
     // Registered bridge cells include a routing margin. A deliberate
     // click beside the physical deck is still a water order.
@@ -94,8 +94,17 @@ function wodUnitStandingOnOpenWater(unit) {
     if(wodDiagonalLandLinkAtPoint(unit,unit.x,unit.y))return false;
     return true;
 }
+// Afloat as far as leave to swim goes. An AI soldier in a bridge's cell beside its deck, or brushing the deck's edge,
+// is in the margin walked as part of the crossing and gets out the way it came, over the deck or onto the bank; given
+// leave to swim there, its way out went on through the water round the bridge landing.
+function wodUnitAfloatForLeave(unit) {
+    if(!wodUnitStandingOnOpenWater(unit))return false;
+    if(wodMpIsHumanOwner(unit.owner)||!isLandArmyUnit(unit))return true;
+    const h=getNearestHexToPoint(unit.x,unit.y);
+    return !(h&&isBridgeHex(h))&&!wodPointOnBridgeForUnit(unit,unit.x,unit.y,1.18);
+}
 function wodSetMarchOrderFlags(unit, resolved) {
-    const afloat=wodUnitStandingOnOpenWater(unit);
+    const afloat=wodUnitAfloatForLeave(unit);
     unit._wodOrderIntoWater = !!(resolved && resolved.intoWater) || afloat;
     const goal=unit.orderTarget&&getNearestHexToPoint(unit.orderTarget.x,unit.orderTarget.y);
     unit._wodShoreExitRouting=!!(afloat&&isLandArmyUnit(unit)&&goal&&!isWaterHex(goal));
@@ -392,7 +401,9 @@ function wodDrawStructureDestruction(ctx,f) {
 }
 function wodEvaluateAllCityCaptures() {
     for(let city of gameData.cities) {
-        if(!city || city.owner <= 0) continue;
+        // (a town that is nobody's, left by a faction that conceded or a map's empty towns, is taken like any other, by
+        // holding all its streets: it used to stay nobody's for good)
+        if(!city) continue;
         let urban = getCityUrbanTerrainHexes(city);
         if(urban.length === 0) {
             let ch = wodHexAt(city.q,city.r);

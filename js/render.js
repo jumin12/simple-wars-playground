@@ -125,21 +125,6 @@ function wodDrawCitiesLayer(ctx, view) {
             }
         }
     }
-    // Small countdown clocks beside each owned production site; effects begin on completion.
-    ctx.save();
-    let timerScale = Math.max(0.05, gameData.camera.zoom || 1);
-    for(let j of gameData.constructionJobs || []) {
-        if(j.owner !== wodLocalPlayerOwner()) continue;
-        if(j.mode==='hospital'){ctx.save();ctx.globalAlpha=.4;wodDrawHospital(ctx,j);ctx.restore();}
-        if(j.mode==='bridge'){drawBridgeSticker(ctx,j,gfxLite,null,.35);ctx.save();ctx.translate(j.x,j.y);ctx.rotate(j.angle||0);ctx.strokeStyle='#f1c40f';ctx.lineWidth=2/timerScale;ctx.setLineDash([6/timerScale,4/timerScale]);ctx.strokeRect(-j.w/2,-j.h/2,j.w,j.h);ctx.restore();}
-        let x=j.x+38/timerScale, y=j.y-22/timerScale, r=12/timerScale;
-        ctx.fillStyle='#101e2bee'; ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
-        ctx.strokeStyle='#526779';ctx.lineWidth=2/timerScale;ctx.stroke();
-        ctx.strokeStyle='#f1c40f';ctx.beginPath();ctx.arc(x,y,r,-Math.PI/2,-Math.PI/2+Math.PI*2*(1-j.remaining/j.total));ctx.stroke();
-        ctx.fillStyle='#fff';ctx.font='bold '+(10/timerScale)+'px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
-        ctx.fillText(String(Math.ceil(j.remaining)),x,y);
-    }
-    ctx.restore();
     // Selection + construction rings: always draw (Cities layer off must not hide them).
     ctx.save();
     for(let ci = 0, cl = gameData.cities.length; ci < cl; ci++) {
@@ -172,11 +157,53 @@ function wodDrawCitiesLayer(ctx, view) {
     ctx.restore();
 }
 
-/** Forts, hospital and command auras, bridges and the bridge tool preview. */
+/** Construction under way: a countdown clock beside each site, with a faint image of the hospital or bridge going up.
+ *  Every job of ours is shown (troops being raised too). Buildings that other players and computer factions are putting
+ *  up (forts, hospitals, bridges, factories, farms, harbours) are shown as well, their clock in their colour, where we can
+ *  see the site; their recruits are not. Only our own used to be drawn, so in multiplayer nobody saw anyone else's and
+ *  the computer's building went unseen. Drawn over bridges and buildings (wodDrawStructuresLayer). */
+const WOD_VISIBLE_BUILD_MODES = new Set(['fort','hospital','bridge','factory','farm','harbor']);
+function wodDrawConstructionJobs(ctx, gfxLite) {
+    const jobs = gameData.constructionJobs;
+    if(!jobs || !jobs.length) return;
+    const lo = wodLocalPlayerOwner(), timerScale = Math.max(0.05, gameData.camera.zoom || 1), fog = wodFogActive();
+    ctx.save();
+    for(const j of jobs) {
+        if(!j || !Number.isFinite(j.x) || !Number.isFinite(j.y) || !(j.total > 0)) continue;
+        const mine = j.owner === lo;
+        if(!mine) {
+            if(!WOD_VISIBLE_BUILD_MODES.has(j.mode)) continue;
+            if(fog && !gameData._spectator) { const h = getNearestHexToPoint(j.x, j.y); if(!h || !wodFogHexVisible(h)) continue; }
+        }
+        const col = mine ? '#f1c40f' : (factionColors[j.owner] || '#bdc3c7');
+        if(j.mode === 'hospital') { ctx.save(); ctx.globalAlpha = .4; wodDrawHospital(ctx, j); ctx.restore(); }
+        if(j.mode === 'bridge') {
+            drawBridgeSticker(ctx, j, gfxLite, null, .35);
+            ctx.save(); ctx.translate(j.x, j.y); ctx.rotate(j.angle || 0); ctx.strokeStyle = col; ctx.lineWidth = 2 / timerScale;
+            ctx.setLineDash([6 / timerScale, 4 / timerScale]); ctx.strokeRect(-j.w / 2, -j.h / 2, j.w, j.h); ctx.restore();
+        }
+        const x = j.x + 38 / timerScale, y = j.y - 22 / timerScale, r = 12 / timerScale;
+        ctx.fillStyle = '#101e2bee'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = '#526779'; ctx.lineWidth = 2 / timerScale; ctx.stroke();
+        ctx.strokeStyle = col; ctx.beginPath(); ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, Math.min(1, 1 - j.remaining / j.total))); ctx.stroke();
+        ctx.fillStyle = '#fff'; ctx.font = 'bold ' + (10 / timerScale) + 'px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(Math.max(0, Math.ceil(j.remaining))), x, y);
+    }
+    ctx.restore();
+}
+/** Bridges, then forts, hospital and command auras over them, and the bridge tool preview. */
 function wodDrawStructuresLayer(ctx, view) {
     const { camL, camR, camT, camB, camZ, culPad, wodCull, gfxLite, gfxDecorSkip } = view;
     const wodInView = (wx, wy, pad) => wx >= camL - pad && wx <= camR + pad && wy >= camT - pad && wy <= camB + pad;
     let structsOn = !(gameData.layers && gameData.layers.structures === false);
+    // Bridges first: a fort or hospital on a bridge's bank tile is drawn over the deck, not under it.
+    if(structsOn && gameData.bridges && gameData.bridges.length) {
+        for(let bri = 0, brl = gameData.bridges.length; bri < brl; bri++) {
+            let brg = gameData.bridges[bri];
+            if(wodCull && !wodInView(brg.x, brg.y, Math.max(brg.w || 40, brg.h || 20))) continue;
+            drawBridgeSticker(ctx, brg, gfxLite, null);
+        }
+    }
     if(structsOn && gameData.forts && gameData.forts.length) {
         let auraR = wodFortCombatAuraRadiusPx();
         let auraPad = auraR + 52,
@@ -204,13 +231,7 @@ function wodDrawStructuresLayer(ctx, view) {
         }
     }
     wodDrawMedicalAndCommandAuras(ctx,structsOn,gfxLite);
-    if(structsOn && gameData.bridges && gameData.bridges.length) {
-        for(let bri = 0, brl = gameData.bridges.length; bri < brl; bri++) {
-            let brg = gameData.bridges[bri];
-            if(wodCull && !wodInView(brg.x, brg.y, Math.max(brg.w || 40, brg.h || 20))) continue;
-            drawBridgeSticker(ctx, brg, gfxLite, null);
-        }
-    }
+    wodDrawConstructionJobs(ctx, gfxLite);
     // The bridge tool's preview is drawn even with the structures layer hidden: it is the tool's only feedback.
     if(gameState === 'PLAYING' && gameData.buildMode === 'bridge' && gameData.bridgePlacement)
         wodDrawBridgeDragPreview(ctx, gfxLite);

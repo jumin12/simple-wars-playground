@@ -508,9 +508,10 @@ function getCityIncome(city) {
     total += city.incomeBonus || 0;
     return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT * 1000) / 1000;
 }
+// A town raises 15 manpower (20 until 2026-11-19), a farm 15 more; a factory adds money, not men (it added 5).
+const WOD_CITY_BASE_MANPOWER = 15;
 function getCityManpowerIncome(city) {
-    let total = 20;
-    if(city.hasFactory) total += 5;
+    let total = WOD_CITY_BASE_MANPOWER;
     if(city.hasFarm) total += 15;
     total += city.manpowerBonus || 0;
     return Math.round(total * WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT * 1000) / 1000;
@@ -532,8 +533,8 @@ function getCityIncomeBreakdown(city) {
 }
 function getCityManpowerBreakdown(city) {
     let mult = WOD_CITY_ECON_TICK_MULT * WOD_INCOME_MULT;
-    let base = 20;
-    let factory = city.hasFactory ? 5 : 0;
+    let base = WOD_CITY_BASE_MANPOWER;
+    let factory = 0;
     let farm = city.hasFarm ? 15 : 0;
     let bonus = city.manpowerBonus || 0;
     let round = (v) => Math.round(v * mult * 1000) / 1000;
@@ -1329,7 +1330,6 @@ function syncInfoCardPanel() {
             ];
             if(sel.hasFactory) {
                 cityEffects.push({ label: 'Factory', stats: formatDollarRate(incBd.factory), detail: 'Factory bonus to $ income.' });
-                cityEffects.push({ label: 'Factory MP', stats: formatManpowerRate(mpBd.factory), detail: 'Factory bonus to manpower growth.' });
             }
             if(sel.hasFarm) {
                 cityEffects.push({ label: 'Farm', stats: formatManpowerRate(mpBd.farm), detail: 'Farm bonus to manpower growth.' });

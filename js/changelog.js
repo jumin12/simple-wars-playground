@@ -2,6 +2,19 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-19T22:00:00Z",title:"A better game lobby, players who leave handed to the AI, construction you can see",items:[
+        "The game lobby has four seats, players and AI together. Set how many players (you included) and how many AI with the counters: three players leave room for one AI, and choices that do not fit are greyed out. Changes take effect at once, each seat has a menu to make it a player seat, an AI or closed, and a friend who joins a full lobby takes a closed or AI seat.",
+        "In multiplayer, a player who leaves the match hands their side to the computer while the battle goes on, so their towns, land and troops stay to be fought for. Only leaving a match of two, or when everyone left is on one side, ends it.",
+        "Towns that belong to nobody, such as those of a player who conceded, can now be captured by taking their streets.",
+        "Multiplayer games of three no longer load a muddled map or freeze for a player on a poor connection: a dropped connection while the map loads starts the load cleanly again, a slow player is sent the latest state instead of an ever longer queue, and when the host leaves everyone carries on with the new host.",
+        "Buildings under construction show their progress circle and time left to every player in multiplayer, and you can see the computer's building sites as they go up (where you can see that ground).",
+        "Troops that step aside to let others past take up their own orders again as soon as the way is clear, attack orders and boarding a transport included.",
+        "Troops cut off at the front through a diagonal gap now take attrition: supply no longer slips through the corner where two enemy cells meet.",
+        "Factories no longer add manpower, and towns add less (15 instead of 20).",
+        "A building and a bridge on the same tile: the building is now drawn over the bridge.",
+        "Computer warships now support their armies: they shell enemy troops fighting near the coast, up to two cells inland, from a firing position off the shore.",
+        "Computer troops keep out of the water. They no longer swim across bays or along the coast after wading ashore, step off bridge decks into the water, or take a march to a point just off the shore as an order to swim."
+    ]},
     {at:"2026-11-19T10:00:00Z",title:"Cut-off troops starve, transports run, an AI that sees threats coming",items:[
         "Cut-off troops starve again, yours and the enemy's. A unit is in touch with its lines only while your supplied land lies on the very next tile, one enemy troops do not hold. Troops pushed a little past the front stay supplied, and an army that advances keeps the ground it crosses as its road back. Before, any unit within several tiles of the front never took attrition, however it was cut off.",
         "A patch of your land cut off by enemy land is encircled again, with or without enemy troops round it.",

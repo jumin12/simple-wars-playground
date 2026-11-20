@@ -11,6 +11,8 @@
 //  pushed  - marched three cells into enemy land past enemy troops standing two cells off its road: supplied.
 //  justIn  - one cell inside enemy land next to our own, with an enemy ring two cells out, or enemy troops on every tile
 //            round it: cut off (their tiles turn theirs, and our tiles inside the ring are a pocket).
+//  corner  - on a tile that meets our lines only at a corner between two enemy-held tiles: cut off (the corner used to
+//            count as a road).
 //  ring    - enemy troops all round ours, three cells out: cut off.
 //  raid    - twelve cells into enemy land with nothing about: cut off; deep: thirty cells: cut off.
 //  pocket  - a three-by-three patch of our land four cells from our lines in enemy land is an encircled pocket, with or
@@ -49,6 +51,10 @@ try{
   const encircle=adjacent=>{world();u=unit(-5,0,1);for(const p of gameData.hexList){const d=Math.max(Math.abs(p.q+5),Math.abs(p.r));if(d===(adjacent?1:2)){const e=unit(p.q,p.r,2);e.damage=0;e.holding=true;}}
    for(let i=0;i<4;i++){gameData._aiEconomyClock+=.5;settle();}return cut(u);};
   out.justInRinged=encircle(false);out.justInSurrounded=encircle(true);
+  // joined to our lines only at a corner: our corridor along r=-1 ends at (-1,-1); the unit on (0,0) meets it only
+  // diagonally, enemy troops on the two cells beside that corner
+  world();for(let q=-5;q<=-1;q++)h(q,-1).owner=1;gameData._supplyTopologyVersion++;for(const [q,r] of [[-1,0],[0,-1]]){const e=unit(q,r,2);e.damage=0;e.holding=true;}
+  u=unit(0,0,1);for(let i=0;i<3;i++){gameData._aiEconomyClock+=.5;settle();}out.cornerOnly={cut:cut(u),own:h(0,0).owner===1,corridor:h(-1,-1).owner===1,flanks:[h(-1,0).owner,h(0,-1).owner]};
   world();u=unit(0,0,1);for(const p of gameData.hexList)if(Math.max(Math.abs(p.q),Math.abs(p.r))===3&&(p.q+p.r)%2===0)unit(p.q,p.r,2);settle();out.ring=cut(u);
   world(-12);u=unit(0,0,1);settle();out.raid=cut(u);
   world(-20);u=unit(10,0,1);settle();out.deep=cut(u);
@@ -72,6 +78,7 @@ try{
  assert(!res.pushedFight.cut,'pushed three cells into enemy land past enemy troops, keeping its road: supplied: '+JSON.stringify(res.pushedFight));
  assert(res.justInRinged,'just inside enemy land, an enemy ring round it: cut off');
  assert(res.justInSurrounded,'just inside enemy land, enemy troops on every tile round it: cut off');
+ assert(res.cornerOnly.cut,'joined to our lines only at a corner between two enemy cells: cut off: '+JSON.stringify(res.cornerOnly));
  assert(res.ring,'an enemy ring round a unit cuts it off');
  assert(res.raid,'twelve cells into enemy land with nobody about is beyond supply');
  assert(res.deep,'thirty cells into enemy land is beyond supply');

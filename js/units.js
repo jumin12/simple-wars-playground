@@ -673,6 +673,16 @@ function wodSupplyNeighbors(hex,fn) {
     });
     wodSupplyNeighborCache.set(hex,{hexes:gameData.hexes,revision,links});
 }
+/** A diagonal step between two cells of a faction carries supply unless both cells beside the corner are an enemy's land:
+ *  two of our cells meeting only at a corner between two enemy cells are no road (the enemy holds the crossing), so a
+ *  unit or a patch of ground joined to its lines only that way is cut off. A corner across water or a mountain still
+ *  links (a chain of land meeting only at corners carries supply). Used by the supply flood, the front-line touch and
+ *  the pocket search; the corner used to count as a road, so units cut off at the front that way took no attrition. */
+function wodSupplyCornerOpen(h,n,owner) {
+    const dq=n.q-h.q,dr=n.r-h.r;if(Math.abs(dq)!==1||Math.abs(dr)!==1)return true;
+    const held=c=>!!c&&!isWaterHex(c)&&c.type!=='mountain'&&c.owner>0&&wodIsHostileOwner(c.owner,owner);
+    return !(held(wodHexAt(h.q+dq,h.r))&&held(wodHexAt(h.q,h.r+dr)));
+}
 function wodSupplyPassable(hex,owner) {
     return !!(hex&&(isBridgeHex(hex)||!isWaterHex(hex)&&isClaimableLand(hex)&&wodIsFriendlyOwner(hex.owner,owner)));
 }
@@ -763,6 +773,7 @@ function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
             if(water&&!isBridgeHex(n)){result.water=true;continue;}
             if(n._supplyStamp===stamp)continue;
             if(!(isBridgeHex(n)||!water&&isClaimableLand(n)&&friend(n.owner)))continue;
+            if(!wodSupplyCornerOpen(h,n,owner))continue;
             n._supplyStamp=stamp;queue.push(n);
         }
     }
@@ -934,6 +945,7 @@ function wodEncirclementProcessChunk() {
             wodSupplyNeighbors(hex,nHex=>{
                 if(!nHex||isWaterHex(nHex)||!isClaimableLand(nHex)||nHex.owner===0)return;
                 if(wodIsFriendlyOwner(nHex.owner, owner)) {
+                    if(!wodSupplyCornerOpen(hex,nHex,owner))return;
                     let nKey = getHexKey(nHex);
                     if(!w.visited.has(nKey)) {
                         w.visited.add(nKey);
@@ -1022,7 +1034,7 @@ function wodFrontlineSupplyTouch(hex,owner) {
     let found=false;const seen=new Set([getHexKey(hex)]),queue=[hex],depth=new Map([[hex,0]]);
     for(let i=0;i<queue.length&&!found;i++){const h=queue[i],d=depth.get(h);
         wodSupplyNeighbors(h,n=>{
-            if(found||!n||isWaterHex(n)&&!isBridgeHex(n))return;
+            if(found||!n||isWaterHex(n)&&!isBridgeHex(n)||!wodSupplyCornerOpen(h,n,owner))return;
             const k=getHexKey(n);if(seen.has(k))return;seen.add(k);
             if(wodSupplyPassable(n,owner)&&wodCurrentSupplyComponent(n,owner).city){found=true;return;}
             if(d+1<WOD_FRONT_SUPPLY_REACH&&n.type!=='mountain'&&!wodSupplyCellHeldByEnemy(n,owner)){depth.set(n,d+1);queue.push(n);}

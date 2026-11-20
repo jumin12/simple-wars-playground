@@ -32,16 +32,43 @@ function findNearestFriendlyWaterHex(owner, x, y) {
     return best;
 }
 
+// Fire support (WOD_OPS.T.shipSupport: 0 the old order; 1 wide, troops within six cells of the army or a town drawing
+// ships from nearly twice as far, which held 164-181 towns against the old order over 90 matches; 2, the default, close
+// fights only, which won 186-167). Enemy
+// troops within four cells of the faction's own troops or towns, and within gun range of the sea, draw its warships from
+// some way further than anything else short of a troopship; a warship goes to a firing position off the coast for them.
+// Before, ground troops came last, after every harbour, and only on a cell beside the water.
+function wodAiShipSupportContext(owner) {
+    const clock=gameData._aiEconomyClock||0,store=gameData._aiShipSupport||(gameData._aiShipSupport={}),old=store[owner];
+    const mode=wodOpsTune(owner).shipSupport??2;
+    if(old&&clock-old.at<1&&old.mode===mode)return old;
+    const ours=gameData.entities.filter(u=>u.owner===owner&&u.hp>0&&!wodIsNavalUnit(u)&&u.type!=='convoy'&&u.type!=='supply'&&!u.boardTransportUid);
+    return store[owner]={at:clock,mode,cells:mode===1?6:4,weight:mode===1?.3:.5,ours,towns:gameData.cities.filter(c=>c.owner===owner)};
+}
+function wodAiShipSupportsArmy(e,ctx) {
+    if(!ctx||!e?.type||wodIsNavalUnit(e)||e.type==='convoy'||e.hp<=0)return false;
+    const r2=((gameData.hexRadius||20)*1.35*ctx.cells)**2;
+    return ctx.ours.some(u=>wodAiDist2(u.x,u.y,e.x,e.y)<r2)||ctx.towns.some(c=>wodAiDist2(c.x,c.y,e.x,e.y)<r2);
+}
+// Within two cells of open water the ship can sail to (its guns reach about three).
+function wodAiWithinGunsOfSea(h,region) {
+    if(!h)return false;
+    for(const p of getHexesInRadius(h.q,h.r,2)){const w=wodHexAt(p.q,p.r);if(w&&wodIsOpenWaterHex(w)&&(!region||region.has(getHexKey(w))))return true;}
+    return false;
+}
 function findBestAiShipPrey(unit) {
     let best = null;
     let bestD = Infinity;
+    const ctx=wodOpsTune(unit.owner).shipSupport!==0?wodAiShipSupportContext(unit.owner):null;
+    const region=ctx?wodNavalWaterRegionKeys(unit,getNearestHexToPoint(unit.x,unit.y)):null;
     for(let u of wodAiKnownEntities(unit.owner)) {
         if(u.hp <= 0 || !wodIsHostileOwner(u.owner,unit.owner) || u.type === 'convoy') continue;
         let uh = getNearestHexToPoint(u.x, u.y);
         if(!uh) continue;
-        if(!isWaterHex(uh) && !getNeighborHexes(uh).some(n => isWaterHex(n))) continue;
+        const support=ctx&&wodAiShipSupportsArmy(u,ctx);
+        if(!isWaterHex(uh) && !getNeighborHexes(uh).some(n => isWaterHex(n)) && !(support&&wodAiWithinGunsOfSea(uh,region))) continue;
         let dx = u.x - unit.x, dy = u.y - unit.y;
-        let d = dx * dx + dy * dy;
+        let d = (dx * dx + dy * dy)*(support?ctx.weight:1);
         if(d < bestD) {
             bestD = d;
             best = u;
@@ -173,11 +200,13 @@ function wodAiScoutFleet(owner,transports) {
     const coasts=wodAiKnownCities(owner).filter(c=>wodIsHostileOwner(c.owner,owner)&&cityHasWaterNeighbor(c));
     // Troopships and supply ships first (a loaded one most of all), then harbour towns: a warship lying off a
     // harbour keeps the town from recruiting and healing and its new ships from putting out.
-    const weight=wodOpsTune(owner).hunt===0?()=>1:g=>g.cargo?.25:g.type==='transport'||g.type==='supply'?.45:g.hasHarbor?.6:1;
+    // (and enemy troops fighting the army or closing on a town, before harbours: wodAiShipSupportsArmy)
+    const ctx=wodOpsTune(owner).shipSupport!==0?wodAiShipSupportContext(owner):null,support=new Set(known.filter(u=>wodAiShipSupportsArmy(u,ctx)));
+    const weight=wodOpsTune(owner).hunt===0?()=>1:g=>g.cargo?.25:g.type==='transport'||g.type==='supply'?.45:support.has(g)?ctx.weight:g.hasHarbor?.6:1;
     for(const ship of warships){
         if(ship._combatEngaged)continue;
         const region=wodNavalWaterRegionKeys(ship,getNearestHexToPoint(ship.x,ship.y));if(!region)continue;
-        const goals=[...known.filter(u=>{const h=getNearestHexToPoint(u.x,u.y);return wodIsNavalUnit(u)||h&&getNeighborHexes(h).some(wodIsOpenWaterHex);}),...coasts]
+        const goals=[...known.filter(u=>{const h=getNearestHexToPoint(u.x,u.y);return wodIsNavalUnit(u)||h&&(getNeighborHexes(h).some(wodIsOpenWaterHex)||support.has(u)&&wodAiWithinGunsOfSea(h,region));}),...coasts]
             .sort((a,b)=>wodAiDist2(ship.x,ship.y,a.x,a.y)*weight(a)-wodAiDist2(ship.x,ship.y,b.x,b.y)*weight(b));
         for(const goal of goals.slice(0,4)){
             const range=goal.type==='convoy'?0:(ship.range||80)*.85;

@@ -54,6 +54,8 @@ const LOBBY_INVITE_DEDUPE_MS = 60000;
 const MP_DISCONNECT_GRACE_MS = 22500;
 /** Close idle sockets that stop responding to pings (proxies often drop ~60s idle WS). */
 const MP_STALE_CONNECTION_MS = 90000;
+// A player whose socket still holds this much unsent data is skipped for snapshots until it drains (the snap relay).
+const MP_SNAP_BACKLOG_BYTES = 1536 * 1024;
 
 function sanitizePlayerId(id) {
   const s = String(id || '').trim().toUpperCase().slice(0, 32);
@@ -509,6 +511,22 @@ function firstFreeHumanSlot(room) {
     if (!taken.has(s)) return s;
   }
   return 0;
+}
+
+// A player joining a lobby with no open seat takes one the host left closed, or failing that the last AI seat: a lobby is
+// full only when four players are in it (it used to refuse them while an AI held a seat). The host's screen redraws its
+// seats from the room's settings, and its map preview follows.
+function openSeatForJoiner(room) {
+  normalizeSeatTypes(room.meta);
+  if (firstFreeHumanSlot(room)) return true;
+  const st = room.meta.seatTypes, cap = lobbyCap(), taken = new Set(room.clients.map((c) => c.slot));
+  let seat = 0;
+  for (let s = 1; s <= cap && !seat; s++) if (st[s - 1] === 'closed' && !taken.has(s)) seat = s;
+  for (let s = cap; s >= 1 && !seat; s--) if (st[s - 1] === 'bot' && !taken.has(s)) seat = s;
+  if (!seat) return false;
+  st[seat - 1] = 'human';
+  normalizeSeatTypes(room.meta);
+  return true;
 }
 
 function pickJoinSlot(room, requestedSeat) {
@@ -1567,7 +1585,7 @@ wss.on('connection', (ws) => {
         return;
       }
       normalizeSeatTypes(room.meta);
-      if (!firstFreeHumanSlot(room)) {
+      if (!openSeatForJoiner(room)) {
         ws.send(JSON.stringify({ t: 'error', msg: 'Lobby full' }));
         return;
       }
@@ -1793,8 +1811,21 @@ wss.on('connection', (ws) => {
           if (cached[field] === undefined && previous[field] !== undefined) cached[field] = previous[field];
         }
       }
-      client.room.lastSnap = { payload: cached, seq: msg.seq };
-      broadcast(client.room, { t: 'snap', payload: msg.payload, seq: msg.seq }, ws);
+      // Snapshots are numbered here, not by whichever player hosts: a new host started again from one, and every
+      // other player's game dropped its snapshots as older than the last one seen and stood still.
+      const room = client.room, seq = room.snapSeq = (room.snapSeq | 0) + 1;
+      room.lastSnap = { payload: cached, seq };
+      // A player on a slow connection is not sent snapshots faster than the line drains: each one would queue behind
+      // the last, the game falling further and further behind (and the map, sent at the start, behind them all). One
+      // whose socket still holds more than MP_SNAP_BACKLOG_BYTES is skipped; when it has drained it is sent the full
+      // latest state (cached, with the territory and ledgers a lightweight snapshot leaves out).
+      let raw = null, full = null;
+      for (const c of room.clients) {
+        if (c.ws === ws || c.ws.readyState !== 1) continue;
+        if ((c.ws.bufferedAmount | 0) > MP_SNAP_BACKLOG_BYTES) { c.snapBehind = true; continue; }
+        if (c.snapBehind) { c.snapBehind = false; c.ws.send(full || (full = JSON.stringify({ t: 'snap', payload: cached, seq }))); continue; }
+        c.ws.send(raw || (raw = JSON.stringify({ t: 'snap', payload: msg.payload, seq })));
+      }
       return;
     }
     if (t === 'cmd' && !client.isHost) {

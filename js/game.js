@@ -410,7 +410,8 @@ function wodFinalizePersonalEnd() {
     if(!gameData._spectator)return;
     const slot=gameData._spectator.slot;
     // Keep the personal result frozen while the remaining world lives.
-    if(gameData.mp?.enabled)wodMpApplyForfeitSlot(slot,false);
+    // (in a match, a faction its player surrendered to the computer plays on: wodMpSurrenderConcedes)
+    if(gameData.mp?.enabled){if(!gameData._mpSurrenderedToAi)wodMpApplyForfeitSlot(slot,false);}
     else{
         gameData.entities=gameData.entities.filter(u=>u.owner!==slot);
         for(const c of gameData.cities)if(c.owner===slot)c.owner=0;
@@ -1101,7 +1102,7 @@ function confirmSurrender() {
         if(!gameData._lifetimeMatch?.mpOutcomeRecorded){if(gameData._lifetimeMatch)gameData._lifetimeMatch.mpOutcomeRecorded=true;wodMpRecordLocalMultiplayerOutcome('lost');}
         if(wodCloudCanSync())WodMultiplayer.syncProgress(wodEnsurePlayerId(),wodBuildCloudSyncPayload());
         const watch=wodSpectatorSurvivors(true).length>1;
-        WodMultiplayer.forfeitMatch({spectate:watch,surrender:true});if(!watch)wodMpClearSession();triggerSurrenderDefeat();return;
+        const concede=wodMpSurrenderConcedes();gameData._mpSurrenderedToAi=!concede;WodMultiplayer.forfeitMatch({spectate:watch,surrender:concede});if(!watch)wodMpClearSession();triggerSurrenderDefeat();return;
     }
     if(gameData.menuAttractMode)return;
     toggleEscMenu(false);
@@ -1241,7 +1242,7 @@ function returnToMenu() {
     if(gameState==='PLAYING'&&!gameData.menuAttractMode)wodFinishLifetimeMatch('defeat','quit');
     wodFlushLifetimeProgress();
     hideCampaignSummaryOverlay();
-    gameData._spectator=null;wodSyncSpectatorUi();
+    gameData._spectator=null;gameData._mpSurrenderedToAi=false;wodSyncSpectatorUi();
     wodHideMissionPopup();
     let deployBanner = document.getElementById('wodDeployBanner');
     if(deployBanner) deployBanner.classList.add('hidden');
@@ -1952,7 +1953,7 @@ function wodClearLiveMapForNewMatch() {
 }
 function wodPrepareForNewMatch(opts) {
     gameData._wodDeepEpoch = (gameData._wodDeepEpoch | 0) + 1;
-    gameData._spectator=null;wodSyncSpectatorUi();
+    gameData._spectator=null;gameData._mpSurrenderedToAi=false;wodSyncSpectatorUi();
     if(!opts?.keepLifetimeMatch){gameData._lifetimeMatch=null;gameData._lifetimeStatsByOwner={};gameData._lifetimeEndReason=null;}
     gameData.controlGroups = {};
     gameData._territoryCleanupKeys = new Set();
