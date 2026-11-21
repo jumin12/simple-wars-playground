@@ -275,9 +275,9 @@ function wodClampIslandMountainLandFraction(gp, seedOffset) {
     let mounts = land.filter(h => h.type === 'mountain');
     let hardCap = Math.max(7, Math.floor(land.length * gp.maxMountainLandFrac));
     if(mounts.length <= hardCap) return;
+    const order = new Map(mounts.map(h => [h, wodGenFbm(h.x, h.y, 0.019, seedOffset + 5011, 3)]));
     mounts.sort((a, b) => {
-        let ar = fbm(a.x * 0.019 + seedOffset + 5011, a.y * 0.019 + seedOffset + 5011, 3);
-        let br = fbm(b.x * 0.019 + seedOffset + 5011, b.y * 0.019 + seedOffset + 5011, 3);
+        let ar = order.get(a), br = order.get(b);
         if(ar !== br) return ar - br;
         return a.q === b.q ? a.r - b.r : a.q - b.q;
     });
@@ -285,7 +285,7 @@ function wodClampIslandMountainLandFraction(gp, seedOffset) {
     let mars = gp.biomeAccent === 'marsh' || gp.biomeAccent === 'flat_low_mtns';
     for(let z = 0; z < trim; z++) {
         let h = mounts[z],
-            wt = fbm(h.x * 0.011 + seedOffset + 9333, h.y * 0.011 + seedOffset + 9333, 4);
+            wt = wodGenFbm(h.x, h.y, 0.011, seedOffset + 9333, 4);
         if(mars && wt > 0.38 && wt < 0.72 && Math.random() < (gp.biomeAccent === 'marsh' ? 0.42 : 0.22)) h.type = 'grass';
         else if(mars && wt > 0.62) h.type = 'swamp';
         else if(wt > 0.53) h.type = 'forest';
@@ -400,8 +400,8 @@ async function wodForceIslandEdgeWaterBuffer(cols, rows, bufferTiles, seedOffset
         let ed = Math.min(h.x - minX, maxX - h.x, h.y - minY, maxY - h.y);
         if(ed <= sandEdge) {
             let so = (seedOffset || 0);
-            let wob = fbm(h.x * 0.006 + so + 5150, h.y * 0.006 + so + 5150, 3) - 0.5;
-            let wob2 = fbm(h.x * 0.021 + so + 7212, h.y * 0.021 + so + 7212, 2) - 0.5;
+            let wob = wodGenFbm(h.x, h.y, 0.006, so + 5150, 3) - 0.5;
+            let wob2 = wodGenFbm(h.x, h.y, 0.021, so + 7212, 2) - 0.5;
             let waterLine = hardEdge + wobAmp * (0.5 + wob * 1.35 + wob2 * 0.55);
             if(ed <= Math.max(sp * 1.5, waterLine)) {
                 wodSetGeneratedTerrainType(h, 'water');
@@ -440,13 +440,33 @@ function wodPoliticalLandmasses() {
 function wodContinentsChannelOffsetCells(h, cols, rows, seedOffset) {
     const gp = gameData._genProfile || {}, sp = gameData.hexRadius * 1.35;
     const ny = h.y / (rows * sp * 0.95), xs = h.x / (cols * sp * 0.95) - (gp.contShear || 0) * ny;
-    const mid = (gp.contChanX || 0) + (fbm(ny * 1.9 + seedOffset + 611, seedOffset * 0.37 + 11, 3) - 0.5) * 2 * (gp.contChanWave || 0);
+    const wf = (typeof WodTerrainGen !== 'undefined' && WodTerrainGen.fbm) || fbm;
+    let wave = wf(ny * 1.9 + seedOffset + 611, seedOffset * 0.37 + 11, 3) - 0.5;
+    // (balanced maps: an odd wave, as in map-gen-worker.js, so the channel turned half round is the same channel)
+    if(wodSymActive()) wave = (wave - (wf(-ny * 1.9 + seedOffset + 611, seedOffset * 0.37 + 11, 3) - 0.5)) * 0.5;
+    const mid = (gp.contChanX || 0) + wave * 2 * (gp.contChanWave || 0);
     return (xs - mid) * cols * 0.95;
 }
 /** Keep the channel between the two continents open sea whatever the height noise did there:
  *  crossing it must take ships, never a land bridge. */
 function wodCarveContinentsChannel(cols, rows, seedOffset) {
     if(gameData.mapShape !== 'continents') return;
+    // Three continents: the channels run out from the centre between them, half a player's share
+    // either side of each player's direction (the terrain worker's mask follows the same lines).
+    if((gameData._genProfile || {}).contThree) {
+        const S = wodSymActive(), ph = S ? S.spec.phase || 0 : 0, A = Math.PI * 2 / 3, sp = gameData.hexRadius * 1.35;
+        const half = Math.max(4.5, rows * 0.08);
+        for(const h of gameData.hexList) {
+            if(!h || isWaterHex(h)) continue;
+            const x = h.x / sp, y = h.y / sp;
+            for(let k = 0; k < 3; k++) {
+                const t = ph + A / 2 + k * A, c = Math.cos(t), si = Math.sin(t);
+                if(x * c + y * si < -1) continue;
+                if(Math.abs(x * si - y * c) <= half) { wodSetGeneratedTerrainType(h, 'water'); break; }
+            }
+        }
+        return;
+    }
     const half = Math.max(3, cols * 0.055);
     for(const h of gameData.hexList)
         if(h && !isWaterHex(h) && Math.abs(wodContinentsChannelOffsetCells(h, cols, rows, seedOffset)) <= half)
@@ -454,11 +474,11 @@ function wodCarveContinentsChannel(cols, rows, seedOffset) {
 }
 /** A continents map is exactly two landmasses: sink every islet beside them.
  *  False when the second landmass is not a real continent. */
-function wodKeepTwoContinents() {
+function wodKeepTwoContinents(count = 2) {
     const masses = wodPoliticalLandmasses();
-    if(masses.length < 2) return false;
-    for(let i = 2; i < masses.length; i++) for(const h of masses[i]) wodSetGeneratedTerrainType(h, 'water');
-    return masses[1].length >= masses[0].length * 0.22;
+    if(masses.length < count) return false;
+    for(let i = count; i < masses.length; i++) for(const h of masses[i]) wodSetGeneratedTerrainType(h, 'water');
+    return masses[count - 1].length >= masses[0].length * 0.22;
 }
 /** Trim the two coasts until each continent holds exactly (its players) x (the same land per
  *  player): players on different continents share no border, so the usual frontier balancing
@@ -544,15 +564,20 @@ async function wodNormalizeRectangleWaterFeatures(seedOffset) {
             if((++floodTick & wodMapGenLoopYieldMask(4095)) === 0) await wodMapGenYieldSlice();
         }
         let span = Math.max(maxQ - minQ, maxR - minR);
-        comps.push({ cells: comp, size: comp.length, span });
+        // (the sea round the land touches the map's edge: never a lake to fill, however broad —
+        // balanced three- and four-player maps have a wide one round their hexagon or square)
+        let edge = comp.some(h => !wodHexAt(h.q + 1, h.r) || !wodHexAt(h.q - 1, h.r) || !wodHexAt(h.q, h.r + 1) || !wodHexAt(h.q, h.r - 1));
+        comps.push({ cells: comp, size: comp.length, span, edge });
     }
 
     let totalWater = water.length;
+    // (only lakes count towards the inland-water budget below)
+    for(let c of comps) if(c.edge) totalWater -= c.size;
     for(let c of comps) {
-        if(c.size >= 4) continue;
+        if(c.size >= 4 || c.edge) continue;
         let ci = 0;
         for(let h of c.cells) {
-            let wet = fbm(h.x * 0.012 + seedOffset + 7210, h.y * 0.012 + seedOffset + 7210, 3);
+            let wet = wodGenFbm(h.x, h.y, 0.012, seedOffset + 7210, 3);
             wodSetGeneratedTerrainType(h, wet > 0.62 ? 'swamp' : 'grass');
             totalWater--;
             if((++ci & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
@@ -561,13 +586,13 @@ async function wodNormalizeRectangleWaterFeatures(seedOffset) {
     }
 
     let maxWater = Math.max(26, Math.floor(gameData.hexList.length * 0.055));
-    let keepers = comps.filter(c => !c.removed).sort((a, b) => (a.size + a.span * 2.2) - (b.size + b.span * 2.2));
+    let keepers = comps.filter(c => !c.removed && !c.edge).sort((a, b) => (a.size + a.span * 2.2) - (b.size + b.span * 2.2));
     for(let c of keepers) {
         if(totalWater <= maxWater) break;
         if(c.size > maxWater * 0.72 && c.span > Math.sqrt(c.size) * 2.2) continue;
         let ci = 0;
         for(let h of c.cells) {
-            let wet = fbm(h.x * 0.012 + seedOffset + 7330, h.y * 0.012 + seedOffset + 7330, 3);
+            let wet = wodGenFbm(h.x, h.y, 0.012, seedOffset + 7330, 3);
             wodSetGeneratedTerrainType(h, wet > 0.58 ? 'swamp' : 'grass');
             if((++ci & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
         }
@@ -602,17 +627,17 @@ async function wodApplyRectangleBiomeDominance(seedOffset) {
     let hi = 0;
     for(let h of gameData.hexList) {
         if(!h || isWaterHex(h) || h.type === 'urban') continue;
-        let u = fbm(h.x * 0.008 + seedOffset + 9900, h.y * 0.008 + seedOffset + 9900, 4);
-        let v = fbm(h.x * 0.0062 + seedOffset + 10440, h.y * 0.0062 + seedOffset + 10440, 4);
+        let u = wodGenFbm(h.x, h.y, 0.008, seedOffset + 9900, 4);
+        let v = wodGenFbm(h.x, h.y, 0.0062, seedOffset + 10440, 4);
         let t = Math.max(0, Math.min(1, u + (v - 0.5) * 0.12));
-        let region = fbm(h.x * 0.0025 + seedOffset + 7710, h.y * 0.0025 + seedOffset + 7710, 3);
+        let region = wodGenFbm(h.x, h.y, 0.0025, seedOffset + 7710, 3);
         if(region < 0.5) {
             if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
             continue;
         }
         let edge = 0.065;
         let w = Math.max(0, Math.min(1, (region - (0.5 - edge)) / (2 * edge)));
-        let soften = fbm(h.x * 0.017 + seedOffset + 3310, h.y * 0.017 + seedOffset + 3310, 2);
+        let soften = wodGenFbm(h.x, h.y, 0.017, seedOffset + 3310, 2);
         if(w < 0.995 && soften > 0.38 + w * 0.52) {
             if((++hi & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
             continue;
@@ -788,6 +813,11 @@ async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
     let riverTargets = rivShape ? 1 + ((Math.random() > 0.52) ? 1 : 0) : 2 + ((Math.random() > 0.38) ? 1 : 0);
     let oceanKeys = rivShape ? wodBuildOceanConnectedWaterKeys(colM, rowM) : null;
     let carved = 0;
+    // Balanced maps: rivers start at representative cells and every river is carved together with its
+    // turned copies, so each player gets the same rivers (see js/mapgen-sym.js).
+    const sym = wodSymActive();
+    // (each river is copied for every player, so fewer are drawn: about as much river as a free map)
+    if(sym) riverTargets = Math.max(1, Math.round(riverTargets * 1.5 / sym.players));
     // (river cells are marked, _river, so the start balancer can tell a river from a sea, a strait or a lake)
     for(const h of gameData.hexList) if(h._river) delete h._river;
     let attempt = 0;
@@ -797,6 +827,9 @@ async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
         let candidates = [];
         for(let h of gameData.hexList) {
             if(!landOk(h)) continue;
+            if(sym && sym.G.rep[wodSymIndexOf(sym, h)] !== wodSymIndexOf(sym, h)) continue;
+            // (and not in the middle: a river from the centre and its copies would run along every border)
+            if(sym && Math.hypot(h.q, h.r) < Math.min(colM, rowM) * 0.3) continue;
             let d0 = distMap.get(getHexKey(h));
             if(d0 == null || d0 < minSteps || d0 > maxSteps) continue;
             if(rivShape && edgeDistH(h) < 8) continue;
@@ -804,7 +837,7 @@ async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
                 let bf = Math.max(Math.abs(h.q) / colM, Math.abs(h.r) / rowM);
                 if(bf > 0.93) continue;
             }
-            let jitter = fbm(h.x * 0.0027 + seedOffset + 3103, h.y * 0.0027 + seedOffset + 3103, 3);
+            let jitter = wodGenFbm(h.x, h.y, 0.0027, seedOffset + 3103, 3);
             candidates.push({ h, d0, jitter });
         }
         candidates.sort((a, b) => b.d0 - a.d0 || a.jitter - b.jitter);
@@ -866,6 +899,17 @@ async function wodCarveProceduralRivers(seedOffset, mapShape, cols, rows) {
             riverFillKeys.add(getHexKey(hx));
             for(let nb of getNeighborHexes(hx)) {
                 if(nb && landOk(nb) && !isWaterHex(nb)) riverFillKeys.add(getHexKey(nb));
+            }
+        }
+        if(sym) {
+            for(const rk of [...riverFillKeys]) {
+                const hx = gameData.hexes[rk], i = hx ? wodSymIndexOf(sym, hx) : -1;
+                if(i < 0) continue;
+                const r = sym.G.rep[i];
+                for(const j of [r, ...(sym.fibre.get(r) || [])]) {
+                    const t = sym.cells[j];
+                    if(t && landOk(t)) riverFillKeys.add(getHexKey(t));
+                }
             }
         }
         let before = wodCountPassableLandComponents();
@@ -2157,7 +2201,7 @@ async function wodNaturalizeBiomeBlends(seedOffset, mapShape) {
     let hi2 = 0;
     for(let h of gameData.hexList) {
         if(!h || isWaterHex(h) || h.type === 'mountain' || h.type === 'urban') continue;
-        let wet = fbm(h.x * 0.0048 + seedOffset + 4700, h.y * 0.0048 + seedOffset + 4700, 4);
+        let wet = wodGenFbm(h.x, h.y, 0.0048, seedOffset + 4700, 4);
         let coast = getNeighborHexes(h).some(nb => nb && isWaterHex(nb));
         if(coast) continue;
         let nForest = 0, nGrass = 0, nSand = 0;
@@ -3162,7 +3206,8 @@ function wodVerifyFairFactionStart(ownerIds) {
     if(sorted.length === 2 && !wodVerifyCityPlacementSymmetry(sorted)) return false;
     if(gameData.mapShape === 'archipelago' && !wodArchipelagoIslandsFair(sorted)) { gameData._wodIslandsUnfair = true; return false; }
     if(!wodStartingTownDistancesFair(sorted)) { gameData._wodTownsFarApart = true; return false; }
-    if(!wodStartingRiversFair(sorted)) return false;
+    // (balanced maps: every player has the same rivers along the same borders)
+    if(!gameData._wodSymFairCheck && !wodStartingRiversFair(sorted)) return false;
     const supplied=wodStartingTownSupply();
     for(const owner of sorted) {
         const pool=gameData.hexList.filter(h=>h.owner===owner&&supplied.get(owner)?.has(getHexKey(h)));
@@ -4389,6 +4434,7 @@ async function assignStartingCities() {
             gameData.entities = [];
             gameData._generalMap = null;
             spawnInitialFrontlineUnits(ownersList);
+            wodSymMirrorStartingArmy(ownersList);
         }
 
         wodMarkTerrainPoliticalDirty();
@@ -4656,16 +4702,13 @@ function limitRectangleMountainDensity(mapShape, seedOffset) {
     let maxMountains = Math.max(14, Math.floor(land.length * 0.12));
     if(mountains.length <= maxMountains) return;
 
-    mountains.sort((a, b) => {
-        let ar = fbm(a.x * 0.015 + seedOffset + 8200, a.y * 0.015 + seedOffset + 8200, 3);
-        let br = fbm(b.x * 0.015 + seedOffset + 8200, b.y * 0.015 + seedOffset + 8200, 3);
-        return ar - br;
-    });
+    const order = new Map(mountains.map(h => [h, wodGenFbm(h.x, h.y, 0.015, seedOffset + 8200, 3)]));
+    mountains.sort((a, b) => order.get(a) - order.get(b));
 
     let convertCount = mountains.length - maxMountains;
     for(let i = 0; i < convertCount; i++) {
         let hex = mountains[i];
-        let wet = fbm(hex.x * 0.009 + seedOffset + 9100, hex.y * 0.009 + seedOffset + 9100, 3);
+        let wet = wodGenFbm(hex.x, hex.y, 0.009, seedOffset + 9100, 3);
         hex.type = wet > 0.62 ? 'forest' : 'hill';
         hex.baseColor = getTerrainColor(hex.type);
         hex.renderColor = hex.baseColor;
@@ -4673,7 +4716,12 @@ function limitRectangleMountainDensity(mapShape, seedOffset) {
 }
 let _wodMapGenYieldState = null;
 function wodMapGenCooperativeMode() {
-    return typeof wodUsesVisualViewportLayout === 'function' && wodUsesVisualViewportLayout();
+    // (asked in every inner loop of map generation; the answer cannot change during one run)
+    const st = _wodMapGenYieldState;
+    if(st && st.coop != null) return st.coop;
+    const coop = typeof wodUsesVisualViewportLayout === 'function' && wodUsesVisualViewportLayout();
+    if(st) st.coop = coop;
+    return coop;
 }
 function wodMapGenLoopYieldMask(defaultMask) {
     if(!wodMapGenCooperativeMode()) return defaultMask;
@@ -4880,12 +4928,22 @@ async function generateMap() {
     gameData.loadedCustomMap = false;
     // Continents are sized by how the players split between them (1+1, 2+1, 2+2), so the
     // faction count has to be known before the terrain exists.
+    // Balanced maps (js/mapgen-sym.js) are built for their player count as well.
     let continentFactions = 2;
-    if(mapShape === 'continents') {
-        if(!(gameData.mp && gameData.mp.enabled)) wodSyncAiCountForMapGen();
-        continentFactions = Math.max(2, wodGetDesiredFactionCountForMapGen());
-    }
-    gameData._genProfile = wodSampleMapGenProfile(mapShape, continentFactions);
+    if(!(gameData.mp && gameData.mp.enabled)) wodSyncAiCountForMapGen();
+    const terrainFactions = Math.max(1, wodGetDesiredFactionCountForMapGen());
+    if(mapShape === 'continents') continentFactions = Math.max(2, terrainFactions);
+    gameData._mapSym = null;
+    gameData._wodArchIslands = null;
+    // Balance (setup / lobby): on = symmetric maps (js/mapgen-sym.js); off = free-form terrain with random
+    // starts, borders and towns that are still checked for playability (wodRandomBordersThenCities).
+    const balanced = wodMapBalanceSetting();
+    gameData._wodMapBalance = balanced;
+    // (after many failed layouts the free generator with its own balancing takes over, either way)
+    gameData._wodRandomStarts = !balanced && wantCities && wantTerritory && procAttempt < 40;
+    if(procAttempt >= 32) gameData._wodSymFallback = true;
+    const symSpec = wantCities && wantTerritory && balanced ? wodMapSymSpecFor(mapShape, terrainFactions) : null;
+    gameData._genProfile = wodSampleMapGenProfile(mapShape, continentFactions, symSpec, gameData._wodRandomStarts ? { players: terrainFactions } : null);
 
     // Generate dense cell grid on the map. The old variable names remain,
     // but these are square-neighbor dots, not hex tiles.
@@ -4895,6 +4953,18 @@ async function generateMap() {
     // Terrain cells come from map-gen-worker.js: in worker threads when the browser has them, otherwise from
     // the same code loaded into the page (WodTerrainGen), so every path builds the same map.
     const terrainJob = { mapR, hr, mapShape, genProfile: gameData._genProfile, seedOffset, cols, rows, spacing };
+    if(symSpec) {
+        terrainJob.sym = symSpec;
+        terrainJob.landBand = wodMapLandFractionBand(mapShape);
+        if(mapShape === 'archipelago') gameData._wodArchIslands = WodTerrainGen.archipelagoLayout(terrainJob);
+    } else if(gameData._wodRandomStarts) {
+        terrainJob.landBand = wodMapLandFractionBand(mapShape);
+        if(mapShape === 'archipelago') gameData._wodArchIslands = WodTerrainGen.archipelagoLayoutFree(terrainJob);
+    }
+    if((symSpec || gameData._wodRandomStarts) && mapShape === 'archipelago' && !gameData._wodArchIslands) {
+        // (the island group did not fit this seed: try another)
+        recordRejection('archipelago-layout'); if(ownsInnerRng) wodPopRandom(); continue outerProcTerrain;
+    }
     let terrainCells = null;
     try { terrainCells = await wodGenerateTerrainCellsInWorker(terrainJob); } catch(_) {}
     if(!terrainCells || !terrainCells.length) terrainCells = WodTerrainGen.generateTerrainCells(terrainJob);
@@ -4907,36 +4977,45 @@ async function generateMap() {
         gameData.hexList.push(hex);
         if(ci > 0 && (ci & wodMapGenLoopYieldMask(255)) === 0) await wodMapGenYieldSlice();
     }
+    if(symSpec && !wodSymInit(symSpec, cols, rows)) { recordRejection('sym-grid'); gameData._wodSymFallback = true; if(ownsInnerRng)wodPopRandom(); continue outerProcTerrain; }
+    // Balanced maps: passes that only smooth or paint are followed by a copy from the representative
+    // cells; repairs (passes through mountains, outlets) are handed to every image of what they changed.
+    const symStep = fn => symSpec ? wodSymAfterCopy(fn) : fn();
+    const symFix = fn => symSpec ? wodSymClosure(fn, false) : fn();
 
-    await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
-    wodCarveContinentsChannel(cols, rows, seedOffset);
-    await wodNaturalizeBiomeBlends(seedOffset, mapShape);
-    await wodCoalesceTerrainSpeckles(2);
-    await wodPaintRectangleMapPerimeterWater(cols, rows);
-    await wodNormalizeRectangleWaterFeatures(seedOffset);
-    limitRectangleMountainDensity(mapShape, seedOffset);
-    await wodApplyRectangleBiomeDominance(seedOffset);
-    wodThinMountainsForProfile(gameData._genProfile, seedOffset);
+    await symStep(() => wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset));
+    await symStep(() => wodCarveContinentsChannel(cols, rows, seedOffset));
+    await symStep(() => wodNaturalizeBiomeBlends(seedOffset, mapShape));
+    await symStep(() => wodCoalesceTerrainSpeckles(2));
+    // (balanced maps: the worker already painted the rim of sea round the playable region)
+    if(!symSpec) await wodPaintRectangleMapPerimeterWater(cols, rows);
+    await symStep(() => wodNormalizeRectangleWaterFeatures(seedOffset));
+    await symStep(() => limitRectangleMountainDensity(mapShape, seedOffset));
+    await symStep(() => wodApplyRectangleBiomeDominance(seedOffset));
+    await symStep(() => wodThinMountainsForProfile(gameData._genProfile, seedOffset));
     // Connectivity first (island shape + playable land), then faction borders, then cities inside borders.
-    await ensureMountainPasses();
-    await softenLandFullyBlockedByMountainRing();
-    if(!gameData._wodFastMapGen) await ensureMountainPasses();
-    wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset);
+    await symFix(() => ensureMountainPasses());
+    await symFix(() => softenLandFullyBlockedByMountainRing());
+    if(!gameData._wodFastMapGen) await symFix(() => ensureMountainPasses());
+    await symStep(() => wodClampIslandMountainLandFraction(gameData._genProfile, seedOffset));
     await wodCarveProceduralRivers(seedOffset, mapShape, cols, rows);
-    await wodPaintCoastalSandAllLand();
-    await wodCoalesceTerrainSpeckles(2);
-    await wodEnsureMountainLandOutlets();
+    if(symSpec) wodSymCopy(false);
+    await symStep(() => wodPaintCoastalSandAllLand());
+    await symStep(() => wodCoalesceTerrainSpeckles(2));
+    await symFix(() => wodEnsureMountainLandOutlets());
     // Re-run last: speckle coalescing / rivers / biome blends can re-add land at the
     // boundary, and island maps must never touch the map edge.
-    await wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset);
+    await symStep(() => wodForceIslandEdgeWaterBuffer(cols, rows, 5, seedOffset));
     if(mapShape === 'continents') {
-        wodCarveContinentsChannel(cols, rows, seedOffset);
-        if(!wodKeepTwoContinents()) { recordRejection('continents-shape'); if(ownsInnerRng)wodPopRandom(); continue outerProcTerrain; }
+        await symStep(() => wodCarveContinentsChannel(cols, rows, seedOffset));
+        if(!(await symFix(() => wodKeepTwoContinents((gameData._genProfile || {}).contThree ? 3 : 2)))) { recordRejection('continents-shape'); if(ownsInnerRng)wodPopRandom(); continue outerProcTerrain; }
     }
-    const cornerRepair=await wodResolveGeneratedTerrainCorners();
+    const cornerRepair = symSpec ? await wodSymResolveTerrainCorners() : await wodResolveGeneratedTerrainCorners();
     if(!cornerRepair.ok) { recordRejection('terrain-corners'); if(ownsInnerRng)wodPopRandom(); continue outerProcTerrain; }
     // Last terrain step: the two continents must hold exactly their players' shares of land.
-    if(mapShape === 'continents' && !wodBalanceContinentsLand(continentFactions, cols, rows)) {
+    // (Balanced continents are copies of each other already.)
+    // (Balance off too: every player gets the same land, so each continent holds its players' shares)
+    if(mapShape === 'continents' && !symSpec && !wodBalanceContinentsLand(continentFactions, cols, rows)) {
         recordRejection('continents-balance'); if(ownsInnerRng)wodPopRandom(); continue outerProcTerrain;
     }
     wodCaptureTerrainPoliticsBase();
@@ -5004,7 +5083,11 @@ async function generateMap() {
                 if(towns === 2 && fails - (asked - 2) * 6 >= fitted) towns = 1;
                 gameData._wodCityCountRelax = asked - towns;
             }
-            procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+            procOk = wodSymActive()
+                ? await wodSymBordersThenCities(cols, rows, mapShape, pt)
+                : gameData._wodRandomStarts
+                    ? await wodRandomBordersThenCities(cols, rows, mapShape, pt)
+                    : await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
             if(procOk) break;
             const why = gameData._startingBorderQuality?.reason||'town-placement';
             recordRejection(why);
@@ -5068,6 +5151,7 @@ async function generateMap() {
         if(ownsInnerRng) wodPopRandom();
         gameData._mapGenOptions = null;
         gameData._wodCityCountRelax = 0;
+        gameData._wodSymFallback = false;
     }
 }
 
@@ -5218,31 +5302,37 @@ async function ensureMountainPasses() {
     // Sort largest first
     components.sort((a, b) => b.length - a.length);
 
-    // For each smaller component, find the closest pair across the largest accessible mass
-    // and carve a pass through any mountains between them.
-    let mainComponent = components[0];
-    let mainSet = new Set(mainComponent.map(landKey));
-
-    for(let i = 1; i < components.length; i++) {
-        let comp = components[i];
+    // A pass through mountains only joins pockets of the same dry landmass: pockets on other
+    // islands or continents are left to the sea (scanning them pair by pair was most of the
+    // generation time on water maps). Each smaller pocket is joined to the largest pocket of its
+    // landmass, at the closest pair of cells that border mountains.
+    const massOf = new Map();
+    let massId = 0;
+    for(const hex of gameData.hexList) {
+        if(!hex || isWaterHex(hex) || massOf.has(hex)) continue;
+        const queue = [hex];
+        massOf.set(hex, massId);
+        for(let qi = 0; qi < queue.length; qi++) for(const nb of getNeighborHexes(queue[qi]))
+            if(nb && !isWaterHex(nb) && !massOf.has(nb)) { massOf.set(nb, massId); queue.push(nb); }
+        massId++;
+    }
+    const rim = comp => comp.filter(h => getNeighborHexes(h).some(n => n && n.type === 'mountain'));
+    const mainByMass = new Map();
+    for(const comp of components) {
+        const m = massOf.get(comp[0]);
+        if(!mainByMass.has(m)) { mainByMass.set(m, { cells: comp, rim: rim(comp) }); continue; }
         if(comp.length < 2) continue;
-
+        const main = mainByMass.get(m), edge = rim(comp);
         let bestA = null, bestB = null, bestDist = Infinity;
-        let pairTick = 0;
-        for(let a of comp) {
-            for(let b of mainComponent) {
-                let dx = a.x - b.x, dy = a.y - b.y;
-                let d = dx * dx + dy * dy;
-                if(d < bestDist) { bestDist = d; bestA = a; bestB = b; }
-                if((++pairTick & wodMapGenLoopYieldMask(2047)) === 0) await wodMapGenYieldSlice();
-            }
+        for(const a of edge) for(const b of main.rim) {
+            const dx = a.x - b.x, dy = a.y - b.y, d = dx * dx + dy * dy;
+            if(d < bestDist) { bestDist = d; bestA = a; bestB = b; }
         }
         if(!bestA || !bestB) continue;
-
         carveMountainLine(bestA, bestB);
-        // Add this component to mainSet
-        for(let h of comp) mainSet.add(landKey(h));
-        mainComponent = mainComponent.concat(comp);
+        main.cells = main.cells.concat(comp);
+        main.rim = main.rim.concat(edge);
+        await wodMapGenYieldSlice();
     }
 
     // For tiny pockets of land entirely surrounded by mountains, convert them to hills

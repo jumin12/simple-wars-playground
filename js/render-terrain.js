@@ -1569,7 +1569,9 @@ function wodPaintFrontlineStyle(style, spacing, strokeFn) {
     }
 }
 function wodSmoothDiplomacyBorderPoints(points,spacing,closed) {
-    if(points.length<8)return points;
+    // (no size to smooth at, as on a canvas not laid out yet, leaves the line as it is: binning by a zero cell
+    // never advanced and filled one bin until the array overflowed, freezing the page for seconds first)
+    if(points.length<8||!(spacing>0)||!Number.isFinite(spacing))return points;
     const cacheKey=spacing+':'+!!closed;
     if(points._borderSmooth?.key===cacheKey)return points._borderSmooth.points;
     // Keep opposite sides of a narrow salient apart. Broad smoothing
@@ -1577,7 +1579,10 @@ function wodSmoothDiplomacyBorderPoints(points,spacing,closed) {
     const bins=new Map(),cell=spacing*2,segments=[];
     for(let i=0;i<points.length-(closed?0:1);i++){
         const a=points[i],b=points[(i+1)%points.length],seg={a,b,i};segments.push(seg);
-        for(let x=Math.floor(Math.min(a.x,b.x)/cell);x<=Math.floor(Math.max(a.x,b.x)/cell);x++)for(let y=Math.floor(Math.min(a.y,b.y)/cell);y<=Math.floor(Math.max(a.y,b.y)/cell);y++){
+        const x0=Math.floor(Math.min(a.x,b.x)/cell),x1=Math.floor(Math.max(a.x,b.x)/cell),y0=Math.floor(Math.min(a.y,b.y)/cell),y1=Math.floor(Math.max(a.y,b.y)/cell);
+        // (a point off at infinity, or a segment spanning thousands of cells, is not binned: it only loosens the cap near it)
+        if(!Number.isFinite(x0+x1+y0+y1)||(x1-x0+1)*(y1-y0+1)>4096)continue;
+        for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){
             const key=x+','+y;if(!bins.has(key))bins.set(key,[]);bins.get(key).push(seg);
         }
     }

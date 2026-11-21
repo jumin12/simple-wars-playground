@@ -2452,6 +2452,7 @@ function wodMpSyncHostCfgFromSetup() {
     wodMpCopyFieldToField('setupMapSize', 'mpCfgMapSize');
     wodMpCopyFieldToField('setupMapShape', 'mpCfgMapShape');
     wodMpCopyFieldToField('setupCitiesPerPlayer', 'mpCfgCitiesPerPlayer');
+    wodMpCopyFieldToField('setupMapBalance', 'mpCfgMapBalance');
     wodMpCopyFieldToField('setupVictoryMode', 'mpCfgVictoryMode');
     wodMpCopyFieldToField('setupFogOfWar', 'mpCfgFogOfWar');
     wodMpCopyFieldToField('setupAiDifficulty', 'mpCfgAiDifficulty');
@@ -2487,6 +2488,10 @@ function wodMpLobbyFactionFingerprint(meta) {
 function wodMpCitiesPerPlayerFromMeta(meta) {
     let v = parseInt(meta && meta.citiesPerPlayer, 10);
     return v >= 1 && v <= 4 ? v : 2;
+}
+/** Balance (lobby): on unless the host turned it off. */
+function wodMpMapBalanceFromMeta(meta) {
+    return !(meta && meta.mapBalance === false);
 }
 function wodMpSyncSeatsToLobbyPopulation(meta) {
     if(!meta || typeof meta !== 'object') return false;
@@ -2722,6 +2727,7 @@ function wodMpBuildInitialHostMeta() {
         mapSize: 60,
         mapShape: 'island',
         citiesPerPlayer: 2,
+        mapBalance: true,
         lobbyMapSeed,
         victoryMode: 'domination',
         money: 1000,
@@ -2759,6 +2765,25 @@ function wodMpApplyLayoutCounts(humanCount, botCount, opts) {
         force: !politicsOk && prevFactionFp !== nextFactionFp
     });
 }
+/** A room-settings broadcast the relay made before the host's latest update reached it (the echo of an earlier
+ *  update, or a player joining or leaving in between) must not put the host's older settings back: the host's
+ *  dialogs would show them, a preview would be made for them, and every later update built from those fields
+ *  (Launch included) would send them out as the room's. Over such a broadcast the host keeps the map and rules
+ *  it sent last, and its seats unless a player now sits in a seat they close (the relay opened it on a join). */
+function wodMpKeepHostSettingsOverStaleMeta(m) {
+    const api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : null;
+    const sent = api && api.isHost ? api.lobbyMetaSent : null;
+    if(!sent || !m || (m.hostMetaRev | 0) >= (sent.hostMetaRev | 0)) return m;
+    const relayOwned = { seatTypes: 1, aiCount: 1, occupiedSlots: 1, playerColors: 1, playerPublic: 1, maxHumans: 1, matchInProgress: 1, hostMetaRev: 1 };
+    const out = Object.assign({}, m);
+    for(const k of Object.keys(sent)) if(!relayOwned[k]) out[k] = sent[k];
+    const occupied = Array.isArray(m.occupiedSlots) ? m.occupiedSlots : [];
+    if(Array.isArray(sent.seatTypes) && occupied.every(s => (sent.seatTypes[s - 1] || 'human') === 'human')) {
+        out.seatTypes = sent.seatTypes.slice();
+        out.aiCount = out.seatTypes.filter(t => t === 'bot').length;
+    }
+    return out;
+}
 function wodMpApplyRoomMeta(meta) {
     window.wodMpRoomMeta = meta && typeof meta === 'object' ? JSON.parse(JSON.stringify(meta)) : {};
     wodMpNormalizeLobbyMeta(window.wodMpRoomMeta);
@@ -2779,6 +2804,10 @@ function wodMpApplyRoomMeta(meta) {
     for(let id of ['setupCitiesPerPlayer', 'mpCfgCitiesPerPlayer']) {
         let el = document.getElementById(id);
         if(el) el.value = String(wodMpCitiesPerPlayerFromMeta(window.wodMpRoomMeta));
+    }
+    for(let id of ['setupMapBalance', 'mpCfgMapBalance']) {
+        let el = document.getElementById(id);
+        if(el) el.checked = wodMpMapBalanceFromMeta(window.wodMpRoomMeta);
     }
     let vic = document.getElementById('mpCfgVictoryMode');
     if(vic && window.wodMpRoomMeta.victoryMode) vic.value = window.wodMpRoomMeta.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
@@ -3197,6 +3226,7 @@ function wodMpSyncLaunchSettingsFromMeta(meta) {
     if(meta.mapSize != null) wodApplyMapSizePreset(meta.mapSize);
     if(meta.mapShape) gameData.mapShape = meta.mapShape;
     gameData.citiesPerPlayer = wodMpCitiesPerPlayerFromMeta(meta);
+    gameData.mapBalance = wodMpMapBalanceFromMeta(meta);
     if(meta.victoryMode) gameData.victoryMode = meta.victoryMode === 'annihilation' ? 'annihilation' : 'domination';
     if(meta.money != null) gameData.money = parseInt(meta.money, 10) || gameData.money;
     if(meta.fogOfWar != null) gameData.fogOfWar = !!meta.fogOfWar;
@@ -3301,8 +3331,13 @@ function wodTerrainOnlyFingerprint() {
         gameData.mapShape || '',
         (gameData._mapGenSeed >>> 0) || 0,
         gameData.loadedCustomMap ? 1 : 0,
-        // Continents are sized for their player count: another count needs new terrain.
-        gameData.mapShape === 'continents' ? wodGetDesiredFactionCountForMapGen() : ''
+        // Continents are sized for their player count, and balanced maps are symmetric for it:
+        // another count needs new terrain.
+        wodIsProcGenMapShape(gameData.mapShape) ? wodGetDesiredFactionCountForMapGen() : '',
+        // (an archipelago lays out an island for every town)
+        gameData.mapShape === 'archipelago' ? wodCitiesPerPlayerSetting() : '',
+        // (Balance on: symmetric terrain; off: free-form)
+        wodIsProcGenMapShape(gameData.mapShape) ? (wodMapBalanceSetting() ? 'b' : 'r') : ''
     ].join('|');
 }
 function wodCaptureTerrainPoliticsBase() {
@@ -3360,7 +3395,26 @@ async function wodRegeneratePoliticsOnCurrentTerrain() {
     if(!(gameData.mp && gameData.mp.enabled)) wodSyncAiCountForMapGen();
     let factionSlots = Math.max(1, wodGetDesiredFactionCountForMapGen());
     gameData._wodCitySplitAnglePhase = wodDeterministicCitySplitPhase01(((gameData._mapGenSeed || 1) >>> 0) ^ Math.imul(factionSlots | 0, 738560931)) * Math.PI * 2;
-    let procOk = await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+    // Balanced terrain is built for its player count (wodTerrainOnlyFingerprint keeps that count),
+    // so its borders and towns are made the balanced way again.
+    const sym = wodSymActive();
+    // (terrain balanced for another player count: the caller makes new terrain)
+    if(sym && sym.players !== factionSlots) return false;
+    // Balanced terrain whose symmetry tables are gone (the cells were rebuilt from a stored copy, as the lobby
+    // does from its committed map): the caller makes the terrain again from its seed, the same terrain, with
+    // tables. Balance off: random starts on the kept terrain.
+    const balanced = wodMapBalanceSetting();
+    if(balanced && !sym && !gameData._wodSymFallback && factionSlots >= 2 && factionSlots <= 4 && wodIsProcGenMapShape(mapShape)) return false;
+    gameData._wodRandomStarts = !balanced;
+    let procOk = false;
+    for(let pt = 0; pt < (sym || gameData._wodRandomStarts ? 4 : 1) && !procOk; pt++) {
+        if(pt > 0 && !wodRestoreTerrainPoliticsBase()) break;
+        procOk = sym && sym.players === factionSlots
+            ? await wodSymBordersThenCities(cols, rows, mapShape, pt)
+            : gameData._wodRandomStarts
+                ? await wodRandomBordersThenCities(cols, rows, mapShape, pt)
+                : await wodProceduralVoronoiBordersThenCitiesSameCount(cols, rows, mapShape);
+    }
     if(!procOk) return false;
     gameData._mapGenOptions = { units: true };
     try {
@@ -3377,8 +3431,13 @@ function wodMpLobbyTerrainFingerprint(meta) {
     if(!meta || typeof meta !== 'object') return '';
     let seed = meta.lobbyMapSeed != null && meta.lobbyMapSeed !== '' ? (parseInt(meta.lobbyMapSeed, 10) >>> 0) : '';
     let parts = [seed, meta.mapSize, meta.mapShape || ''];
-    // Continents are sized for their player count: another count needs new terrain.
-    if(meta.mapShape === 'continents') parts.push(wodMpGetLobbyFactionSlotsFromMeta(meta).length);
+    // Continents are sized for their player count, and balanced maps are symmetric for it:
+    // another count needs new terrain.
+    if(wodIsProcGenMapShape(meta.mapShape)) parts.push(wodMpGetLobbyFactionSlotsFromMeta(meta).length);
+    // (an archipelago lays out an island for every town)
+    if(meta.mapShape === 'archipelago') parts.push(wodMpCitiesPerPlayerFromMeta(meta));
+    // (Balance on: symmetric terrain; off: free-form)
+    if(!wodMpMapBalanceFromMeta(meta)) parts.push('r');
     return parts.join('|');
 }
 function wodMpLobbyPoliticsFingerprint(meta) {
@@ -3423,7 +3482,7 @@ function wodSetElementDisabled(el, on) {
     el.toggleAttribute('disabled', !!on);
 }
 const WOD_SETUP_LOCK_WHILE_GENERATING = [
-    'setupMapSize', 'setupMapShape', 'setupCitiesPerPlayer', 'setupAI', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney',
+    'setupMapSize', 'setupMapShape', 'setupCitiesPerPlayer', 'setupMapBalance', 'setupAI', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney',
     'setupPlayerColor', 'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap',
     'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack'
 ];
@@ -3490,7 +3549,7 @@ function wodRefreshMapPreviewGeneratingUi() {
     let on = !!_wodMpLobbyPreviewBusy;
     for(let id of ['mpBtnGlMap', 'mpBtnGlRules', 'mpBtnGlLaunch',
         'mpCfgMapApply', 'mpCfgMapSaveMap', 'mpCfgMapLoadMap', 'mpCfgMapClose',
-        'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgCitiesPerPlayer', 'mpCfgVictoryMode', 'mpCfgFogOfWar', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
+        'mpCfgMapSize', 'mpCfgMapShape', 'mpCfgCitiesPerPlayer', 'mpCfgMapBalance', 'mpCfgVictoryMode', 'mpCfgFogOfWar', 'mpCfgMoney', 'mpCfgPlayerColor', 'mpCfgGamePeriod',
         'mpCfgRulesApply', 'mpCfgRulesClose']) {
         wodSetElementDisabled(document.getElementById(id), on);
     }
@@ -3569,11 +3628,21 @@ function wodMpRefreshLobbyMapPreview(opts) {
             (async function() {
                 try {
                     if(previewTok !== _wodMpLobbyPreviewGenToken || gameState === 'PLAYING') return;
+                    // (another map still being made on the same state, as the menu battlefield: let it finish, then
+                    // keep what it left as the state to put back, or this preview commits its half-made map)
+                    if(window._wodBootBusy || window._wodMenuBootstrapBusy || gameData._mapGenInProgress) {
+                        await wodAwaitOtherMapGen();
+                        if(previewTok !== _wodMpLobbyPreviewGenToken || gameState === 'PLAYING') return;
+                        snap = wodMpSnapshotLobbyGenBackup();
+                    }
                     wodApplyMapSizePreset(parseInt(meta.mapSize, 10) || 60);
                     if(shapeEl) shapeEl.value = meta.mapShape || 'island';
                     // The generator reads towns per player from the setup control.
                     let citiesEl = document.getElementById('setupCitiesPerPlayer');
                     if(citiesEl) citiesEl.value = String(wodMpCitiesPerPlayerFromMeta(meta));
+                    // (and Balance from the same control the solo setup uses)
+                    let balanceEl = document.getElementById('setupMapBalance');
+                    if(balanceEl) balanceEl.checked = wodMpMapBalanceFromMeta(meta);
                     gameData.loadedCustomMap = false;
                     wodMpNormalizeLobbyMeta(meta);
                     let st = meta.seatTypes || [];
@@ -3674,6 +3743,8 @@ function wodMpApplyMetaToSetupFields(meta) {
     if(sh && meta.mapShape) sh.value = meta.mapShape;
     let cpp = document.getElementById('setupCitiesPerPlayer');
     if(cpp) cpp.value = String(wodMpCitiesPerPlayerFromMeta(meta));
+    let bal = document.getElementById('setupMapBalance');
+    if(bal) bal.checked = wodMpMapBalanceFromMeta(meta);
     let ai = document.getElementById('setupAI');
     if(ai && meta.aiCount != null) {
         let bc = Math.max(0, Math.min(WOD_MAX_AI_OPPONENTS, parseInt(meta.aiCount, 10) || 0));
@@ -3795,6 +3866,8 @@ function wodMpRenderGameLobbyScreen() {
         readout.innerHTML =
             '<strong>Map</strong> ' + wodMpEscapeHtml(msL || '—') + ' · ' + wodMpEscapeHtml(shL || '') +
             '<br><strong>Cities per player</strong> ' + wodMpCitiesPerPlayerFromMeta(meta) +
+            '<br><strong>Balance</strong> <span title="' + wodMpEscapeHtml(wodMapBalanceText(wodMpMapBalanceFromMeta(meta)).line) + '">' +
+                wodMapBalanceText(wodMpMapBalanceFromMeta(meta)).short + ' (' + wodMapBalanceText(wodMpMapBalanceFromMeta(meta)).brief + ')</span>' +
             '<br><strong>AI seats</strong> ' + botN +
             '<br><strong>Victory</strong> ' + wodMpEscapeHtml(meta.victoryLabel || '') +
             '<br><strong>Fog of war</strong> ' + (meta.fogOfWar ? 'On' : 'Off') +
@@ -3920,6 +3993,7 @@ function wodMpBuildLobbyMetaFromSetup() {
         mapSize,
         mapShape,
         citiesPerPlayer,
+        mapBalance: !!((document.getElementById('mpCfgMapBalance') || document.getElementById('setupMapBalance') || { checked: true }).checked),
         aiCount: botCount,
         seatTypes: st,
         lobbyMapSeed: window.wodMpRoomMeta.lobbyMapSeed >>> 0,
@@ -3973,7 +4047,7 @@ function wodMpRenderLobbyList(lobbies) {
     el.innerHTML = lobbies.map(l => {
         let meta = l.meta || {};
         let inProgress = !!(l.inProgress || l.matchInProgress || meta.matchInProgress);
-        let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel, meta.fogOfWar ? 'Fog' : '', meta.aiCount ? wodAiDifficultyLabel(meta.aiDifficulty) + ' AI' : '']
+        let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel, meta.fogOfWar ? 'Fog' : '', meta.mapBalance === false ? 'Random map' : (meta.mapShapeLabel ? 'Balanced' : ''), meta.aiCount ? wodAiDifficultyLabel(meta.aiDifficulty) + ' AI' : '']
             .filter(Boolean).join(' · ');
         if(!detail) detail = inProgress ? 'Match in progress' : 'Host still configuring map';
         let name = wodMpEscapeHtml(l.name || 'Game');
@@ -4096,6 +4170,14 @@ function wodMpSyncHostMapDlgFromMeta() {
     if(size && meta.mapSize != null) size.value = String(meta.mapSize);
     if(shape && meta.mapShape) shape.value = meta.mapShape;
     if(towns) towns.value = String(wodMpCitiesPerPlayerFromMeta(meta));
+    const balance = document.getElementById('mpCfgMapBalance');
+    if(balance) balance.checked = wodMpMapBalanceFromMeta(meta);
+    wodSyncBalanceExplain('mpCfgMapBalance', 'mpCfgMapBalanceDetail');
+    // (toggled in the dialog: its word and line follow before Apply)
+    if(balance && !balance._wodExplainBound) {
+        balance._wodExplainBound = true;
+        balance.addEventListener('change', () => wodSyncBalanceExplain('mpCfgMapBalance', 'mpCfgMapBalanceDetail'));
+    }
 }
 function wodMpOpenHostMapDlg() {
     if(wodIsMapPreviewGenerating()) return;
@@ -4500,6 +4582,7 @@ function wodMpWireLobbyControls() {
         wodMpCopyFieldToField('mpCfgMapSize', 'setupMapSize');
         wodMpCopyFieldToField('mpCfgMapShape', 'setupMapShape');
         wodMpCopyFieldToField('mpCfgCitiesPerPlayer', 'setupCitiesPerPlayer');
+        wodMpCopyFieldToField('mpCfgMapBalance', 'setupMapBalance');
         if(!window.wodMpRoomMeta || typeof window.wodMpRoomMeta !== 'object') window.wodMpRoomMeta = {};
         window.wodMpRoomMeta.lobbyMapSeed = (Math.imul(Date.now() >>> 0, 2246822519) ^ (window.wodMpRoomMeta.lobbyMapSeed || 0) ^ 0x9e3779b9) >>> 0;
         if(!window.wodMpRoomMeta.lobbyMapSeed) window.wodMpRoomMeta.lobbyMapSeed = 0x6a09e667;
@@ -4846,6 +4929,11 @@ function wodMpOnMatchStart(ev) {
         if(pl.aiCount != null) gameData.aiCount = pl.aiCount;
         hidePanels();
         gameState = 'PLAYING';
+        // In the match from here on, while the host's map still loads: a line that drops now must rejoin
+        // the match (and send its ready again) like any other drop, not count as leaving the lobby. With
+        // the session saved only after the load, a guest cut mid-load sent its ready into a closed socket
+        // and was never heard from again, holding every player at "Waiting for all players".
+        wodMpSaveSession();
         pauseMenuBackgroundBattle();
         wodPrepareForNewMatch({ keepMp: true });
         wodClearLiveMapForNewMatch();
@@ -5130,6 +5218,7 @@ function wodMpWireNetworkEvents() {
     });
     addEventListener('wod-mp-RoomMeta', (ev) => {
         let m = ev.detail && ev.detail.meta;
+        if(m) m = wodMpKeepHostSettingsOverStaleMeta(m);
         if(m) {
             let prevFactionFp = wodMpLobbyFactionFingerprint(window.wodMpRoomMeta || {});
             let prevTerrainFp = wodMpLobbyTerrainFingerprint(window.wodMpRoomMeta || {});
@@ -5280,6 +5369,8 @@ function wodCaptureSoloPreviewSnapshot() {
             aiCount: gameData._mapGenLockedAiCount != null ? gameData._mapGenLockedAiCount : gameData.aiCount,
             mapGenSeed: gameData._mapGenSeed || 0,
             citiesPerPlayer: wodCitiesPerPlayerSetting(),
+            mapBalance: wodMapBalanceSetting(),
+            sym: wodSymSnapshotInfo(),
             hexList: hexList,
             cities: wodDeepClonePlain(gameData.cities || []),
             roads: wodDeepClonePlain(gameData.roads || []),
@@ -5302,6 +5393,8 @@ function wodRestoreSoloPreviewSnapshot(newRadius, requestedShape) {
     if(snap.aiCount != null && snap.aiCount !== gameData.aiCount) return false;
     // The preview was made for another towns-per-player setting: generate again.
     if(snap.citiesPerPlayer != null && snap.citiesPerPlayer !== wodCitiesPerPlayerSetting()) return false;
+    // ... or for the other Balance setting
+    if(snap.mapBalance != null && snap.mapBalance !== wodMapBalanceSetting()) return false;
 
     gameData.mapRadius = snap.mapRadius;
     gameData.mapShape = snap.mapShape;
@@ -5316,6 +5409,8 @@ function wodRestoreSoloPreviewSnapshot(newRadius, requestedShape) {
     gameData.roads = wodDeepClonePlain(snap.roads);
     gameData.entities = wodDeepClonePlain(snap.entities);
     wodRelinkSnapshotRoads();
+    // (balanced maps: the symmetry tables follow the rebuilt cells, so the starting armies are turned copies)
+    wodSymRestoreFromSnapshot(snap.sym);
 
     let startMoney = parseInt(document.getElementById('setupMoney').value, 10) || 10000;
     let owners = wodOwnersListActiveForProcgen();

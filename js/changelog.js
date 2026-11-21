@@ -2,6 +2,11 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-21T05:00:00Z",title:"Balanced and random maps, clearer game setup",items:[
+        "Balance now gives each side matching terrain and starting positions on generated maps. Turn it off for free-form terrain and random starts with equal land, cities and starting armies.",
+        "Skirmish setup shows the map preview, starting settings and a map summary in one view. The Balance switch explains what changes before you start.",
+        "Multiplayer lobbies use the same Balance options. Map previews update when the host changes settings, and older lobby updates no longer undo newer choices."
+    ]},
     {at:"2026-11-19T22:00:00Z",title:"A better game lobby, players who leave handed to the AI, construction you can see",items:[
         "The game lobby has four seats, players and AI together. Set how many players (you included) and how many AI with the counters: three players leave room for one AI, and choices that do not fit are greyed out. Changes take effect at once, each seat has a menu to make it a player seat, an AI or closed, and a friend who joins a full lobby takes a closed or AI seat.",
         "In multiplayer, a player who leaves the match hands their side to the computer while the battle goes on, so their towns, land and troops stay to be fought for. Only leaving a match of two, or when everyone left is on one side, ends it.",

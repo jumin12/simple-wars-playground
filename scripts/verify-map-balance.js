@@ -3,7 +3,9 @@
 //  - every player has the same land and towns (as before) and the same ground: for forest, hills, swamp and sand, each
 //    player's share of its open ground within three points of every other's, and of mountains within six;
 //  - no river runs between some players only: either no river cell lies between two players' land, or every pair of
-//    neighbouring players meets across one;
+//    neighbouring players meets across one, or (balanced maps, js/mapgen-sym.js) the map is symmetric and every player
+//    has the same river along its borders (four players: opposite players touch only at the centre, without a river,
+//    while side neighbours may share river borders, the same for everybody);
 //  - each player's nearest enemy town is no more than a third further than any other player's.
 // Fixtures first: a river between two of three players is filled; rivers between every pair of neighbours stay; a player with far more
 // forest than the others is evened out.
@@ -16,17 +18,17 @@ try{
  await page.evaluate(()=>{setGameSpeed(0,true);cancelAnimationFrame(animationFrameId);wodDismissChangelogPopup();
   window.measure=()=>{const owners=[...new Set(gameData.cities.map(c=>c.owner).filter(o=>o>0))].sort((a,b)=>a-b),set=new Set(owners),per={};
    for(const o of owners)per[o]={land:0,open:0,mountain:0,forest:0,hill:0,swamp:0,sand:0,towns:gameData.cities.filter(c=>c.owner===o).length};
-   const land=h=>h&&!isWaterHex(h)&&set.has(h.owner),key=(a,b)=>a<b?a+'-'+b:b+'-'+a,neighbours=new Set(),riverPairs=new Set();let border=0;
+   const land=h=>h&&!isWaterHex(h)&&set.has(h.owner),key=(a,b)=>a<b?a+'-'+b:b+'-'+a,neighbours=new Set(),riverPairs=new Set(),riverBy={};let border=0;
    for(const h of gameData.hexList){
     if(land(h)){const p=per[h.owner];if(h.type!=='urban'&&!h.cityId){p.land++;if(h.type==='mountain')p.mountain++;else{p.open++;if(p[h.type]!==undefined&&h.type!=='mountain')p[h.type]++;}}for(const n of getNeighborHexes(h))if(land(n)&&n.owner!==h.owner)neighbours.add(key(h.owner,n.owner));continue;}
     if(!h||!h._river||!isWaterHex(h)||isBridgeHex(h))continue;
     const near=new Set();for(const p of getHexesInRadius(h.q,h.r,2)){const n=wodHexAt(p.q,p.r);if(land(n))near.add(n.owner);}
-    if(near.size<2)continue;border++;const l=[...near];for(let i=0;i<l.length;i++)for(let j=i+1;j<l.length;j++){riverPairs.add(key(l[i],l[j]));neighbours.add(key(l[i],l[j]));}}
+    if(near.size<2)continue;border++;const l=[...near];for(const o of l)riverBy[o]=(riverBy[o]||0)+1;for(let i=0;i<l.length;i++)for(let j=i+1;j<l.length;j++){riverPairs.add(key(l[i],l[j]));neighbours.add(key(l[i],l[j]));}}
    const spread=a=>Math.max(...a)-Math.min(...a);
    const terrain=Math.max(...['forest','hill','swamp','sand'].map(k=>spread(owners.map(o=>per[o][k]/Math.max(1,per[o].open)*100))));
    const mountain=spread(owners.map(o=>per[o].mountain/Math.max(1,per[o].land)*100));
    const near=owners.map(o=>{let b=Infinity;for(const c of gameData.cities)if(c.owner===o)for(const e of gameData.cities)if(e.owner>0&&e.owner!==o)b=Math.min(b,Math.hypot(c.x-e.x,c.y-e.y));return b;});
-   return{owners:owners.length,towns:owners.map(o=>per[o].towns),terrain:Math.round(terrain*10)/10,mountain:Math.round(mountain*10)/10,riverBorder:border,riverFair:!border||[...neighbours].every(k=>riverPairs.has(k)),near:Math.round(Math.max(...near)/Math.min(...near)*100)/100};};
+   return{owners:owners.length,towns:owners.map(o=>per[o].towns),terrain:Math.round(terrain*10)/10,mountain:Math.round(mountain*10)/10,riverBorder:border,riverFair:!border||[...neighbours].every(k=>riverPairs.has(k))||(!!gameData._mapSym&&spread(owners.map(o=>riverBy[o]||0))<=Math.max(2,0.12*Math.max(...owners.map(o=>riverBy[o]||0)))),sym:gameData._mapSym?gameData._mapSym.spec.type+(gameData._mapSym.spec.n||''):'none',near:Math.round(Math.max(...near)/Math.min(...near)*100)/100};};
  });
  // fixtures: three players in thirds of a blank map (q<-6, -6..6, >6); a river along q=-6 (between 1 and 2 only), or also
  // along q=6 and across r=8 on the far side so all three pairs meet across water

@@ -22,7 +22,7 @@ function wodEnsureMapGenWorker() {
     if(!wodMapGenWorker && wodMapGenWorkers.length) wodMapGenWorker = wodMapGenWorkers[0];
     if(wodMapGenWorker || typeof Worker === 'undefined') return wodMapGenWorker;
     try {
-        wodMapGenWorker = new Worker('map-gen-worker.js?v=52e8877b7e');
+        wodMapGenWorker = new Worker('map-gen-worker.js?v=dfa8860cff');
     } catch(_) {
         wodMapGenWorker = null;
     }
@@ -32,7 +32,7 @@ function wodEnsureMapGenWorkerPool() {
     if(wodMapGenWorkers.length > 0 || typeof Worker === 'undefined') return wodMapGenWorkers;
     for(let i = 0; i < WOD_MAP_GEN_POOL; i++) {
         try {
-            wodMapGenWorkers.push(new Worker('map-gen-worker.js?v=52e8877b7e'));
+            wodMapGenWorkers.push(new Worker('map-gen-worker.js?v=dfa8860cff'));
         } catch(_) {}
     }
     if(!wodMapGenWorker && wodMapGenWorkers.length) wodMapGenWorker = wodMapGenWorkers[0];
@@ -74,7 +74,7 @@ function wodMapGenWorkerCall(w, payload) {
 function wodGenerateTerrainCellsInWorker(payload) {
     return new Promise(function(resolve, reject) {
         let pool = wodEnsureMapGenWorkerPool();
-        if(pool.length >= 2 && payload && payload.rows != null) {
+        if(pool.length >= 2 && payload && payload.rows != null && !payload.sym && !payload.landBand) {
             let rows = payload.rows | 0;
             let bands = pool.length;
             let jobs = [];

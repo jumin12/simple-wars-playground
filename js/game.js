@@ -738,6 +738,41 @@ function syncSetupVictoryDetail() {
     let mode = sel.value === 'annihilation' ? 'annihilation' : 'domination';
     span.textContent = WOD_VICTORY_MODE_DETAIL_TEXT[mode] || '';
 }
+/** What the Balance setting does, as the player reads it (skirmish setup, the lobby's map dialog and its summary). */
+const WOD_MAP_BALANCE_TEXT = {
+    on: { short: 'Balanced', brief: 'mirrored map, the same ground for everyone', line: 'Mirrored map: everyone gets the same land, cities, terrain and starting army, and the same distances to their rivals. The terrain still looks natural.' },
+    off: { short: 'Random', brief: 'random starts, equal land and cities', line: 'Free-form map with random starting spots. Land, cities and starting armies are still equal, but the ground around each player differs.' }
+};
+function wodMapBalanceText(on) { return WOD_MAP_BALANCE_TEXT[on ? 'on' : 'off']; }
+/** A switch's On/Off word beside it. */
+function wodSyncSwitchState(input) {
+    let st = input && input.closest('.wod-switch-wrap') && input.closest('.wod-switch-wrap').querySelector('.wod-switch-state');
+    if(st) st.textContent = input.checked ? 'On' : 'Off';
+}
+/** A Balance switch's On/Off word and the line under it saying what that means. */
+function wodSyncBalanceExplain(inputId, detailId) {
+    let el = document.getElementById(inputId);
+    if(!el) return;
+    wodSyncSwitchState(el);
+    let d = document.getElementById(detailId);
+    if(d) d.textContent = wodMapBalanceText(el.checked).line;
+}
+/** Skirmish setup: the switches' words, the Balance line, your colour swatch and the one-line map summary. */
+function wodSyncSetupMapUi() {
+    wodSyncBalanceExplain('setupMapBalance', 'setupMapBalanceDetail');
+    wodSyncSwitchState(document.getElementById('setupFogOfWar'));
+    let col = document.getElementById('setupPlayerColor'), sw = document.getElementById('setupPlayerColorSwatch');
+    if(col && sw) sw.style.background = col.value;
+    let sum = document.getElementById('setupMapSummary');
+    if(!sum) return;
+    const text = id => { let e = document.getElementById(id); return e && e.options && e.selectedIndex >= 0 ? e.options[e.selectedIndex].text : ''; };
+    let players = 1 + (typeof wodCurrentSetupAiCount === 'function' ? wodCurrentSetupAiCount() : 1);
+    if(gameData.loadedCustomMap) { sum.textContent = 'Loaded map · ' + players + ' players'; return; }
+    let towns = parseInt((document.getElementById('setupCitiesPerPlayer') || {}).value, 10) || 2;
+    let bal = document.getElementById('setupMapBalance');
+    sum.textContent = [text('setupMapSize') + ' ' + text('setupMapShape').toLowerCase(), players + ' players',
+        towns + (towns === 1 ? ' city' : ' cities') + ' each', wodMapBalanceText(!bal || bal.checked).short].join(' · ');
+}
 function initSetupPanelBindings() {
     let shapeSel = document.getElementById('setupMapShape');
     let sizeSel = document.getElementById('setupMapSize');
@@ -749,6 +784,12 @@ function initSetupPanelBindings() {
         // Player count and towns per player only move borders and towns: keep the terrain.
         let politicsOnly = !!(ev && ev.target && (ev.target.id === 'setupAI' || ev.target.id === 'setupCitiesPerPlayer') && typeof wodCanRegeneratePoliticsOnly === 'function' && wodCanRegeneratePoliticsOnly());
         previewMap(politicsOnly ? { politicsOnly: true } : {});
+    }
+    // Balance changes the terrain itself (symmetric or free-form): always a new map.
+    let balanceBox = document.getElementById('setupMapBalance');
+    if(balanceBox && !balanceBox._wodBound) {
+        balanceBox._wodBound = true;
+        balanceBox.addEventListener('change', regenerateSetupPreview);
     }
     let citiesSel = document.getElementById('setupCitiesPerPlayer');
     if(citiesSel && !citiesSel._wodBound) {
@@ -795,6 +836,16 @@ function initSetupPanelBindings() {
         periodSel.addEventListener('change', () => wodApplyGamePeriod(periodSel.value, { saveProfile: true }));
     }
     wodSyncAllPeriodSelects();
+    // (any setting changed: the switches' words, the Balance line, the swatch and the summary follow)
+    let panel = document.getElementById('setupPanel');
+    if(panel && !panel._wodSummaryBound) {
+        panel._wodSummaryBound = true;
+        panel.addEventListener('change', () => {
+            wodSyncSetupMapUi();
+            if(typeof wodSyncSetupOpponentsBrief === 'function') wodSyncSetupOpponentsBrief();
+        });
+    }
+    wodSyncSetupMapUi();
 }
 function showPanel(panelId, opts) {
     opts = opts || {};
@@ -889,7 +940,7 @@ function showPanel(panelId, opts) {
             wodArmMapPreviewSpinner('mapPreview');
             gameData._soloPreviewGenerating = true;
             wodRefreshMapPreviewGeneratingUi();
-            void generateMap()
+            void wodAwaitOtherMapGen().then(() => (gameData._soloPreviewEpoch || 0) === previewEpoch ? generateMap() : null)
                 .then(() => {
                     if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                     previewLoadedMap();
@@ -1484,6 +1535,8 @@ function previewLoadedMap(canvasOrId) {
     if(typeof canvasOrId === 'string') prevCanvas = document.getElementById(canvasOrId);
     if(!prevCanvas) prevCanvas = document.getElementById('mapPreview');
     if(!prevCanvas) return;
+    // (the summary under the skirmish preview says what this map is: a new one, or one loaded from the library)
+    if(prevCanvas.id === 'mapPreview' && typeof wodSyncSetupMapUi === 'function') wodSyncSetupMapUi();
 
     let rect = prevCanvas.getBoundingClientRect();
     let w = Math.max(80, Math.floor(rect.width) || 320);
@@ -1577,6 +1630,7 @@ function previewMap(opts) {
             }
             let ok = true;
             try {
+                await wodAwaitOtherMapGen();
                 let prevSz = document.getElementById('setupMapSize');
                 wodApplyMapSizePreset(prevSz ? prevSz.value : 60);
                 wodEndMapGenAiLock();
@@ -2375,6 +2429,14 @@ function wodRunInitialBootToMenu() {
         }
     })();
 }
+/** Wait while another map is being made on the shared map state (the boot warm-up, the menu battlefield, a
+ *  preview). generateMap returns at once while one runs, and its caller would take the half-made map as its own. */
+async function wodAwaitOtherMapGen(opts) {
+    // (the menu battlefield waits only for a generation in progress: boot runs it, and it marks itself busy)
+    const busy = () => opts && opts.mapGenOnly ? gameData._mapGenInProgress
+        : window._wodBootBusy || window._wodMenuBootstrapBusy || gameData._mapGenInProgress;
+    for(let guard = 0; busy() && guard < 1200; guard++) await new Promise(r => setTimeout(r, 50));
+}
 async function bootstrapMenuBackgroundBattle() {
     pauseMenuBackgroundBattle();
     if(window._wodMenuBootstrapBusy) return;
@@ -2407,6 +2469,8 @@ async function bootstrapMenuBackgroundBattle() {
     let shapeEl = document.getElementById('setupMapShape');
     if(shapeEl) shapeEl.value = 'island';
     gameData.aiCount = 1;
+    // (a preview still being made would turn this generateMap into a no-op on its half-made map)
+    await wodAwaitOtherMapGen({ mapGenOnly: true });
     await generateMap();
     remapAttractBattleFromPlayerSlotsToAis();
     gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: false, cityNames: true, structures: true, units: true };
@@ -2420,6 +2484,13 @@ async function bootstrapMenuBackgroundBattle() {
     wodCenterCameraOnLandmassForMenu();
     kickstartMenuAttractSim();
     captureMenuBattleLive();
+    // A panel opened (or a match started) while this battlefield was being made: it stays seeded and paused, as
+    // opening the panel would have left a running one. Started anyway it ran behind the panel, simulating and drawing
+    // on the same map state a lobby or skirmish preview was being generated into.
+    if(gameState !== 'MENU' || !wodIsMainMenuAttractEligible()) {
+        pauseMenuBackgroundBattle();
+        return;
+    }
     draw();
     menuDemoLastTime = performance.now();
     if(menuDemoAnimId) cancelAnimationFrame(menuDemoAnimId);

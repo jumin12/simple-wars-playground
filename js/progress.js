@@ -1,7 +1,61 @@
 // Player profile, lifetime stats, achievements and rewards.
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
-function wodSampleMapGenProfile(mapShape, factionCount) {
+function wodSampleMapGenProfile(mapShape, factionCount, symSpec, randomStarts) {
+    const gp = wodSampleFreeMapGenProfile(mapShape, factionCount);
+    if(symSpec) return wodBalancedMapGenProfile(gp, mapShape, symSpec);
+    if(randomStarts && mapShape === 'archipelago') {
+        // Balance off: the same kind of island group, laid out freely (map-gen-worker.js archipelagoLayoutFree)
+        gp.archSeed = (Math.floor(Math.random() * 4294967296) >>> 0) || 1;
+        gp.archTowns = wodCitiesPerPlayerSetting();
+        gp.archPlayers = Math.max(1, randomStarts.players | 0);
+        gp.mountElevThresh = 0.9;
+    }
+    return gp;
+}
+/** Shape settings for a balanced map (js/mapgen-sym.js): round outlines when three or four players
+ *  need the same reach in every direction, continents that are copies of each other, and the seed of
+ *  the island group on archipelago maps. */
+function wodBalancedMapGenProfile(gp, mapShape, symSpec) {
+    const n = symSpec.type === 'cont4' ? 4 : symSpec.n | 0;
+    if(n >= 3 && symSpec.type === 'rot') { gp.stretchX = 1; gp.stretchY = 1; }
+    if(mapShape === 'ring' && n >= 3) {
+        // a round ring fits the grid's height only: it has to be broader to hold the same land
+        gp.ringOuterFrac = 0.9 + Math.random() * 0.06;
+        gp.ringInnerFrac = 0.16 + Math.random() * 0.2;
+    }
+    if(mapShape === 'island' && n >= 3) {
+        // a long or wide outline cannot be the same for three or four players
+        if(gp.islandMode === 'elongated' || gp.islandMode === 'wide') gp.islandMode = Math.random() < 0.5 ? 'blob' : 'crescent';
+    }
+    if(mapShape === 'archipelago') {
+        gp.archSeed = (Math.floor(Math.random() * 4294967296) >>> 0) || 1;
+        gp.archTowns = wodCitiesPerPlayerSetting();
+        gp.mountElevThresh = 0.9;
+    }
+    if(mapShape === 'continents') {
+        if(symSpec.type === 'rot' && symSpec.n === 3) {
+            // three continents, one per player (the free profile's two lobes are not used)
+            gp.contThree = true; gp.contShear = 0; gp.contChanX = 0; gp.contChanWave = 0;
+            gp.contLobeR = 0.5 + Math.random() * 0.04;
+            gp.contLobeRx = 0.44 + Math.random() * 0.05;
+            gp.contLobeRy = 0.4 + Math.random() * 0.05;
+            gp.contChanHalf = Math.max(0.13, 6 / ((Math.floor((gameData.mapRadius || 60) * 0.8) - 6) * 0.95));
+        } else if(symSpec.type === 'cont4') {
+            // one continent per half of the map, both the same, each turned about its own centre
+            gp.contShear = 0; gp.contChanX = 0; gp.contChanWave = 0;
+            gp.contLobeRx = 0.4 + Math.random() * 0.05;
+            gp.contLobeRy = 0.8 + Math.random() * 0.08;
+            gp.contChanHalf = Math.max(0.085, 4.6 / ((gameData.mapRadius || 60) * 0.95));
+        } else {
+            // two continents of one player each: the free profile already makes them equal and
+            // half a turn apart; only the channel must run through the centre
+            gp.contChanX = 0;
+        }
+    }
+    return gp;
+}
+function wodSampleFreeMapGenProfile(mapShape, factionCount) {
     if(mapShape === 'ring') {
         let bio = wodRollIslandStyleBiomeFields('ring');
         let inner = 0.12 + Math.random() * 0.16;
@@ -207,14 +261,11 @@ function wodThinMountainsForProfile(gp, seedOffset) {
             : Math.max(2, Math.min(12, Math.floor(landM.length * 0.04)));
     take = Math.min(take, Math.max(0, landM.length - reserve));
     if(take <= 0) return;
-    landM.sort((a, b) => {
-        let ar = fbm(a.x * 0.017 + seedOffset + 8800, a.y * 0.017 + seedOffset + 8800, 3);
-        let br = fbm(b.x * 0.017 + seedOffset + 8800, b.y * 0.017 + seedOffset + 8800, 3);
-        return ar - br;
-    });
+    const order = new Map(landM.map(h => [h, wodGenFbm(h.x, h.y, 0.017, seedOffset + 8800, 3)]));
+    landM.sort((a, b) => order.get(a) - order.get(b));
     for(let i = 0; i < take; i++) {
         let h = landM[i];
-        let wet = fbm(h.x * 0.009 + seedOffset + 9200, h.y * 0.009 + seedOffset + 9200, 3);
+        let wet = wodGenFbm(h.x, h.y, 0.009, seedOffset + 9200, 3);
         if((gp.biomeAccent === 'marsh' || gp.biomeAccent === 'forest') && wet > 0.48 && wet < 0.78 && Math.random() < 0.35) {
             h.type = wet > 0.62 ? 'swamp' : 'grass';
         } else if(gp.biomeAccent === 'marsh' && wet > 0.55 && Math.random() < 0.25) {

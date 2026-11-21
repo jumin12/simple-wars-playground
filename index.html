@@ -8,7 +8,7 @@
     <link rel="icon" type="image/png" href="branding/favicon-32.png" sizes="32x32">
     <link rel="icon" type="image/png" href="branding/favicon-192.png" sizes="192x192">
     <link rel="apple-touch-icon" href="branding/favicon-192.png">
-    <link rel="stylesheet" href="css/game.css?v=994fcd2aea">
+    <link rel="stylesheet" href="css/game.css?v=15dcfa4f50">
     <link rel="stylesheet" href="css/tutorial.css?v=5ca0a9c516">
 <link rel="stylesheet" href="commerce-shop.css?v=778f1f8dcd">
     <link rel="stylesheet" href="campaign-ui.css?v=251b7a8796">
@@ -224,109 +224,144 @@
         </div>
 
         <div id="setupPanel" class="overlay hidden">
-            <div class="panel">
-                <h2>Game Setup</h2>
-                <div class="setup-row">
-                    <label>Map Size:</label>
-                    <select id="setupMapSize">
-                        <option value="40">Small</option>
-                        <option value="60" selected>Medium</option>
-                        <option value="80">Large</option>
-                    </select>
-                </div>
-                <div class="setup-row">
-                    <label>Map Shape:</label>
-                    <select id="setupMapShape">
-                        <option value="island" selected>Island</option>
-                        <option value="rectangle">Rectangle</option>
-                        <option value="ring">Ring (lake)</option>
-                        <option value="archipelago">Archipelago</option>
-                        <option value="forest">Forest</option>
-                        <option value="mountain">Mountain</option>
-                        <option value="desert">Desert</option>
-                        <option value="continents">Continents</option>
-                    </select>
-                </div>
-                <div class="setup-row">
-                    <label>Cities per player:</label>
-                    <select id="setupCitiesPerPlayer" title="Starting towns for every player on generated maps">
-                        <option value="1">1</option>
-                        <option value="2" selected>2</option>
-                        <option value="3">3</option>
-                        <option value="4">4</option>
-                    </select>
-                </div>
-                <div class="setup-row">
-                    <label>AI Opponents:</label>
-                    <select id="setupAI">
-                        <option value="1" selected>1</option>
-                        <option value="2">2</option>
-                        <option value="3">3</option>
-                    </select>
-                </div>
-                <div class="setup-row">
-                    <label for="setupAiDifficulty">AI difficulty:</label>
-                    <select id="setupAiDifficulty" title="How strong the computer opponents play. No level gives them extra money, troops or vision.">
-                        <option value="easy">Easy</option>
-                        <option value="normal" selected>Normal</option>
-                        <option value="hard">Hard</option>
-                    </select>
-                </div>
-                <p class="setup-victory-hint" id="setupAiDifficultyDetail"></p>
-                <div class="setup-row">
-                    <label>Victory:</label>
-                    <select id="setupVictoryMode" title="How a solo vs AI match ends">
-                        <option value="domination" selected>Domination</option>
-                        <option value="annihilation">Annihilation</option>
-                    </select>
-                </div>
-                <p class="setup-victory-hint" id="setupVictoryModeDetail"></p>
-                <div id="setupOpponentsBrief" class="setup-victory-hint" aria-live="polite"></div>
-                <div class="setup-row">
-                    <label>Fog of war:</label>
-                    <input type="checkbox" id="setupFogOfWar" title="Hide enemy units and shroud map outside your vision">
-                </div>
-                <div class="setup-row hidden" id="setupGamePeriodRow">
-                    <label>Time period:</label>
-                    <select id="setupGamePeriod" title="Themed unit names and buildings for this match">
-                        <option value="modern" selected>Modern</option>
-                    </select>
-                </div>
-                <div class="setup-row">
-                    <label>Starting Money:</label>
-                    <input type="number" id="setupMoney" value="10000" step="250">
-                </div>
-                <div class="setup-row" id="setupPlayerColorRow">
-                    <label>Your faction color:</label>
-                    <select id="setupPlayerColor">
-                        <option value="#2ecc71" selected>Green</option>
-                        <option value="#3498db">Blue</option>
-                        <option value="#e74c3c">Red</option>
-                        <option value="#9b59b6">Purple</option>
-                        <option value="#e67e22">Orange</option>
-                        <option value="#f1c40f">Yellow</option>
-                        <option value="#1abc9c">Teal</option>
-                        <option value="#ecf0f1">Light gray</option>
-                    </select>
-                </div>
-                <div class="setup-row">
-                    <button type="button" class="build-btn" id="setupBtnGenerateNew" onclick="previewMap()">Generate New</button>
-                    <button type="button" class="wod-editor-btn" id="setupBtnShopMaps" onclick="wodOpenSetupShopMapPicker()" disabled title="Unlock missions in the Shop first" style="display:none">Shop Mission</button>
-                    <button type="button" class="wod-editor-btn" id="setupBtnSaveMap" onclick="wodPromptSaveMapToLibrary()">Save Map</button>
-                    <button type="button" class="wod-editor-btn" id="setupBtnLoadMap" onclick="showPanel('mapLibrary', { libContext: 'setup' })">Load Map</button>
-                </div>
-                <div class="wod-preview-shell">
-                    <canvas id="mapPreview"></canvas>
-                    <div id="mapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
-                        <div class="wod-load-spinner" aria-hidden="true"></div>
-                        <span>Generating map…</span>
+            <div class="panel wod-setup-panel">
+                <header class="wod-setup-head">
+                    <h2>Game Setup</h2>
+                    <p class="wod-setup-sub">Skirmish against the computer</p>
+                </header>
+                <div class="wod-setup-body">
+                    <div class="wod-setup-col wod-setup-col--map">
+                        <section class="wod-setup-mapview" aria-label="Map preview">
+                            <div class="wod-preview-shell">
+                                <canvas id="mapPreview"></canvas>
+                                <div id="mapPreviewBusy" class="wod-preview-busy hidden" aria-hidden="true">
+                                    <div class="wod-load-spinner" aria-hidden="true"></div>
+                                    <span>Generating map…</span>
+                                </div>
+                            </div>
+                            <p class="wod-setup-mapsum" id="setupMapSummary" aria-live="polite"></p>
+                            <div class="wod-setup-maptools">
+                                <button type="button" class="build-btn" id="setupBtnGenerateNew" onclick="previewMap()" title="Make a new map with these settings">Generate New</button>
+                                <button type="button" class="wod-editor-btn" id="setupBtnLoadMap" onclick="showPanel('mapLibrary', { libContext: 'setup' })" title="Play a map from your library">Load Map</button>
+                                <button type="button" class="wod-editor-btn" id="setupBtnSaveMap" onclick="wodPromptSaveMapToLibrary()" title="Keep this map in your library">Save Map</button>
+                                <button type="button" class="wod-editor-btn" id="setupBtnShopMaps" onclick="wodOpenSetupShopMapPicker()" disabled title="Unlock missions in the Shop first" style="display:none">Shop Mission</button>
+                            </div>
+                        </section>
+                        <fieldset class="wod-setup-group wod-setup-group--rules">
+                            <legend>Rules</legend>
+                            <div class="setup-row">
+                                <label for="setupVictoryMode">Victory</label>
+                                <select id="setupVictoryMode" title="How a solo vs AI match ends">
+                                    <option value="domination" selected>Domination</option>
+                                    <option value="annihilation">Annihilation</option>
+                                </select>
+                            </div>
+                            <p class="wod-setup-hint" id="setupVictoryModeDetail"></p>
+                            <div class="setup-row">
+                                <label for="setupMoney">Starting money</label>
+                                <input type="number" id="setupMoney" value="10000" step="250" min="0">
+                            </div>
+                            <div class="setup-row">
+                                <label for="setupFogOfWar">Fog of war</label>
+                                <span class="wod-switch-wrap">
+                                    <span class="wod-switch-state" id="setupFogOfWarState" aria-hidden="true">Off</span>
+                                    <input type="checkbox" class="wod-switch" id="setupFogOfWar" role="switch" title="Hide enemy units and shroud map outside your vision">
+                                </span>
+                            </div>
+                            <div class="setup-row hidden" id="setupGamePeriodRow">
+                                <label for="setupGamePeriod">Time period</label>
+                                <select id="setupGamePeriod" title="Themed unit names and buildings for this match">
+                                    <option value="modern" selected>Modern</option>
+                                </select>
+                            </div>
+                        </fieldset>
+                    </div>
+                    <div class="wod-setup-col wod-setup-col--opts">
+                        <fieldset class="wod-setup-group wod-setup-group--map">
+                            <legend>Map</legend>
+                            <div class="setup-row">
+                                <label for="setupMapShape">Shape</label>
+                                <select id="setupMapShape">
+                                    <option value="island" selected>Island</option>
+                                    <option value="rectangle">Rectangle</option>
+                                    <option value="ring">Ring (lake)</option>
+                                    <option value="archipelago">Archipelago</option>
+                                    <option value="forest">Forest</option>
+                                    <option value="mountain">Mountain</option>
+                                    <option value="desert">Desert</option>
+                                    <option value="continents">Continents</option>
+                                </select>
+                            </div>
+                            <div class="setup-row">
+                                <label for="setupMapSize">Size</label>
+                                <select id="setupMapSize">
+                                    <option value="40">Small</option>
+                                    <option value="60" selected>Medium</option>
+                                    <option value="80">Large</option>
+                                </select>
+                            </div>
+                            <div class="setup-row">
+                                <label for="setupCitiesPerPlayer">Cities per player</label>
+                                <select id="setupCitiesPerPlayer" title="Starting cities for every player on generated maps">
+                                    <option value="1">1</option>
+                                    <option value="2" selected>2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                </select>
+                            </div>
+                            <div class="setup-row">
+                                <label for="setupMapBalance">Balance</label>
+                                <span class="wod-switch-wrap">
+                                    <span class="wod-switch-state" id="setupMapBalanceState" aria-hidden="true">On</span>
+                                    <input type="checkbox" class="wod-switch" id="setupMapBalance" checked role="switch" aria-describedby="setupMapBalanceDetail">
+                                </span>
+                            </div>
+                            <p class="wod-setup-hint" id="setupMapBalanceDetail"></p>
+                        </fieldset>
+                        <fieldset class="wod-setup-group wod-setup-group--players">
+                            <legend>Players</legend>
+                            <div class="setup-row" id="setupPlayerColorRow">
+                                <label for="setupPlayerColor">Your colour</label>
+                                <span class="wod-setup-colorpick">
+                                    <span class="wod-setup-swatch" id="setupPlayerColorSwatch" aria-hidden="true"></span>
+                                    <select id="setupPlayerColor">
+                                        <option value="#2ecc71" selected>Green</option>
+                                        <option value="#3498db">Blue</option>
+                                        <option value="#e74c3c">Red</option>
+                                        <option value="#9b59b6">Purple</option>
+                                        <option value="#e67e22">Orange</option>
+                                        <option value="#f1c40f">Yellow</option>
+                                        <option value="#1abc9c">Teal</option>
+                                        <option value="#ecf0f1">Light gray</option>
+                                    </select>
+                                </span>
+                            </div>
+                            <div class="setup-row">
+                                <label for="setupAI">AI opponents</label>
+                                <select id="setupAI">
+                                    <option value="1" selected>1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                </select>
+                            </div>
+                            <div class="setup-row">
+                                <label for="setupAiDifficulty">AI difficulty</label>
+                                <select id="setupAiDifficulty" title="How strong the computer opponents play. No level gives them extra money, troops or vision.">
+                                    <option value="easy">Easy</option>
+                                    <option value="normal" selected>Normal</option>
+                                    <option value="hard">Hard</option>
+                                </select>
+                            </div>
+                            <p class="wod-setup-hint" id="setupAiDifficultyDetail"></p>
+                            <div id="setupOpponentsBrief" class="wod-setup-roster" aria-live="polite"></div>
+                        </fieldset>
                     </div>
                 </div>
-                <div class="wod-setup-actions">
-                    <button class="menu-btn" id="setupBtnStartAi" onclick="startGame('ai')">Start Game</button>
-                    <button class="menu-btn" id="setupBtnMpReturn" type="button" style="display:none" onclick="wodMpFinishSetupFromHost()">Return to lobby</button>
-                    <button class="menu-btn" id="setupBtnBack" onclick="wodBackFromSkirmishSetup()">Back</button>
-                </div>
+                <footer class="wod-setup-actions">
+                    <button class="menu-btn wod-setup-back" id="setupBtnBack" onclick="wodBackFromSkirmishSetup()">Back</button>
+                    <button class="menu-btn wod-setup-start" id="setupBtnStartAi" onclick="startGame('ai')">Start Game</button>
+                    <button class="menu-btn wod-setup-start" id="setupBtnMpReturn" type="button" style="display:none" onclick="wodMpFinishSetupFromHost()">Return to lobby</button>
+                </footer>
             </div>
         </div>
 
@@ -536,7 +571,7 @@
         <div id="mpHostMapDlg" class="mp-host-dlg hidden" aria-hidden="true">
             <div class="panel">
                 <h3>Map</h3>
-                <p style="font-size:14px;opacity:0.9;margin-top:0">Size and land shape apply to the next generated battle. Preview updates the hidden setup preview (used when you launch).</p>
+                <p class="mp-host-dlg-lead">Apply makes a new map for the lobby; every player sees it before the match starts.</p>
                 <div class="setup-row"><label>Map size</label>
                     <select id="mpCfgMapSize" style="flex:1">
                         <option value="40">Small</option>
@@ -564,6 +599,13 @@
                         <option value="4">4</option>
                     </select>
                 </div>
+                <div class="setup-row"><label for="mpCfgMapBalance">Balance</label>
+                    <span class="wod-switch-wrap">
+                        <span class="wod-switch-state" id="mpCfgMapBalanceState" aria-hidden="true">On</span>
+                        <input type="checkbox" class="wod-switch" id="mpCfgMapBalance" checked role="switch" aria-describedby="mpCfgMapBalanceDetail">
+                    </span>
+                </div>
+                <p class="wod-setup-hint" id="mpCfgMapBalanceDetail"></p>
                 <div class="mp-host-dlg-actions">
                     <button type="button" class="menu-btn" id="mpCfgMapApply">Apply &amp; regenerate preview</button>
                     <button type="button" class="wod-editor-btn" id="mpCfgMapSaveMap">Save Map</button>
@@ -2293,25 +2335,26 @@
     </script>
 <script src="js/errors.js?v=1af9822b8c"></script>
 <script src="store-catalog.js?v=1661861e87"></script>
-<script src="map-gen-worker.js?v=52e8877b7e"></script>
+<script src="map-gen-worker.js?v=dfa8860cff"></script>
 <script src="premium-unit-art.js?v=393b6dd3cc"></script>
 <script src="board-art.js?v=64db5bd0ee"></script>
 <script src="hd-relief.js?v=6e7d9a7607"></script>
 <link rel="stylesheet" href="board-art.css?v=8c5d282b68">
 <script src="commerce-client.js?v=3abda566ec"></script>
-<script src="multiplayer-client.js?v=05dd9a6934"></script>
+<script src="multiplayer-client.js?v=217303f644"></script>
     <script src="ancient-civ-emblems.js?v=5c7b33e5a1"></script>
     <script src="music-player.js?v=4102f187e8"></script>
     <script src="battle-audio.js?v=a7356989e2"></script>
     <script src="campaign-ui.js?v=1654292d2f"></script>
     <!-- Game script, in load order: functions and constants per area first, js/main.js (startup) last. -->
-    <script src="js/changelog.js?v=e0d6de24b7"></script>
-    <script src="js/core.js?v=53d150266d"></script>
+    <script src="js/changelog.js?v=8b2a3ea1b4"></script>
+    <script src="js/core.js?v=2c3ca5f433"></script>
     <script src="js/world.js?v=52a84e459d"></script>
     <script src="js/units.js?v=8c65df6900"></script>
     <script src="js/eras.js?v=2f1ffc7cd0"></script>
-    <script src="js/mapgen.js?v=a50a02636a"></script>
-    <script src="js/workers.js?v=d33125d3fe"></script>
+    <script src="js/mapgen-sym.js?v=8dabd40e18"></script>
+    <script src="js/mapgen.js?v=b2a9410155"></script>
+    <script src="js/workers.js?v=4638b1904c"></script>
     <script src="js/territory.js?v=a50d7a4f79"></script>
     <script src="js/movement.js?v=0603251843"></script>
     <script src="js/orders.js?v=bff08f1a57"></script>
@@ -2331,7 +2374,7 @@
     <script src="js/ai/navy.js?v=dc3823a6f8"></script>
     <script src="js/ai/medical.js?v=2dc0fce4c2"></script>
     <script src="js/ai/field-command.js?v=f9215e975c"></script>
-    <script src="js/render-terrain.js?v=d2e4d3921f"></script>
+    <script src="js/render-terrain.js?v=762d948d2c"></script>
     <script src="js/render-units.js?v=af7d589cb2"></script>
     <script src="js/render-orders.js?v=dd9c691ac4"></script>
     <script src="js/render.js?v=603e5145ca"></script>
@@ -2339,13 +2382,13 @@
     <script src="js/report.js?v=b17f8c088e"></script>
     <script src="js/input.js?v=5f17b591d7"></script>
     <script src="js/saves.js?v=b764a76290"></script>
-    <script src="js/progress.js?v=bc5789d8e8"></script>
+    <script src="js/progress.js?v=222591aa90"></script>
     <script src="js/shop.js?v=829f5f5666"></script>
     <script src="js/audio.js?v=e47e9ed124"></script>
     <script src="js/missions.js?v=b05444b202"></script>
     <script src="js/campaign.js?v=722ff2e896"></script>
-    <script src="js/multiplayer.js?v=577a4178b7"></script>
-    <script src="js/game.js?v=f2ef68293d"></script>
+    <script src="js/multiplayer.js?v=0911470d98"></script>
+    <script src="js/game.js?v=db4689d260"></script>
     <script src="js/dev.js?v=8099438850"></script>
     <script src="js/tutorial.js?v=16960c5e71"></script>
     <script src="js/main.js?v=8189f0bc29"></script>

@@ -604,9 +604,15 @@ function wodSyncSetupOpponentsBrief() {
     let n = 1;
     let sel = document.getElementById('setupAI');
     if(sel) n = Math.max(1, Math.min(3, parseInt(sel.value, 10) || 1));
-    let lines = ['<p class="setup-opp-line">You: <strong>' + (wodMatchUsesWorldLore()?WOD_WORLD.player.name:'Player') + '</strong></p>'];
-    for(let i=0;i<n;i++)lines.push('<p class="setup-opp-line">Opponent '+(i+1)+': <strong>'+wodSideLabel(2+i)+'</strong></p>');
-    el.innerHTML = lines.join('');
+    // A roster: who plays, in their colours, with the computer's difficulty beside each opponent.
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+    const colourOf = o => { let c = typeof factionColors !== 'undefined' && factionColors[o]; return /^#[0-9A-Fa-f]{6}$/.test(c || '') ? c : '#888888'; };
+    let you = document.getElementById('setupPlayerColor'), youColour = you && /^#[0-9A-Fa-f]{6}$/.test(you.value) ? you.value : colourOf(1);
+    let level = (WOD_AI_DIFFICULTIES[wodSetupAiDifficulty()] || WOD_AI_DIFFICULTIES.normal).label;
+    const line = (colour, name, tag, cls) => '<li class="wod-roster-line' + (cls ? ' ' + cls : '') + '"><span class="wod-roster-dot" style="background:' + colour + '"></span><span class="wod-roster-name">' + esc(name) + '</span><span class="wod-roster-tag">' + esc(tag) + '</span></li>';
+    let lines = [line(youColour, wodMatchUsesWorldLore() ? WOD_WORLD.player.name : 'Player', 'You', 'wod-roster-line--you')];
+    for(let i = 0; i < n; i++) lines.push(line(colourOf(2 + i), wodSideLabel(2 + i), 'Opponent ' + (i + 1) + ' · ' + level));
+    el.innerHTML = '<ul class="wod-roster" aria-label="Players in this match">' + lines.join('') + '</ul>';
 }
 const WOD_FACTION_COLOR_OPTIONS = [
     { value: '#2ecc71', label: 'Green' },

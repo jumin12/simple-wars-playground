@@ -31,7 +31,15 @@
     lastSeq: 0,
     online: 0,
     lobbies: [],
+    // Room settings: every update the host sends is numbered (hostMetaRev, kept by the relay and carried in its
+    // broadcasts), so the host can tell a broadcast made before its latest update reached the relay.
+    lobbyMetaRev: 0,
+    lobbyMetaSent: null,
   };
+  function noteLobbyMetaRev(meta) {
+    const r = meta && meta.hostMetaRev | 0;
+    if (r > api.lobbyMetaRev) api.lobbyMetaRev = r;
+  }
 
   let joinResolve = null;
   let joinReject = null;
@@ -195,6 +203,9 @@
           api.isHost = !!msg.isHost;
           api.max = msg.max || 6;
           api.connected = true;
+          // (the relay's settings at join time are the room's: nothing sent before counts any more)
+          api.lobbyMetaSent = null;
+          noteLobbyMetaRev(msg.meta);
           if (api.isHost) {
             joinResolve = null;
             joinReject = null;
@@ -215,6 +226,7 @@
           emit('Joined', { ...api, lobbyName: msg.lobbyName, players: msg.players, meta: msg.meta || {} });
           break;
         case 'room_meta':
+          noteLobbyMetaRev(msg.meta);
           emit('RoomMeta', { meta: msg.meta || {} });
           break;
         case 'lobby_preview':
@@ -306,6 +318,8 @@
           emit('RemoteCmd', { fromSlot: msg.fromSlot, cmd: msg.cmd });
           break;
         case 'error':
+          // (an update the relay refused never comes back: the room's next broadcast is the truth again)
+          api.lobbyMetaSent = null;
           clearJoinHandlers(Object.assign(new Error(msg.msg||'Error'),{code:msg.reason||''}));
           clearCreateHandlers(new Error(msg.msg || 'Error'));
           emit('Error', { msg: msg.msg });
@@ -441,7 +455,11 @@
       });
     },
     sendLobbyMeta(meta) {
-      send({ t: 'lobby_meta', meta: meta || {} });
+      const m = { ...(meta || {}) };
+      api.lobbyMetaRev = (api.lobbyMetaRev | 0) + 1;
+      m.hostMetaRev = api.lobbyMetaRev;
+      api.lobbyMetaSent = m;
+      send({ t: 'lobby_meta', meta: m });
     },
     sendLobbyPreview(fp, payload) {
       send({ t: 'lobby_preview', fp: fp != null ? String(fp) : '', payload: payload || {} });
