@@ -940,7 +940,8 @@ function showPanel(panelId, opts) {
             wodArmMapPreviewSpinner('mapPreview');
             gameData._soloPreviewGenerating = true;
             wodRefreshMapPreviewGeneratingUi();
-            void wodAwaitOtherMapGen().then(() => (gameData._soloPreviewEpoch || 0) === previewEpoch ? generateMap() : null)
+            const otherGen = window._wodBootBusy || window._wodMenuBootstrapBusy || gameData._mapGenInProgress;
+            void (otherGen ? wodAwaitOtherMapGen().then(() => (gameData._soloPreviewEpoch || 0) === previewEpoch ? generateMap() : null) : generateMap())
                 .then(() => {
                     if((gameData._soloPreviewEpoch || 0) !== previewEpoch) return;
                     previewLoadedMap();
@@ -2469,8 +2470,12 @@ async function bootstrapMenuBackgroundBattle() {
     let shapeEl = document.getElementById('setupMapShape');
     if(shapeEl) shapeEl.value = 'island';
     gameData.aiCount = 1;
-    // (a preview still being made would turn this generateMap into a no-op on its half-made map)
-    await wodAwaitOtherMapGen({ mapGenOnly: true });
+    // (a preview still being made would turn this generateMap into a no-op on its half-made map: wait for it, and
+    // only then, since even an empty wait lets other code run first; a match begun meanwhile keeps its own map)
+    if(gameData._mapGenInProgress) {
+        await wodAwaitOtherMapGen({ mapGenOnly: true });
+        if(gameState !== 'MENU') return;
+    }
     await generateMap();
     remapAttractBattleFromPlayerSlotsToAis();
     gameData.layers = { terrain: true, diplomacy: true, territory: false, cities: false, cityNames: true, structures: true, units: true };

@@ -2901,6 +2901,7 @@ let _wodMpLobbyPreviewLastFp = '';
 let _wodMpLobbyPreviewLastTerrainFp = '';
 let _wodMpLobbyPreviewLastFactionFp = '';
 let _wodMpGuestLobbyPreviewFp = '';
+let _wodMpGuestLobbyPreviewPayload = null;
 let _wodMpCommittedLobbyMap = null;
 function wodMpDeepSnapshotMapState() {
     return {
@@ -3087,6 +3088,22 @@ function wodMpGuestPreviewMatchesMeta(meta) {
     if(!_wodMpGuestLobbyPreviewFp || !meta) return false;
     return _wodMpGuestLobbyPreviewFp === wodMpLobbyPreviewFingerprint(meta);
 }
+/** Previews are drawn at their size on screen. After the window is resized the one in view is drawn again
+ *  (until then the canvas keeps its picture, scaled without stretching by object-fit). */
+function wodRepaintVisibleMapPreviews() {
+    if(gameState === 'PLAYING') return;
+    const shown = id => { const el = document.getElementById(id); return !!(el && el.getClientRects().length && el.getBoundingClientRect().width > 0); };
+    if(shown('mapPreview') && !wodIsMapPreviewGenerating() && gameData.hexList && gameData.hexList.length && !wodLiveMapLooksLikeMenuAttract())
+        previewLoadedMap('mapPreview');
+    if(shown('mpLobbyMapPreview') && window.wodMpRoomMeta) {
+        if(wodMpIsLobbyPreviewHost()) { if(!_wodMpLobbyPreviewBusy) wodMpTryPaintLobbyPreviewCanvas(window.wodMpRoomMeta); }
+        else if(_wodMpGuestLobbyPreviewPayload) { _wodMpGuestLobbyPreviewFp = ''; wodMpPaintSyncedLobbyPreview(_wodMpGuestLobbyPreviewPayload); }
+    }
+}
+if(typeof window !== 'undefined' && window.addEventListener) {
+    let _wodPreviewResizeTimer = 0;
+    window.addEventListener('resize', () => { clearTimeout(_wodPreviewResizeTimer); _wodPreviewResizeTimer = setTimeout(() => { try { wodRepaintVisibleMapPreviews(); } catch(e) {} }, 200); });
+}
 function wodMpPaintSyncedLobbyPreview(payload) {
     if(!payload || !payload.hexList || !payload.hexList.length) return false;
     if(gameState === 'PLAYING') return false;
@@ -3098,6 +3115,7 @@ function wodMpPaintSyncedLobbyPreview(payload) {
         if(!wodMpApplyLobbyPreviewSnapshot(payload)) return false;
         previewLoadedMap('mpLobbyMapPreview');
         _wodMpGuestLobbyPreviewFp = fp;
+        _wodMpGuestLobbyPreviewPayload = payload;
         wodDisarmMapPreviewSpinner('mpLobbyMapPreview');
         return true;
     } finally {
@@ -3469,7 +3487,7 @@ function wodMpClearLobbyPreviewDedupeState() {
     _wodMpLobbyPreviewLastFp = '';
     _wodMpLobbyPreviewLastTerrainFp = '';
     _wodMpLobbyPreviewLastFactionFp = '';
-    _wodMpGuestLobbyPreviewFp = '';
+    _wodMpGuestLobbyPreviewFp = ''; _wodMpGuestLobbyPreviewPayload = null;
     _wodMpCommittedLobbyMap = null;
     wodRefreshMapPreviewGeneratingUi();
 }
@@ -3863,20 +3881,23 @@ function wodMpRenderGameLobbyScreen() {
         for(let i = 0; i < WOD_MP_MAX_PLAYERS; i++) {
             if(st[i] === 'bot') botN++;
         }
-        readout.innerHTML =
-            '<strong>Map</strong> ' + wodMpEscapeHtml(msL || '—') + ' · ' + wodMpEscapeHtml(shL || '') +
-            '<br><strong>Cities per player</strong> ' + wodMpCitiesPerPlayerFromMeta(meta) +
-            '<br><strong>Balance</strong> <span title="' + wodMpEscapeHtml(wodMapBalanceText(wodMpMapBalanceFromMeta(meta)).line) + '">' +
-                wodMapBalanceText(wodMpMapBalanceFromMeta(meta)).short + ' (' + wodMapBalanceText(wodMpMapBalanceFromMeta(meta)).brief + ')</span>' +
-            '<br><strong>AI seats</strong> ' + botN +
-            '<br><strong>Victory</strong> ' + wodMpEscapeHtml(meta.victoryLabel || '') +
-            '<br><strong>Fog of war</strong> ' + (meta.fogOfWar ? 'On' : 'Off') +
-            '<br><strong>AI difficulty</strong> ' + wodAiDifficultyLabel(meta.aiDifficulty) +
-            '<br><strong>Starting $</strong> $' + (meta.money != null ? (meta.money | 0) : '—') +
-            '<br><strong>Time period</strong> ' + wodMpEscapeHtml(meta.gamePeriodLabel || meta.gamePeriod || 'Modern');
+        // (a grid of facts; Balance spans the grid with what it means)
+        const bal = wodMapBalanceText(wodMpMapBalanceFromMeta(meta));
+        const fact = (k, v, cls) => '<div class="mp-gl-fact' + (cls ? ' ' + cls : '') + '"><dt>' + k + '</dt><dd>' + v + '</dd></div>';
+        readout.innerHTML = '<dl class="mp-gl-facts">' +
+            fact('Map', wodMpEscapeHtml((msL || '—') + (shL ? ' · ' + shL : ''))) +
+            fact('Cities per player', String(wodMpCitiesPerPlayerFromMeta(meta))) +
+            fact('Victory', wodMpEscapeHtml(meta.victoryLabel || '')) +
+            fact('Fog of war', meta.fogOfWar ? 'On' : 'Off') +
+            fact('AI seats', botN + (botN ? ' · ' + wodAiDifficultyLabel(meta.aiDifficulty) : '')) +
+            fact('Starting money', '$' + (meta.money != null ? (meta.money | 0).toLocaleString('en-US') : '—')) +
+            fact('Time period', wodMpEscapeHtml(meta.gamePeriodLabel || meta.gamePeriod || 'Modern')) +
+            fact('Balance', '<strong>' + bal.short + '</strong> <span class="mp-gl-fact-note">' + wodMpEscapeHtml(bal.line) + '</span>', 'mp-gl-fact--wide') +
+            '</dl>';
     }
     let hostAct = document.getElementById('mpGlHostActions');
     let guestW = document.getElementById('mpGlGuestWait');
+    document.querySelectorAll('#mpGameLobbyScreen .mp-gl-host-only').forEach(el => { el.hidden = !api.isHost; });
     if(api.isHost) {
         if(hostAct) hostAct.classList.add('visible');
         if(guestW) guestW.style.display = 'none';
@@ -4069,14 +4090,14 @@ function wodMpRenderLobbyList(lobbies) {
         else
             joinPart = '<span style="font-size:12px;opacity:0.65">In progress</span>';
         return '<div class="' + rowClass + '">' +
-            '<div style="min-width:0;flex:1">' +
-            '<div style="font-weight:700">' + name + (l.locked ? ' <span title="Password required">🔒</span>' : '') + '</div>' +
-            '<div style="font-size:12px;opacity:0.85">' + wodMpEscapeHtml(detail) + '</div>' +
+            '<div class="mp-lobby-info">' +
+            '<div class="mp-lobby-name">' + name + (l.locked ? ' <span class="mp-lobby-lock" title="Password required">🔒</span>' : '') + '</div>' +
+            '<div class="mp-lobby-detail">' + wodMpEscapeHtml(detail) + '</div>' +
             status +
-            '<div style="font-size:12px;opacity:0.75">' + (inProgress
+            '<div class="mp-lobby-count">' + (inProgress
                 ? ((l.disconnectedCount | 0) + ' disconnected · ' + (l.players | 0) + ' online')
                 : ((l.players | 0) + ' / ' + (l.max || WOD_MP_MAX_PLAYERS) + ' players')) + '</div>' +
-            '</div>' + joinPart + '</div>';
+            '</div><div class="mp-lobby-action">' + joinPart + '</div></div>';
     }).join('');
     el.querySelectorAll('.mp-join-btn, .mp-rejoin-btn').forEach(btn => {
         btn.onclick = () => wodMpJoinLobbyFromList(btn.getAttribute('data-id'), btn.getAttribute('data-locked') === '1', {
@@ -4261,7 +4282,7 @@ function wodMpInitGlobalHandlers() {
         }
         if(gameState === 'PLAYING' && gameData.mp && gameData.mp.enabled) return;
         window.wodMpRoomMeta = {};
-        _wodMpGuestLobbyPreviewFp = '';
+        _wodMpGuestLobbyPreviewFp = ''; _wodMpGuestLobbyPreviewPayload = null;
         if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
         wodMpRefreshMpPanelState();
         wodMpRenderLobbyList([]);
@@ -5237,7 +5258,7 @@ function wodMpWireNetworkEvents() {
                     });
                 });
             } else if(!wodMpGuestPreviewMatchesMeta(m)) {
-                _wodMpGuestLobbyPreviewFp = '';
+                _wodMpGuestLobbyPreviewFp = ''; _wodMpGuestLobbyPreviewPayload = null;
                 wodArmMapPreviewSpinner('mpLobbyMapPreview');
                 wodMpRenderGuestLobbyPreviewPlaceholder();
             }
@@ -5283,7 +5304,7 @@ function wodMpWireNetworkEvents() {
     addEventListener('wod-mp-RejoinMatch', (ev) => wodMpOnRejoinMatch(ev));
     addEventListener('wod-mp-LeftLobby', () => {
         window.wodMpRoomMeta = {};
-        _wodMpGuestLobbyPreviewFp = '';
+        _wodMpGuestLobbyPreviewFp = ''; _wodMpGuestLobbyPreviewPayload = null;
         if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
         wodMpRefreshMpPanelState();
         if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.socketOpen)

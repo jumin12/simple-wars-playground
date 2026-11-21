@@ -251,7 +251,8 @@ async function match(spec, idx) {
     const orders = await Promise.all([host, ...guests].map(orderTroops));
     res.orders = orders.map(o => o.me + ':' + o.uids.length);
     for(const o of orders) assert(o.uids.length > 0, tag + ': player ' + o.me + ' has troops to order ' + JSON.stringify(o));
-    res.simSeconds = await waitSim(host, (spec.watch || 14000) / 1000);
+    // (an AI with no land route to its enemy, on continents or islands, needs longer to get going)
+    res.simSeconds = await waitSim(host, (spec.watch || (spec.bots && /continents|archipelago/.test(spec.shape) ? 45000 : 14000)) / 1000);
     assert(res.simSeconds, tag + ': the match clock advances on the host');
     const p1 = await Promise.all([host, ...guests].map(c => positions(c.page)));
     const st1 = await Promise.all([host, ...guests].map(playing));

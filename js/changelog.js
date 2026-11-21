@@ -2,6 +2,11 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-21T15:00:00Z",title:"Clearer skirmish setup and multiplayer lobbies",items:[
+        "Skirmish setup and multiplayer screens now share a layout that adapts to smaller windows and phones.",
+        "The multiplayer lobby groups map and match rules beside the preview. Guests see the same settings and map, with editing controls available to the host.",
+        "Map previews redraw when the window changes size. Starting a skirmish keeps its map separate from the main menu battle."
+    ]},
     {at:"2026-11-21T05:00:00Z",title:"Balanced and random maps, clearer game setup",items:[
         "Balance now gives each side matching terrain and starting positions on generated maps. Turn it off for free-form terrain and random starts with equal land, cities and starting armies.",
         "Skirmish setup shows the map preview, starting settings and a map summary in one view. The Balance switch explains what changes before you start.",
