@@ -75,7 +75,7 @@ function wodAiIsSuspended(owner) {
 // for one seat. What each level changes is listed with WOD_AI_DIFFICULTIES (js/core.js); none of it is a bonus.
 function wodAiDifficultyId(owner) {
     const d = owner != null ? wodOpsTune(owner).diff : undefined;
-    if(typeof d === 'number' && !isNaN(d)) return ['easy','normal','hard'][Math.max(0, Math.min(2, d | 0))];
+    if(typeof d === 'number' && !isNaN(d)) return ['easy','normal','hard','brutal'][Math.max(0, Math.min(3, d | 0))];
     // (the battle behind the main menu always plays Normal, whatever the last match was set to)
     if(gameData.menuAttractMode) return 'normal';
     return WOD_AI_DIFFICULTIES[gameData.aiDifficulty] ? gameData.aiDifficulty : 'normal';

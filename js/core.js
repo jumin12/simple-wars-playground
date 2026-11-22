@@ -560,16 +560,56 @@ const WOD_AI_COMMANDERS = {
     highland:{name:'General Ridge',style:'Highland',doctrine:'hunter',line:'Uses mountaineers, high ground and passes, and falls on armies in the open.',defense:.34,flank:.24,ratio:1.25,motor:.1,mountain:.38,armor:.1,land:.6,traits:['Terrain specialist','Hunter']},
     blitz:{name:'General Hale',style:'Blitz',doctrine:'blitz',line:'Strikes early and often, before the enemy has dug in.',defense:.22,flank:.26,ratio:1.05,motor:.3,mountain:.12,armor:.2,land:.45,traits:['Aggressive','Early pressure']}
 };
-// Computer difficulty. None of these give the computer money, manpower, vision or rules the player does not
-// have: they change how quickly it reacts, how big an edge it wants before attacking, how much of its bag of
-// tricks it uses and how long it remembers what it saw under fog. Read through wodAiDifficulty (js/ai/brain.js).
+// Computer difficulty: how quickly it reacts, how big an edge it wants before attacking, how much of its bag of tricks
+// it uses and how long it trusts what it saw under fog; and, on Hard and Brutal only, more money and manpower from its
+// towns (bonus: Hard 10%, Brutal 25%; js/sim.js wodStepAiEconomy). Every description and difficulty picker says so.
+// Easy and Normal get the same economy as the player. None sees through fog. Read through wodAiDifficulty (js/ai/brain.js).
+// (Hard had no bonus until 2026-11-22: head to head it was no stronger than Normal, 183-201 towns over 96 lab matches.)
 const WOD_AI_DIFFICULTIES = {
     easy:{label:'Easy',line:'Recruits slowly, reacts slowly, attacks only with a big advantage and keeps to plain attacks: no flanking wings, supply cuts, ambushes or baiting. Forgets what it saw under fog quickly.',
         pulseEvery:2,edge:.3,tricks:false,memory:20,buyEvery:5000,movesPerFrame:1,recruitGap:12000},
-    normal:{label:'Normal',line:'The full computer opponent.',pulseEvery:1,edge:0,tricks:true,memory:45,buyEvery:2500,movesPerFrame:3},
-    hard:{label:'Hard',line:'Reacts faster, accepts thinner odds and remembers what it saw under fog for longer. Same rules and income as you.',
-        pulseEvery:1,pulseScale:.8,edge:-.06,tricks:true,memory:75,buyEvery:2000,movesPerFrame:5}
+    normal:{label:'Normal',line:'The full computer opponent, with the same rules, money and manpower as you.',pulseEvery:1,edge:0,tricks:true,memory:45,buyEvery:2500,movesPerFrame:3},
+    hard:{label:'Hard',line:'Reacts faster, accepts thinner odds and trusts what it saw under fog for longer. Its towns give it 10% more money and manpower than yours give you.',
+        pulseEvery:1,pulseScale:.8,edge:-.06,tricks:true,memory:75,buyEvery:2000,movesPerFrame:5,bonus:1.1},
+    brutal:{label:'Brutal',line:'Plays as Hard, but its towns give it 25% more money and manpower than yours give you. It still cannot see through fog.',
+        pulseEvery:1,pulseScale:.8,edge:-.06,tricks:true,memory:75,buyEvery:2000,movesPerFrame:5,bonus:1.25}
 };
+// The economy bonus of a level as players read it ('' for none), e.g. "+10% money and manpower".
+function wodAiDifficultyBonusText(id) {
+    const d = WOD_AI_DIFFICULTIES[id];
+    return d && d.bonus && d.bonus !== 1 ? '+' + Math.round((d.bonus - 1) * 100) + '% money and manpower' : '';
+}
+// The line under every difficulty picker (skirmish, the lobby's rules, the campaign's new war and the war in progress)
+// says what the chosen level does, its economy bonus included.
+const WOD_DIFFICULTY_PICKERS = [['setupAiDifficulty', 'setupAiDifficultyDetail'], ['mpCfgAiDifficulty', 'mpCfgAiDifficultyDetail'],
+    ['wodCampSetDifficulty', 'wodCampSetDifficultyDetail'], ['wodCampActiveDifficulty', 'wodCampActiveDifficultyDetail']];
+// The game has one AI difficulty (wodStoredAiDifficulty): skirmish, the missions and the campaign play at it, and each of
+// these pickers shows and sets it. (The lobby's picker is the room's own setting, which starts from it.)
+const WOD_SHARED_DIFFICULTY_PICKERS = ['setupAiDifficulty', 'wodCampSetDifficulty', 'wodCampActiveDifficulty'];
+function wodSyncSharedDifficultyPickers() {
+    // (each picker gets its own listener: a change event that does not bubble still counts)
+    for(const [p] of WOD_DIFFICULTY_PICKERS) {
+        const el = document.getElementById(p);
+        if(!el || el._wodDifficultyBound) continue;
+        el._wodDifficultyBound = true;
+        el.addEventListener('change', () => {
+            if(WOD_SHARED_DIFFICULTY_PICKERS.includes(p) && WOD_AI_DIFFICULTIES[el.value]) { wodStoreAiDifficulty(el.value); wodSyncSharedDifficultyPickers(); }
+            else wodSyncDifficultyDetails();
+        });
+    }
+    const id = wodStoredAiDifficulty();
+    for(const p of WOD_SHARED_DIFFICULTY_PICKERS) { const el = document.getElementById(p); if(el && el.value !== id) el.value = id; }
+    wodSyncDifficultyDetails();
+}
+function wodSyncDifficultyDetails() {
+    for(const [selId, hintId] of WOD_DIFFICULTY_PICKERS) {
+        const sel = document.getElementById(selId), hint = document.getElementById(hintId);
+        if(sel && hint) hint.textContent = (WOD_AI_DIFFICULTIES[sel.value] || WOD_AI_DIFFICULTIES.normal).line;
+    }
+}
+if(typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('DOMContentLoaded', () => wodSyncSharedDifficultyPickers());
+}
 // Skirmish setup: the AI difficulty is remembered between sessions. (Each opponent's commander is drawn at random
 // when the match starts and kept secret: see wodAiAssignCommanders.)
 const WOD_AI_DIFFICULTY_KEY = 'simplewarsAiDifficulty';
@@ -587,10 +627,12 @@ function wodSyncSetupAiDifficulty() {
     if(!sel) return;
     if(!sel._wodBound) {
         sel._wodBound = true;
-        sel.value = wodStoredAiDifficulty();
         sel.addEventListener('change', () => { wodStoreAiDifficulty(sel.value); wodSyncSetupAiDifficulty(); });
     }
+    sel.value = wodStoredAiDifficulty(); // (one setting for the whole game: it may have been changed in the campaign)
+    wodSyncSharedDifficultyPickers();
     if(hint) hint.textContent = (WOD_AI_DIFFICULTIES[sel.value] || WOD_AI_DIFFICULTIES.normal).line;
+    wodSyncDifficultyDetails();
 }
 // The difficulty chosen in skirmish setup (also used for authored missions).
 function wodSetupAiDifficulty() {

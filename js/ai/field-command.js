@@ -86,6 +86,19 @@
 // Ideas that lost when measured over 24-match sets have been taken out rather than kept behind switches:
 // spreading waiting troops over cover cells, pulling a beaten force all the way home, a wider marching column,
 // stricter forming up, and keeping the forward post on our own ground.
+// Tried on 2026-11-21 (lab h2h, 40-minute matches, four map shapes, fog half the time, two or three seed sets; also
+// against scripted opponents that spam tanks or bait a town every minute, sim/bench-player-tactics.sh), and not kept:
+// valuing his towns by factories, farms, harbours and nearby hospitals (-22 towns over 96 matches); the commander's
+// ratio, land, flank, armor and defense shaping the land war (-22, then -14); capping the answer to an enemy party
+// near our towns while an assault is on (lost 125-131 to the bait opponent, uncapped won 147-109); buying armour and
+// motor troops to answer his mix (-10 and -6 towns over 96 matches against this AI; the "tank spam" opponent it was
+// also tried against turned out never to have bought a tank, so that test was AI against AI too). And as a set, level at best:
+// firing positions judged by wodFrontlineSupplyTouch instead of "our ground within two cells", wrecking his unguarded
+// forts and hospitals, fire weighted toward units about to break, a scout under fog when most of his army is unseen,
+// assaults on towns waiting until most of the force has gathered (and twenty seconds after a beaten one), and the first
+// wing sent round his thinner side: -16 towns over 144 matches against this AI, and no better against the two scripted
+// opponents (bait +18 against +30 without them). A real tank spammer (sim/bridge.js: it saves for tanks and raises no
+// other land regiment while it has a factory) lost to this AI: 0 wins, 10 losses, 6 draws in 16 games of 40 minutes.
 'use strict';
 const WOD_OPS={T:{},seatT:null};
 

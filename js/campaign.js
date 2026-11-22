@@ -715,13 +715,11 @@ function wodRogueLoad() {
     return null;
 }
 // The campaign's AI difficulty (js/core.js WOD_AI_DIFFICULTIES). Campaigns begun before it existed play Normal.
+// The campaign plays at the game's one AI difficulty, the same as skirmish and the missions (wodStoredAiDifficulty).
+// Campaigns used to keep a level of their own; one saved that way is now played at the shared level.
 function wodCampaignAiDifficulty() {
-    const id = wodRogueLoad()?.settings?.aiDifficulty;
+    const id = wodStoredAiDifficulty();
     return WOD_AI_DIFFICULTIES[id] ? id : 'normal';
-}
-function wodCampaignChosenDifficulty() {
-    const sel = document.getElementById('wodCampSetDifficulty');
-    return sel && WOD_AI_DIFFICULTIES[sel.value] ? sel.value : wodStoredAiDifficulty();
 }
 function wodRogueSave() {
     if(!wodRogue) return;
@@ -754,7 +752,7 @@ function wodRogueBegin() {
             length: d.length,
             startPoints: startPts,
             gamePeriod: campPeriod,
-            aiDifficulty: wodCampaignChosenDifficulty()
+            // (no difficulty of its own: the game's one AI difficulty applies, wodCampaignAiDifficulty)
         },
         worldEnc: { W: world.W, H: world.H, cells: wodRogueEncodeCells(world.cells) },
         world: { nodes: world.nodes, edges: world.edges },
@@ -1192,15 +1190,13 @@ function wodRogueWirePanelOnce() {
         wodRogueInvalidateMapCache();
         wodRefreshCampaignPanel();
     });
-    // AI difficulty: chosen with the new war (remembered as the default for the next one) and changeable later.
-    let diffSetup = document.getElementById('wodCampSetDifficulty');
-    if(diffSetup) { diffSetup.value = wodStoredAiDifficulty(); diffSetup.addEventListener('change', () => wodStoreAiDifficulty(diffSetup.value)); }
+    // AI difficulty: the game's one setting, shown here as well (js/core.js wodSyncSharedDifficultyPickers keeps every
+    // picker of it in step). Changed during a war, it applies from the next battle.
+    wodSyncSharedDifficultyPickers();
     let diffActive = document.getElementById('wodCampActiveDifficulty');
     if(diffActive) diffActive.addEventListener('change', () => {
-        let c = wodRogueLoad();
-        if(!c || !WOD_AI_DIFFICULTIES[diffActive.value]) return;
-        c.settings = c.settings || {};c.settings.aiDifficulty = diffActive.value;wodRogueSave();
-        showNotification('AI difficulty: ' + wodAiDifficultyLabel(diffActive.value) + ' from the next battle.', 'info');
+        if(!WOD_AI_DIFFICULTIES[diffActive.value]) return;
+        showNotification('AI difficulty: ' + wodAiDifficultyLabel(diffActive.value) + ' from the next battle (for every mode).', 'info');
     });
     let lenSelect = document.getElementById('wodCampSetLen');
     if(lenSelect) lenSelect.addEventListener('change', () => {
@@ -1489,7 +1485,7 @@ function wodRefreshCampaignPanel() {
     let side = document.querySelector('#campaignPanel .wod-camp-side');
     let sideScroll = side ? side.scrollTop : 0;
     if(c.settings && c.settings.gamePeriod) wodSyncPeriodSelectEl(document.getElementById('wodCampActiveGamePeriod'), c.settings.gamePeriod);
-    {const sel=document.getElementById('wodCampActiveDifficulty');if(sel)sel.value=wodCampaignAiDifficulty();}
+    {const sel=document.getElementById('wodCampActiveDifficulty');if(sel)sel.value=wodCampaignAiDifficulty();if(typeof wodSyncDifficultyDetails==='function')wodSyncDifficultyDetails();}
     if(_wodRogueSelectedNode == null || (!wodRogueNodeTemplate(_wodRogueSelectedNode))) {
         let firstPlayable = null;
         if(wodRogueAdvanceBlocked(c)) {

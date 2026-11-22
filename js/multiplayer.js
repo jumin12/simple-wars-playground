@@ -3889,7 +3889,7 @@ function wodMpRenderGameLobbyScreen() {
             fact('Cities per player', String(wodMpCitiesPerPlayerFromMeta(meta))) +
             fact('Victory', wodMpEscapeHtml(meta.victoryLabel || '')) +
             fact('Fog of war', meta.fogOfWar ? 'On' : 'Off') +
-            fact('AI seats', botN + (botN ? ' · ' + wodAiDifficultyLabel(meta.aiDifficulty) : '')) +
+            fact('AI seats', botN + (botN ? ' · ' + wodAiDifficultyLabel(meta.aiDifficulty) + (wodAiDifficultyBonusText(meta.aiDifficulty) ? ' (' + wodAiDifficultyBonusText(meta.aiDifficulty) + ')' : '') : '')) +
             fact('Starting money', '$' + (meta.money != null ? (meta.money | 0).toLocaleString('en-US') : '—')) +
             fact('Time period', wodMpEscapeHtml(meta.gamePeriodLabel || meta.gamePeriod || 'Modern')) +
             fact('Balance', '<strong>' + bal.short + '</strong> <span class="mp-gl-fact-note">' + wodMpEscapeHtml(bal.line) + '</span>', 'mp-gl-fact--wide') +
@@ -4214,6 +4214,7 @@ function wodMpCloseHostMapDlg() {
 function wodMpOpenHostRulesDlg() {
     if(wodIsMapPreviewGenerating()) return;
     wodMpSyncMpCfgVictoryDetail();
+    if(typeof wodSyncSharedDifficultyPickers === 'function') wodSyncSharedDifficultyPickers();
     let d = document.getElementById('mpHostRulesDlg');
     if(d) { d.classList.remove('hidden'); d.setAttribute('aria-hidden', 'false'); }
     wodRefreshMapPreviewGeneratingUi();

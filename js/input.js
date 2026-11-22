@@ -216,7 +216,8 @@ function tryMobileMapOrderTap(clientX, clientY) {
     let units = getMovableSelectedUnits();
     if(units.length === 0) return;
     let worldPos = getWorldPosFromClientXY(clientX, clientY);
-    const target=pickInspectableUnitAt(worldPos);if(target&&wodIsHostileOwner(target.owner,wodLocalPlayerOwner())&&wodIssuePreferredTarget(target))return;
+    // (touch has no right-click: a tap on an enemy's counter attacks it; a tap beside one is an ordinary order)
+    const target=wodPickAttackTargetAt(worldPos);if(target&&wodIssuePreferredTarget(target))return;
     if(mobileOrderMode === 'formation') {
         issueLineFormationOrder(worldPos,worldPos);
         return;
@@ -248,6 +249,19 @@ function pickAnyUnitAt(worldPos) {
         if(dx * dx + dy * dy < r * r) return unit;
     }
     return null;
+}
+/** The enemy an attack order is meant for: the visible one whose counter the pointer is on (its inner part, so a
+ *  move to a spot beside an enemy stays a move). Null when the pointer is not on an enemy. */
+function wodPickAttackTargetAt(worldPos) {
+    const lo = wodLocalPlayerOwner();
+    let best = null, bestD = Infinity;
+    for(const u of gameData.entities) {
+        if(!u || u.hp <= 0 || u.type === 'convoy' || !wodIsHostileOwner(u.owner, lo) || !wodFogCanSeeUnit(u)) continue;
+        const x = u._drawX != null ? u._drawX : u.x, y = u._drawY != null ? u._drawY : u.y;
+        const d = Math.hypot(worldPos.x - x, worldPos.y - y);
+        if(d < (u.radius || 10) * 0.85 && d < bestD) { bestD = d; best = u; }
+    }
+    return best;
 }
 function pickInspectableUnitAt(worldPos) {
     function inRange(unit) {
@@ -715,7 +729,7 @@ function applyShiftWaypointMarch(opt) {
     if(!wps || wps.length === 0) return;
     wodSendOrApplyShiftWaypointPaths(units, wps, opt && opt.line ? opt.line : null);
 }
-function issueMoveOrder(worldPos) {
+function issueMoveOrder(worldPos, opts) {
     if(wodCampaignDeployActive()) {
         wodCampaignDeployUnitsAt(worldPos);
         return;
@@ -723,8 +737,9 @@ function issueMoveOrder(worldPos) {
     if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
     let units = getMovableSelectedUnits();
     if(units.length === 0) return;
-    const focus=pickInspectableUnitAt(worldPos);
-    if(focus&&wodIsHostileOwner(focus.owner,wodLocalPlayerOwner())&&focus.type!=='convoy'&&wodIssuePreferredTarget(focus))return;
+    // (an attack is its own order: a right-click on an enemy's counter. A move to a spot beside an enemy, or any left-click
+    // order, stays a move; it used to turn into an attack on whatever enemy was under the pointer)
+    if(opts&&opts.attack){const foe=wodPickAttackTargetAt(worldPos);if(foe&&wodIssuePreferredTarget(foe))return;}
     const hit=gameData.entities.find(t=>t.type==='transport'&&t.owner===wodLocalPlayerOwner()&&t.hp>0&&Math.hypot(t.x-worldPos.x,t.y-worldPos.y)<(t.radius||16)+10);
     if(hit&&!units.includes(hit)&&units.some(u=>!wodIsNavalUnit(u))){const u=units.find(u=>!wodIsNavalUnit(u));if(wodSendTransportCommand('boardTransport',u,hit)){showNotification('Boarding transport');return;}}
     const destination=getNearestHexToPoint(worldPos.x,worldPos.y);
@@ -810,7 +825,7 @@ function finishGameTouchEnd(touch) {
             }
             let pickSel = wodPickCityOrUnitForMapSelection(worldPos);
             if(pickSel.city) { wodReplaceMapSelection(pickSel.city); return; }
-            if(pickSel.unit) { if(getMovableSelectedUnits().length&&wodIsHostileOwner(pickSel.unit.owner,wodLocalPlayerOwner())&&wodIssuePreferredTarget(pickSel.unit))return;wodReplaceMapSelection(pickSel.unit); return; }
+            if(pickSel.unit) { if(getMovableSelectedUnits().length&&wodIsHostileOwner(pickSel.unit.owner,wodLocalPlayerOwner())){const foe=wodPickAttackTargetAt(worldPos);if(foe&&wodIssuePreferredTarget(foe))return;}wodReplaceMapSelection(pickSel.unit); return; }
             if(!wodIsMobileOrderModeArmed()) {
                 deselectAllSelection();
                 return;

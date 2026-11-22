@@ -2,6 +2,11 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-22T00:56:28Z",title:"Brutal AI and clearer attack orders",items:[
+        "AI difficulty is shared across skirmishes, missions, and the campaign. Multiplayer hosts can set a separate difficulty for their lobby’s AI.",
+        "Hard AI towns earn 10% more money and manpower. Brutal uses the same tactics with a 25% bonus. Easy and Normal have no economy bonus, and every difficulty follows fog of war.",
+        "Right-click an enemy counter to order an attack on desktop, or tap it on touch screens. Ordering a move beside an enemy keeps the destination you chose."
+    ]},
     {at:"2026-11-21T15:00:00Z",title:"Clearer skirmish setup and multiplayer lobbies",items:[
         "Skirmish setup and multiplayer screens now share a layout that adapts to smaller windows and phones.",
         "The multiplayer lobby groups map and match rules beside the preview. Guests see the same settings and map, with editing controls available to the host.",

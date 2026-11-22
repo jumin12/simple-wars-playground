@@ -202,6 +202,11 @@ function wodStepAiEconomy(dt, incomeTick, upkeepByOwner, netMoney) {
         }
     }
     for(let owner in aiCitiesByOwner) aiIncomeByOwner[owner] = getOwnerIncome(parseInt(owner, 10));
+    // Brutal (WOD_AI_DIFFICULTIES.brutal.bonus): a computer faction's towns pay it a quarter more money and manpower.
+    for(let owner in aiCitiesByOwner) {
+        const o = parseInt(owner, 10), bonus = typeof wodAiDifficulty === 'function' && !(typeof wodMpIsHumanOwner === 'function' && wodMpIsHumanOwner(o)) ? (wodAiDifficulty(o).bonus || 1) : 1;
+        if(bonus !== 1) { aiIncomeByOwner[owner] *= bonus; aiManpowerIncomeByOwner[owner] *= bonus; }
+    }
     for(let owner in aiCitiesByOwner) {
         if(gameData.aiMoneyByOwner[owner] === undefined) gameData.aiMoneyByOwner[owner] = 1000;
         if(gameData.aiManpowerByOwner[owner] === undefined) gameData.aiManpowerByOwner[owner] = 5000;

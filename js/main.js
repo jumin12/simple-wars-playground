@@ -273,7 +273,6 @@ canvas.addEventListener('mousedown', (e) => {
 
     if (e.button === 0) {
         const movers=getMovableSelectedUnits(),picked=pickInspectableUnitAt(worldPos);
-        if(!gameData.buildMode&&!e.shiftKey&&!e.altKey&&movers.length&&picked&&wodIsHostileOwner(picked.owner,wodLocalPlayerOwner())&&wodIssuePreferredTarget(picked)){e.preventDefault();return;}
         if(!gameData.buildMode&&movers.length&&(wodIsMobileOrderModeArmed()||(e.shiftKey&&(!picked||picked.owner!==wodLocalPlayerOwner())))) {
             leftMapOrderDrag={active:true,mode:e.shiftKey?'waypoint':mobileOrderMode,startWorld:{...worldPos}};
             formationDrag.active=true;formationDrag.startWorld={...worldPos};formationDrag.endWorld={...worldPos};
@@ -444,7 +443,9 @@ canvas.addEventListener('mouseup', (e) => {
         if(mobileOrderMode==='formation'||getMovableSelectedUnits().length > 1 && wodFormationGestureIsLine(formationDrag.startWorld,endWorld)) {
             issueLineFormationOrder(formationDrag.startWorld, formationDrag.endWorld);
         } else {
-            issueMoveOrder(formationDrag.endWorld);
+            // (a right-click that stayed put is how an attack is ordered: on an enemy it attacks, anywhere else it moves)
+            const s = formationDrag.startWorld, z = gameData.camera.zoom || 1;
+            issueMoveOrder(formationDrag.endWorld, { attack: Math.hypot(endWorld.x - s.x, endWorld.y - s.y) * z < 6 });
         }
         formationDrag.active = false;
     } else if ((e.button === 1 || e.button === 2) && isPanning) {

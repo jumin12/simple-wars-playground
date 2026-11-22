@@ -1,5 +1,5 @@
 'use strict';
-// AI difficulty: chosen in skirmish setup and the campaign, applied to the match and shown in the battle report;
+// AI difficulty: one setting for skirmish, missions and the campaign (set in skirmish setup or the campaign), applied to the match and shown in the battle report;
 // commanders are drawn at random and never shown; difficulty settings reach the AI; the AI treats every enemy
 // alike and pays the same upkeep penalty as a player.
 const H=require('./lib/harness');
@@ -26,7 +26,7 @@ fs.mkdirSync(OUT,{recursive:true});
             await page.selectOption('#setupAiDifficulty','hard');
             const chosen=await page.evaluate(()=>({stored:localStorage.getItem('simplewarsAiDifficulty'),hint:document.getElementById('setupAiDifficultyDetail').textContent,
                 brief:document.getElementById('setupOpponentsBrief').innerText,pickers:document.querySelectorAll('#setupOpponentsBrief select').length}));
-            assert.equal(chosen.stored,'hard');assert.match(chosen.hint,/Same rules and income as you/);assert.equal(chosen.pickers,0);
+            assert.equal(chosen.stored,'hard');assert.match(chosen.hint,/10% more money and manpower/);assert.equal(chosen.pickers,0);
             await page.screenshot({path:path.join(OUT,'setup-'+viewport.width+'.png')});
             await page.waitForFunction(()=>!wodIsMapPreviewGenerating(),null,{timeout:180000});
             await page.locator('#setupBtnStartAi').click();
@@ -69,19 +69,19 @@ fs.mkdirSync(OUT,{recursive:true});
         assert.equal(r.normal.tricks,true);
         assert.equal(r.foe3,true);assert.equal(r.foe1,true);assert.equal(r.friendSelf,false);
         assert(r.unpaid.after<r.unpaid.before&&r.unpaid.flash,'an AI faction out of money and in deficit loses strength to unpaid upkeep');
-        // campaign: chosen with the new war, saved with it, changeable in the campaign panel
+        // campaign: plays at the game's one AI difficulty; its pickers show and set that same setting, and skirmish follows
         results.campaign=await page.evaluate(async()=>{
             returnToMenu();await new Promise(r=>setTimeout(r,500));
             localStorage.removeItem(WOD_ROGUE_LS_KEY);wodRogue=null;showPanel('campaign');await new Promise(r=>setTimeout(r,300));
             const set=document.getElementById('wodCampSetDifficulty');set.value='easy';set.dispatchEvent(new Event('change'));
             document.getElementById('wodCampBeginBtn').click();await new Promise(r=>setTimeout(r,300));
-            const begun=wodRogueLoad().settings.aiDifficulty,shown=document.getElementById('wodCampActiveDifficulty').value;
+            const begun=wodStoredAiDifficulty(),shown=document.getElementById('wodCampActiveDifficulty').value;
             const active=document.getElementById('wodCampActiveDifficulty');active.value='hard';active.dispatchEvent(new Event('change'));
-            const changed=wodRogueLoad().settings.aiDifficulty,applied=wodCampaignAiDifficulty();
+            const changed=wodStoredAiDifficulty(),applied=wodCampaignAiDifficulty();wodSyncSetupAiDifficulty();const skirmish=document.getElementById('setupAiDifficulty').value;
             localStorage.removeItem(WOD_ROGUE_LS_KEY);wodRogue=null;
-            return {begun,shown,changed,applied};
+            return {begun,shown,changed,applied,skirmish};
         });
-        assert.deepEqual(results.campaign,{begun:'easy',shown:'easy',changed:'hard',applied:'hard'});
+        assert.deepEqual(results.campaign,{begun:'easy',shown:'easy',changed:'hard',applied:'hard',skirmish:'hard'});
         assert.deepEqual(errors.pageErrors,[],'no page errors');
         console.log(JSON.stringify(results,null,1));
         console.log('verify-ai-difficulty: PASS');
