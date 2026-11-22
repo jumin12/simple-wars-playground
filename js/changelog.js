@@ -2,6 +2,12 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-22T06:12:00Z",title:"Clan applications, parties and rankings",items:[
+        "Choose from 107 flags or a badge for your clan emblem. Search for private clans and apply to join. Clan leaders review applications, and clan members can invite friends.",
+        "A clan can have up to five pending applications, with three places for applications from search and two for invitations or the leader's code. After 60 days of leader inactivity, the highest-ranked member can take over.",
+        "Form a 2v2 party with a clanmate and queue together. The 1v1 queue remains available to solo players.",
+        "Separate leaderboards track Clan Wars results and members' results in regular multiplayer. Both include wins, defeats, kills and losses."
+    ]},
     {at:"2026-11-22T03:30:00Z",title:"Clans and clan wars",items:[
         "Found a clan with a name and an emblem, either a badge or a country flag. Public clans are listed for anyone to join; private clans are joined with an invite code that only the leader holds.",
         "Each clan has its own chat room, with notes when members join or leave and when the clan wins or loses a war.",

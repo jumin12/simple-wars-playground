@@ -46,6 +46,13 @@ function wodFlagNordic(bg, cross, inner) {
 function wodFlagJack() {
     return '<rect width="60" height="40" fill="#012169"/><path d="M0,0L60,40M60,0L0,40" stroke="#fff" stroke-width="8"/><path d="M0,0L60,40M60,0L0,40" stroke="#C8102E" stroke-width="2.7"/><path d="M30,0V40M0,20H60" stroke="#fff" stroke-width="13"/><path d="M30,0V40M0,20H60" stroke="#C8102E" stroke-width="7.5"/>';
 }
+// A crescent (a disc with a disc of the background cut out of it), as on several flags.
+function wodFlagCrescent(cx, cy, r, fill, bg, shift) { return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '"/><circle cx="' + (cx + (shift == null ? r * 0.28 : shift)) + '" cy="' + cy + '" r="' + (r * 0.8).toFixed(2) + '" fill="' + bg + '"/>'; }
+function wodFlagSun(cx, cy, r, fill, rays) {
+    let s = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + fill + '"/>';
+    for(let i = 0; i < (rays || 12); i++) { const a = i / (rays || 12) * Math.PI * 2, b = a + Math.PI / (rays || 12); s += '<polygon points="' + [[cx + Math.cos(a - .12) * r * 1.1, cy + Math.sin(a - .12) * r * 1.1], [cx + Math.cos(b) * r * 1.75, cy + Math.sin(b) * r * 1.75], [cx + Math.cos(a + Math.PI * 2 / (rays || 12) + .12) * r * 1.1, cy + Math.sin(a + Math.PI * 2 / (rays || 12) + .12) * r * 1.1]].map(p => p.map(n => n.toFixed(2)).join(',')).join(' ') + '" fill="' + fill + '"/>'; }
+    return s;
+}
 const wodFlagCanton = inner => '<svg x="0" y="0" width="30" height="20" viewBox="0 0 60 40">' + inner + '</svg>';
 const WOD_CLAN_FLAGS = {
     us: ['United States', () => { let s = ''; for(let i = 0; i < 13; i++) s += '<rect x="0" y="' + (i * 40 / 13).toFixed(2) + '" width="60" height="' + (40 / 13 + 0.05).toFixed(2) + '" fill="' + (i % 2 ? '#fff' : '#b22234') + '"/>'; s += '<rect width="25" height="21.5" fill="#3c3b6e"/>'; for(let r = 0; r < 5; r++) for(let c = 0; c < 6; c++) s += '<circle cx="' + (2.4 + c * 4 + (r % 2) * 2).toFixed(1) + '" cy="' + (2.6 + r * 4.1).toFixed(1) + '" r="0.9" fill="#fff"/>'; return s; }],
@@ -98,6 +105,63 @@ const WOD_CLAN_FLAGS = {
     ee: ['Estonia', () => wodFlagStripes('h', ['#0072ce', '#000', '#fff'])],
     lt: ['Lithuania', () => wodFlagStripes('h', ['#fdb913', '#006a44', '#c1272d'])],
     lv: ['Latvia', () => wodFlagStripes('h', ['#9e3039', '#fff', '#9e3039'], [2, 1, 2])],
+    eng: ['England', () => '<rect width="60" height="40" fill="#fff"/><rect x="26" y="0" width="8" height="40" fill="#ce1124"/><rect x="0" y="16" width="60" height="8" fill="#ce1124"/>'],
+    sct: ['Scotland', () => '<rect width="60" height="40" fill="#005eb8"/><path d="M0,0L60,40M60,0L0,40" stroke="#fff" stroke-width="7"/>'],
+    bg: ['Bulgaria', () => wodFlagStripes('h', ['#fff', '#00966e', '#d62612'])],
+    lu: ['Luxembourg', () => wodFlagStripes('h', ['#ed2939', '#fff', '#00a1de'])],
+    rs: ['Serbia', () => wodFlagStripes('h', ['#c6363c', '#0c4076', '#fff']) + '<path d="M17 11H27V22Q27 28 22 30Q17 28 17 22Z" fill="#c6363c" stroke="#fff" stroke-width="1.2"/><path d="M22 14V26M18.5 19H25.5" stroke="#fff" stroke-width="1.6"/>'],
+    hr: ['Croatia', () => { let c = ''; for(let r = 0; r < 4; r++) for(let k = 0; k < 4; k++) c += '<rect x="' + (24 + k * 3) + '" y="' + (12 + r * 3) + '" width="3" height="3" fill="' + ((r + k) % 2 ? '#fff' : '#ff0000') + '"/>'; return wodFlagStripes('h', ['#ff0000', '#fff', '#171796']) + '<path d="M24 12H36V24Q36 29 30 31Q24 29 24 24Z" fill="#fff"/>' + c + '<path d="M24 24Q24 29 30 31Q36 29 36 24Z" fill="#ff0000"/><path d="M24 24H36" stroke="#fff" stroke-width=".6"/>'; }],
+    si: ['Slovenia', () => wodFlagStripes('h', ['#fff', '#005da4', '#ed1c24']) + '<path d="M12 8H22V17Q22 22 17 24Q12 22 12 17Z" fill="#005da4" stroke="#ed1c24" stroke-width="1"/><path d="M13 18L15.5 14L17 16L18.5 13L21 18Z" fill="#fff"/>'],
+    sk: ['Slovakia', () => wodFlagStripes('h', ['#fff', '#0b4ea2', '#ee1c25']) + '<path d="M14 10H28V22Q28 29 21 32Q14 29 14 22Z" fill="#ee1c25" stroke="#fff" stroke-width="1.4"/><path d="M21 13V27M17.5 17H24.5M18.5 21H23.5" stroke="#fff" stroke-width="1.8"/><path d="M15.5 27Q21 22 26.5 27Q24 30.5 21 31.5Q18 30.5 15.5 27Z" fill="#0b4ea2"/>'],
+    al: ['Albania', () => '<rect width="60" height="40" fill="#e41e20"/><g transform="translate(10.8 -0.6) scale(.6)"><path d="M32 16C29.8 16 28.3 17.6 28.3 19.6L26.5 22.4L28.8 22.8L29.3 26.5L22 21.5H18L11.5 15.5L12.6 20.6L7.5 18.8L10.8 23.8H5.8L9.8 27.8L5.8 29.8L11.8 31.8L9.8 34.8L16.8 33.8L22 33L26.8 36L26 43.5L21.5 50L26.8 48L29 52.5L32 49L35 52.5L37.2 48L42.5 50L38 43.5L37.2 36L42 33L47.2 33.8L54.2 34.8L52.2 31.8L58.2 29.8L54.2 27.8L58.2 23.8H53.2L56.5 18.8L51.4 20.6L52.5 15.5L46 21.5H42L34.7 26.5L35.2 22.8L37.5 22.4L35.7 19.6C35.7 17.6 34.2 16 32 16Z" fill="#000"/></g>'],
+    ge: ['Georgia', () => '<rect width="60" height="40" fill="#fff"/><rect x="26" y="0" width="8" height="40" fill="#ff0000"/><rect x="0" y="16" width="60" height="8" fill="#ff0000"/>' + [[13, 8], [47, 8], [13, 32], [47, 32]].map(([x, y]) => '<rect x="' + (x - 1) + '" y="' + (y - 4) + '" width="2" height="8" fill="#ff0000"/><rect x="' + (x - 4) + '" y="' + (y - 1) + '" width="8" height="2" fill="#ff0000"/>').join('')],
+    am: ['Armenia', () => wodFlagStripes('h', ['#d90012', '#0033a0', '#f2a800'])],
+    az: ['Azerbaijan', () => wodFlagStripes('h', ['#0092bc', '#e4002b', '#00af66']) + wodFlagCrescent(28, 20, 5, '#fff', '#e4002b', 1.4) + wodFlagStar(34.5, 20, 2.6, '#fff', -90)],
+    md: ['Moldova', () => wodFlagStripes('v', ['#003da5', '#ffd200', '#cc092f']) + '<path d="M25 13H35V22Q35 27 30 29Q25 27 25 22Z" fill="#8c5a2b"/><path d="M25 21H35" stroke="#cc092f" stroke-width="2"/>'],
+    mt: ['Malta', () => wodFlagStripes('v', ['#fff', '#cf142b']) + '<rect x="4" y="4" width="8" height="8" fill="#ccc" stroke="#cf142b" stroke-width=".7"/><path d="M8 5V11M5 8H11" stroke="#999" stroke-width="1.6"/>'],
+    mc: ['Monaco', () => wodFlagStripes('h', ['#ce1126', '#fff'])],
+    eu: ['European Union', () => { let s = '<rect width="60" height="40" fill="#003399"/>'; for(let i = 0; i < 12; i++) { const a = i / 12 * Math.PI * 2; s += wodFlagStar(30 + Math.cos(a) * 11, 20 + Math.sin(a) * 11, 2, '#ffcc00'); } return s; }],
+    ve: ['Venezuela', () => { let s = wodFlagStripes('h', ['#ffcc00', '#00247d', '#cf142b']); for(let i = 0; i < 8; i++) { const a = Math.PI * (1.15 + i * 0.7 / 7); s += wodFlagStar(30 + Math.cos(a) * 9, 22 + Math.sin(a) * 9, 1.3, '#fff'); } return s; }],
+    ec: ['Ecuador', () => wodFlagStripes('h', ['#ffd100', '#0072ce', '#ef3340'], [2, 1, 1]) + '<ellipse cx="30" cy="20" rx="4.5" ry="5.5" fill="#6fb7e3" stroke="#8c5a2b" stroke-width="1"/>'],
+    bo: ['Bolivia', () => wodFlagStripes('h', ['#d52b1e', '#f9e300', '#007934'])],
+    py: ['Paraguay', () => wodFlagStripes('h', ['#d52b1e', '#fff', '#0038a8']) + '<circle cx="30" cy="20" r="4" fill="none" stroke="#0038a8" stroke-width="1"/>' + wodFlagStar(30, 20, 2, '#ffd100')],
+    uy: ['Uruguay', () => { let s = ''; for(let i = 0; i < 9; i++) s += '<rect x="0" y="' + (i * 40 / 9).toFixed(2) + '" width="60" height="' + (40 / 9 + 0.05).toFixed(2) + '" fill="' + (i % 2 ? '#0038a8' : '#fff') + '"/>'; return s + '<rect width="22.2" height="22.2" fill="#fff"/>' + wodFlagSun(11.1, 11.1, 4, '#fcd116', 12); }],
+    cu: ['Cuba', () => wodFlagStripes('h', ['#002a8f', '#fff', '#002a8f', '#fff', '#002a8f']) + '<polygon points="0,0 30,20 0,40" fill="#cf142b"/>' + wodFlagStar(10, 20, 5, '#fff')],
+    jm: ['Jamaica', () => '<rect width="60" height="40" fill="#009b3a"/><polygon points="0,0 30,20 0,40" fill="#000"/><polygon points="60,0 30,20 60,40" fill="#000"/><path d="M0,0L60,40M60,0L0,40" stroke="#fed100" stroke-width="5"/>'],
+    cr: ['Costa Rica', () => wodFlagStripes('h', ['#002b7f', '#fff', '#ce1126', '#fff', '#002b7f'], [1, 1, 2, 1, 1])],
+    pa: ['Panama', () => '<rect width="60" height="40" fill="#fff"/><rect x="30" y="0" width="30" height="20" fill="#da121a"/><rect x="0" y="20" width="30" height="20" fill="#072357"/>' + wodFlagStar(15, 10, 4, '#072357') + wodFlagStar(45, 30, 4, '#da121a')],
+    gt: ['Guatemala', () => wodFlagStripes('v', ['#4997d0', '#fff', '#4997d0']) + '<circle cx="30" cy="20" r="5" fill="none" stroke="#4b8a3e" stroke-width="1.6"/><circle cx="30" cy="20" r="2" fill="#4997d0"/>'],
+    do: ['Dominican Republic', () => '<rect width="60" height="40" fill="#fff"/><rect width="26" height="16" fill="#002d62"/><rect x="34" y="24" width="26" height="16" fill="#002d62"/><rect x="34" width="26" height="16" fill="#ce1126"/><rect y="24" width="26" height="16" fill="#ce1126"/><circle cx="30" cy="20" r="2.5" fill="#007a3d"/>'],
+    pr: ['Puerto Rico', () => wodFlagStripes('h', ['#ed0000', '#fff', '#ed0000', '#fff', '#ed0000']) + '<polygon points="0,0 30,20 0,40" fill="#0050f0"/>' + wodFlagStar(10, 20, 5, '#fff')],
+    pk: ['Pakistan', () => '<rect width="60" height="40" fill="#01411c"/><rect width="15" height="40" fill="#fff"/>' + wodFlagCrescent(37, 21, 9, '#fff', '#01411c', 3) + wodFlagStar(42, 15, 3, '#fff', -60)],
+    my: ['Malaysia', () => { let s = ''; for(let i = 0; i < 14; i++) s += '<rect x="0" y="' + (i * 40 / 14).toFixed(2) + '" width="60" height="' + (40 / 14 + 0.05).toFixed(2) + '" fill="' + (i % 2 ? '#fff' : '#cc0001') + '"/>'; return s + '<rect width="30" height="22.86" fill="#010066"/>' + wodFlagCrescent(12, 11.4, 7, '#fc0', '#010066', 2.4) + wodFlagStar(22, 11.4, 4.2, '#fc0'); }],
+    sg: ['Singapore', () => wodFlagStripes('h', ['#ef3340', '#fff']) + wodFlagCrescent(12, 10, 6, '#fff', '#ef3340', 2.2) + [[17, 6], [20.5, 9], [19, 13.2], [15, 13.2], [13.5, 9]].map(([x, y]) => wodFlagStar(x + 1.5, y, 1.3, '#fff')).join('')],
+    tw: ['Taiwan', () => '<rect width="60" height="40" fill="#fe0000"/><rect width="30" height="20" fill="#000095"/>' + wodFlagSun(15, 10, 3.6, '#fff', 12) + '<circle cx="15" cy="10" r="3.6" fill="#fff" stroke="#000095" stroke-width=".7"/>'],
+    kz: ['Kazakhstan', () => '<rect width="60" height="40" fill="#00afca"/>' + wodFlagSun(32, 16, 5, '#fec50c', 16) + '<path d="M20 28Q32 22 44 28Q38 26 32 27Q26 26 20 28Z" fill="#fec50c"/><rect x="5" y="2" width="2.5" height="36" fill="#fec50c" opacity=".85"/>'],
+    sa: ['Saudi Arabia', () => '<rect width="60" height="40" fill="#006c35"/><path d="M15 14Q18 11 21 14T27 14T33 14T39 14T45 14M17 18Q20 16 23 18T29 18T35 18T41 18" stroke="#fff" stroke-width="1.6" fill="none"/><path d="M16 27H44L46 25.5" stroke="#fff" stroke-width="1.8" fill="none"/><path d="M16 25V29" stroke="#fff" stroke-width="1.5"/>'],
+    ae: ['United Arab Emirates', () => wodFlagStripes('h', ['#00732f', '#fff', '#000']) + '<rect width="15" height="40" fill="#ff0000"/>'],
+    qa: ['Qatar', () => { let p = 'M0,0 H18'; for(let i = 0; i < 9; i++) { p += ' L24,' + (i * 40 / 9 + 40 / 18).toFixed(2) + ' L18,' + ((i + 1) * 40 / 9).toFixed(2); } return '<rect width="60" height="40" fill="#8a1538"/><path d="' + p + ' H0Z" fill="#fff"/>'; }],
+    kw: ['Kuwait', () => wodFlagStripes('h', ['#007a3d', '#fff', '#ce1126']) + '<polygon points="0,0 15,13.3 15,26.7 0,40" fill="#000"/>'],
+    jo: ['Jordan', () => wodFlagStripes('h', ['#000', '#fff', '#007a3d']) + '<polygon points="0,0 28,20 0,40" fill="#ce1126"/>' + wodFlagStar(9, 20, 3.2, '#fff')],
+    lb: ['Lebanon', () => wodFlagStripes('h', ['#ed1c24', '#fff', '#ed1c24'], [1, 2, 1]) + '<path d="M30 11L37 23H33L38 28H22L27 23H23Z" fill="#00a651"/><rect x="29" y="27" width="2" height="3" fill="#00a651"/>'],
+    ir: ['Iran', () => wodFlagStripes('h', ['#239f40', '#fff', '#da0000']) + '<path d="M27 16Q30 21 27 24.5M33 16Q30 21 33 24.5M30 15V25" stroke="#da0000" stroke-width="1.5" fill="none"/>'],
+    la: ['Laos', () => wodFlagStripes('h', ['#ce1126', '#002868', '#ce1126'], [1, 2, 1]) + '<circle cx="30" cy="20" r="8" fill="#fff"/>'],
+    mm: ['Myanmar', () => wodFlagStripes('h', ['#fecb00', '#34b233', '#ea2839']) + wodFlagStar(30, 21.5, 13, '#fff')],
+    gh: ['Ghana', () => wodFlagStripes('h', ['#ce1126', '#fcd116', '#006b3f']) + wodFlagStar(30, 20.5, 6.5, '#000')],
+    ke: ['Kenya', () => wodFlagStripes('h', ['#000', '#fff', '#bb0000', '#fff', '#006600'], [6, 1, 6, 1, 6]) + '<ellipse cx="30" cy="20" rx="5" ry="11" fill="#bb0000" stroke="#000" stroke-width="1.6"/><path d="M30 10V30" stroke="#fff" stroke-width="1.2"/>'],
+    et: ['Ethiopia', () => wodFlagStripes('h', ['#078930', '#fcdd09', '#da121a']) + '<circle cx="30" cy="20" r="8" fill="#0f47af"/><polygon points="30,13.5 31.6,18.4 36.6,18.4 32.6,21.4 34.1,26.4 30,23.3 25.9,26.4 27.4,21.4 23.4,18.4 28.4,18.4" fill="none" stroke="#fcdd09" stroke-width="1.2"/>'],
+    ma: ['Morocco', () => '<rect width="60" height="40" fill="#c1272d"/><polygon points="30,10.5 32.8,18.5 41.2,18.5 34.4,23.6 37,31.6 30,26.6 23,31.6 25.6,23.6 18.8,18.5 27.2,18.5" fill="none" stroke="#006233" stroke-width="1.8"/>'],
+    dz: ['Algeria', () => wodFlagStripes('v', ['#006233', '#fff']) + wodFlagCrescent(30, 20, 8, '#d21034', '#fff', 2.4) + wodFlagStar(33.5, 20, 3.6, '#d21034', -90)],
+    tn: ['Tunisia', () => '<rect width="60" height="40" fill="#e70013"/><circle cx="30" cy="20" r="10" fill="#fff"/>' + wodFlagCrescent(29, 20, 7, '#e70013', '#fff', 2) + wodFlagStar(32, 20, 3.4, '#e70013', -90)],
+    sn: ['Senegal', () => wodFlagStripes('v', ['#00853f', '#fdef42', '#e31b23']) + wodFlagStar(30, 20.5, 5, '#00853f')],
+    cm: ['Cameroon', () => wodFlagStripes('v', ['#007a5e', '#ce1126', '#fcd116']) + wodFlagStar(30, 20.5, 5, '#fcd116')],
+    ci: ['Côte d\'Ivoire', () => wodFlagStripes('v', ['#f77f00', '#fff', '#009e60'])],
+    ml: ['Mali', () => wodFlagStripes('v', ['#14b53a', '#fcd116', '#ce1126'])],
+    td: ['Chad', () => wodFlagStripes('v', ['#002664', '#fecb00', '#c60c30'])],
+    bw: ['Botswana', () => wodFlagStripes('h', ['#75aadb', '#fff', '#000', '#fff', '#75aadb'], [9, 1, 4, 1, 9])],
+    so: ['Somalia', () => '<rect width="60" height="40" fill="#4189dd"/>' + wodFlagStar(30, 21, 9, '#fff')],
+    tz: ['Tanzania', () => '<rect width="60" height="40" fill="#1eb53a"/><polygon points="60,0 60,40 0,40" fill="#00a3dd"/><path d="M0,40L60,0" stroke="#fcd116" stroke-width="14"/><path d="M0,40L60,0" stroke="#000" stroke-width="9"/>'],
+    fj: ['Fiji', () => '<rect width="60" height="40" fill="#68bfe5"/>' + wodFlagCanton(wodFlagJack()) + '<path d="M38 10H52V22Q52 30 45 33Q38 30 38 22Z" fill="#fff" stroke="#ce1126" stroke-width=".8"/><rect x="38" y="10" width="14" height="4.5" fill="#ce1126"/>'],
 };
 const WOD_CLAN_EMBLEM_IDS = [...Object.keys(WOD_CLAN_PRESETS).map(k => 'p:' + k), ...Object.keys(WOD_CLAN_FLAGS).map(k => 'f:' + k)];
 const wodClanEmblemCache = new Map();
@@ -130,8 +194,10 @@ function wodClanBadgeHtml(clan, variant) {
 
 // ---------------------------------------------------------------- state and relay messages
 const WodClans = {
-    mine: null, detail: null, list: [], lbRows: [], lbSort: 'rating', lbKind: 'players', cw: { counts: null, queued: null, war: null },
-    form: { mode: 'create', emblem: 'p:swords', tab: 'presets', visibility: 'public', name: '' }, queuedAt: 0, error: '', launchTimer: 0, launching: '', lastResult: null,
+    mine: null, detail: null, pending: { applications: [], invitations: [] }, list: [], searchQuery: '',
+    lb: { kind: 'war', sort: 'wins', rows: [] }, lbKind: 'players',
+    cw: { counts: null, queued: null, war: null, party: null, partyInvite: null, partyInvitesSent: [] },
+    form: { mode: 'create', emblem: 'p:swords', tab: 'presets', visibility: 'public', name: '' }, queuedAt: 0, error: '', launchTimer: 0, launching: '', unread: 0,
 };
 try { WodClans.mine = JSON.parse(localStorage.getItem('simplewarsClanCache') || 'null'); } catch(_) {}
 function wodClanOnline() { return typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen && WodMultiplayer.api.registered; }
@@ -150,8 +216,21 @@ function wodClanRefresh(opts) {
     wodClanSend({ t: 'clan_mine' });
     if(opts && opts.list) wodClanSend({ t: 'clan_list', query: WodClans.searchQuery || '' });
     if(opts && opts.wars) wodClanSend({ t: 'cw_status', watch: true });
-    if(opts && opts.board) wodClanSend({ t: 'clan_leaderboard', sort: WodClans.lbSort });
+    if(opts && opts.board) wodClanSend({ t: 'clan_leaderboard', kind: WodClans.lb.kind, sort: WodClans.lb.sort });
 }
+const WOD_CLAN_DONE = {
+    clan_create: () => 'Clan founded. Invite your friends from the Clan tab.',
+    clan_join: m => 'You joined ' + (m.mine ? m.mine.name : 'the clan') + '.',
+    clan_apply: () => 'Application sent: the clan\'s leader will approve or decline it.',
+    clan_app_cancel: () => 'Application withdrawn.',
+    clan_leave: () => 'You left the clan.',
+    clan_update: () => 'Clan updated.',
+    clan_kick: () => 'Member removed.',
+    clan_approve: () => 'Application approved: they are in the clan.',
+    clan_decline: () => 'Application declined.',
+    clan_invite: () => 'Invitation sent.',
+    clan_invite_declined: () => 'Invitation declined.',
+};
 function wodClanOnMessage(m) {
     if(!m || !m.t) return;
     switch(m.t) {
@@ -159,18 +238,19 @@ function wodClanOnMessage(m) {
             if(m.view) { wodClanShowView(m.clan); break; }
             wodClanSetMine(m.mine);
             WodClans.detail = m.clan && m.clan.youAreMember ? m.clan : null;
+            if(m.pending) WodClans.pending = m.pending;
             if(m.done) {
                 WodClans.error = '';
-                const msg = { clan_create: 'Clan founded. Share its invite code with your friends.', clan_join: 'You joined ' + (m.mine ? m.mine.name : 'the clan') + '.', clan_leave: 'You left the clan.', clan_update: 'Clan updated.', clan_kick: 'Member removed.' }[m.done];
-                if(msg) showNotification(msg);
+                const say = WOD_CLAN_DONE[m.done];
+                if(say) showNotification(say(m));
                 if(m.done === 'clan_update') WodClans.form.mode = 'create';
-                if(m.done === 'clan_leave' || m.done === 'clan_join' || m.done === 'clan_create') wodClanSend({ t: 'clan_list', query: WodClans.searchQuery || '' });
+                if(['clan_leave', 'clan_join', 'clan_create', 'clan_apply', 'clan_app_cancel'].includes(m.done)) wodClanSend({ t: 'clan_list', query: WodClans.searchQuery || '' });
             }
             if(m.notice) showNotification(m.notice);
             wodClanRenderAll();
             break;
         case 'clan_list': WodClans.list = m.clans || []; wodClanRenderPane(); break;
-        case 'clan_leaderboard': WodClans.lbRows = m.rows || []; WodClans.lbSort = m.sort || WodClans.lbSort; wodClanRenderLeaderboard(); break;
+        case 'clan_leaderboard': WodClans.lb = { kind: m.kind || 'war', sort: m.sort || 'wins', rows: m.rows || [] }; wodClanRenderLeaderboard(); break;
         case 'clan_chat': {
             const d = WodClans.detail, mine = m.message && m.message.playerId === WodMultiplayer.api.playerId;
             if(!d || d.id !== m.clanId || !m.message) break;
@@ -182,18 +262,25 @@ function wodClanOnMessage(m) {
             break;
         }
         case 'clan_error': case 'cw_error':
-            if(m.chat) { showNotification(m.msg || 'Message not sent.'); break; }
+            if(m.chat || m.t === 'cw_error') { showNotification(m.msg || 'That did not work.'); if(m.t === 'cw_error') wodCwRenderPane(); break; }
             WodClans.error = m.msg || 'That did not work.';
             showNotification(WodClans.error);
             wodClanRenderAll();
             break;
         case 'cw_status':
-            WodClans.cw = { counts: m.counts || null, queued: m.queued || null, war: m.war || WodClans.cw.war || null };
+            WodClans.cw = { counts: m.counts || null, queued: m.queued || null, war: m.war || (WodMultiplayer.api.code ? WodClans.cw.war : null) || null, party: m.party || null, partyInvite: m.partyInvite || null, partyInvitesSent: m.partyInvitesSent || [] };
             if(!m.queued) WodClans.queuedAt = 0; else if(!WodClans.queuedAt) WodClans.queuedAt = Date.now();
-            if(!m.war && WodClans.cw.war && !WodMultiplayer.api.code) WodClans.cw.war = null;
+            wodCwSetBadge();
             wodCwRenderPane();
             break;
+        case 'cw_party_invite':
+            showNotification(m.name + ' invites you to a 2v2 party. Open Clan wars to accept.');
+            break;
+        case 'cw_party_ended':
+            if(m.msg) showNotification(m.msg);
+            break;
         case 'cw_match':
+            wodCwClosePicker();
             WodClans.cw.war = m.war; WodClans.cw.queued = null; WodClans.queuedAt = 0;
             showNotification('Clan war found: ' + m.war.sides.map(s => s.clan ? s.clan.name : 'Clan').join(' vs ') + ' (' + m.war.tier + '). Setting up the battlefield…');
             wodCwRenderPane();
@@ -235,14 +322,36 @@ function wodClanOnHubTab(tabId) {
     if(tabId === 'wars') { wodClanRefresh({ wars: true }); wodCwRenderPane(); }
     if(tabId === 'rankings') { wodClanSyncLbKind(); if(WodClans.lbKind === 'clans') wodClanRefresh({ board: true }); }
 }
-function wodClanRenderAll() { wodClanRenderProfileBadge(); wodClanRenderPane(); wodCwRenderPane(); }
+function wodClanRenderAll() { wodClanRenderProfileBadge(); wodClanRenderPane(); wodCwRenderPane(); wodClanSetUnread(WodClans.unread); }
+function wodTabBadge(tabId, n, label) {
+    const tab = document.getElementById(tabId);
+    if(!tab) return;
+    let badge = tab.querySelector('.mp-tab-badge');
+    if(!n) { if(badge) badge.remove(); return; }
+    if(!badge) { badge = document.createElement('span'); badge.className = 'mp-tab-badge'; tab.appendChild(badge); }
+    badge.textContent = n > 9 ? '9+' : String(n);
+    badge.setAttribute('aria-label', label);
+}
+// The Clan tab's badge counts unread chat, waiting applications (for the leader) and open invitations.
+function wodClanSetUnread(n) {
+    WodClans.unread = Math.max(0, n | 0);
+    const apps = WodClans.detail && WodClans.detail.youAreLeader ? (WodClans.detail.applications || []).length : 0;
+    const invites = !WodClans.detail ? (WodClans.pending.invitations || []).length : 0;
+    const total = WodClans.unread + apps + invites;
+    wodTabBadge('mpTabClan', total, total + ' new in your clan');
+}
+function wodCwSetBadge() { wodTabBadge('mpTabWars', WodClans.cw.partyInvite ? 1 : 0, 'A 2v2 party invitation'); }
 
 // ---------------------------------------------------------------- Clan tab
+function wodClanNum(n) { return typeof formatLifetimeBig === 'function' ? formatLifetimeBig(n | 0) : String(n | 0); }
 function wodClanStatCard(label, value, note) {
     return '<div class="clan-stat"><span class="clan-stat-val">' + value + '</span><span class="clan-stat-lbl">' + label + '</span>' + (note ? '<span class="clan-stat-note">' + note + '</span>' : '') + '</div>';
 }
-function wodClanWinRate(w, p) { return p ? Math.round(100 * w / p) + '%' : '—'; }
 function wodClanDate(t) { try { return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); } catch(_) { return ''; } }
+function wodClanAgo(t) {
+    const d = Math.floor((Date.now() - (t || 0)) / 86400000);
+    return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d + ' days ago';
+}
 function wodClanHistoryHtml(history, empty) {
     if(!history || !history.length) return '<p class="clan-empty">' + empty + '</p>';
     return '<ol class="clan-history-list">' + history.map(h => '<li class="clan-war-row clan-war-row--' + h.outcome + '">' +
@@ -250,48 +359,70 @@ function wodClanHistoryHtml(history, empty) {
         '<span class="clan-tier-chip">' + wodClanEsc(h.tier) + '</span>' +
         '<span class="clan-war-vs">vs ' + wodClanBadgeHtml(h.opponent, 'sm') + '</span>' +
         '<span class="clan-war-players">' + wodClanEsc((h.players || []).join(', ')) + '</span>' +
-        '<span class="clan-war-rating">' + (h.ratingChange >= 0 ? '+' : '') + (h.ratingChange | 0) + '</span>' +
+        '<span class="clan-war-rating" title="Kills and losses in this war">' + wodClanNum(h.kills) + ' kills · ' + wodClanNum(h.losses) + ' lost</span>' +
         '<span class="clan-war-date">' + wodClanDate(h.at) + '</span></li>').join('') + '</ol>';
 }
-function wodClanStatsHtml(d) {
-    const s = d.stats || {}, t1 = (s.byTier || {})['1v1'] || {}, t2 = (s.byTier || {})['2v2'] || {}, tot = d.totals || {};
-    const streak = s.streak > 0 ? s.streak + ' won' : s.streak < 0 ? -s.streak + ' lost' : '—';
-    return '<section class="clan-section"><h4>Clan stats</h4>' +
-        '<div class="clan-stat-grid">' + wodClanStatCard('War rating', Math.round(s.rating || 1000)) + wodClanStatCard('Wars won', s.wins | 0) + wodClanStatCard('Wars lost', s.losses | 0) +
-        wodClanStatCard('Win rate', wodClanWinRate(s.wins | 0, s.played | 0)) + wodClanStatCard('Streak', streak) + wodClanStatCard('Best streak', s.bestStreak ? s.bestStreak + ' won' : '—') + '</div>' +
-        '<div class="clan-tier-grid">' +
-        '<div class="clan-tier-card"><span class="clan-tier-chip">1v1</span><strong>' + (t1.wins | 0) + ' – ' + (t1.losses | 0) + '</strong><span>' + (t1.played ? t1.played + (t1.played === 1 ? ' war' : ' wars') + ' · ' + wodClanWinRate(t1.wins | 0, t1.played | 0) + ' won' : 'No 1v1 wars yet') + '</span></div>' +
-        '<div class="clan-tier-card"><span class="clan-tier-chip">2v2</span><strong>' + (t2.wins | 0) + ' – ' + (t2.losses | 0) + '</strong><span>' + (t2.played ? t2.played + (t2.played === 1 ? ' war' : ' wars') + ' · ' + wodClanWinRate(t2.wins | 0, t2.played | 0) + ' won' : 'No 2v2 wars yet') + '</span></div>' +
-        '<div class="clan-tier-card clan-tier-card--members"><span class="clan-tier-chip">Members</span><strong>' + formatLifetimeBig(tot.wins | 0) + ' wins</strong><span>' + formatLifetimeBig(tot.gamesPlayed | 0) + ((tot.gamesPlayed | 0) === 1 ? ' match' : ' matches') + ' · ' + formatLifetimeBig(tot.kills | 0) + ' kills in multiplayer</span></div>' +
-        '</div></section>';
+// Clan-war stats count clan wars only; normal play is the members' multiplayer totals, as on the player leaderboard.
+function wodClanWarStatsHtml(d) {
+    const s = d.stats || {}, t1 = (s.byTier || {})['1v1'] || {}, t2 = (s.byTier || {})['2v2'] || {};
+    return '<section class="clan-section"><h4>Clan war stats <span class="clan-h4-note">clan wars only</span></h4>' +
+        '<div class="clan-stat-grid">' + wodClanStatCard('Wins', s.wins | 0) + wodClanStatCard('1v1 wins', t1.wins | 0) + wodClanStatCard('2v2 wins', t2.wins | 0) +
+        wodClanStatCard('Defeats', s.defeats | 0) + wodClanStatCard('Kills', wodClanNum(s.kills)) + wodClanStatCard('Losses', wodClanNum(s.losses)) + '</div>' +
+        '<p class="clan-stat-foot">' + ((s.played | 0) ? (s.played | 0) + ((s.played | 0) === 1 ? ' war' : ' wars') + ' fought · 1v1 ' + (t1.wins | 0) + '–' + (t1.defeats | 0) + ' · 2v2 ' + (t2.wins | 0) + '–' + (t2.defeats | 0) : 'No clan wars yet: queue in the Clan wars tab.') + '</p></section>';
+}
+function wodClanNormalStatsHtml(d) {
+    const t = d.totals || {};
+    return '<section class="clan-section"><h4>Normal play <span class="clan-h4-note">all members combined, as on the player leaderboard</span></h4>' +
+        '<div class="clan-stat-grid clan-stat-grid--4">' + wodClanStatCard('Wins', wodClanNum(t.wins)) + wodClanStatCard('Kills', wodClanNum(t.kills)) + wodClanStatCard('Losses', wodClanNum(t.losses)) + wodClanStatCard('Defeats', wodClanNum(t.defeats)) + '</div></section>';
 }
 function wodClanMembersHtml(d, canKick) {
     if(!d.memberList) return '<section class="clan-section"><h4>Members (' + d.members + ')</h4><p class="clan-empty">This clan is private: only its members see who is in it.</p></section>';
     const myId = WodMultiplayer.api.playerId || '';
-    return '<section class="clan-section"><h4>Members (' + d.members + ' / 30)</h4><ul class="clan-member-list">' + d.memberList.map(m =>
-        '<li class="clan-member"><span class="clan-online ' + (m.online ? 'is-online' : '') + '" title="' + (m.online ? 'Online' : 'Offline') + '"></span>' +
+    return '<section class="clan-section"><h4>Members (' + d.members + ' / 30) <span class="clan-h4-note">ranked by clan-war wins, then wins</span></h4><ul class="clan-member-list">' + d.memberList.map(m =>
+        '<li class="clan-member"><span class="clan-member-rank">#' + m.rank + '</span><span class="clan-online ' + (m.online ? 'is-online' : '') + '" title="' + (m.online ? 'Online' : 'Offline') + '"></span>' +
         '<span class="clan-member-name">' + wodClanEsc(m.name) + (m.playerId === myId ? ' <em>(you)</em>' : '') + '</span>' +
         (m.role === 'leader' ? '<span class="clan-role">Leader</span>' : '') +
         '<span class="clan-member-stat" title="Clan wars won / fought">' + (m.warWins | 0) + '/' + (m.warsPlayed | 0) + ' wars</span>' +
         '<span class="clan-member-stat" title="Multiplayer wins">' + (m.wins | 0) + ' wins</span>' +
+        (m.lastSeenAt && !m.online ? '<span class="clan-member-stat" title="Last seen">' + wodClanAgo(m.lastSeenAt) + '</span>' : '') +
         (canKick && m.role !== 'leader' ? '<button type="button" class="wod-editor-btn clan-kick" data-pid="' + wodClanEsc(m.playerId) + '">Remove</button>' : '') + '</li>').join('') + '</ul></section>';
 }
 function wodClanHeroHtml(d, actions) {
+    const s = d.stats || {};
     return '<header class="clan-hero"><div class="clan-hero-emblem">' + wodClanEmblemSvg(d.emblem) + '</div><div class="clan-hero-text"><h3>' + wodClanEsc(d.name) + '</h3>' +
-        '<p>' + (d.visibility === 'private' ? 'Private clan · invite code only' : 'Public clan · anyone can join') + ' · ' + d.members + (d.members === 1 ? ' member' : ' members') + ' · led by ' + wodClanEsc(d.leaderName || '—') + ' · founded ' + wodClanDate(d.createdAt) + '</p>' +
-        '<div class="clan-hero-pills"><span class="clan-pill clan-pill--gold">Rating ' + Math.round((d.stats || {}).rating || 1000) + '</span><span class="clan-pill">' + ((d.stats || {}).wins | 0) + ' – ' + ((d.stats || {}).losses | 0) + ' in wars</span><span class="clan-pill">' + (d.visibility === 'private' ? '🔒 Private' : 'Public') + '</span></div></div>' +
+        '<p>' + (d.visibility === 'private' ? 'Private clan · apply to join' : 'Public clan · anyone can join') + ' · ' + d.members + (d.members === 1 ? ' member' : ' members') + ' · led by ' + wodClanEsc(d.leaderName || '—') + ' · founded ' + wodClanDate(d.createdAt) + '</p>' +
+        '<div class="clan-hero-pills"><span class="clan-pill clan-pill--gold">' + (s.wins | 0) + ((s.wins | 0) === 1 ? ' war win' : ' war wins') + '</span><span class="clan-pill">' + (s.defeats | 0) + ((s.defeats | 0) === 1 ? ' defeat' : ' defeats') + '</span><span class="clan-pill">' + (d.visibility === 'private' ? '🔒 Private' : 'Public') + '</span></div></div>' +
         '<div class="clan-hero-actions">' + (actions || '') + '</div></header>';
+}
+function wodClanAppKind(a) { return a.kind === 'random' ? 'Applied from search' : a.invitedBy === 'code' ? 'Used your invite code' : 'Invited by ' + wodClanEsc(a.invitedByName || 'a member'); }
+function wodClanApplicationsHtml(d) {
+    const q = d.queue || {}, apps = d.applications || [];
+    // (a public clan is joined straight away, so its leader only sees this box when someone is waiting)
+    if(!d.youAreLeader || (d.visibility !== 'private' && !apps.length)) return '';
+    return '<section class="clan-section clan-apps"><h4>Applications <span class="clan-h4-note">' + apps.length + ' / ' + ((q.maxFromSearch | 0) + (q.maxInvited | 0)) + ' waiting · from search ' + (q.fromSearch | 0) + '/' + (q.maxFromSearch | 0) + ' · invited ' + (q.invited | 0) + '/' + (q.maxInvited | 0) + '</span></h4>' +
+        (apps.length ? '<ul class="clan-app-list">' + apps.map(a => '<li class="clan-app"><div class="clan-app-main"><strong>' + wodClanEsc(a.name) + '</strong><span>' + wodClanAppKind(a) + ' · ' + (a.stats.wins | 0) + ' wins · ' + wodClanNum(a.stats.kills) + ' kills · ' + wodClanAgo(a.at) + '</span></div>' +
+            '<button type="button" class="build-btn clan-approve" data-pid="' + wodClanEsc(a.playerId) + '">Approve</button><button type="button" class="wod-editor-btn clan-decline" data-pid="' + wodClanEsc(a.playerId) + '">Decline</button></li>').join('') + '</ul>'
+            : '<p class="clan-empty">No applications waiting. ' + (d.visibility === 'private' ? 'Players find your clan in search and apply; friends your members invite, or anyone with your code, wait here for you too.' : 'Your clan is public, so players join it straight away.') + '</p>') + '</section>';
+}
+function wodClanInviteFriendsHtml(d) {
+    const friends = typeof wodMpGetFriendsList === 'function' ? wodMpGetFriendsList() : [];
+    const members = new Set((d.memberList || []).map(m => m.playerId)), invited = new Map((d.invited || []).map(i => [i.playerId, i]));
+    const rows = friends.filter(f => f && f.playerId && !members.has(f.playerId));
+    return '<section class="clan-section clan-invite-friends"><h4>Invite friends</h4><p class="clan-card-lead">' + (d.visibility === 'private' ? 'A friend who accepts waits for the leader\'s approval.' : 'A friend who accepts joins at once.') + '</p>' +
+        (rows.length ? '<ul class="clan-friend-list">' + rows.map(f => '<li><span class="clan-friend-name">' + wodClanEsc(f.displayName || f.playerId) + '</span>' +
+            (invited.has(f.playerId) ? '<span class="clan-tag">Invited · waiting</span>' : '<button type="button" class="build-btn clan-invite-btn" data-pid="' + wodClanEsc(f.playerId) + '">Invite</button>') + '</li>').join('') + '</ul>'
+            : '<p class="clan-empty">' + (friends.length ? 'All your friends are in this clan.' : 'Add friends in the Friends tab, then invite them here.') + '</p>') + '</section>';
 }
 function wodClanHomeHtml(d) {
     const lead = d.youAreLeader;
     return '<div class="clan-home">' + wodClanHeroHtml(d, (lead ? '<button type="button" class="wod-editor-btn" id="clanEditBtn">Edit clan</button>' : '') + '<button type="button" class="wod-editor-btn clan-danger" id="clanLeaveBtn">Leave clan</button>') +
-        // (only the leader holds the invite code, so only the leader brings players into a private clan)
         (lead ? '<section class="clan-invite"><div><span class="clan-invite-label">Invite code</span><code id="clanInviteCode">' + wodClanEsc(d.code || '') + '</code></div>' +
             '<div class="clan-invite-actions"><button type="button" class="wod-editor-btn" id="clanCopyCode">Copy</button><button type="button" class="wod-editor-btn" id="clanNewCode">New code</button></div>' +
-            '<p>' + (d.visibility === 'private' ? 'Your clan is private: only you can invite. Give this code to the players you want; a new code stops the old one working.' : 'Players can join from the clan list, or with this code.') + '</p></section>'
-            : '<p class="clan-invite-note">' + (d.visibility === 'private' ? '🔒 Private clan: only the leader, ' + wodClanEsc(d.leaderName || '') + ', can invite new members.' : 'Public clan: anyone can join from the clan list.') + '</p>') +
-        '<div class="clan-home-cols"><div>' + wodClanStatsHtml(d) + '<section class="clan-section"><h4>Recent clan wars</h4>' + wodClanHistoryHtml(d.history, 'No clan wars yet. Queue for one in the Clan wars tab.') + '</section></div>' +
-        '<div>' + wodClanChatHtml(d) + wodClanMembersHtml(d, lead) + '</div></div></div>';
+            '<p>' + (d.visibility === 'private' ? 'Only you hold this code. A player who uses it is queued as an invited applicant for you to approve; a new code stops the old one working.' : 'Players can join from the clan list, or with this code.') + '</p></section>'
+            : '<p class="clan-invite-note">' + (d.visibility === 'private' ? '🔒 Private clan: players apply or are invited, and the leader, ' + wodClanEsc(d.leaderName || '') + ', approves them.' : 'Public clan: anyone can join from the clan list.') + '</p>') +
+        wodClanApplicationsHtml(d) +
+        '<div class="clan-home-cols"><div>' + wodClanWarStatsHtml(d) + wodClanNormalStatsHtml(d) + '<section class="clan-section"><h4>Recent clan wars</h4>' + wodClanHistoryHtml(d.history, 'No clan wars yet. Queue for one in the Clan wars tab.') + '</section></div>' +
+        '<div>' + wodClanChatHtml(d) + wodClanMembersHtml(d, lead) + wodClanInviteFriendsHtml(d) + '</div></div></div>';
 }
 // ---- clan chat
 function wodClanChatTime(t) { try { const d = new Date(t), today = new Date().toDateString() === d.toDateString(); return (today ? '' : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ') + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); } catch(_) { return ''; } }
@@ -319,16 +450,6 @@ function wodClanChatVisible() {
     const pane = document.getElementById('mpPaneClan'), panel = document.getElementById('multiplayerPanel');
     return !!(pane && !pane.hidden && panel && !panel.classList.contains('hidden') && document.getElementById('clanChatList'));
 }
-function wodClanSetUnread(n) {
-    WodClans.unread = Math.max(0, n | 0);
-    const tab = document.getElementById('mpTabClan');
-    if(!tab) return;
-    let badge = tab.querySelector('.mp-tab-badge');
-    if(!WodClans.unread) { if(badge) badge.remove(); return; }
-    if(!badge) { badge = document.createElement('span'); badge.className = 'mp-tab-badge'; tab.appendChild(badge); }
-    badge.textContent = WodClans.unread > 9 ? '9+' : String(WodClans.unread);
-    badge.setAttribute('aria-label', WodClans.unread + ' unread clan messages');
-}
 function wodClanFormHtml(mode, d) {
     const f = WodClans.form, isEdit = mode === 'edit';
     if(isEdit && !f.editing) { f.editing = true; f.name = d.name; f.emblem = d.emblem; f.visibility = d.visibility; }
@@ -337,25 +458,41 @@ function wodClanFormHtml(mode, d) {
         '<h3>' + (isEdit ? 'Edit your clan' : 'Found a clan') + '</h3>' + (isEdit ? '' : '<p class="clan-card-lead">You lead the clan you found. Name it, pick its emblem, and choose who can join.</p>') +
         '<label class="clan-field"><span class="clan-field-label">Clan name</span><input type="text" id="clanNameInput" maxlength="24" placeholder="3 to 24 characters" value="' + wodClanEsc(f.name || '') + '" autocomplete="off"></label>' +
         '<div class="clan-field"><span class="clan-field-label">Emblem</span>' +
-        '<div class="clan-emblem-tabs" role="tablist"><button type="button" class="mp-hub-tab' + (f.tab !== 'flags' ? ' active' : '') + '" data-etab="presets">Emblems</button><button type="button" class="mp-hub-tab' + (f.tab === 'flags' ? ' active' : '') + '" data-etab="flags">Country flags</button></div>' +
+        '<div class="clan-emblem-tabs" role="tablist"><button type="button" class="mp-hub-tab' + (f.tab !== 'flags' ? ' active' : '') + '" data-etab="presets">Emblems</button><button type="button" class="mp-hub-tab' + (f.tab === 'flags' ? ' active' : '') + '" data-etab="flags">Country flags (' + Object.keys(WOD_CLAN_FLAGS).length + ')</button></div>' +
         '<div class="clan-emblem-grid' + (f.tab === 'flags' ? ' clan-emblem-grid--flags' : '') + '">' + ids.map(id => '<button type="button" class="clan-emblem-opt' + (id === f.emblem ? ' is-selected' : '') + '" data-emblem="' + id + '" title="' + wodClanEsc(wodClanEmblemLabel(id)) + '" aria-label="' + wodClanEsc(wodClanEmblemLabel(id)) + '" aria-pressed="' + (id === f.emblem) + '">' + wodClanEmblemSvg(id) + '</button>').join('') + '</div></div>' +
         '<div class="clan-field"><span class="clan-field-label">Who can join</span><div class="clan-visibility">' +
-        '<button type="button" class="clan-vis-opt' + (f.visibility !== 'private' ? ' is-selected' : '') + '" data-vis="public"><strong>Public</strong><span>Listed for everyone; anyone can join.</span></button>' +
-        '<button type="button" class="clan-vis-opt' + (f.visibility === 'private' ? ' is-selected' : '') + '" data-vis="private"><strong>Private</strong><span>Hidden from the list; join with the invite code.</span></button></div></div>' +
+        '<button type="button" class="clan-vis-opt' + (f.visibility !== 'private' ? ' is-selected' : '') + '" data-vis="public"><strong>Public</strong><span>Anyone can join straight from the clan list.</span></button>' +
+        '<button type="button" class="clan-vis-opt' + (f.visibility === 'private' ? ' is-selected' : '') + '" data-vis="private"><strong>Private</strong><span>Listed and searchable, but players apply and the leader approves them.</span></button></div></div>' +
         '<div class="clan-form-foot"><div class="clan-preview">' + wodClanBadgeHtml({ name: f.name || 'Your clan', emblem: f.emblem }, 'md') + '</div>' +
         (isEdit ? '<button type="button" class="wod-editor-btn" id="clanEditCancel">Cancel</button>' : '') +
         '<button type="button" class="menu-btn clan-primary" id="clanSubmitBtn">' + (isEdit ? 'Save changes' : 'Found clan') + '</button></div>' +
         (WodClans.error ? '<p class="clan-form-error" role="alert">' + wodClanEsc(WodClans.error) + '</p>' : '') + '</section>';
 }
+// The player's open invitations and applications (only shown while not in a clan).
+function wodClanPendingHtml() {
+    const p = WodClans.pending || {}, inv = p.invitations || [], apps = p.applications || [];
+    if(!inv.length && !apps.length) return '';
+    return '<section class="clan-card clan-pending"><h3>Your invitations and applications</h3><ul class="clan-app-list">' +
+        inv.map(i => '<li class="clan-app"><span class="clan-list-emblem">' + wodClanEmblemSvg(i.clan.emblem) + '</span><div class="clan-app-main"><strong>' + wodClanEsc(i.clan.name) + '</strong><span>Invited by ' + wodClanEsc(i.byName) + (i.clan.visibility === 'private' ? ' · then the leader approves you' : ' · you join at once') + '</span></div>' +
+            '<button type="button" class="build-btn clan-inv-accept" data-clan="' + wodClanEsc(i.clan.id) + '">Accept</button><button type="button" class="wod-editor-btn clan-inv-decline" data-clan="' + wodClanEsc(i.clan.id) + '">Decline</button></li>').join('') +
+        apps.map(a => '<li class="clan-app"><span class="clan-list-emblem">' + wodClanEmblemSvg(a.clan.emblem) + '</span><div class="clan-app-main"><strong>' + wodClanEsc(a.clan.name) + '</strong><span>Waiting for the leader · ' + (a.kind === 'invite' ? 'invited' : 'applied') + ' ' + wodClanAgo(a.at) + '</span></div>' +
+            '<button type="button" class="wod-editor-btn clan-app-cancel" data-clan="' + wodClanEsc(a.clan.id) + '">Withdraw</button></li>').join('') + '</ul></section>';
+}
+function wodClanListAction(c) {
+    if(c.visibility === 'public') return '<button type="button" class="build-btn clan-join-btn" data-clan="' + wodClanEsc(c.id) + '">Join</button>';
+    if(c.applied) return '<button type="button" class="wod-editor-btn clan-app-cancel" data-clan="' + wodClanEsc(c.id) + '" title="Withdraw your application">Applied ✓</button>';
+    if(c.queueFull) return '<button type="button" class="build-btn" disabled title="Its leader has 3 applications from search waiting already">Queue full</button>';
+    return '<button type="button" class="build-btn clan-apply-btn" data-clan="' + wodClanEsc(c.id) + '">Apply</button>';
+}
 function wodClanJoinHtml() {
     const rows = WodClans.list || [];
-    return '<section class="clan-card clan-join"><h3>Join a clan</h3>' +
-        '<div class="clan-code-row"><input type="text" id="clanCodeInput" maxlength="16" placeholder="Invite code, e.g. CLAN-1A2B3C4D" autocomplete="off"><button type="button" class="build-btn" id="clanCodeJoin">Join with code</button></div>' +
-        '<input type="search" id="clanSearchInput" class="clan-search" placeholder="Search public clans" value="' + wodClanEsc(WodClans.searchQuery || '') + '">' +
+    return '<section class="clan-card clan-join"><h3>Join a clan</h3><p class="clan-card-lead">Join a public clan at once, or apply to a private one for its leader to approve.</p>' +
+        '<div class="clan-code-row"><input type="text" id="clanCodeInput" maxlength="16" placeholder="Invite code, e.g. CLAN-1A2B3C4D" autocomplete="off"><button type="button" class="build-btn" id="clanCodeJoin">Use code</button></div>' +
+        '<input type="search" id="clanSearchInput" class="clan-search" placeholder="Search clans by name" value="' + wodClanEsc(WodClans.searchQuery || '') + '">' +
         '<div class="clan-list">' + (rows.length ? rows.map(c => '<div class="clan-list-row">' + '<span class="clan-list-emblem">' + wodClanEmblemSvg(c.emblem) + '</span>' +
-            '<span class="clan-list-main"><strong>' + wodClanEsc(c.name) + '</strong><span>' + c.members + (c.members === 1 ? ' member' : ' members') + ' · rating ' + c.rating + '</span></span>' +
-            '<button type="button" class="wod-editor-btn clan-view" data-clan="' + wodClanEsc(c.id) + '">View</button><button type="button" class="build-btn clan-join-btn" data-clan="' + wodClanEsc(c.id) + '">Join</button></div>').join('')
-            : '<p class="clan-empty">' + (wodClanOnline() ? 'No public clans' + (WodClans.searchQuery ? ' match that search' : ' yet: found the first one') + '.' : 'Connecting to the multiplayer server…') + '</p>') + '</div></section>';
+            '<span class="clan-list-main"><strong>' + wodClanEsc(c.name) + (c.visibility === 'private' ? ' <span class="clan-lock" title="Private: apply to join">🔒</span>' : '') + '</strong><span>' + c.members + (c.members === 1 ? ' member' : ' members') + ' · ' + (c.wins | 0) + ' war wins · ' + (c.visibility === 'private' ? 'private' : 'public') + '</span></span>' +
+            '<button type="button" class="wod-editor-btn clan-view" data-clan="' + wodClanEsc(c.id) + '">View</button>' + wodClanListAction(c) + '</div>').join('')
+            : '<p class="clan-empty">' + (wodClanOnline() ? 'No clans' + (WodClans.searchQuery ? ' match that search' : ' yet: found the first one') + '.' : 'Connecting to the multiplayer server…') + '</p>') + '</div></section>';
 }
 function wodClanRenderPane() {
     const root = document.getElementById('mpClanRoot');
@@ -363,15 +500,23 @@ function wodClanRenderPane() {
     const d = WodClans.detail;
     const focus = document.activeElement && root.contains(document.activeElement) ? document.activeElement.id : '';
     const draft = (document.getElementById('clanChatInput') || {}).value || '';
+    const scrollTop = root.closest('.mp-hub-main') ? root.closest('.mp-hub-main').scrollTop : 0;
     if(d && d.youAreMember && WodClans.form.mode === 'edit') root.innerHTML = '<div class="clan-edit-wrap">' + wodClanFormHtml('edit', d) + '</div>';
     else if(d && d.youAreMember) { WodClans.form.editing = false; root.innerHTML = wodClanHomeHtml(d); }
-    else { WodClans.form.editing = false; if(WodClans.form.mode === 'edit') WodClans.form.mode = 'create'; root.innerHTML = '<div class="clan-start">' + wodClanFormHtml('create') + wodClanJoinHtml() + '</div>'; }
+    else { WodClans.form.editing = false; if(WodClans.form.mode === 'edit') WodClans.form.mode = 'create'; root.innerHTML = wodClanPendingHtml() + '<div class="clan-start">' + wodClanFormHtml('create') + wodClanJoinHtml() + '</div>'; }
     wodClanWirePane(root);
     const chatInput = document.getElementById('clanChatInput');
     if(chatInput && draft) chatInput.value = draft;
     const chatList = document.getElementById('clanChatList');
     if(chatList) chatList.scrollTop = chatList.scrollHeight;
+    if(root.closest('.mp-hub-main')) root.closest('.mp-hub-main').scrollTop = scrollTop;
     if(focus) { const el = document.getElementById(focus); if(el) { el.focus(); if(el.setSelectionRange && el.value != null) el.setSelectionRange(el.value.length, el.value.length); } }
+}
+function wodClanWireListButtons(root) {
+    root.querySelectorAll('.clan-join-btn').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_join', clanId: b.dataset.clan }));
+    root.querySelectorAll('.clan-apply-btn').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_join', clanId: b.dataset.clan }));
+    root.querySelectorAll('.clan-app-cancel').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_app_cancel', clanId: b.dataset.clan }));
+    root.querySelectorAll('.clan-view').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_get', clanId: b.dataset.clan }));
 }
 function wodClanWirePane(root) {
     const f = WodClans.form, $ = id => root.querySelector('#' + id);
@@ -395,7 +540,7 @@ function wodClanWirePane(root) {
     if(leave) leave.onclick = async () => {
         const d = WodClans.detail;
         const solo = d && d.members === 1;
-        if(await wodShowConfirmDialog({ title: 'Leave ' + (d ? d.name : 'clan') + '?', body: solo ? 'You are its only member, so the clan and its records will be disbanded.' : d && d.youAreLeader ? 'The longest-serving member becomes leader.' : 'You can rejoin later if the clan is public, or with its invite code.', confirmLabel: solo ? 'Disband clan' : 'Leave clan', danger: true }))
+        if(await wodShowConfirmDialog({ title: 'Leave ' + (d ? d.name : 'clan') + '?', body: solo ? 'You are its only member, so the clan and its records will be disbanded.' : d && d.youAreLeader ? 'Your highest-ranked member becomes leader.' : 'To come back you will have to join or apply again.', confirmLabel: solo ? 'Disband clan' : 'Leave clan', danger: true }))
             wodClanSend({ t: 'clan_leave' });
     };
     const chatForm = $('clanChatForm');
@@ -411,16 +556,20 @@ function wodClanWirePane(root) {
     const newCode = $('clanNewCode');
     if(newCode) newCode.onclick = () => wodClanSend({ t: 'clan_update', newCode: true });
     root.querySelectorAll('.clan-kick').forEach(b => b.onclick = async () => {
-        if(await wodShowConfirmDialog({ title: 'Remove this member?', body: 'They leave the clan; they can only rejoin if it is public or they have the invite code.', confirmLabel: 'Remove', danger: true }))
+        if(await wodShowConfirmDialog({ title: 'Remove this member?', body: 'They leave the clan; to come back they have to join or apply again.', confirmLabel: 'Remove', danger: true }))
             wodClanSend({ t: 'clan_kick', playerId: b.dataset.pid });
     });
+    root.querySelectorAll('.clan-approve').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_app_answer', playerId: b.dataset.pid, approve: true }));
+    root.querySelectorAll('.clan-decline').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_app_answer', playerId: b.dataset.pid, approve: false }));
+    root.querySelectorAll('.clan-invite-btn').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_invite', playerId: b.dataset.pid }));
+    root.querySelectorAll('.clan-inv-accept').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_invite_answer', clanId: b.dataset.clan, accept: true }));
+    root.querySelectorAll('.clan-inv-decline').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_invite_answer', clanId: b.dataset.clan, accept: false }));
     const codeJoin = $('clanCodeJoin'), codeInput = $('clanCodeInput');
     if(codeJoin) codeJoin.onclick = () => { const code = (codeInput.value || '').trim(); if(!code) { showNotification('Enter a clan invite code.'); return; } wodClanSend({ t: 'clan_join', code }); };
     if(codeInput) codeInput.onkeydown = e => { if(e.key === 'Enter') codeJoin.click(); };
     const search = $('clanSearchInput');
     if(search) search.oninput = () => { WodClans.searchQuery = search.value; clearTimeout(WodClans.searchTimer); WodClans.searchTimer = setTimeout(() => wodClanSend({ t: 'clan_list', query: WodClans.searchQuery }), 250); };
-    root.querySelectorAll('.clan-join-btn').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_join', clanId: b.dataset.clan }));
-    root.querySelectorAll('.clan-view').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_get', clanId: b.dataset.clan }));
+    wodClanWireListButtons(root);
 }
 // Another clan, from the list or the leaderboard.
 function wodClanShowView(d) {
@@ -434,37 +583,62 @@ function wodClanShowView(d) {
         dlg.setAttribute('aria-modal', 'true');
         document.body.appendChild(dlg);
     }
-    const canJoin = !WodClans.mine && d.visibility === 'public';
-    dlg.innerHTML = '<div class="clan-view-backdrop"></div><div class="clan-view-card">' + wodClanHeroHtml(d, (canJoin ? '<button type="button" class="build-btn" id="clanViewJoin">Join clan</button>' : '') + '<button type="button" class="wod-editor-btn" id="clanViewClose">Close</button>') +
-        '<div class="clan-home-cols"><div>' + wodClanStatsHtml(d) + '<section class="clan-section"><h4>Recent clan wars</h4>' + wodClanHistoryHtml(d.history, 'No clan wars yet.') + '</section></div><div>' + wodClanMembersHtml(d, false) + '</div></div></div>';
+    const free = !WodClans.mine && !d.youAreMember;
+    const action = !free ? '' : d.visibility === 'public' ? '<button type="button" class="build-btn clan-join-btn" data-clan="' + wodClanEsc(d.id) + '">Join clan</button>'
+        : d.youApplied ? '<button type="button" class="wod-editor-btn clan-app-cancel" data-clan="' + wodClanEsc(d.id) + '">Withdraw application</button>'
+        : '<button type="button" class="build-btn clan-apply-btn" data-clan="' + wodClanEsc(d.id) + '">Apply to join</button>';
+    dlg.innerHTML = '<div class="clan-view-backdrop"></div><div class="clan-view-card">' + wodClanHeroHtml(d, action + '<button type="button" class="wod-editor-btn" id="clanViewClose">Close</button>') +
+        '<div class="clan-home-cols"><div>' + wodClanWarStatsHtml(d) + wodClanNormalStatsHtml(d) + '<section class="clan-section"><h4>Recent clan wars</h4>' + wodClanHistoryHtml(d.history, 'No clan wars yet.') + '</section></div><div>' + wodClanMembersHtml(d, false) + '</div></div></div>';
     dlg.hidden = false;
     const close = () => { dlg.hidden = true; };
     dlg.querySelector('#clanViewClose').onclick = close;
     dlg.querySelector('.clan-view-backdrop').onclick = close;
-    const j = dlg.querySelector('#clanViewJoin');
-    if(j) j.onclick = () => { wodClanSend({ t: 'clan_join', clanId: d.id }); close(); };
+    wodClanWireListButtons(dlg);
+    dlg.querySelectorAll('.clan-join-btn, .clan-apply-btn, .clan-app-cancel').forEach(b => b.addEventListener('click', close));
 }
 
 // ---------------------------------------------------------------- Rankings: clans
+const WOD_CLAN_BOARDS = {
+    war: { label: 'Clan wars', lead: 'Clan war results only.', sorts: [['wins', 'Wins'], ['wins1v1', '1v1 wins'], ['wins2v2', '2v2 wins'], ['defeats', 'Defeats'], ['kills', 'Kills'], ['losses', 'Losses']] },
+    normal: { label: 'Normal play', lead: 'All members\' multiplayer stats added together, as on the player leaderboard.', sorts: [['wins', 'Wins'], ['kills', 'Kills'], ['losses', 'Losses'], ['defeats', 'Defeats']] },
+};
 function wodClanSyncLbKind() {
     const kind = WodClans.lbKind;
     document.querySelectorAll('#mpLbKind [data-lb-kind]').forEach(b => { const on = b.dataset.lbKind === kind; b.classList.toggle('active', on); b.setAttribute('aria-selected', on); });
     const players = document.getElementById('mpLbPlayersView'), clansView = document.getElementById('mpLbClansView');
     if(players) players.hidden = kind !== 'players';
     if(clansView) clansView.hidden = kind !== 'clans';
+    wodClanRenderLbControls();
+}
+function wodClanRenderLbControls() {
+    const lb = WodClans.lb, board = WOD_CLAN_BOARDS[lb.kind] || WOD_CLAN_BOARDS.war;
+    const kinds = document.getElementById('mpClanLbKind'), sorts = document.getElementById('mpClanLbSort'), lead = document.getElementById('mpClanLbLead');
+    if(kinds) kinds.innerHTML = Object.entries(WOD_CLAN_BOARDS).map(([k, b]) => '<button type="button" class="mp-hub-tab' + (k === lb.kind ? ' active' : '') + '" data-clan-board="' + k + '">' + b.label + '</button>').join('');
+    if(sorts) sorts.innerHTML = board.sorts.map(([k, label]) => '<button type="button" class="mp-hub-tab' + (k === lb.sort ? ' active' : '') + '" data-clan-sort="' + k + '">' + label + '</button>').join('');
+    if(lead) lead.textContent = board.lead;
+    document.querySelectorAll('#mpClanLbKind [data-clan-board]').forEach(b => b.onclick = () => { WodClans.lb = { kind: b.dataset.clanBoard, sort: 'wins', rows: [] }; wodClanRenderLeaderboard(); wodClanRefresh({ board: true }); });
+    document.querySelectorAll('#mpClanLbSort [data-clan-sort]').forEach(b => b.onclick = () => { WodClans.lb.sort = b.dataset.clanSort; wodClanRenderLbControls(); wodClanRefresh({ board: true }); });
 }
 function wodClanRenderLeaderboard() {
+    wodClanRenderLbControls();
     const host = document.getElementById('mpClanLeaderboardList');
     if(!host) return;
-    document.querySelectorAll('#mpClanLbSort [data-clan-sort]').forEach(b => b.classList.toggle('active', b.dataset.clanSort === WodClans.lbSort));
-    const rows = WodClans.lbRows || [], mineId = WodClans.mine && WodClans.mine.id;
-    if(!rows.length) { host.innerHTML = '<p class="mp-hub-pane-lead">No clans yet. Found one in the Clan tab, then fight clan wars to climb this table.</p>'; return; }
-    const primary = { rating: r => 'Rating ' + r.rating, wins: r => r.wins + ' wars won', members: r => r.members + ' members', memberWins: r => formatLifetimeBig(r.memberWins) + ' member wins' }[WodClans.lbSort] || (r => 'Rating ' + r.rating);
-    host.innerHTML = rows.map((r, i) => '<div class="mp-lb-row clan-lb-row' + (r.id === mineId ? ' is-mine' : '') + '"><span class="mp-lb-rank">' + (i + 1) + '</span><span class="clan-lb-emblem">' + wodClanEmblemSvg(r.emblem) + '</span>' +
-        '<div class="mp-lb-meta"><div class="mp-lb-name">' + wodClanEsc(r.name) + (r.visibility === 'private' ? ' <span class="clan-lock" title="Private clan">🔒</span>' : '') + (r.id === mineId ? ' <span class="mp-lb-friend-tag">Your clan</span>' : '') + '</div>' +
-        '<div class="mp-lb-val"><span class="mp-lb-val-primary">' + primary(r) + '</span> · ' + r.wins + '–' + r.losses + ' in wars · 1v1 ' + ((r.byTier || {})['1v1'] || {}).wins + '–' + ((r.byTier || {})['1v1'] || {}).losses + ' · 2v2 ' + ((r.byTier || {})['2v2'] || {}).wins + '–' + ((r.byTier || {})['2v2'] || {}).losses + ' · ' + r.members + (r.members === 1 ? ' member' : ' members') + '</div>' +
-        '<div class="mp-lb-status">Led by ' + wodClanEsc(r.leaderName || '—') + '</div></div>' +
-        '<div class="mp-lb-actions"><button type="button" class="wod-editor-btn clan-view" data-clan="' + wodClanEsc(r.id) + '">View</button></div></div>').join('');
+    const lb = WodClans.lb, rows = lb.rows || [], mineId = WodClans.mine && WodClans.mine.id;
+    if(!rows.length) { host.innerHTML = '<p class="mp-hub-pane-lead">No clans yet. Found one in the Clan tab.</p>'; return; }
+    const labels = Object.fromEntries((WOD_CLAN_BOARDS[lb.kind] || WOD_CLAN_BOARDS.war).sorts);
+    const values = r => {
+        if(lb.kind === 'normal') { const t = r.totals || {}; return { wins: t.wins, kills: t.kills, losses: t.losses, defeats: t.defeats }; }
+        const s = r.stats || {}, bt = s.byTier || {};
+        return { wins: s.wins, wins1v1: (bt['1v1'] || {}).wins, wins2v2: (bt['2v2'] || {}).wins, defeats: s.defeats, kills: s.kills, losses: s.losses };
+    };
+    host.innerHTML = rows.map((r, i) => {
+        const v = values(r), order = [lb.sort, ...Object.keys(labels).filter(k => k !== lb.sort)];
+        return '<div class="mp-lb-row clan-lb-row' + (r.id === mineId ? ' is-mine' : '') + '"><span class="mp-lb-rank">' + (i + 1) + '</span><span class="clan-lb-emblem">' + wodClanEmblemSvg(r.emblem) + '</span>' +
+            '<div class="mp-lb-meta"><div class="mp-lb-name">' + wodClanEsc(r.name) + (r.visibility === 'private' ? ' <span class="clan-lock" title="Private clan">🔒</span>' : '') + (r.id === mineId ? ' <span class="mp-lb-friend-tag">Your clan</span>' : '') + '</div>' +
+            '<div class="mp-lb-val">' + order.map((k, j) => j ? labels[k] + ' ' + wodClanNum(v[k]) : '<span class="mp-lb-val-primary">' + labels[k] + ' ' + wodClanNum(v[k]) + '</span>').join(' · ') + '</div>' +
+            '<div class="mp-lb-status">' + r.members + (r.members === 1 ? ' member' : ' members') + ' · led by ' + wodClanEsc(r.leaderName || '—') + '</div></div>' +
+            '<div class="mp-lb-actions"><button type="button" class="wod-editor-btn clan-view" data-clan="' + wodClanEsc(r.id) + '">View</button></div></div>';
+    }).join('');
     host.querySelectorAll('.clan-view').forEach(b => b.onclick = () => wodClanSend({ t: 'clan_get', clanId: b.dataset.clan }));
 }
 function wodClanWireRankings() {
@@ -473,35 +647,105 @@ function wodClanWireRankings() {
         wodClanSyncLbKind();
         if(WodClans.lbKind === 'clans') wodClanRefresh({ board: true });
     });
-    document.querySelectorAll('#mpClanLbSort [data-clan-sort]').forEach(b => b.onclick = () => { WodClans.lbSort = b.dataset.clanSort; wodClanRefresh({ board: true }); wodClanRenderLeaderboard(); });
+    wodClanRenderLbControls();
 }
 
 // ---------------------------------------------------------------- Clan wars tab
-const WOD_CW_TIERS = [
-    { id: '1v1', title: '1v1 duel', lead: 'One member of your clan against one member of another clan.' },
-    { id: '2v2', title: '2v2 squad', lead: 'Two members of your clan, allied, against two of another clan. Both of you join the 2v2 queue; a war starts when two clans each have two players waiting.' },
-];
+function wodCwCountHtml(tier) {
+    const c = ((WodClans.cw.counts || {})[tier]) || { players: 0, clans: 0, parties: 0 };
+    const extra = tier === '2v2' ? ((c.parties | 0) === 1 ? ' · 1 party' : ' · ' + (c.parties | 0) + ' parties') : '';
+    return '<div class="cw-tier-count" aria-live="polite"><strong class="cw-count-num" data-tier-count="' + tier + '">' + (c.players | 0) + '</strong><span>' + ((c.players | 0) === 1 ? 'player' : 'players') + ' in this queue now' + ((c.players | 0) ? extra + ' · from ' + (c.clans | 0) + ((c.clans | 0) === 1 ? ' clan' : ' clans') : '') + '</span></div>';
+}
+function wodCw1v1Html() {
+    const cw = WodClans.cw, queued = cw.queued === '1v1', busy = !!(cw.war || WodMultiplayer.api.code);
+    return '<section class="cw-tier' + (queued ? ' is-queued' : '') + '"><div class="cw-tier-top"><span class="clan-tier-chip clan-tier-chip--lg">1v1</span><h4>1v1 duel</h4></div>' +
+        '<p class="cw-tier-lead">You against one member of another clan. You are never matched with a clanmate.</p>' + wodCwCountHtml('1v1') +
+        (queued ? '<p class="cw-searching"><span class="cw-pulse"></span>Searching for an opposing clan… <span id="cwWait">' + wodCwWaitText() + '</span></p><button type="button" class="wod-editor-btn cw-leave">Leave queue</button>'
+            : cw.party ? '<p class="cw-note">You are in a 2v2 party: leave it to fight 1v1.</p><button type="button" class="menu-btn clan-primary" disabled>Join 1v1 queue</button>'
+            : '<button type="button" class="menu-btn clan-primary cw-join" data-tier="1v1"' + (busy || cw.queued ? ' disabled' : '') + '>Join 1v1 queue</button>') + '</section>';
+}
+function wodCw2v2Html() {
+    const cw = WodClans.cw, party = cw.party, queued = cw.queued === '2v2', myId = WodMultiplayer.api.playerId || '';
+    let body = '';
+    if(party && party.members.length === 2) {
+        const mate = party.members.find(m => m.playerId !== myId) || {};
+        body = '<div class="cw-party"><span class="cw-party-label">Your party</span><span class="cw-party-member">You</span><span class="cw-party-plus">+</span><span class="cw-party-member">' + wodClanEsc(mate.name || 'Teammate') + (mate.online === false ? ' (offline)' : '') + '</span><button type="button" class="wod-editor-btn cw-party-leave">Leave party</button></div>' +
+            (queued ? '<p class="cw-searching"><span class="cw-pulse"></span>Your party is searching for an opposing clan… <span id="cwWait">' + wodCwWaitText() + '</span></p><button type="button" class="wod-editor-btn cw-leave">Stop searching</button>'
+                : '<button type="button" class="menu-btn clan-primary cw-join" data-tier="2v2"' + (cw.war || WodMultiplayer.api.code ? ' disabled' : '') + '>Search for a 2v2 war</button>');
+    } else {
+        const inv = cw.partyInvite, sent = cw.partyInvitesSent || [];
+        body = (inv ? '<div class="cw-party-invite"><strong>' + wodClanEsc(inv.name) + '</strong> invites you to their 2v2 party.<button type="button" class="build-btn cw-party-accept" data-from="' + wodClanEsc(inv.from) + '">Accept</button><button type="button" class="wod-editor-btn cw-party-decline" data-from="' + wodClanEsc(inv.from) + '">Decline</button></div>' : '') +
+            '<p class="cw-note">' + (sent.length ? 'Invited ' + sent.map(s => wodClanEsc(s.name)).join(', ') + ': waiting for an answer.' : 'You need a teammate: press Search to pick an online clanmate for your party.') + '</p>' +
+            // (alone, Search opens the list of online clanmates to invite; the search itself starts once the party is two)
+            '<button type="button" class="menu-btn clan-primary cw-2v2-pick"' + (cw.war || WodMultiplayer.api.code || cw.queued ? ' disabled' : '') + '>Search for a 2v2 war</button>';
+    }
+    return '<section class="cw-tier' + (queued ? ' is-queued' : '') + '"><div class="cw-tier-top"><span class="clan-tier-chip clan-tier-chip--lg">2v2</span><h4>2v2 party</h4></div>' +
+        '<p class="cw-tier-lead">You and a clanmate, as allies, against a party of two from another clan. Only a party of two can search.</p>' + wodCwCountHtml('2v2') + body + '</section>';
+}
+// ---- the teammate picker: 2v2 Search pressed without a party lists the clanmates online now, to invite one
+function wodCwOpenTeammatePicker() {
+    WodClans.picker = true;
+    wodClanSend({ t: 'clan_mine' });                  // (who is online now)
+    wodClanSend({ t: 'cw_status', watch: true });
+    wodCwRenderPicker();
+}
+function wodCwClosePicker() {
+    WodClans.picker = false;
+    const dlg = document.getElementById('cwPickDlg');
+    if(dlg) dlg.hidden = true;
+}
+function wodCwRenderPicker() {
+    if(!WodClans.picker) return;
+    let dlg = document.getElementById('cwPickDlg');
+    if(!dlg) {
+        dlg = document.createElement('div');
+        dlg.id = 'cwPickDlg';
+        dlg.className = 'clan-view-dlg cw-pick-dlg';
+        dlg.setAttribute('role', 'dialog');
+        dlg.setAttribute('aria-modal', 'true');
+        dlg.setAttribute('aria-labelledby', 'cwPickTitle');
+        document.body.appendChild(dlg);
+    }
+    const cw = WodClans.cw, party = cw.party, myId = WodMultiplayer.api.playerId || '';
+    let body;
+    if(party && party.members.length === 2) {
+        const mate = party.members.find(m => m.playerId !== myId) || {};
+        body = '<h3 id="cwPickTitle">Party ready</h3><p class="cw-pick-lead"><strong>' + wodClanEsc(mate.name || 'Your teammate') + '</strong> joined your 2v2 party.</p>' +
+            '<div class="cw-pick-foot"><button type="button" class="wod-editor-btn" id="cwPickClose">Not yet</button><button type="button" class="menu-btn clan-primary" id="cwPickSearch">Search for a 2v2 war</button></div>';
+    } else {
+        const sent = new Set((cw.partyInvitesSent || []).map(s => s.playerId));
+        const members = (WodClans.detail && WodClans.detail.memberList) || [];
+        const online = members.filter(m => m.online && m.playerId !== myId), offline = members.filter(m => !m.online && m.playerId !== myId).length;
+        body = '<h3 id="cwPickTitle">Pick a teammate</h3><p class="cw-pick-lead">2v2 is fought as a party of two. Invite a clanmate who is online now; when they accept, your party can search.</p>' +
+            (online.length ? '<ul class="cw-mate-list">' + online.map(m => '<li><span class="clan-online is-online"></span><span class="clan-member-name">' + wodClanEsc(m.name) + '</span><span class="clan-member-stat">' + (m.warWins | 0) + ' war wins</span>' +
+                (sent.has(m.playerId) ? '<span class="clan-tag">Invited · waiting</span>' : '<button type="button" class="build-btn cw-party-invite-btn" data-pid="' + wodClanEsc(m.playerId) + '">Invite</button>') + '</li>').join('') + '</ul>'
+                : '<p class="clan-empty">' + (members.length ? 'None of your clanmates are online right now' + (offline ? ' (' + offline + ' offline)' : '') + '.' : 'Checking who is online…') + ' You can still fight a 1v1, or invite friends to your clan in the Clan tab.</p>') +
+            '<div class="cw-pick-foot"><button type="button" class="wod-editor-btn" id="cwPickClose">Close</button></div>';
+    }
+    dlg.innerHTML = '<div class="clan-view-backdrop"></div><div class="clan-view-card cw-pick-card">' + body + '</div>';
+    dlg.hidden = false;
+    dlg.querySelector('.clan-view-backdrop').onclick = wodCwClosePicker;
+    dlg.querySelector('#cwPickClose').onclick = wodCwClosePicker;
+    const search = dlg.querySelector('#cwPickSearch');
+    if(search) search.onclick = () => { WodClans.queuedAt = Date.now(); wodClanSend({ t: 'cw_queue', tier: '2v2' }); wodCwClosePicker(); };
+    dlg.querySelectorAll('.cw-party-invite-btn').forEach(b => b.onclick = () => { b.disabled = true; wodClanSend({ t: 'cw_party_invite', playerId: b.dataset.pid }); });
+}
 function wodCwRenderPane() {
+    wodCwRenderPicker();
     const root = document.getElementById('mpWarsRoot');
     if(!root || root.closest('[hidden]')) return;
-    const mine = WodClans.mine, cw = WodClans.cw || {}, counts = cw.counts || {};
-    let html = '<div class="cw-root"><header class="cw-head"><div class="cw-head-text"><h3>Clan wars</h3><p>Fight for your clan against other clans. Every war counts for both clans\' stats, rating and place on the clan leaderboard.</p></div>' +
+    const mine = WodClans.mine, cw = WodClans.cw || {};
+    let html = '<div class="cw-root"><header class="cw-head"><div class="cw-head-text"><h3>Clan wars</h3><p>Fight for your clan against other clans. Every war counts towards both clans\' clan-war stats and the clan-war leaderboard.</p></div>' +
         '<div class="cw-head-clan">' + (mine ? '<span class="cw-head-label">Fighting for</span>' + wodClanBadgeHtml(mine, 'md') : '') + '</div></header>';
     if(!mine) {
         html += '<section class="clan-card cw-noclan"><h3>Join a clan first</h3><p>Clan wars are fought between clans. Found a clan or join one, then come back to queue.</p><button type="button" class="menu-btn clan-primary" id="cwGoClan">Find or found a clan</button></section>';
-    } else if(cw.war) {
-        const w = cw.war;
-        html += '<section class="cw-war-found"><span class="clan-tier-chip">' + wodClanEsc(w.tier) + '</span><h3>War found</h3><div class="cw-war-sides">' + w.sides.map(s => '<div class="cw-war-side">' + wodClanEmblemSvg(s.clan && s.clan.emblem) + '<strong>' + wodClanEsc(s.clan ? s.clan.name : 'Clan') + '</strong><span>' + s.players.map(p => wodClanEsc(p.name)).join(' & ') + '</span></div>').join('<span class="cw-vs">vs</span>') + '</div>' +
-            '<p>' + (WodMultiplayer.api.code ? 'In the war lobby: the war starts as soon as every player is in and the map is ready.' : 'Setting up the war lobby…') + '</p></section>';
-    }
-    if(mine) {
-        html += '<div class="cw-tiers">' + WOD_CW_TIERS.map(t => {
-            const c = counts[t.id] || { players: 0, clans: 0 }, queued = cw.queued === t.id;
-            return '<section class="cw-tier' + (queued ? ' is-queued' : '') + '"><div class="cw-tier-top"><span class="clan-tier-chip clan-tier-chip--lg">' + t.id + '</span><h4>' + t.title + '</h4></div><p class="cw-tier-lead">' + t.lead + '</p>' +
-                '<div class="cw-tier-count" aria-live="polite"><strong class="cw-count-num" data-tier-count="' + t.id + '">' + (c.players | 0) + '</strong><span>' + ((c.players | 0) === 1 ? 'player' : 'players') + ' in this queue now' + ((c.players | 0) ? ' · from ' + (c.clans | 0) + ((c.clans | 0) === 1 ? ' clan' : ' clans') : '') + '</span></div>' +
-                (queued ? '<p class="cw-searching"><span class="cw-pulse"></span>Searching for an opposing clan… <span id="cwWait">' + wodCwWaitText() + '</span></p><button type="button" class="wod-editor-btn cw-leave" data-tier="' + t.id + '">Leave queue</button>'
-                    : '<button type="button" class="menu-btn clan-primary cw-join" data-tier="' + t.id + '"' + (cw.war || cw.queued || WodMultiplayer.api.code ? ' disabled' : '') + '>Join ' + t.id + ' queue</button>') + '</section>';
-        }).join('') + '</div>';
+    } else {
+        if(cw.war) {
+            const w = cw.war;
+            html += '<section class="cw-war-found"><span class="clan-tier-chip">' + wodClanEsc(w.tier) + '</span><h3>War found</h3><div class="cw-war-sides">' + w.sides.map(s => '<div class="cw-war-side">' + wodClanEmblemSvg(s.clan && s.clan.emblem) + '<strong>' + wodClanEsc(s.clan ? s.clan.name : 'Clan') + '</strong><span>' + s.players.map(p => wodClanEsc(p.name)).join(' & ') + '</span></div>').join('<span class="cw-vs">vs</span>') + '</div>' +
+                '<p>' + (WodMultiplayer.api.code ? 'In the war lobby: the war starts as soon as every player is in and the map is ready.' : 'Setting up the war lobby…') + '</p></section>';
+        }
+        html += '<div class="cw-tiers">' + wodCw1v1Html() + wodCw2v2Html() + '</div>';
         if(WodMultiplayer.api.code && !cw.war) html += '<p class="cw-note">Leave your current lobby to queue for a clan war.</p>';
         html += '<section class="clan-section cw-history"><h4>Your clan\'s recent wars</h4>' + wodClanHistoryHtml(WodClans.detail && WodClans.detail.history, 'No clan wars yet: queue above to fight the first.') + '</section>';
     }
@@ -509,6 +753,11 @@ function wodCwRenderPane() {
     root.innerHTML = html;
     root.querySelectorAll('.cw-join').forEach(b => b.onclick = () => { WodClans.queuedAt = Date.now(); wodClanSend({ t: 'cw_queue', tier: b.dataset.tier }); });
     root.querySelectorAll('.cw-leave').forEach(b => b.onclick = () => wodClanSend({ t: 'cw_leave_queue' }));
+    root.querySelectorAll('.cw-party-invite-btn').forEach(b => b.onclick = () => wodClanSend({ t: 'cw_party_invite', playerId: b.dataset.pid }));
+    root.querySelectorAll('.cw-party-accept').forEach(b => b.onclick = () => wodClanSend({ t: 'cw_party_answer', from: b.dataset.from, accept: true }));
+    root.querySelectorAll('.cw-party-decline').forEach(b => b.onclick = () => wodClanSend({ t: 'cw_party_answer', from: b.dataset.from, accept: false }));
+    root.querySelectorAll('.cw-party-leave').forEach(b => b.onclick = () => wodClanSend({ t: 'cw_party_leave' }));
+    root.querySelectorAll('.cw-2v2-pick').forEach(b => b.onclick = wodCwOpenTeammatePicker);
     const go = root.querySelector('#cwGoClan');
     if(go) go.onclick = () => wodMpSwitchHubTab('clan');
     clearInterval(WodClans.waitTimer);

@@ -147,24 +147,65 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
         if(want('db')) {
             const { PGlite } = require('../server/node_modules/@electric-sql/pglite'), { createClans } = require('../server/clans');
             const dir = fs.mkdtempSync(path.join(OUT, 'pg-')), noFiles = fs.mkdtempSync(path.join(OUT, 'nofile-'));
-            const open = async () => { const db = new PGlite(dir); const pool = { query: (q, v) => db.query(q, v) }; const store = createClans({ dataDir: noFiles, pool, profiles: { getProfile: () => null, computeCombinedStats: () => ({}) }, nameOf: id => id, isOnline: () => false }); await store.init(); return { db, store }; };
+            let clock = Date.UTC(2026, 10, 22);
+            const wins = { P2: 9, P3: 3 };  // multiplayer wins, for ranking members and the normal-play board
+            const profilesStub = { getProfile: id => ({ id }), computeCombinedStats: p => ({ wins: wins[p.id] | 0, kills: (wins[p.id] | 0) * 10, losses: 4, defeats: 2, gamesPlayed: 12 }) };
+            const open = async () => { const db = new PGlite(dir); const pool = { query: (q, v) => db.query(q, v) }; const store = createClans({ dataDir: noFiles, pool, profiles: profilesStub, nameOf: id => id, isOnline: () => false, now: () => clock }); await store.init(); return { db, store }; };
             let { db, store } = await open();
             const red = store.create('P1', { name: 'Db Reds', emblem: 'f:it', visibility: 'private' }).clan;
             const blue = store.create('P2', { name: 'Db Blues', emblem: 'p:anchor', visibility: 'public' }).clan;
-            store.join('P3', { code: red.code });
-            store.recordWar({ warId: 'W-db', tier: '2v2', sides: [{ clanId: red.id, outcome: 'won', players: ['P1', 'P3'] }, { clanId: blue.id, outcome: 'lost', players: ['P2'] }] });
+            // a public clan is joined at once; a private one is listed and searchable, but takes an application
+            assert(store.join('P9', { clanId: blue.id }).joined, 'a public clan is joined at once');
+            assert(store.list('db reds', 'P5').some(c => c.id === red.id && c.visibility === 'private'), 'a private clan is found by search');
+            // the queue: at most 3 applicants from search and 2 invited ones (friends or the invite code) at a time
+            for(const p of ['P10', 'P11', 'P12']) assert(store.join(p, { clanId: red.id }).applied, p + ' applies from search');
+            assert.match(store.join('P13', { clanId: red.id }).msg, /queue is full/);
+            for(const p of ['P20', 'P21']) assert(store.join(p, { code: red.code }).applied, p + ' applies with the invite code');
+            assert.match(store.join('P22', { code: red.code }).msg, /queue is full/);
+            assert.equal(store.clanOf('P10'), null, 'an applicant is not a member yet');
+            assert.match(store.answerApplication('P10', 'P11', true).msg, /Only the clan leader/);
+            assert(store.answerApplication('P1', 'P10', true).approved, 'the leader approves');
+            assert.equal(store.clanOf('P10').id, red.id);
+            assert(store.join('P13', { clanId: red.id }).applied, 'approving frees a place in the queue');
+            assert(store.cancelApplication('P11', red.id).ok, 'an applicant may withdraw');
+            assert(!store.answerApplication('P1', 'P12', false).approved && !store.clanOf('P12'), 'the leader declines');
+            // members invite friends; a friend who accepts waits as an invited applicant (both invited places are full here)
+            assert(store.inviteFriend('P10', 'P30', () => true).ok, 'a member invites a friend');
+            assert.equal(store.pendingFor('P30').invitations[0].clan.id, red.id, 'the friend sees the invitation');
+            assert.match(store.answerInvite('P30', red.id, true).msg, /queue is full/);
+            store.answerApplication('P1', 'P20', false);
+            assert(store.answerInvite('P30', red.id, true).applied, 'accepted: queued for the leader');
+            assert.equal(store.detail(store.get(red.id), 'P1').applications.find(a => a.playerId === 'P30').invitedByName, 'P10', 'the leader sees who invited them');
+            assert(store.inviteFriend('P9', 'P31', () => true).ok && store.answerInvite('P31', blue.id, true).joined, 'a friend invited to a public clan joins at once');
+            // clan-war stats: wins by tier, defeats, kills and losses; the clan-war and normal-play leaderboards
+            store.recordWar({ warId: 'W-db', tier: '2v2', sides: [{ clanId: red.id, outcome: 'won', players: ['P1', 'P10'], kills: 40, losses: 12 }, { clanId: blue.id, outcome: 'lost', players: ['P2', 'P9'], kills: 12, losses: 40 }] });
+            store.recordWar({ warId: 'W-db2', tier: '1v1', sides: [{ clanId: red.id, outcome: 'lost', players: ['P10'], kills: 5, losses: 9 }, { clanId: blue.id, outcome: 'won', players: ['P2'], kills: 9, losses: 5 }] });
+            const rs = store.get(red.id).stats;
+            assert.deepEqual([rs.wins, rs.byTier['2v2'].wins, rs.byTier['1v1'].wins, rs.defeats, rs.kills, rs.losses], [1, 1, 0, 1, 45, 21]);
+            assert.equal(store.leaderboard('war', 'kills').rows[0].id, red.id, 'clan-war board by kills');
+            assert.equal(store.leaderboard('war', 'wins1v1').rows[0].id, blue.id, 'clan-war board by 1v1 wins');
+            const normal = store.leaderboard('normal', 'wins');
+            assert.equal(normal.rows[0].id, blue.id, 'normal-play board: the members\' wins added up');
+            assert.deepEqual(normal.rows[0].totals, { wins: 9, kills: 90, losses: 12, defeats: 6, gamesPlayed: 36 });
+            // a leader gone for 60 days hands the clan to its highest-ranked active member
+            assert.equal(store.get(red.id).leaderId, 'P1');
+            clock += 59 * 86400000; store.touch('P10'); store.checkInactiveLeaders();
+            assert.equal(store.get(red.id).leaderId, 'P1', 'not before 60 days');
+            clock += 2 * 86400000; store.touch('P10'); store.checkInactiveLeaders();
+            assert.equal(store.get(red.id).leaderId, 'P10', 'after 60 days the highest-ranked member leads');
+            assert(store.get(red.id).chat.some(m => m.system && /60 days/.test(m.text)), 'the clan chat says why');
             const gone = store.create('P4', { name: 'Db Gone', emblem: 'p:star', visibility: 'public' }).clan;
             store.leave('P4');
             await store.flush(); await db.close();
             ({ db, store } = await open());
             const back = store.get(red.id);
-            assert(back && back.members.length === 2 && back.stats.byTier['2v2'].wins === 1 && back.visibility === 'private' && back.code === red.code, 'a clan, its members, code and war record come back from the database');
-            assert.equal(store.clanOf('P3').id, red.id, 'membership is found again by player');
+            assert(back && back.members.length === 2 && back.leaderId === 'P10' && back.stats.kills === 45 && back.applications.some(a => a.playerId === 'P30') && back.code === red.code, 'a clan, its members, leader, queue and stats come back from the database');
+            assert.equal(store.clanOf('P10').id, red.id, 'membership is found again by player');
             assert.equal(store.get(gone.id), null, 'a disbanded clan is deleted from the database');
             assert.equal(fs.readdirSync(noFiles).length, 0, 'with a database nothing is written to the relay disk');
             await db.close();
             results.db = true;
-            console.log('db: clans, members, codes and war records saved to and restored from the database; disbanded clan deleted');
+            console.log('db: public join, private apply, queue 3 search + 2 invited, approve/decline/withdraw, friend invites, war and normal boards, 60-day leader hand-over, saved in the database');
         }
 
         // ---------------------------------------------------------------- 0. war setup edge cases, straight on the relay
@@ -223,13 +264,29 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
                 p1.send({ t: 'cw_status' });
                 const status = await p1.wait('cw_status', m => !m.war);
                 assert.equal(status.queued, null);
+                // 2v2 is fought only as a party of two clanmates
+                p1.send({ t: 'cw_queue', tier: '2v2' });
+                assert.match((await p1.wait('cw_error')).msg, /party/i, 'no party, no 2v2');
+                p1.send({ t: 'cw_party_invite', playerId: p2.id });
+                assert.match((await p1.wait('cw_error')).msg, /members of your clan/, 'only clanmates can be invited');
+                p4.send({ t: 'clan_join', clanId: (await (async () => { p4.send({ t: 'clan_list', query: 'Proto Reds' }); return (await p4.wait('clan_list')).clans[0].id; })()) });
+                await p4.wait('clan_info', m => m.done === 'clan_join');
+                p1.send({ t: 'cw_party_invite', playerId: p4.id });
+                const pinv = await p4.wait('cw_party_invite');
+                assert.equal(pinv.from, p1.id);
+                p4.send({ t: 'cw_party_answer', from: p1.id, accept: true });
+                await p1.wait('cw_status', m => m.party && m.party.members.length === 2);
+                p4.send({ t: 'cw_queue', tier: '1v1' });
+                assert.match((await p4.wait('cw_error')).msg, /party/, 'a party member cannot queue 1v1');
+                p4.send({ t: 'cw_party_leave' });
+                await p1.wait('cw_status', m => !m.party);
                 // a matched player who is busy in another game declines, and the war is called off at once
                 p1.send({ t: 'cw_queue', tier: '1v1' }); p2.send({ t: 'cw_queue', tier: '1v1' });
                 const again = await p2.wait('cw_match');
                 p2.send({ t: 'cw_decline', warId: again.war.id });
                 assert.match((await p1.wait('cw_cancelled')).msg, /another game/);
                 results.protocol = true;
-                console.log('protocol: no-clan and in-lobby queueing refused, war lobby private and seat-locked, hijack refused, leaving before start calls the war off');
+                console.log('protocol: no-clan and in-lobby queueing refused, war lobby private and seat-locked, hijack refused, leaving before start calls the war off, 2v2 only as a party of clanmates');
             } finally { for(const p of peers) p.socket.close(); }
         }
 
@@ -267,17 +324,37 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             await recruit.page.locator('#mpClanRoot .clan-list-row', { hasText: 'Iron Wolves' }).locator('.clan-join-btn').click();
             await recruit.page.waitForFunction(() => document.querySelector('#mpClanRoot .clan-hero h3')?.textContent === 'Iron Wolves', null, { timeout: 15000 });
             await leader.page.waitForFunction(() => WodClans.detail && WodClans.detail.members === 2, null, { timeout: 15000 });
-            // a private clan: not listed, joinable only with its code
+            // a private clan: listed and searchable, but players apply and its leader approves
             await send(loner, { t: 'clan_create', name: 'Night Owls', emblem: 'p:eagle', visibility: 'private' });
             const owls = (await clanMsg(loner, 'clan_info', 'm.done === "clan_create"')).clan;
             assert.equal(owls.visibility, 'private');
             await send(recruit, { t: 'clan_leave' }); await clanMsg(recruit, 'clan_info', 'm.done === "clan_leave"');
-            await send(recruit, { t: 'clan_list' });
-            assert(!(await clanMsg(recruit, 'clan_list')).clans.some(c => c.name === 'Night Owls'), 'a private clan is not listed');
-            await send(recruit, { t: 'clan_join', clanId: owls.id });
-            assert.match((await clanMsg(recruit, 'clan_error')).msg, /private/);
-            await send(recruit, { t: 'clan_join', code: owls.code });
-            assert.equal((await clanMsg(recruit, 'clan_info', 'm.done === "clan_join"')).mine.name, 'Night Owls');
+            await tab(recruit, 'clan');
+            await recruit.page.locator('#clanSearchInput').fill('night');
+            const owlRow = recruit.page.locator('#mpClanRoot .clan-list-row', { hasText: 'Night Owls' });
+            await owlRow.locator('.clan-apply-btn').click();
+            await recruit.page.waitForFunction(() => (WodClans.pending.applications || []).some(a => a.clan.name === 'Night Owls') && !WodClans.mine, null, { timeout: 15000 });
+            await recruit.page.waitForFunction(() => document.querySelector('#mpClanRoot .clan-pending') && [...document.querySelectorAll('#mpClanRoot .clan-list-row')].some(r => /Night Owls/.test(r.textContent) && /Applied/.test(r.textContent)), null, { timeout: 15000 });
+            await shot(recruit, 'clan-applied.png');
+            await tab(loner, 'clan');
+            await loner.page.waitForFunction(() => document.querySelector('#mpClanRoot .clan-apps .clan-approve') && document.querySelector('#mpTabClan .mp-tab-badge'), null, { timeout: 15000 });
+            await shot(loner, 'clan-applications.png');
+            await loner.page.locator('#mpClanRoot .clan-apps .clan-approve').first().click();
+            await recruit.page.waitForFunction(() => WodClans.mine && WodClans.mine.name === 'Night Owls', null, { timeout: 15000 });
+            // a member invites a friend; the friend accepts in the Clan tab and waits for the leader, who approves
+            const friend = await client('Owl Friend');
+            await recruit.page.evaluate(f => { wodProgress.profile.friends.push({ playerId: f.id, displayName: f.name }); wodClanRenderPane(); }, { id: friend.id, name: friend.name });
+            await tab(recruit, 'clan');
+            await recruit.page.locator('#mpClanRoot .clan-invite-btn').first().click();
+            await recruit.page.waitForFunction(() => /Invited/.test(document.querySelector('#mpClanRoot .clan-invite-friends')?.textContent || ''), null, { timeout: 15000 });
+            await tab(friend, 'clan');
+            await friend.page.waitForFunction(() => document.querySelector('#mpClanRoot .clan-pending .clan-inv-accept'), null, { timeout: 15000 });
+            await friend.page.locator('#mpClanRoot .clan-pending .clan-inv-accept').click();
+            await friend.page.waitForFunction(() => (WodClans.pending.applications || []).some(a => a.clan.name === 'Night Owls' && a.kind === 'invite'), null, { timeout: 15000 });
+            await loner.page.waitForFunction(() => [...document.querySelectorAll('#mpClanRoot .clan-app')].some(e => /Invited by Clan Recruit/.test(e.textContent)), null, { timeout: 15000 });
+            await loner.page.locator('#mpClanRoot .clan-apps .clan-approve').first().click();
+            await friend.page.waitForFunction(() => WodClans.mine && WodClans.mine.name === 'Night Owls', null, { timeout: 15000 });
+            await friend.context.close(); clients.splice(clients.indexOf(friend), 1);
             // the player leaderboard shows each player's clan
             const lb = await leader.page.evaluate(() => new Promise(res => { addEventListener('wod-mp-Leaderboard', e => res(e.detail.rows), { once: true }); WodMultiplayer.requestLeaderboard('wins'); }));
             assert.equal((lb.find(r => r.playerId === leader.id) || {}).clan?.name, 'Iron Wolves', 'leaderboard rows carry the clan');
@@ -287,6 +364,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             await leader.page.locator('#mpLbKind [data-lb-kind="clans"]').click();
             await leader.page.waitForFunction(() => { const names = [...document.querySelectorAll('#mpClanLeaderboardList .clan-lb-row .mp-lb-name')].map(e => e.textContent); return ['Iron Wolves', 'Night Owls'].every(n => names.some(t => t.startsWith(n))); }, null, { timeout: 15000 });
             await shot(leader, 'clan-leaderboard.png');
+            await leader.page.locator('#mpClanLbKind [data-clan-board="normal"]').click();
+            await leader.page.waitForFunction(() => WodClans.lb.kind === 'normal' && document.querySelectorAll('#mpClanLeaderboardList .clan-lb-row').length >= 2 && /Kills/.test(document.getElementById('mpClanLbSort').textContent) && !/1v1/.test(document.getElementById('mpClanLbSort').textContent), null, { timeout: 15000 });
+            await shot(leader, 'clan-leaderboard-normal.png');
             // only a clan's leader holds its invite code: the Owls' member sees no code and no invite card
             await send(recruit, { t: 'clan_mine' });
             const memberView = (await clanMsg(recruit, 'clan_info')).clan;
@@ -332,7 +412,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             await back.page.waitForFunction(() => [...document.querySelectorAll('#clanChatList .clan-chat-text')].some(e => e.textContent === 'Wolves only'), null, { timeout: 20000 });
             results.clans = { home, owls: { id: owls.id, visibility: owls.visibility } };
             for(const c of clients.splice(0)) await c.context.close();
-            console.log('clans: create (flag emblem, public), unique names, list and join, private by code only, leader-only invite code, chat (badge, text-only, clan-only, limits), leader hand-over, kept after restart ok');
+            console.log('clans: create (flag emblem, public), unique names, list and join, private apply + leader approval in the UI, friend invite + approval, leader-only invite code, both clan boards, chat (badge, text-only, clan-only, limits), leader hand-over, kept after restart ok');
         }
 
         // ---------------------------------------------------------------- 3. clan wars
@@ -341,7 +421,9 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             const found = async (p, name, emblem, vis) => { await send(p, { t: 'clan_create', name, emblem, visibility: vis }); return (await clanMsg(p, 'clan_info', 'm.done === "clan_create"')).clan; };
             const wolves = await found(a, 'Grey Wolves', 'p:wolf', 'public'), owls = await found(c, 'Snow Owls', 'f:fi', 'private');
             await send(b, { t: 'clan_join', clanId: wolves.id }); await clanMsg(b, 'clan_info', 'm.done === "clan_join"');
-            await send(d, { t: 'clan_join', code: owls.code }); await clanMsg(d, 'clan_info', 'm.done === "clan_join"');
+            await send(d, { t: 'clan_join', code: owls.code }); await clanMsg(d, 'clan_info', 'm.done === "clan_apply"');
+            await send(c, { t: 'clan_app_answer', playerId: d.id, approve: true }); await clanMsg(c, 'clan_info', 'm.done === "clan_approve"');
+            await d.page.waitForFunction(() => WodClans.mine && WodClans.mine.name === 'Snow Owls', null, { timeout: 15000 });
             for(const p of [a, b, c, d]) await tab(p, 'wars');
             // the queue sizes show before joining
             await a.page.waitForFunction(() => document.querySelector('[data-tier-count="1v1"]')?.textContent === '0' && document.querySelector('[data-tier-count="2v2"]')?.textContent === '0', null, { timeout: 15000 });
@@ -367,6 +449,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             await shot(host1, 'war1-playing.png');
             // the host's side (whoever that is) conquers the other
             await playedAMinute(host1);
+            await host1.page.evaluate(() => { gameData._lifetimeStatsByOwner = { 1: { enemyTroopKills: 30, enemyTankKills: 2, ownTroopLosses: 7 }, 2: { enemyTroopKills: 7, ownTroopLosses: 30, ownTankLosses: 2 } }; wodMpHostEmitSnapshot(); });
+            await sleep(400);
             await conquer(host1, [2]);
             await Promise.all([a, c].map(p => p.page.waitForFunction(() => gameData._campaignEnded, null, { timeout: 30000 })));
             const winnerClan = host1 === a ? 'Grey Wolves' : 'Snow Owls', loserClan = host1 === a ? 'Snow Owls' : 'Grey Wolves';
@@ -374,12 +458,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             assert.deepEqual(res1.sides.map(s => [s.clan.name, s.outcome]).sort(), [[winnerClan, 'won'], [loserClan, 'lost']].sort(), 'the war result names the winning clan');
             for(const p of [a, c]) await p.page.evaluate(() => returnToMenu());
             // clan stats and the clan leaderboard
-            await send(a, { t: 'clan_leaderboard', sort: 'rating' });
+            await send(a, { t: 'clan_leaderboard', kind: 'war', sort: 'wins' });
             const board1 = (await clanMsg(a, 'clan_leaderboard')).rows;
-            assert.equal(board1[0].name, winnerClan, 'the winner leads the clan leaderboard');
+            assert.equal(board1[0].name, winnerClan, 'the winner leads the clan-war leaderboard');
             const wRow = board1.find(r => r.name === winnerClan), lRow = board1.find(r => r.name === loserClan);
-            assert.deepEqual([wRow.wins, wRow.byTier['1v1'].wins, lRow.losses, lRow.byTier['1v1'].losses], [1, 1, 1, 1]);
-            assert(wRow.rating > 1000 && lRow.rating < 1000 && board1.indexOf(lRow) === board1.length - 1, 'rating moves with the result');
+            assert.deepEqual([wRow.stats.wins, wRow.stats.byTier['1v1'].wins, wRow.stats.defeats, lRow.stats.defeats, lRow.stats.byTier['1v1'].defeats], [1, 1, 0, 1, 1]);
+            // (the test wipes out the loser's army, which the host counts as its losses on top of the seeded ones)
+            assert.deepEqual([wRow.stats.kills, wRow.stats.losses, lRow.stats.kills], [32, 7, 7], 'the war\'s kills and losses count for each clan');
+            assert(lRow.stats.losses >= 32, 'the loser\'s losses include the troops it lost: ' + lRow.stats.losses);
             await tab(a, 'clan');
             await a.page.waitForFunction(() => document.querySelectorAll('#mpClanRoot .clan-war-row').length === 1, null, { timeout: 15000 });
             await shot(a, 'clan-stats-after-war.png');
@@ -397,10 +483,29 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
                 };
             });
             for(const p of [a, b, c, d]) await tab(p, 'wars');
-            await a.page.locator('.cw-join[data-tier="2v2"]').click();
-            await a.page.waitForFunction(() => WodClans.cw.queued === '2v2', null, { timeout: 15000 });
-            for(const p of [b, c]) { await p.page.locator('.cw-join[data-tier="2v2"]').click(); await p.page.waitForFunction(() => WodClans.cw.queued === '2v2', null, { timeout: 15000 }); }
-            await d.page.waitForFunction(() => document.querySelector('[data-tier-count="2v2"]')?.textContent === '3', null, { timeout: 15000 });
+            // alone, pressing 2v2 Search opens the list of clanmates online now, to invite one; it does not search
+            const formParty = async (inviter, invitee, mateName) => {
+                await inviter.page.locator('.cw-2v2-pick').click();
+                await inviter.page.waitForFunction(name => [...document.querySelectorAll('#cwPickDlg:not([hidden]) .cw-mate-list li')].some(li => li.textContent.includes(name) && li.querySelector('.cw-party-invite-btn')), mateName, { timeout: 15000 });
+                assert.equal(await inviter.page.evaluate(() => WodClans.cw.queued), null, 'alone, Search does not queue');
+                if(inviter === a) await shot(a, 'wars-pick-teammate.png');
+                await inviter.page.locator('#cwPickDlg .cw-mate-list li', { hasText: mateName }).locator('.cw-party-invite-btn').click();
+                await inviter.page.waitForFunction(() => /Invited/.test(document.querySelector('#cwPickDlg .cw-mate-list')?.textContent || ''), null, { timeout: 15000 });
+                await invitee.page.waitForFunction(() => document.querySelector('.cw-party-accept') && document.querySelector('#mpTabWars .mp-tab-badge'), null, { timeout: 15000 });
+                await invitee.page.locator('.cw-party-accept').click();
+                await invitee.page.waitForFunction(() => WodClans.cw.party && WodClans.cw.party.members.length === 2 && document.querySelector('.cw-join[data-tier="2v2"]:not([disabled])'), null, { timeout: 15000 });
+                // the inviter's picker turns into "Party ready", with the search button
+                await inviter.page.waitForFunction(() => WodClans.cw.party && WodClans.cw.party.members.length === 2 && document.querySelector('#cwPickDlg:not([hidden]) #cwPickSearch'), null, { timeout: 15000 });
+            };
+            await formParty(a, b, 'Wolf Beta');
+            await shot(b, 'wars-party.png');
+            await formParty(c, d, 'Owl Delta');
+            await c.page.locator('#cwPickClose').click();
+            // in a party, 1v1 is closed
+            assert.equal(await a.page.locator('.cw-join[data-tier="1v1"]').count(), 0, 'a party member cannot queue 1v1');
+            await a.page.locator('#cwPickSearch').click();
+            await b.page.waitForFunction(() => WodClans.cw.queued === '2v2', null, { timeout: 15000 });
+            await d.page.waitForFunction(() => document.querySelector('[data-tier-count="2v2"]')?.textContent === '2', null, { timeout: 15000 });
             await d.page.locator('.cw-join[data-tier="2v2"]').click();
             await Promise.all([a, b, c, d].map(p => p.page.waitForFunction(() => gameState === 'PLAYING' && gameData.mp?.allReady, null, { timeout: 120000 })));
             const war2 = await Promise.all([a, b, c, d].map(p => p.page.evaluate(() => ({ slot: gameData.mp.localSlot, host: WodMultiplayer.api.isHost, alliances: gameData.alliances.map(x => [x.a ?? x[0], x.b ?? x[1]]) }))));
