@@ -156,7 +156,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             const blue = store.create('P2', { name: 'Db Blues', emblem: 'p:anchor', visibility: 'public' }).clan;
             // a public clan is joined at once; a private one is listed and searchable, but takes an application
             assert(store.join('P9', { clanId: blue.id }).joined, 'a public clan is joined at once');
-            assert(store.list('db reds', 'P5').some(c => c.id === red.id && c.visibility === 'private'), 'a private clan is found by search');
+            assert(store.list('db reds', 'P5').clans.some(c => c.id === red.id && c.visibility === 'private'), 'a private clan is found by search');
             // the queue: at most 3 applicants from search and 2 invited ones (friends or the invite code) at a time
             for(const p of ['P10', 'P11', 'P12']) assert(store.join(p, { clanId: red.id }).applied, p + ' applies from search');
             assert.match(store.join('P13', { clanId: red.id }).msg, /queue is full/);
@@ -304,11 +304,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             await leader.page.locator('[data-etab="flags"]').click();
             await leader.page.locator('[data-emblem="f:de"]').click();
             await leader.page.locator('[data-vis="public"]').click();
+            await leader.page.locator('#clanDescInput').fill('Casual clan for weekend wars.');
+            await leader.page.waitForFunction(() => document.getElementById('clanDescCount').textContent === '29 / 200');
             await leader.page.locator('#clanSubmitBtn').click();
             await leader.page.waitForFunction(() => document.querySelector('#mpClanRoot .clan-hero h3')?.textContent === 'Iron Wolves', null, { timeout: 15000 });
             await shot(leader, 'clan-home.png');
             const home = await leader.page.evaluate(() => ({ emblem: WodClans.detail.emblem, vis: WodClans.detail.visibility, leader: WodClans.detail.youAreLeader, code: WodClans.detail.code, badge: document.getElementById('mpProfileClan').textContent }));
             assert.deepEqual([home.emblem, home.vis, home.leader], ['f:de', 'public', true]);
+            assert.equal(await leader.page.locator('#mpClanRoot .clan-hero-desc').textContent(), 'Casual clan for weekend wars.', 'the clan page shows its description');
             assert(/^CLAN-[0-9A-F]{8}$/.test(home.code) && /Iron Wolves/.test(home.badge), JSON.stringify(home));
             // names are unique, emblems must be real ones, one clan at a time
             await send(loner, { t: 'clan_create', name: 'iron wolves', emblem: 'p:star', visibility: 'public' });
@@ -355,6 +358,41 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             await loner.page.locator('#mpClanRoot .clan-apps .clan-approve').first().click();
             await friend.page.waitForFunction(() => WodClans.mine && WodClans.mine.name === 'Night Owls', null, { timeout: 15000 });
             await friend.context.close(); clients.splice(clients.indexOf(friend), 1);
+            // finding a clan: search by name, filter public or private, and page through long results (8 to a page)
+            {
+                const { WebSocket } = require('../server/node_modules/ws'), cr = require('crypto'), sockets = [];
+                try {
+                    for(let i = 1; i <= 9; i++) {
+                        const ws = new WebSocket('ws://127.0.0.1:' + relayPort), got = [];
+                        ws.on('message', raw => got.push(JSON.parse(raw)));
+                        const until = async t => { for(let k = 0; k < 200 && !got.some(m => m.t === t); k++) await sleep(25); if(!got.some(m => m.t === t)) throw Error('no ' + t); };
+                        await until('welcome');
+                        ws.send(JSON.stringify({ t: 'register_player', playerId: 'WOD-SRC0' + i + '-TEST', deviceSecret: cr.randomBytes(32).toString('hex'), displayName: 'Search Founder ' + i }));
+                        await until('registered');
+                        ws.send(JSON.stringify({ t: 'clan_create', name: 'Search Test 0' + i, emblem: 'f:fr', visibility: i % 2 ? 'public' : 'private', description: 'Test clan number ' + i }));
+                        await until('clan_info');
+                        sockets.push(ws);
+                    }
+                    const seeker = await client('Clan Seeker');
+                    await tab(seeker, 'clan');
+                    await seeker.page.locator('#clanSearchInput').fill('search test');
+                    await seeker.page.waitForFunction(() => /^9 clans matching/.test(document.querySelector('.clan-results-head')?.textContent || '') && document.querySelectorAll('#clanSearchResults .clan-list-row').length === 8 && /Page 1 \/ 2/.test(document.querySelector('.clan-page-label')?.textContent || ''), null, { timeout: 15000 });
+                    assert(await seeker.page.locator('#clanSearchResults .clan-list-desc', { hasText: 'Test clan number' }).count() > 0, 'search results show descriptions');
+                    await shot(seeker, 'clan-search.png');
+                    await seeker.page.locator('.clan-page-next').click();
+                    await seeker.page.waitForFunction(() => document.querySelectorAll('#clanSearchResults .clan-list-row').length === 1 && /Page 2 \/ 2/.test(document.querySelector('.clan-page-label').textContent) && document.querySelector('.clan-page-next').disabled, null, { timeout: 15000 });
+                    await seeker.page.locator('.clan-page-prev').click();
+                    await seeker.page.waitForFunction(() => document.querySelectorAll('#clanSearchResults .clan-list-row').length === 8, null, { timeout: 15000 });
+                    await seeker.page.locator('[data-clan-filter="private"]').click();
+                    await seeker.page.waitForFunction(() => /^4 private clans matching/.test(document.querySelector('.clan-results-head').textContent) && document.querySelectorAll('#clanSearchResults .clan-apply-btn').length === 4 && !document.querySelector('.clan-pager'), null, { timeout: 15000 });
+                    await seeker.page.locator('#clanSearchInput').fill('search test 07');
+                    await seeker.page.locator('[data-clan-filter="all"]').click();
+                    await seeker.page.waitForFunction(() => document.querySelectorAll('#clanSearchResults .clan-list-row').length === 1 && /Search Test 07/.test(document.querySelector('#clanSearchResults').textContent), null, { timeout: 15000 });
+                    await seeker.page.locator('#clanSearchInput').fill('zzz no such clan');
+                    await seeker.page.waitForFunction(() => /No clans match/.test(document.querySelector('#clanSearchResults').textContent), null, { timeout: 15000 });
+                    await seeker.context.close(); clients.splice(clients.indexOf(seeker), 1);
+                } finally { for(const ws of sockets) ws.close(); }
+            }
             // the player leaderboard shows each player's clan
             const lb = await leader.page.evaluate(() => new Promise(res => { addEventListener('wod-mp-Leaderboard', e => res(e.detail.rows), { once: true }); WodMultiplayer.requestLeaderboard('wins'); }));
             assert.equal((lb.find(r => r.playerId === leader.id) || {}).clan?.name, 'Iron Wolves', 'leaderboard rows carry the clan');
@@ -505,6 +543,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
             assert.equal(await a.page.locator('.cw-join[data-tier="1v1"]').count(), 0, 'a party member cannot queue 1v1');
             await a.page.locator('#cwPickSearch').click();
             await b.page.waitForFunction(() => WodClans.cw.queued === '2v2', null, { timeout: 15000 });
+            await sleep(1600);
+            await Promise.all([a, b].map(p => p.page.evaluate(() => wodClanSend({ t: 'cw_status' }))));
+            await sleep(400);
+            const timers = await Promise.all([a, b].map(p => p.page.evaluate(() => ({ at: WodClans.queuedAt, by: WodClans.queuedBy, shown: document.getElementById('cwWait') ? document.getElementById('cwWait').textContent : '', who: document.querySelector('.cw-searching')?.textContent || '' }))));
+            assert(Math.abs(timers[0].at - timers[1].at) < 400, 'both players of the party count the search from the same moment: ' + JSON.stringify(timers));
+            assert(timers.every(t => t.by === 'Wolf Alpha' && /started by Wolf Alpha/.test(t.who)), 'both see who started the search: ' + JSON.stringify(timers));
+            await shot(b, 'wars-party-searching.png');
             await d.page.waitForFunction(() => document.querySelector('[data-tier-count="2v2"]')?.textContent === '2', null, { timeout: 15000 });
             await d.page.locator('.cw-join[data-tier="2v2"]').click();
             await Promise.all([a, b, c, d].map(p => p.page.waitForFunction(() => gameState === 'PLAYING' && gameData.mp?.allReady, null, { timeout: 120000 })));

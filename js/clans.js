@@ -53,6 +53,9 @@ function wodFlagSun(cx, cy, r, fill, rays) {
     for(let i = 0; i < (rays || 12); i++) { const a = i / (rays || 12) * Math.PI * 2, b = a + Math.PI / (rays || 12); s += '<polygon points="' + [[cx + Math.cos(a - .12) * r * 1.1, cy + Math.sin(a - .12) * r * 1.1], [cx + Math.cos(b) * r * 1.75, cy + Math.sin(b) * r * 1.75], [cx + Math.cos(a + Math.PI * 2 / (rays || 12) + .12) * r * 1.1, cy + Math.sin(a + Math.PI * 2 / (rays || 12) + .12) * r * 1.1]].map(p => p.map(n => n.toFixed(2)).join(',')).join(' ') + '" fill="' + fill + '"/>'; }
     return s;
 }
+// Diagonal band from the bottom left to the top right (or the other way), for several flags.
+function wodFlagDiag(color, width, down) { return '<path d="' + (down ? 'M0,0L60,40' : 'M0,40L60,0') + '" stroke="' + color + '" stroke-width="' + width + '"/>'; }
+function wodFlagHoist(color, depth) { return '<polygon points="0,0 ' + (depth || 26) + ',20 0,40" fill="' + color + '"/>'; }
 const wodFlagCanton = inner => '<svg x="0" y="0" width="30" height="20" viewBox="0 0 60 40">' + inner + '</svg>';
 const WOD_CLAN_FLAGS = {
     us: ['United States', () => { let s = ''; for(let i = 0; i < 13; i++) s += '<rect x="0" y="' + (i * 40 / 13).toFixed(2) + '" width="60" height="' + (40 / 13 + 0.05).toFixed(2) + '" fill="' + (i % 2 ? '#fff' : '#b22234') + '"/>'; s += '<rect width="25" height="21.5" fill="#3c3b6e"/>'; for(let r = 0; r < 5; r++) for(let c = 0; c < 6; c++) s += '<circle cx="' + (2.4 + c * 4 + (r % 2) * 2).toFixed(1) + '" cy="' + (2.6 + r * 4.1).toFixed(1) + '" r="0.9" fill="#fff"/>'; return s; }],
@@ -162,6 +165,100 @@ const WOD_CLAN_FLAGS = {
     so: ['Somalia', () => '<rect width="60" height="40" fill="#4189dd"/>' + wodFlagStar(30, 21, 9, '#fff')],
     tz: ['Tanzania', () => '<rect width="60" height="40" fill="#1eb53a"/><polygon points="60,0 60,40 0,40" fill="#00a3dd"/><path d="M0,40L60,0" stroke="#fcd116" stroke-width="14"/><path d="M0,40L60,0" stroke="#000" stroke-width="9"/>'],
     fj: ['Fiji', () => '<rect width="60" height="40" fill="#68bfe5"/>' + wodFlagCanton(wodFlagJack()) + '<path d="M38 10H52V22Q52 30 45 33Q38 30 38 22Z" fill="#fff" stroke="#ce1126" stroke-width=".8"/><rect x="38" y="10" width="14" height="4.5" fill="#ce1126"/>'],
+    ad: ["Andorra", () => wodFlagStripes('v', ["#10069f","#fedf00","#d50032"], [8,9,8]) + '<path d="M25.5 14H34.5V22Q34.5 27 30 29Q25.5 27 25.5 22Z" fill="#c7b37f" stroke="#7a5a1e" stroke-width=".8"/><path d="M30 14V29M25.5 21H34.5" stroke="#d50032" stroke-width="1"/>'],
+    by: ["Belarus", () => wodFlagStripes('h', ["#c8313e","#4aa657"], [2,1]) + '<rect width="7" height="40" fill="#fff"/>' + [3, 9, 15, 21, 27, 33].map(y => '<polygon points="3.5,' + (y - 2.5) + ' 6,' + y + ' 3.5,' + (y + 2.5) + ' 1,' + y + '" fill="#c8313e"/>').join('')],
+    ba: ["Bosnia and Herzegovina", () => '<rect width="60" height="40" fill="#002395"/><polygon points="16,0 44,0 44,40" fill="#fecb00"/>' + [0, 1, 2, 3, 4, 5, 6, 7].map(i => wodFlagStar(12 + i * 4.3, 1.5 + i * 5.3, 2, '#fff')).join('')],
+    cy: ["Cyprus", () => '<rect width="60" height="40" fill="#fff"/><path d="M14 17Q22 11 33 13Q41 12 47 9L44 14Q38 18 31 20Q22 21 17 22Z" fill="#d57800"/><path d="M20 30Q30 35 40 30" stroke="#4e5b31" stroke-width="2" fill="none"/>'],
+    li: ["Liechtenstein", () => wodFlagStripes('h', ["#002b7f","#ce1126"]) + '<path d="M9 13L10 7L13 10L15 5L17 10L20 7L21 13Z" fill="#ffd83d"/><circle cx="15" cy="4.5" r="1" fill="#ffd83d"/>'],
+    me: ["Montenegro", () => '<rect width="60" height="40" fill="#c4a000"/><rect x="2" y="2" width="56" height="36" fill="#c40308"/><g transform="translate(14.3 4) scale(.5)"><path d="M32 16C29.8 16 28.3 17.6 28.3 19.6L26.5 22.4L28.8 22.8L29.3 26.5L22 21.5H18L11.5 15.5L12.6 20.6L7.5 18.8L10.8 23.8H5.8L9.8 27.8L5.8 29.8L11.8 31.8L9.8 34.8L16.8 33.8L22 33L26.8 36L26 43.5L21.5 50L26.8 48L29 52.5L32 49L35 52.5L37.2 48L42.5 50L38 43.5L37.2 36L42 33L47.2 33.8L54.2 34.8L52.2 31.8L58.2 29.8L54.2 27.8L58.2 23.8H53.2L56.5 18.8L51.4 20.6L52.5 15.5L46 21.5H42L34.7 26.5L35.2 22.8L37.5 22.4L35.7 19.6C35.7 17.6 34.2 16 32 16Z" fill="#d4af3a"/></g>'],
+    mk: ["North Macedonia", () => '<rect width="60" height="40" fill="#d20000"/><g fill="#ffe600"><polygon points="0,0 9,0 30,20 0,6"/><polygon points="60,0 51,0 30,20 60,6"/><polygon points="0,40 9,40 30,20 0,34"/><polygon points="60,40 51,40 30,20 60,34"/><polygon points="27,0 33,0 30,20"/><polygon points="27,40 33,40 30,20"/><polygon points="0,17 0,23 30,20"/><polygon points="60,17 60,23 30,20"/></g><circle cx="30" cy="20" r="6" fill="#ffe600" stroke="#d20000" stroke-width="1.4"/>'],
+    sm: ["San Marino", () => wodFlagStripes('h', ["#fff","#5eb6e4"]) + '<path d="M26.5 13H33.5V21Q33.5 25 30 27Q26.5 25 26.5 21Z" fill="#5eb6e4" stroke="#c7a24a" stroke-width="1"/><path d="M28 19L29 15.5L30 18L31 15.5L32 19Z" fill="#fff"/>'],
+    va: ["Vatican City", () => wodFlagStripes('v', ["#ffe000","#fff"]) + '<path d="M38 26L50 14M50 26L38 14" stroke="#c7a24a" stroke-width="2"/><path d="M38 26L50 14" stroke="#b5b5b5" stroke-width="1.2"/><path d="M41.5 10L44 7.5L46.5 10L44 12Z" fill="#c7a24a"/>'],
+    xk: ["Kosovo", () => '<rect width="60" height="40" fill="#244aa5"/><path d="M24 17L30 14L37 16L39 21L35 27L28 28L23 23Z" fill="#d0a650"/>' + [0, 1, 2, 3, 4, 5].map(i => wodFlagStar(18.5 + i * 4.6, 10 - Math.sin((i + .5) / 6 * Math.PI) * 3, 1.7, '#fff')).join('')],
+    ag: ["Antigua and Barbuda", () => '<rect width="60" height="40" fill="#ce1126"/><polygon points="0,0 60,0 49.5,14 10.5,14" fill="#000"/>' + wodFlagSun(30, 14, 5, '#fcd116', 12) + '<polygon points="10.5,14 49.5,14 44.25,21 15.75,21" fill="#0072c6"/><polygon points="15.75,21 44.25,21 30,40" fill="#fff"/>'],
+    bs: ["Bahamas", () => wodFlagStripes('h', ["#00abc9","#fae042","#00abc9"]) + wodFlagHoist('#000', 26)],
+    bb: ["Barbados", () => wodFlagStripes('v', ["#00267f","#ffc726","#00267f"]) + '<path d="M30 30V12M24 13Q24 21 30 21Q36 21 36 13M30 9L28.5 12H31.5ZM24 10L22.8 13H25.2ZM36 10L34.8 13H37.2Z" stroke="#000" stroke-width="1.6" fill="#000"/>'],
+    bz: ["Belize", () => '<rect width="60" height="40" fill="#003f87"/><rect width="60" height="4" fill="#ce1126"/><rect y="36" width="60" height="4" fill="#ce1126"/><circle cx="30" cy="20" r="11" fill="#fff"/><circle cx="30" cy="20" r="9" fill="none" stroke="#4e8c3a" stroke-width="1.6" stroke-dasharray="2 1"/><path d="M27 18H33V22Q33 25 30 26Q27 25 27 22Z" fill="#00599f"/>'],
+    dm: ["Dominica", () => '<rect width="60" height="40" fill="#006b3f"/><rect x="24" y="0" width="4" height="40" fill="#fcd116"/><rect x="28" y="0" width="4" height="40" fill="#000"/><rect x="32" y="0" width="4" height="40" fill="#fff"/><rect x="0" y="14" width="60" height="4" fill="#fcd116"/><rect x="0" y="18" width="60" height="4" fill="#000"/><rect x="0" y="22" width="60" height="4" fill="#fff"/><circle cx="30" cy="20" r="9" fill="#d41c30"/>' + [...Array(10)].map((_, i) => wodFlagStar(30 + Math.cos(i * Math.PI / 5) * 6.8, 20 + Math.sin(i * Math.PI / 5) * 6.8, 1.1, '#4aa657')).join('') + '<circle cx="30" cy="20" r="2.6" fill="#7a3f99"/>'],
+    sv: ["El Salvador", () => wodFlagStripes('h', ["#0047ab","#fff","#0047ab"]) + '<circle cx="30" cy="20" r="4" fill="none" stroke="#3a7d44" stroke-width="1.2"/><polygon points="30,17 33,22 27,22" fill="#ffd200"/>'],
+    gd: ["Grenada", () => '<rect width="60" height="40" fill="#ce1126"/><polygon points="5,5 55,5 30,20" fill="#fcd116"/><polygon points="5,35 55,35 30,20" fill="#fcd116"/><polygon points="5,5 5,35 30,20" fill="#007a5e"/><polygon points="55,5 55,35 30,20" fill="#007a5e"/><circle cx="30" cy="20" r="5" fill="#ce1126"/>' + wodFlagStar(30, 20, 3.5, '#fcd116') + [15, 30, 45].map(x => wodFlagStar(x, 2.5, 1.6, '#fcd116') + wodFlagStar(x, 37.5, 1.6, '#fcd116')).join('')],
+    gy: ["Guyana", () => '<rect width="60" height="40" fill="#009e49"/><polygon points="0,0 60,20 0,40" fill="#fff"/><polygon points="0,2 55,20 0,38" fill="#fcd116"/><polygon points="0,0 30,20 0,40" fill="#000"/><polygon points="0,2.5 27,20 0,37.5" fill="#ce1126"/>'],
+    ht: ["Haiti", () => wodFlagStripes('h', ["#00209f","#d21034"]) + '<rect x="22" y="13" width="16" height="14" fill="#fff"/><path d="M26 24H34L30 16Z" fill="#016a16"/>'],
+    hn: ["Honduras", () => wodFlagStripes('h', ["#0073cf","#fff","#0073cf"]) + [[30, 20], [24, 17], [24, 23], [36, 17], [36, 23]].map(([x, y]) => wodFlagStar(x, y, 2, '#0073cf')).join('')],
+    ni: ["Nicaragua", () => wodFlagStripes('h', ["#0067c6","#fff","#0067c6"]) + '<polygon points="30,16 34.5,23.5 25.5,23.5" fill="none" stroke="#c7a24a" stroke-width="1"/><circle cx="30" cy="20.5" r="5.5" fill="none" stroke="#c7a24a" stroke-width=".6"/>'],
+    kn: ["Saint Kitts and Nevis", () => '<polygon points="0,0 60,0 0,40" fill="#009e49"/><polygon points="60,0 60,40 0,40" fill="#ce1126"/>' + wodFlagDiag('#fcd116', 16) + wodFlagDiag('#000', 11) + wodFlagStar(21, 26, 3.5, '#fff') + wodFlagStar(39, 14, 3.5, '#fff')],
+    lc: ["Saint Lucia", () => '<rect width="60" height="40" fill="#65cfff"/><polygon points="30,5 41,34 19,34" fill="#fff"/><polygon points="30,8 39,34 21,34" fill="#000"/><polygon points="30,20 41,34 19,34" fill="#fcd116"/>'],
+    vc: ["Saint Vincent and the Grenadines", () => wodFlagStripes('v', ["#002674","#fcd116","#009e60"], [1,2,1]) + [[25, 14], [35, 14], [30, 26]].map(([x, y]) => '<polygon points="' + x + ',' + (y - 5) + ' ' + (x + 3.4) + ',' + y + ' ' + x + ',' + (y + 5) + ' ' + (x - 3.4) + ',' + y + '" fill="#009e60"/>').join('')],
+    sr: ["Suriname", () => wodFlagStripes('h', ["#377e3f","#fff","#b40a2d","#fff","#377e3f"], [2,1,4,1,2]) + wodFlagStar(30, 20.5, 6, '#ecc81d')],
+    tt: ["Trinidad and Tobago", () => '<rect width="60" height="40" fill="#da1a35"/>' + wodFlagDiag('#fff', 15, true) + wodFlagDiag('#000', 10, true)],
+    af: ["Afghanistan", () => wodFlagStripes('v', ["#000","#d32011","#007a36"]) + '<circle cx="30" cy="20" r="6.5" fill="none" stroke="#fff" stroke-width="1.2"/><path d="M27 23V18.5L30 16L33 18.5V23Z" fill="#fff"/>'],
+    bh: ["Bahrain", () => { let p = 'M0,0H14'; for(let i = 0; i < 5; i++) p += ' L22,' + (i * 8 + 4) + ' L14,' + ((i + 1) * 8); return '<rect width="60" height="40" fill="#ce1126"/><path d="' + p + ' H0Z" fill="#fff"/>'; }],
+    bt: ["Bhutan", () => '<polygon points="0,0 60,0 0,40" fill="#ffd520"/><polygon points="60,0 60,40 0,40" fill="#ff4e12"/><path d="M14 30Q20 22 28 22Q34 22 38 17Q42 12 48 11" stroke="#fff" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M14 30Q20 22 28 22Q34 22 38 17Q42 12 48 11" stroke="#d9d9d9" stroke-width="1" fill="none" stroke-dasharray="2 2"/>'],
+    bn: ["Brunei", () => '<rect width="60" height="40" fill="#f7e017"/><path d="M0,8L60,26" stroke="#fff" stroke-width="7"/><path d="M0,15L60,33" stroke="#000" stroke-width="6"/><path d="M24 26Q30 32 36 26M30 14V28M26 16H34" stroke="#cf1126" stroke-width="2" fill="none"/>'],
+    kh: ["Cambodia", () => wodFlagStripes('h', ["#032ea1","#e00025","#032ea1"], [1,2,1]) + '<path d="M18 28H42V26H40V22H38V19H36V22H34V17H32V14L30 11L28 14V17H26V22H24V19H22V22H20V26H18Z" fill="#fff"/>'],
+    iq: ["Iraq", () => wodFlagStripes('h', ["#ce1126","#fff","#000"]) + '<path d="M21 22Q23 18 25 22T29 22M31 18V22H35M37 18V22Q39 22 39 20" stroke="#007a3d" stroke-width="1.4" fill="none"/>'],
+    kg: ["Kyrgyzstan", () => '<rect width="60" height="40" fill="#e8112d"/>' + wodFlagSun(30, 20, 6, '#ffef00', 20) + '<circle cx="30" cy="20" r="5" fill="#e8112d"/><circle cx="30" cy="20" r="4" fill="#ffef00"/><path d="M26.5 18.5Q30 16.5 33.5 18.5M26.2 21.5Q30 19.5 33.8 21.5M28 17V23M32 17V23" stroke="#e8112d" stroke-width=".8" fill="none"/>'],
+    mv: ["Maldives", () => '<rect width="60" height="40" fill="#d21034"/><rect x="10" y="7" width="40" height="26" fill="#007e3a"/>' + wodFlagCrescent(31, 20, 7, '#fff', '#007e3a', 2.6)],
+    mn: ["Mongolia", () => wodFlagStripes('v', ["#c4272f","#015197","#c4272f"]) + '<g fill="#f9cf02"><circle cx="10" cy="12" r="2"/><path d="M10 6L11 9.5H9Z"/><rect x="7" y="16" width="6" height="1.5"/><polygon points="10,18.5 13,20 10,21.5 7,20"/><rect x="7" y="23" width="6" height="1.5"/><rect x="7" y="27" width="6" height="1.5"/><rect x="5" y="15" width="1.4" height="14"/><rect x="13.6" y="15" width="1.4" height="14"/></g>'],
+    np: ["Nepal", () => '<path d="M14 2L42 21H22L42 38H14Z" fill="#dc143c" stroke="#003893" stroke-width="2" stroke-linejoin="round"/><circle cx="21" cy="15" r="3" fill="#fff"/><path d="M17.5 13Q21 16.5 24.5 13" fill="none" stroke="#dc143c" stroke-width="1"/>' + wodFlagSun(21, 29, 2.6, '#fff', 10)],
+    kp: ["North Korea", () => wodFlagStripes('h', ["#024fa2","#fff","#ed1c27","#fff","#024fa2"], [6,1,15,1,6]) + '<circle cx="21" cy="20" r="6.5" fill="#fff"/>' + wodFlagStar(21, 20.5, 6, '#ed1c27')],
+    om: ["Oman", () => wodFlagStripes('h', ["#fff","#db161b","#008000"]) + '<rect width="16" height="40" fill="#db161b"/><path d="M4 5L12 11M12 5L4 11M8 3V12" stroke="#fff" stroke-width="1.3"/>'],
+    ps: ["Palestine", () => wodFlagStripes('h', ["#000","#fff","#149954"]) + wodFlagHoist('#e4312b', 22)],
+    lk: ["Sri Lanka", () => '<rect width="60" height="40" fill="#ffbe29"/><rect x="2.5" y="2.5" width="6.5" height="35" fill="#00534e"/><rect x="9" y="2.5" width="6.5" height="35" fill="#eb7400"/><rect x="18" y="2.5" width="39.5" height="35" fill="#8d153a"/><path d="M28 30V22Q28 16 34 15Q40 14 42 18L46 17L44 21Q46 25 44 30Z" fill="#ffbe29"/><path d="M44 15L50 9" stroke="#ffbe29" stroke-width="1.6"/>'],
+    sy: ["Syria", () => wodFlagStripes('h', ["#ce1126","#fff","#000"]) + wodFlagStar(23, 20, 3.4, '#007a3d') + wodFlagStar(37, 20, 3.4, '#007a3d')],
+    tj: ["Tajikistan", () => wodFlagStripes('h', ["#cc0000","#fff","#006600"], [2,3,2]) + '<path d="M26 22L27 18.5L28.5 20L30 17.5L31.5 20L33 18.5L34 22Z" fill="#f8c300"/>' + [0, 1, 2, 3, 4, 5, 6].map(i => wodFlagStar(30 + Math.cos(Math.PI * (1.15 + i * .7 / 6)) * 7.5, 19.5 + Math.sin(Math.PI * (1.15 + i * .7 / 6)) * 7.5, 1, '#f8c300')).join('')],
+    tl: ["Timor-Leste", () => '<rect width="60" height="40" fill="#dc241f"/>' + wodFlagHoist('#ffc726', 30) + wodFlagHoist('#000', 20) + wodFlagStar(7, 20, 4, '#fff', -60)],
+    tm: ["Turkmenistan", () => '<rect width="60" height="40" fill="#00843d"/><rect x="7" y="0" width="10" height="40" fill="#d22630"/>' + [5, 13, 21, 29, 37].map(y => '<polygon points="12,' + (y - 3) + ' 15.5,' + y + ' 12,' + (y + 3) + ' 8.5,' + y + '" fill="#ffc72c" opacity=".85"/>').join('') + wodFlagCrescent(26, 10, 4.5, '#fff', '#00843d', 1.8) + [[31, 6], [34, 9], [33, 13], [30, 14], [31, 10]].map(([x, y]) => wodFlagStar(x + 1, y, 1, '#fff')).join('')],
+    uz: ["Uzbekistan", () => '<rect width="60" height="13.3" fill="#0099b5"/><rect y="13.3" width="60" height="13.4" fill="#fff"/><rect y="26.7" width="60" height="13.3" fill="#1eb53a"/><rect y="13.3" width="60" height="1" fill="#ce1126"/><rect y="25.7" width="60" height="1" fill="#ce1126"/>' + wodFlagCrescent(8, 6.6, 4.5, '#fff', '#0099b5', 1.6) + [...Array(12)].map((_, i) => wodFlagStar(15.5 + (i % 4) * 3.4 + (i < 4 ? 3.4 * (1 - Math.min(1, i)) : 0), 3 + Math.floor(i / 4) * 3.4, .9, '#fff')).join('')],
+    ye: ["Yemen", () => wodFlagStripes('h', ["#ce1126","#fff","#000"])],
+    ao: ["Angola", () => wodFlagStripes('h', ["#cc092f","#000"]) + '<path d="M24 26A8 8 0 1 1 36 16" stroke="#ffcb00" stroke-width="2.4" fill="none"/><path d="M26 25L35 17" stroke="#ffcb00" stroke-width="2.2"/>' + wodFlagStar(30, 14, 2.4, '#ffcb00')],
+    bj: ["Benin", () => wodFlagStripes('h', ["#fcd116","#e8112d"]) + '<rect width="24" height="40" fill="#008751"/>'],
+    bf: ["Burkina Faso", () => wodFlagStripes('h', ["#ef2b2d","#009e49"]) + wodFlagStar(30, 20.5, 6, '#fcd116')],
+    bi: ["Burundi", () => '<polygon points="0,0 60,0 30,20" fill="#ce1126"/><polygon points="0,40 60,40 30,20" fill="#ce1126"/><polygon points="0,0 0,40 30,20" fill="#1eb53a"/><polygon points="60,0 60,40 30,20" fill="#1eb53a"/><path d="M0,0L60,40M60,0L0,40" stroke="#fff" stroke-width="5"/><circle cx="30" cy="20" r="9" fill="#fff"/>' + [[30, 16], [26.5, 22], [33.5, 22]].map(([x, y]) => wodFlagStar(x, y, 2.4, '#ce1126')).join('')],
+    cv: ["Cabo Verde", () => '<rect width="60" height="40" fill="#003893"/><rect y="21" width="60" height="2.6" fill="#fff"/><rect y="23.6" width="60" height="2.6" fill="#cf2027"/><rect y="26.2" width="60" height="2.6" fill="#fff"/>' + [...Array(10)].map((_, i) => wodFlagStar(22 + Math.cos(i * Math.PI / 5) * 8, 25 + Math.sin(i * Math.PI / 5) * 8, 1.4, '#f7d116')).join('')],
+    cf: ["Central African Republic", () => wodFlagStripes('h', ["#003082","#fff","#289728","#ffce00"]) + '<rect x="26" width="8" height="40" fill="#d21034"/>' + wodFlagStar(10, 5, 3.2, '#ffce00')],
+    km: ["Comoros", () => wodFlagStripes('h', ["#ffd100","#fff","#ce1126","#3a75c4"]) + wodFlagHoist('#3d8e33', 22) + wodFlagCrescent(7, 20, 5.5, '#fff', '#3d8e33', 2) + [15, 18, 22, 25].map((y, i) => wodFlagStar(10.5, y, 1, '#fff')).join('')],
+    cd: ["DR Congo", () => '<rect width="60" height="40" fill="#007fff"/>' + wodFlagDiag('#f7d618', 13) + wodFlagDiag('#ce1021', 9) + wodFlagStar(10, 8, 5, '#f7d618')],
+    cg: ["Congo", () => '<polygon points="0,0 40,0 0,40" fill="#009543"/><polygon points="60,0 60,40 20,40" fill="#dc241f"/><polygon points="40,0 60,0 20,40 0,40" fill="#fbde4a"/>'],
+    dj: ["Djibouti", () => wodFlagStripes('h', ["#6ab2e7","#12ad2b"]) + '<polygon points="0,0 30,20 0,40" fill="#fff"/>' + wodFlagStar(10, 20, 3.8, '#d7141a')],
+    gq: ["Equatorial Guinea", () => wodFlagStripes('h', ["#3e9a00","#fff","#e32118"]) + wodFlagHoist('#0073ce', 14) + '<path d="M28 18H32V23Q32 25 30 25.5Q28 25 28 23Z" fill="#c4c4c4"/><path d="M30 15.5V20" stroke="#3e9a00" stroke-width="2"/>'],
+    er: ["Eritrea", () => '<polygon points="0,0 60,0 60,20" fill="#12ad2b"/><polygon points="0,40 60,40 60,20" fill="#4189dd"/><polygon points="0,0 60,20 0,40" fill="#ea0437"/><circle cx="14" cy="20" r="6" fill="none" stroke="#ffc726" stroke-width="1.6"/><path d="M14 26V14" stroke="#ffc726" stroke-width="1.2"/>'],
+    sz: ["Eswatini", () => wodFlagStripes('h', ["#3e5eb9","#ffd900","#b10c0c","#ffd900","#3e5eb9"], [3,1,8,1,3]) + '<path d="M16 20H44" stroke="#c4a56c" stroke-width="1.2"/><ellipse cx="30" cy="20" rx="10" ry="5.5" fill="#fff"/><path d="M30 14.5A10 5.5 0 0 1 30 25.5A10 5.5 0 0 1 20 20A10 5.5 0 0 1 30 14.5Z" fill="#000"/>'],
+    ga: ["Gabon", () => wodFlagStripes('h', ["#009e60","#fcd116","#3a75c4"])],
+    gm: ["Gambia", () => wodFlagStripes('h', ["#ce1126","#fff","#0c1c8c","#fff","#3a7728"], [6,1,4,1,6])],
+    gn: ["Guinea", () => wodFlagStripes('v', ["#ce1126","#fcd116","#009460"])],
+    gw: ["Guinea-Bissau", () => wodFlagStripes('h', ["#fcd116","#009e49"]) + '<rect width="20" height="40" fill="#ce1126"/>' + wodFlagStar(10, 20.5, 5, '#000')],
+    ls: ["Lesotho", () => wodFlagStripes('h', ["#00209f","#fff","#009543"], [3,4,3]) + '<path d="M24 23Q30 19 36 23L33 22.5L30 14.5L27 22.5Z" fill="#000"/>'],
+    lr: ["Liberia", () => { let s = ''; for(let i = 0; i < 11; i++) s += '<rect x="0" y="' + (i * 40 / 11).toFixed(2) + '" width="60" height="' + (40 / 11 + 0.05).toFixed(2) + '" fill="' + (i % 2 ? '#fff' : '#bf0a30') + '"/>'; return s + '<rect width="18.2" height="18.2" fill="#002868"/>' + wodFlagStar(9.1, 9.6, 5.5, '#fff'); }],
+    ly: ["Libya", () => wodFlagStripes('h', ["#e70013","#000","#239e46"], [1,2,1]) + wodFlagCrescent(28, 20, 5, '#fff', '#000', 1.6) + wodFlagStar(33.5, 20, 2.4, '#fff', -90)],
+    mg: ["Madagascar", () => wodFlagStripes('h', ["#fc3d32","#007e3a"]) + '<rect width="20" height="40" fill="#fff"/>'],
+    mw: ["Malawi", () => wodFlagStripes('h', ["#000","#ce1126","#339e35"]) + '<path d="M21 13.3A9 9 0 0 1 39 13.3Z" fill="#ce1126"/>' + [...Array(13)].map((_, i) => { const a = Math.PI * (1 + i / 12); return '<path d="M' + (30 + Math.cos(a) * 9.5).toFixed(1) + ' ' + (13.3 + Math.sin(a) * 9.5).toFixed(1) + 'L' + (30 + Math.cos(a) * 12.5).toFixed(1) + ' ' + (13.3 + Math.sin(a) * 12.5).toFixed(1) + '" stroke="#ce1126" stroke-width="1.2"/>'; }).join('')],
+    mr: ["Mauritania", () => '<rect width="60" height="40" fill="#00a95c"/><rect width="60" height="6" fill="#d01c1f"/><rect y="34" width="60" height="6" fill="#d01c1f"/><path d="M21 17A9 9 0 0 0 39 17A9 7 0 0 1 21 17Z" fill="#ffd700"/>' + wodFlagStar(30, 15.5, 3.4, '#ffd700')],
+    mu: ["Mauritius", () => wodFlagStripes('h', ["#ea2839","#1a206d","#ffd500","#00a551"])],
+    mz: ["Mozambique", () => wodFlagStripes('h', ["#007168","#fff","#000","#fff","#fce100"], [6,0.8,6,0.8,6]) + wodFlagHoist('#d21034', 24) + wodFlagStar(9, 20.5, 5, '#fce100')],
+    na: ["Namibia", () => '<polygon points="0,0 60,0 0,40" fill="#003580"/><polygon points="60,0 60,40 0,40" fill="#009543"/>' + wodFlagDiag('#fff', 14) + wodFlagDiag('#d21034', 10) + wodFlagSun(11, 10, 3, '#ffce00', 12)],
+    ne: ["Niger", () => wodFlagStripes('h', ["#e05206","#fff","#0db02b"]) + '<circle cx="30" cy="20" r="4" fill="#e05206"/>'],
+    rw: ["Rwanda", () => wodFlagStripes('h', ["#00a1de","#fad201","#20603d"], [2,1,1]) + wodFlagSun(50, 8, 3, '#e5be01', 16)],
+    st: ["São Tomé and Príncipe", () => wodFlagStripes('h', ["#12ad2b","#ffce00","#12ad2b"], [2,3,2]) + wodFlagHoist('#d21034', 16) + wodFlagStar(30, 20.5, 4.5, '#000') + wodFlagStar(44, 20.5, 4.5, '#000')],
+    sc: ["Seychelles", () => '<polygon points="0,40 0,0 20,0" fill="#003f87"/><polygon points="0,40 20,0 40,0" fill="#fcd856"/><polygon points="0,40 40,0 60,0 60,13.3" fill="#d62828"/><polygon points="0,40 60,13.3 60,26.7" fill="#fff"/><polygon points="0,40 60,26.7 60,40" fill="#007a3d"/>'],
+    sl: ["Sierra Leone", () => wodFlagStripes('h', ["#1eb53a","#fff","#0072c6"])],
+    ss: ["South Sudan", () => wodFlagStripes('h', ["#000","#fff","#da121a","#fff","#078930"], [6,1,6,1,6]) + wodFlagHoist('#0f47af', 26) + wodFlagStar(8.5, 20, 4.5, '#fcdd09')],
+    sd: ["Sudan", () => wodFlagStripes('h', ["#d21034","#fff","#000"]) + wodFlagHoist('#007229', 22)],
+    tg: ["Togo", () => wodFlagStripes('h', ["#006a4e","#ffce00","#006a4e","#ffce00","#006a4e"]) + '<rect width="24" height="24" fill="#d21034"/>' + wodFlagStar(12, 12.5, 6.5, '#fff')],
+    ug: ["Uganda", () => wodFlagStripes('h', ["#000","#fcdc04","#d90000","#000","#fcdc04","#d90000"]) + '<circle cx="30" cy="20" r="7.5" fill="#fff"/><path d="M27 25L29 17Q30 13 33 14Q31 16 31.5 18L33 25" stroke="#9ca69c" stroke-width="2" fill="none"/><circle cx="31.5" cy="14.5" r="1.4" fill="#d90000"/>'],
+    zm: ["Zambia", () => '<rect width="60" height="40" fill="#198a00"/><rect x="40" y="16" width="6.6" height="24" fill="#de2010"/><rect x="46.6" y="16" width="6.7" height="24" fill="#000"/><rect x="53.3" y="16" width="6.7" height="24" fill="#ef7d00"/><path d="M42 10Q47 6 50 9Q53 6 58 10Q53 9 51 12L50 14L49 12Q47 9 42 10Z" fill="#ef7d00"/>'],
+    zw: ["Zimbabwe", () => wodFlagStripes('h', ["#006400","#ffd200","#d40000","#000","#d40000","#ffd200","#006400"]) + '<polygon points="0,0 28,20 0,40" fill="#fff" stroke="#000" stroke-width="1"/>' + wodFlagStar(9, 20, 5, '#d40000') + '<path d="M8 16L10 13L11 15L10.5 22L9 24Z" fill="#ffd200"/>'],
+    ki: ["Kiribati", () => '<rect width="60" height="40" fill="#fff"/><rect width="60" height="20" fill="#ce1126"/>' + wodFlagSun(30, 20, 6, '#fcd116', 14) + '<rect y="20" width="60" height="20" fill="#003f87"/>' + [24, 29, 34].map(y => '<path d="M0 ' + y + 'Q7.5 ' + (y - 2) + ' 15 ' + y + 'T30 ' + y + 'T45 ' + y + 'T60 ' + y + '" stroke="#fff" stroke-width="2" fill="none"/>').join('') + '<path d="M20 9Q30 3 40 9Q33 7 30 10Q27 7 20 9Z" fill="#fcd116"/>'],
+    mh: ["Marshall Islands", () => '<rect width="60" height="40" fill="#003893"/><path d="M0,40L60,4" stroke="#fff" stroke-width="5"/><path d="M0,36L60,0" stroke="#dd7500" stroke-width="5"/>' + [...Array(12)].map((_, i) => { const a = i * Math.PI / 6; return '<polygon points="' + (11 + Math.cos(a) * 7).toFixed(1) + ',' + (11 + Math.sin(a) * 7).toFixed(1) + ' ' + (11 + Math.cos(a + 1.4) * 2).toFixed(1) + ',' + (11 + Math.sin(a + 1.4) * 2).toFixed(1) + ' ' + (11 + Math.cos(a - 1.4) * 2).toFixed(1) + ',' + (11 + Math.sin(a - 1.4) * 2).toFixed(1) + '" fill="#fff"/>'; }).join('')],
+    fm: ["Micronesia", () => '<rect width="60" height="40" fill="#75b2dd"/>' + [[30, 10], [20, 20], [40, 20], [30, 30]].map(([x, y]) => wodFlagStar(x, y, 3.5, '#fff')).join('')],
+    nr: ["Nauru", () => '<rect width="60" height="40" fill="#002b7f"/><rect y="18.5" width="60" height="3" fill="#ffc61e"/>' + [...Array(12)].map((_, i) => { const a = i * Math.PI / 6; return '<polygon points="' + (16 + Math.cos(a) * 5.5).toFixed(1) + ',' + (29 + Math.sin(a) * 5.5).toFixed(1) + ' ' + (16 + Math.cos(a + 1.3) * 2).toFixed(1) + ',' + (29 + Math.sin(a + 1.3) * 2).toFixed(1) + ' ' + (16 + Math.cos(a - 1.3) * 2).toFixed(1) + ',' + (29 + Math.sin(a - 1.3) * 2).toFixed(1) + '" fill="#fff"/>'; }).join('') + '<circle cx="16" cy="29" r="2.4" fill="#fff"/>'],
+    pw: ["Palau", () => '<rect width="60" height="40" fill="#4aadd6"/><circle cx="26" cy="20" r="11" fill="#ffde00"/>'],
+    pg: ["Papua New Guinea", () => '<polygon points="0,0 60,0 60,40" fill="#ce1126"/><polygon points="0,0 0,40 60,40" fill="#000"/>' + [[12, 18, 2.6], [8, 25, 2.2], [17, 26, 2.2], [12, 33, 2.6], [14, 28, 1.3]].map(([x, y, r]) => wodFlagStar(x, y, r, '#fff')).join('') + '<path d="M36 14Q42 8 50 10Q46 12 47 15Q52 14 54 18Q48 17 46 19Q42 22 38 20Q40 17 36 14Z" fill="#fcd116"/>'],
+    ws: ["Samoa", () => '<rect width="60" height="40" fill="#ce1126"/><rect width="30" height="20" fill="#002b7f"/>' + [[15, 4.5, 2.6], [9.5, 10, 2.6], [21, 9, 2.6], [15, 16, 2.6], [17.5, 12, 1.5]].map(([x, y, r]) => wodFlagStar(x, y, r, '#fff')).join('')],
+    sb: ["Solomon Islands", () => '<polygon points="0,0 60,0 0,40" fill="#0051ba"/><polygon points="60,0 60,40 0,40" fill="#215b33"/>' + wodFlagDiag('#fcd116', 3) + [[7, 5], [17, 5], [12, 10], [7, 15], [17, 15]].map(([x, y]) => wodFlagStar(x, y, 2.4, '#fff')).join('')],
+    to: ["Tonga", () => '<rect width="60" height="40" fill="#c10000"/><rect width="24" height="20" fill="#fff"/><rect x="10" y="3" width="4" height="14" fill="#c10000"/><rect x="5" y="8" width="14" height="4" fill="#c10000"/>'],
+    tv: ["Tuvalu", () => '<rect width="60" height="40" fill="#5b97b1"/>' + wodFlagCanton(wodFlagJack()) + [[37, 6], [44, 10], [52, 7], [40, 17], [48, 20], [55, 15], [42, 27], [50, 31], [56, 25]].map(([x, y]) => wodFlagStar(x, y, 1.8, '#ffce00')).join('')],
+    vu: ["Vanuatu", () => wodFlagStripes('h', ["#d21034","#009543"]) + '<polygon points="0,-2 31,18 60,18 60,22 31,22 0,42" fill="#000"/><polygon points="0,1 30,19.2 60,19.2 60,20.8 30,20.8 0,39" fill="#fdce12"/><polygon points="0,4 27,20 0,36" fill="#000"/><circle cx="9" cy="20" r="4" fill="none" stroke="#fdce12" stroke-width="1.3"/>'],
 };
 const WOD_CLAN_EMBLEM_IDS = [...Object.keys(WOD_CLAN_PRESETS).map(k => 'p:' + k), ...Object.keys(WOD_CLAN_FLAGS).map(k => 'f:' + k)];
 const wodClanEmblemCache = new Map();
@@ -197,7 +294,8 @@ const WodClans = {
     mine: null, detail: null, pending: { applications: [], invitations: [] }, list: [], searchQuery: '',
     lb: { kind: 'war', sort: 'wins', rows: [] }, lbKind: 'players',
     cw: { counts: null, queued: null, war: null, party: null, partyInvite: null, partyInvitesSent: [] },
-    form: { mode: 'create', emblem: 'p:swords', tab: 'presets', visibility: 'public', name: '' }, queuedAt: 0, error: '', launchTimer: 0, launching: '', unread: 0,
+    form: { mode: 'create', emblem: 'p:swords', tab: 'presets', visibility: 'public', name: '', description: '', flagQuery: '' },
+    listPage: 0, listPages: 1, listTotal: 0, listFilter: 'all', queuedBy: '', queuedAt: 0, error: '', launchTimer: 0, launching: '', unread: 0,
 };
 try { WodClans.mine = JSON.parse(localStorage.getItem('simplewarsClanCache') || 'null'); } catch(_) {}
 function wodClanOnline() { return typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen && WodMultiplayer.api.registered; }
@@ -214,7 +312,7 @@ function wodClanSetMine(summary) {
 function wodClanRefresh(opts) {
     if(!wodClanOnline()) return;
     wodClanSend({ t: 'clan_mine' });
-    if(opts && opts.list) wodClanSend({ t: 'clan_list', query: WodClans.searchQuery || '' });
+    if(opts && opts.list) wodClanSearch();
     if(opts && opts.wars) wodClanSend({ t: 'cw_status', watch: true });
     if(opts && opts.board) wodClanSend({ t: 'clan_leaderboard', kind: WodClans.lb.kind, sort: WodClans.lb.sort });
 }
@@ -244,12 +342,15 @@ function wodClanOnMessage(m) {
                 const say = WOD_CLAN_DONE[m.done];
                 if(say) showNotification(say(m));
                 if(m.done === 'clan_update') WodClans.form.mode = 'create';
-                if(['clan_leave', 'clan_join', 'clan_create', 'clan_apply', 'clan_app_cancel'].includes(m.done)) wodClanSend({ t: 'clan_list', query: WodClans.searchQuery || '' });
+                if(['clan_leave', 'clan_join', 'clan_create', 'clan_apply', 'clan_app_cancel'].includes(m.done)) wodClanSearch();
             }
             if(m.notice) showNotification(m.notice);
             wodClanRenderAll();
             break;
-        case 'clan_list': WodClans.list = m.clans || []; wodClanRenderPane(); break;
+        case 'clan_list':
+            WodClans.list = m.clans || []; WodClans.listPage = m.page | 0; WodClans.listPages = Math.max(1, m.pages | 0); WodClans.listTotal = m.total | 0;
+            if(document.getElementById('clanSearchResults')) wodClanRenderSearchResults(); else wodClanRenderPane();
+            break;
         case 'clan_leaderboard': WodClans.lb = { kind: m.kind || 'war', sort: m.sort || 'wins', rows: m.rows || [] }; wodClanRenderLeaderboard(); break;
         case 'clan_chat': {
             const d = WodClans.detail, mine = m.message && m.message.playerId === WodMultiplayer.api.playerId;
@@ -269,7 +370,8 @@ function wodClanOnMessage(m) {
             break;
         case 'cw_status':
             WodClans.cw = { counts: m.counts || null, queued: m.queued || null, war: m.war || (WodMultiplayer.api.code ? WodClans.cw.war : null) || null, party: m.party || null, partyInvite: m.partyInvite || null, partyInvitesSent: m.partyInvitesSent || [] };
-            if(!m.queued) WodClans.queuedAt = 0; else if(!WodClans.queuedAt) WodClans.queuedAt = Date.now();
+            WodClans.queuedAt = m.queued ? Date.now() - Math.max(0, m.queuedFor | 0) : 0;
+            WodClans.queuedBy = m.queuedBy || '';
             wodCwSetBadge();
             wodCwRenderPane();
             break;
@@ -390,6 +492,7 @@ function wodClanMembersHtml(d, canKick) {
 function wodClanHeroHtml(d, actions) {
     const s = d.stats || {};
     return '<header class="clan-hero"><div class="clan-hero-emblem">' + wodClanEmblemSvg(d.emblem) + '</div><div class="clan-hero-text"><h3>' + wodClanEsc(d.name) + '</h3>' +
+        (d.description ? '<p class="clan-hero-desc">' + wodClanEsc(d.description) + '</p>' : '') +
         '<p>' + (d.visibility === 'private' ? 'Private clan · apply to join' : 'Public clan · anyone can join') + ' · ' + d.members + (d.members === 1 ? ' member' : ' members') + ' · led by ' + wodClanEsc(d.leaderName || '—') + ' · founded ' + wodClanDate(d.createdAt) + '</p>' +
         '<div class="clan-hero-pills"><span class="clan-pill clan-pill--gold">' + (s.wins | 0) + ((s.wins | 0) === 1 ? ' war win' : ' war wins') + '</span><span class="clan-pill">' + (s.defeats | 0) + ((s.defeats | 0) === 1 ? ' defeat' : ' defeats') + '</span><span class="clan-pill">' + (d.visibility === 'private' ? '🔒 Private' : 'Public') + '</span></div></div>' +
         '<div class="clan-hero-actions">' + (actions || '') + '</div></header>';
@@ -452,14 +555,17 @@ function wodClanChatVisible() {
 }
 function wodClanFormHtml(mode, d) {
     const f = WodClans.form, isEdit = mode === 'edit';
-    if(isEdit && !f.editing) { f.editing = true; f.name = d.name; f.emblem = d.emblem; f.visibility = d.visibility; }
-    const ids = f.tab === 'flags' ? Object.keys(WOD_CLAN_FLAGS).map(k => 'f:' + k) : Object.keys(WOD_CLAN_PRESETS).map(k => 'p:' + k);
+    if(isEdit && !f.editing) { f.editing = true; f.name = d.name; f.emblem = d.emblem; f.visibility = d.visibility; f.description = d.description || ''; }
+    const fq = (f.flagQuery || '').trim().toLowerCase();
+    const ids = f.tab === 'flags' ? Object.keys(WOD_CLAN_FLAGS).filter(k => !fq || WOD_CLAN_FLAGS[k][0].toLowerCase().includes(fq)).map(k => 'f:' + k) : Object.keys(WOD_CLAN_PRESETS).map(k => 'p:' + k);
     return '<section class="clan-card clan-form">' +
         '<h3>' + (isEdit ? 'Edit your clan' : 'Found a clan') + '</h3>' + (isEdit ? '' : '<p class="clan-card-lead">You lead the clan you found. Name it, pick its emblem, and choose who can join.</p>') +
         '<label class="clan-field"><span class="clan-field-label">Clan name</span><input type="text" id="clanNameInput" maxlength="24" placeholder="3 to 24 characters" value="' + wodClanEsc(f.name || '') + '" autocomplete="off"></label>' +
+        '<label class="clan-field"><span class="clan-field-label">Description <span class="clan-field-count" id="clanDescCount">' + (f.description || '').length + ' / 200</span></span><textarea id="clanDescInput" maxlength="200" rows="2" placeholder="What is your clan about? Who should join? (optional)">' + wodClanEsc(f.description || '') + '</textarea></label>' +
         '<div class="clan-field"><span class="clan-field-label">Emblem</span>' +
         '<div class="clan-emblem-tabs" role="tablist"><button type="button" class="mp-hub-tab' + (f.tab !== 'flags' ? ' active' : '') + '" data-etab="presets">Emblems</button><button type="button" class="mp-hub-tab' + (f.tab === 'flags' ? ' active' : '') + '" data-etab="flags">Country flags (' + Object.keys(WOD_CLAN_FLAGS).length + ')</button></div>' +
-        '<div class="clan-emblem-grid' + (f.tab === 'flags' ? ' clan-emblem-grid--flags' : '') + '">' + ids.map(id => '<button type="button" class="clan-emblem-opt' + (id === f.emblem ? ' is-selected' : '') + '" data-emblem="' + id + '" title="' + wodClanEsc(wodClanEmblemLabel(id)) + '" aria-label="' + wodClanEsc(wodClanEmblemLabel(id)) + '" aria-pressed="' + (id === f.emblem) + '">' + wodClanEmblemSvg(id) + '</button>').join('') + '</div></div>' +
+        (f.tab === 'flags' ? '<input type="search" id="clanFlagSearch" class="clan-search clan-flag-search" placeholder="Find a country" value="' + wodClanEsc(f.flagQuery || '') + '" autocomplete="off">' : '') +
+        '<div class="clan-emblem-grid' + (f.tab === 'flags' ? ' clan-emblem-grid--flags' : '') + '">' + (ids.length ? '' : '<p class="clan-empty">No country matches that.</p>') + ids.map(id => '<button type="button" class="clan-emblem-opt' + (id === f.emblem ? ' is-selected' : '') + '" data-emblem="' + id + '" title="' + wodClanEsc(wodClanEmblemLabel(id)) + '" aria-label="' + wodClanEsc(wodClanEmblemLabel(id)) + '" aria-pressed="' + (id === f.emblem) + '">' + wodClanEmblemSvg(id) + '</button>').join('') + '</div></div>' +
         '<div class="clan-field"><span class="clan-field-label">Who can join</span><div class="clan-visibility">' +
         '<button type="button" class="clan-vis-opt' + (f.visibility !== 'private' ? ' is-selected' : '') + '" data-vis="public"><strong>Public</strong><span>Anyone can join straight from the clan list.</span></button>' +
         '<button type="button" class="clan-vis-opt' + (f.visibility === 'private' ? ' is-selected' : '') + '" data-vis="private"><strong>Private</strong><span>Listed and searchable, but players apply and the leader approves them.</span></button></div></div>' +
@@ -484,15 +590,39 @@ function wodClanListAction(c) {
     if(c.queueFull) return '<button type="button" class="build-btn" disabled title="Its leader has 3 applications from search waiting already">Queue full</button>';
     return '<button type="button" class="build-btn clan-apply-btn" data-clan="' + wodClanEsc(c.id) + '">Apply</button>';
 }
+// Ask the relay for a page of clans matching the search (name) and filter.
+function wodClanSearch(page) {
+    WodClans.listPage = page == null ? 0 : Math.max(0, page | 0);
+    wodClanSend({ t: 'clan_list', query: WodClans.searchQuery || '', page: WodClans.listPage, filter: WodClans.listFilter });
+}
+function wodClanSearchResultsHtml() {
+    const rows = WodClans.list || [], q = (WodClans.searchQuery || '').trim(), total = WodClans.listTotal | 0, pages = WodClans.listPages || 1, page = WodClans.listPage | 0;
+    const what = WodClans.listFilter === 'public' ? 'public clan' : WodClans.listFilter === 'private' ? 'private clan' : 'clan';
+    const head = '<p class="clan-results-head" aria-live="polite">' + (total ? total + ' ' + what + (total === 1 ? '' : 's') + (q ? ' matching “' + wodClanEsc(q) + '”' : '') : '') + '</p>';
+    const list = rows.length ? rows.map(c => '<div class="clan-list-row">' + '<span class="clan-list-emblem">' + wodClanEmblemSvg(c.emblem) + '</span>' +
+        '<span class="clan-list-main"><strong>' + wodClanEsc(c.name) + (c.visibility === 'private' ? ' <span class="clan-lock" title="Private: apply to join">🔒</span>' : '') + '</strong>' +
+        (c.description ? '<span class="clan-list-desc">' + wodClanEsc(c.description) + '</span>' : '') +
+        '<span>' + c.members + (c.members === 1 ? ' member' : ' members') + ' · ' + (c.wins | 0) + ((c.wins | 0) === 1 ? ' war win' : ' war wins') + ' · ' + (c.visibility === 'private' ? 'private: apply' : 'public: join now') + '</span></span>' +
+        '<button type="button" class="wod-editor-btn clan-view" data-clan="' + wodClanEsc(c.id) + '">View</button>' + wodClanListAction(c) + '</div>').join('')
+        : '<p class="clan-empty">' + (!wodClanOnline() ? 'Connecting to the multiplayer server…' : q ? 'No ' + what + 's match “' + wodClanEsc(q) + '”. Check the spelling, or try part of the name.' : WodClans.listFilter !== 'all' ? 'No ' + what + 's yet.' : 'No clans yet: found the first one.') + '</p>';
+    const pager = pages > 1 ? '<div class="clan-pager"><button type="button" class="wod-editor-btn clan-page-prev" aria-label="Previous page"' + (page <= 0 ? ' disabled' : '') + '>←</button><span class="clan-page-label">Page ' + (page + 1) + ' / ' + pages + '</span><button type="button" class="wod-editor-btn clan-page-next" aria-label="Next page"' + (page >= pages - 1 ? ' disabled' : '') + '>→</button></div>' : '';
+    return head + '<div class="clan-list">' + list + '</div>' + pager;
+}
+function wodClanRenderSearchResults() {
+    const box = document.getElementById('clanSearchResults');
+    if(!box) return;
+    box.innerHTML = wodClanSearchResultsHtml();
+    wodClanWireListButtons(box);
+    const prev = box.querySelector('.clan-page-prev'), next = box.querySelector('.clan-page-next');
+    if(prev) prev.onclick = () => wodClanSearch(WodClans.listPage - 1);
+    if(next) next.onclick = () => wodClanSearch(WodClans.listPage + 1);
+}
 function wodClanJoinHtml() {
-    const rows = WodClans.list || [];
-    return '<section class="clan-card clan-join"><h3>Join a clan</h3><p class="clan-card-lead">Join a public clan at once, or apply to a private one for its leader to approve.</p>' +
-        '<div class="clan-code-row"><input type="text" id="clanCodeInput" maxlength="16" placeholder="Invite code, e.g. CLAN-1A2B3C4D" autocomplete="off"><button type="button" class="build-btn" id="clanCodeJoin">Use code</button></div>' +
-        '<input type="search" id="clanSearchInput" class="clan-search" placeholder="Search clans by name" value="' + wodClanEsc(WodClans.searchQuery || '') + '">' +
-        '<div class="clan-list">' + (rows.length ? rows.map(c => '<div class="clan-list-row">' + '<span class="clan-list-emblem">' + wodClanEmblemSvg(c.emblem) + '</span>' +
-            '<span class="clan-list-main"><strong>' + wodClanEsc(c.name) + (c.visibility === 'private' ? ' <span class="clan-lock" title="Private: apply to join">🔒</span>' : '') + '</strong><span>' + c.members + (c.members === 1 ? ' member' : ' members') + ' · ' + (c.wins | 0) + ' war wins · ' + (c.visibility === 'private' ? 'private' : 'public') + '</span></span>' +
-            '<button type="button" class="wod-editor-btn clan-view" data-clan="' + wodClanEsc(c.id) + '">View</button>' + wodClanListAction(c) + '</div>').join('')
-            : '<p class="clan-empty">' + (wodClanOnline() ? 'No clans' + (WodClans.searchQuery ? ' match that search' : ' yet: found the first one') + '.' : 'Connecting to the multiplayer server…') + '</p>') + '</div></section>';
+    return '<section class="clan-card clan-join"><h3>Find a clan</h3><p class="clan-card-lead">Search by name. Join a public clan at once, or apply to a private one for its leader to approve.</p>' +
+        '<div class="clan-search-row"><input type="search" id="clanSearchInput" class="clan-search" placeholder="Search clans by name" value="' + wodClanEsc(WodClans.searchQuery || '') + '" autocomplete="off" aria-label="Search clans by name"></div>' +
+        '<div class="clan-filter" role="group" aria-label="Show">' + [['all', 'All'], ['public', 'Public'], ['private', 'Private']].map(([k, label]) => '<button type="button" class="mp-hub-tab' + (WodClans.listFilter === k ? ' active' : '') + '" data-clan-filter="' + k + '">' + label + '</button>').join('') + '</div>' +
+        '<div id="clanSearchResults">' + wodClanSearchResultsHtml() + '</div>' +
+        '<details class="clan-code-box"><summary>Have an invite code?</summary><div class="clan-code-row"><input type="text" id="clanCodeInput" maxlength="16" placeholder="CLAN-1A2B3C4D" autocomplete="off"><button type="button" class="build-btn" id="clanCodeJoin">Use code</button></div></details></section>';
 }
 function wodClanRenderPane() {
     const root = document.getElementById('mpClanRoot');
@@ -528,7 +658,7 @@ function wodClanWirePane(root) {
     const submit = $('clanSubmitBtn');
     if(submit) submit.onclick = () => {
         WodClans.error = '';
-        const payload = { name: (f.name || '').trim(), emblem: f.emblem, visibility: f.visibility };
+        const payload = { name: (f.name || '').trim(), emblem: f.emblem, visibility: f.visibility, description: (f.description || '').trim() };
         if(payload.name.length < 3) { WodClans.error = 'Clan names need at least 3 characters.'; wodClanRenderPane(); return; }
         if(!wodClanSend({ t: f.mode === 'edit' ? 'clan_update' : 'clan_create', ...payload })) { WodClans.error = 'Not connected to the multiplayer server.'; wodClanRenderPane(); }
     };
@@ -568,7 +698,18 @@ function wodClanWirePane(root) {
     if(codeJoin) codeJoin.onclick = () => { const code = (codeInput.value || '').trim(); if(!code) { showNotification('Enter a clan invite code.'); return; } wodClanSend({ t: 'clan_join', code }); };
     if(codeInput) codeInput.onkeydown = e => { if(e.key === 'Enter') codeJoin.click(); };
     const search = $('clanSearchInput');
-    if(search) search.oninput = () => { WodClans.searchQuery = search.value; clearTimeout(WodClans.searchTimer); WodClans.searchTimer = setTimeout(() => wodClanSend({ t: 'clan_list', query: WodClans.searchQuery }), 250); };
+    if(search) {
+        search.oninput = () => { WodClans.searchQuery = search.value; clearTimeout(WodClans.searchTimer); WodClans.searchTimer = setTimeout(() => wodClanSearch(0), 220); };
+        search.onkeydown = e => { if(e.key === 'Enter') { clearTimeout(WodClans.searchTimer); wodClanSearch(0); } };
+    }
+    root.querySelectorAll('[data-clan-filter]').forEach(b => b.onclick = () => { WodClans.listFilter = b.dataset.clanFilter; root.querySelectorAll('[data-clan-filter]').forEach(x => x.classList.toggle('active', x === b)); wodClanSearch(0); });
+    const prev = root.querySelector('.clan-page-prev'), next = root.querySelector('.clan-page-next');
+    if(prev) prev.onclick = () => wodClanSearch(WodClans.listPage - 1);
+    if(next) next.onclick = () => wodClanSearch(WodClans.listPage + 1);
+    const desc = $('clanDescInput');
+    if(desc) desc.oninput = () => { f.description = desc.value; const n = $('clanDescCount'); if(n) n.textContent = desc.value.length + ' / 200'; };
+    const flagSearch = $('clanFlagSearch');
+    if(flagSearch) flagSearch.oninput = () => { f.flagQuery = flagSearch.value; wodClanRenderPane(); };
     wodClanWireListButtons(root);
 }
 // Another clan, from the list or the leaderboard.
@@ -670,7 +811,7 @@ function wodCw2v2Html() {
     if(party && party.members.length === 2) {
         const mate = party.members.find(m => m.playerId !== myId) || {};
         body = '<div class="cw-party"><span class="cw-party-label">Your party</span><span class="cw-party-member">You</span><span class="cw-party-plus">+</span><span class="cw-party-member">' + wodClanEsc(mate.name || 'Teammate') + (mate.online === false ? ' (offline)' : '') + '</span><button type="button" class="wod-editor-btn cw-party-leave">Leave party</button></div>' +
-            (queued ? '<p class="cw-searching"><span class="cw-pulse"></span>Your party is searching for an opposing clan… <span id="cwWait">' + wodCwWaitText() + '</span></p><button type="button" class="wod-editor-btn cw-leave">Stop searching</button>'
+            (queued ? '<p class="cw-searching"><span class="cw-pulse"></span>Your party is searching' + (cw.queuedBy || WodClans.queuedBy ? ' (started by ' + wodClanEsc(WodClans.queuedBy) + ')' : '') + '… <span id="cwWait">' + wodCwWaitText() + '</span></p><button type="button" class="wod-editor-btn cw-leave">Stop searching</button>'
                 : '<button type="button" class="menu-btn clan-primary cw-join" data-tier="2v2"' + (cw.war || WodMultiplayer.api.code ? ' disabled' : '') + '>Search for a 2v2 war</button>');
     } else {
         const inv = cw.partyInvite, sent = cw.partyInvitesSent || [];

@@ -18,7 +18,13 @@ const FLAG_EMBLEMS = ['us', 'gb', 'ca', 'au', 'fr', 'de', 'it', 'es', 'pt', 'nl'
     'eng', 'sct', 'bg', 'lu', 'rs', 'hr', 'si', 'sk', 'al', 'ge', 'am', 'az', 'md', 'mt', 'mc', 'eu',
     've', 'ec', 'bo', 'py', 'uy', 'cu', 'jm', 'cr', 'pa', 'gt', 'do', 'pr',
     'pk', 'my', 'sg', 'tw', 'kz', 'sa', 'ae', 'qa', 'kw', 'jo', 'lb', 'ir', 'la', 'mm',
-    'gh', 'ke', 'et', 'ma', 'dz', 'tn', 'sn', 'cm', 'ci', 'ml', 'td', 'bw', 'so', 'tz', 'fj'];
+    'gh', 'ke', 'et', 'ma', 'dz', 'tn', 'sn', 'cm', 'ci', 'ml', 'td', 'bw', 'so', 'tz', 'fj',
+    'ad', 'by', 'ba', 'cy', 'li', 'me', 'mk', 'sm', 'va', 'xk', 'ag', 'bs', 'bb', 'bz', 'dm', 'sv',
+    'gd', 'gy', 'ht', 'hn', 'ni', 'kn', 'lc', 'vc', 'sr', 'tt', 'af', 'bh', 'bt', 'bn', 'kh', 'iq',
+    'kg', 'mv', 'mn', 'np', 'kp', 'om', 'ps', 'lk', 'sy', 'tj', 'tl', 'tm', 'uz', 'ye', 'ao', 'bj',
+    'bf', 'bi', 'cv', 'cf', 'km', 'cd', 'cg', 'dj', 'gq', 'er', 'sz', 'ga', 'gm', 'gn', 'gw', 'ls',
+    'lr', 'ly', 'mg', 'mw', 'mr', 'mu', 'mz', 'na', 'ne', 'rw', 'st', 'sc', 'sl', 'ss', 'sd', 'tg',
+    'ug', 'zm', 'zw', 'ki', 'mh', 'fm', 'nr', 'pw', 'pg', 'ws', 'sb', 'to', 'tv', 'vu'];
 const EMBLEM_IDS = new Set([...PRESET_EMBLEMS.map(id => 'p:' + id), ...FLAG_EMBLEMS.map(id => 'f:' + id)]);
 const TIERS = ['1v1', '2v2'];
 const MAX_MEMBERS = 30;
@@ -39,6 +45,9 @@ function cleanName(raw) {
     return String(raw || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
 }
 function nameKey(name) { return cleanName(name).toLowerCase(); }
+const DESCRIPTION_MAX = 200;
+function cleanDescription(raw) { return String(raw || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX); }
+const LIST_PAGE_SIZE = 8;
 function newCode() { return 'CLAN-' + crypto.randomBytes(4).toString('hex').toUpperCase(); }
 function emptyTier() { return { played: 0, wins: 0, defeats: 0 }; }
 function emptyStats() { return { played: 0, wins: 0, defeats: 0, kills: 0, losses: 0, byTier: { '1v1': emptyTier(), '2v2': emptyTier() } }; }
@@ -126,7 +135,7 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
     }
     function summary(clan) {
         if(!clan) return null;
-        return { id: clan.id, name: clan.name, emblem: clan.emblem, visibility: clan.visibility, members: clan.members.length, wins: clan.stats.wins };
+        return { id: clan.id, name: clan.name, emblem: clan.emblem, visibility: clan.visibility, members: clan.members.length, wins: clan.stats.wins, description: clan.description || '' };
     }
     // Normal play: the members' multiplayer totals, counted as on the player leaderboard.
     function memberTotals(clan) {
@@ -182,7 +191,7 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         const emblem = String(fields.emblem || '');
         if(!EMBLEM_IDS.has(emblem)) return { ok: false, msg: 'Pick an emblem for the clan.' };
         const visibility = fields.visibility === 'private' ? 'private' : 'public';
-        return { ok: true, name, emblem, visibility };
+        return { ok: true, name, emblem, visibility, description: cleanDescription(fields.description) };
     }
     // Joining a clan drops the player's applications and invitations everywhere else.
     function addMember(clan, playerId, note) {
@@ -204,7 +213,7 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         const v = validate(fields || {});
         if(!v.ok) return v;
         let id; do { id = 'C' + crypto.randomBytes(5).toString('hex').toUpperCase(); } while(clans.has(id));
-        const clan = { id, name: v.name, emblem: v.emblem, visibility: v.visibility, code: newCode(), leaderId: playerId, createdAt: now(), members: [], stats: emptyStats(), history: [], chat: [], applications: [], invites: [] };
+        const clan = { id, name: v.name, emblem: v.emblem, visibility: v.visibility, description: v.description, code: newCode(), leaderId: playerId, createdAt: now(), members: [], stats: emptyStats(), history: [], chat: [], applications: [], invites: [] };
         clans.set(id, clan);
         addMember(clan, playerId, nameOf(playerId) + ' founded ' + clan.name + '.');
         return { ok: true, clan };
@@ -317,9 +326,9 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         const clan = clanOf(playerId);
         if(!clan) return { ok: false, msg: 'You are not in a clan.' };
         if(!isLeader(clan, playerId)) return { ok: false, msg: 'Only the clan leader can change the clan.' };
-        const v = validate({ name: fields.name ?? clan.name, emblem: fields.emblem ?? clan.emblem, visibility: fields.visibility ?? clan.visibility }, clan.id);
+        const v = validate({ name: fields.name ?? clan.name, emblem: fields.emblem ?? clan.emblem, visibility: fields.visibility ?? clan.visibility, description: fields.description ?? clan.description }, clan.id);
         if(!v.ok) return v;
-        Object.assign(clan, { name: v.name, emblem: v.emblem, visibility: v.visibility });
+        Object.assign(clan, { name: v.name, emblem: v.emblem, visibility: v.visibility, description: v.description });
         if(fields.newCode) clan.code = newCode();
         changed(clan);
         return { ok: true, clan };
@@ -356,11 +365,16 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         }
         return any;
     }
-    function list(query, viewerId) {
-        const q = String(query || '').trim().toLowerCase();
-        return [...clans.values()].filter(c => !q || c.name.toLowerCase().includes(q))
-            .sort((a, b) => (a.visibility === 'public' ? 0 : 1) - (b.visibility === 'public' ? 0 : 1) || b.members.length - a.members.length || b.stats.wins - a.stats.wins).slice(0, 60)
-            .map(c => ({ ...summary(c), applied: !!viewerId && c.applications.some(a => a.playerId === viewerId), queueFull: c.visibility === 'private' && c.applications.filter(a => a.kind === 'random').length >= APPLY_FROM_SEARCH }));
+    function list(query, viewerId, opts) {
+        const q = String(query || '').trim().toLowerCase(), filter = ['public', 'private'].includes(opts && opts.filter) ? opts.filter : 'all';
+        const rank = c => !q ? 0 : c.name.toLowerCase() === q ? 0 : c.name.toLowerCase().startsWith(q) ? 1 : 2;
+        const found = [...clans.values()].filter(c => (!q || c.name.toLowerCase().includes(q)) && (filter === 'all' || c.visibility === filter))
+            .sort((a, b) => rank(a) - rank(b) || b.members.length - a.members.length || b.stats.wins - a.stats.wins || a.name.localeCompare(b.name));
+        const pages = Math.max(1, Math.ceil(found.length / LIST_PAGE_SIZE)), page = Math.min(pages - 1, Math.max(0, (opts && opts.page) | 0));
+        return {
+            total: found.length, page, pages, pageSize: LIST_PAGE_SIZE, filter,
+            clans: found.slice(page * LIST_PAGE_SIZE, (page + 1) * LIST_PAGE_SIZE).map(c => ({ ...summary(c), applied: !!viewerId && c.applications.some(a => a.playerId === viewerId), queueFull: c.visibility === 'private' && c.applications.filter(a => a.kind === 'random').length >= APPLY_FROM_SEARCH })),
+        };
     }
     // Two leaderboards: clan wars ('war') and the members' normal multiplayer play ('normal').
     const WAR_SORTS = { wins: s => s.wins, wins1v1: s => s.byTier['1v1'].wins, wins2v2: s => s.byTier['2v2'].wins, defeats: s => s.defeats, kills: s => s.kills, losses: s => s.losses };

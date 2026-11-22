@@ -2,6 +2,12 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-22T08:00:00Z",title:"Every country's flag, clan descriptions and clan search",items:[
+        "Clan emblems include the flag of every country: 197 in all, plus England, Scotland, Puerto Rico and the EU. A search box finds a country quickly.",
+        "Clans can have a description of up to 200 characters, shown on the clan page and in search results.",
+        "Find clans by name, show only public or private clans, and use the arrows to page through long results.",
+        "Both players in a 2v2 party see the same search timer and who started the search. Pressing Search without a teammate lists your clanmates who are online, so you can invite one."
+    ]},
     {at:"2026-11-22T06:12:00Z",title:"Clan applications, parties and rankings",items:[
         "Choose from 107 flags or a badge for your clan emblem. Search for private clans and apply to join. Clan leaders review applications, and clan members can invite friends.",
         "A clan can have up to five pending applications, with three places for applications from search and two for invitations or the leader's code. After 60 days of leader inactivity, the highest-ranked member can take over.",
