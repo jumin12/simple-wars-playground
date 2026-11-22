@@ -569,9 +569,9 @@ const WOD_AI_DIFFICULTIES = {
     easy:{label:'Easy',line:'Recruits slowly, reacts slowly, attacks only with a big advantage and keeps to plain attacks: no flanking wings, supply cuts, ambushes or baiting. Forgets what it saw under fog quickly.',
         pulseEvery:2,edge:.3,tricks:false,memory:20,buyEvery:5000,movesPerFrame:1,recruitGap:12000},
     normal:{label:'Normal',line:'The full computer opponent, with the same rules, money and manpower as you.',pulseEvery:1,edge:0,tricks:true,memory:45,buyEvery:2500,movesPerFrame:3},
-    hard:{label:'Hard',line:'Reacts faster, accepts thinner odds and trusts what it saw under fog for longer. Its towns give it 10% more money and manpower than yours give you.',
+    hard:{label:'Hard',line:'Reacts faster, accepts thinner odds and trusts what it saw under fog for longer. It gets 10% more money and manpower than the same towns and land would give you.',
         pulseEvery:1,pulseScale:.8,edge:-.06,tricks:true,memory:75,buyEvery:2000,movesPerFrame:5,bonus:1.1},
-    brutal:{label:'Brutal',line:'Plays as Hard, but its towns give it 25% more money and manpower than yours give you. It still cannot see through fog.',
+    brutal:{label:'Brutal',line:'Plays as Hard, but it gets 25% more money and manpower than the same towns and land would give you. It still cannot see through fog.',
         pulseEvery:1,pulseScale:.8,edge:-.06,tricks:true,memory:75,buyEvery:2000,movesPerFrame:5,bonus:1.25}
 };
 // The economy bonus of a level as players read it ('' for none), e.g. "+10% money and manpower".

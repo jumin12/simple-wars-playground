@@ -2,6 +2,10 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-22T08:01:00Z",title:"Simple Wars Steam launch",items:[
+        "Simple Wars is launching on Steam as a free-to-play game. Thanks to everyone who playtested, reported bugs, and shared ideas along the way.",
+        "The tutorial and Help guide now explain attack orders, supply, bridges, and AI difficulty more clearly."
+    ]},
     {at:"2026-11-22T08:00:00Z",title:"Every country's flag, clan descriptions and clan search",items:[
         "Clan emblems include the flag of every country: 197 in all, plus England, Scotland, Puerto Rico and the EU. A search box finds a country quickly.",
         "Clans can have a description of up to 200 characters, shown on the clan page and in search results.",

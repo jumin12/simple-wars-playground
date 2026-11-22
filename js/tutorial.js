@@ -134,7 +134,7 @@ function wodTutorialSteps() {
     const at = k => wodTutorialWorld(T[k].q, T[k].r);
     return [
         { id: 'welcome', info: true, title: 'Welcome, Commander',
-          text: 'This short battle teaches the basics: moving troops, taking towns, recruiting and supply. It takes about ten minutes, and you can leave at any time from Menu.<br><br>Your goal in every battle is the same: <b>capture every enemy town</b>.' },
+          text: 'This short battle teaches the basics: moving troops, taking towns, recruiting and supply. It takes about ten minutes. <b>Show me</b> points the camera at what a step needs, <b>Skip step</b> moves on, and <b>Exit</b> on this panel leaves the tutorial at any time.<br><br>Your goal in every battle is the same: <b>capture every enemy town</b>.' },
         { id: 'camera', title: 'Look around',
           text: touch ? 'Drag with one finger to move the map and pinch to zoom.'
               : 'Move the map with <b>W A S D</b> or the <b>arrow keys</b>, or drag it with the right mouse button. Zoom with the <b>mouse wheel</b>.',
@@ -144,7 +144,7 @@ function wodTutorialSteps() {
           text: touch ? 'Your regiments wait outside Fort Dawn. <b>Tap a regiment</b> to select it.'
               : 'Your regiments wait outside Fort Dawn. <b>Click</b> a regiment to select it, or <b>drag a box</b> around several to select a group.',
           enter: () => wodTutorialCenterCamera(wodTutorialArmyCentre()),
-          done: () => gameData.selection.some(s => s.owner === WOD_TUTORIAL_PLAYER && !s.isCity && s.hp > 0) },
+          done: () => gameData.selection.some(s => s.owner === WOD_TUTORIAL_PLAYER && !s.isCity && !s.id && s.type !== 'convoy' && s.hp > 0) },
         { id: 'card', info: true, title: 'The unit card', target: ['#infoCard'],
           text: 'The card shows the selected regiment: its <b>strength</b>, <b>manpower</b>, <b>morale</b> and experience. Morale drops under fire; a regiment whose morale breaks runs back on its own. The terrain page lists the ground it stands on.' },
         { id: 'move', title: 'Give an order', worldTarget: () => at('mill'), radius: 3,
@@ -175,14 +175,14 @@ function wodTutorialSteps() {
           target: () => wodTutorialProductionTarget('structures', 'button[onclick="beginFactoryBuild()"]'),
           text: () => gameData.buildMode === 'factory'
               ? 'Now <b>' + (wodTutorialTouch() ? 'tap' : 'click') + ' one of your towns</b> to build the factory there. A town works on one order at a time, so pick one that is not training troops. Every building takes 60 seconds.'
-              : 'Factories unlock armour and motorized infantry. Open <b>Buildings</b> and press <b>Build Factory</b>.',
+              : 'Factories unlock armor and motorized infantry. Open <b>Buildings</b> and press <b>Build Factory</b>.',
           done: () => wodTutorialPlayerJob('factory') || gameData.cities.some(c => c.owner === WOD_TUTORIAL_PLAYER && c.hasFactory) },
         { id: 'terrain', info: true, title: 'Ground matters', worldTarget: () => at('red'), radius: 4.2,
           enter: () => wodTutorialCenterCamera(at('red')),
           text: '<b>Redwater</b> sits on hills with a wood in front of it. Troops in woods, on hills and in towns take less damage, so a defended town needs more attackers. Open ground suits fast troops; rough ground slows them.' },
         { id: 'attack', title: 'Attack Redwater', worldTarget: () => wodTutorialTownFocus('red'), radius: 2.6,
           text: () => 'Two enemy regiments hold Redwater. Bring <b>at least three</b> of yours and take the town. Units fire on their own at enemies in range; '
-              + (wodTutorialTouch() ? 'tap an enemy with troops selected to focus fire on it.' : '<b>left-click an enemy</b> with troops selected to focus fire on it.')
+              + (wodTutorialTouch() ? 'tap an enemy with troops selected to focus fire on it.' : '<b>right-click an enemy</b> with troops selected to focus fire on it.')
               + (wodTutorial && wodTutorial.sawFight ? '<br><br><i>Under fire, morale falls. Pull a regiment out before it breaks: select it and press Retreat.</i>' : '')
               + wodTutorialStreetsHint('red'),
           done: () => wodTutorialTown('red')?.owner === WOD_TUTORIAL_PLAYER },
@@ -195,8 +195,8 @@ function wodTutorialSteps() {
           enter: t => wodTutorialLaunchCounterattack(t),
           text: () => (wodTutorialTown('red')?.owner === WOD_TUTORIAL_PLAYER
               ? 'The enemy is counterattacking Redwater! <b>Hold the town.</b> '
-              : 'The enemy has retaken Redwater. <b>Win it back!</b> ')
-              + (wodTutorialTouch() ? 'Use the speed menu at the top to pause while you give orders.' : 'Press <b>Space</b> to pause while you give orders; the speed buttons at the top make time run faster.'),
+              : 'Redwater is in enemy hands. <b>Take it!</b> ')
+              + (wodTutorialTouch() ? 'Use the speed menu at the top to pause while you give orders.' : 'Press <b>Space</b> to pause while you give orders (it resumes at normal speed); the speed buttons at the top make time run faster.'),
           done: t => wodTutorialWaveBeaten(t) && wodTutorialTown('red')?.owner === WOD_TUTORIAL_PLAYER },
         { id: 'final', title: 'Take Ironhold', worldTarget: () => wodTutorialTownFocus('iron'), radius: 2.8,
           enter: () => wodTutorialCenterCamera(at('iron')),
