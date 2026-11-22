@@ -11,6 +11,7 @@ const { WebSocketServer } = require('ws');
 const profiles = require('./profiles');
 const commerceHttp = require('./commerce-http').createCommerceHttp();
 const profileHttp = require('./profile-http').createProfileHttp(profiles);
+const { createClans } = require('./clans');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
@@ -51,11 +52,182 @@ const FRIEND_REQUEST_COOLDOWN_MS = 30000;
 const LOBBY_INVITE_COOLDOWN_MS = 45000;
 const LOBBY_INVITE_DEDUPE_MS = 60000;
 /** Grace before a dropped connection is treated as a full disconnect (AI takeover). */
-const MP_DISCONNECT_GRACE_MS = 22500;
+const MP_DISCONNECT_GRACE_MS = parseInt(process.env.WOD_MP_GRACE_MS || '22500', 10);
 /** Close idle sockets that stop responding to pings (proxies often drop ~60s idle WS). */
 const MP_STALE_CONNECTION_MS = 90000;
 // A player whose socket still holds this much unsent data is skipped for snapshots until it drains (the snap relay).
 const MP_SNAP_BACKLOG_BYTES = 1536 * 1024;
+// Clans live in clans.json; a player's clan is found by player id, so it follows the profile between sessions.
+const clans = createClans({
+  dataDir: DATA_DIR,
+  pool: process.env.DATABASE_URL ? new (require('pg').Pool)({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000, statement_timeout: 30000 }) : null,
+  profiles,
+  nameOf: (pid) => String((profiles.getProfile(pid) && profiles.getProfile(pid).profile.mpDisplayName) || 'Player'),
+  isOnline: (pid) => onlineByPlayerId.has(pid),
+});
+// ---- Clan wars ----
+// Members of different clans queue for a tier: 1v1 pairs two players of two clans; 2v2 needs two queued players from
+// each of two clans. A match makes a private war lobby: the first player hosts it (its game builds the map and starts
+// the war once everyone is seated), the others are sent its code and seat. Results count for the clans; a side whose
+// players all leave the war loses it.
+const CW_SETUP_MS = parseInt(process.env.WOD_CW_SETUP_MS || '90000', 10);
+const cwQueues = { '1v1': [], '2v2': [] };
+const cwWars = new Map();
+function cwSend(client, msg) { try { if (client && client.ws.readyState === 1) client.ws.send(JSON.stringify(msg)); } catch (_) {} }
+function cwLive(e) { return e.client.ws.readyState === 1 && onlineByPlayerId.get(e.playerId) === e.client; }
+function cwCounts() {
+  const out = {};
+  for (const tier of clans.TIERS) {
+    const q = cwQueues[tier].filter(cwLive);
+    out[tier] = { players: q.length, clans: new Set(q.map((e) => e.clanId)).size };
+  }
+  out.warsInProgress = [...cwWars.values()].filter((w) => w.room && w.room.matchStarted).length;
+  return out;
+}
+function cwQueuedTier(client) {
+  for (const tier of clans.TIERS) if (cwQueues[tier].some((e) => e.client === client)) return tier;
+  return null;
+}
+function cwStatusFor(client) {
+  const war = client.cwWarId ? cwWars.get(client.cwWarId) : null;
+  return { t: 'cw_status', counts: cwCounts(), queued: cwQueuedTier(client), war: war ? cwPublic(war) : null };
+}
+function cwBroadcastStatus() {
+  wss.clients.forEach((ws) => { const c = ws._wodClient; if (c && c.cwWatch && ws.readyState === 1) cwSend(c, cwStatusFor(c)); });
+}
+function cwRemove(client) {
+  let changed = false;
+  for (const tier of clans.TIERS) {
+    const before = cwQueues[tier].length;
+    cwQueues[tier] = cwQueues[tier].filter((e) => e.client !== client && cwLive(e));
+    if (cwQueues[tier].length !== before) changed = true;
+  }
+  return changed;
+}
+function cwSeatTypes(war) { return war.tier === '1v1' ? ['human', 'human', 'closed', 'closed'] : ['human', 'human', 'human', 'human']; }
+function cwPublic(war) {
+  return {
+    id: war.id, tier: war.tier,
+    sides: war.sides.map((s) => ({ clan: clans.summary(clans.get(s.clanId)) || s.clan, slots: s.slots.slice(), players: s.players.map((p) => ({ playerId: p.playerId, name: p.name, slot: p.slot })) })),
+    alliances: war.tier === '2v2' ? [[1, 2], [3, 4]] : [],
+  };
+}
+function cwTryMatch(tier) {
+  const q = (cwQueues[tier] = cwQueues[tier].filter(cwLive));
+  let teams = null;
+  if (tier === '1v1') {
+    outer: for (let i = 0; i < q.length; i++) for (let j = i + 1; j < q.length; j++) if (q[i].clanId !== q[j].clanId) { teams = [[q[i]], [q[j]]]; break outer; }
+  } else {
+    const byClan = new Map();
+    for (const e of q) { if (!byClan.has(e.clanId)) byClan.set(e.clanId, []); byClan.get(e.clanId).push(e); }
+    const ready = [...byClan.values()].filter((list) => list.length >= 2).sort((a, b) => a[0].since - b[0].since);
+    if (ready.length >= 2) teams = [ready[0].slice(0, 2), ready[1].slice(0, 2)];
+  }
+  if (!teams) return false;
+  const picked = new Set(teams.flat());
+  cwQueues[tier] = q.filter((e) => !picked.has(e));
+  cwStartWar(tier, teams);
+  return true;
+}
+function cwStartWar(tier, teams) {
+  const seats = tier === '1v1' ? [[1], [2]] : [[1, 2], [3, 4]];
+  const war = { id: 'W' + crypto.randomBytes(6).toString('hex'), tier, secret: crypto.randomBytes(9).toString('base64url'), room: null, createdAt: Date.now(), recorded: false, cancelled: false, timer: null };
+  war.sides = teams.map((team, i) => ({
+    clanId: team[0].clanId, clan: clans.summary(clans.get(team[0].clanId)), slots: seats[i].slice(),
+    players: team.map((e, k) => ({ playerId: e.playerId, name: e.client.displayName || 'Player', slot: seats[i][k] })),
+  }));
+  war.players = war.sides.flatMap((s) => s.players);
+  war.hostPlayerId = war.players[0].playerId;
+  cwWars.set(war.id, war);
+  const pub = cwPublic(war);
+  for (const p of war.players) {
+    const c = onlineByPlayerId.get(p.playerId);
+    if (!c) continue;
+    c.cwWarId = war.id;
+    cwSend(c, p.playerId === war.hostPlayerId ? { t: 'cw_match', war: pub, role: 'host', slot: p.slot, secret: war.secret } : { t: 'cw_match', war: pub, role: 'guest', slot: p.slot });
+  }
+  war.timer = setTimeout(() => cwCancel(war, 'Not everyone reached the war lobby in time, so the war was called off. You can queue again.'), CW_SETUP_MS);
+  cwBroadcastStatus();
+}
+function cwCancel(war, reason) {
+  if (!war || war.cancelled || war.recorded || (war.room && war.room.matchStarted)) return;
+  war.cancelled = true;
+  clearTimeout(war.timer);
+  cwWars.delete(war.id);
+  for (const p of war.players) {
+    const c = onlineByPlayerId.get(p.playerId);
+    if (!c) continue;
+    if (c.cwWarId === war.id) c.cwWarId = null;
+    cwSend(c, { t: 'cw_cancelled', warId: war.id, msg: reason });
+  }
+  const room = war.room;
+  if (room) {
+    room.clanWar = null;
+    for (const c of [...room.clients]) { leaveRoom(c); cwSend(c, { t: 'left' }); }
+  }
+  cwBroadcastStatus();
+}
+function cwFinish(war, outcomes) {
+  if (!war || war.recorded) return;
+  war.recorded = true;
+  clearTimeout(war.timer);
+  clans.recordWar({ warId: war.id, tier: war.tier, sides: war.sides.map((s, i) => ({ clanId: s.clanId, outcome: outcomes[i], players: s.players.map((p) => p.playerId) })) });
+  const msg = { t: 'cw_result', warId: war.id, tier: war.tier, sides: war.sides.map((s, i) => ({ clan: clans.summary(clans.get(s.clanId)) || s.clan, outcome: outcomes[i], players: s.players.map((p) => p.name) })) };
+  for (const p of war.players) {
+    const c = onlineByPlayerId.get(p.playerId);
+    if (!c) continue;
+    if (c.cwWarId === war.id) c.cwWarId = null;
+    cwSend(c, msg);
+  }
+  cwWars.delete(war.id);
+  cwBroadcastStatus();
+}
+// The host's reported result: a side won if any of its seats won (allies share a win).
+function cwRecordFromOutcomes(room, outcomes) {
+  const war = room && room.clanWar;
+  if (!war || war.recorded) return;
+  const of = (side) => side.slots.some((s) => outcomes[String(s)] === 'won') ? 'won'
+    : side.slots.every((s) => outcomes[String(s)] === 'lost' || (room.forfeitedSlots && room.forfeitedSlots.has(s))) ? 'lost' : null;
+  let [a, b] = war.sides.map(of);
+  if (a === 'won' && b !== 'won') b = 'lost';
+  else if (b === 'won' && a !== 'won') a = 'lost';
+  if (!a || !b || a === b) return;
+  cwFinish(war, [a, b]);
+}
+// A side with nobody left (each seat surrendered, quit, beaten and watching, or gone past the reconnect grace) has
+// given up the war: its seats surrender, so the other side's game ends in its victory, and the war is recorded now.
+function cwCheckSideGone(room) {
+  const war = room && room.clanWar;
+  if (!war || war.recorded || !room.matchStarted) return;
+  const present = new Set(room.clients.filter((c) => !c.spectating && c.ws.readyState === 1).map((c) => c.slot));
+  const gone = (side) => side.slots.every((s) => (room.forfeitedSlots && room.forfeitedSlots.has(s)) || (!present.has(s) && !(room.pendingReconnect && room.pendingReconnect.has(s))));
+  const [ga, gb] = war.sides.map(gone);
+  if (ga === gb) return;
+  const loser = ga ? war.sides[0] : war.sides[1];
+  room.forfeitedSlots ||= new Set();
+  room.surrenderedSlots ||= new Set();
+  for (const s of loser.slots) {
+    if (room.surrenderedSlots.has(s)) continue;
+    room.forfeitedSlots.add(s);
+    room.surrenderedSlots.add(s);
+    for (const payload of [room.matchInitPayload, room.lastSnap && room.lastSnap.payload]) {
+      if (!payload) continue;
+      payload.forfeitedSlots = [...room.forfeitedSlots];
+      payload.surrenderedSlots = [...room.surrenderedSlots];
+      payload.eliminatedSlots = [...new Set([...(payload.eliminatedSlots || []), s])];
+    }
+    broadcastAll(room, { t: 'player_forfeited', slot: s, count: room.clients.length, surrender: true, clanWar: true });
+  }
+  cwFinish(war, ga ? ['lost', 'won'] : ['won', 'lost']);
+}
+function clanInfoFor(client, clan) { return { t: 'clan_info', clan: clans.detail(clan, client.playerId), mine: clans.summary(clans.clanOf(client.playerId)) }; }
+function notifyClanMembers(clan, exceptClient) {
+  if (!clan) return;
+  for (const m of clan.members) {
+    const c = onlineByPlayerId.get(m.playerId);
+    if (c && c !== exceptClient) cwSend(c, clanInfoFor(c, clan));
+  }
+}
 
 function sanitizePlayerId(id) {
   const s = String(id || '').trim().toUpperCase().slice(0, 32);
@@ -412,6 +584,7 @@ function buildLeaderboardRows(sortKey, filterIds) {
       stats: r.stats,
       updatedAt: r.updatedAt,
       online: !!(r.playerId && onlineByPlayerId.has(sanitizePlayerId(r.playerId))),
+      clan: clans.summary(clans.clanOf(r.playerId)),
     }));
 }
 
@@ -758,6 +931,7 @@ async function commitHostResult(room, pending) {
       }
     }
   }
+  cwRecordFromOutcomes(room, pending.outcomes);
   try { host.ws.send(JSON.stringify({ t: 'mp_match_end_ack', updatedPlayerIds: result.updatedPlayerIds || [] })); } catch (_) {}
 }
 
@@ -842,6 +1016,7 @@ function markSlotDisconnectedInMatch(room, leftSlot) {
     count: room.clients.length,
     canRejoin: true,
   });
+  cwCheckSideGone(room);
   maybeEndMatchWhenEmpty(room);
   broadcastLobbyList();
 }
@@ -910,6 +1085,7 @@ async function forfeitClientFromMatch(client, spectate=false, surrender=false) {
   // computer, which the others must still beat (the game hands such seats to the AI, wodMpHandSlotToAi). They used to vanish.
   const patch=payload=>{if(!payload)return;payload.forfeitedSlots=[...room.forfeitedSlots];payload.surrenderedSlots=[...(room.surrenderedSlots||[])];if(!surrender)return;payload.eliminatedSlots=[...new Set([...(payload.eliminatedSlots||[]),slot])];if(payload.entities)payload.entities=payload.entities.filter(u=>u.owner!==slot);if(payload.cities)for(const c of payload.cities)if(c.owner===slot)c.owner=0;if(payload.hexOwners)payload.hexOwners=payload.hexOwners.map(o=>o===slot?0:o);if(payload.hexList)for(const h of payload.hexList)if(h.owner===slot)h.owner=0;};
   patch(room.matchInitPayload);patch(room.lastSnap?.payload);
+  setImmediate(()=>cwCheckSideGone(room));
   if(spectate){client.spectating=true;room.observerSlots||=new Set();room.observerSlots.add(slot);cancelMatchReconnectGrace(room,slot);broadcastAll(room,{t:'player_forfeited',slot,count:room.clients.length,surrender:!!room.surrenderedSlots?.has(slot)});return;}
   disconnectClientFromMatch(client,true);
 }
@@ -978,6 +1154,7 @@ function countOnline() {
 function getLobbyListPublic() {
   const out = [];
   for (const room of rooms.values()) {
+    if (room.clanWar && !room.matchStarted) continue;
     normalizeSeatTypes(room.meta);
     const cap = lobbyCap();
     const inProgress = !!room.matchStarted;
@@ -1045,6 +1222,10 @@ function addClientToRoom(client, room, requestedSeat) {
 function leaveRoom(client) {
   const room = client.room;
   if (!room) return;
+  if (room.clanWar && !room.matchStarted && !room.clanWar.cancelled) {
+    const war = room.clanWar;
+    setImmediate(() => cwCancel(war, (client.displayName || 'A player') + ' left the war lobby, so the war was called off. You can queue again.'));
+  }
   const leftSlot = client.slot;
   const idx = room.clients.indexOf(client);
   if (idx >= 0) room.clients.splice(idx, 1);
@@ -1173,7 +1354,7 @@ wss.on('connection', (ws) => {
         return;
       }
       await profiles.flush();
-      ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId, profile: result.profile || null }));
+      ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId, profile: result.profile || null, clan: clans.summary(clans.clanOf(result.playerId)) }));
       flushFriendRemovalsForClient(client);
       flushFriendRequestsForClient(client);
       return;
@@ -1440,6 +1621,63 @@ wss.on('connection', (ws) => {
       return;
     }
 
+    if (/^(clan|cw)_/.test(String(t || ''))) {
+      const pid = client.playerId;
+      if (!pid) { cwSend(client, { t: 'clan_error', msg: 'Connect your multiplayer profile first.' }); return; }
+      if (t === 'clan_mine') { cwSend(client, clanInfoFor(client, clans.clanOf(pid))); return; }
+      if (t === 'clan_get') { cwSend(client, { ...clanInfoFor(client, clans.get(String(msg.clanId || ''))), view: true }); return; }
+      if (t === 'clan_list') { cwSend(client, { t: 'clan_list', clans: clans.listPublic(msg.query), emblems: [...clans.EMBLEM_IDS] }); return; }
+      if (t === 'clan_leaderboard') { cwSend(client, { t: 'clan_leaderboard', sort: String(msg.sort || 'rating'), rows: clans.leaderboard(msg.sort) }); return; }
+      if (t === 'clan_create' || t === 'clan_join' || t === 'clan_leave' || t === 'clan_update' || t === 'clan_kick') {
+        const before = clans.clanOf(pid);
+        if ((t === 'clan_leave' || t === 'clan_join' || t === 'clan_create') && (cwQueuedTier(client) || client.cwWarId)) {
+          cwSend(client, { t: 'clan_error', msg: 'Leave the clan war queue (or finish your war) first.' });
+          return;
+        }
+        const r = t === 'clan_create' ? clans.create(pid, msg)
+          : t === 'clan_join' ? clans.join(pid, msg)
+          : t === 'clan_leave' ? clans.leave(pid)
+          : t === 'clan_update' ? clans.update(pid, msg)
+          : clans.kick(pid, sanitizePlayerId(msg.playerId));
+        if (!r.ok) { cwSend(client, { t: 'clan_error', msg: r.msg }); return; }
+        if (t === 'clan_kick') { const kicked = onlineByPlayerId.get(sanitizePlayerId(msg.playerId)); if (kicked) { cwRemove(kicked); cwSend(kicked, { ...clanInfoFor(kicked, null), notice: 'You were removed from ' + r.clan.name + '.' }); } }
+        cwSend(client, { ...clanInfoFor(client, t === 'clan_leave' ? null : r.clan), done: t });
+        notifyClanMembers(t === 'clan_leave' ? before : r.clan, client);
+        if (client.room && client.room.meta && client.room.meta.playerPublic && client.room.meta.playerPublic[String(client.slot)]) {
+          client.room.meta.playerPublic[String(client.slot)].clan = clans.summary(clans.clanOf(pid));
+          broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
+        }
+        cwBroadcastStatus();
+        return;
+      }
+      if (t === 'clan_chat') {
+        const r = clans.post(pid, msg.text);
+        if (!r.ok) { cwSend(client, { t: 'clan_error', msg: r.msg, chat: true }); return; }
+        for (const m of r.clan.members) cwSend(onlineByPlayerId.get(m.playerId), { t: 'clan_chat', clanId: r.clan.id, message: r.message });
+        return;
+      }
+      if (t === 'cw_status') { client.cwWatch = msg.watch !== false; cwSend(client, cwStatusFor(client)); return; }
+      if (t === 'cw_queue') {
+        const tier = String(msg.tier || '');
+        const clan = clans.clanOf(pid);
+        const refuse = !clans.TIERS.includes(tier) ? 'Pick 1v1 or 2v2.' : !clan ? 'Join or found a clan to fight clan wars.' : client.room ? 'Leave your lobby before queueing for a clan war.' : client.cwWarId ? 'You are already in a clan war.' : '';
+        if (refuse) { cwSend(client, { t: 'cw_error', msg: refuse }); return; }
+        cwRemove(client);
+        cwQueues[tier].push({ client, playerId: pid, clanId: clan.id, since: Date.now() });
+        client.cwWatch = true;
+        while (cwTryMatch(tier));
+        cwBroadcastStatus();
+        return;
+      }
+      if (t === 'cw_leave_queue') { cwRemove(client); cwBroadcastStatus(); return; }
+      if (t === 'cw_decline') {
+        const war = client.cwWarId && client.cwWarId === String(msg.warId || '') ? cwWars.get(client.cwWarId) : null;
+        if (war) cwCancel(war, (client.displayName || 'A player') + ' is in another game, so the war was called off. You can queue again.');
+        return;
+      }
+      return;
+    }
+
     if (t === 'list_lobbies') {
       ws.send(
         JSON.stringify({
@@ -1485,7 +1723,27 @@ wss.on('connection', (ws) => {
         lobbyPreview: null,
       };
       rooms.set(id, room);
+      const cwWar = msg.cwWarId ? cwWars.get(String(msg.cwWarId)) : null;
+      if (msg.cwWarId && (!cwWar || cwWar.room || cwWar.cancelled || cwWar.hostPlayerId !== client.playerId)) {
+        rooms.delete(id);
+        ws.send(JSON.stringify({ t: 'error', msg: 'That clan war is no longer waiting for its lobby.' }));
+        return;
+      }
+      if (!cwWar) cwRemove(client);
       addClientToRoom(client, room);
+      if (cwWar) {
+        room.clanWar = cwWar;
+        cwWar.room = room;
+        room.password = cwWar.secret;
+        room.meta.seatTypes = cwSeatTypes(cwWar);
+        room.meta.aiCount = 0;
+        room.meta.cw = cwPublic(cwWar);
+        room.name = 'Clan war · ' + cwWar.sides.map((s) => s.clan ? s.clan.name : 'Clan').join(' vs ');
+        for (const p of cwWar.players) {
+          if (p.playerId === client.playerId) continue;
+          cwSend(onlineByPlayerId.get(p.playerId), { t: 'cw_join', warId: cwWar.id, code: room.id, password: cwWar.secret, seat: p.slot });
+        }
+      }
       ws.send(
         JSON.stringify({
           t: 'joined',
@@ -1589,7 +1847,12 @@ wss.on('connection', (ws) => {
         ws.send(JSON.stringify({ t: 'error', msg: 'Lobby full' }));
         return;
       }
-      const reqSeat = parseInt(msg.seat, 10) || 0;
+      let reqSeat = parseInt(msg.seat, 10) || 0;
+      if (room.clanWar) {
+        const seat = room.clanWar.players.find((p) => p.playerId === client.playerId);
+        if (!seat) { ws.send(JSON.stringify({ t: 'error', msg: 'This lobby is a clan war between two clans.' })); return; }
+        reqSeat = seat.slot;
+      } else cwRemove(client);
       leaveRoom(client);
       addClientToRoom(client, room, reqSeat);
       ws.send(
@@ -1638,6 +1901,11 @@ wss.on('connection', (ws) => {
           return;
         }
         client.room.meta = trial;
+        if (client.room.clanWar) {
+          client.room.meta.seatTypes = cwSeatTypes(client.room.clanWar);
+          client.room.meta.aiCount = 0;
+          client.room.meta.cw = cwPublic(client.room.clanWar);
+        }
         if (!client.room.meta.playerColors || typeof client.room.meta.playerColors !== 'object')
           client.room.meta.playerColors = {};
         Object.assign(client.room.meta.playerColors, prevPc);
@@ -1748,6 +2016,7 @@ wss.on('connection', (ws) => {
         unitSkin,
         playerId: playerId || client.playerId || '',
         combinedStats,
+        clan: clans.summary(clans.clanOf(client.playerId)),
       };
       broadcastAll(client.room, { t: 'room_meta', meta: metaWire(client.room) });
       broadcastLobbyList();
@@ -1786,6 +2055,7 @@ wss.on('connection', (ws) => {
       client.room.lastSnap = null;
       client.room.hostPlayerId = sanitizePlayerId(client.playerId);
       captureMatchSeatPlayers(client.room);
+      if (client.room.clanWar) { clearTimeout(client.room.clanWar.timer); setImmediate(cwBroadcastStatus); }
       broadcastAll(client.room, { t: 'match_start', payload, fromSlot: client.slot });
       broadcastLobbyList();
       return;
@@ -1819,10 +2089,13 @@ wss.on('connection', (ws) => {
       // the last, the game falling further and further behind (and the map, sent at the start, behind them all). One
       // whose socket still holds more than MP_SNAP_BACKLOG_BYTES is skipped; when it has drained it is sent the full
       // latest state (cached, with the territory and ledgers a lightweight snapshot leaves out).
+      // (Never skipped: a snapshot that ends the match, or ends it for some players. The host may send nothing after
+      // it, so a player who missed it was never told the match was over and his game ran on.)
+      const endsMatch = !!(cached && cached.matchEnd);
       let raw = null, full = null;
       for (const c of room.clients) {
         if (c.ws === ws || c.ws.readyState !== 1) continue;
-        if ((c.ws.bufferedAmount | 0) > MP_SNAP_BACKLOG_BYTES) { c.snapBehind = true; continue; }
+        if (!endsMatch && (c.ws.bufferedAmount | 0) > MP_SNAP_BACKLOG_BYTES) { c.snapBehind = true; continue; }
         if (c.snapBehind) { c.snapBehind = false; c.ws.send(full || (full = JSON.stringify({ t: 'snap', payload: cached, seq }))); continue; }
         c.ws.send(raw || (raw = JSON.stringify({ t: 'snap', payload: msg.payload, seq })));
       }
@@ -1844,6 +2117,8 @@ wss.on('connection', (ws) => {
   }
 
   ws.on('close', () => {
+    if (cwRemove(client)) cwBroadcastStatus();
+    if (client.cwWarId && cwWars.has(client.cwWarId) && !(client.room && client.room.matchStarted)) cwCancel(cwWars.get(client.cwWarId), (client.displayName || 'A player') + ' disconnected, so the war was called off. You can queue again.');
     if (client.room && client.room.matchStarted) scheduleMatchSocketClose(client);
     else leaveRoom(client);
     unregisterClientPlayer(client);
@@ -1870,9 +2145,9 @@ setInterval(() => {
 loadLeaderboardFromDisk();
 loadFriendRemovalsFromDisk();
 loadFriendRequestsFromDisk();
-profiles.initialize().then(()=>{
+profiles.initialize().then(()=>clans.init()).then(()=>{
   hydrateLeaderboardFromProfiles();scheduleLeaderboardSave();
   server.listen(PORT,()=>console.log(`simple-wars-mp listening on ${PORT} (max ${MAX_PLAYERS} players / room)`));
 }).catch(()=>{console.error('[profiles] durable storage unavailable; refusing to start with empty profiles');process.exitCode=1;});
-let closing=false;async function shutdown(){if(closing)return;closing=true;server.close();for(const ws of wss.clients)ws.close();try{await profiles.close();await commerceHttp.close();}finally{process.exit(0);}}
+let closing=false;async function shutdown(){if(closing)return;closing=true;try{await clans.flush();}catch(_){}server.close();for(const ws of wss.clients)ws.close();try{await profiles.close();await commerceHttp.close();}finally{process.exit(0);}}
 process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);

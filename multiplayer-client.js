@@ -126,8 +126,8 @@
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
         case 'registered':
-          api.registered=true;api.playerId=msg.playerId||'';
-          emit('Registered', { playerId: msg.playerId || '', profile: msg.profile || null });
+          api.registered=true;api.playerId=msg.playerId||'';api.clan=msg.clan||null;
+          emit('Registered', { playerId: msg.playerId || '', profile: msg.profile || null, clan: msg.clan || null });
           break;
         case 'profile':
           emit('Profile', { profile: msg.profile || null });
@@ -333,6 +333,11 @@
           emit('LeftLobby', {});
           break;
         default:
+          // Clans and clan wars (js/clans.js listens for these).
+          if (/^(clan|cw)_/.test(String(msg.t || ''))) {
+            if (msg.t === 'clan_info' && 'mine' in msg) api.clan = msg.mine || null;
+            emit('Clan', msg);
+          }
           break;
       }
     };
@@ -405,6 +410,9 @@
     requestLobbyList() {
       send({ t: 'list_lobbies' });
     },
+    clanSend(obj) {
+      if (obj && /^(clan|cw)_/.test(String(obj.t || ''))) send(obj);
+    },
     createLobby(opts) {
       opts = opts || {};
       return new Promise((resolve, reject) => {
@@ -426,6 +434,7 @@
           name: opts.name || 'Game',
           password: opts.password || '',
           meta: opts.meta || {},
+          cwWarId: opts.cwWarId || '',
         });
       });
     },

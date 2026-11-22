@@ -2,6 +2,13 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-22T03:30:00Z",title:"Clans and clan wars",items:[
+        "Found a clan with a name and an emblem, either a badge or a country flag. Public clans are listed for anyone to join; private clans are joined with an invite code.",
+        "Clan wars: queue for a 1v1 or 2v2 war against another clan, and see how many players are waiting in each queue before you join. Wars set themselves up on a balanced map and start when everyone is in.",
+        "Clan stats track wars won and lost, rating, streaks and recent wars, and Rankings has a clan leaderboard. Your clan shows beside your name on the player leaderboard and in lobbies, and stays with your profile.",
+        "A multiplayer win now counts as a battle won, as in single player, alongside match gold and stats.",
+        "Every player now sees a multiplayer match end: a player whose game received two updates at once could miss the result and keep playing after the host's game had finished."
+    ]},
     {at:"2026-11-22T01:49:00Z",title:"A more responsive main menu",items:[
         "Main menu buttons now show feedback as soon as you press them.",
         "Opening a panel defers the background terrain copy, and the changelog skips layout for entries outside the visible area.",

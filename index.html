@@ -10,6 +10,7 @@
     <link rel="apple-touch-icon" href="branding/favicon-192.png">
     <link rel="stylesheet" href="css/game.css?v=61ec2a8e4b">
     <link rel="stylesheet" href="css/tutorial.css?v=a83c6a4334">
+    <link rel="stylesheet" href="css/clans.css?v=ef59368bb1">
 <link rel="stylesheet" href="commerce-shop.css?v=778f1f8dcd">
     <link rel="stylesheet" href="campaign-ui.css?v=251b7a8796">
 </head>
@@ -378,7 +379,7 @@
                     <header class="wod-screen-head mp-hub-head">
                         <div class="wod-screen-titles">
                             <h2>Multiplayer</h2>
-                            <p class="wod-screen-sub">Play with friends: join an open game, host your own, or see the rankings.</p>
+                            <p class="wod-screen-sub">Play with friends: join an open game, host your own, fight for your clan, or see the rankings.</p>
                         </div>
                         <div class="mp-hub-head-meta wod-screen-head-meta">
                             <span class="mp-hub-pill mp-hub-pill--live"><span id="mpOnlineCount">—</span> online</span>
@@ -407,6 +408,7 @@
                                 <input type="text" id="mpDisplayName" placeholder="Choose a unique name" maxlength="24" autocomplete="nickname">
                                 <p class="mp-display-name-hint" id="mpDisplayNameHint">Names must be unique — taken names cannot be used in multiplayer.</p>
                             </div>
+                            <div class="mp-profile-clan" id="mpProfileClan"></div>
                             <div class="mp-profile-field">
                                 <label>Player ID <span style="opacity:0.7">(share with friends)</span></label>
                                 <div class="mp-profile-id-row">
@@ -431,6 +433,8 @@
                             <div class="mp-hub-tabs" role="tablist" aria-label="Multiplayer sections">
                                 <button type="button" class="mp-hub-tab active" id="mpTabBrowse" data-mp-tab="browse" role="tab" aria-selected="true">Browse games</button>
                                 <button type="button" class="mp-hub-tab" id="mpTabHost" data-mp-tab="host" role="tab" aria-selected="false">Host</button>
+                                <button type="button" class="mp-hub-tab" id="mpTabWars" data-mp-tab="wars" role="tab" aria-selected="false">Clan wars</button>
+                                <button type="button" class="mp-hub-tab" id="mpTabClan" data-mp-tab="clan" role="tab" aria-selected="false">Clan</button>
                                 <button type="button" class="mp-hub-tab" id="mpTabFriends" data-mp-tab="friends" role="tab" aria-selected="false">Friends</button>
                                 <button type="button" class="mp-hub-tab" id="mpTabRankings" data-mp-tab="rankings" role="tab" aria-selected="false">Rankings</button>
                             </div>
@@ -484,6 +488,12 @@
                                     </div>
                                 </div>
                             </div>
+                            <div id="mpPaneWars" class="mp-hub-pane" data-mp-pane="wars" role="tabpanel" hidden>
+                                <div id="mpWarsRoot"></div>
+                            </div>
+                            <div id="mpPaneClan" class="mp-hub-pane" data-mp-pane="clan" role="tabpanel" hidden>
+                                <div id="mpClanRoot"></div>
+                            </div>
                             <div id="mpPaneFriends" class="mp-hub-pane" data-mp-pane="friends" role="tabpanel" hidden>
                                 <p class="mp-hub-pane-lead">Send a friend request by player ID. They must accept before you can invite them to lobbies.</p>
                                 <div class="mp-friends-add">
@@ -494,6 +504,11 @@
                                 <p id="mpFriendsEmpty" class="mp-hub-pane-lead" style="display:none;margin-top:8px">No friends yet — send a request using their player ID.</p>
                             </div>
                             <div id="mpPaneRankings" class="mp-hub-pane" data-mp-pane="rankings" role="tabpanel" hidden>
+                                <div class="mp-lb-kind" id="mpLbKind" role="tablist" aria-label="Rankings">
+                                    <button type="button" class="mp-hub-tab active" data-lb-kind="players" role="tab" aria-selected="true">Players</button>
+                                    <button type="button" class="mp-hub-tab" data-lb-kind="clans" role="tab" aria-selected="false">Clans</button>
+                                </div>
+                                <div id="mpLbPlayersView">
                                 <p class="mp-hub-pane-lead">Compare stats with friends or see global rankings. Sort by any stat — add players as friends directly from the list.</p>
                                 <div class="mp-lb-scope" id="mpLbScope">
                                     <button type="button" class="mp-hub-tab active" data-lb-scope="global">Global</button>
@@ -511,6 +526,17 @@
                                     <span id="mpLbPageLabel" class="mp-lb-page-label"></span>
                                     <button type="button" class="wod-editor-btn" id="mpLbPageNext" aria-label="Next page">→</button>
                                 </div>
+                                </div>
+                                <div id="mpLbClansView" hidden>
+                                    <p class="mp-hub-pane-lead">Clans ranked by their clan wars. A win against a higher-rated clan moves you up more.</p>
+                                    <div class="mp-lb-sort" id="mpClanLbSort">
+                                        <button type="button" class="mp-hub-tab active" data-clan-sort="rating">Rating</button>
+                                        <button type="button" class="mp-hub-tab" data-clan-sort="wins">Wars won</button>
+                                        <button type="button" class="mp-hub-tab" data-clan-sort="members">Members</button>
+                                        <button type="button" class="mp-hub-tab" data-clan-sort="memberWins">Member wins</button>
+                                    </div>
+                                    <div id="mpClanLeaderboardList"></div>
+                                </div>
                             </div>
                         </main>
                     </div>
@@ -525,6 +551,7 @@
                             <h2 id="mpGlHeading">Game lobby</h2>
                             <p id="mpGlSub" class="mp-gl-sub wod-screen-sub"></p>
                         </div>
+                        <div id="mpGlWarBanner" class="mp-gl-war-banner" hidden></div>
                     </header>
                     <div class="wod-screen-body mp-gl-grid">
                         <section class="mp-gl-col mp-gl-col--players" aria-label="Players">
@@ -2352,13 +2379,13 @@
 <script src="hd-relief.js?v=6e7d9a7607"></script>
 <link rel="stylesheet" href="board-art.css?v=8c5d282b68">
 <script src="commerce-client.js?v=3abda566ec"></script>
-<script src="multiplayer-client.js?v=217303f644"></script>
+<script src="multiplayer-client.js?v=7e4b15c040"></script>
     <script src="ancient-civ-emblems.js?v=5c7b33e5a1"></script>
     <script src="music-player.js?v=4102f187e8"></script>
     <script src="battle-audio.js?v=a7356989e2"></script>
     <script src="campaign-ui.js?v=1654292d2f"></script>
     <!-- Game script, in load order: functions and constants per area first, js/main.js (startup) last. -->
-    <script src="js/changelog.js?v=ef23061387"></script>
+    <script src="js/changelog.js?v=eac2e5f4aa"></script>
     <script src="js/core.js?v=ba864f6799"></script>
     <script src="js/world.js?v=52a84e459d"></script>
     <script src="js/units.js?v=8c65df6900"></script>
@@ -2398,7 +2425,8 @@
     <script src="js/audio.js?v=e47e9ed124"></script>
     <script src="js/missions.js?v=b05444b202"></script>
     <script src="js/campaign.js?v=cebebae274"></script>
-    <script src="js/multiplayer.js?v=9fc3734972"></script>
+    <script src="js/multiplayer.js?v=890c202a70"></script>
+    <script src="js/clans.js?v=b7da59a193"></script>
     <script src="js/game.js?v=026c4f53a2"></script>
     <script src="js/dev.js?v=8099438850"></script>
     <script src="js/tutorial.js?v=16960c5e71"></script>

@@ -449,7 +449,7 @@ function wodMpBuildInitPayload() {
         hexRadius: gameData.hexRadius,
         aiCount: gameData.aiCount, aiDifficulty:gameData.aiDifficulty||'normal',aiCommanderProfiles:gameData.aiCommanderProfiles||{},
         victoryMode: gameData.victoryMode,
-        alliances: wodNormalizeAlliances(gameData.alliances),
+        alliances: wodNormalizeAlliances((typeof wodCwAlliances === 'function' && wodCwAlliances()) || gameData.alliances),
         humanSlots: hs,
         factionSlots: factions,
         connectedSlots: conn,
@@ -900,7 +900,9 @@ function wodMpClientApplyMatchEnd(me) {
     if(me.final||wodSpectatorSurvivors(true).length<2)wodMpClearSession();
     if(oc==='lost'&&typeof WodMultiplayer!=='undefined')WodMultiplayer.api.spectating=true;
     let mpActive = !!(gameData.mp && gameData.mp.enabled);
-    if(oc === 'won') triggerCampaignVictory(me.message || 'Victory', !mpActive && me.countAsBattleWon === true);
+    // (a multiplayer win counts as a battle won, as taking the last enemy town does in single player: captures in a
+    // multiplayer match skip that count, so a win here used to add nothing to it)
+    if(oc === 'won') triggerCampaignVictory(me.message || 'Victory', mpActive || me.countAsBattleWon === true);
     else if(oc === 'lost') triggerCampaignDefeat(me.message || 'Defeat');
     if(!gameData._lifetimeMatch?.mpOutcomeRecorded) {
         if(gameData._lifetimeMatch)gameData._lifetimeMatch.mpOutcomeRecorded=true;
@@ -1080,7 +1082,9 @@ function wodMpApplyDeferredSnapshot(fallback) {
 }
 function wodMpRetainSnapshotState(payload, previous) {
     if(previous && previous !== payload) {
-        for(const field of ['hexOwners', 'battleLedger', 'lifetimeStatsByOwner']) {
+        // (matchEnd too: the host sends it in one snapshot only. When the next one landed in the same frame, only that
+        // one was applied and a guest was never told the match had ended, so its game ran on.)
+        for(const field of ['hexOwners', 'battleLedger', 'lifetimeStatsByOwner', 'matchEnd']) {
             if(payload[field] === undefined && previous[field] !== undefined) payload[field] = previous[field];
         }
     }
@@ -1824,7 +1828,7 @@ function wodMpRenderLeaderboardPage() {
         if(row.playerId && row.playerId === myId && typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen)
             isOnline = true;
         meta.innerHTML =
-            '<div class="mp-lb-name">' + wodMpEscapeHtml(row.displayName || row.playerId || 'Player') + '</div>' +
+            '<div class="mp-lb-name">' + wodMpEscapeHtml(row.displayName || row.playerId || 'Player') + (typeof wodClanBadgeHtml === 'function' ? wodClanBadgeHtml(row.clan, 'sm') : '') + '</div>' +
             '<div class="mp-lb-val">' + statBits.join(' · ') + '</div>' +
             '<div class="mp-lb-status ' + (isOnline ? 'online' : 'offline') + '">' +
             (isOnline ? '● Online' : '○ Offline') + '</div>';
@@ -2030,6 +2034,7 @@ function wodMpSwitchHubTab(tabId) {
         wodMpRenderFriendsList();
         wodMpQueryFriendPresence();
     }
+    if(typeof wodClanOnHubTab === 'function') wodClanOnHubTab(tabId);
     if(tabId === 'rankings') {
         wodMpQueryFriendPresence();
         wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
@@ -3852,6 +3857,7 @@ function wodMpRenderGameLobbyScreen() {
     let api = typeof WodMultiplayer !== 'undefined' ? WodMultiplayer.api : {};
     let meta = window.wodMpRoomMeta || {};
     wodMpNormalizeLobbyMeta(meta);
+    if(typeof wodCwSyncLobby === 'function') wodCwSyncLobby(meta);
     wodMpSyncLayoutCountFieldsFromMeta(meta);
     let st = meta.seatTypes || [];
     let occ = new Set(Array.isArray(meta.occupiedSlots) ? meta.occupiedSlots : []);
@@ -3918,6 +3924,7 @@ function wodMpRenderGameLobbyScreen() {
             let name = '', sub = '', tags = '';
             if(kind === 'player') {
                 name = wodMpEscapeHtml(wodMpDisplayNameForSlot(s, { meta }));
+                if(typeof wodClanBadgeHtml === 'function') tags += wodClanBadgeHtml(((meta.playerPublic || {})[String(s)] || {}).clan, 'seat');
                 if(mine) tags += '<span class="mp-gl-seat-tag mp-gl-seat-tag--you">You</span>';
                 if((meta.hostSlot | 0) === s || (mine && api.isHost)) tags += '<span class="mp-gl-seat-tag">Host</span>';
                 sub = 'Player';
@@ -4520,9 +4527,12 @@ function wodMpWireLobbyControls() {
             let pwEl = document.getElementById('mpHostPassword');
             let name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : 'Game';
             let password = pwEl ? String(pwEl.value) : '';
-            if(st) st.textContent = 'Creating lobby…';
+            const cwOpts = window._wodCwHostOpts || null;
+            if(cwOpts) { name = cwOpts.name; password = cwOpts.password; }
+            if(st) st.textContent = cwOpts ? 'Setting up the clan war…' : 'Creating lobby…';
             let hostMeta = wodMpBuildInitialHostMeta();
-            await WodMultiplayer.createLobby({ name, password, meta: hostMeta });
+            if(cwOpts) { hostMeta.seatTypes = cwOpts.seatTypes.slice(); hostMeta.aiCount = 0; hostMeta.mapBalance = true; hostMeta.victoryMode = 'domination'; }
+            await WodMultiplayer.createLobby({ name, password, meta: hostMeta, cwWarId: cwOpts ? cwOpts.warId : '' });
             wodMpLobbyCount = 1;
             if(typeof wodMpClearLobbyPreviewDedupeState === 'function') wodMpClearLobbyPreviewDedupeState();
             window.wodMpRoomMeta = Object.assign(window.wodMpRoomMeta || {}, hostMeta);
