@@ -375,6 +375,7 @@ function wodMpNormalizeHexListTerrainColors(list) {
     }
 }
 function wodMpClearTerrainCachesForNewMatch() {
+    wodTakeDueMenuTerrainCopy();
     wodMarkTerrainFullDirty();
     wodTerrainBakeNextMs = 0;
     wodTerrainPolWork = null;

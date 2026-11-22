@@ -2096,7 +2096,7 @@ function captureMenuBattleLive() {
     if(!gameData.hexList || !gameData.hexList.length) return;
     menuBattleLive = cloneMenuBattleState();
     menuBattleHexListRef = gameData.hexList;
-    wodSnapshotMenuTerrain();
+    wodQueueMenuTerrainCopy();
 }
 function wodCloneCanvas(src) {
     if(!src || src.width < 2 || src.height < 2) return null;
@@ -2107,6 +2107,16 @@ function wodCloneCanvas(src) {
     return c;
 }
 function wodRestoreMenuTerrain() {
+    if(wodMenuTerrainCopyDue) {
+        // Nothing has painted terrain since the battle was paused: the live canvases still hold its picture.
+        wodMenuTerrainCopyDue = false;
+        wodTerrainNeedFullRebuild = false;
+        wodTerrainPoliticalDirty = false;
+        terrainNeedsUpdate = false;
+        wodTerrainBaseBuilt = true;
+        wodTerrainPolWork = null;
+        return true;
+    }
     if(!menuTerrainSnap || !menuTerrainSnap.base || !menuTerrainSnap.composite) return false;
     // Adopt preloaded buffers instead of copying/rebaking several large
     // terrain textures in the frame where the summary closes.
@@ -2234,7 +2244,7 @@ function resumeMenuBackgroundBattle() {
     if(mapReplaced && menuBattleLive) {
         applyMenuBattleState(menuBattleLive);
         wodRestoreMenuTerrain();
-    }
+    } else wodMenuTerrainCopyDue = false; // (the battle's own canvases were never painted over: no copy needed)
     if(gameData.hexList && gameData.hexList.length) menuBattleHexListRef = gameData.hexList;
     if(!wodTerrainBaseBuilt || !terrainCanvas || terrainCanvas.width < 2)
         wodMarkTerrainFullDirty();
@@ -2491,8 +2501,9 @@ async function bootstrapMenuBackgroundBattle() {
     captureMenuBattleLive();
     // A panel opened (or a match started) while this battlefield was being made: it stays seeded and paused, as
     // opening the panel would have left a running one. Started anyway it ran behind the panel, simulating and drawing
-    // on the same map state a lobby or skirmish preview was being generated into.
-    if(gameState !== 'MENU' || !wodIsMainMenuAttractEligible()) {
+    // on the same map state a lobby or skirmish preview was being generated into. (Only an open panel counts: during
+    // boot the splash hides the main menu, and the battle must still start so the menu shows it when it appears.)
+    if(gameState !== 'MENU' || [...UI.panels].some(p => p && !p.classList.contains('hidden'))) {
         pauseMenuBackgroundBattle();
         return;
     }

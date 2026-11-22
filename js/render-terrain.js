@@ -2,6 +2,25 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 let wodPoliticalStagingCanvas = null;
+// The menu battle's terrain picture is kept while a panel, the setup preview or a match has the map, so the battle can
+// come back as it was. Copying it (four map-sized canvases) took about 20 ms inside the press that opens a panel, before
+// the panel could show. The press now only marks the copy as due: nothing changes those canvases until terrain is
+// painted again, so each terrain painter here takes the due copy first, and an idle moment once the panel is up takes it
+// otherwise. Going back to the menu on the same map drops it (the battle's canvases were never touched).
+let wodMenuTerrainCopyDue = false, wodMenuTerrainCopyIdle = 0;
+function wodQueueMenuTerrainCopy() {
+    menuTerrainSnap = null;
+    // (a picture not yet painted for this map is not worth keeping: the battle is repainted when it comes back)
+    wodMenuTerrainCopyDue = !!(wodTerrainBaseBuilt && !wodTerrainNeedFullRebuild && terrainCanvas && terrainCanvas.width > 1);
+    if(!wodMenuTerrainCopyDue || wodMenuTerrainCopyIdle) return;
+    const take = () => { wodMenuTerrainCopyIdle = 0; wodTakeDueMenuTerrainCopy(); };
+    wodMenuTerrainCopyIdle = window.requestIdleCallback ? requestIdleCallback(take, { timeout: 2000 }) : setTimeout(take, 250);
+}
+function wodTakeDueMenuTerrainCopy() {
+    if(!wodMenuTerrainCopyDue) return;
+    wodMenuTerrainCopyDue = false;
+    wodSnapshotMenuTerrain();
+}
 function wodFinishTerrainPoliticalBake(costMs) {
     wodTerrainPoliticalDirty = false;
     wodTerrainNeedFullRebuild = false;
@@ -100,6 +119,7 @@ function wodDiplomacyBorderChunk(w, maxChains) {
     return w.ci >= chains.length;
 }
 function wodStepTerrainPoliticalBake(budgetMs) {
+    wodTakeDueMenuTerrainCopy();
     if(wodTerrainNeedFullRebuild || !wodTerrainBaseBuilt) {
         updateTerrainCache();
         return;
@@ -192,6 +212,7 @@ function wodMarkTerrainFullDirty() {
     wodTerrainPolWork = null;
 }
 function updateTerrainCache() {
+    wodTakeDueMenuTerrainCopy();
     let bakeStartMs = performance.now();
     let minX, maxX, minY, maxY;
     let pad = gameData.hexRadius * 2;
@@ -618,6 +639,7 @@ function drawTerrainSchematicMap(ctx, offsetX, offsetY) {
     wodRoundTerrainCorners(ctx,offsetX,offsetY,type=>type==='water'||type==='deep_water'?getTerrainColor('water'):'#f7f9fc');
 }
 function drawTerritoryOverlay(ctx, offsetX, offsetY) {
+    wodTakeDueMenuTerrainCopy();
     if(!gameData.layers.territory) return;
     let spacing = gameData.hexRadius * 1.35;
     let discR = spacing * 0.78;
@@ -1366,6 +1388,7 @@ function wodAcquirePatchCtx(w, h) {
     return wodEditorPatchCtx;
 }
 function wodRedrawBorderLayer() {
+    wodTakeDueMenuTerrainCopy();
     if(!terrainCanvas.width || !terrainCanvas.height) return;
     if(!wodBorderLayerCanvas) {
         wodBorderLayerCanvas = document.createElement('canvas');
@@ -1442,6 +1465,7 @@ function wodCompositeTerrainRect(x, y, w, h) {
     terrainCtx.restore();
 }
 function wodPatchEditorTerrain(seeds, opts) {
+    wodTakeDueMenuTerrainCopy();
     if(!seeds || !seeds.length) return;
     if(terrainBaseCanvas.width < 2 || terrainCanvas.width !== terrainBaseCanvas.width || terrainCanvas.height !== terrainBaseCanvas.height) {
         updateTerrainCache();

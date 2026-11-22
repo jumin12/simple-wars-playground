@@ -2,6 +2,11 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-22T01:49:00Z",title:"A more responsive main menu",items:[
+        "Main menu buttons now show feedback as soon as you press them.",
+        "Opening a panel defers the background terrain copy, and the changelog skips layout for entries outside the visible area.",
+        "The background battle resumes from where it paused when you return from a panel, map preview, or skirmish."
+    ]},
     {at:"2026-11-22T00:56:28Z",title:"Brutal AI and clearer attack orders",items:[
         "AI difficulty is shared across skirmishes, missions, and the campaign. Multiplayer hosts can set a separate difficulty for their lobby’s AI.",
         "Hard AI towns earn 10% more money and manpower. Brutal uses the same tactics with a 25% bonus. Easy and Normal have no economy bonus, and every difficulty follows fog of war.",

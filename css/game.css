@@ -103,9 +103,10 @@ body, html {
     box-sizing: border-box;
 }
 
+/* (No backdrop blur: the battle behind the menu changes every frame, so a full-screen blur over it had to be redone
+   every frame, and the menu ran at about 20 frames a second with presses slow to show. A little more shade instead.) */
 #mainMenu.overlay {
-    background: linear-gradient(180deg, rgba(6, 12, 20, 0.38) 0%, rgba(6, 12, 20, 0.62) 48%, rgba(6, 12, 20, 0.78) 100%);
-    backdrop-filter: blur(2px);
+    background: linear-gradient(180deg, rgba(6, 12, 20, 0.44) 0%, rgba(6, 12, 20, 0.66) 48%, rgba(6, 12, 20, 0.82) 100%);
     pointer-events: none;
 }
 
@@ -178,6 +179,10 @@ body, html {
     padding: 10px 0 2px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
+/* The changelog holds every version (some 1,500 elements), and the browser laid all of them out each time the main
+   menu came back from a panel, about 20 ms per press. Entries scrolled out of view now skip layout and painting until
+   they are scrolled to (the size each last had is remembered, so the scrollbar stays steady). */
+.wod-changelog-entry { content-visibility: auto; contain-intrinsic-size: auto 180px; }
 #mainMenu .wod-changelog-entry time {
     display: block;
     font-size: 11px;
@@ -846,6 +851,13 @@ body, html {
     color: #08140d;
     transform: translateY(-2px);
     box-shadow: 0 8px 18px rgba(46, 204, 113, 0.28), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+/* Pressed: the button pushes in the moment it is pressed (its action runs on release, so without this a press showed
+   nothing until the finger or mouse button came up). */
+.menu-btn:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4), inset 0 2px 5px rgba(0, 0, 0, 0.22);
+    transition-duration: 0.05s;
 }
 
 /* In-Game UI */
