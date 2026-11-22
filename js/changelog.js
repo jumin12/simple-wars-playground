@@ -3,7 +3,8 @@
 
 const WOD_CHANGELOG = [
     {at:"2026-11-22T03:30:00Z",title:"Clans and clan wars",items:[
-        "Found a clan with a name and an emblem, either a badge or a country flag. Public clans are listed for anyone to join; private clans are joined with an invite code.",
+        "Found a clan with a name and an emblem, either a badge or a country flag. Public clans are listed for anyone to join; private clans are joined with an invite code that only the leader holds.",
+        "Each clan has its own chat room, with notes when members join or leave and when the clan wins or loses a war.",
         "Clan wars: queue for a 1v1 or 2v2 war against another clan, and see how many players are waiting in each queue before you join. Wars set themselves up on a balanced map and start when everyone is in.",
         "Clan stats track wars won and lost, rating, streaks and recent wars, and Rankings has a clan leaderboard. Your clan shows beside your name on the player leaderboard and in lobbies, and stays with your profile.",
         "A multiplayer win now counts as a battle won, as in single player, alongside match gold and stats.",
