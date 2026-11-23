@@ -318,8 +318,16 @@ async function smokeClient(url, { dir = outDir('smoke'), steps = SMOKE_STEPS, it
   return { errors, states };
 }
 
+// The 'hello' a game page sends the relay as soon as it connects: which build it is (the date of the newest changelog
+// entry). Tests that talk to the relay over a bare socket send it too, or the relay treats them as an out-of-date game.
+function relayHello() {
+  const list = require('vm').runInNewContext(fs.readFileSync(path.join(ROOT, 'js', 'changelog.js'), 'utf8') + '\n;WOD_CHANGELOG', {});
+  const t = Math.max(...list.map(e => Date.parse(e && e.at)).filter(Number.isFinite));
+  return { t: 'hello', build: new Date(t).toISOString(), version: '' };
+}
+
 module.exports = {
-  ROOT, OUTPUT, MIME, outDir,
+  ROOT, OUTPUT, MIME, outDir, relayHello,
   createStaticServer, startServer, injectHead,
   isLocalUrl, isolateContext, launchBrowser, collectErrors,
   waitForMenu, gotoMenu, waitForMatch, gotoAutostart, closeChangelog, startSkirmish, stepGame, gameText,

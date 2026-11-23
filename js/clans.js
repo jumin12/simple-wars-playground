@@ -296,6 +296,8 @@ const WodClans = {
     cw: { counts: null, queued: null, war: null, party: null, partyInvite: null, partyInvitesSent: [] },
     form: { mode: 'create', emblem: 'p:swords', tab: 'presets', visibility: 'public', name: '', description: '', flagQuery: '' },
     listPage: 0, listPages: 1, listTotal: 0, listFilter: 'all', queuedBy: '', queuedAt: 0, error: '', launchTimer: 0, launching: '', unread: 0,
+    // the clan browser (its own search, filter, order and page, apart from the Clan tab's search for a clan to join)
+    browse: { query: '', filter: 'all', sort: 'members', page: 0, pages: 1, total: 0, allClans: 0, rows: [], loaded: false, timer: 0 },
 };
 try { WodClans.mine = JSON.parse(localStorage.getItem('simplewarsClanCache') || 'null'); } catch(_) {}
 function wodClanOnline() { return typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api && WodMultiplayer.api.socketOpen && WodMultiplayer.api.registered; }
@@ -342,12 +344,17 @@ function wodClanOnMessage(m) {
                 const say = WOD_CLAN_DONE[m.done];
                 if(say) showNotification(say(m));
                 if(m.done === 'clan_update') WodClans.form.mode = 'create';
-                if(['clan_leave', 'clan_join', 'clan_create', 'clan_apply', 'clan_app_cancel'].includes(m.done)) wodClanSearch();
+                if(['clan_leave', 'clan_join', 'clan_create', 'clan_apply', 'clan_app_cancel'].includes(m.done)) { wodClanSearch(); if(wodClanBrowserShown()) wodClanBrowse(WodClans.browse.page); }
             }
             if(m.notice) showNotification(m.notice);
             wodClanRenderAll();
             break;
         case 'clan_list':
+            if(m.browse) {
+                Object.assign(WodClans.browse, { rows: m.clans || [], page: m.page | 0, pages: Math.max(1, m.pages | 0), total: m.total | 0, allClans: m.allClans | 0, loaded: true });
+                wodClanRenderBrowser();
+                break;
+            }
             WodClans.list = m.clans || []; WodClans.listPage = m.page | 0; WodClans.listPages = Math.max(1, m.pages | 0); WodClans.listTotal = m.total | 0;
             if(document.getElementById('clanSearchResults')) wodClanRenderSearchResults(); else wodClanRenderPane();
             break;
@@ -363,6 +370,7 @@ function wodClanOnMessage(m) {
             break;
         }
         case 'clan_error': case 'cw_error':
+            if(m.reason === 'outdated') { if(typeof wodShowUpdateNotice === 'function') void wodShowUpdateNotice('multiplayer'); wodCwRenderPane(); break; }
             if(m.chat || m.t === 'cw_error') { showNotification(m.msg || 'That did not work.'); if(m.t === 'cw_error') wodCwRenderPane(); break; }
             WodClans.error = m.msg || 'That did not work.';
             showNotification(WodClans.error);
@@ -421,10 +429,11 @@ function wodClanRenderProfileBadge() {
 }
 function wodClanOnHubTab(tabId) {
     if(tabId === 'clan') { wodClanSetUnread(0); wodClanRefresh({ list: true }); wodClanRenderPane(); }
+    if(tabId === 'clans') { wodClanRenderBrowser(); wodClanBrowse(WodClans.browse.page); }
     if(tabId === 'wars') { wodClanRefresh({ wars: true }); wodCwRenderPane(); }
     if(tabId === 'rankings') { wodClanSyncLbKind(); if(WodClans.lbKind === 'clans') wodClanRefresh({ board: true }); }
 }
-function wodClanRenderAll() { wodClanRenderProfileBadge(); wodClanRenderPane(); wodCwRenderPane(); wodClanSetUnread(WodClans.unread); }
+function wodClanRenderAll() { wodClanRenderProfileBadge(); wodClanRenderPane(); wodCwRenderPane(); wodClanRenderBrowser(); wodClanSetUnread(WodClans.unread); }
 function wodTabBadge(tabId, n, label) {
     const tab = document.getElementById(tabId);
     if(!tab) return;
@@ -711,6 +720,71 @@ function wodClanWirePane(root) {
     const flagSearch = $('clanFlagSearch');
     if(flagSearch) flagSearch.oninput = () => { f.flagQuery = flagSearch.value; wodClanRenderPane(); };
     wodClanWireListButtons(root);
+}
+// ---------------------------------------------------------------- Clan browser
+// Every clan on the server, for every player (in a clan or not): search by name, show public or private ones, order by
+// members, clan-war wins, members online, age or name, and page through. View opens a clan's page; a player without a
+// clan can join or apply from the row.
+const WOD_CLAN_BROWSE_SORTS = [['members', 'Most members'], ['wins', 'Most war wins'], ['online', 'Most online now'], ['newest', 'Newest'], ['name', 'Name (A to Z)']];
+const WOD_CLAN_BROWSE_PAGE = 12;
+function wodClanBrowserShown() { const root = document.getElementById('mpClanBrowserRoot'); return !!root && !root.closest('[hidden]'); }
+function wodClanBrowse(page) {
+    const b = WodClans.browse;
+    b.page = page == null ? 0 : Math.max(0, page | 0);
+    if(!wodClanSend({ t: 'clan_list', browse: true, query: b.query || '', page: b.page, filter: b.filter, sort: b.sort, pageSize: WOD_CLAN_BROWSE_PAGE })) { b.loaded = false; wodClanRenderBrowser(); }
+}
+function wodClanBrowserRowHtml(c) {
+    const mine = !!(WodClans.mine && WodClans.mine.id === c.id), n = c.members | 0, on = c.online | 0, wins = c.wins | 0;
+    const action = mine ? '<span class="clan-browse-yours">Your clan</span>' : !WodClans.mine ? wodClanListAction(c) : '';
+    const meta = [n + (n === 1 ? ' member' : ' members'), on ? '<span class="clan-browse-online">' + on + ' online</span>' : 'none online', wins + (wins === 1 ? ' war win' : ' war wins')];
+    const more = [c.leaderName ? 'Led by ' + wodClanEsc(c.leaderName) : '', c.createdAt ? 'founded ' + wodClanAgo(c.createdAt) : '', c.visibility === 'private' ? 'private: apply to join' : 'public: anyone can join'].filter(Boolean);
+    return '<div class="clan-list-row clan-browse-row' + (mine ? ' is-mine' : '') + '" data-clan-row="' + wodClanEsc(c.id) + '"><span class="clan-list-emblem">' + wodClanEmblemSvg(c.emblem) + '</span>' +
+        '<span class="clan-list-main"><strong>' + wodClanEsc(c.name) + (c.visibility === 'private' ? ' <span class="clan-lock" title="Private: apply to join">🔒</span>' : '') + '</strong>' +
+        (c.description ? '<span class="clan-list-desc">' + wodClanEsc(c.description) + '</span>' : '') +
+        '<span class="clan-browse-meta">' + meta.join(' · ') + '</span><span class="clan-browse-meta">' + more.join(' · ') + '</span></span>' +
+        '<span class="clan-browse-actions"><button type="button" class="wod-editor-btn clan-view" data-clan="' + wodClanEsc(c.id) + '">View</button>' + action + '</span></div>';
+}
+function wodClanBrowserResultsHtml() {
+    const b = WodClans.browse, q = (b.query || '').trim(), what = b.filter === 'public' ? 'public clan' : b.filter === 'private' ? 'private clan' : 'clan';
+    if(!wodClanOnline()) return '<p class="clan-empty">Connecting to the multiplayer server…</p>';
+    if(!b.loaded) return '<p class="clan-empty">Loading clans…</p>';
+    const head = '<p class="clan-results-head" aria-live="polite">' + (b.total ? b.total + ' ' + what + (b.total === 1 ? '' : 's') + (q ? ' matching “' + wodClanEsc(q) + '”' : '') + (b.allClans > b.total ? ' (of ' + b.allClans + ' clans)' : '') : '') + '</p>';
+    const list = b.rows.length ? b.rows.map(wodClanBrowserRowHtml).join('')
+        : '<p class="clan-empty">' + (q ? 'No ' + what + 's match “' + wodClanEsc(q) + '”. Check the spelling, or try part of the name.' : b.filter !== 'all' ? 'No ' + what + 's yet.' : 'No clans yet. Found the first one in the Clan tab.') + '</p>';
+    const pager = b.pages > 1 ? '<div class="clan-pager"><button type="button" class="wod-editor-btn clan-browse-prev" aria-label="Previous page"' + (b.page <= 0 ? ' disabled' : '') + '>←</button><span class="clan-page-label">Page ' + (b.page + 1) + ' / ' + b.pages + '</span><button type="button" class="wod-editor-btn clan-browse-next" aria-label="Next page"' + (b.page >= b.pages - 1 ? ' disabled' : '') + '>→</button></div>' : '';
+    return head + '<div class="clan-list">' + list + '</div>' + pager;
+}
+function wodClanBrowserLeadHtml() {
+    const m = WodClans.mine;
+    return m ? 'You are in ' + wodClanBadgeHtml(m, 'sm') + '. To join another clan, leave yours first in the Clan tab.' : 'Join a public clan at once, or apply to a private one for its leader to approve. View a clan to see its members and record.';
+}
+function wodClanRenderBrowser() {
+    const root = document.getElementById('mpClanBrowserRoot');
+    if(!root || root.closest('[hidden]')) return;
+    const b = WodClans.browse;
+    if(!root.querySelector('#clanBrowseResults')) {
+        root.innerHTML = '<section class="clan-card clan-browser"><h3>Clan browser</h3><p class="clan-card-lead" id="clanBrowseLead"></p>' +
+            '<div class="clan-browser-controls"><input type="search" id="clanBrowseSearch" class="clan-search" placeholder="Search clans by name" autocomplete="off" aria-label="Search clans by name">' +
+            '<div class="clan-filter" role="group" aria-label="Show">' + [['all', 'All'], ['public', 'Public'], ['private', 'Private']].map(([k, label]) => '<button type="button" class="mp-hub-tab" data-browse-filter="' + k + '">' + label + '</button>').join('') + '</div>' +
+            '<label class="clan-browse-sort">Sort by <select id="clanBrowseSort">' + WOD_CLAN_BROWSE_SORTS.map(([k, label]) => '<option value="' + k + '">' + label + '</option>').join('') + '</select></label></div>' +
+            '<div id="clanBrowseResults"></div></section>';
+        const search = root.querySelector('#clanBrowseSearch');
+        search.value = b.query || '';
+        search.oninput = () => { b.query = search.value; clearTimeout(b.timer); b.timer = setTimeout(() => wodClanBrowse(0), 220); };
+        search.onkeydown = e => { if(e.key === 'Enter') { clearTimeout(b.timer); wodClanBrowse(0); } };
+        root.querySelectorAll('[data-browse-filter]').forEach(btn => btn.onclick = () => { b.filter = btn.dataset.browseFilter; wodClanRenderBrowser(); wodClanBrowse(0); });
+        const sort = root.querySelector('#clanBrowseSort');
+        sort.onchange = () => { b.sort = sort.value; wodClanBrowse(0); };
+    }
+    root.querySelector('#clanBrowseLead').innerHTML = wodClanBrowserLeadHtml();
+    root.querySelectorAll('[data-browse-filter]').forEach(btn => { const on = btn.dataset.browseFilter === b.filter; btn.classList.toggle('active', on); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+    root.querySelector('#clanBrowseSort').value = b.sort;
+    const box = root.querySelector('#clanBrowseResults');
+    box.innerHTML = wodClanBrowserResultsHtml();
+    wodClanWireListButtons(box);
+    const prev = box.querySelector('.clan-browse-prev'), next = box.querySelector('.clan-browse-next');
+    if(prev) prev.onclick = () => wodClanBrowse(b.page - 1);
+    if(next) next.onclick = () => wodClanBrowse(b.page + 1);
 }
 // Another clan, from the list or the leaderboard.
 function wodClanShowView(d) {

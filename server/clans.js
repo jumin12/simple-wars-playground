@@ -48,6 +48,14 @@ function nameKey(name) { return cleanName(name).toLowerCase(); }
 const DESCRIPTION_MAX = 200;
 function cleanDescription(raw) { return String(raw || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX); }
 const LIST_PAGE_SIZE = 8;
+// How the clan browser can order clans (rows are { c: clan, online: members online now }).
+const LIST_SORTS = {
+    members: (a, b) => b.c.members.length - a.c.members.length,
+    wins: (a, b) => b.c.stats.wins - a.c.stats.wins,
+    online: (a, b) => b.online - a.online,
+    newest: (a, b) => (b.c.createdAt || 0) - (a.c.createdAt || 0),
+    name: (a, b) => a.c.name.localeCompare(b.c.name),
+};
 function newCode() { return 'CLAN-' + crypto.randomBytes(4).toString('hex').toUpperCase(); }
 function emptyTier() { return { played: 0, wins: 0, defeats: 0 }; }
 function emptyStats() { return { played: 0, wins: 0, defeats: 0, kills: 0, losses: 0, byTier: { '1v1': emptyTier(), '2v2': emptyTier() } }; }
@@ -365,15 +373,22 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         }
         return any;
     }
+    // Clans by name (part of it) and visibility, a page at a time. The search for a clan to join puts the best name match
+    // first; the clan browser sorts by opts.sort (LIST_SORTS) instead, and asks for longer pages (opts.pageSize, 4 to 20).
     function list(query, viewerId, opts) {
-        const q = String(query || '').trim().toLowerCase(), filter = ['public', 'private'].includes(opts && opts.filter) ? opts.filter : 'all';
-        const rank = c => !q ? 0 : c.name.toLowerCase() === q ? 0 : c.name.toLowerCase().startsWith(q) ? 1 : 2;
+        opts = opts || {};
+        const q = String(query || '').trim().toLowerCase(), filter = ['public', 'private'].includes(opts.filter) ? opts.filter : 'all';
+        const sort = typeof opts.sort === 'string' && Object.hasOwn(LIST_SORTS, opts.sort) ? opts.sort : '';
+        const size = Math.min(20, Math.max(4, (opts.pageSize | 0) || LIST_PAGE_SIZE));
+        const rank = c => !q || sort ? 0 : c.name.toLowerCase() === q ? 0 : c.name.toLowerCase().startsWith(q) ? 1 : 2;
         const found = [...clans.values()].filter(c => (!q || c.name.toLowerCase().includes(q)) && (filter === 'all' || c.visibility === filter))
-            .sort((a, b) => rank(a) - rank(b) || b.members.length - a.members.length || b.stats.wins - a.stats.wins || a.name.localeCompare(b.name));
-        const pages = Math.max(1, Math.ceil(found.length / LIST_PAGE_SIZE)), page = Math.min(pages - 1, Math.max(0, (opts && opts.page) | 0));
+            .map(c => ({ c, online: c.members.reduce((n, m) => n + (isOnline(m.playerId) ? 1 : 0), 0) }))
+            .sort((a, b) => rank(a.c) - rank(b.c) || LIST_SORTS[sort || 'members'](a, b) || b.c.members.length - a.c.members.length || b.c.stats.wins - a.c.stats.wins || a.c.name.localeCompare(b.c.name));
+        const pages = Math.max(1, Math.ceil(found.length / size)), page = Math.min(pages - 1, Math.max(0, opts.page | 0));
         return {
-            total: found.length, page, pages, pageSize: LIST_PAGE_SIZE, filter,
-            clans: found.slice(page * LIST_PAGE_SIZE, (page + 1) * LIST_PAGE_SIZE).map(c => ({ ...summary(c), applied: !!viewerId && c.applications.some(a => a.playerId === viewerId), queueFull: c.visibility === 'private' && c.applications.filter(a => a.kind === 'random').length >= APPLY_FROM_SEARCH })),
+            total: found.length, page, pages, pageSize: size, filter, sort: sort || 'members', allClans: clans.size,
+            clans: found.slice(page * size, (page + 1) * size).map(({ c, online }) => ({ ...summary(c), online, leaderName: nameOf(c.leaderId), createdAt: c.createdAt || 0, mine: !!memberOf(c, viewerId),
+                applied: !!viewerId && c.applications.some(a => a.playerId === viewerId), queueFull: c.visibility === 'private' && c.applications.filter(a => a.kind === 'random').length >= APPLY_FROM_SEARCH })),
         };
     }
     // Two leaderboards: clan wars ('war') and the members' normal multiplayer play ('normal').

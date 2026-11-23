@@ -13,7 +13,7 @@ async function protocolChecks(){
  async function peer(n,secret=crypto.randomBytes(32).toString('hex')){
   const socket=new WebSocket('ws://127.0.0.1:'+relayPort),messages=[];socket.on('message',raw=>messages.push(JSON.parse(raw)));
   const wait=async(type,predicate=()=>true)=>{for(let i=0;i<200;i++){const at=messages.findIndex(m=>m.t===type&&predicate(m));if(at>=0)return messages.splice(at,1)[0];await new Promise(r=>setTimeout(r,25));}throw Error('Missing '+type+': '+JSON.stringify(messages));};
-  await wait('welcome');const send=m=>socket.send(JSON.stringify(m));send({t:'register_player',playerId:'WOD-QA0'+n+'-TEST',deviceSecret:secret,displayName:'Protocol '+n});const registered=await wait('registered');const p={socket,send,wait,id:registered.playerId,secret};peers.push(p);return p;
+  await wait('welcome');const send=m=>socket.send(JSON.stringify(m));send(H.relayHello());send({t:'register_player',playerId:'WOD-QA0'+n+'-TEST',deviceSecret:secret,displayName:'Protocol '+n});const registered=await wait('registered');const p={socket,send,wait,id:registered.playerId,secret};peers.push(p);return p;
  }
  try{
   const a=await peer(1),b=await peer(2),c=await peer(3);a.send({t:'create_lobby',password:'protected',meta:{seatTypes:['human','human','human','closed'],gamePeriod:'modern'}});const lobby=(await a.wait('joined')).code;

@@ -21,6 +21,18 @@ function wodChangelogFormatStamp(iso) {
     return months[rounded.getMonth()] + ' ' + rounded.getDate() + ', ' + rounded.getFullYear()
         + ', ' + hour12 + ':' + minute + ' ' + suffix;
 }
+// This copy of the game: its build is the date of the newest changelog entry (ISO), its version the number the changelog
+// shows for that entry (js/main.js). The multiplayer relay compares the build with the newest one it knows.
+function wodClientBuild() {
+    let best = NaN;
+    for(const e of (typeof WOD_CHANGELOG !== 'undefined' ? WOD_CHANGELOG : [])) { const t = Date.parse(e && e.at); if(Number.isFinite(t) && !(t <= best)) best = t; }
+    return Number.isFinite(best) ? new Date(best).toISOString() : '';
+}
+function wodClientVersion() {
+    const build = wodClientBuild();
+    const e = (typeof WOD_CHANGELOG !== 'undefined' ? WOD_CHANGELOG : []).find(x => Number.isFinite(Date.parse(x.at)) && new Date(Date.parse(x.at)).toISOString() === build);
+    return (e && e.version) || '';
+}
 function wodChangelogHtml() {
     return WOD_CHANGELOG.map(function(entry) {
         let items = (entry.items || []).map(function(line) {
@@ -50,6 +62,8 @@ function wodDismissChangelogPopup() {
     pop.classList.add('hidden');
     window._wodDeferMusic = false;
     wodStartMenuMusic();
+    // (an out-of-date game is told so once the changelog is out of the way: js/multiplayer.js)
+    if(typeof wodMaybeWarnOutdatedOnMenu === 'function') setTimeout(wodMaybeWarnOutdatedOnMenu, 250);
 }
 function wodQuitApplication() {
     if(window.simpleWarsDesktop && typeof window.simpleWarsDesktop.quit === 'function') {
@@ -1476,6 +1490,8 @@ function returnToMenu() {
     stopGame();
     if(menuBattleLive || menuDemoSeeded) resumeMenuBackgroundBattle();
     else void bootstrapMenuBackgroundBattle();
+    // back on the menu with an out-of-date game: the update notice, once per new version (js/multiplayer.js)
+    if(typeof wodMaybeWarnOutdatedOnMenu === 'function') setTimeout(wodMaybeWarnOutdatedOnMenu, 600);
 }
 const WOD_END_COUNTDOWN_SECONDS = 15;
 /** Objectives don't end the match instantly: once a win/lose condition holds, a
@@ -2499,6 +2515,8 @@ function wodRunInitialBootToMenu() {
             window._wodBootSettledUntil = 0;
             window._wodBootBusy = false;
             if(typeof wodPreloadAncientCivArt === 'function') void wodPreloadAncientCivArt();
+            // (an out-of-date game, told so on the menu: after the changelog when it opens, else now)
+            if(typeof wodMaybeWarnOutdatedOnMenu === 'function') setTimeout(wodMaybeWarnOutdatedOnMenu, 400);
         });
     }
 

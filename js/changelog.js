@@ -1,17 +1,25 @@
 // Player-facing changelog shown on the main menu (data only).
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
+// Each update is one entry, dated when it is released (never later: an entry dated ahead of its release reads as a
+// version that has not come out yet). The newest entry's date is also the game's build stamp for the multiplayer version
+// check (wodClientBuild in js/game.js, multiplayer-client.js, server/index.js): after changing it, run
+// scripts/stamp-assets.js, which also writes the relay's copy (server/game-build.json).
 const WOD_CHANGELOG = [
-    {at:"2026-11-23T15:00:00Z",title:"Bridges, retreats and landing craft",items:[
+    {at:"2026-11-23T09:15:00Z",title:"Update checks and a clan browser",items:[
+        "Multiplayer now checks that you have the latest version. If your game is out of date, you can't host or join multiplayer matches until you update, and the game shows you how to update.",
+        "If your game is out of date, the main menu reminds you to update once. If you already saw the reminder in multiplayer, it won't show it again.",
+        "New clan browser in the multiplayer screen, open to everyone, even if you're already in a clan. Sort clans by most members, most war wins, most members online, newest or name. Filter for public or private clans, search by name, and see who leads each one and how many members are online.",
+        "The changelog now lists each update once, with the time it came out. The last update was split in two, and its newest part was dated hours ahead."
+    ]},
+    {at:"2026-11-23T09:00:00Z",title:"Loading screen, safer bridges and a warier AI",items:[
+        "Every match now opens behind a loading screen with a progress bar. The map, towns and armies are made, the terrain and borders are painted, and the first frames are drawn before the clock starts, so the opening seconds of a big match no longer stutter. Multiplayer matches show it too while each player's map loads.",
+        "Units joined to their lines through a narrow corner are no longer counted as out of supply. Where two sides' land meets corner to corner, the map draws one side joined, and supply now goes the same way. Before, both sides were cut there, and whole regions starved.",
+        "In games of three or more, the computer watches its other neighbours. While a different enemy threatens one of its towns, it no longer sends most of its army after a single unit of yours. It sends what that fight needs and keeps the rest free to defend.",
         "Clicking the water right beside a bridge now sends your units to the bank there. Before, they walked out onto the bridge and stepped off its side into the river.",
         "Troops crowding a bridge, or stuck in a fight at its far end, no longer get pushed off into the river and drown. They queue on the deck, and units squeezed to its edge still count as on the bridge.",
         "A retreat you order keeps going while the enemy chases it, pulling back up to three times, instead of stopping a few cells away and being shot where it stands.",
         "The computer's general no longer boards a landing craft until his landing is ready to sail. If his boat can't set off within half a minute, it brings him back ashore. Damaged landing craft now land their troops at home instead of keeping them aboard."
-    ]},
-    {at:"2026-11-23T09:00:00Z",title:"Loading screen, supply through corners and a warier AI",items:[
-        "Every match now opens behind a loading screen with a progress bar. The map, towns and armies are made, the terrain and borders are painted, and the first frames are drawn before the clock starts, so the opening seconds of a big match no longer stutter. Multiplayer matches show it too while each player's map loads.",
-        "Units joined to their lines through a narrow corner are no longer counted as out of supply. Where two sides' land meets corner to corner, the map draws one side joined, and supply now goes the same way. Before, both sides were cut there, and whole regions starved.",
-        "In games of three or more, the computer watches its other neighbours. While a different enemy threatens one of its towns, it no longer sends most of its army after a single unit of yours. It sends what that fight needs and keeps the rest free to defend."
     ]},
     {at:"2026-11-22T21:00:00Z",title:"Smoother battles and steadier AI",items:[
         "Big battles no longer stutter. The computer's naval planning used to freeze the game for up to a second or two on maps with water, and many smaller hitches came from checks that ran far too often. In a large four-player match, each frame now spends about half as long on the simulation.",

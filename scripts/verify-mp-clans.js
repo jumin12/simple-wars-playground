@@ -217,6 +217,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
                 const wait = async (type, pred = () => true) => { for(let i = 0; i < 240; i++) { const at = messages.findIndex(m => m.t === type && pred(m)); if(at >= 0) return messages.splice(at, 1)[0]; await sleep(25); } throw Error('Missing ' + type + ': ' + JSON.stringify(messages.map(m => m.t))); };
                 await wait('welcome');
                 const send = m => socket.send(JSON.stringify(m));
+                send(H.relayHello());
                 send({ t: 'register_player', playerId: 'WOD-CW0' + n + '-TEST', deviceSecret: crypto.randomBytes(32).toString('hex'), displayName: 'War Peer ' + n });
                 const p = { socket, send, wait, messages, id: (await wait('registered')).playerId };
                 peers.push(p);

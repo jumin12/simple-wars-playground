@@ -27,6 +27,40 @@ const ABUSE_DROPS_BEFORE_CLOSE = 2000;
 // Results reported by the host wait this long for the other players' clients to confirm or dispute them.
 const RESULT_CONFIRM_MS = 15000;
 const DATA_DIR=process.env.WOD_DATA_DIR||__dirname;fs.mkdirSync(DATA_DIR,{recursive:true});
+// ---- Game version check
+// The game's build is the date of its newest changelog entry (js/changelog.js, shipped in the same repository as this
+// relay), and its version number counts the entries the way the game does (js/main.js). A client says which build it is
+// (the 'hello' message, sent as soon as it connects); one older than the current build may not host or join a match or
+// queue for a clan war until it updates, and is told how far behind it is. Clients from before this check send no
+// build at all and count as out of date. WOD_MIN_CLIENT_BUILD (an ISO date) sets the oldest build allowed instead of the
+// newest (for a grace period while a store update rolls out); WOD_VERSION_GATE=0 turns the check off.
+function wodReadGameBuild(){
+  // (deployed, the relay has only its own folder: game-build.json there is written from the changelog by
+  // scripts/stamp-assets.js. The changelog itself is read only where the whole game sits beside the relay.)
+  try{
+    const b=JSON.parse(fs.readFileSync(path.join(__dirname,'game-build.json'),'utf8')),t=Date.parse(b&&b.build);
+    if(Number.isFinite(t))return{build:new Date(t).toISOString(),version:String(b.version||'')};
+  }catch(_){}
+  for(const file of [path.join(__dirname,'..','js','changelog.js')]){
+    try{
+      // (the changelog is data only: one array literal)
+      const list=require('vm').runInNewContext(fs.readFileSync(file,'utf8')+'\n;WOD_CHANGELOG',{},{timeout:1000});
+      const times=(Array.isArray(list)?list:[]).map(e=>Date.parse(e&&e.at)).filter(Number.isFinite);
+      if(!times.length)continue;
+      const n=times.length+9;
+      return{build:new Date(Math.max(...times)).toISOString(),version:Math.floor(n/10)+'.'+n%10};
+    }catch(_){}
+  }
+  return{build:'',version:''};
+}
+const GAME_BUILD=wodReadGameBuild();
+const MIN_CLIENT_BUILD=(()=>{const v=process.env.WOD_MIN_CLIENT_BUILD;const t=v?Date.parse(v):NaN;return Number.isFinite(t)?new Date(t).toISOString():GAME_BUILD.build||'';})();
+const VERSION_GATE=process.env.WOD_VERSION_GATE!=='0'&&!!MIN_CLIENT_BUILD;
+function clientOutdated(client){const t=Date.parse(client.build||'');return VERSION_GATE&&!(Number.isFinite(t)&&t>=Date.parse(MIN_CLIENT_BUILD));}
+function returningToMatch(client,msg){const room=rooms.get(String(msg.id||'').trim());return !!(room&&room.matchStarted&&client.playerId&&room.seatByPlayerId&&room.seatByPlayerId[client.playerId]);}
+function outdatedMessage(client){
+  return 'Your game is out of date'+(client.version?' (version '+client.version+')':'')+'. Update Simple Wars'+(GAME_BUILD.version?' to version '+GAME_BUILD.version:'')+' to play multiplayer.';
+}
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json');
 const FRIEND_REMOVALS_FILE = path.join(DATA_DIR, 'friend-removals.json');
 const FRIEND_REQUESTS_FILE = path.join(DATA_DIR, 'friend-requests-pending.json');
@@ -1385,6 +1419,9 @@ wss.on('connection', (ws) => {
         t: 'welcome',
         online: countOnline(),
         lobbies: getLobbyListPublic(),
+        latestBuild: GAME_BUILD.build,
+        latestVersion: GAME_BUILD.version,
+        minBuild: VERSION_GATE ? MIN_CLIENT_BUILD : '',
       }),
     );
   } catch (_) {}
@@ -1421,6 +1458,22 @@ wss.on('connection', (ws) => {
       return;
     }
     const t = msg && msg.t;
+
+    if (t === 'hello') {
+      client.build = String(msg.build || '').slice(0, 40);
+      client.version = String(msg.version || '').slice(0, 12);
+      return;
+    }
+    // (an out-of-date game may keep its profile, friends and clan, but not play: see clientOutdated)
+    // (a player coming back to a match already running was let in when it started, so may finish it)
+    if ((t === 'create_lobby' || t === 'join_lobby') && clientOutdated(client) && !(t === 'join_lobby' && returningToMatch(client, msg))) {
+      ws.send(JSON.stringify({ t: 'error', reason: 'outdated', latestVersion: GAME_BUILD.version, msg: outdatedMessage(client) }));
+      return;
+    }
+    if (t === 'cw_queue' && clientOutdated(client)) {
+      cwSend(client, { t: 'cw_error', reason: 'outdated', latestVersion: GAME_BUILD.version, msg: outdatedMessage(client) });
+      return;
+    }
 
     if (t === 'register_player') {
       if(client.identityKey&&!msg.profileToken&&client.identityKey!=='browser:'+crypto.createHash('sha256').update(String(msg.deviceSecret||'')).digest('hex')){ws.send(JSON.stringify({t:'register_failed',reason:'identity_locked',msg:'This connection already belongs to a player profile.'}));return;}
@@ -1711,7 +1764,7 @@ wss.on('connection', (ws) => {
       const refuse = (m) => cwSend(client, { t: 'clan_error', msg: m });
       if (t === 'clan_mine') { cwSend(client, clanInfoFor(client, clans.clanOf(pid))); return; }
       if (t === 'clan_get') { cwSend(client, clanInfoFor(client, clans.get(String(msg.clanId || '')), { view: true })); return; }
-      if (t === 'clan_list') { cwSend(client, { t: 'clan_list', query: String(msg.query || '').slice(0, 40), ...clans.list(msg.query, pid, { page: msg.page, filter: msg.filter }), emblems: [...clans.EMBLEM_IDS] }); return; }
+      if (t === 'clan_list') { cwSend(client, { t: 'clan_list', browse: !!msg.browse, query: String(msg.query || '').slice(0, 40), ...clans.list(msg.query, pid, { page: msg.page, filter: msg.filter, sort: msg.sort, pageSize: msg.pageSize }), emblems: [...clans.EMBLEM_IDS] }); return; }
       if (t === 'clan_leaderboard') { cwSend(client, { t: 'clan_leaderboard', ...clans.leaderboard(String(msg.kind || 'war'), String(msg.sort || 'wins')) }); return; }
       if (t === 'clan_chat') {
         const r = clans.post(pid, msg.text);

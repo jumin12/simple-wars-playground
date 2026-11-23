@@ -62,6 +62,8 @@
   function send(obj) {
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
   }
+  function clientBuild() { try { return typeof global.wodClientBuild === 'function' ? global.wodClientBuild() : ''; } catch (_) { return ''; } }
+  function clientVersion() { try { return typeof global.wodClientVersion === 'function' ? global.wodClientVersion() : ''; } catch (_) { return ''; } }
 
   function stopPing() {
     if (pingTimer) {
@@ -115,7 +117,16 @@
           api.socketOpen = true;
           api.online = msg.online | 0;
           api.lobbies = msg.lobbies || [];
+          // The newest build the relay knows (the date of the newest changelog entry it ships with). Older than the
+          // oldest it allows (minBuild: normally the newest), this game may not host, join or queue until it updates.
+          api.latestBuild = String(msg.latestBuild || '');
+          api.latestVersion = String(msg.latestVersion || '');
+          {
+            const mine = Date.parse(clientBuild()), need = Date.parse(msg.minBuild || '');
+            api.outdated = Number.isFinite(need) && Number.isFinite(mine) && mine < need;
+          }
           startPing();
+          emit('Version', { outdated: api.outdated, latestBuild: api.latestBuild, latestVersion: api.latestVersion, build: clientBuild(), version: clientVersion() });
           emit('Welcome', { online: api.online, lobbies: api.lobbies });
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
@@ -321,7 +332,8 @@
           // (an update the relay refused never comes back: the room's next broadcast is the truth again)
           api.lobbyMetaSent = null;
           clearJoinHandlers(Object.assign(new Error(msg.msg||'Error'),{code:msg.reason||''}));
-          clearCreateHandlers(new Error(msg.msg || 'Error'));
+          clearCreateHandlers(Object.assign(new Error(msg.msg || 'Error'),{code:msg.reason||''}));
+          if (msg.reason === 'outdated') { api.outdated = true; if (msg.latestVersion) api.latestVersion = String(msg.latestVersion); emit('Outdated', { latestVersion: api.latestVersion, msg: msg.msg || '' }); break; }
           emit('Error', { msg: msg.msg });
           break;
         case 'left':
@@ -404,6 +416,8 @@
         ws.onopen = () => {
           attachHandlers();
           global.addEventListener('wod-mp-Welcome', onWel, { once: true });
+          // which build this is, before anything else (the relay keeps out-of-date games out of matches)
+          send({ t: 'hello', build: clientBuild(), version: clientVersion() });
         };
       });
     },
@@ -411,6 +425,7 @@
       send({ t: 'list_lobbies' });
     },
     clanSend(obj) {
+      if (obj && obj.t === 'cw_queue' && api.outdated) { emit('Outdated', { latestVersion: api.latestVersion }); return; }
       if (obj && /^(clan|cw)_/.test(String(obj.t || ''))) send(obj);
     },
     createLobby(opts) {
@@ -418,6 +433,11 @@
       return new Promise((resolve, reject) => {
         if (!ws || ws.readyState !== 1) {
           reject(new Error('Not connected'));
+          return;
+        }
+        if (api.outdated) {
+          emit('Outdated', { latestVersion: api.latestVersion });
+          reject(Object.assign(new Error('Update Simple Wars to play multiplayer.'), { code: 'outdated' }));
           return;
         }
         createResolve = resolve;
@@ -443,6 +463,11 @@
       return new Promise((resolve, reject) => {
         if (!ws || ws.readyState !== 1) {
           reject(new Error('Not connected'));
+          return;
+        }
+        if (api.outdated) {
+          emit('Outdated', { latestVersion: api.latestVersion });
+          reject(Object.assign(new Error('Update Simple Wars to play multiplayer.'), { code: 'outdated' }));
           return;
         }
         joinResolve = resolve;

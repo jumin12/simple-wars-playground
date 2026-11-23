@@ -5544,3 +5544,64 @@ function wodDevActivitySnapshot() {
     rows.sort((a, b) => a.ageMs - b.ageMs);
     return rows.slice(0, 14);
 }
+
+// ---------------------------------------------------------------- Out-of-date game
+// The relay says which build is current (multiplayer-client.js: welcome, api.outdated). An out-of-date game may not host,
+// join or queue for multiplayer: every try opens the update notice, and the multiplayer screen carries a banner. On the
+// main menu the notice comes up once per new version (on returning to the menu, or after the changelog at start-up),
+// and not at all if it was already shown in multiplayer for that version.
+const WOD_UPDATE_NOTICE_KEY = 'wodUpdateNoticeForV1';
+let wodUpdateNoticeOpen = false;
+function wodUpdateApi() { return typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api ? WodMultiplayer.api : null; }
+function wodGameOutdated() { const api = wodUpdateApi(); return !!(api && api.outdated); }
+function wodUpdateNoticeKey() { const api = wodUpdateApi(); return api ? (api.latestBuild || api.latestVersion || 'newer') : ''; }
+function wodUpdateNoticeSeen() { try { return localStorage.getItem(WOD_UPDATE_NOTICE_KEY) === wodUpdateNoticeKey(); } catch(_) { return false; } }
+function wodMarkUpdateNoticeSeen() { try { localStorage.setItem(WOD_UPDATE_NOTICE_KEY, wodUpdateNoticeKey()); } catch(_) {} }
+function wodUpdateHowTo() {
+    if(window.simpleWarsDesktop) return 'Close Simple Wars and start it again from Steam: Steam downloads the update while the game is closed. If it does not, restart Steam.';
+    return 'Reload the page to get the latest version.';
+}
+async function wodShowUpdateNotice(context) {
+    if(wodUpdateNoticeOpen) return false;
+    wodUpdateNoticeOpen = true;
+    wodMarkUpdateNoticeSeen();
+    const api = wodUpdateApi() || {}, mine = typeof wodClientVersion === 'function' ? wodClientVersion() : '', latest = api.latestVersion || '';
+    const desktop = !!window.simpleWarsDesktop, mp = context === 'multiplayer';
+    const versions = (mine ? 'You have version ' + mine : 'Your game is out of date') + (latest ? '; the latest is ' + latest + '. ' : '. ');
+    const why = mp ? 'Multiplayer matches need the latest version. ' : 'Multiplayer needs the latest version, and the update has fixes and new features. ';
+    let ok = false;
+    try {
+        ok = await wodShowConfirmDialog({ title: mp ? 'Update to play multiplayer' : 'A new version of Simple Wars is out', body: versions + why + wodUpdateHowTo(),
+            confirmLabel: desktop ? 'Quit to update' : 'Reload now', cancelLabel: 'Later' });
+    } finally { wodUpdateNoticeOpen = false; }
+    if(ok) { if(desktop) wodQuitApplication(); else location.reload(); }
+    return ok;
+}
+// (start-up and returning to the menu: once per new version, after the changelog has been closed)
+function wodMaybeWarnOutdatedOnMenu() {
+    if(gameState !== 'MENU' || !wodGameOutdated() || wodUpdateNoticeSeen() || wodUpdateNoticeOpen || window._wodBootBusy) return;
+    // (not over the loading screen or the start-up changelog: closing that one asks again, js/game.js)
+    const boot = document.getElementById('wodBootOverlay'), pop = document.getElementById('wodChangelogPopup');
+    if((boot && !boot.classList.contains('hidden')) || (pop && !pop.classList.contains('hidden'))) return;
+    void wodShowUpdateNotice('menu');
+}
+function wodSyncUpdateBanner() {
+    const host = document.querySelector('.mp-hub-main');
+    if(!host) return;
+    let bar = document.getElementById('wodMpUpdateBanner');
+    if(!wodGameOutdated()) { if(bar) bar.hidden = true; return; }
+    if(!bar) {
+        bar = document.createElement('div');
+        bar.id = 'wodMpUpdateBanner';
+        bar.className = 'wod-mp-update-banner';
+        bar.setAttribute('role', 'alert');
+        host.insertBefore(bar, host.firstChild);
+    }
+    const api = wodUpdateApi() || {};
+    bar.innerHTML = '<span><strong>Update needed.</strong> Your game is out of date' + (api.latestVersion ? ' (the latest is version ' + wodMpEscapeHtml(api.latestVersion) + ')' : '') +
+        '. You can look around, but hosting, joining and clan wars need the latest version.</span><button type="button" class="build-btn" id="wodMpUpdateHow">How to update</button>';
+    bar.hidden = false;
+    bar.querySelector('#wodMpUpdateHow').onclick = () => void wodShowUpdateNotice('multiplayer');
+}
+window.addEventListener('wod-mp-Version', () => { wodSyncUpdateBanner(); setTimeout(wodMaybeWarnOutdatedOnMenu, 300); });
+window.addEventListener('wod-mp-Outdated', () => { wodSyncUpdateBanner(); void wodShowUpdateNotice('multiplayer'); });
