@@ -457,7 +457,8 @@ function wodUpdateRecoveredRetreat(unit, dt) {
     const futureLeg=unit.fullMarchWaypoints&&unit.marchWpCursor<unit.fullMarchWaypoints.length-1;
     const distance=goal?Math.hypot(goal.x-unit.x,goal.y-unit.y):0;
     if(!futureLeg&&!unit.path?.length&&(!unit.target||distance<=2)){
-        wodClearRetreatOnArrival(unit);
+        // (a retreat that goes on under pursuit has a fresh leg now: releasing the unit would cancel it)
+        if(wodClearRetreatOnArrival(unit))return;
         if(recovered)wodReleaseRecoveredUnit(unit,!!unit.target);
         return;
     }
@@ -480,6 +481,8 @@ function wodUpdateRecoveredRetreat(unit, dt) {
 }
 function wodClearRetreatOnArrival(unit) {
     if(!unit || unit.moraleBroken) return;
+    // (an enemy still on its heels: the player's retreat goes on, wodContinueRetreatUnderPursuit; true when it does)
+    if(typeof wodContinueRetreatUnderPursuit === 'function' && wodContinueRetreatUnderPursuit(unit)) return true;
     if(unit.retreating || unit._wodOrderedRetreat || unit._wodRiskRetreat) {
         if(!wodMpIsHumanOwner(unit.owner)&&(unit.hp<unit.maxHp*.94||(unit.manpower??unit.maxManpower)<unit.maxManpower*.94))unit._medicalRecovering=true;
         wodClearRetreatFlags(unit);

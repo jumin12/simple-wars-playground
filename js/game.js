@@ -1215,6 +1215,138 @@ function setGameSpeed(speed, allowNonRealtime) {
         btn.classList.toggle('active', s === speed);
     });
 }
+// ---- Match loading screen ----
+// Every match (skirmish, mission, campaign battle, multiplayer) opens behind a loading screen with a progress bar, and the
+// clock does not start until it lifts. Its steps are the real work: making the map, painting the terrain and borders,
+// then the warm-up (wodWarmMatchForPlay), which builds what the first moments of play used to build mid-game and draws a
+// few frames unseen so the graphics card has the big map images before the battle begins. Through a step the bar glides
+// on the compositor towards the step's end over the time that step took last time on this device (kept per map size),
+// so it keeps moving while the page is busy; it reaches the step's end only when the step is done.
+const wodMatchLoad = { active: false, seq: 0, step: null, stepAt: 0, size: 0, timer: 0, shown: 0 };
+const WOD_MATCH_LOAD_TIMES_KEY = 'wodMatchLoadTimesV1';
+function wodMatchLoadActive() { return wodMatchLoad.active; }
+function wodMatchLoadTimes() {
+    try { return JSON.parse(localStorage.getItem(WOD_MATCH_LOAD_TIMES_KEY) || '{}') || {}; } catch(e) { return {}; }
+}
+function wodMatchLoadSetBar(pct, seconds) {
+    const inner = document.getElementById('wodMatchLoadBarInner'), bar = document.getElementById('wodMatchLoadBar');
+    const p = Math.max(0, Math.min(100, pct));
+    if(inner) { inner.style.transitionDuration = Math.max(0, seconds || 0).toFixed(2) + 's'; inner.style.transform = `scaleX(${p / 100})`; }
+    if(bar) bar.setAttribute('aria-valuenow', String(Math.round(p)));
+    // (a short move is shown at once; through a long glide the ticks follow the bar)
+    if(!(seconds > 0.3)) { wodMatchLoad.shown = Math.max(wodMatchLoad.shown, Math.floor(p)); const t = document.getElementById('wodMatchLoadPct'); if(t) t.textContent = wodMatchLoad.shown + '%'; }
+}
+// The percentage shown is where the bar really is (it moves on the compositor between ticks).
+function wodMatchLoadTick() {
+    if(!wodMatchLoad.active) return;
+    const inner = document.getElementById('wodMatchLoadBarInner'), pct = document.getElementById('wodMatchLoadPct');
+    if(!inner || !pct) return;
+    let s = 0;
+    try { const m = /matrix\(([-\d.e]+)/.exec(getComputedStyle(inner).transform || ''); s = m ? +m[1] : 0; } catch(e) {}
+    const p = Math.max(wodMatchLoad.shown, Math.floor(s * 100));
+    wodMatchLoad.shown = p; pct.textContent = p + '%';
+}
+function wodMatchLoadPaintFrame() {
+    return new Promise(resolve => {
+        let done = false;
+        const go = () => { if(!done) { done = true; setTimeout(resolve, 0); } };
+        if(typeof requestAnimationFrame === 'function') requestAnimationFrame(go);
+        setTimeout(go, 60);
+    });
+}
+function wodMatchLoadBegin(title, size) {
+    const m = wodMatchLoad, el = document.getElementById('wodMatchLoadOverlay');
+    m.active = true; m.seq++; m.step = null;
+    m.size = Math.round(+size || +(document.getElementById('setupMapSize') || {}).value || gameData.mapRadius || 60);
+    if(el) { el.classList.remove('hidden', 'wod-match-load-out'); el.setAttribute('aria-busy', 'true'); }
+    const t = document.getElementById('wodMatchLoadTitle'); if(t) t.textContent = title || 'Preparing battle';
+    const c = document.getElementById('wodMatchLoadCaption'); if(c) c.textContent = 'Preparing…';
+    m.shown = 0; wodMatchLoadSetBar(0, 0);
+    clearInterval(m.timer); m.timer = setInterval(wodMatchLoadTick, 120);
+}
+// Begin a step of the loading (from/to in percent of the whole bar); the last step's time is recorded for next time.
+async function wodMatchLoadStep(key, from, to, caption, defaultSeconds) {
+    const m = wodMatchLoad;
+    if(!m.active) return;
+    wodMatchLoadFinishStep();
+    const times = wodMatchLoadTimes(), est = +times[key + '@' + m.size] || defaultSeconds || 0.5;
+    m.step = { key, from, to }; m.stepAt = performance.now();
+    const c = document.getElementById('wodMatchLoadCaption'); if(c && caption) c.textContent = caption;
+    // jump to the step's start, then glide towards (most of) its end over the time it is expected to take
+    wodMatchLoadSetBar(Math.max(from, m.shown), 0.15);
+    await wodMatchLoadPaintFrame();
+    wodMatchLoadSetBar(from + (to - from) * 0.92, est * 1.1);
+    await wodMatchLoadPaintFrame();
+}
+function wodMatchLoadFinishStep() {
+    const m = wodMatchLoad, st = m.step;
+    if(!st) return;
+    m.step = null;
+    const took = (performance.now() - m.stepAt) / 1000;
+    try {
+        const times = wodMatchLoadTimes(), k = st.key + '@' + m.size, old = +times[k];
+        times[k] = +(old > 0 ? old * 0.5 + took * 0.5 : took).toFixed(3);
+        localStorage.setItem(WOD_MATCH_LOAD_TIMES_KEY, JSON.stringify(times));
+    } catch(e) {}
+    wodMatchLoadSetBar(st.to, 0.12);
+}
+async function wodMatchLoadEnd() {
+    const m = wodMatchLoad;
+    if(!m.active) return;
+    wodMatchLoadFinishStep();
+    const c = document.getElementById('wodMatchLoadCaption'); if(c) c.textContent = 'Ready';
+    wodMatchLoadSetBar(100, 0.15);
+    await new Promise(r => setTimeout(r, 170));
+    wodMatchLoadHide();
+}
+function wodMatchLoadHide() {
+    const m = wodMatchLoad, el = document.getElementById('wodMatchLoadOverlay');
+    if(!m.active && el && el.classList.contains('hidden')) return;
+    m.active = false; m.step = null; clearInterval(m.timer); m.timer = 0;
+    if(!el) return;
+    el.classList.add('wod-match-load-out'); el.setAttribute('aria-busy', 'false');
+    const seq = m.seq;
+    setTimeout(() => { if(!m.active && m.seq === seq) el.classList.add('hidden'); }, 280);
+}
+// The warm-up behind the loading screen, once the map, towns and armies exist and the game loop runs paused: the
+// terrain and border paint (otherwise finished a slice per frame through the first seconds of play), the bridge index
+// and every faction's supply network, the fog of war, then a few frames drawn unseen (the first draws of a big map
+// upload its images to the graphics card, a stall of a few hundred milliseconds). None of it changes the game.
+async function wodWarmMatchForPlay(from, to, opts) {
+    if(!gameData.hexList || !gameData.hexList.length) return;
+    const frames = !(opts && opts.frames === false);
+    const span = to - from;let at = from;
+    const next = share => { const a = at; at = share >= 1 ? to : at + span * share; return [a, at]; };
+    if(terrainNeedsUpdate) {
+        await wodMatchLoadStep('paint', ...next(0.45), 'Painting the terrain', 0.8);
+        try {
+            if(UI.canvas && UI.canvas.style.display !== 'none' && (wodTerrainNeedFullRebuild || !wodTerrainBaseBuilt)) updateTerrainCache();
+            for(let i = 0; i < 200 && terrainNeedsUpdate && !wodSuppressTerrainBake; i++) {
+                wodStepTerrainPoliticalBake(30);
+                if(i % 4 === 3) await wodMatchLoadPaintFrame();
+            }
+        } catch(e) { console.warn('warm terrain', e); }
+    }
+    await wodMatchLoadStep('routes', ...next(0.2), 'Laying supply lines', 0.25);
+    try {
+        wodEnsureBridgePathIndex();
+        for(const h of gameData.hexList)
+            if(h.owner > 0 && !isWaterHex(h)) wodCurrentSupplyComponent(h, h.owner);
+        if(typeof wodRefreshFogVision === 'function') wodRefreshFogVision(0, true);
+    } catch(e) { console.warn('warm routes', e); }
+    if(!frames) return;
+    await wodMatchLoadStep('view', ...next(1), 'Readying the battlefield', 0.5);
+    try {
+        // the running loop draws behind the screen; give it frames until nothing is left to paint
+        const until = performance.now() + 2500;
+        // (a tab in the background gets no animation frames: the timeout keeps a player loading there from waiting forever)
+        for(let n = 0; n < 4 || terrainNeedsUpdate && performance.now() < until; n++) {
+            await new Promise(r => { const t = setTimeout(r, 120); requestAnimationFrame(() => { clearTimeout(t); r(); }); });
+            if(n > 40) break;
+        }
+        if(document.fonts && document.fonts.ready) await Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 800))]);
+    } catch(e) { console.warn('warm view', e); }
+}
 function startGame(mode, opts) {
     opts = opts || {};
     if(mode === 'ai' && !opts.mission && typeof wodIsMapPreviewGenerating === 'function' && wodIsMapPreviewGenerating()) {
@@ -1223,10 +1355,12 @@ function startGame(mode, opts) {
     }
     if(mode === 'ai' && !opts.mission && typeof wodAbandonSoloPreviewForLaunch === 'function')
         wodAbandonSoloPreviewForLaunch();
-    gameState = 'PLAYING';
-    pauseMenuBackgroundBattle();
     let launchingMission = !!(opts.mission || gameData._selectedMissionEntry);
     let launchingCampaign = !!(gameData._campaignRun);
+    // (the loading screen goes up first, so nothing of the half-made match shows)
+    wodMatchLoadBegin(launchingCampaign ? 'Preparing battle' : launchingMission ? 'Loading mission' : 'Preparing battle');
+    gameState = 'PLAYING';
+    pauseMenuBackgroundBattle();
     if(opts.mission) gameData._launchingMission = true;
     wodPrepareForNewMatch({ keepMp: false, keepLiveMap: launchingMission || launchingCampaign });
     if(launchingCampaign) {
@@ -1250,9 +1384,9 @@ function startGame(mode, opts) {
     if(window.wodMusic) {
         try { window.wodMusic.bindUi(); window.wodMusic.start(); } catch(e) { console.warn(e); }
     }
-    // Campaign battles stay paused until the roster is fielded / deploy begins,
-    // so the loop cannot fire a false "army destroyed" defeat during load.
-    setGameSpeed(launchingCampaign ? 0 : 1, true);
+    // Paused while the match loads (the clock starts when the loading screen lifts); campaign battles stay paused
+    // until the roster is fielded and deploy begins, so the loop cannot fire a false "army destroyed" defeat during load.
+    setGameSpeed(0, true);
     wodResetMobileHud();
     if(!gameData.layers) gameData.layers = {};
     gameData.layers.territory = false;
@@ -1263,6 +1397,7 @@ function startGame(mode, opts) {
             // boot warm-up calls update()/generateMap() and would run against the new match's
             // half-initialized state (this could pause a fresh match with a false instant defeat).
             let bootGuard = 0;
+            await wodMatchLoadStep('wait', 0, 4, 'Preparing…', 0.1);
             while((window._wodBootBusy || window._wodMenuBootstrapBusy) && bootGuard++ < 600)
                 await new Promise(r => setTimeout(r, 100));
             if(mode === 'ai' && !opts.mission && typeof wodAwaitMapGenIdle === 'function')
@@ -1273,6 +1408,10 @@ function startGame(mode, opts) {
             gameData._campaignEnded = false;
             hideCampaignSummaryOverlay();
             wodResetEndCountdowns();
+            // (the loop runs paused from here; the warm-up finishes what the first frames of play would do)
+            await wodWarmMatchForPlay(80, 99);
+            await wodMatchLoadEnd();
+            if(gameState !== 'PLAYING') return;
             wodBeginLifetimeMatch();
             if(gameData._campaignRun) {
                 wodCampaignOnBattleStart();
@@ -1284,6 +1423,7 @@ function startGame(mode, opts) {
             wodSyncCampaignBattleHud();
         } catch(e) {
             console.error(e);
+            wodMatchLoadHide();
         }
         wodSyncDesktopLayersPanelExpanded();
         syncInGameLayerToolbar();
@@ -1765,6 +1905,8 @@ async function initGame() {
 
     applyPlayerFactionColorFromSetup();
 
+    await wodMatchLoadStep(launchingMission ? 'mission' : launchingCampaign ? 'campaign' : 'map', 4, 62,
+        launchingMission ? 'Loading the mission map' : launchingCampaign ? 'Loading the battlefield' : 'Generating the map', 2);
     {
         if(launchingMission) {
             if(!gameData.loadedCustomMap || !gameData.hexList.length) {
@@ -1836,8 +1978,9 @@ async function initGame() {
 
     wodBindHudResourceTooltips();
 
-    // Pre-bake the full terrain canvas now (loading overlay still up) so the first
+    // Pre-bake the full terrain canvas now (loading screen still up) so the first
     // gameplay frame doesn't stall ~350ms on a lazy full rebuild inside draw().
+    await wodMatchLoadStep('terrain', 62, 80, 'Painting the terrain', 0.9);
     if(terrainNeedsUpdate && UI.canvas && UI.canvas.style.display !== 'none') {
         try { updateTerrainCache(); } catch(_) {}
     }

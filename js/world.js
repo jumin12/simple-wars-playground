@@ -97,9 +97,14 @@ function wodUnitStandingOnOpenWater(unit) {
 // Afloat as far as leave to swim goes. An AI soldier in a bridge's cell beside its deck, or brushing the deck's edge,
 // is in the margin walked as part of the crossing and gets out the way it came, over the deck or onto the bank; given
 // leave to swim there, its way out went on through the water round the bridge landing.
+// The same goes for the player's troops unless the player sent them into the water: one pushed off a crowded deck by
+// its comrades stood in the margin beside it, took that as leave to swim, and walked on to its next waypoint straight
+// across the river beside the bridge. (A unit on a bank or a bridge may not step into the water beside a bridge beyond
+// the margin of the deck at all: wodSamplePosOnWalkableTerrain.)
 function wodUnitAfloatForLeave(unit) {
     if(!wodUnitStandingOnOpenWater(unit))return false;
-    if(wodMpIsHumanOwner(unit.owner)||!isLandArmyUnit(unit))return true;
+    if(!isLandArmyUnit(unit))return true;
+    if(wodMpIsHumanOwner(unit.owner)&&(unit._wodChoseWater||unit.orderTarget?.intoWater))return true;
     const h=getNearestHexToPoint(unit.x,unit.y);
     return !(h&&isBridgeHex(h))&&!wodPointOnBridgeForUnit(unit,unit.x,unit.y,1.18);
 }

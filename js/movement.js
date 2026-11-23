@@ -61,6 +61,13 @@ function wodResolveLandMarchHex(unit, x, y, startHexOpt) {
     // (only a player means a point in the water as a swim: an AI march to a point just off the shore, or beside a
     // bridge deck, is to the dry ground or deck nearest it; taken as a swim it waded out along the coast)
     const aiLand=!wodMpIsHumanOwner(unit.owner)&&isLandArmyUnit(unit);
+    // A point in the water beside a bridge deck (not on it) means the bank there, not a swim (the player wants the unit
+    // near the bridge): taken as a swim, the water cells along a deck count as bridge cells, so the unit walked out onto
+    // the bridge, along the deck and stepped off its side. A point in open water away from bridges is still a swim.
+    if(!aiLand&&direct&&isWaterHex(direct)&&!wodPointOnBridgeForUnit(unit,x,y,1.05)){
+        const bank=wodBankBesideBridgeClick(unit,x,y,startHexOpt);
+        if(bank)return {hex:bank,exactX:bank.x,exactY:bank.y,intoWater:false};
+    }
     if(!aiLand&&direct&&isWaterHex(direct)&&!wodPointOnBridgeForUnit(unit,x,y,1.05))return {hex:direct,exactX:x,exactY:y,intoWater:true};
     let bridgeHex = wodBridgeHexAtPoint(unit, x, y);
     if(bridgeHex && (wodPointOnBridgeForUnit(unit, x, y, 1.05) ||
@@ -108,6 +115,63 @@ function wodResolveLandMarchHex(unit, x, y, startHexOpt) {
         }
     }
     return best ? { hex: best, exactX: best.x, exactY: best.y, intoWater: false } : null;
+}
+// The narrow margin beside a deck that a land unit walking the bridge may be squeezed into and still be on the bridge:
+// within 1.7 deck half-widths of its centre line (movement, steering and sidesteps keep troops there, and no water
+// attrition reaches them there: wodUnitClingsToBridge).
+const WOD_BRIDGE_MARGIN_PAD = 1.7;
+function wodPointBesideBridge(unit, x, y) {
+    return wodPointOnBridgeForUnit(unit, x, y, WOD_BRIDGE_MARGIN_PAD);
+}
+// How far a point lies outside a bridge's deck rectangle (0 on it), in pixels.
+function wodPointDistanceToBridgeDeck(x, y, br) {
+    if(!br) return Infinity;
+    if(br.x == null) wodSyncBridgeWorldCoords(br);
+    const c = Math.cos(br.angle || 0), s = Math.sin(br.angle || 0), dx = x - br.x, dy = y - br.y;
+    const lx = Math.abs(dx * c + dy * s) - (br.w || 0) / 2, ly = Math.abs(-dx * s + dy * c) - (br.h || 0) / 2;
+    return Math.hypot(Math.max(0, lx), Math.max(0, ly));
+}
+/** For a player's order to a point in the water within a cell and a half of a bridge deck and two cells of a bank: the dry
+ *  cell nearest the point,
+ *  on the unit's own bank (reached without a bridge) unless the other bank is clearly nearer (wodResolveLandMarchHex sends
+ *  the unit there). Null away from bridges. */
+function wodBankBesideBridgeClick(unit, x, y, startHexOpt) {
+    if(!gameData.bridges || !gameData.bridges.length) return null;
+    const C = (gameData.hexRadius || 20) * 1.35;
+    if(!gameData.bridges.some(br => br && wodPointDistanceToBridgeDeck(x, y, br) <= C * 1.6)) return null;
+    const centre = getNearestHexToPoint(x, y);
+    if(!centre) return null;
+    const land = [];
+    for(const p of getHexesInRadius(centre.q, centre.r, 5)) {
+        const h = wodHexAt(p.q, p.r);
+        if(!h || isWaterHex(h) || isBridgeHex(h) || !wodHexWalkableForLandPath(unit, h, false)) continue;
+        if(h.type === 'mountain' && !wodCanClimb(unit)) continue;
+        land.push({ h, d: Math.hypot(h.x - x, h.y - y) });
+    }
+    if(!land.length) return null;
+    land.sort((a, b) => a.d - b.d);
+    // (only near a bank: a point out in the middle of a wide river is a swim, as anywhere else)
+    if(land[0].d > C * 2.2) return null;
+    // the unit's own bank: the dry ground it can walk to without a bridge (a bounded flood, stopped once every
+    // candidate is placed)
+    const start = startHexOpt || getNearestWalkableHexForUnit(unit, unit.x, unit.y);
+    let own = null;
+    if(start && !isWaterHex(start) && !isBridgeHex(start)) {
+        const want = new Set(land.map(e => getHexKey(e.h))), seen = new Set([getHexKey(start)]), queue = [start];
+        let found = want.has(getHexKey(start)) ? 1 : 0;
+        const reached = new Set(found ? [getHexKey(start)] : []);
+        for(let i = 0; i < queue.length && i < 12000 && found < want.size; i++) {
+            const a = queue[i];
+            for(const d of hexDirections) {
+                const n = wodHexAt(a.q + d.q, a.r + d.r), k = n && getHexKey(n);
+                if(!n || seen.has(k) || isWaterHex(n) || isBridgeHex(n) || !wodCanStepBetweenHexes(unit, a, n, false)) continue;
+                seen.add(k); queue.push(n);
+                if(want.has(k)) { reached.add(k); found++; }
+            }
+        }
+        own = land.find(e => reached.has(getHexKey(e.h))) || null;
+    }
+    return own && own.d <= land[0].d + C * 1.2 ? own.h : land[0].h;
 }
 function wodHexStepDistance(fromHex, toHex) {
     if(!fromHex || !toHex) return 1;
@@ -359,6 +423,15 @@ function wodSamplePosOnWalkableTerrain(unit, px, py) {
     let h = getNearestHexToPoint(px, py);
     if(h&&!isWaterHex(h)&&wodPathTileWalkable(unit,h,false))return true;
     if(wodDiagonalLandLinkAtPoint(unit,px,py))return true;
+    // A unit on dry ground or on a bridge may step over water only onto a deck or the narrow margin beside it
+    // (wodPointBesideBridge, where it is still on the bridge: wodUnitClingsToBridge). The water cells a deck touches are
+    // bridge cells for routing, and any point in them used to pass here: crowded on a bridge or stalled in a fight at its
+    // end, troops were steered and pushed out round the deck into the river and drowned there. (One already in the water
+    // may still move about in it to get out; a swim order or a ferry leave is not affected.)
+    if(h&&isWaterHex(h)&&wodUnitUsesLandBridges(unit)&&gameData.bridges?.length&&!wodOrderIntoWater(unit,h)&&!wodUnitAfloatForLeave(unit)){
+        const here=getNearestHexToPoint(unit.x,unit.y);
+        if((!here||!isWaterHex(here)||wodPointBesideBridge(unit,unit.x,unit.y))&&!wodPointBesideBridge(unit,px,py))return false;
+    }
     if(wodBridgeHexAtPoint(unit, px, py)) return true;
     if(wodPointOnBridgeForUnit(unit, px, py, 1.18)) return true;
     if(h&&isWaterHex(h)&&(isLandArmyUnit(unit)||unit._wodKeepLandFormation)&&!wodOrderIntoWater(unit,h)&&!isWaterHex(getNearestHexToPoint(unit.x,unit.y)))return false;
@@ -1168,8 +1241,11 @@ function wodStepAsideForTraffic(mover,blocker,loser,dx,dy) {
     // Marines already swimming can pass in open water. A landed marine
     // or an ordinary land formation still yields on dry ground only.
     const waterYield=wodIsNavalUnit(loser)||loser.type==='marine'&&!loser._wodKeepLandFormation&&isWaterHex(center)&&!wodUnitOnBridgeDeck(loser);
+    // (a water cell of a bridge is a place to stand aside only where its middle is on the deck or the margin beside it:
+    // the cells round a deck are bridge cells for routing, and a comrade stepping aside into one stood in the river)
+    const deckCell=h=>isBridgeHex(h)&&(!isWaterHex(h)||wodPointBesideBridge(loser,h.x,h.y));
     for(const pt of getHexesInRadius(center.q,center.r,6)) {
-        const h=wodHexAt(pt.q,pt.r);if(!h||!wodPathTileWalkable(loser,h,false)||!waterYield&&isWaterHex(h)&&!isBridgeHex(h)||isWorldPositionBlockedByUnits(loser,h.x,h.y))continue;
+        const h=wodHexAt(pt.q,pt.r);if(!h||!wodPathTileWalkable(loser,h,false)||!waterYield&&isWaterHex(h)&&!deckCell(h)||isWorldPositionBlockedByUnits(loser,h.x,h.y))continue;
         if(!loser.target&&!wodPassiveDisplacementAllowed(loser,h.x,h.y))continue;
         if(reserved.some(s=>Math.hypot(h.x-s.point.x,h.y-s.point.y)<(loser.radius||12)+(s.u.radius||12)+4))continue;
         if(loser.type==='supply'&&(!wodSupplyParkingSafe(loser,h)||!wodOpenWaterChordClear(loser,loser.x,loser.y,h.x,h.y)))continue;
@@ -1177,7 +1253,7 @@ function wodStepAsideForTraffic(mover,blocker,loser,dx,dy) {
             !gameData.entities.some(s=>s.owner===loser.owner&&s.type==='supply'&&s.hp>0&&Math.hypot(s.x-h.x,s.y-h.y)<wodSupplyShipRadiusPx()*.9))continue;
         const x=h.x-loser.x,y=h.y-loser.y,along=x*dx+y*dy,lateral=Math.abs(x*dy-y*dx);
         if(along<spacing*.7||lateral<spacing*.8||onRoad(h))continue;
-        const open=getNeighborHexes(h).filter(n=>wodPathTileWalkable(loser,n,false)&&(!isWaterHex(n)||waterYield||isBridgeHex(n))).length;
+        const open=getNeighborHexes(h).filter(n=>wodPathTileWalkable(loser,n,false)&&(!isWaterHex(n)||waterYield||deckCell(n))).length;
         if(open<5)continue;
         sites.push({h,score:Math.hypot(x,y)+lateral*.35});
     }
@@ -4400,10 +4476,29 @@ function findNavalRetreatPoint(unit,minCells=2) {
     }
     return best?{x:best.x,y:best.y}:null;
 }
-function wodRetreatUnit(unit) {
+// (leg: the how-manyth pullback of one retreat order; see wodContinueRetreatUnderPursuit)
+function wodRetreatUnit(unit, leg) {
     if(!unit||unit.hp<=0||unit.id||unit.type==='convoy'||unit.moraleBroken)return false;
     const pt=findOrderedRetreatPoint(unit,2);if(!pt)return false;
-    const ok=assignUnitMoveAlongWaypoints(unit,[pt],{forceRetreat:true});if(ok){unit.retreating=true;unit._wodOrderedRetreat=true;unit.holding=false;}return ok;
+    const ok=assignUnitMoveAlongWaypoints(unit,[pt],{forceRetreat:true});if(ok){unit.retreating=true;unit._wodOrderedRetreat=true;unit.holding=false;unit._wodRetreatLeg=leg||1;}return ok;
+}
+/** A retreat the player ordered is a short pullback (findOrderedRetreatPoint: a few cells off the front). Where the enemy
+ *  followed, the unit stopped there with him on its heels and was shot at where it stood: now, arriving with a visible
+ *  enemy within two and a half cells of its reach that is after it or coming at it, it pulls back again, up to three
+ *  legs in all. */
+const WOD_RETREAT_MAX_LEGS = 3;
+function wodContinueRetreatUnderPursuit(unit) {
+    if(!unit||!unit._wodOrderedRetreat||unit.moraleBroken||!wodMpIsHumanOwner(unit.owner)||wodIsNavalUnit(unit))return false;
+    const leg=unit._wodRetreatLeg||1;if(leg>=WOD_RETREAT_MAX_LEGS)return false;
+    const hr=gameData.hexRadius||20,now=gameData._aiEconomyClock||0;
+    // pursued: a visible enemy within two and a half cells of reach that is after this unit, or coming at it (an enemy
+    // standing its ground nearby, a guard at a pass, does not keep the retreat going)
+    const closing=e=>e._wodAttackOrder?.uid===unit.uid||e.preferredTargetUid===unit.uid||
+        e._wodVelocityAt!=null&&now-e._wodVelocityAt<.5&&Math.hypot(e._wodVelocityX||0,e._wodVelocityY||0)>1&&
+        ((e._wodVelocityX||0)*(unit.x-e.x)+(e._wodVelocityY||0)*(unit.y-e.y))>0;
+    const pursued=gameData.entities.some(e=>e!==unit&&e.hp>0&&e.damage>0&&!e.boardTransportUid&&!wodIsNavalUnit(e)&&wodIsHostileOwner(e.owner,unit.owner)&&
+        wodOwnerCanSee(unit.owner,e)&&Math.hypot(e.x-unit.x,e.y-unit.y)<Math.max(e.range||50,unit.range||50)+hr*1.35*2.5&&closing(e));
+    return pursued&&wodRetreatUnit(unit,leg+1);
 }
 /** A bounded native-grid A*: trade travel time against visible enemy fire,
  * while treating bodies and bridge portals as physical obstacles. */

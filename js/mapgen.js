@@ -2041,6 +2041,14 @@ function wodUnitOnBridgeDeck(unit) {
     // deck. That margin must not shelter troops swimming beside a bridge.
     return !!unit&&wodPointOnBridgeForUnit(unit,unit.x,unit.y,1.05);
 }
+// A land unit squeezed into the narrow margin beside a deck while it crosses (wodPointBesideBridge: comrades and fights
+// press troops there, and movement keeps them from going further) is on the bridge, not in the river: no water attrition,
+// and its supply runs over the bridge. One the player sent into the water there is swimming, as before.
+function wodUnitClingsToBridge(unit) {
+    if(!unit||!isLandArmyUnit(unit)||!gameData.bridges||!gameData.bridges.length)return false;
+    if(unit._wodChoseWater||unit.orderTarget?.intoWater)return false;
+    return typeof wodPointBesideBridge==='function'&&wodPointBesideBridge(unit,unit.x,unit.y);
+}
 /** Water cells under a deck's centre line. Prices a deck that arrives without a cell count
  * (jobs from older saves, scripted placements); dragged spans carry their own count. */
 function wodBridgeRecordCells(br) {
@@ -4779,6 +4787,8 @@ function wodYieldToMainThread() {
 }
 function wodShouldShowMapGenOverlay() {
     if(gameData._wodSkipMapGenLoader) return false;
+    // (a match being launched shows its own loading screen with a progress bar)
+    if(typeof wodMatchLoadActive === 'function' && wodMatchLoadActive()) return false;
     if(gameData._wodPreviewSpinnerCanvasIds && gameData._wodPreviewSpinnerCanvasIds.size > 0) return false;
     if(gameData._soloPreviewGenerating) return false;
     let setupPanel = document.getElementById('setupPanel');

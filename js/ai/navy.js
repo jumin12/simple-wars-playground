@@ -329,7 +329,7 @@ function wodAiPlanFerryAssaults(owner,transports,operationSea=null) {
         if(wodAiFerryCanSail(t)&&anchor&&(!beach||uncovered||Math.hypot(beach.x-anchor.x,beach.y-anchor.y)>wodFortCombatAuraRadiusPx()*.75))wodOrderUnloadTransport(t,anchor);
     }
     for(const t of transports.filter(t=>t.owner===owner&&t.hp>0&&!t._medicalRecovering&&!t.retreating&&!t.moraleBroken&&!t.cargo&&!t.pickupUid)){
-        const available=candidates.filter(u=>u._needsTransport&&!u.boardTransportUid&&(!u.isGeneral||u._navalEvacuating||mission&&wodAiGeneralCanTransfer(u,[mission.goal],supplyShips))).sort((a,b)=>Number(!!b._navalEvacuating)-Number(!!a._navalEvacuating)||Number(b.type==='heavy')-Number(a.type==='heavy')||wodAiDist2(a.x,a.y,t.x,t.y)-wodAiDist2(b.x,b.y,t.x,t.y));
+        const available=candidates.filter(u=>u._needsTransport&&!u.boardTransportUid&&(!u.isGeneral||u._navalEvacuating||mission&&wodAiGeneralBoardsNow(owner,mission)&&wodAiGeneralCanTransfer(u,[mission.goal],supplyShips))).sort((a,b)=>Number(!!b._navalEvacuating)-Number(!!a._navalEvacuating)||Number(b.type==='heavy')-Number(a.type==='heavy')||wodAiDist2(a.x,a.y,t.x,t.y)-wodAiDist2(b.x,b.y,t.x,t.y));
         for(const u of available){if(!u._navalEvacuating&&mission&&!mission.canEmbark)break;const goal=u._navalAssaultGoal||u.orderTarget;if(wodOrderBoardTransport(u,t)){t._aiFleetId=u._navalEvacuating?null:mission?.id;t.ferryGoal=goal?{x:goal.x,y:goal.y}:null;t._aiFerryMission=true;break;}}
     }
     const combatShips=gameData.entities.filter(u=>u.owner===owner&&u.type==='ship'&&onSea(u)&&u.hp>u.maxHp*.45&&!u._medicalRecovering&&!u.retreating&&!u.moraleBroken);
@@ -447,7 +447,7 @@ function wodAiStepFerries(transports,dt) {
         } else if(!t.cargo&&!t.pickupUid) {
             const candidates=gameData.entities.filter(u=>u.owner===t.owner&&u.hp>0&&isLandArmyUnit(u)&&!u._medicalEvacuating&&(!u._medicalRecovering||u._navalEvacuating)&&(u._needsTransport||isWaterHex(getNearestHexToPoint(u.x,u.y)))&&!u.boardTransportUid&&!u._navalGarrison&&(!(u._navalAssaultUntil>wodAiOperationTime())||u._navalEvacuating)&&(!['defend','hold'].includes(u.aiTfKind)||u._navalEvacuating));
             candidates.sort((a,b)=>Number(!!b._needsTransport)-Number(!!a._needsTransport)||wodAiDist2(a.x,a.y,t.x,t.y)-wodAiDist2(b.x,b.y,t.x,t.y));
-            if(candidates[0]){const u=candidates[0],mission=gameData.aiNavalPlans?.[t.owner],goal=u._navalAssaultGoal||u.orderTarget;if(!u._navalEvacuating&&mission&&!mission.canEmbark)continue;if(u.isGeneral&&!u._navalEvacuating&&!wodAiGeneralCanTransfer(u,[mission?.goal||goal].filter(Boolean),gameData.entities.filter(s=>s.owner===u.owner&&s.type==='supply'&&s.hp>0&&!s.retreating)))continue;if(wodOrderBoardTransport(u,t)){t._aiFleetId=u._navalEvacuating?null:mission?.id;if(goal)t.ferryGoal={x:goal.x,y:goal.y};t._aiFerryMission=true;}}
+            if(candidates[0]){const u=candidates[0],mission=gameData.aiNavalPlans?.[t.owner],goal=u._navalAssaultGoal||u.orderTarget;if(!u._navalEvacuating&&mission&&!mission.canEmbark)continue;if(u.isGeneral&&!u._navalEvacuating&&(!wodAiGeneralBoardsNow(u.owner,mission)||!wodAiGeneralCanTransfer(u,[mission?.goal||goal].filter(Boolean),gameData.entities.filter(s=>s.owner===u.owner&&s.type==='supply'&&s.hp>0&&!s.retreating))))continue;if(wodOrderBoardTransport(u,t)){t._aiFleetId=u._navalEvacuating?null:mission?.id;if(goal)t.ferryGoal={x:goal.x,y:goal.y};t._aiFerryMission=true;}}
         }
         }catch(e){failed.add(t.owner);wodAiReportError(t.owner,'ferries',e);}
     }
@@ -804,6 +804,16 @@ function wodAiNavalRecon(owner,transports) {
     scout._aiScoutUntil=0;scout._navalScoutGoal=null;return null;
 }
 
+// The general (armour, and his aura is worth a regiment or two to everyone round him) boards a landing's ferry only when
+// the wave is ready to sail, or he is all it still waits for. He used to board with the first troops and sat afloat with
+// them while the wave gathered, minutes at a time, out of every fight; the cargo watch lets a loaded ferry wait up to five.
+function wodAiGeneralBoardsNow(owner,mission) {
+    if(wodOpsTune(owner).generalBoard===0)return true; // (WOD_OPS.T.generalBoard=0: he boards with the first troops, as he did)
+    if(!mission)return false;
+    if(mission.canSail)return true;
+    if(mission.reason!=='embark')return false;
+    return (mission.waveTroops?.length||0)>=Math.max(1,(mission.firstWaveMinimum||2)-1);
+}
 function wodAiGeneralCanTransfer(unit,targets,supplyShips) {
     if(!unit.isGeneral)return true;
     if(unit.hp<unit.maxHp*.85||unit._medicalRecovering||unit._navalEvacuating)return !!unit._navalEvacuating;
@@ -1650,15 +1660,29 @@ function wodAiMaintainMissions(owner,transports=[]) {
         // Retry decisions after a bounded pause, without pretending we moved.
         watch.at=now-4000;
     }
-    for(const t of transports.filter(t=>t.owner===owner&&t.hp>0&&!t._medicalRecovering&&!t._aiMedicalFor&&!t.retreating&&!t.moraleBroken)){
+    // (WOD_OPS.T.cargoWatch=0 turns the two additions off) A damaged ferry (retreating, or sent for repairs) is watched
+    // too: it used to be left out, so whatever it carried stayed aboard while it ran or lay up, however long that took; it
+    // now puts it ashore at home first. And a ferry with the general aboard waits half a minute, not the minutes a wave
+    // may gather in, before it takes him home.
+    const watchAll=wodOpsTune(owner).cargoWatch!==0;
+    for(const t of transports.filter(t=>t.owner===owner&&t.hp>0&&!t._aiMedicalFor&&(watchAll&&t.cargo&&!t._aiEvacFor||!t._medicalRecovering&&!t.retreating&&!t.moraleBroken))){
         if(!t.cargo){if(t._aiFerryReturning){t._aiFerryReturning=false;t._aiFleetId=null;t.ferryGoal=null;}t._aiCargoWatch=null;continue;}
         let watch=t._aiCargoWatch;
         if(!watch||watch.cargo!==t.cargo.uid||Math.hypot(t.x-watch.x,t.y-watch.y)>hr*.5)t._aiCargoWatch=watch={cargo:t.cargo.uid,x:t.x,y:t.y,at:now,retryAt:0};
+        // (a medical or evacuation ferry has its own way home: wodAiPlanMedicalFerries, wodAiPlanEvacuationFerries)
+        const damaged=t._medicalRecovering||t.retreating||t.moraleBroken;
+        if(damaged){
+            // already making for a home landing with it: let it get there
+            if(t._aiFerryReturning&&t.unloadHexKey&&t.target)continue;
+            if(now-watch.retryAt<6000)continue;watch.retryAt=now;
+        }else{
         if(t._trafficYield&&now-(t._aiWork?.progressAt??now)>30000){t._trafficYield=null;wodClearTransportMove(t);}
         if(t._trafficYield||now-watch.at<10000||now-watch.retryAt<6000)continue;watch.retryAt=now;
-        const mission=wodAiMissionForVessel(t),live=mission&&mission.hexes===gameData.hexes&&mission.phase!=='complete';
+        }
+        const mission=wodAiMissionForVessel(t),live=!damaged&&mission&&mission.hexes===gameData.hexes&&mission.phase!=='complete';
         if(!live&&!t._aiFerryReturning)t._aiFleetId=null;
-        const goal=t.ferryGoal||t.cargo._navalAssaultGoal;
+        const goal=damaged?null:t.ferryGoal||t.cargo._navalAssaultGoal;
+        const generalWaits=watchAll&&t.cargo.isGeneral&&!t.cargo._navalEvacuating&&live&&!wodAiFerryCanSail(t)&&now-watch.at>=30000;
         if(goal&&wodAiFerryCanSail(t)&&wodAiFerryLandingSafe(t,goal)){
             if(!t.target||(t.stuckTimer||0)>1){
                 if(t.unloadHexKey&&now-watch.at>=30000){t._ferryBlockedShores||={};t._ferryBlockedShores[t.unloadHexKey]=(t._ferryElapsed||0)+30;}
@@ -1673,7 +1697,7 @@ function wodAiMaintainMissions(owner,transports=[]) {
         // A distant assigned passenger can legitimately take longer than the
         // cargo watchdog to reach its embarkation coast. Credit only that real
         // boarding work, not arbitrary movement by another ship in the fleet.
-        if(live&&mission.reason==='embark'&&!mission.canSail&&now-watch.at<300000){
+        if(!damaged&&!generalWaits&&live&&mission.reason==='embark'&&!mission.canSail&&now-watch.at<300000){
             const joining=transports.some(peer=>{
                 if(peer===t||peer.owner!==owner||peer._aiFleetId!==mission.id||!peer.pickupUid||peer.hp<=0||peer.retreating||peer._medicalRecovering)return false;
                 const passenger=army.find(u=>u.uid===peer.pickupUid),pickup=gameData.hexes[peer.pickupLandKey];
@@ -1687,14 +1711,14 @@ function wodAiMaintainMissions(owner,transports=[]) {
         }
         // A different boat's progress cannot keep this loaded vessel waiting
         // forever. Brief fleet assembly is retained; each hull has its own cap.
-        if(live&&mission.phase==='prepare'&&['supply','gathering','escort'].includes(mission.reason)&&now-watch.at<180000){
+        if(!damaged&&!generalWaits&&live&&mission.phase==='prepare'&&['supply','gathering','escort'].includes(mission.reason)&&now-watch.at<180000){
             const supportIds=new Set([...(mission.requiredSupply?mission.support||[]:[]),...(mission.requiredEscorts?mission.escorts||[]:[])]);
             const joining=army.some(peer=>peer!==t&&supportIds.has(peer.uid)&&peer.hp>peer.maxHp*.4&&!peer.retreating&&!peer._medicalRecovering&&
                 peer.target&&now-(peer._aiWork?.progressAt??0)<16000&&
                 wodAiArrivalSeconds(peer,t,hr*5,90)<=90);
             if(joining){wodAiObserveWork(t,'transporting','assembling-support');continue;}
         }
-        if(now-watch.at<60000&&!(!live&&!goal)||live&&now-watch.at<90000&&now-(mission.progressAt??mission.at??now)<60000)continue;
+        if(!damaged&&!generalWaits&&(now-watch.at<60000&&!(!live&&!goal)||live&&now-watch.at<90000&&now-(mission.progressAt??mission.at??now)<60000))continue;
         const sea=wodAiSeaRegionFrom(owner,t),homes=gameData.cities.filter(c=>c.owner===owner&&wodAiLandingOnSea(owner,c,sea)&&
             !known.some(e=>Math.hypot(e.x-c.x,e.y-c.y)<(e.range||50)+hr*3));
         homes.sort((a,b)=>Math.hypot(a.x-t.x,a.y-t.y)-Math.hypot(b.x-t.x,b.y-t.y));

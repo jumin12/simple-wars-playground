@@ -4722,17 +4722,21 @@ function wodMpWireLobbyControls() {
             wodPrepareForNewMatch({ keepMp: true });
             wodMpEnsureDefaultMatchLayers(true);
             let launchPayload = null;
+            wodMatchLoadBegin('Preparing battle', meta.mapSize);
+            await wodMatchLoadStep('mp-map', 2, 50, 'Generating the map', 2);
             try {
                 launchPayload = await wodMpPrepareHostLaunchPayload(meta);
             } catch(e) {
                 console.error(e);
                 gameData._wodMpLaunchFactionSlots = null;
+                wodMatchLoadHide();
                 showNotification('Failed to start multiplayer match — map could not be generated.');
                 return;
             } finally {
                 gameData._wodMpLaunchFactionSlots = null;
             }
             if(!launchPayload || !launchPayload.hexList || !launchPayload.hexList.length || !launchPayload.cities || !launchPayload.cities.length) {
+                wodMatchLoadHide();
                 showNotification('Map generation failed — wait for the lobby preview, then launch again.');
                 return;
             }
@@ -4752,10 +4756,12 @@ function wodMpWireLobbyControls() {
             wodResetMobileHud();
             setGameSpeed(0, true);
             wodMpSnapSeq = 0;
+            await wodMatchLoadStep('mp-apply', 50, 72, 'Setting out the armies', 0.6);
             try {
                 await wodMpApplyMatchStartPayload(launchPayload, { asyncHexes: false });
             } catch(err) {
                 console.error(err);
+                wodMatchLoadHide();
                 showNotification('Failed to load multiplayer map on host.');
                 gameState = 'MENU';
                 return;
@@ -4771,7 +4777,6 @@ function wodMpWireLobbyControls() {
                 showNotification('Failed to send map to players (too large?)');
             }
             wodMpSaveSession();
-            wodMpTryMarkReady(WodMultiplayer.api.slot | 0);
             wodSyncDesktopLayersPanelExpanded();
             syncInGameLayerToolbar();
             wodApplyPlayViewportLock(true);
@@ -4786,6 +4791,10 @@ function wodMpWireLobbyControls() {
             if(animationFrameId) cancelAnimationFrame(animationFrameId);
             gameLoop(lastTime);
             requestAnimationFrame(() => draw());
+            // (the players' maps load at the same time; the host is ready, like each guest, once its own warm-up is done)
+            await wodWarmMatchForPlay(72, 99);
+            await wodMatchLoadEnd();
+            if(gameState === 'PLAYING' && gameData.mp && gameData.mp.enabled) wodMpTryMarkReady(WodMultiplayer.api.slot | 0);
         })();
     };
 
@@ -4938,6 +4947,7 @@ function wodMpOnMatchStart(ev) {
         const gen = ++_wodMpLoadGen;
         wodMpAbortLobbyPreviewJobs();
         let pl = ev.detail.payload;
+        wodMatchLoadBegin('Preparing battle', pl.mapSize || (window.wodMpRoomMeta || {}).mapSize);
         let expectedReady = Array.isArray(pl.expectedReady) ? pl.expectedReady.slice() : (pl.connectedSlots || pl.humanSlots || [1]).slice();
         let conn = Array.isArray(pl.connectedSlots) ? pl.connectedSlots.slice() : expectedReady.slice();
         let maxL = wodMpClampLobbyCap(pl.maxLobbySlots != null ? pl.maxLobbySlots : WOD_MP_MAX_PLAYERS);
@@ -4990,6 +5000,7 @@ function wodMpOnMatchStart(ev) {
         wodMpRefreshSyncOverlay();
         let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
         if(syncMsg) syncMsg.textContent = 'Loading host map…';
+        await wodMatchLoadStep('mp-load', 2, 70, 'Loading the host’s map', 1.5);
         // Any map making still running on this page (a preview) would go on writing over the host's map once installed:
         // let it finish first, and try a second time before giving up.
         let loaded = false, loadErr = null;
@@ -5011,6 +5022,7 @@ function wodMpOnMatchStart(ev) {
         }
         if(!loaded) {
             gameData._mpLoadingMatch = false;
+            wodMatchLoadHide();
             wodMpGuestMatchLoadFailed(loadErr);
             return;
         }
@@ -5029,6 +5041,10 @@ function wodMpOnMatchStart(ev) {
             gameData.camera.x = sc.x * gameData.camera.zoom - vw / 2;
             gameData.camera.y = sc.y * gameData.camera.zoom - vh / 2;
         }
+        await wodWarmMatchForPlay(70, 99);
+        if(gen !== _wodMpLoadGen) return;
+        await wodMatchLoadEnd();
+        wodMpRefreshSyncOverlay();
         if(typeof WodMultiplayer !== 'undefined' && WodMultiplayer.sendMatchReady)
             WodMultiplayer.sendMatchReady();
         wodMpSaveSession();
@@ -5096,12 +5112,15 @@ function wodMpOnRejoinMatch(ev) {
         let syncMsg = document.querySelector('#wodMpSyncOverlay .wod-mp-sync-msg');
         if(syncMsg) syncMsg.textContent = 'Loading host map…';
         const observer=!!WodMultiplayer.api.spectating,saved=observer?wodReadSpectatorReport():null;
+        wodMatchLoadBegin(observer ? 'Joining as observer' : 'Rejoining battle', pl.mapSize || (window.wodMpRoomMeta || {}).mapSize);
+        await wodMatchLoadStep('mp-load', 2, 70, 'Loading the host’s map', 1.5);
         if(observer){gameData._restoringSpectator=true;gameData._lifetimeMatch={...(saved?.match||{}),mode:'multiplayer',finished:true,mpOutcomeRecorded:true,outcome:'defeat',reason:saved?.match?.reason||'eliminated',applied:{}};}
         try {
             await wodMpApplyMatchStartPayload(pl, { asyncHexes: true, resumeMatch: true, gen });
             if(gen !== _wodMpLoadGen) return;
         } catch(err) {
             console.error(err);
+            wodMatchLoadHide();
             gameData._restoringSpectator=false;showNotification('Failed to load host map on rejoin.');
             gameState = 'MENU';
             return;
@@ -5115,10 +5134,15 @@ function wodMpOnRejoinMatch(ev) {
         }
         wodMpEnsureLocalSlotConnected();
         if(!gameData.hexList || !gameData.hexList.length) {
+            wodMatchLoadHide();
             showNotification('Host map data was empty — cannot rejoin.');
             gameState = 'MENU';
             return;
         }
+        // (the match is under way elsewhere: only the paint and caches here, no unseen frames)
+        await wodWarmMatchForPlay(70, 99, { frames: false });
+        if(gen !== _wodMpLoadGen) return;
+        await wodMatchLoadEnd();
         wodMpFreezeSeatPlayerMap();
         gameData.mp.allReady = true;
         if(gameData.mp.isHost) wodMpHostMarkSlotReconnected(gameData.mp.localSlot);

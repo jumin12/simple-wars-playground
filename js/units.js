@@ -167,7 +167,7 @@ function updateUnitHealing(unit, dt) {
 }
 function wodUnitInUnsuppliedWater(unit,hex) {
     return !!(unit&&hex&&!wodIsNavalUnit(unit)&&!(unit.type==='convoy'&&unit.convoySeaRoute)&&unit.type!=='marine'&&isWaterHex(hex)&&
-        !wodUnitOnBridgeDeck(unit)&&!wodDiagonalLandLinkAtPoint(unit,unit.x,unit.y));
+        !wodUnitOnBridgeDeck(unit)&&!wodUnitClingsToBridge(unit)&&!wodDiagonalLandLinkAtPoint(unit,unit.x,unit.y));
 }
 const WOD_SUPPLY_GRACE_SECONDS=10;
 const WOD_SUPPLY_CONFIRM_SECONDS=2;
@@ -201,7 +201,7 @@ function wodSupplyAttritionStats(unit,state) {
 function wodWaterAttritionStats(unit) {return wodSupplyAttritionStats(unit,{water:true});}
 function applyTerrainUnitEffects(unit, dt) {
     let hex = wodDiagonalLandLinkAtPoint(unit,unit.x,unit.y)||getNearestHexToPoint(unit.x, unit.y);
-    let onBridge = wodUnitOnBridgeDeck(unit);
+    let onBridge = wodUnitOnBridgeDeck(unit)||wodUnitClingsToBridge(unit);
     let sea = !!(hex && isWaterHex(hex) && !isBridgeHex(hex) && !onBridge && !wodIsNavalUnit(unit)&&!(unit.type==='convoy'&&unit.convoySeaRoute));
     unit.amphibInWater = !!(unit.type === 'marine' && sea);
     if(sea)unit.healingFlash=0;
@@ -418,7 +418,7 @@ function renderHelpEffectCards() {
     }
 }
 function getUnitSpeedMultiplier(unit,terrainOverride) {
-    let onBridge = wodUnitOnBridgeDeck(unit);
+    let onBridge = wodUnitOnBridgeDeck(unit)||wodUnitClingsToBridge(unit);
     let waterSlow = onBridge||wodIsNavalUnit(unit) ? 1 : ((terrainOverride?isWaterHex(terrainOverride):unit.inWater||unit.amphibInWater) ? .90 : 1);
     let water = waterSlow;
     if(unit.type === 'convoy') return water;
@@ -678,10 +678,29 @@ function wodSupplyNeighbors(hex,fn) {
  *  unit or a patch of ground joined to its lines only that way is cut off. A corner across water or a mountain still
  *  links (a chain of land meeting only at corners carries supply). Used by the supply flood, the front-line touch and
  *  the pocket search; the corner used to count as a road, so units cut off at the front that way took no attrition. */
+// Where two factions' ground meets in a checkerboard (ours on one diagonal, one enemy's on the other), the map draws one
+// diagonal joined and rounds the other off (wodCornerPinchedOwner, the territory fill and the border tracer); supply
+// follows the picture, so exactly one side keeps the road. Both used to be cut there: two whole regions, each drawn
+// joined to its towns on one side, starved at once over a single corner.
 function wodSupplyCornerOpen(h,n,owner) {
     const dq=n.q-h.q,dr=n.r-h.r;if(Math.abs(dq)!==1||Math.abs(dr)!==1)return true;
     const held=c=>!!c&&!isWaterHex(c)&&c.type!=='mountain'&&c.owner>0&&wodIsHostileOwner(c.owner,owner);
-    return !(held(wodHexAt(h.q+dq,h.r))&&held(wodHexAt(h.q,h.r+dr)));
+    const a=wodHexAt(h.q+dq,h.r),b=wodHexAt(h.q,h.r+dr);
+    if(!(held(a)&&held(b)))return true;
+    if(a.owner!==b.owner||h.owner!==n.owner||isWaterHex(h)||isWaterHex(n)||typeof wodCornerPinchedOwner!=='function')return false;
+    const q=Math.min(h.q,n.q),r=Math.min(h.r,n.r);
+    return wodCornerPinchedOwner([wodHexAt(q,r),wodHexAt(q+1,r),wodHexAt(q,r+1),wodHexAt(q+1,r+1)],gameData.hexes)!==h.owner;
+}
+// Whether a change of hands at this cell can turn such a corner within reach of it (the drawing weighs the ground three
+// cells round a corner): the factions of every checkerboard corner there, whose supply then has to be worked out again.
+function wodNoteSupplyCornerOwners(hex,owners) {
+    for(let q=hex.q-4;q<=hex.q+3;q++)for(let r=hex.r-4;r<=hex.r+3;r++){
+        const c0=wodHexAt(q,r);if(!c0||!(c0.owner>0))continue;
+        const c3=wodHexAt(q+1,r+1);if(!c3||c3.owner!==c0.owner)continue;
+        const c1=wodHexAt(q+1,r);if(!c1||!(c1.owner>0)||c1.owner===c0.owner)continue;
+        const c2=wodHexAt(q,r+1);if(!c2||c2.owner!==c1.owner)continue;
+        owners.add(c0.owner);owners.add(c1.owner);
+    }
 }
 function wodSupplyPassable(hex,owner) {
     return !!(hex&&(isBridgeHex(hex)||!isWaterHex(hex)&&isClaimableLand(hex)&&wodIsFriendlyOwner(hex.owner,owner)));
@@ -717,6 +736,9 @@ function wodNoteSupplyOwnerChange(hex,from,to) {
     // a town's own cells are supply sources: changing them rebuilds everything
     if(hex.cityId||hex.type==='urban'){d.all=true;return;}
     d.owners.add(from);d.owners.add(to);
+    // (a checkerboard corner near it may now be drawn joined on the other diagonal, or have been made or undone by this
+    // change: see wodSupplyCornerOpen; the cell already has its new owner here)
+    const now=hex.owner;hex.owner=from;wodNoteSupplyCornerOwners(hex,d.owners);hex.owner=now;wodNoteSupplyCornerOwners(hex,d.owners);
 }
 let wodSupplyFloodStamp=0;
 function wodCurrentSupplyComponent(hex,owner=hex?.owner) {
@@ -1052,8 +1074,12 @@ function wodGetUnitEncirclementState(unit, hex) {
     hex=wodDiagonalLandLinkAtPoint(unit,unit.x,unit.y)||hex;
     if(!wodUnitInUnsuppliedWater(unit,hex)&&wodSupplyShipForUnit(unit))return null;
     if(isWaterHex(hex)) {
-        if(!wodUnitOnBridgeDeck(unit))return wodUnitInUnsuppliedWater(unit,hex)?{relief:false,water:true}:null;
-        const deck=wodNearestBridgeHexForUnit(unit,unit.x,unit.y);
+        const clings=!wodUnitOnBridgeDeck(unit)&&wodUnitClingsToBridge(unit);
+        if(!wodUnitOnBridgeDeck(unit)&&!clings)return wodUnitInUnsuppliedWater(unit,hex)?{relief:false,water:true}:null;
+        let deck=wodNearestBridgeHexForUnit(unit,unit.x,unit.y);
+        // (beside the deck: the deck cell level with the unit)
+        if(!deck&&clings){let br=null,bd=Infinity;for(const b of gameData.bridges){const d=wodPointDistanceToBridgeDeck(unit.x,unit.y,b);if(d<bd){bd=d;br=b;}}
+            if(br){const c=Math.cos(br.angle||0),s=Math.sin(br.angle||0),dx=unit.x-br.x,dy=unit.y-br.y,lx=Math.max(-br.w/2,Math.min(br.w/2,dx*c+dy*s));deck=wodNearestBridgeHexForUnit(unit,br.x+lx*c,br.y+lx*s);}}
         if(deck)hex=deck;
         // The bridge is only a neutral land corridor. Its builder/owner
         // does not supply it: the deck must reach an actual friendly city.

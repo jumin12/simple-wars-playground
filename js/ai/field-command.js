@@ -720,6 +720,10 @@ function wodOpsRun(owner,units){
     // What a fight at P would really be against: the enemies there (cover: 0 none, 1 full, .5 when we can
     // shoot from cover of our own), most of what stands within a short march, and some of what could still
     // arrive while the fight lasts. Fights last minutes and everything walks at the same pace.
+    // (Every enemy counts here, of whatever faction: in a game of three or more another enemy's army in the district is
+    // a danger to the troops sent, as likely to fall on them as on him. Counting only his own side lost 3-player lab
+    // matches, 45-54 towns over 24.)
+    let oppFirst=0;
     const oppAt=(P,base,cover,siege)=>{
         const inBase=new Set(base),mid=[],far=[],rest=[];
         for(const e of foes){
@@ -733,6 +737,7 @@ function wodOpsRun(owner,units){
         // less is learnt from this enemy: every assault he beats off raises it, every town taken lowers it.
         const first=wodOpsStrength(here,false)*(1-cover)+wodOpsStrength(here,true)*cover+(siege?1:.9)*wodOpsStrength(mid,false)+wodOpsStrength(shipsAt(P,C*3),false);
         const later=(siege?.8:.5)*wodOpsStrength(far,false)+(siege?.4:.1)*wodOpsStrength(rest,false);
+        oppFirst=first; // (what is there and beside it, without what could arrive later: see otherDanger)
         return first+later*(siege?TU.K??S.reliefK??.8:.6);
     };
 
@@ -1219,11 +1224,12 @@ function wodOpsRun(owner,units){
         const dMine=Math.min(g.home,...myHospitals.map(h=>dist(h,g.c)));
         const dTheirs=enemyTowns.length?Math.min(...enemyTowns.map(t=>dist(t,g.c))):dMine;
         const logistics=Math.max(.82,Math.min(1.2,.8+.4*dMine/Math.max(1,dMine+dTheirs)));
-        let need=oppAt(g.pos,g.units,TU.scover??.7)*Math.max(.95,edge-.04)*logistics-wodOpsStrength(helpers,true)*.8;
-        if(pocketed)need*=.6; // they are starving: time is on our side
-        need=Math.max(.6,need);
+        // (starving: time is on our side)
+        const opp=oppAt(g.pos,g.units,TU.scover??.7),need=Math.max(.6,(opp*Math.max(.95,edge-.04)*logistics-wodOpsStrength(helpers,true)*.8)*(pocketed?.6:1));
+        // the fight in front of it alone, without what the enemy could bring up later (used while a town of ours is in danger)
+        const needNow=Math.min(need,Math.max(.6,(oppFirst*Math.max(.95,edge-.04)*logistics-wodOpsStrength(helpers,true)*.8)*(pocketed?.6:1)));
         const value=(intruding?(26+12*g.raw)*(g.home<C*8?2:atWorks?1.5:1):8*g.raw*(alone?1.5:1))*D.hunt/(1+failed(key)*.5);
-        jobs.push({key,kind:'strike',g,pos:g.pos,enemies:g.units,need,value,wk,maxD:C*(intruding?34:26)});
+        jobs.push({key,kind:'strike',g,pos:g.pos,enemies:g.units,need,needNow,value,wk,maxD:C*(intruding?34:26)});
     }
     const atLarge=groups.filter(g=>!g.town).reduce((n,g)=>n+g.raw,0);
     for(const c of enemyTowns){
@@ -1266,6 +1272,18 @@ function wodOpsRun(owner,units){
     // An army with no battle on is an army running about. The best town on the list is then accepted a
     // little under its price: troops assaulting are worth more than troops waiting for perfect odds.
     if(!TU.noPush&&!jobs.some(j=>j.active&&!j.raid)){const j=jobs.find(j=>j.kind==='take'&&!j.raid&&!j.cool);if(j)j.push=true;}
+    // Another enemy faction than the one this job is against (not allied to it) within fifteen cells of a town of ours,
+    // stronger than what guards that town. (Only another faction: against a single enemy, falling on whatever comes with
+    // everything stays better, here as in the bait benches. Counting the same enemy's other groups too lost 2-player lab
+    // matches 87-105 towns over 48; with another faction only, 3-player matches were level.)
+    const townFoes=new Map(myTowns.map(c=>[c,near(foes,c,C*15)]));
+    const otherDanger=j=>{
+        if(j._danger!==undefined)return j._danger;
+        const sides=[...new Set((j.enemies||[]).map(e=>e.owner))];let v=false;
+        const other=x=>!sides.some(o=>o===x.owner||wodIsFriendlyOwner(x.owner,o));
+        for(const c of myTowns){const e=townFoes.get(c).filter(other);if(e.length&&wodOpsStrength(e,false)>wodOpsStrength(guards.get(c)||[],true)*.9+.3){v=true;break;}}
+        return j._danger=v;
+    };
     // who would go on this job, from the troops still unassigned
     const pick=j=>{
         const st=S.ts[j.key],was=new Set(st?.members||[]),cands=[];
@@ -1277,10 +1295,18 @@ function wodOpsRun(owner,units){
             cands.push({u,d:d*(was.has(u.uid)?.55:1)});
         }
         cands.sort((a,b)=>a.d-b.d);
-        // a raid takes what it needs; a battle takes everyone in reach, because numbers end a fight sooner and cheaper
-        const want=j.raid?j.need+.9:j.need<2.5?Math.max(j.need*1.6,j.need+1):Infinity,members=[];let got=0;
+        // a raid takes what it needs; a battle takes everyone in reach, because numbers end a fight sooner and cheaper ...
+        // unless it is a strike on an enemy group while another enemy faction stands near one of our towns with more than
+        // its guards can hold (otherDanger): then it is sized for the fight in front of it (needNow) with a good margin,
+        // and the rest stay free for that. (WOD_OPS.T.allIn: 1 everyone in reach always,
+        // as it was; 0 never.) The need counts what the enemy could bring up over the next minutes, so one unit with its
+        // army twenty cells off was a battle: in a match of three, nine of an army's sixteen regiments were seen going
+        // after a single enemy unit while another enemy outweighed the guard of one of its towns.
+        const danger=!j.raid&&j.kind==='strike'&&TU.allIn!==1&&otherDanger(j),need=danger?j.needNow:j.need;
+        const allIn=!j.raid&&need>=2.5&&(TU.allIn===1||!danger&&TU.allIn!==0);
+        const want=j.raid?need+.9:allIn?Infinity:Math.max(need*(TU.margin??1.6),need+1),members=[];let got=0;
         for(const cnd of cands){if(got>=want)break;members.push(cnd.u);got=wodOpsStrength(members,false);}
-        return {members,got,enough:got>=j.need*(j.active?.7:j.push?TU.push??.88:1)};
+        return {members,got,enough:got>=need*(j.active?.7:j.push?TU.push??.88:1)};
     };
     const runs=[];let blocked=null,raidOut=0;
     const commit=(j,a)=>{for(const u of a.members)pool.delete(u);j.members=a.members;j.got=a.got;runs.push(j);};
@@ -1370,7 +1396,7 @@ function wodOpsRun(owner,units){
         let st=S.ts[j.key];
         if(!st||now-st.seen>8000||!!st.raid!==!!j.raid)st=S.ts[j.key]={phase:'gather',since:now,born:now,raid:!!j.raid,raidCool:st?.raidCool||0};
         if(st.size>M.length+1&&st.phase==='fight')st.lost=(st.lost||0)+st.size-M.length; // rough: wounded leave too, but a shrinking force is a costly fight
-        st.size=M.length;st.seen=now;st.members=M.map(u=>u.uid);
+        st.size=M.length;st.seen=now;st.members=M.map(u=>u.uid);st.need=j.need;
         const role=j.raid?'raid':j.kind==='take'?'assault':'strike';
         const mc=wodOpsCentroid(M);
         // everything this force is about to be shot at by: at the objective and around the troops themselves
