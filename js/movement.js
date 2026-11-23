@@ -911,10 +911,13 @@ function wodRetreatGoRoundHeadway(unit) {
 function wodSteerAroundFriendlyUnits(unit,nx,ny,dt=1/60) {
     const sx=nx-unit.x,sy=ny-unit.y,step=Math.hypot(sx,sy);if(step<.00001)return null;
     const speed=step/Math.max(.001,dt),friends=[],blockers=[];let hostile=false;
+    // An unarmed boat (a transport or supply ship) has no fight to stay in: it steers round an enemy vessel as it does
+    // round a comrade. Two enemy landing craft that met bow to bow used to stop there for good, each waiting on the other.
+    const unarmedBoat=wodIsNavalUnit(unit)&&!(unit.damage>0);
     forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,(unit.radius||12)+100,u=>{
         if(u===unit||u.hp<=0||u.type==='convoy'||!wodBodiesMeet(unit,u,nx,ny))return;
         blockers.push(u);if(u.boardTransportUid)return;
-        if(!wodIsFriendlyOwner(u.owner,unit.owner)){if(Math.hypot(u.x-nx,u.y-ny)<(unit.radius||12)+(u.radius||12)+6)hostile=true;return;}
+        if(!wodIsFriendlyOwner(u.owner,unit.owner)&&!(unarmedBoat&&wodIsNavalUnit(u))){if(Math.hypot(u.x-nx,u.y-ny)<(unit.radius||12)+(u.radius||12)+6)hostile=true;return;}
         const goal=u._trafficYield?.route?.target||u.target,dx=goal?goal.x-u.x:0,dy=goal?goal.y-u.y:0,len=Math.hypot(dx,dy)||1;
         const recent=goal&&u._wodVelocityAt!=null&&(gameData._aiEconomyClock||0)-u._wodVelocityAt<.3;
         // Recent measured motion already supplies both components.
@@ -1739,6 +1742,35 @@ function wodResolveBridgeExitLeg(unit, br, deck, deckExit, targetHex, preferredE
 /** Fast land-only BFS for bridge approach legs; set usePortals false to test land connectivity without bridges.
  *  Optional outMeta: { incomplete } — true when the search timed out / hit the node cap
  *  without finishing (callers must NOT treat that as "land is disconnected"). */
+// A step along a bridge link (wodRebuildBridgeLandLinks joins a deck cell to land cells up to five cells off, so that a
+// slanted deck always meets its banks): its real length in cells, and how much of it lies over open water beside the
+// bridge. Kept per map revision.
+const wodBridgeLinkStepCache = new Map();
+let wodBridgeLinkStepCacheVer = -1;
+function wodBridgeLinkStep(a, b) {
+    const ver = gameData._wodPfVer | 0;
+    if(ver !== wodBridgeLinkStepCacheVer || wodBridgeLinkStepCache.size > 40000) { wodBridgeLinkStepCache.clear(); wodBridgeLinkStepCacheVer = ver; }
+    const key = getHexKey(a) + '>' + getHexKey(b);
+    let v = wodBridgeLinkStepCache.get(key);
+    if(v) return v;
+    const sp = (gameData.hexRadius || 20) * 1.35, len = Math.hypot(b.x - a.x, b.y - a.y) / sp, n = Math.max(1, Math.ceil(len / .3)), probe = { type: 'light' };
+    let wet = 0, off = 0;
+    for(let i = 1; i < n; i++) {
+        const x = a.x + (b.x - a.x) * i / n, y = a.y + (b.y - a.y) * i / n, h = getNearestHexToPoint(x, y);
+        const deck = !!h && isBridgeHex(h) || wodPointOnBridgeForUnit(probe, x, y, 1.05);
+        if(!deck) { off++; if(h && isWaterHex(h)) wet++; }
+    }
+    v = { len, wet: wet * len / n, off: off * len / n };
+    wodBridgeLinkStepCache.set(key, v);
+    return v;
+}
+// The extra price of a bridge-link step that crosses open water: a link meant to join a deck to its bank also joined it
+// to any land within five cells, so a route could jump from one bridge's end over the water to another bridge's end.
+const WOD_BRIDGE_LINK_WET_COST = 10;
+/** Shortest dry way between two cells, by distance walked (diagonal steps are longer, and a bridge link costs its real
+ *  length plus WOD_BRIDGE_LINK_WET_COST per cell of open water under it). Until 2026-11-22 this counted steps: a link to a
+ *  deck five cells off counted as one step, so with two bridges near each other the route went over to the other
+ *  bridge's end and back ("why does my unit go to the other bridge"). */
 function wodLandBfsPath(unit, fromHex, toHex, maxNodes, usePortals, outMeta) {
     if(outMeta) outMeta.incomplete = false;
     if(!fromHex || !toHex) return [];
@@ -1751,13 +1783,17 @@ function wodLandBfsPath(unit, fromHex, toHex, maxNodes, usePortals, outMeta) {
     let bfsRelaxed = unit && unit._wodPfRelaxUntil && performance.now() < unit._wodPfRelaxUntil;
     let bfsCeil = unit && unit._wodPfDeepUntil > 0 ? 150 : bfsRelaxed ? 22 : (gameState === 'PLAYING' && !gameData.menuAttractMode ? 7 : 26);
     let sk = getHexKey(fromHex);
-    let q = [fromHex];
-    let qi = 0;
     let parent = Object.create(null);
     let depth = Object.create(null);
+    let cost = Object.create(null);
     parent[sk] = null;
     depth[sk] = 0;
-    let seen = new Set([sk]);
+    cost[sk] = 0;
+    let closed = new Set();
+    // binary heap of [cost, hex]
+    const heap = [[0, fromHex]];
+    const push = (g, h) => { const e = [g, h]; let i = heap.length; heap.push(e); while(i) { const p = (i - 1) >> 1; if(heap[p][0] <= g) break; heap[i] = heap[p]; i = p; } heap[i] = e; };
+    const pop = () => { const top = heap[0], last = heap.pop(); if(heap.length) { let i = 0; for(;;) { let c = i * 2 + 1; if(c >= heap.length) break; if(c + 1 < heap.length && heap[c + 1][0] < heap[c][0]) c++; if(heap[c][0] >= last[0]) break; heap[i] = heap[c]; i = c; } heap[i] = last; } return top; };
     let nodes = 0;
     function rebuildPath(endKey) {
         let path = [];
@@ -1768,27 +1804,38 @@ function wodLandBfsPath(unit, fromHex, toHex, maxNodes, usePortals, outMeta) {
         }
         return path;
     }
-    while(qi < q.length && nodes++ < limit) {
+    while(heap.length && nodes < limit) {
+        const [g, hex] = pop();
+        let hk = getHexKey(hex);
+        if(closed.has(hk) || g > cost[hk]) continue;
+        closed.add(hk);
+        nodes++;
         if((nodes & 255) === 0 && performance.now() - bfsT0 > bfsCeil) {
             if(outMeta) outMeta.incomplete = true;
             return [];
         }
-        let hex = q[qi++];
-        let hk = getHexKey(hex);
         if(wodHexKeysEqual(hex, toHex)) return rebuildPath(hk);
         if(depth[hk] >= 420) continue;
         function tryStep(nHex, portal) {
             if(!nHex) return;
             let nk = getHexKey(nHex);
-            if(seen.has(nk)) return;
+            if(closed.has(nk)) return;
             if(!wodPathTileWalkable(unit, nHex, false)) return;
+            let step;
             if(portal) {
                 if(isWaterHex(nHex) && !isBridgeHex(nHex)) return;
-            } else if(!wodCanStepBetweenHexes(unit, hex, nHex, true)) return;
-            seen.add(nk);
+                const link = wodBridgeLinkStep(hex, nHex);
+                step = link.len + link.wet * WOD_BRIDGE_LINK_WET_COST;
+            } else {
+                if(!wodCanStepBetweenHexes(unit, hex, nHex, true)) return;
+                step = wodHexStepDistance(hex, nHex);
+            }
+            const ng = g + step;
+            if(cost[nk] !== undefined && ng >= cost[nk]) return;
+            cost[nk] = ng;
             parent[nk] = hk;
             depth[nk] = depth[hk] + 1;
-            q.push(nHex);
+            push(ng, nHex);
         }
         for(let di = 0; di < hexDirections.length; di++) {
             let d = hexDirections[di];
@@ -1798,7 +1845,7 @@ function wodLandBfsPath(unit, fromHex, toHex, maxNodes, usePortals, outMeta) {
             wodForEachBridgePathPortal(unit, hex, (nHex) => tryStep(nHex, true));
     }
     // Node cap hit with unexplored frontier ⇒ incomplete; empty queue ⇒ true miss.
-    if(outMeta && qi < q.length) outMeta.incomplete = true;
+    if(outMeta && heap.length) outMeta.incomplete = true;
     else if(outMeta && nodes >= limit) outMeta.incomplete = true;
     return [];
 }
@@ -2558,6 +2605,12 @@ function findPathAroundTerrain(unit, targetHex, startHexOpt, skipBridgeCompose, 
         let convoyHexExtraCost = (unit.type === 'convoy') ? buildConvoyFrontlineAvoidanceCost(unit) : null;
         let pathSeaConvoy = unit.type === 'convoy' && unit.convoySeaRoute;
         let pathMarine = unit.type === 'marine';
+        // (WOD_OPS.T.deckPrice=0 turns it off) For the computer's troops a bridge link that boards a deck from land costs its
+        // length (below): deck steps cost a fortieth of a step, so a link from land several cells off onto the corner of
+        // another bridge's deck was a nearly free jump, and their routes went over to that bridge's end. (Pricing the deck
+        // itself by its length lost head to head, 44-52 towns, and a charge for getting on or off a deck sent a march on a
+        // deck off its side through the water.)
+        const deckPrice = !wodIsNavalUnit(unit) && !(wodMpIsHumanOwner(unit.owner) && isLandArmyUnit(unit)) && typeof wodOpsTune === 'function' && wodOpsTune(unit.owner).deckPrice !== 0;
 
         function key(hex) { return `${hex.q},${hex.r}`; }
         let mtnProxHeuristicCache = new Map();
@@ -2704,6 +2757,18 @@ function findPathAroundTerrain(unit, targetHex, startHexOpt, skipBridgeCompose, 
                 return;
             }
             let tentativeG = (gScore[currentKey] ?? Infinity) + movementCost(current, nHex);
+            // A bridge link can join a deck to land up to five cells away. One that runs over open water off the bridge
+            // (to another bridge's end, across a bay) is charged for that water: it used to be the cheapest way on, so
+            // routes went over to the other bridge and back. (A link along its own deck stays as it was: the march
+            // walks it down the deck.)
+            if(bridgeLink) {
+                const link = wodBridgeLinkStep(current, nHex);
+                tentativeG += link.wet * WOD_BRIDGE_LINK_WET_COST;
+                // (and, for the computer's troops, a link that boards a deck from land costs its length: from land a few cells
+                // off, onto the corner of a deck, was a nearly free jump. A link off a deck is how a march walks down its own
+                // deck to the bank, and stays cheap.)
+                if(deckPrice && !isBridgeHex(current) && isBridgeHex(nHex)) tentativeG += Math.max(0, link.len - wodHexStepDistance(current, nHex));
+            }
             if(tentativeG >= (gScore[nKey] ?? Infinity)) return;
             cameFrom[nKey] = current;
             gScore[nKey] = tentativeG;

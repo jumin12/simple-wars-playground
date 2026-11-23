@@ -2,6 +2,13 @@
 // Part of the game script; loaded by index.html in a fixed order (see the list there).
 
 const WOD_CHANGELOG = [
+    {at:"2026-11-22T21:00:00Z",title:"Smoother battles and steadier AI",items:[
+        "Big battles no longer stutter. The computer's naval planning used to freeze the game for up to a second or two on maps with water, and many smaller hitches came from checks that ran far too often. In a large four-player match, each frame now spends about half as long on the simulation.",
+        "Enemy landing craft that meet bow to bow now steer past each other instead of stopping there for good.",
+        "Units crossing a bridge no longer detour to a nearby bridge's end before heading on. Routes across bridges now take the shortest way on, and never jump across open water to reach another bridge. The computer's troops no longer leap onto a nearby bridge to cut a corner.",
+        "AI armies no longer march back and forth between two staging points. While none of its planned attacks had enough troops, the AI faced a different enemy town every few seconds, so its reserve bunched up on the road and never arrived. It now stays on one objective and takes more towns.",
+        "AI warships supporting a landing no longer sail back and forth between two orders."
+    ]},
     {at:"2026-11-22T08:01:00Z",title:"Simple Wars Steam launch",items:[
         "Simple Wars is launching on Steam as a free-to-play game. Thanks to everyone who playtested, reported bugs, and shared ideas along the way.",
         "The tutorial and Help guide now explain attack orders, supply, bridges, and AI difficulty more clearly."

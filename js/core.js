@@ -51,6 +51,15 @@ function wodIsHostileOwner(a, b) {
     if(a < 1 || b < 1 || a === b) return false;
     return !wodAreAllies(a, b);
 }
+/** A sort comparator by score, ascending, that works each item's score out once: list.sort(wodByScore(score)) puts the
+ *  list in the same order as list.sort((a,b)=>score(a)-score(b)) when the score has no side effects. The AI sorts
+ *  candidate cells by scores that sum over every known enemy or the whole front line; worked out twice for every
+ *  comparison they made planning passes freeze the game for seconds. */
+function wodByScore(score) {
+    const memo = new Map();
+    const of = x => { if(memo.has(x)) return memo.get(x); const v = score(x); memo.set(x, v); return v; };
+    return (a, b) => of(a) - of(b);
+}
 function wodAddAlliance(a, b) {
     a = a | 0; b = b | 0;
     if(a < 1 || b < 1 || a === b) return false;

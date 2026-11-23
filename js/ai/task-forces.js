@@ -1212,6 +1212,8 @@ function wodAiCutObjective(owner,members) {
     }
     let best=null;
     for(const cut of sections.slice(0,24)){
+        // (too few troops for this cut: skip it before flooding the enemy's whole network without it)
+        if(members.length<Math.min(6,cut.length+1))continue;
         const h=cut[Math.floor(cut.length/2)],key=owner+':cut:'+cut.map(getHexKey).join('|')+':'+connectedCluster.map(u=>u.uid).join(',');let isolated=context[key];
         if(isolated==null){
             const removed=new Set(cut.map(getHexKey)),seen=new Set(),queue=roots.filter(r=>!removed.has(getHexKey(r)));

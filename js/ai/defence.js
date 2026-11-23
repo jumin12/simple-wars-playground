@@ -411,10 +411,10 @@ function* wodAiBuildDefense(owner,units,old,now,hr,cityStamp,topology) {
             (t.kind==='counter'?Math.pow(Math.max(0,wodAiUnitCombatPower(u)-neededPower),2)*hr*hr*400+
                 (base(u)?.phase==='assault'&&neededPower<4?hr*hr*150:0):0)+
             (old?.unitJob[u.uid]===t.id?-hr*hr*(t.kind==='corridor'?100:critical?20:200):0);
-        candidates.sort((a,b)=>cost(a)-cost(b));
+        candidates.sort(wodByScore(cost));
         const responseLimit=t.kind==='counter'&&t.primaryTheater?24:t.kind==='territory'?Math.min(20,Math.max(6,Math.ceil(neededPower*1.2))):10;
         while(candidates.length) {
-            if(t.kind==='corridor')candidates.sort((a,b)=>cost(a)-cost(b));
+            if(t.kind==='corridor')candidates.sort(wodByScore(cost));
             const u=candidates.shift();
             if(want<=0&&responsePower>=neededPower||budget<=0||recruited>=responseBudget||t.kind!=='corridor'&&job.members.length>=trappedCount+responseLimit)break;
             const previousResponse=old?.jobs.find(j=>j.id===old.unitJob[u.uid]);
@@ -745,7 +745,7 @@ function* wodAiReserveDefenseScreens(owner,threats,available,plan,budget,previou
         const routine=t.kind==='territory'||t.kind==='corridor'&&t.predictive&&t.closureSeconds>60;
         const score=u=>distance(u)**2/Math.max(.5,wodAiUnitCombatPower(u))+(routine&&['main','armor','raid'].includes(base(u)?.kind)?hr*hr*80:0)+(previous?.unitJob[u.uid]===t.id?-hr*hr*20:0)+
             (t.kind==='corridor'&&t.riskUnits?.has(u.uid)?hr*hr*60:0);
-        candidates.sort((a,b)=>score(a)-score(b));
+        candidates.sort(wodByScore(score));
         const deadline=t.kind==='corridor'?Math.min(75,Math.max(8,t.closureSeconds||35)):null;
         const u=candidates.slice(0,8).find(u=>gates.some(g=>wodAiCanReach(u,g)&&
             (deadline==null||wodAiArrivalSeconds(u,g,hr*3,deadline)<=deadline)));
@@ -1029,7 +1029,7 @@ function wodAiIssueTownDefense(unit,job) {
                 foes.reduce((n,e)=>n+Math.max(0,(e.range||50)+hr*2-Math.hypot(e.x-h.x,e.y-h.y))*3,0)-
                 (underAttack&&cityCells.includes(h)?hr*14:0)-
                 (1-getTerrainDefenseModifier(lead,h))*hr*4;
-            points.sort((a,b)=>score(a)-score(b));anchor=points[0]||job.holdHex;
+            points.sort(wodByScore(score));anchor=points[0]||job.holdHex;
         }
         const balance=wodAiForecast(owner,members,foes),gathered=members.filter(u=>Math.hypot(u.x-anchor.x,u.y-anchor.y)<hr*6);
         const localBalance=wodAiForecast(owner,gathered,foes.filter(e=>Math.hypot(e.x-anchor.x,e.y-anchor.y)<hr*10));
@@ -1057,7 +1057,7 @@ function wodAiIssueTownDefense(unit,job) {
             const score=h=>(firing&&Math.hypot(h.x-foe.x,h.y-foe.y)>(unit.range||50)*wodGeneralStatMultiplier(unit)*.98?hr*100:0)+Math.hypot(h.x-stand.x,h.y-stand.y)+Math.abs(Math.hypot(h.x-foe.x,h.y-foe.y)-(unit.range||50)*.75)*2+
                 getTerrainDefenseModifier(unit,h)*hr*5+
                 Object.entries(used).filter(([id,p])=>id!==unit.uid&&Math.hypot(p.x-h.x,p.y-h.y)<(unit.radius||12)*2+8).length*hr*30;
-            points.sort((a,b)=>score(a)-score(b));target=points[0]||stand;used[unit.uid]={x:target.x,y:target.y};
+            points.sort(wodByScore(score));target=points[0]||stand;used[unit.uid]={x:target.x,y:target.y};
         }
     }else{
         const dx=state.ex-state.anchor.x,dy=state.ey-state.anchor.y,len=Math.hypot(dx,dy)||1,lane=(column-2)*hr*1.7;
@@ -1136,7 +1136,7 @@ function wodAiSharedFallbackHex(unit,job,local,cut,defense) {
         const center=getNearestHexToPoint(unit.x+dx/len*span,unit.y+dy/len*span),reach=wodAiOperationReach(unit);
         const points=getHexesInRadius(center.q,center.r,4).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&h.owner===owner&&!isWaterHex(h)&&canUnitEnterHex(unit,h)&&reach.has(getHexKey(h))&&wodCurrentSupplyComponent(h,owner).city);
         const score=h=>Math.hypot(h.x-center.x,h.y-center.y)+local.enemies.reduce((n,e)=>n+Math.max(0,hr*6-Math.hypot(e.x-h.x,e.y-h.y))*4,0)+(getTerrainDefenseModifier(unit,h)-1)*hr*3;
-        points.sort((a,b)=>score(a)-score(b));anchor=points[0];
+        points.sort(wodByScore(score));anchor=points[0];
         if(!anchor)return null;cache.lines[key]={at:now,anchor};
         if(Object.keys(cache.lines).length>96)cache.lines=Object.fromEntries(Object.entries(cache.lines).sort((a,b)=>b[1].at-a[1].at).slice(0,64));
     }
@@ -1372,7 +1372,7 @@ function wodAiSupplyExit(unit,job) {
     // twelve-cell scan. Own towns remain known and are valid dry escape goals.
     if(!safe.length)safe=gameData.cities.filter(c=>c.owner===unit.owner).map(c=>gameData.hexes[c.q+','+c.r]).filter(h=>h&&!isWaterHex(h)&&canUnitEnterHex(unit,h)&&reach.has(getHexKey(h))&&wodCurrentSupplyComponent(h,unit.owner).city);
     const score=h=>Math.hypot(h.x-unit.x,h.y-unit.y)+foes.reduce((n,e)=>n+Math.max(0,(e.range||50)+hr*2-Math.hypot(e.x-h.x,e.y-h.y))*3,0);
-    safe.sort((a,b)=>score(a)-score(b));const goal=safe[0];if(!goal)return false;
+    safe.sort(wodByScore(score));const goal=safe[0];if(!goal)return false;
     // Escaping a pocket is a retreat, so use the same visible-enemy risk path
     // as the retreat button. A normal march could steer straight through the
     // force closing the neck, then repeatedly rejoin the offensive at its edge.

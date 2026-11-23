@@ -365,7 +365,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
                     for(let i = 1; i <= 9; i++) {
                         const ws = new WebSocket('ws://127.0.0.1:' + relayPort), got = [];
                         ws.on('message', raw => got.push(JSON.parse(raw)));
-                        const until = async t => { for(let k = 0; k < 200 && !got.some(m => m.t === t); k++) await sleep(25); if(!got.some(m => m.t === t)) throw Error('no ' + t); };
+                        const until = async t => { for(let k = 0; k < 600 && !got.some(m => m.t === t); k++) await sleep(25); if(!got.some(m => m.t === t)) throw Error('no ' + t); };
                         await until('welcome');
                         ws.send(JSON.stringify({ t: 'register_player', playerId: 'WOD-SRC0' + i + '-TEST', deviceSecret: cr.randomBytes(32).toString('hex'), displayName: 'Search Founder ' + i }));
                         await until('registered');

@@ -283,7 +283,7 @@ function wodUpdateUnitAttackOrder(unit,force=false) {
         return {q:h.q,r:h.r,x:h.x+dx/d*step,y:h.y+dy/d*step};
     }).filter(p=>Math.hypot(p.x-point.x,p.y-point.y)<(visible?range*.94:hr*1.5)&&!isWorldPositionBlockedByUnits(unit,p.x,p.y));
     const score=h=>Math.hypot(h.x-unit.x,h.y-unit.y)+Math.abs(Math.hypot(h.x-point.x,h.y-point.y)-desired)*1.8;
-    sites.sort((a,b)=>score(a)-score(b));
+    sites.sort(wodByScore(score));
     const target=sites[0];if(!target)return;
     if(assignUnitMoveAlongWaypoints(unit,[target],{attackPursuit:true})){order.aim={...point};unit.holding=false;}
 }

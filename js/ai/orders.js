@@ -364,7 +364,7 @@ function wodAiFormationSlot(unit,job,anchor,goal,members) {
     if(old&&prior?.layout===layout&&Math.hypot(old.x-desired.x,old.y-desired.y)<hr*2.5&&
         !Object.entries(used).some(([id,k])=>id!==unit.uid&&ids.includes(id)&&k===getHexKey(old))&&
         !threats.some(e=>Math.hypot(e.x-old.x,e.y-old.y)<(e.range||50)+hr)){wodAiRememberDeployment(unit,old,'formation');return old;}
-    sites.sort((a,b)=>score(a)-score(b));const target=sites[0]||getNearestHexToPoint(unit.x,unit.y);used[unit.uid]=getHexKey(target);slotState[unit.uid]={layout,anchor:getHexKey(anchor),at:now};wodAiRememberDeployment(unit,target,'formation');return target;
+    sites.sort(wodByScore(score));const target=sites[0]||getNearestHexToPoint(unit.x,unit.y);used[unit.uid]=getHexKey(target);slotState[unit.uid]={layout,anchor:getHexKey(anchor),at:now};wodAiRememberDeployment(unit,target,'formation');return target;
 }
 
 // Reservations belong to the battlefield, not just to one squad's job. Two
@@ -436,7 +436,7 @@ function wodAiCompactFormationSlot(unit,job,anchor,goal,members) {
     if(old&&Math.hypot(old.x-desired.x,old.y-desired.y)<hr*2.5&&
         !Object.entries(used).some(([id,k])=>id!==unit.uid&&ids.includes(id)&&k===getHexKey(old))&&
         !threats.some(e=>Math.hypot(e.x-old.x,e.y-old.y)<(e.range||50)+hr))return old;
-    sites.sort((a,b)=>score(a)-score(b));const target=sites[0]||anchor;used[unit.uid]=getHexKey(target);slotState[unit.uid]={anchor:getHexKey(anchor),at:now};return target;
+    sites.sort(wodByScore(score));const target=sites[0]||anchor;used[unit.uid]=getHexKey(target);slotState[unit.uid]={anchor:getHexKey(anchor),at:now};return target;
 }
 
 function wodDrainAiMoveQueue() {

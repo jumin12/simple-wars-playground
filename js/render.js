@@ -508,8 +508,21 @@ function wodRebuildCanvasCaches() {
         showNotification('The system reset the graphics; the map has been redrawn.');
     } catch(err) { wodReportRuntimeError(err, 'graphics reset'); }
 }
+// Every frame starts from a clean canvas state. A frame that threw part-way through (the game loop catches the
+// error and carries on) used to leave its camera transform pushed, so each later frame was drawn moved and zoomed on
+// top of the last and the background no longer covered the screen: the map showed again and again at other sizes.
+function wodResetMainCanvasState() {
+    if(typeof ctx.reset === 'function') ctx.reset();          // (also empties a save stack a failed frame left)
+    else { ctx.restore(); ctx.restore(); ctx.restore(); }
+    const dpr = wodCanvasAllocSize.dpr > 0 ? wodCanvasAllocSize.dpr : 1;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    if(typeof ctx.imageSmoothingEnabled === 'boolean') ctx.imageSmoothingEnabled = true;
+}
 function draw() {
     if(wodCanvasesLost()) return;
+    wodResetMainCanvasState();
     if(wodFogActive()&&performance.now()>(gameData._fogViewNextAt||0)) {
         gameData._fogViewNextAt=performance.now()+220;wodRefreshFogVision(.23);
     }

@@ -106,10 +106,15 @@ function wodGetOwnerSpawnAnchorHexes(owner) {
     return out;
 }
 function getOwnerFrontlineHexes(owner) {
-    return gameData.hexList.filter(hex => {
-        if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain') return false;
-        return getNeighborHexes(hex).some(nHex => isClaimableLand(nHex) && (nHex.owner === 0 || wodIsHostileOwner(nHex.owner, owner)));
-    });
+    // (plain loops: this runs over every cell of the map for each faction every strategy pulse)
+    const out = [], list = gameData.hexList;
+    for(let i = 0, n = list.length; i < n; i++) {
+        const hex = list[i];
+        if(hex.owner !== owner || !isClaimableLand(hex) || hex.type === 'mountain') continue;
+        const nb = getNeighborHexes(hex);
+        for(let j = 0; j < nb.length; j++) { const nHex = nb[j]; if(isClaimableLand(nHex) && (nHex.owner === 0 || wodIsHostileOwner(nHex.owner, owner))) { out.push(hex); break; } }
+    }
+    return out;
 }
 function nearestHexDistanceSq(x, y, hexes) {
     let best = Infinity;
@@ -387,14 +392,13 @@ function findRetreatPoint(unit) {
     // Prefer healing-favorable hexes: own territory, no nearby enemies, defensive terrain.
     let bestHex = null;
     let bestScore = Infinity;
+    // (the score first: a cell that cannot beat the best so far needs none of the slower tests. They ran for every cell of
+    // the map, for every unit falling back, in the AI's strategy pulse)
     for(let hex of gameData.hexList) {
-        if(hex.owner !== unit.owner || !canUnitEnterHex(unit, hex)) continue;
-        if(isFrontlineHex(hex, unit.owner)) continue;
+        if(hex.owner !== unit.owner) continue;
         let dx = hex.x - unit.x;
         let dy = hex.y - unit.y;
         let dist = dx * dx + dy * dy;
-        let enemyNearby = countNearbyUnits(unit.owner, hex.x, hex.y, 180, true);
-        if(enemyNearby > 0) continue;
         let terrainBonus = 0;
         // Defensive terrain helps healing
         if(unit.type !== 'heavy') {
@@ -402,6 +406,11 @@ function findRetreatPoint(unit) {
             else if(hex.type === 'urban') terrainBonus = -40000;
         } else if(hex.type === 'urban') terrainBonus = -30000;
         let score = dist + terrainBonus;
+        if(!(score < bestScore)) continue;
+        if(!canUnitEnterHex(unit, hex)) continue;
+        if(isFrontlineHex(hex, unit.owner)) continue;
+        let enemyNearby = countNearbyUnits(unit.owner, hex.x, hex.y, 180, true);
+        if(enemyNearby > 0) continue;
         if(score < bestScore) {
             bestScore = score;
             bestHex = hex;

@@ -1300,12 +1300,19 @@ function wodOpsRun(owner,units){
     // strip it. Only an enemy group inside our land near a town comes before it.
     const homeStrike=j=>j.kind==='strike'&&j.g.home<C*8;
     const order=TU.commit===0?jobs:[...jobs.filter(homeStrike),...jobs.filter(j=>!homeStrike(j)&&j.active),...jobs.filter(j=>!homeStrike(j)&&!j.active)];
+    const short=[];
     for(const j of order){
         if(j.cool||j.raid)continue;
         const a=pick(j);
-        if(!a.enough){if(!blocked&&j.kind==='take')blocked=j;continue;}
+        if(!a.enough){if(j.kind==='take')short.push(j);continue;}
         commit(j,a);
     }
+    blocked=short[0]||null;
+    // (WOD_OPS.T.postStick=0 turns it off) While several attacks are each short of troops, the army keeps facing the
+    // one its post already faces. It faced whichever scored highest that pulse, and the scores trade places from one
+    // pulse to the next: the post, and the whole reserve with it, went from one enemy town to another and back every
+    // few seconds, twenty cells each way, and the army stood about in heaps on the road between them.
+    if(TU.postStick!==0&&short.length>1&&S.post?.aim){const kept=short.find(j=>j.pos?.id===S.post.aim);if(kept)blocked=kept;}
 
 
     // ---------- 4. carry the jobs out
@@ -1633,7 +1640,15 @@ function wodOpsRun(owner,units){
 
     // ---------- 6. the reserve waits in cover at the front; a share of it walks into empty enemy land
     const rest=[...pool];
-    const aim=blocked?blocked.pos:(enemyTowns.slice().sort((a,b)=>dist(a,pc)-dist(b,pc))[0]||null);
+    let aim=blocked?blocked.pos:(enemyTowns.slice().sort((a,b)=>dist(a,pc)-dist(b,pc))[0]||null);
+    // (WOD_OPS.T.postStick=0 turns it off) The objective the post faces is kept until another enemy town is clearly
+    // nearer. It was the enemy town nearest the middle of the free troops, so as they walked to the post facing one town
+    // the middle moved, another town became the nearest, and the post (and the whole reserve) went over to face that
+    // one; then back: armies walked to and fro between two posts twenty cells apart and never got anywhere.
+    if(TU.postStick!==0&&!blocked&&aim&&S.post?.aim&&S.post.aim!==aim.id&&now-S.post.at<60000){
+        const kept=enemyTowns.find(c=>c.id===S.post.aim);
+        if(kept&&dist(kept,pc)<dist(aim,pc)*1.35)aim=kept;
+    }
     const base=aim?myTowns.slice().sort((a,b)=>dist(a,aim)-dist(b,aim))[0]:towns[0];
     if(S.post&&pocketed.filter(u=>dist(u,S.post)<C*10).length>=2){S.post=null;S.timid=now+45000;}
     let post=S.post&&now-S.post.at<60000&&S.post.aim===(aim?.id||'')&&S.post.base===base.id&&!anyNear(foes,S.post,C*6)?S.post:null;

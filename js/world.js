@@ -440,7 +440,10 @@ function attackerControlsAllCityUrbanTerrain(city, attackerOwner) {
     return true;
 }
 function isFrontlineHex(hex, owner) {
-    return hex && hex.owner === owner && getNeighborHexes(hex).some(nHex => isClaimableLand(nHex) && (nHex.owner === 0 || wodIsHostileOwner(nHex.owner, owner)));
+    if(!hex || hex.owner !== owner) return hex && false;
+    const nb = getNeighborHexes(hex);
+    for(let j = 0; j < nb.length; j++) { const nHex = nb[j]; if(isClaimableLand(nHex) && (nHex.owner === 0 || wodIsHostileOwner(nHex.owner, owner))) return true; }
+    return false;
 }
 function getSpatialCellKey(x, y, cellSize) {
     let cx = (Math.floor(x / cellSize) + 32768) | 0;
@@ -1395,11 +1398,15 @@ function isCityEncircledForProduction(city) {
     return false;
 }
 /** True when urban combat or encirclement blocks recruiting from this town. */
-function wodShipEngagesTown(ship,city,urban=getCityUrbanTerrainHexes(city)) {
-    const inside=u=>u&&u.hp>0&&wodIsHostileOwner(u.owner,ship.owner)&&urban.some(h=>wodHexKeysEqual(h,getNearestHexToPoint(u.x,u.y)));
+function wodShipEngagesTown(ship,city,urban=getCityUrbanTerrainHexes(city),keys=null) {
+    // (a unit's cell is looked up once and compared by key; the cheap tests go first. This ran for every enemy ship
+    // against every unit, looking the unit's cell up again for each town cell, several times a frame for every town)
+    const inside=u=>{if(!u||!(u.hp>0)||!wodIsHostileOwner(u.owner,ship.owner)||!urban.length)return false;
+        const n=getNearestHexToPoint(u.x,u.y);if(!n)return false;const k=getHexKey(n);return keys?keys.has(k):urban.some(h=>h&&getHexKey(h)===k);};
     const target=gameData.entities.find(u=>u.uid===ship.combatTargetUid)||ship._combatEngaged&&ship._combatEnemy;
-    if(inside(target)&&ship.damage>0&&Math.hypot(ship.x-target.x,ship.y-target.y)<=(ship.range||0)*wodGeneralStatMultiplier(ship))return true;
-    return gameData.entities.some(u=>inside(u)&&u.combatTargetUid===ship.uid&&u.damage>0&&Math.hypot(ship.x-u.x,ship.y-u.y)<=(u.range||0)*wodGeneralStatMultiplier(u));
+    if(ship.damage>0&&inside(target)&&Math.hypot(ship.x-target.x,ship.y-target.y)<=(ship.range||0)*wodGeneralStatMultiplier(ship))return true;
+    const uid=ship.uid;
+    return gameData.entities.some(u=>u.combatTargetUid===uid&&u.damage>0&&inside(u)&&Math.hypot(ship.x-u.x,ship.y-u.y)<=(u.range||0)*wodGeneralStatMultiplier(u));
 }
 function isCitySiegeBlockedForProduction(city) {
     if(!city || !city.id) return false;
@@ -1417,7 +1424,7 @@ function isCitySiegeBlockedForProduction(city) {
     // Otherwise only a fight with our troops standing in the town stops it: a land fight on a town cell marks the town as
     // it is fought (wodStagingMarkCombatOnCityUrbanTile, above), and a ship counts while it exchanges fire with troops in
     // the town. An enemy merely within firing range of a town cell used to stop it too, with nobody fighting.
-    return gameData.entities.some(u=>u.hp>0&&wodIsNavalUnit(u)&&wodIsHostileOwner(u.owner,city.owner)&&wodShipEngagesTown(u,city,urban));
+    return gameData.entities.some(u=>u.hp>0&&wodIsNavalUnit(u)&&wodIsHostileOwner(u.owner,city.owner)&&wodShipEngagesTown(u,city,urban,keys));
 }
 function citySiegeShowsCombatIndicator(city) {
     if(!city || !city.id) return false;

@@ -392,7 +392,7 @@ function wodAiRefreshFrontSupport(owner,plan,ready) {
             const lead=front.allies.slice().sort((a,b)=>Math.hypot(u.x-a.x,u.y-a.y)-Math.hypot(u.x-b.x,u.y-b.y))[0],at=getNearestHexToPoint(lead.x,lead.y);
             const choices=getHexesInRadius(at.q,at.r,4).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&!used.has(getHexKey(h))&&!isWaterHex(h)&&wodIsFriendlyOwner(h.owner,owner)&&canUnitEnterHex(u,h)&&wodCurrentSupplyComponent(h,owner).city&&!isWorldPositionBlockedByUnits(u,h.x,h.y));
             const score=h=>Math.abs(Math.hypot(h.x-front.enemy.x,h.y-front.enemy.y)-(u.range||50)*.85)*3+Math.hypot(u.x-h.x,u.y-h.y)*.15+getTerrainDefenseModifier(u,h)*hr;
-            choices.sort((a,b)=>score(a)-score(b));const h=choices.slice(0,8).find(h=>wodAiCanReach(u,h));if(!h)continue;
+            choices.sort(wodByScore(score));const h=choices.slice(0,8).find(h=>wodAiCanReach(u,h));if(!h)continue;
             const travel=Math.hypot(u.x-h.x,u.y-h.y)/Math.max(1,u.speed*WOD_MOVE_SPEED_FACTOR);
             assigned.set(u,{job:j.id,hexes:gameData.hexes,h,until:now+Math.min(90000,Math.max(18000,travel*1500+8000))});used.add(getHexKey(h));front.gap-=wodAiUnitCombatPower(u);committed++;loans[j.id]=(loans[j.id]||0)+1;if(j.kind==='reserve')reserveN++;
             u.aiOrderUntil=0;u.aiOrderResponseId='front-support';gameData._aiMoveQueue?.delete(u);
@@ -444,7 +444,7 @@ function wodAiSectorAdvanceHex(unit,job,members) {
     const choices=getHexesInRadius(goal.q,goal.r,3).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&!isWaterHex(h)&&!h.cityId&&wodIsHostileOwner(h.owner,unit.owner)&&canUnitEnterHex(unit,h)&&hasOwnerNeighbor(h,unit.owner)&&wodAiCanReach(unit,h));
     const used=job._sectorTargets||=( {} );
     const score=h=>Math.hypot(h.x-goal.x,h.y-goal.y)*.7+Math.hypot(h.x-unit.x,h.y-unit.y)*.3+Object.entries(used).filter(([id,key])=>id!==unit.uid&&key===getHexKey(h)).length*hr*8;
-    choices.sort((a,b)=>score(a)-score(b));const target=choices[0]||goal;used[unit.uid]=getHexKey(target);return target;
+    choices.sort(wodByScore(score));const target=choices[0]||goal;used[unit.uid]=getHexKey(target);return target;
 }
 
 // Pick one attainable theater for nearby stalled attack groups. Independent
@@ -572,7 +572,7 @@ function wodAiIssueQuietFrontAdvance(unit,job) {
     const dx=aim.x-here.x,dy=aim.y-here.y,length=Math.hypot(dx,dy)||1;
     const direction=bearing?.job===job.id?bearing:unit._aiQuietBearing={job:job.id,x:dx/length,y:dy/length};
     const score=p=>p.depth*hr*1.5-((p.h.x-here.x)*direction.x+(p.h.y-here.y)*direction.y)*1.2;
-    sites.sort((a,b)=>score(a)-score(b));
+    sites.sort(wodByScore(score));
     const target=sites.find(p=>!reservations.has(getHexKey(p.h))||reservations.get(getHexKey(p.h)).unit===unit.uid)?.h;
     if(!target)return false;
     if(!wodAiMoveUnitTowardHex(unit,target,false,.05))return false;
@@ -1083,7 +1083,7 @@ function wodAiContinueFrontOffensive(owner,op,army) {
             const next=getNeighborHexes(at).filter(h=>(!explored||explored.has(getHexKey(h)))&&!visited.has(getHexKey(h))&&!isWaterHex(h)&&
                 wodIsHostileOwner(h.owner,owner)&&wodCanStepBetweenHexes(lead,at,h,true)&&safe(h)&&
                 (h.x-at.x)*bearing.x+(h.y-at.y)*bearing.y>hr*.2)
-                .sort((a,b)=>score(a)-score(b))[0];
+                .sort(wodByScore(score))[0];
             if(!next)break;visited.add(getHexKey(next));at=goal=next;
         }
     }

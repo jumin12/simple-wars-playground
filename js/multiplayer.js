@@ -4736,8 +4736,10 @@ function wodMpWireLobbyControls() {
                 showNotification('Map generation failed — wait for the lobby preview, then launch again.');
                 return;
             }
-            hidePanels();
+            // (in the match before the panels close: closing them on the menu restarted the menu's background battle,
+            // which swapped its own map back in while the match loaded)
             gameState = 'PLAYING';
+            hidePanels();
             UI.mainMenu.classList.add('hidden');
             UI.panels.forEach(p => p.classList.add('hidden'));
             UI.escMenu.classList.add('hidden');
@@ -4960,8 +4962,10 @@ function wodMpOnMatchStart(ev) {
         };
         wodMpInitSyncState(expectedReady);
         if(pl.aiCount != null) gameData.aiCount = pl.aiCount;
-        hidePanels();
+        // (in the match before the panels close: closing them on the menu restarted the menu's background battle,
+        // which swapped its own map back in while the match loaded)
         gameState = 'PLAYING';
+        hidePanels();
         // In the match from here on, while the host's map still loads: a line that drops now must rejoin
         // the match (and send its ready again) like any other drop, not count as leaving the lobby. With
         // the session saved only after the load, a guest cut mid-load sent its ready into a closed socket
@@ -5068,8 +5072,10 @@ function wodMpOnRejoinMatch(ev) {
         };
         wodMpInitSyncState(expectedReady);
         if(pl.aiCount != null) gameData.aiCount = pl.aiCount;
-        hidePanels();
+        // (in the match before the panels close: closing them on the menu restarted the menu's background battle,
+        // which swapped its own map back in while the match loaded)
         gameState = 'PLAYING';
+        hidePanels();
         pauseMenuBackgroundBattle();
         wodPrepareForNewMatch({ keepMp: true, keepLifetimeMatch: true });
         wodClearLiveMapForNewMatch();

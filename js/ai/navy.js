@@ -354,9 +354,9 @@ function wodAiPlanFerryAssaults(owner,transports,operationSea=null) {
         const landingLanes=transports.filter(t=>t.owner===owner&&t.cargo&&t.unloadHexKey).map(t=>({land:gameData.hexes[t.unloadHexKey],water:t._trafficYield?.points?.at(-1)||t.orderTarget,radius:(ship.radius||16)+(t.cargo.radius||12)+8,waterRadius:(ship.radius||16)+(t.radius||16)+8}));
         const clearsLanding=h=>landingLanes.every(l=>(!l.land||Math.hypot(h.x-l.land.x,h.y-l.land.y)>l.radius)&&(!l.water||Math.hypot(h.x-l.water.x,h.y-l.water.y)>l.waterRadius));
         const seaRegion=wodNavalWaterRegionKeys(ship,getNearestHexToPoint(ship.x,ship.y));
-        const sites=gameData.hexList.filter(h=>wodIsOpenWaterHex(h)&&(!seaRegion||seaRegion.has(getHexKey(h)))&&
-            (Math.hypot(h.x-goal.x,h.y-goal.y)<radius*.9||protectedTroops.length&&Math.hypot(h.x-ship.x,h.y-ship.y)<(gameData.hexRadius||20)*4)&&
-            clearsLanding(h));
+        // (the distance tests first: this runs over every cell of the map for every supply ship)
+        const sites=gameData.hexList.filter(h=>(Math.hypot(h.x-goal.x,h.y-goal.y)<radius*.9||protectedTroops.length&&Math.hypot(h.x-ship.x,h.y-ship.y)<(gameData.hexRadius||20)*4)&&
+            wodIsOpenWaterHex(h)&&(!seaRegion||seaRegion.has(getHexKey(h)))&&clearsLanding(h));
         const current=getNearestHexToPoint(ship.x,ship.y);if(protectedTroops.length&&wodIsOpenWaterHex(current)&&!sites.includes(current))sites.push(current);
         const dependent=protectedTroops.filter(u=>!wodCurrentSupplyComponent(getNearestHexToPoint(u.x,u.y),owner).city);
         const coverAll=h=>dependent.every(u=>Math.hypot(h.x-u.x,h.y-u.y)<radius*.99);
@@ -364,7 +364,9 @@ function wodAiPlanFerryAssaults(owner,transports,operationSea=null) {
         const reachableSites=sites.filter(h=>supplyReach.has(getHexKey(h))),screened=reachableSites.filter(h=>wodAiSupplySiteSafe(ship,h));
         const safeSites=screened.filter(coverAll),choices=safeSites.length?safeSites:screened;
         if(dependent.length&&!safeSites.length)for(const u of dependent)u._aiSupplyHoldUntil=clock+8000;
-        choices.sort((a,b)=>{const score=h=>wodAiDist2(h.x,h.y,goal.x,goal.y)*2+wodAiDist2(h.x,h.y,ship.x,ship.y)*.15+dependent.reduce((n,u)=>n+Math.max(0,Math.hypot(h.x-u.x,h.y-u.y)-radius*.88)**2*32,0)+threats.reduce((n,e)=>n+Math.max(0,140-Math.hypot(h.x-e.x,h.y-e.y))**2*3,0);return score(a)-score(b);});
+        // (each site's score once, not twice per comparison: it sums over every known enemy)
+        const siteScore=new Map();for(const h of choices)siteScore.set(h,wodAiDist2(h.x,h.y,goal.x,goal.y)*2+wodAiDist2(h.x,h.y,ship.x,ship.y)*.15+dependent.reduce((n,u)=>n+Math.max(0,Math.hypot(h.x-u.x,h.y-u.y)-radius*.88)**2*32,0)+threats.reduce((n,e)=>n+Math.max(0,140-Math.hypot(h.x-e.x,h.y-e.y))**2*3,0));
+        choices.sort((a,b)=>siteScore.get(a)-siteScore.get(b));
         const site=choices.find(h=>wodNavalDestinationClear(ship,h));
         if(!site&&protectedTroops.length&&wodAiSupplyExposure(ship,ship).length){
             for(const u of protectedTroops){u._navalEvacuating=true;u._needsTransport=true;u._aiSupplyHoldUntil=clock+8000;}
@@ -407,7 +409,11 @@ function wodAiPlanFerryAssaults(owner,transports,operationSea=null) {
                 const p={x:t.x+(to.x-t.x)/d*hr*2,y:t.y+(to.y-t.y)/d*hr*2},at=getNearestHexToPoint(p.x,p.y);
                 site=at&&wodIsOpenWaterHex(at)&&onSea(at)?at:getNearestHexToPoint(t.x,t.y);
             }else if(!enemy&&mission?.phase==='prepare'&&TU.escort!==0)continue; // gathering with the ferries (the rendezvous, wodAiChooseNavalMission)
-            else if(operation||enemy)site=wodAiNavalFirePosition(ship,enemy||mission?.goal||operation);
+            else if(operation||enemy){site=wodAiNavalFirePosition(ship,enemy||mission?.goal||operation);
+                // (a ship firing for the landing keeps that job while the enemy is there: a gathering mission called it
+                // back to the rendezvous each time it stood still, and this pass sent it out again, so it rocked
+                // between the two for minutes; wodAiChooseNavalMission leaves it alone until this lapses)
+                if(enemy&&site)ship._aiFireSupportUntil=clock+5000;}
             if(site&&wodIsOpenWaterHex(site)&&Math.hypot(ship.x-site.x,ship.y-site.y)>hr*2&&
                 (!ship.target||!ship.orderTarget||Math.hypot(ship.orderTarget.x-site.x,ship.orderTarget.y-site.y)>hr*2))
                 assignUnitMoveAlongWaypoints(ship,[{x:site.x,y:site.y}],{transportInternal:true});
@@ -640,9 +646,13 @@ function wodAiExpeditionDemand(owner,cities,army,pending=[]) {
 function wodAiInvasionBeach(owner,goal,lead) {
     const h=getNearestHexToPoint(goal.x,goal.y),region=wodTransportLandingRegion({type:'light',owner},h);if(!region)return goal;
     const hr=gameData.hexRadius||20,known=wodAiThreats(owner),coast=[...region].map(k=>gameData.hexes[k]).filter(p=>p&&p.type!=='mountain'&&getNeighborHexes(p).some(wodIsOpenWaterHex));
+    // (each beach scored once, and each enemy's strength worked out once: inside the sort this ran a million strength
+    // estimates for one island's coast, a five-second freeze in the headless rig every time a crossing was planned)
+    const ground=known.filter(e=>!wodIsNavalUnit(e)).map(e=>({e,power:wodAiUnitCombatPower(e)}));
     const score=p=>Math.hypot(p.x-goal.x,p.y-goal.y)*.6+Math.hypot(p.x-lead.x,p.y-lead.y)*.16+
-        known.filter(e=>!wodIsNavalUnit(e)).reduce((n,e)=>n+Math.max(0,hr*7-Math.hypot(e.x-p.x,e.y-p.y))*wodAiUnitCombatPower(e)*2,0);
-    coast.sort((a,b)=>score(a)-score(b));return coast[0]||goal;
+        ground.reduce((n,{e,power})=>n+Math.max(0,hr*7-Math.hypot(e.x-p.x,e.y-p.y))*power*2,0);
+    const scored=new Map();for(const p of coast)scored.set(p,score(p));
+    coast.sort((a,b)=>scored.get(a)-scored.get(b));return coast[0]||goal;
 }
 
 function wodAiNavalFirePosition(ship,goal) {
@@ -658,14 +668,17 @@ function wodAiNavalFirePosition(ship,goal) {
             if(!ours.includes(ship))ours.push(ship);if(wodAiForecast(ship.owner,ours,theirs).ratio>=1.2)incomingWeight=1;}
     }
     const points=getHexesInRadius(center.q,center.r,9).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&sea.has(getHexKey(h))&&wodIsOpenWaterHex(h)&&wodNavalDestinationClear(ship,h));
+    const power=new Map(threats.map(e=>[e,wodAiUnitCombatPower(e)]));
     const score=h=>{
         const targets=threats.filter(e=>Math.hypot(e.x-h.x,e.y-h.y)<range);
         const nearest=threats.length?Math.min(...threats.map(e=>Math.hypot(e.x-h.x,e.y-h.y))):Math.hypot(h.x-goal.x,h.y-goal.y);
-        const incoming=threats.reduce((n,e)=>n+Math.max(0,(e.range||50)+hr*.35-Math.hypot(e.x-h.x,e.y-h.y))*wodAiUnitCombatPower(e),0);
+        const incoming=threats.reduce((n,e)=>n+Math.max(0,(e.range||50)+hr*.35-Math.hypot(e.x-h.x,e.y-h.y))*power.get(e),0);
         return Math.abs(nearest-range)*1.5+incoming*incomingWeight+Math.hypot(h.x-ship.x,h.y-ship.y)*.06+
-            Math.hypot(h.x-goal.x,h.y-goal.y)*.12-targets.reduce((n,e)=>n+wodAiUnitCombatPower(e),0)*hr*.4;
+            Math.hypot(h.x-goal.x,h.y-goal.y)*.12-targets.reduce((n,e)=>n+power.get(e),0)*hr*.4;
     };
-    points.sort((a,b)=>score(a)-score(b));return points[0]||null;
+    // (each point scored once, not twice per comparison)
+    const scored=new Map();for(const h of points)scored.set(h,score(h));
+    points.sort((a,b)=>scored.get(a)-scored.get(b));return points[0]||null;
 }
 
 function wodAiRetireBeachheads(owner) {
@@ -989,7 +1002,9 @@ function wodAiPlanMarineRaids(owner,marines) {
         const depth=front.reduce((d,f)=>Math.min(d,Math.hypot(f.x-h.x,f.y-h.y)),hr*16);
         return Math.hypot(h.x-source.x,h.y-source.y)*.35+town*.7-Math.min(hr*12,depth)*.65;
     };
-    choices.sort((a,b)=>score(a)-score(b));
+    // (each beach scored once: the score runs over the whole front line)
+    const scored=new Map();for(const h of choices)scored.set(h,score(h));
+    choices.sort((a,b)=>scored.get(a)-scored.get(b));
     const deadline=performance.now()+7;
     const spread=[];for(const h of choices)if(!spread.some(p=>Math.hypot(p.x-h.x,p.y-h.y)<hr*6)){spread.push(h);if(spread.length>=6)break;}
     for(const beach of spread){
@@ -1113,7 +1128,7 @@ function wodAiChooseNavalMission(owner, transports, candidates, targets, supplyS
             return wodAiDist2(from.x,from.y,t.x,t.y)/(hr*hr*120)+danger*6+(t.shore?35:0)+(failure&&now-failure.at<90000?30:0);
         };
         const towns=available.filter(t=>!t.shore),objectives=towns.length?towns:available;
-        objectives.sort((a,b)=>score(a)-score(b));goal=objectives[0];if(!goal){delete gameData.aiNavalPlans[owner];return null;}
+        objectives.sort(wodByScore(score));goal=objectives[0];if(!goal){delete gameData.aiNavalPlans[owner];return null;}
     }
     const goalHex=getNearestHexToPoint(goal.x,goal.y),region=wodTransportLandingRegion({type:'light',owner},goalHex);
     landed=gameData.entities.filter(u=>u.owner===owner&&(isLandArmyUnit(u)||u.type==='marine')&&u.hp>0&&!u.boardTransportUid&&!u._medicalRecovering&&region?.has(getHexKey(getNearestHexToPoint(u.x,u.y))));
@@ -1244,7 +1259,7 @@ function wodAiChooseNavalMission(owner, transports, candidates, targets, supplyS
     }
     for(const ship of [...ships,...missionSupply]){
         ship._aiFleetId=mission.id;
-        if(reason==='gathering'||reason==='embark'||reason==='troops'){
+        if((reason==='gathering'||reason==='embark'||reason==='troops')&&!(wodOpsTune(owner).fireHold!==0&&ship._aiFireSupportUntil>now)){
             const water=wodNavalWaterRegionKeys(ship,getNearestHexToPoint(ship.x,ship.y));
             const site=water&&[...water].map(k=>gameData.hexes[k]).filter(h=>h&&Math.hypot(h.x-startX,h.y-startY)<hr*5&&
                 wodNavalDestinationClear(ship,h)).sort((a,b)=>wodAiDist2(a.x,a.y,ship.x,ship.y)-wodAiDist2(b.x,b.y,ship.x,ship.y))[0];
@@ -1378,11 +1393,28 @@ function wodAiDirectBeachhead(owner,supplyShips) {
             if(old)reserved.delete(old.key);
             const clear=h=>!reserved.has(getHexKey(h))&&!isWorldPositionBlockedByUnits(u,h.x,h.y);
             const legal=h=>canUnitEnterHex(u,h)&&reach.has(getHexKey(h))&&covered(u,h)&&clear(h);
-            const urban=objective?.cutHexes?new Set(objective.cutHexes):objective?.town?new Set(getCityUrbanTerrainHexes(objective.town).map(getHexKey)):new Set();
-            const targets=objective?.kind==='scout'?[objective.goal].filter(legal):remaining.filter(h=>legal(h)&&(!intel||intel.explored.has(getHexKey(h))));
-            targets.sort((a,b)=>Number(!urban.has(getHexKey(a)))-Number(!urban.has(getHexKey(b)))||
-                Math.hypot(a.x-goal.x,a.y-goal.y)*.6+Math.hypot(a.x-u.x,a.y-u.y)*.4-Math.hypot(b.x-goal.x,b.y-goal.y)*.6-Math.hypot(b.x-u.x,b.y-u.y)*.4);
-            let target=ready&&Math.hypot(u.x-lead.x,u.y-lead.y)<hr*9?targets[0]:null,attack=!!target;
+            // The cell to attack is wanted only when the wave is ready and the unit is with its lead. It used to be
+            // looked for every time for every landed unit: every enemy cell of the island tested and sorted, every two
+            // seconds, for an answer thrown away. The best legal cell in the same order is the first legal one after
+            // sorting all of them (the sort is stable), so the cheap ordering goes first and the tests stop at it.
+            let target=null;
+            if(ready&&Math.hypot(u.x-lead.x,u.y-lead.y)<hr*9){
+                const urban=objective?.cutHexes?new Set(objective.cutHexes):objective?.town?new Set(getCityUrbanTerrainHexes(objective.town).map(getHexKey)):new Set();
+                if(objective?.kind==='scout')target=[objective.goal].filter(legal)[0]||null;
+                else{
+                    // (the island's every enemy cell, for every landed unit: the best is picked out directly, a few
+                    // times over if it fails the tests, and the whole lot sorted only when those all fail)
+                    const pool=intel?remaining.filter(h=>intel.explored.has(getHexKey(h))):remaining.slice();
+                    const cmp=(a,b)=>Number(!urban.has(getHexKey(a)))-Number(!urban.has(getHexKey(b)))||
+                        Math.hypot(a.x-goal.x,a.y-goal.y)*.6+Math.hypot(a.x-u.x,a.y-u.y)*.4-Math.hypot(b.x-goal.x,b.y-goal.y)*.6-Math.hypot(b.x-u.x,b.y-u.y)*.4;
+                    for(let tries=0;tries<6&&pool.length&&!target;tries++){
+                        let bi=0;for(let i=1;i<pool.length;i++)if(cmp(pool[i],pool[bi])<0)bi=i;
+                        if(legal(pool[bi]))target=pool[bi];else pool.splice(bi,1);
+                    }
+                    if(!target&&pool.length){pool.sort(cmp);target=pool.find(legal)||null;}
+                }
+            }
+            let attack=!!target;
             if(!target){
                 u._navalAdvanceGoal={x:goal.x,y:goal.y};
                 const choices=getHexesInRadius(getNearestHexToPoint(lead.x,lead.y).q,getNearestHexToPoint(lead.x,lead.y).r,5)
@@ -1390,7 +1422,8 @@ function wodAiDirectBeachhead(owner,supplyShips) {
                 const score=h=>Math.hypot(h.x-lead.x,h.y-lead.y)*1.3+Math.hypot(h.x-goal.x,h.y-goal.y)*.6+
                     threats.reduce((n,e)=>n+Math.max(0,(e.range||50)+hr-Math.hypot(e.x-h.x,e.y-h.y))*4,0)+
                     (getNeighborHexes(h).some(wodIsOpenWaterHex)?hr*2:0);
-                choices.sort((a,b)=>score(a)-score(b));target=choices[0];
+                const scored=new Map();for(const h of choices)scored.set(h,score(h));
+                choices.sort((a,b)=>scored.get(a)-scored.get(b));target=choices[0];
             }
             if(target){
                 const key=getHexKey(target);reserved.set(key,u.uid);
@@ -1460,7 +1493,7 @@ function wodAiEscortSupply(owner,supplies,warships,mission) {
             const sites=getHexesInRadius(center.q,center.r,8).map(p=>gameData.hexes[p.q+','+p.r]).filter(h=>h&&sea.has(getHexKey(h))&&wodIsOpenWaterHex(h)&&wodNavalDestinationClear(escort,h));
             const score=h=>Math.abs(Math.hypot(h.x-foe.x,h.y-foe.y)-range)*2+Math.hypot(h.x-supply.x,h.y-supply.y)*.3+
                 Math.hypot(h.x-escort.x,h.y-escort.y)*.08+Math.max(0,Math.hypot(h.x-aim.x,h.y-aim.y)-Math.hypot(supply.x-aim.x,supply.y-aim.y))*1.5;
-            sites.sort((a,b)=>score(a)-score(b));const site=sites[0];if(!site)continue;
+            sites.sort(wodByScore(score));const site=sites[0];if(!site)continue;
             assigned.add(escort.uid);escort._aiSupplyEscortFor=supply.uid;escort._aiSupplyEscortUntil=now+8000;
             escort._navalEscortUntil=now+8000;escort._aiScoutUntil=0;escort._navalScoutGoal=null;
             if(!escort._trafficYield&&Math.hypot(site.x-escort.x,site.y-escort.y)>hr&&
