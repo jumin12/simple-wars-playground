@@ -207,6 +207,11 @@ function wodStepAiEconomy(dt, incomeTick, upkeepByOwner, netMoney) {
         const o = parseInt(owner, 10), bonus = typeof wodAiDifficulty === 'function' && !(typeof wodMpIsHumanOwner === 'function' && wodMpIsHumanOwner(o)) ? (wodAiDifficulty(o).bonus || 1) : 1;
         if(bonus !== 1) { aiIncomeByOwner[owner] *= bonus; aiManpowerIncomeByOwner[owner] *= bonus; }
     }
+    // (a historical battle can limit how fast the computer raises fresh troops: mission.enemyManpowerRate is the share
+    // of its towns' manpower it receives, so the armies on the map and the scripted waves decide the battle; its money,
+    // which pays the upkeep, is untouched)
+    const levy = gameData.mission?.enemyManpowerRate;
+    if(levy >= 0 && levy < 1) for(let owner in aiCitiesByOwner) aiManpowerIncomeByOwner[owner] *= levy;
     for(let owner in aiCitiesByOwner) {
         if(gameData.aiMoneyByOwner[owner] === undefined) gameData.aiMoneyByOwner[owner] = 1000;
         if(gameData.aiManpowerByOwner[owner] === undefined) gameData.aiManpowerByOwner[owner] = 5000;
@@ -542,7 +547,7 @@ function wodStepUnitCombat(unit, dt) {
         wodGrantUnitCombatXp(unit, dealtCas, dmgPerSec * dt);
         wodStagingMarkCombatOnCityUrbanTile(unit, enemy);
         if(unit._combatShotTimer == null) {
-            unit._combatShotTimer = wodCombatShotPhase(unit) * shotInterval * 1.35;
+            unit._combatShotTimer = wodCombatShotFirstTimer(unit, shotInterval);
         }
         if(unit._combatShotSlot == null) unit._combatShotSlot = (wodCombatShotPhase(unit) * 5) | 0;
         unit._combatShotTimer += dt;

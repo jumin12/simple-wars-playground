@@ -10,9 +10,13 @@ for(const stage of stages){
  if(PLANS[stage.id]){
   const water=hash(d.hexList.filter(h=>h.type==='water').map(h=>[h.q,h.r]));assert(!riverHashes.has(water),'reused water layout '+stage.id);riverHashes.add(water);
   const towns=hash(d.cities.map(c=>[c.q,c.r]));assert(!townLayouts.has(towns),'reused town layout '+stage.id);townLayouts.add(towns);
-  assert(d.hexList.filter(h=>h.type==='urban').every(h=>d.cities.some(c=>c.id===h.cityId)),'orphan urban blocks '+stage.id);
+  // a town's streets (every one must be held to take it) are its compact core; the rest of a built-up district is
+  // street-fighting cover owned by the nearest town's side, not streets (500+ block Berlin districts never fell)
+  assert(d.hexList.filter(h=>h.cityId).every(h=>h.type==='urban'&&d.cities.some(c=>c.id===h.cityId&&Math.abs(h.q-c.q)<=2&&Math.abs(h.r-c.r)<=2)),'town streets beyond the core '+stage.id);
+  for(const c of d.cities){const streets=d.hexList.filter(h=>h.cityId===c.id).length;assert(streets>=9&&streets<=13,'town footprint '+c.name+' '+streets+' '+stage.id);}
+  assert(d.hexList.filter(h=>h.type==='urban'&&!h.cityId).every(h=>h.owner>0),'ownerless district blocks '+stage.id);
   assert(d.roads.every(r=>r.points?.length>=2&&r.points.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))),'road plan lost '+stage.id);
  }
 }
-assert.equal(terrainHashes.size,24);assert.equal(riverHashes.size,17);assert.equal(townLayouts.size,17);
+assert.equal(terrainHashes.size,27);assert.equal(riverHashes.size,17);assert.equal(townLayouts.size,17);
 console.log('24 distinct complete battlefields; all 17 campaign maps have unique waterways, town layouts, explicit road routes and named landmarks.');

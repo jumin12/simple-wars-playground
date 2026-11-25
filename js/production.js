@@ -270,7 +270,7 @@ function drawWodUnitSpawnFx(ctx, unit, ur, gfxLite, layer) {
     }
     ctx.restore();
 }
-/** One horizontal row above the unit: combat star + badges (never stacked vertically). */
+/** One horizontal row above the unit: the fighting icon (drawCombatEraIcon) + badges (never stacked vertically). */
 function drawWodUnitOverheadRow(ctx, unit, ur, gfxLite, combatBurstOn) {
     if(!unit || unit.hp <= 0 || unit.type === 'convoy') return;
     const grace=(unit.encircledFlash||0)>0?Math.max(0,WOD_SUPPLY_GRACE_SECONDS-(unit.outOfSupplySeconds||0)):0;
@@ -323,7 +323,7 @@ function drawWodUnitOverheadRow(ctx, unit, ur, gfxLite, combatBurstOn) {
         ctx.translate(cx, rowY);
         ctx.scale(sc, sc);
         if(s.k === 'combat')
-            drawCombatBurstIcon(ctx, 0, 0, burstSz);
+            drawCombatEraIcon(ctx, 0, 0, burstSz);
         else if(s.k === 'fort')
             drawWodFortShieldBadge(ctx, 0, 0, glyphR);
         else {

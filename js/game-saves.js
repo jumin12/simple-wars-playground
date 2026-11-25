@@ -153,7 +153,7 @@ const WOD_GAME_SAVE_SKIP_KEYS = new Set([
     '_unitSpriteCache', '_fogCanvas', '_fogCtx', '_fogCloudPattern', '_topoShadeCanvas', '_fogCanvasDirty', '_fogVisible',
     '_fogViewNextAt', '_fogVisionTimer', '_fogOwner', '_fogRevision', '_hudDomAt', '_lastUpdateMs', '_terrDirtyNext',
     '_terrDirtyPending', '_frameSimDt', '_wodPfCache', '_wodPfFrameActive', '_unitGridScratch', 'unitSpatialGrid',
-    '_cityGridScratch', 'citySpatialGrid', '_wodCombatDrawScratch', '_combatFx', '_combatFxPool', '_aiLocalSituation',
+    '_cityGridScratch', 'citySpatialGrid', '_wodCombatDrawScratch', '_combatFx', '_combatFxPool', '_combatBumps', '_combatFxPeriod', '_combatFxSeq', '_aiLocalSituation',
     '_uiTroopCache', '_uiTankCache', '_uiShipCache', '_enemyDistField', '_aiFrontlineHexCache', '_landIncomeCache',
     '_citySupplyCache', '_healingCombatRange', '_generalAuraCache', '_aiArrivalCache', '_hdRegionGeometry',
     '_combatCamBounds', '_wodBootSettledUntil', '_wodSaveClock', '_wodSavedSlot', '_fogSeenAt',
@@ -525,11 +525,13 @@ function wodCloseGameSaves() {
     if(ui.returnTo && ui.returnTo !== 'menu' && document.getElementById(ui.returnTo + 'Panel')) { showPanel(ui.returnTo); return; }
     hidePanels();
 }
-/** Pause menu → Save game. The menu opens over the pause menu, which keeps the battle paused while a slot is picked. */
+/** Pause menu → Saved games. The menu opens over the pause menu, which keeps the battle paused while a slot is picked.
+ *  It saves this battle when it can be saved, and loads any save (leaving this battle). */
 function wodOpenGameSavesFromGame() {
+    if((gameData.mp && gameData.mp.enabled) || (typeof wodTutorial !== 'undefined' && wodTutorial)) { showNotification(wodGameSaveBlockReason() || 'Saved games are not available here.'); return; }
     const why = wodGameSaveBlockReason();
-    if(why) { showNotification(why); return; }
-    wodOpenGameSaves({ mode: 'save', tab: wodGameSaveMatchTab(), kind: 'match', returnTo: 'game' });
+    wodGameSavesUi.saveBlocked = why;
+    wodOpenGameSaves({ mode: why ? 'load' : 'save', tab: wodGameSaveMatchTab(), kind: 'match', returnTo: 'game' });
 }
 /** Campaign map → Save campaign / Saved games. */
 function wodOpenCampaignSaves(save) {
@@ -546,8 +548,8 @@ function wodSyncEscSaveButton() {
     const hidden = !!(gameData.mp && gameData.mp.enabled) || (typeof wodTutorial !== 'undefined' && !!wodTutorial);
     btn.classList.toggle('hidden', hidden);
     const why = hidden ? '' : wodGameSaveBlockReason();
-    btn.disabled = !!why;
-    btn.title = why || 'Save this battle in one of five slots';
+    btn.disabled = false;
+    btn.title = why ? why + ' You can still load a saved game.' : 'Save this battle, or load a saved game';
 }
 function wodSyncCampaignSaveButtons() {
     const save = document.getElementById('wodCampSaveBtn');
@@ -600,7 +602,7 @@ function wodGameSaveSlotHtml(tab, i, entry) {
         ? '<img class="wod-save-slot-thumb" alt="" src="' + entry.thumb + '">' : '<div class="wod-save-slot-thumb is-blank" aria-hidden="true"></div>';
     let acts = '';
     if(saving) acts += btn('overwrite', 'Overwrite', 'wod-save-slot-primary');
-    else if(ui.mode === 'load') acts += btn('load', 'Load', 'wod-save-slot-primary');
+    if(ui.mode === 'load' || ui.returnTo === 'game') acts += btn('load', 'Load', saving ? '' : 'wod-save-slot-primary');
     acts += btn('rename', 'Rename') + btn('delete', 'Delete', 'wod-save-slot-danger');
     return '<div class="wod-save-slot' + (current ? ' is-current' : '') + '" data-slot="' + i + '"><div class="wod-save-slot-num">' + (i + 1) + '</div>' + thumb
         + '<div class="wod-save-slot-body"><div class="wod-save-slot-name">' + esc(entry.name || 'Saved game') + (current ? ' <span class="wod-save-slot-tag">This battle</span>' : '') + '</div>' + lines + when + '</div>'
@@ -617,7 +619,7 @@ async function wodRefreshGameSavesPanel() {
     if(title) title.textContent = ui.mode === 'save' ? (ui.kind === 'campaign-map' ? 'Save campaign' : 'Save game') : 'Saved games';
     if(lead) {
         const where = WOD_GAME_SAVE_TAB_LABEL[ui.saveTab] || '';
-        lead.textContent = ui.mode !== 'save' ? 'Five slots each for skirmish battles, campaigns and missions. Load one to carry on where you left off.'
+        lead.textContent = ui.mode !== 'save' ? (ui.returnTo === 'game' && ui.saveBlocked ? ui.saveBlocked + ' You can load a saved game instead.' : 'Five slots each for skirmish battles, campaigns and missions. Load one to carry on where you left off.')
             : ui.tab !== ui.saveTab ? 'This ' + (ui.kind === 'campaign-map' ? 'campaign' : 'battle') + ' saves under ' + where + '. You can rename or delete saves here.'
             : ui.kind === 'campaign-map' ? 'Pick a slot for this campaign. A save keeps the war map, your army and research.'
             : 'Pick a slot for this battle. Five slots for ' + where.toLowerCase() + (ui.saveTab === 'campaign' ? ' (the campaign is saved with it).' : '.');
@@ -664,6 +666,17 @@ async function wodGameSaveAction(act, tab, slot) {
             showNotification('Saved “' + saved.name + '” in slot ' + (slot + 1) + '.');
         } else if(act === 'load') {
             if(!entry) return;
+            if(gameState === 'PLAYING' && ui.returnTo === 'game') {
+                const kept = wodGameSavedAndUnchanged();
+                const ok = await wodShowConfirmDialog({ title: 'Leave this battle?', confirmLabel: 'Load', danger: !kept,
+                    body: 'Load “' + entry.name + '”. ' + (kept ? 'This battle is saved as it stands.' : 'This battle has not been saved since it moved on, so leaving it counts as a loss.') + (tab === 'campaign' ? ' The save replaces the campaign you are fighting now.' : '') });
+                if(!ok) return;
+                const panel = wodGameSavesPanel();
+                if(panel) { panel.classList.add('hidden'); panel.classList.remove('wod-saves-ingame'); }
+                returnToMenu();
+                await run(() => wodLoadGameSave(tab, slot));
+                return;
+            }
             if(tab === 'campaign' && wodRogueLoad()) {
                 const ok = await wodShowConfirmDialog({ title: 'Load this campaign save?', body: 'It replaces the campaign you are fighting now. Save that one first if you want to keep it.', confirmLabel: 'Load' });
                 if(!ok) return;

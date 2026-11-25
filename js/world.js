@@ -514,6 +514,7 @@ function wodCombatFxClear() {
     } else {
         gameData._combatFx = [];
     }
+    if(gameData._combatBumps) gameData._combatBumps.clear();
 }
 function wodCombatFxTake() {
     if(!gameData._combatFxPool) gameData._combatFxPool = [];
@@ -714,6 +715,17 @@ function wodBuildFxPrecache() {
             c.globalCompositeOperation = 'source-over';
         }));
     }
+    // a soft puff of powder smoke (Napoleonic volleys and broadsides: wodDrawVolleyFx)
+    cache.combat.puff = wodBakeFxSprite(64, 64, (c) => {
+        let g = c.createRadialGradient(0, 0, 2, 0, 0, 31);
+        g.addColorStop(0, 'rgba(247, 245, 239, 1)');
+        g.addColorStop(0.45, 'rgba(233, 230, 222, 0.78)');
+        g.addColorStop(1, 'rgba(222, 218, 210, 0)');
+        c.fillStyle = g;
+        c.beginPath();
+        c.arc(0, 0, 31, 0, Math.PI * 2);
+        c.fill();
+    });
     cache.ready = true;
     wodFxCache = cache;
     return cache;
@@ -761,6 +773,7 @@ function wodRefreshCombatCamBounds() {
     let camL = gameData.camera.x / camZ;
     let camT = gameData.camera.y / camZ;
     let pad = Math.max(72, 120 / camZ);
+    gameData._combatFxPeriod = wodGetRenderPeriod();
     gameData._combatCamBounds = {
         l: camL - pad,
         r: camL + viewW / camZ + pad,
@@ -783,18 +796,28 @@ function wodCombatShotPhase(unit) {
 }
 function wodCombatShotVisualInterval(unit) {
     if(!unit) return 0.24;
+    const eraInterval = WOD_ERA_FX_INTERVAL[wodCombatFxStyle(unit)];
+    if(eraInterval) return eraInterval;
     if(unit.type === 'heavy') return 0.52;
     if(wodIsNavalUnit(unit)) return 0.38;
     if(unit.type === 'marine') return 0.30;
     return 0.22;
 }
+/** Seconds before a unit's first shot of a fight (its shot timer starts here and fires at the shot interval). */
+function wodCombatShotFirstTimer(unit, interval) {
+    const phase = wodCombatShotPhase(unit);
+    // (a fight opens with its first clash, arrows or volley within about a second, each unit of a line at its own moment)
+    return interval <= 0.6 ? phase * interval * 1.35 : Math.max(0, interval - 0.15 - phase * 0.9);
+}
 function wodEmitCombatShot(attacker, target) {
     if(!attacker || !target) return;
-    if(gameData._combatFx && gameData._combatFx.length >= WOD_COMBAT_FX_CAP) return;
+    if(gameData._combatFx && gameData._combatFx.length >= WOD_COMBAT_FX_CAP && !wodCombatFxMakeRoom()) return;
     if(!wodFogCanSeeUnit(attacker) && !wodFogCanSeeUnit(target)) return;
     let tx = target.x, ty = target.y;
     let mx = (attacker.x + tx) * 0.5, my = (attacker.y + ty) * 0.5;
     if(!wodCombatShotInView(mx, my)) return;
+    const style = wodCombatFxStyle(attacker);
+    if(style !== 'tracer') { wodEmitEraCombatFx(attacker, target, style); return; }
     let m = wodCombatMuzzlePoint(attacker, tx, ty);
     let dx = tx - m.x, dy = ty - m.y;
     let dist = Math.sqrt(dx * dx + dy * dy) || 1;
@@ -813,6 +836,386 @@ function wodEmitCombatShot(attacker, target) {
     tr.life = tracerLife; tr.maxLife = tracerLife;
     tr.color = col; tr.width = width; tr.heavy = heavy;
     if(!wodCombatFxPush(tr)) gameData._combatFxPool.push(tr);
+}
+
+// ---- How each era fights on screen
+// Modern armies fire tracers (above). Older armies fight the way their era did. It all comes from the same shot calls
+// (the host's combat step, and a multiplayer guest's wodGuestCombatFx), so every player sees the same kind of fight:
+//   melee     ancient and medieval foot: the unit lunges at its enemy and the two clash, with sparks and dust; two that
+//             fight each other meet in the middle (wodCombatBumpOffset moves the drawn unit)
+//   charge    horse, chariots and knights, and the Napoleonic horse regiments and dragoons: a harder, deeper lunge
+//   arrows    medieval rangers and the warships of both eras loose arcing arrows; javelins: ancient skirmishers
+//   volley    Napoleonic foot fires a volley every few seconds: flashes along the line, then a bank of smoke that drifts
+//             off and thins; skirmish: chasseurs fire loose single shots; broadside: ships of the line
+// Effects only: what a unit hits and when is the same in every era.
+const WOD_ERA_FX_INTERVAL = { melee: 1.1, charge: 1.6, arrows: 1.5, javelins: 1.8, volley: 3.2, skirmish: 0.9, broadside: 4.2 };
+function wodCombatFxStyle(unit, period) {
+    period = period || gameData._combatFxPeriod || wodGetRenderPeriod();
+    if(!unit || period === 'modern' || WOD_PERIOD_IDS.indexOf(period) < 0) return 'tracer';
+    const t = unit.type;
+    if(wodIsNavalUnit(unit)) return period === 'napoleonic' ? 'broadside' : 'arrows';
+    if(t === 'heavy' || t === 'motorized') return 'charge';
+    if(period === 'napoleonic') return t === 'mountaineer' ? 'skirmish' : 'volley';
+    if(t === 'mountaineer') return period === 'ancient' ? 'javelins' : 'arrows';
+    return 'melee';
+}
+function wodFxRand(seed, i) {
+    const s = Math.sin(seed * 12.9898 + i * 78.233) * 43758.5453;
+    return s - Math.floor(s);
+}
+// (when the effect budget is full, the oldest smoke or landed arrows still thinning out make way for a new shot)
+function wodCombatFxMakeRoom() {
+    const fx = gameData._combatFx;
+    let best = -1, left = Infinity;
+    for(let i = 0; i < fx.length; i++) {
+        const f = fx[i];
+        if((f.kind === 'volley' || f.kind === 'arrows') && f.life < f.maxLife * 0.45 && f.life < left) { best = i; left = f.life; }
+    }
+    if(best < 0) return false;
+    if(!gameData._combatFxPool) gameData._combatFxPool = [];
+    gameData._combatFxPool.push(fx.splice(best, 1)[0]);
+    return true;
+}
+function wodEmitEraCombatFx(attacker, target, style) {
+    const period = gameData._combatFxPeriod || wodGetRenderPeriod();
+    // (seeds from a counter, not Math.random: the scatter of arrows and smoke takes nothing from any random sequence)
+    const seed = gameData._combatFxSeq = ((gameData._combatFxSeq | 0) + 1) & 0xffff;
+    if(style === 'melee' || style === 'charge') wodEmitMeleeClash(attacker, target, style === 'charge', period, seed);
+    else if(style === 'arrows' || style === 'javelins') wodEmitArrows(attacker, target, style === 'javelins', seed);
+    else wodEmitVolley(attacker, target, style, seed);
+}
+
+// Melee: the lunge, as a share of the distance to the enemy over the bump's life: a short draw back, a rush in, the
+// knock of the clash, and back into place.
+const WOD_MELEE_HIT = 0.36;
+const WOD_CLASH_COLORS = {
+    ancient: { spark: '#ffd88a', dust: 'rgb(186, 164, 122)' },
+    medieval: { spark: '#eef3ff', dust: 'rgb(160, 146, 118)' },
+    napoleonic: { spark: '#fff2c4', dust: 'rgb(168, 150, 116)' }
+};
+const WOD_MELEE_KNOCK_SECONDS = 0.13;
+function wodMeleeLunge(p) {
+    if(p < 0.14) return -0.1 * Math.sin(p / 0.14 * Math.PI * 0.5);
+    if(p < WOD_MELEE_HIT) { const q = (p - 0.14) / (WOD_MELEE_HIT - 0.14); return -0.1 + 1.1 * q * q; }
+    if(p < 0.48) return 1 - 0.08 * Math.sin((p - WOD_MELEE_HIT) / (0.48 - WOD_MELEE_HIT) * Math.PI);
+    const q = (p - 0.48) / 0.52;
+    return 1 - q * q * (3 - 2 * q);
+}
+/** How far a unit fighting hand to hand is drawn from where it stands (null when it is not lunging). */
+function wodCombatBumpOffset(unit) {
+    const m = gameData._combatBumps;
+    const f = m && m.size && unit.uid != null ? m.get(unit.uid) : null;
+    if(!f || f.kind !== 'bump' || f.uid !== unit.uid || !(f.life > 0)) return null;
+    // (a unit struck by one it is not fighting back is knocked back a little just as the blow lands, at the end of its
+    // short bump)
+    const k = (f.knock ? Math.sin(Math.min(1, Math.max(0, 1 - f.life / WOD_MELEE_KNOCK_SECONDS)) * Math.PI) : wodMeleeLunge(1 - f.life / f.maxLife)) * f.dist;
+    return { x: f.dx * k, y: f.dy * k };
+}
+function wodEmitMeleeClash(a, b, charge, period, seed) {
+    if(a.uid == null) return;
+    const bumps = gameData._combatBumps || (gameData._combatBumps = new Map());
+    if(bumps.has(a.uid)) return;
+    const ax = a._drawX != null ? a._drawX : a.x, ay = a._drawY != null ? a._drawY : a.y;
+    const bx = b._drawX != null ? b._drawX : b.x, by = b._drawY != null ? b._drawY : b.y;
+    let dx = bx - ax, dy = by - ay;
+    const d = Math.hypot(dx, dy);
+    if(d < 0.5) return;
+    dx /= d; dy /= d;
+    const ra = a.radius || 10, rb = b.radius || 10;
+    // (to where the two drawn units touch, a little over a unit's radius from its middle, and a little into the enemy,
+    // so they visibly strike; a charge strikes deeper)
+    const reach = Math.min(56, Math.max(ra * 0.6, d - (ra + rb) * (charge ? 1 : 1.1)));
+    const bStyle = b.uid != null && b.hp > 0 && !bumps.has(b.uid) ? wodCombatFxStyle(b, period) : null;
+    const room = (gameData._combatFx || []).length + 2 <= WOD_COMBAT_FX_CAP;
+    const meet = room && b.combatTargetUid === a.uid && (bStyle === 'melee' || bStyle === 'charge');
+    const life = charge ? 0.8 : 0.62, dist = meet ? reach * 0.5 : reach;
+    const col = WOD_CLASH_COLORS[period] || WOD_CLASH_COLORS.medieval;
+    const f = wodCombatFxTake();
+    f.kind = 'bump'; f.uid = a.uid; f.dx = dx; f.dy = dy; f.dist = dist; f.life = life; f.maxLife = life;
+    f.charge = charge; f.clash = true; f.knock = false; f.seed = seed; f.spark = col.spark; f.dust = col.dust;
+    f.cx = ax + dx * (ra * 1.1 + dist); f.cy = ay + dy * (ra * 1.1 + dist); f.x = f.cx; f.y = f.cy;
+    if(!wodCombatFxPush(f)) { gameData._combatFxPool.push(f); return; }
+    bumps.set(a.uid, f);
+    if(!bStyle || !room) return;
+    // the enemy: if it fights this unit hand to hand too, it lunges back at the same moment and they meet in the middle;
+    // otherwise it is knocked back a little as the blow lands
+    const g = wodCombatFxTake();
+    g.kind = 'bump'; g.uid = b.uid; g.life = life; g.maxLife = life; g.clash = false; g.seed = seed; g.spark = col.spark; g.dust = col.dust;
+    g.cx = f.cx; g.cy = f.cy; g.x = f.cx; g.y = f.cy;
+    if(meet) { g.dx = -dx; g.dy = -dy; g.dist = dist; g.charge = bStyle === 'charge'; g.knock = false; }
+    else {
+        g.dx = dx; g.dy = dy; g.dist = Math.min(6, rb * 0.4) * (charge ? 1.4 : 1); g.charge = false; g.knock = true;
+        g.life = g.maxLife = life * WOD_MELEE_HIT + WOD_MELEE_KNOCK_SECONDS;
+    }
+    if(wodCombatFxPush(g)) bumps.set(b.uid, g);
+    else { gameData._combatFxPool.push(g); if(meet) f.dist = reach; }
+}
+function wodDrawMeleeClash(ctx, f, gfxLite) {
+    if(!f.clash) return false;
+    const h = (1 - f.life / f.maxLife - WOD_MELEE_HIT) / (1 - WOD_MELEE_HIT);
+    if(h < 0) return false;
+    const x = f.cx, y = f.cy, big = f.charge ? 1.45 : 1;
+    ctx.save();
+    // dust kicked up where they meet
+    const puffs = gfxLite ? 3 : (f.charge ? 7 : 5);
+    ctx.fillStyle = f.dust;
+    for(let i = 0; i < puffs; i++) {
+        const a = wodFxRand(f.seed, i) * Math.PI * 2, sp = (6 + wodFxRand(f.seed, i + 9) * 9) * big;
+        const r = (3 + h * 8 * big) * (0.7 + wodFxRand(f.seed, i + 17) * 0.6);
+        ctx.globalAlpha = 0.4 * (1 - h) * (1 - h);
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(a) * sp * h, y + Math.sin(a) * sp * h * 0.6 - h * 4, r, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    // the knock of weapons and shields: a bright flash and sparks thrown out to the sides
+    if(h < 0.45) {
+        const k = h / 0.45;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1 - k;
+        ctx.fillStyle = f.spark;
+        ctx.beginPath();
+        ctx.arc(x, y, (2.6 + k * 2.5) * big, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = f.spark;
+        ctx.lineWidth = 1.3;
+        ctx.lineCap = 'round';
+        const n = gfxLite ? 4 : 7, along = Math.atan2(f.dy, f.dx);
+        for(let i = 0; i < n; i++) {
+            const ang = along + (i % 2 ? 1 : -1) * Math.PI * 0.5 + (wodFxRand(f.seed, i + 30) - 0.5) * 1.6;
+            const r0 = 2 + k * 7 * big, r1 = r0 + (4 + wodFxRand(f.seed, i + 40) * 4) * (1 - k * 0.6);
+            ctx.beginPath();
+            ctx.moveTo(x + Math.cos(ang) * r0, y + Math.sin(ang) * r0);
+            ctx.lineTo(x + Math.cos(ang) * r1, y + Math.sin(ang) * r1);
+            ctx.stroke();
+        }
+    }
+    ctx.restore();
+    return true;
+}
+
+// Arrows and javelins: a few at a time, each on its own arc to somewhere about the enemy, then stuck in the ground for a
+// moment.
+function wodEmitArrows(a, b, javelin, seed) {
+    const m = wodCombatMuzzlePoint(a, b.x, b.y);
+    const d = Math.hypot(b.x - m.x, b.y - m.y) || 1;
+    const f = wodCombatFxTake();
+    f.kind = 'arrows'; f.javelin = javelin; f.seed = seed;
+    f.x0 = m.x; f.y0 = m.y; f.x1 = b.x; f.y1 = b.y; f.d = d;
+    f.n = javelin ? 2 : (wodIsNavalUnit(a) ? 4 : 3);
+    f.flight = (javelin ? 0.5 : 0.42) + d / (javelin ? 260 : 330);
+    f.stagger = javelin ? 0.16 : 0.085;
+    f.stick = 0.55;
+    f.arc = d * (javelin ? 0.2 : 0.3) + 4;
+    f.spreadFrom = (a.radius || 10) * 1.3;
+    f.spreadTo = (b.radius || 10) * 1.1;
+    f.life = f.maxLife = f.flight + f.stagger * (f.n - 1) + f.stick;
+    f.x = (m.x + b.x) * 0.5; f.y = (m.y + b.y) * 0.5;
+    if(!wodCombatFxPush(f)) gameData._combatFxPool.push(f);
+}
+function wodDrawArrowShape(ctx, hx, hy, vx, vy, len, javelin, alpha, stuck) {
+    const tx = hx - vx * len, ty = hy - vy * len;
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = javelin ? '#6b4a2b' : '#4a3320';
+    ctx.lineWidth = javelin ? 2.1 : 1.6;
+    ctx.beginPath();
+    ctx.moveTo(tx, ty);
+    ctx.lineTo(hx, hy);
+    ctx.stroke();
+    if(!stuck) {
+        ctx.fillStyle = '#d8d2c4';
+        ctx.beginPath();
+        ctx.moveTo(hx + vx * 3.4, hy + vy * 3.4);
+        ctx.lineTo(hx - vy * 1.8, hy + vx * 1.8);
+        ctx.lineTo(hx + vy * 1.8, hy - vx * 1.8);
+        ctx.closePath();
+        ctx.fill();
+    }
+    if(!javelin) {
+        ctx.strokeStyle = '#efe6d2';
+        ctx.lineWidth = 1.3;
+        ctx.beginPath();
+        ctx.moveTo(tx + vx * 3, ty + vy * 3);
+        ctx.lineTo(tx - vy * 2.3 - vx * 0.4, ty + vx * 2.3 - vy * 0.4);
+        ctx.moveTo(tx + vx * 3, ty + vy * 3);
+        ctx.lineTo(tx + vy * 2.3 - vx * 0.4, ty - vx * 2.3 - vy * 0.4);
+        ctx.stroke();
+    }
+}
+function wodDrawArrowsFx(ctx, f, gfxLite) {
+    const age = f.maxLife - f.life, len = f.javelin ? 18 : 12;
+    const ux = (f.x1 - f.x0) / f.d, uy = (f.y1 - f.y0) / f.d, px = -uy, py = ux;
+    let drew = false;
+    ctx.save();
+    ctx.lineCap = 'round';
+    for(let i = 0; i < f.n; i++) {
+        const fa = age - i * f.stagger;
+        if(fa < 0) continue;
+        const sj = (wodFxRand(f.seed, i) - 0.5) * f.spreadFrom;
+        const ej = (wodFxRand(f.seed, i + 7) - 0.5) * f.spreadTo * 2, el = (wodFxRand(f.seed, i + 13) - 0.5) * f.spreadTo * 1.4;
+        const sx = f.x0 + px * sj, sy = f.y0 + py * sj;
+        const ex = f.x1 + px * ej + ux * el, ey = f.y1 + py * ej + uy * el;
+        const t = fa / f.flight;
+        if(t <= 1) {
+            const x = sx + (ex - sx) * t, y = sy + (ey - sy) * t, lift = f.arc * 4 * t * (1 - t);
+            let vx = ex - sx, vy = (ey - sy) - f.arc * 4 * (1 - 2 * t);
+            const vl = Math.hypot(vx, vy) || 1;
+            vx /= vl; vy /= vl;
+            if(!gfxLite) {
+                // its shadow on the ground, under it
+                ctx.globalAlpha = 0.2;
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                ctx.moveTo(x - ux * len * 0.8, y - uy * len * 0.8);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+            wodDrawArrowShape(ctx, x, y - lift, vx, vy, len, f.javelin, 1, false);
+        } else {
+            const k = (fa - f.flight) / f.stick;
+            if(k >= 1) continue;
+            let vx = ex - sx, vy = (ey - sy) + f.arc * 4;
+            const vl = Math.hypot(vx, vy) || 1;
+            wodDrawArrowShape(ctx, ex, ey, vx / vl, vy / vl, len * 0.72, f.javelin, 1 - k * k, true);
+        }
+        drew = true;
+    }
+    ctx.restore();
+    return drew;
+}
+
+// Volleys: muzzle flashes along the front of the line, the balls, dust where they strike, and smoke from every musket
+// that billows out toward the enemy, drifts with the wind and thins out over a few seconds.
+const WOD_VOLLEY_KIND = {
+    volley: { n: 6, life: 2.8, ripple: 0.012, ragged: 0.05, front: 0.9, width: 2.3, flash: 0.1, flashR: 4.2, flashLen: 10, travel: 0.14, r0: 5, r1: 15, alpha: 0.8, push: 10, rise: 3.5, puffs: 2, cannon: false },
+    skirmish: { n: 1, life: 1.8, ripple: 0, ragged: 0, front: 0.9, width: 0, flash: 0.09, flashR: 3.6, flashLen: 9, travel: 0.14, r0: 4, r1: 11, alpha: 0.72, push: 7, rise: 3.5, puffs: 2, cannon: false },
+    broadside: { n: 5, life: 3.4, ripple: 0.09, ragged: 0.04, front: 0.6, width: 1.8, flash: 0.13, flashR: 6, flashLen: 13, travel: 0.42, r0: 6, r1: 20, alpha: 0.8, push: 11, rise: 3, puffs: 2, cannon: true }
+};
+const WOD_SMOKE_WIND = { x: 2.2, y: -1.2 };
+function wodEmitVolley(a, b, style, seed) {
+    const cfg = WOD_VOLLEY_KIND[style] || WOD_VOLLEY_KIND.volley;
+    let dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.hypot(dx, dy) || 1;
+    dx /= d; dy /= d;
+    const ra = a.radius || 10;
+    const f = wodCombatFxTake();
+    f.kind = 'volley'; f.style = style; f.seed = seed;
+    f.dx = dx; f.dy = dy; f.px = -dy; f.py = dx; f.d = d;
+    f.x0 = a.x + dx * ra * cfg.front; f.y0 = a.y + dy * ra * cfg.front;
+    f.x1 = b.x; f.y1 = b.y; f.tr = (b.radius || 10) * 0.8;
+    f.n = cfg.n; f.width = ra * cfg.width; f.water = wodIsNavalUnit(b);
+    f.life = f.maxLife = cfg.life + (cfg.n - 1) * cfg.ripple + cfg.ragged;
+    f.x = (f.x0 + b.x) * 0.5; f.y = (f.y0 + b.y) * 0.5;
+    if(!wodCombatFxPush(f)) gameData._combatFxPool.push(f);
+}
+function wodDrawVolleyFx(ctx, f, gfxLite) {
+    const cfg = WOD_VOLLEY_KIND[f.style] || WOD_VOLLEY_KIND.volley, age = f.maxLife - f.life;
+    const puff = wodFxCache && wodFxCache.ready && wodFxCache.combat && wodFxCache.combat.puff;
+    const puffs = gfxLite ? 1 : cfg.puffs;
+    let drew = false;
+    ctx.save();
+    // the smoke first, under the flashes
+    for(let i = 0; i < f.n; i++) {
+        const fa = age - i * cfg.ripple - wodFxRand(f.seed, i) * cfg.ragged;
+        if(fa < 0 || fa >= cfg.life) continue;
+        const off = f.n > 1 ? (i / (f.n - 1) - 0.5) * f.width : 0;
+        const lx = f.x0 + f.px * off, ly = f.y0 + f.py * off;
+        const s = fa / cfg.life, grow = 1 - Math.exp(-fa * 2.4), out = 1 - Math.exp(-fa * 3);
+        for(let j = 0; j < puffs; j++) {
+            const rj = wodFxRand(f.seed, i * 5 + j + 50);
+            const fwd = cfg.push * out * (1 + j * 0.55), side = (rj - 0.5) * cfg.r1 * 0.7 * grow;
+            const cx = lx + f.dx * fwd + f.px * side + WOD_SMOKE_WIND.x * fa;
+            const cy = ly + f.dy * fwd + f.py * side + WOD_SMOKE_WIND.y * fa - cfg.rise * fa;
+            const r = (cfg.r0 + (cfg.r1 - cfg.r0) * grow) * (0.8 + rj * 0.4) * (j ? 0.85 : 1);
+            const alpha = Math.min(1, fa / 0.06) * cfg.alpha * Math.pow(1 - s, 1.3) * (j ? 0.8 : 1);
+            if(alpha <= 0.01) continue;
+            ctx.globalAlpha = alpha;
+            if(puff) ctx.drawImage(puff, cx - r, cy - r, r * 2, r * 2);
+            else {
+                ctx.fillStyle = '#ebe7de';
+                ctx.beginPath();
+                ctx.arc(cx, cy, r * 0.7, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            drew = true;
+        }
+    }
+    // flashes, the shot in flight and where it lands
+    for(let i = 0; i < f.n; i++) {
+        const fa = age - i * cfg.ripple - wodFxRand(f.seed, i) * cfg.ragged;
+        if(fa < 0 || fa > cfg.travel + 0.45) continue;
+        const off = f.n > 1 ? (i / (f.n - 1) - 0.5) * f.width : 0;
+        const lx = f.x0 + f.px * off, ly = f.y0 + f.py * off;
+        const hj = (wodFxRand(f.seed, i + 20) - 0.5) * f.tr * 2, hl = (wodFxRand(f.seed, i + 25) - 0.5) * f.tr * 1.4;
+        const hx = f.x1 + f.px * hj + f.dx * hl, hy = f.y1 + f.py * hj + f.dy * hl;
+        if(fa < cfg.flash) {
+            const k = fa / cfg.flash;
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.globalAlpha = (1 - k) * 0.9;
+            ctx.fillStyle = '#ffb54d';
+            ctx.beginPath();
+            ctx.arc(lx, ly, cfg.flashR * (1 - k * 0.4), 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff3d0';
+            ctx.beginPath();
+            ctx.moveTo(lx + f.px * cfg.flashR * 0.6, ly + f.py * cfg.flashR * 0.6);
+            ctx.lineTo(lx + f.dx * cfg.flashLen * (1 - k * 0.3), ly + f.dy * cfg.flashLen * (1 - k * 0.3));
+            ctx.lineTo(lx - f.px * cfg.flashR * 0.6, ly - f.py * cfg.flashR * 0.6);
+            ctx.closePath();
+            ctx.fill();
+            ctx.globalCompositeOperation = 'source-over';
+            drew = true;
+        }
+        if(fa < cfg.travel && !gfxLite) {
+            const t = fa / cfg.travel, x = lx + (hx - lx) * t, y = ly + (hy - ly) * t;
+            if(cfg.cannon) {
+                ctx.globalAlpha = 0.95;
+                ctx.fillStyle = '#1e1e1e';
+                ctx.beginPath();
+                ctx.arc(x, y - f.d * 0.08 * 4 * t * (1 - t), 1.8, 0, Math.PI * 2);
+                ctx.fill();
+            } else {
+                ctx.globalAlpha = 0.55;
+                ctx.strokeStyle = '#f2ede0';
+                ctx.lineWidth = 0.9;
+                ctx.beginPath();
+                ctx.moveTo(x - f.dx * 5, y - f.dy * 5);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+            drew = true;
+        }
+        const ia = fa - cfg.travel;
+        if(ia >= 0 && ia < 0.45) {
+            const k = ia / 0.45, big = cfg.cannon ? 2.2 : 1;
+            ctx.globalAlpha = (cfg.cannon ? 0.6 : 0.42) * (1 - k);
+            ctx.fillStyle = f.water ? '#e8f4f8' : (cfg.cannon ? '#5f5446' : '#a8957a');
+            if(f.water && cfg.cannon) {
+                // a splash: a column of spray that rises and falls back
+                for(let s = -1; s <= 1; s++) {
+                    ctx.beginPath();
+                    ctx.arc(hx + s * 2.4, hy - Math.sin(k * Math.PI) * (5 + (s ? 0 : 4)), 1.8 + k * 1.5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } else {
+                for(let s = 0; s < 3; s++) {
+                    const a = wodFxRand(f.seed, i * 3 + s + 70) * Math.PI * 2;
+                    ctx.beginPath();
+                    ctx.arc(hx + Math.cos(a) * 3 * k * big, hy + Math.sin(a) * 2 * k * big - k * 3, (1.5 + k * 3) * big, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+            drew = true;
+        }
+    }
+    ctx.restore();
+    return drew;
+}
+function wodDrawEraCombatFx(ctx, f, gfxLite) {
+    if(f.kind === 'bump') return wodDrawMeleeClash(ctx, f, gfxLite);
+    if(f.kind === 'arrows') return wodDrawArrowsFx(ctx, f, gfxLite);
+    if(f.kind === 'volley') return wodDrawVolleyFx(ctx, f, gfxLite);
+    return false;
 }
 // A multiplayer guest runs no simulation, so the shots the host's fights fire (wodEmitCombatShot, from the combat step)
 // were never drawn there: guests saw the armies fight without gunfire, and no effect ever aged. The host's snapshots carry
@@ -834,7 +1237,7 @@ function wodGuestCombatFx(dt) {
         const t = byUid.get(u.combatTargetUid);
         if(!t || Math.hypot(t.x - u.x, t.y - u.y) > (u.range || 50) * wodGeneralStatMultiplier(u) * 1.5 + (gameData.hexRadius || 20)) continue;
         const interval = wodCombatShotVisualInterval(u);
-        if(u._guestShotTimer == null) u._guestShotTimer = wodCombatShotPhase(u) * interval;
+        if(u._guestShotTimer == null) u._guestShotTimer = wodCombatShotFirstTimer(u, interval);
         u._guestShotTimer += dt;
         if(u._guestShotTimer >= interval && budget > 0) {
             u._guestShotTimer = Math.min(u._guestShotTimer - interval, interval);
@@ -900,12 +1303,18 @@ function wodUnitSmoothDrawXY(unit, simDt) {
 function wodUpdateCombatFx(dt) {
     if(gameData._structureCaptureDirty&&(!gameData.mp?.enabled||gameData.mp.isHost))wodSyncFortCapturesAfterTerritory();
     let fx = gameData._combatFx;
+    // (the units lunging at an enemy are rebuilt from the effects every step, so a unit never stays drawn mid-lunge)
+    const bumps = gameData._combatBumps;
+    if(bumps && bumps.size) bumps.clear();
     if(!fx || !fx.length) return;
     if(!gameData._combatFxPool) gameData._combatFxPool = [];
     let w = 0;
     for(let i = 0; i < fx.length; i++) {
         fx[i].life -= dt;
-        if(fx[i].life > 0) fx[w++] = fx[i];
+        if(fx[i].life > 0) {
+            fx[w++] = fx[i];
+            if(fx[i].kind === 'bump') (gameData._combatBumps || (gameData._combatBumps = new Map())).set(fx[i].uid, fx[i]);
+        }
         else gameData._combatFxPool.push(fx[i]);
     }
     fx.length = w;
@@ -922,7 +1331,12 @@ function wodDrawCombatFx(ctx, camL, camR, camT, camB, culPad, gfxLite, wodCull) 
         if(drawN >= drawCap) break;
         let f = fx[i];
         if(f.kind==='structure'){if(!wodCull||f.x>=camL-pad&&f.x<=camR+pad&&f.y>=camT-pad&&f.y<=camB+pad)wodDrawStructureDestruction(ctx,f);continue;}
-        if(f.kind !== 'tracer'||gameData.layers.units===false) continue;
+        if(gameData.layers.units===false) continue;
+        if(f.kind !== 'tracer') {
+            if(wodCull && (f.x < camL - pad || f.x > camR + pad || f.y < camT - pad || f.y > camB + pad)) continue;
+            if(wodDrawEraCombatFx(ctx, f, gfxLite)) drawN++;
+            continue;
+        }
         let mx = (f.x0 + f.x1) * 0.5;
         let my = (f.y0 + f.y1) * 0.5;
         if(wodCull && (mx < camL - pad || mx > camR + pad || my < camT - pad || my > camB + pad)) continue;

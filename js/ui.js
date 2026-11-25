@@ -801,6 +801,44 @@ function drawCombatBurstIcon(ctx, x, y, size) {
     ctx.fill();
     ctx.restore();
 }
+/** The "fighting" icon above units and besieged towns: crossed swords in the ancient and medieval eras, which fought
+ *  hand to hand; the burst of gunfire from the Napoleonic era on (and with the modern and WW2 skins). */
+function drawCombatEraIcon(ctx, x, y, size) {
+    const playing = gameState === 'PLAYING' || gameState === 'PAUSED';
+    const period = playing && gameData._combatFxPeriod || wodGetRenderPeriod();
+    if(period === 'ancient' || period === 'medieval') drawCrossedSwordsIcon(ctx, x, y, size);
+    else drawCombatBurstIcon(ctx, x, y, size);
+}
+function drawCrossedSwordsIcon(ctx, x, y, size) {
+    const L = size * 1.12, g = L * 0.42, bw = size * 0.32;
+    // one sword along +x: pommel, grip, crossguard, then the blade to its point
+    const sword = (angle) => {
+        ctx.save();
+        ctx.rotate(angle);
+        const blade = () => { ctx.beginPath(); ctx.moveTo(-g, -bw / 2); ctx.lineTo(L - bw * 0.9, -bw / 2); ctx.lineTo(L, 0); ctx.lineTo(L - bw * 0.9, bw / 2); ctx.lineTo(-g, bw / 2); ctx.closePath(); };
+        const guard = () => { ctx.beginPath(); ctx.rect(-g - size * 0.1, -size * 0.44, size * 0.2, size * 0.88); };
+        const grip = () => { ctx.beginPath(); ctx.rect(-L + size * 0.14, -size * 0.11, L - g - size * 0.14, size * 0.22); };
+        const pommel = () => { ctx.beginPath(); ctx.arc(-L + size * 0.1, 0, size * 0.17, 0, Math.PI * 2); };
+        ctx.strokeStyle = '#050505';
+        ctx.lineWidth = Math.max(1.25, size * 0.16);
+        for(const part of [blade, grip, guard, pommel]) { part(); ctx.stroke(); }
+        ctx.fillStyle = '#7a4a24'; grip(); ctx.fill();
+        ctx.fillStyle = '#e9eef2'; blade(); ctx.fill();
+        ctx.fillStyle = '#f1c40f'; guard(); ctx.fill(); pommel(); ctx.fill();
+        // the fuller down the middle of the blade
+        ctx.strokeStyle = 'rgba(120, 132, 145, 0.85)';
+        ctx.lineWidth = Math.max(0.5, size * 0.07);
+        ctx.beginPath(); ctx.moveTo(-g + size * 0.12, 0); ctx.lineTo(L - bw * 1.4, 0); ctx.stroke();
+        ctx.restore();
+    };
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    sword(-Math.PI * 0.75);
+    sword(-Math.PI * 0.25);
+    ctx.restore();
+}
 let wodPlayerSummarySig = '';
 function wodBattleLedger() {
     if(!gameData._battleLedger||gameData._battleLedgerMap!==gameData.hexes) {

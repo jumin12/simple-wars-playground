@@ -93,7 +93,7 @@ function wodDrawCitiesLayer(ctx, view) {
                     ctx.save();
                     let py = city.y - (!gfxLite ? 52 : 44);
                     if(showCityNames) py = city.y - (!gfxLite ? 58 : 50);
-                    drawCombatBurstIcon(ctx, city.x, py, gfxLite ? 8 : 10);
+                    drawCombatEraIcon(ctx, city.x, py, gfxLite ? 8 : 10);
                     ctx.restore();
                 }
             }
@@ -285,7 +285,9 @@ function wodDrawUnitsLayer(ctx, view) {
             ctx.save();
             if(fogAlpha < 1) ctx.globalAlpha *= fogAlpha;
             let dp = wodUnitSmoothDrawXY(unit, gameData._frameSimDt);
-            ctx.translate(dp.x, dp.y);
+            // (a unit fighting hand to hand lunges at its enemy and back, bars and all: js/world.js wodCombatBumpOffset)
+            const bump = wodCombatBumpOffset(unit);
+            ctx.translate(dp.x + (bump ? bump.x : 0), dp.y + (bump ? bump.y : 0));
 
             let uColor = factionColors[unit.owner];
             let ur = wodCrowdedUnitMarkerRadius(unit);

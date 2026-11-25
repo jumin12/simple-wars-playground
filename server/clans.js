@@ -11,6 +11,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { NAME_TAKEN_PLACEHOLDER, stripInvisible, nameMatchKey, isPlaceholderName } = require('./names');
 
 // Emblem ids the client can draw (js/clans.js has the drawings; scripts/verify-mp-clans.js checks the lists match).
 const PRESET_EMBLEMS = ['swords', 'shield', 'star', 'crown', 'eagle', 'wolf', 'tower', 'anchor', 'bolt', 'flame', 'tank', 'skull', 'lion', 'axe', 'sun', 'trident'];
@@ -42,9 +43,17 @@ const DAY = 86400000;
 const SEEN_SAVE_MS = 6 * 3600000; // a member's "last seen" is saved at most this often
 
 function cleanName(raw) {
-    return String(raw || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
+    return stripInvisible(raw || '').replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 24);
 }
-function nameKey(name) { return cleanName(name).toLowerCase(); }
+// (two clan names are one name when they read the same: case, spacing, punctuation, accents and look-alike letters
+// aside; server/names.js)
+function nameKey(name) { return nameMatchKey(cleanName(name)); }
+// Which of two clans is older (founded first): it keeps a name both hold.
+function olderClan(a, b) { return (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(String(b.id)); }
+// Names settled by hand, before age: when clans share one of these names, the clan with this player (as its leader,
+// else as a member) keeps it, whichever was founded first; the others show as "thanks for noticing" until renamed.
+// (the live relay had two "the dev clan"s; the developer's, with jumin121, keeps it)
+const NAME_KEEPERS = [{ clan: 'the dev clan', player: 'jumin121' }];
 const DESCRIPTION_MAX = 200;
 function cleanDescription(raw) { return String(raw || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX); }
 const LIST_PAGE_SIZE = 8;
@@ -67,6 +76,7 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
     let saveTimer = null;
 
     function index() {
+        namesDirty = true;
         byPlayer.clear();
         for(const clan of clans.values()) for(const m of clan.members) byPlayer.set(m.playerId, clan.id);
     }
@@ -83,6 +93,7 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         c.invites = Array.isArray(c.invites) ? c.invites : [];
         for(const m of c.members) m.lastSeenAt ||= m.joinedAt || c.createdAt || now();
         clans.set(c.id, c);
+        namesDirty = true;
     }
     function load() {
         try { for(const c of JSON.parse(fs.readFileSync(file, 'utf8')).clans || []) adopt(c); } catch(_) {}
@@ -118,8 +129,8 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         });
         return work;
     }
-    function changed(...list) { for(const c of list) if(c) dirty.add(c.id); scheduleSave(); }
-    function removed(id) { dirty.delete(id); gone.add(id); scheduleSave(); }
+    function changed(...list) { namesDirty = true; for(const c of list) if(c) dirty.add(c.id); scheduleSave(); }
+    function removed(id) { namesDirty = true; dirty.delete(id); gone.add(id); scheduleSave(); }
     function save() {
         clearTimeout(saveTimer); saveTimer = null;
         const tmp = file + '.tmp';
@@ -133,6 +144,28 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
     }
     function flush() { return pool ? persist() : Promise.resolve(saveTimer && save()); }
 
+    // Each name's holder: the oldest clan with it. A younger clan with the same name is shown as the placeholder
+    // ("thanks for noticing") until its leader renames it, and cannot change anything else before that.
+    // (a NAME_KEEPERS clan first, its leader's before a member's; then the older clan)
+    const keepers = new Map(NAME_KEEPERS.map(k => [nameKey(k.clan), nameMatchKey(k.player)]));
+    function keeperRank(clan) {
+        const who = keepers.get(nameKey(clan.name));
+        if(!who) return 0;
+        const is = pid => nameMatchKey(String(nameOf(pid) || '')) === who;
+        return is(clan.leaderId) ? 2 : clan.members.some(m => is(m.playerId)) ? 1 : 0;
+    }
+    function holdsBefore(a, b) { return keeperRank(b) - keeperRank(a) || olderClan(a, b); }
+    // (recounted when a clan changes, and every half minute: a keeper's display name can change without one)
+    let namesDirty = true, namesAt = 0, nameHolder = new Map();
+    function holders() {
+        if(!namesDirty && now() - namesAt < 30000) return nameHolder;
+        nameHolder = new Map();
+        for(const c of clans.values()) { const k = nameKey(c.name), h = nameHolder.get(k); if(!h || holdsBefore(c, h) < 0) nameHolder.set(k, c); }
+        namesDirty = false; namesAt = now();
+        return nameHolder;
+    }
+    function nameFlagged(clan) { return !!clan && (isPlaceholderName(clan.name) || holders().get(nameKey(clan.name)) !== clan); }
+    function shownName(clan) { return !clan ? '' : nameFlagged(clan) ? NAME_TAKEN_PLACEHOLDER : clan.name; }
     const clanOf = playerId => { const id = byPlayer.get(playerId); return id ? clans.get(id) || null : null; };
     const isLeader = (clan, playerId) => !!clan && clan.leaderId === playerId;
     const memberOf = (clan, playerId) => clan && clan.members.find(m => m.playerId === playerId) || null;
@@ -143,7 +176,7 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
     }
     function summary(clan) {
         if(!clan) return null;
-        return { id: clan.id, name: clan.name, emblem: clan.emblem, visibility: clan.visibility, members: clan.members.length, wins: clan.stats.wins, description: clan.description || '' };
+        return { id: clan.id, name: shownName(clan), nameFlagged: nameFlagged(clan), emblem: clan.emblem, visibility: clan.visibility, members: clan.members.length, wins: clan.stats.wins, description: clan.description || '' };
     }
     // Normal play: the members' multiplayer totals, counted as on the player leaderboard.
     function memberTotals(clan) {
@@ -194,8 +227,14 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         const name = cleanName(fields.name);
         if(name.length < 3) return { ok: false, msg: 'Clan names need at least 3 characters.' };
         if(!/[a-z0-9]/i.test(name)) return { ok: false, msg: 'Clan names need a letter or a number.' };
-        const key = nameKey(name);
-        for(const c of clans.values()) if(c.id !== selfId && nameKey(c.name) === key) return { ok: false, msg: 'That clan name is taken.' };
+        if(isPlaceholderName(name)) return { ok: false, msg: 'Pick a new name for the clan.' };
+        // A new name must be free. A clan keeping its own name loses it only to a clan that holds it first (older, or
+        // its NAME_KEEPERS clan).
+        const key = nameKey(name), self = selfId ? clans.get(selfId) : null, keeping = !!self && nameKey(self.name) === key;
+        for(const c of clans.values()) {
+            if(c.id === selfId || nameKey(c.name) !== key) continue;
+            if(!keeping || holdsBefore(c, self) < 0) return { ok: false, msg: keeping ? 'Another clan had this name first. Pick a new name for your clan.' : 'That clan name is taken.' };
+        }
         const emblem = String(fields.emblem || '');
         if(!EMBLEM_IDS.has(emblem)) return { ok: false, msg: 'Pick an emblem for the clan.' };
         const visibility = fields.visibility === 'private' ? 'private' : 'public';
@@ -223,15 +262,16 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         let id; do { id = 'C' + crypto.randomBytes(5).toString('hex').toUpperCase(); } while(clans.has(id));
         const clan = { id, name: v.name, emblem: v.emblem, visibility: v.visibility, description: v.description, code: newCode(), leaderId: playerId, createdAt: now(), members: [], stats: emptyStats(), history: [], chat: [], applications: [], invites: [] };
         clans.set(id, clan);
+        namesDirty = true;
         addMember(clan, playerId, nameOf(playerId) + ' founded ' + clan.name + '.');
         return { ok: true, clan };
     }
     function canTakeMember(clan) { return clan.members.length < MAX_MEMBERS ? null : 'That clan is full (' + MAX_MEMBERS + ' members).'; }
     function queueApplication(clan, playerId, kind, invitedBy) {
         prune(clan);
-        if(clan.applications.some(a => a.playerId === playerId)) return { ok: false, msg: 'You have already applied to ' + clan.name + '; its leader will decide.' };
+        if(clan.applications.some(a => a.playerId === playerId)) return { ok: false, msg: 'You have already applied to ' + shownName(clan) + '; its leader will decide.' };
         const used = clan.applications.filter(a => a.kind === kind).length, max = kind === 'invite' ? APPLY_INVITED : APPLY_FROM_SEARCH;
-        if(used >= max) return { ok: false, msg: clan.name + '\'s application queue is full (' + (kind === 'invite' ? APPLY_INVITED + ' invited players' : APPLY_FROM_SEARCH + ' applications from search') + ' at a time). Try again once its leader has answered them.' };
+        if(used >= max) return { ok: false, msg: shownName(clan) + '\'s application queue is full (' + (kind === 'invite' ? APPLY_INVITED + ' invited players' : APPLY_FROM_SEARCH + ' applications from search') + ' at a time). Try again once its leader has answered them.' };
         clan.applications.push({ playerId, kind, invitedBy: invitedBy || '', at: now() });
         changed(clan);
         return { ok: true, clan, applied: true };
@@ -380,8 +420,8 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
         const q = String(query || '').trim().toLowerCase(), filter = ['public', 'private'].includes(opts.filter) ? opts.filter : 'all';
         const sort = typeof opts.sort === 'string' && Object.hasOwn(LIST_SORTS, opts.sort) ? opts.sort : '';
         const size = Math.min(20, Math.max(4, (opts.pageSize | 0) || LIST_PAGE_SIZE));
-        const rank = c => !q || sort ? 0 : c.name.toLowerCase() === q ? 0 : c.name.toLowerCase().startsWith(q) ? 1 : 2;
-        const found = [...clans.values()].filter(c => (!q || c.name.toLowerCase().includes(q)) && (filter === 'all' || c.visibility === filter))
+        const rank = c => !q || sort ? 0 : shownName(c).toLowerCase() === q ? 0 : shownName(c).toLowerCase().startsWith(q) ? 1 : 2;
+        const found = [...clans.values()].filter(c => (!q || shownName(c).toLowerCase().includes(q)) && (filter === 'all' || c.visibility === filter))
             .map(c => ({ c, online: c.members.reduce((n, m) => n + (isOnline(m.playerId) ? 1 : 0), 0) }))
             .sort((a, b) => rank(a.c) - rank(b.c) || LIST_SORTS[sort || 'members'](a, b) || b.c.members.length - a.c.members.length || b.c.stats.wins - a.c.stats.wins || a.c.name.localeCompare(b.c.name));
         const pages = Math.max(1, Math.ceil(found.length / size)), page = Math.min(pages - 1, Math.max(0, opts.page | 0));
@@ -420,10 +460,10 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
             if(won) { st.wins++; tierSt.wins++; } else { st.defeats++; tierSt.defeats++; }
             st.kills += kills; st.losses += losses;
             for(const m of clan.members) if((side.players || []).includes(m.playerId)) { m.warsPlayed = (m.warsPlayed | 0) + 1; if(won) m.warWins = (m.warWins | 0) + 1; }
-            clan.history.unshift({ at: now(), tier, outcome: won ? 'won' : 'lost', kills, losses, opponent: other.clan ? { id: other.clan.id, name: other.clan.name, emblem: other.clan.emblem } : { name: 'A disbanded clan', emblem: 'p:shield' }, players: (side.players || []).map(nameOf) });
+            clan.history.unshift({ at: now(), tier, outcome: won ? 'won' : 'lost', kills, losses, opponent: other.clan ? { id: other.clan.id, name: shownName(other.clan), emblem: other.clan.emblem } : { name: 'A disbanded clan', emblem: 'p:shield' }, players: (side.players || []).map(nameOf) });
             clan.history = clan.history.slice(0, HISTORY_LEN);
             (clan.recordedWars ||= []).push(warId); clan.recordedWars = clan.recordedWars.slice(-64);
-            say(clan, (won ? 'Won' : 'Lost') + ' a ' + tier + ' war against ' + (other.clan ? other.clan.name : 'a disbanded clan') + ' (' + (side.players || []).map(nameOf).join(' & ') + ').');
+            say(clan, (won ? 'Won' : 'Lost') + ' a ' + tier + ' war against ' + (other.clan ? shownName(other.clan) : 'a disbanded clan') + ' (' + (side.players || []).map(nameOf).join(' & ') + ').');
         }
         changed(a.clan, b.clan);
         return true;
@@ -456,6 +496,7 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
     return {
         init, post, EMBLEM_IDS, PRESET_EMBLEMS, FLAG_EMBLEMS, TIERS, MAX_MEMBERS, clanOf, summary, detail, create, join, apply, useCode, cancelApplication, answerApplication,
         inviteFriend, answerInvite, pendingFor, leave, update, kick, touch, checkInactiveLeaders, rankedMembers, list, leaderboard, recordWar, flush, get: id => clans.get(id) || null,
+        shownName, nameFlagged,
     };
 }
 

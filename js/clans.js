@@ -527,7 +527,9 @@ function wodClanInviteFriendsHtml(d) {
 }
 function wodClanHomeHtml(d) {
     const lead = d.youAreLeader;
-    return '<div class="clan-home">' + wodClanHeroHtml(d, (lead ? '<button type="button" class="wod-editor-btn" id="clanEditBtn">Edit clan</button>' : '') + '<button type="button" class="wod-editor-btn clan-danger" id="clanLeaveBtn">Leave clan</button>') +
+    const taken = d.nameFlagged ? '<div class="clan-name-taken" role="alert"><p><strong>Your clan needs a new name.</strong> Another clan had this name first, so yours shows as \u201c' + wodClanEsc(d.name) + '\u201d until ' + (lead ? 'you rename it' : 'your leader, ' + wodClanEsc(d.leaderName || '') + ', renames it') + '.</p>' +
+        (lead ? '<button type="button" class="wod-editor-btn" id="clanRenameBtn">Rename clan</button>' : '') + '</div>' : '';
+    return '<div class="clan-home">' + taken + wodClanHeroHtml(d, (lead ? '<button type="button" class="wod-editor-btn" id="clanEditBtn">Edit clan</button>' : '') + '<button type="button" class="wod-editor-btn clan-danger" id="clanLeaveBtn">Leave clan</button>') +
         (lead ? '<section class="clan-invite"><div><span class="clan-invite-label">Invite code</span><code id="clanInviteCode">' + wodClanEsc(d.code || '') + '</code></div>' +
             '<div class="clan-invite-actions"><button type="button" class="wod-editor-btn" id="clanCopyCode">Copy</button><button type="button" class="wod-editor-btn" id="clanNewCode">New code</button></div>' +
             '<p>' + (d.visibility === 'private' ? 'Only you hold this code. A player who uses it is queued as an invited applicant for you to approve; a new code stops the old one working.' : 'Players can join from the clan list, or with this code.') + '</p></section>'
@@ -564,11 +566,11 @@ function wodClanChatVisible() {
 }
 function wodClanFormHtml(mode, d) {
     const f = WodClans.form, isEdit = mode === 'edit';
-    if(isEdit && !f.editing) { f.editing = true; f.name = d.name; f.emblem = d.emblem; f.visibility = d.visibility; f.description = d.description || ''; }
+    if(isEdit && !f.editing) { f.editing = true; f.name = d.nameFlagged ? '' : d.name; f.emblem = d.emblem; f.visibility = d.visibility; f.description = d.description || ''; }
     const fq = (f.flagQuery || '').trim().toLowerCase();
     const ids = f.tab === 'flags' ? Object.keys(WOD_CLAN_FLAGS).filter(k => !fq || WOD_CLAN_FLAGS[k][0].toLowerCase().includes(fq)).map(k => 'f:' + k) : Object.keys(WOD_CLAN_PRESETS).map(k => 'p:' + k);
     return '<section class="clan-card clan-form">' +
-        '<h3>' + (isEdit ? 'Edit your clan' : 'Found a clan') + '</h3>' + (isEdit ? '' : '<p class="clan-card-lead">You lead the clan you found. Name it, pick its emblem, and choose who can join.</p>') +
+        '<h3>' + (isEdit ? 'Edit your clan' : 'Found a clan') + '</h3>' + (isEdit ? (d && d.nameFlagged ? '<p class="clan-card-lead clan-name-taken-note">Another clan had your clan\'s name first. Pick a new name to save any change.</p>' : '') : '<p class="clan-card-lead">You lead the clan you found. Name it, pick its emblem, and choose who can join.</p>') +
         '<label class="clan-field"><span class="clan-field-label">Clan name</span><input type="text" id="clanNameInput" maxlength="24" placeholder="3 to 24 characters" value="' + wodClanEsc(f.name || '') + '" autocomplete="off"></label>' +
         '<label class="clan-field"><span class="clan-field-label">Description <span class="clan-field-count" id="clanDescCount">' + (f.description || '').length + ' / 200</span></span><textarea id="clanDescInput" maxlength="200" rows="2" placeholder="What is your clan about? Who should join? (optional)">' + wodClanEsc(f.description || '') + '</textarea></label>' +
         '<div class="clan-field"><span class="clan-field-label">Emblem</span>' +
@@ -675,6 +677,8 @@ function wodClanWirePane(root) {
     if(cancel) cancel.onclick = () => { f.mode = 'create'; f.editing = false; WodClans.error = ''; wodClanRenderPane(); };
     const edit = $('clanEditBtn');
     if(edit) edit.onclick = () => { f.mode = 'edit'; f.editing = false; f.tab = String(WodClans.detail.emblem).startsWith('f:') ? 'flags' : 'presets'; wodClanRenderPane(); };
+    const rename = $('clanRenameBtn');
+    if(rename && edit) rename.onclick = () => edit.onclick();
     const leave = $('clanLeaveBtn');
     if(leave) leave.onclick = async () => {
         const d = WodClans.detail;

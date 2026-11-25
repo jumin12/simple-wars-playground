@@ -346,11 +346,14 @@ function wodDeployStartingArmy(ownerIds) {
 }
 function wodReduceAuthoredStartingArmy(ownerIds) {
     const historical=!!gameData._selectedMissionEntry?.storeMission;
+    // (a battle authored at its intended strength keeps every unit: mission.fullStartingArmy, the era battles of
+    // scripts/era-battles.js; older scenarios were authored at twice the size and keep every other unit of each type)
+    const full=historical&&!!gameData.mission?.fullStartingArmy;
     for(let owner of ownerIds) {
         let army = gameData.entities.filter(u => u.owner === owner && u.type !== 'convoy');
         if(army.some(u => u._startDeployment)) continue;
         const byType=Object.create(null);
-        let keep = new Set(army.filter((u, i) => ((byType[u.type]=(byType[u.type]||0)+1)%2===1)));
+        let keep = new Set(full?army:army.filter((u, i) => ((byType[u.type]=(byType[u.type]||0)+1)%2===1)));
         gameData.entities = gameData.entities.filter(u => u.owner !== owner || u.type === 'convoy' || keep.has(u));
         if(historical)for(const u of keep)u._startDeployment='authored';
     }

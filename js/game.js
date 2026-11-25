@@ -928,6 +928,8 @@ function showPanel(panelId, opts) {
         let sb = document.getElementById('setupBtnStartAi');
         let rb = document.getElementById('setupBtnMpReturn');
         let shopMapBtn = document.getElementById('setupBtnShopMaps');
+        let savesBtn = document.getElementById('setupBtnSavedGames');
+        if(savesBtn) savesBtn.style.display = opts.fromMpHost ? 'none' : '';
         if(opts.fromMpHost) {
             if(rb) rb.style.display = '';
             if(sb) sb.style.display = 'none';

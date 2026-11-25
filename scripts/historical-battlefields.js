@@ -24,7 +24,7 @@ const PLANS={
   size:42,towns:[[30,27,1],[16,3,2],[-3,10,2],[-27,18,2]],front:['y',22,1],
   rivers:[river('Spree',[[44,16],[30,15],[19,10],[8,1],[-4,-3],[-19,-8],[-44,-15]],1.7),river('Dahme',[[20,36],[16,25],[20,17],[19,10]],1.25),river('Landwehrkanal',[[-44,5],[-30,2],[-16,3],[-4,-3]],.65)],
   lakes:[[31,15,9,5,'Müggelsee']],patches:[patch('forest',[28,-11,11,12]),patch('forest',[35,29,9,7]),patch('forest',[2,9,5,8],'Treptower Park'),patch('urban',[-26,18,12,10]),patch('urban',[-3,10,8,8]),patch('urban',[15,2,8,6])],
-  bridges:[[18,10],[17,25],[-2,-3],[-21,2]],roads:[road(0,1,[[22,26],[17,25],[12,17],[18,10]]),road(1,2,[[7,4]]),road(2,3,[[-15,14]])],forts:[[8,13],[-18,11]],
+  bridges:[[18,10],[11,3],[17,25],[-2,-3],[-21,2]],roads:[road(0,1,[[22,26],[17,25],[12,17],[18,10]]),road(1,2,[[7,4]]),road(2,3,[[-15,14]])],forts:[[8,13],[-18,11]],
   labels:[['Müggelsee',31,13,'water'],['Treptower Park',1,17,'land']],note:'The Spree and Dahme meet by Köpenick; Müggelsee, wooded banks and the southwest approach toward Neukölln shape this sector.'
  },
  'berlin-04-south':{
@@ -169,8 +169,10 @@ function buildBattlefield({MapBuilder,stage,seed}){
   // Initial friendly source positions all have a safe dry corridor into their town.
   b.each(h=>{if(h.type!=='water'&&h.type!=='bridge'&&Math.hypot(h.q-q,h.r-r)<5)h.owner=owner;});return c;
  });
- // Give every drawn urban block to its nearest named district on the same bank.
- for(const h of b.hexes.values())if(h.type!=='water'&&(h._builtUpArea||h.type==='urban')&&!h.cityId){const c=towns.slice().sort((a,c)=>(a.q-h.q)**2+(a.r-h.r)**2-((c.q-h.q)**2+(c.r-h.r)**2))[0];if(h.type==='urban'){h.cityId=c.id;h.urbanVariant=(Math.abs(h.q)+Math.abs(h.r*3))%5;}h.owner=c.owner;}
+ // Give every drawn urban block to its nearest named district on the same bank: its owner, not its streets. A town is
+ // taken by holding every street it owns, so only the 13-block core above counts (a whole Berlin district tagged to its
+ // town meant sweeping 500+ blocks before it fell); the rest of the built-up area is street-fighting cover.
+ for(const h of b.hexes.values())if(h.type!=='water'&&(h._builtUpArea||h.type==='urban')&&!h.cityId){const c=towns.slice().sort((a,c)=>(a.q-h.q)**2+(a.r-h.r)**2-((c.q-h.q)**2+(c.r-h.r)**2))[0];if(h.type==='urban')h.urbanVariant=(Math.abs(h.q)+Math.abs(h.r*3))%5;h.owner=c.owner;}
  // Avoid placing battlefield defenders in water, on towns or in a solid fort wall.
  for(const [q,r]of plan.forts||[]){const h=b.at(q,r);if(h&&!['water','bridge','mountain'].includes(h.type))b.fort(q,r,2);}
  const routes=(plan.roads||[]).map(v=>({from:towns[v.from],to:towns[v.to],points:[[towns[v.from].q,towns[v.from].r],...v.via,[towns[v.to].q,towns[v.to].r]].map(([q,r])=>({x:q*SP,y:r*SP}))}));

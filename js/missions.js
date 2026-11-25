@@ -475,7 +475,7 @@ function wodNormalizeMission(raw) {
         zone:goal.zone&&Number.isFinite(goal.zone.x)&&Number.isFinite(goal.zone.y)?{x:goal.zone.x,y:goal.zone.y,radius:Math.max(1,Math.min(2000,Number(goal.zone.radius)||100))}:null
     }:null;
     const battlefield=raw.battlefield&&typeof raw.battlefield==='object'?{version:1,northUp:raw.battlefield.northUp!==false,note:String(raw.battlefield.note||'').slice(0,600),features:(Array.isArray(raw.battlefield.features)?raw.battlefield.features:[]).filter(f=>f&&Number.isFinite(f.x)&&Number.isFinite(f.y)).slice(0,32).map(f=>({name:String(f.name||'').slice(0,80),x:f.x,y:f.y,kind:f.kind==='water'?'water':'land'}))}:null;
-    return {version:1,title:String(raw.title||'').slice(0,80),victoryMode:raw.victoryMode==='annihilation'?'annihilation':'domination',...(objective?{objective}:{}),...(battlefield?{battlefield}:{}),events};
+    return {version:1,title:String(raw.title||'').slice(0,80),victoryMode:raw.victoryMode==='annihilation'?'annihilation':'domination',...(objective?{objective}:{}),...(battlefield?{battlefield}:{}),...(raw.fullStartingArmy===true?{fullStartingArmy:true}:{}),...(Number.isFinite(raw.enemyManpowerRate)?{enemyManpowerRate:Math.max(0,Math.min(1,raw.enemyManpowerRate))}:{}),events};
 }
 function wodMissionHasEvents() {
     return !!(gameData.mission && Array.isArray(gameData.mission.events) && gameData.mission.events.length);
@@ -505,7 +505,9 @@ function wodCheckScriptedMissionEnd(dt) {
         success=rt.elapsed>=goal.duration&&evacuated.length>=goal.minUnits;
         progress=evacuated.length+' / '+goal.minUnits+' evacuated'+(rt.elapsed<goal.duration?' · nightfall in '+wodFormatHoldClock(goal.duration-rt.elapsed):'');
     }
-    if(goal.type==='fleet'){const left=gameData.entities.filter(u=>u.owner===goal.owner&&u.hp>0&&wodIsNavalUnit(u)).length;success=left===0;progress=left+' enemy naval formations remaining';}
+    // (a fleet is beaten when its warships are sunk: transports and supply ships, which run rather than fight, and the
+    // transport carrying its commander, do not have to be hunted down)
+    if(goal.type==='fleet'){const left=gameData.entities.filter(u=>u.owner===goal.owner&&u.hp>0&&u.type==='ship').length;success=left===0;progress=left+' enemy warships remaining';}
     if(rt.progressText!==progress){rt.progressText=progress;syncHudObjectiveDisplay();}
     if(success&&friendly.length)triggerCampaignVictory('Mission complete — '+goal.label,true);
 }

@@ -111,6 +111,9 @@ class SteamCommerce {
     catch (_) { throw new CommerceError('Unknown shop item.'); }
     return this.store.transaction(session.steamId, data => {
       initializeAccount(data);
+      // (a mission from an older era also needs that era's army, or the Supporter Pack, which includes every era)
+      const needs = items.find(item => item.requiresSkin && !data.ownedSkins[item.requiresSkin] && !isSupporter(data) && !item.grants.every(id => data.ownedVisuals[id]));
+      if (needs) throw new CommerceError('Unlock the ' + needs.requiresSkin.charAt(0).toUpperCase() + needs.requiresSkin.slice(1) + ' army first.');
       const remaining = items.filter(item => !item.grants.every(id => (item.kind === 'skin' ? data.ownedSkins : data.ownedVisuals)[id]));
       const cost = remaining.reduce((total, item) => total + item.price, 0);
       if (data.gold < cost) throw new CommerceError('Not enough gold.');

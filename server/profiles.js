@@ -103,6 +103,7 @@ function defaultProfile(playerId) {
   return {
     playerId,
     version: 1,
+    createdAt: Date.now(),
     progressImported:false,
     updatedAt: Date.now(),
     profile: {
@@ -466,6 +467,8 @@ function hydrateProfile(playerId, row) {
     losses: clampInt(row.multiplayer && row.multiplayer.losses, 0, 999999),
   };
   base.updatedAt = Math.max(0, parseInt(row.updatedAt, 10) || 0);
+  // (when the profile was made; one saved before profiles kept it is older than any that has it)
+  base.createdAt = Math.max(0, parseInt(row.createdAt, 10) || 0);
   recomputeAchievements(base);
   return base;
 }
@@ -670,9 +673,12 @@ function shopPurchase(playerId, req) {
     const shopId = itemId.startsWith('shop_map_') ? itemId : `shop_map_${itemId}`;
     const mapKey = shopId.replace(/^shop_map_/, '');
     if (cur.ownedShopVisuals[shopId]) return { ok: true, profile: exportProfile(id), alreadyOwned: true };
-    let price;
-    try { price = catalog.shopItems({kind:'map',itemId:shopId},missionManifest)[0].price; }
+    let price, requiresSkin;
+    try { ({ price, requiresSkin } = catalog.shopItems({kind:'map',itemId:shopId},missionManifest)[0]); }
     catch (_) { return { ok:false, msg:'Unknown mission' }; }
+    // A mission from an older era also needs that era's army (or the Supporter Pack, which includes every era).
+    if (requiresSkin && !cur.ownedUnitSkins?.[requiresSkin] && !cur.supporterPack)
+      return { ok: false, msg: 'Unlock the ' + requiresSkin.charAt(0).toUpperCase() + requiresSkin.slice(1) + ' army first' };
     if ((cur.gold || 0) < price) return { ok: false, msg: 'Not enough gold' };
     cur.gold -= price;
     cur.ownedShopVisuals[shopId] = true;

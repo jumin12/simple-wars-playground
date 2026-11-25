@@ -3508,7 +3508,7 @@ function wodSetElementDisabled(el, on) {
 const WOD_SETUP_LOCK_WHILE_GENERATING = [
     'setupMapSize', 'setupMapShape', 'setupCitiesPerPlayer', 'setupMapBalance', 'setupAI', 'setupVictoryMode', 'setupFogOfWar', 'setupMoney',
     'setupPlayerColor', 'setupGamePeriod', 'setupBtnGenerateNew', 'setupBtnSaveMap',
-    'setupBtnLoadMap', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack'
+    'setupBtnLoadMap', 'setupBtnSavedGames', 'setupBtnStartAi', 'setupBtnMpReturn', 'setupBtnBack'
 ];
 function wodCurrentSetupAiCount() {
     let aiEl = document.getElementById('setupAI');

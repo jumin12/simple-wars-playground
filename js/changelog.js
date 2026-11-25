@@ -6,6 +6,39 @@
 // check (wodClientBuild in js/game.js, multiplayer-client.js, server/index.js): after changing it, run
 // scripts/stamp-assets.js, which also writes the relay's copy (server/game-build.json).
 const WOD_CHANGELOG = [
+    {at:"2026-11-25T19:45:00Z",title:"New and remade battles in the shop",items:[
+        "The shop's Missions tab is now divided by era. The modern era, which every player starts with, comes first, then the Napoleonic, medieval and ancient eras.",
+        "A mission from an older era now needs that era's army from Troop skins as well as its gold. If you don't have the army yet, the mission tells you, and Get the army takes you to it. Missions you already own stay yours.",
+        "Each older era now has two battles, an attack and a defence, fought with that era's own troops: infantry, cavalry, archers or skirmishers, chariots or knights, and named units such as the Spartan hoplites and the Companion cavalry.",
+        "Ancient: Gaugamela, new, where Alexander waits for the Persian line to open up, and a remade Thermopylae, where you hold the narrow pass while a Persian column comes over the mountain path.",
+        "Medieval: a remade Hastings, where you break the shield wall on Senlac ridge, and Agincourt, new, where the French cross a muddy field under the English longbows.",
+        "Napoleonic: a remade Austerlitz, where you storm the Pratzen Heights, and Waterloo, new, where you hold the ridge at Mont-Saint-Jean until the Prussians arrive.",
+        "The four modern missions are remade the same way. Normandy lands on Utah, Omaha and Gold and links them at Carentan and Bayeux. Kursk holds the salient against attacks from the north and the south. Midway is a fleet battle around the atoll. El Alamein breaks through the minefields between the sea and the Qattara cliffs.",
+        "The Berlin, Normandy and Market Garden campaigns keep their maps but field new armies: named formations with infantry, armour and motorised troops, defended towns that counterattack, and reserves that join you during each battle.",
+        "Fixed campaign towns that could not be taken. In the big cities, a town counted every block of its district, sometimes hundreds, and all of them had to be held. Now each town is its own centre, about a dozen blocks, and the rest of the city is still there to fight through.",
+        "Campaign objectives are now listed nearest first, in the order you reach them.",
+        "The first battle of each campaign is a little easier. The enemy's reserves there are two infantry companies, without armour.",
+        "In Köpenick to Neukölln, a second bridge now crosses the Spree where the road to Treptow meets the river, so you no longer have to push the whole attack over one bridge.",
+        "Every shop battle now starts with its whole army, and the enemy no longer out-recruits you. Every side can pay its army's upkeep to the end, and defenders in an attack raise fresh troops slowly.",
+        "At Midway you win by sinking the enemy warships. Transports that run away don't need to be hunted down.",
+        "Fixed columns getting stuck where a narrow pass turns a corner. The unit in front now goes first while the ones behind wait their turn. Units no longer walk back for a corner they were pushed past, or try to step aside through the column behind them."
+    ]},
+    {at:"2026-11-25T17:39:00Z",title:"Battles that look like their era",items:[
+        "Units now fight on screen the way their era did. Modern armies still fire tracers.",
+        "In the ancient and medieval eras, foot soldiers rush at each other and clash, with a flash of sparks and a puff of dust. Two units fighting each other meet in the middle. A unit struck by an enemy it isn't fighting back is knocked back a little.",
+        "Cavalry, chariots and knights charge harder and further, and so do the Napoleonic horse regiments and dragoons.",
+        "In the ancient and medieval eras, units that are fighting, and towns under siege, now show two crossed swords above them instead of the explosion. The explosion stays for the Napoleonic and modern eras.",
+        "Medieval rangers, triremes and war galleys shoot arrows that arc through the air and stick in the ground where they land. Ancient skirmishers throw javelins.",
+        "In the Napoleonic era, musket lines fire a volley every few seconds, with flashes along the line and a bank of smoke that drifts away. Chasseurs fire single shots, and ships of the line fire broadsides of cannonballs that throw up dirt or spray.",
+        "Only the look of battle has changed: every unit fights exactly as well as before."
+    ]},
+    {at:"2026-11-25T15:50:00Z",title:"One name each for clans and players",items:[
+        "No two clans can share a name, and no two players can share a display name. Names that differ only in capital letters, spacing, punctuation, accents, hidden characters or look-alike letters from other alphabets count as the same name.",
+        "Where two clans or two players already shared a name, the one that had it first keeps it. The newer one shows as \"thanks for noticing\" in the rankings and everywhere else until it picks a new name. A clan in that spot can't change anything else until its leader renames it, and a player has to pick a new display name before playing multiplayer again.",
+        "The name \"the dev clan\" stays with the developer's clan, the one jumin121 is in. The other clan with that name shows as \"thanks for noticing\" until its leader picks a new name.",
+        "Saved games now also opens from the pause menu during a battle, where you can load any save as well as save this one, and from the skirmish setup and missions screens.",
+        "Loading a save during a battle asks you first. If the battle has moved on since you last saved it, leaving it counts as a loss."
+    ]},
     {at:"2026-11-24T22:40:00Z",title:"Saved games, steadier fog of war and a better game browser",items:[
         "You can now save your games. Skirmish battles, the campaign and missions each have five save slots. Save a battle from the pause menu, or your campaign from the war map with Save campaign.",
         "All saves are in one Saved games menu, with a tab each for skirmish, campaign and missions. Open it from the main menu, Play vs AI or the campaign screen. Load a save to carry on where you left off. You can name your saves, and rename or delete them.",

@@ -127,7 +127,7 @@ async function saveFromPauseMenu(page, tab, slot, name, overwrite) {
     if(!await page.evaluate(() => wodGameSavesOpen())) {
         await page.evaluate(() => toggleEscMenu(true));
         const btn = page.locator('#wodEscSaveBtn');
-        assert.ok(await btn.isVisible() && await btn.isEnabled(), 'the pause menu has an enabled Save game button');
+        assert.ok(await btn.isVisible() && await btn.isEnabled() && /Saved games/.test(await btn.textContent()), 'the pause menu has a Saved games button');
         await btn.click();
         await page.locator('#savesPanel:not(.hidden)').waitFor();
     }
@@ -227,6 +227,14 @@ async function skirmishPhase(browser, url) {
     await page.evaluate(() => { toggleEscMenu(true); wodOpenGameSavesFromGame(); });
     await page.waitForFunction(() => wodGameSavesOpen() && !!wodGameSavesUi.idx);
     assert.equal(await page.locator('#wodSavesQuit').isVisible(), false, 'no quit shortcut once the battle has moved on');
+    // from the pause menu, load another save: it asks first (leaving now counts as a loss), then opens that battle
+    const lostBefore = await page.evaluate(() => wodProgress.lifetime.matchesLost || 0);
+    await page.locator('#wodSavesSlots [data-save-act="load"][data-save-slot="0"]').click();
+    await page.locator('#wodConfirmDlg:not(.hidden)').waitFor();
+    assert.match(await page.locator('#wodConfirmDlgBody').textContent(), /counts as a loss/, 'it warns that leaving an unsaved battle counts as a loss');
+    await page.locator('#wodConfirmDlgOk').click();
+    await page.waitForFunction(() => gameState === 'PLAYING' && gameData._matchReadyForEndChecks && gameData._wodSavedSlot && gameData._wodSavedSlot.slot === 0 && !wodMatchLoadActive(), null, { timeout: 180000 });
+    assert.equal(await page.evaluate(() => wodProgress.lifetime.matchesLost || 0), lostBefore + 1, 'the battle left behind counted as lost');
     await shot(page, 'skirmish-menu');
     assert.deepEqual(errors.pageErrors, [], 'no page errors');
     await context.close();
@@ -235,6 +243,19 @@ async function skirmishPhase(browser, url) {
 
 async function blockedPhase(browser, url) {
     const { context, page, errors } = await bootPage(browser, url);
+    // the skirmish setup screen and the missions screen open Saved games too, and Back returns there
+    await page.evaluate(() => showPanel('setup'));
+    await page.waitForFunction(() => !wodIsMapPreviewGenerating(), null, { timeout: 180000 });
+    await page.locator('#setupBtnSavedGames').click();
+    await page.waitForFunction(() => wodGameSavesOpen() && document.getElementById('wodSavesSlots').dataset.tab === 'skirmish');
+    await page.locator('#wodSavesBack').click();
+    await page.waitForFunction(() => !document.getElementById('setupPanel').classList.contains('hidden') && !wodGameSavesOpen());
+    await page.evaluate(() => showPanel('missions'));
+    await page.locator('#wodMissionSavesBtn').click();
+    await page.waitForFunction(() => wodGameSavesOpen() && document.getElementById('wodSavesSlots').dataset.tab === 'missions');
+    await page.locator('#wodSavesBack').click();
+    await page.waitForFunction(() => !document.getElementById('missionsPanel').classList.contains('hidden'));
+    await page.evaluate(() => hidePanels());
     await H.startSkirmish(page);
     const mp = await page.evaluate(async () => {
         const real = gameData.mp;
@@ -301,8 +322,17 @@ async function campaignPhase(browser, url) {
     assert.match(await page.evaluate(() => wodGameSaveBlockReason()), /begin/, 'no saving during the briefing');
     await closePopups(page);
     await page.waitForFunction(() => gameData._campaignRun.deploying);
-    const deploying = await page.evaluate(() => { toggleEscMenu(true); const b = document.getElementById('wodEscSaveBtn'); const r = { disabled: b.disabled, why: b.title }; toggleEscMenu(false); return r; });
-    assert.ok(deploying.disabled && /deploy/i.test(deploying.why), 'no saving while deploying: ' + JSON.stringify(deploying));
+    // while deploying the pause menu's Saved games still opens, to load, but nothing can be saved
+    const deploying = await page.evaluate(async () => {
+        toggleEscMenu(true); const b = document.getElementById('wodEscSaveBtn'); const r = { disabled: b.disabled, why: b.title };
+        b.click(); for(let i = 0; i < 50 && !(wodGameSavesOpen() && document.getElementById('wodSavesSlots').dataset.tab === 'campaign'); i++) await new Promise(res => setTimeout(res, 50));
+        r.save = document.querySelectorAll('#wodSavesSlots [data-save-act="save"], #wodSavesSlots [data-save-act="overwrite"]').length;
+        r.load = document.querySelectorAll('#wodSavesSlots [data-save-act="load"]').length;
+        r.lead = document.getElementById('wodSavesLead').textContent;
+        document.getElementById('wodSavesBack').click(); toggleEscMenu(false); return r;
+    });
+    assert.ok(!deploying.disabled && /deploy/i.test(deploying.why), 'the pause menu button stays usable while deploying: ' + JSON.stringify(deploying));
+    assert.ok(deploying.save === 0 && deploying.load === 1 && /deploy/i.test(deploying.lead), 'no saving while deploying, but the campaign save can be loaded: ' + JSON.stringify(deploying));
     await page.evaluate(() => { wodFinishCampaignDeployPhase(); window.checkCampaignEndConditions = () => {}; setGameSpeed(3, true); });
     await page.waitForFunction(() => (gameData._aiEconomyClock || 0) > 20, null, { timeout: 120000 });
     await closePopups(page);

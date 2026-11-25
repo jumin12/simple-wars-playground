@@ -345,7 +345,7 @@ function fillTerrainCombatHelpTables() {
     for(let mount of document.querySelectorAll('.wod-help-terrain-combat-mount:not(#infoTerrainEffectsMount)')) mount.innerHTML = tbl;
 }
 const WOD_HELP_EFFECT_ENTRIES = [
-    { id: 'fighting', title: 'Fighting', overhead: 'combat', drawType: 'light', note: 'A burst icon while the unit is trading fire.', effect: { label: 'Fighting', stats: 'Trading fire · Moves at a third of its speed', detail: 'In combat with an enemy unit.' } },
+    { id: 'fighting', title: 'Fighting', overhead: 'combat', drawType: 'light', note: 'A burst icon while the unit is fighting (crossed swords in the ancient and medieval eras).', effect: { label: 'Fighting', stats: 'Trading fire · Moves at a third of its speed', detail: 'In combat with an enemy unit.' } },
     { id: 'fort', title: 'Fortified', overhead: 'fort', drawType: 'heavy', note: 'A shield icon inside one of your forts’ rings.', effect: { label: 'Fortified', render: 'fortDmg', fortDmgPct: 80, block: true, detail: 'Takes about 80% of normal damage.' } },
     { id: 'encircled', title: 'Out of supply', overhead: 'encircled', drawType: 'light', note: 'A yellow countdown, then a red exclamation mark, when the unit is cut off from supply.', effect: { label: 'Encircled', stats: '−3.5% max HP/s · No healing', block: true, warn: true, detail: 'No path of friendly land to a town.' } },
     { id: 'deepwater', title: 'In water', overhead: 'water', drawType: 'light', note: 'A blue ~ when a land unit stands in water without supply.', effect: { label: 'Deep water', stats: '−3.5% max HP/s · No healing', block: true, warn: true, detail: 'Land units in water lose strength once the 10-second countdown ends. Ships and marines are not affected.' } },
@@ -375,7 +375,7 @@ function drawHelpUnitMarker(ctx, unit, ur, col) {
 }
 function drawHelpFxOverheadIcon(ctx, kind, cx, cy) {
     let glyphR = 4.41;
-    if(kind === 'combat') drawCombatBurstIcon(ctx, cx, cy, 5.21);
+    if(kind === 'combat') drawCombatEraIcon(ctx, cx, cy, 5.21);
     else if(kind === 'fort') drawWodFortShieldBadge(ctx, cx, cy, glyphR);
     else if(kind === 'encircled') drawWodOverheadTextBadge(ctx, cx, cy, '!', '#e74c3c');
     else if(kind === 'unpaid') drawWodOverheadTextBadge(ctx, cx, cy, '$', '#f39c12');

@@ -51,7 +51,9 @@ const server=H.createStaticServer();
     }
     let invalid=0, arrived=null;const badPoints=[];
     for(let step=0;step<3000;step++) {
-     gameData._wodSimTick=(gameData._wodSimTick||0)+1;wodBeginSimPfBudget(n);gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRebuildHexCombatOccupancy();
+     // (the clock ticks as update() ticks it: stepping aside for a comrade, its give-up and its retries run on it, and with
+     // it stopped a unit that stepped aside in the bend never stopped stepping aside)
+     gameData._wodSimTick=(gameData._wodSimTick||0)+1;gameData._aiEconomyClock=(gameData._aiEconomyClock||0)+.1;wodBeginSimPfBudget(n);gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRebuildHexCombatOccupancy();
      for(const u of units) {const before=[u.x,u.y];moveUnitTowardTarget(u,.1);if(!wodSamplePosOnWalkableTerrain(u,u.x,u.y)){invalid++;if(badPoints.length<8)badPoints.push({stage:'move',before,x:u.x,y:u.y,hex:(h=>h?{q:h.q,r:h.r,type:h.type}:null)(getNearestHexToPoint(u.x,u.y)),target:u.target,path:u.path?.slice(0,2),type:u.type});}}
      gameData.unitSpatialGrid=buildUnitSpatialGrid(96);wodRunUnitSeparationSync(40,96);
      for(const u of units)if(!wodSamplePosOnWalkableTerrain(u,u.x,u.y)&&badPoints.length<8)badPoints.push({stage:'sep',x:u.x,y:u.y,hex:(h=>h?{q:h.q,r:h.r,type:h.type}:null)(getNearestHexToPoint(u.x,u.y)),target:u.target,type:u.type});

@@ -8,7 +8,7 @@ function modernizeMissionRoster(m){
  const d=m.data,id=m.entry.id||m.file.replace(/\.json$/,''),era=d.gamePeriod||'modern',by=new Map(d.hexList.map(h=>[h.q+','+h.r,h]));
  const at=u=>by.get(Math.round(u.x/27)+','+Math.round(u.y/27)),distance=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);
  const rough=u=>{const h=at(u);return d.hexList.filter(p=>['hill','mountain'].includes(p.type)&&Math.abs(p.q-h.q)<=4&&Math.abs(p.r-h.r)<=4).length;};
- const mountain=/mountain|winter|shattered|seelow|cherbourg|thermopylae|austerlitz/.test(id);
+ const mountain=/mountain|winter|shattered|seelow|cherbourg/.test(id);
  const naval=/first_landing|ironshore|normandy-dday|normandy-02|normandy-03/.test(id);
  const airborne=/normandy-01|market-03|market-05/.test(id),fleet=id==='midway-1942';
  const changes=[];
@@ -21,7 +21,7 @@ function modernizeMissionRoster(m){
    const count=Math.min(maxSpecial,lights.length>=10?3:2);
    for(const u of candidates.slice().sort((a,b)=>rough(b)-rough(a)).slice(0,count)){configure(u,'mountaineer',era);used++;changes.push({owner,type:'mountaineer',uid:u.uid});}
   }
-  const mobileAllowed=!fleet&&!(owner===1&&airborne)&&!(era==='ancient'&&id.includes('thermopylae'));
+  const mobileAllowed=!fleet&&!(owner===1&&airborne);
   if(mobileAllowed){
    const count=Math.min(Math.max(0,maxSpecial-used),lights.length>=14?3:lights.length>=6?2:1);
    const rear=d.cities.filter(c=>c.owner===owner);
@@ -40,7 +40,7 @@ function modernizeMissionRoster(m){
  // later wave to generic infantry. Preserve total counts and objective IDs.
  for(const event of d.mission?.events||[]){const reinforcements=event.reinforcements||[];for(const row of reinforcements.slice()){
   if(row.type!=='light'||row.count<3||fleet||airborne&&row.owner===1)continue;
-  const type=mountain?'mountaineer':era!=='ancient'||!id.includes('thermopylae')?'motorized':null;
+  const type=mountain?'mountaineer':'motorized';
   if(type){row.count--;reinforcements.push({...row,type,count:1});}
  }}
  d.mission.rosterRevision=2;d.mission.rosterRoles=changes.reduce((n,c)=>(n[c.type]=(n[c.type]||0)+1,n),{});

@@ -3,6 +3,7 @@
  * Host-authoritative: host runs full sim; server forwards snapshots & player commands.
  * Lobby browser: list open games and ongoing matches, optional password, online count.
  */
+const { NAME_TAKEN_PLACEHOLDER, stripInvisible, nameMatchKey, isPlaceholderName } = require('./names');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -96,7 +97,7 @@ const clans = createClans({
   dataDir: DATA_DIR,
   pool: process.env.DATABASE_URL ? new (require('pg').Pool)({ connectionString: process.env.DATABASE_URL, max: 1, connectionTimeoutMillis: 10000, statement_timeout: 30000 }) : null,
   profiles,
-  nameOf: (pid) => String((profiles.getProfile(pid) && profiles.getProfile(pid).profile.mpDisplayName) || 'Player'),
+  nameOf: (pid) => shownPlayerName(pid, String((profiles.getProfile(pid) && profiles.getProfile(pid).profile.mpDisplayName) || 'Player')),
   isOnline: (pid) => onlineByPlayerId.has(pid),
 });
 // ---- Clan wars ----
@@ -353,42 +354,75 @@ function sanitizePlayerId(id) {
 }
 
 function sanitizeDisplayName(raw) {
-  return String(raw || '').trim().slice(0, 24) || 'Player';
+  return stripInvisible(raw || '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Player';
 }
 
+// Two display names are one name when they read the same: case, spacing, punctuation, accents, invisible characters
+// and look-alike letters aside (server/names.js).
 function displayNameKey(raw) {
-  return sanitizeDisplayName(raw).toLowerCase();
+  return nameMatchKey(sanitizeDisplayName(raw));
 }
+const DEFAULT_NAME_KEY = displayNameKey('Player');
 
-function findPlayerIdByDisplayName(displayName, excludePlayerId) {
-  const key = displayNameKey(displayName);
-  if (!key) return '';
-  for (const [pid, row] of leaderboard) {
-    if (excludePlayerId && pid === excludePlayerId) continue;
-    if (displayNameKey(row.displayName) === key) return pid;
+// Which of two players is older: the profile made first (one made before profiles kept the date counts as oldest),
+// then the one with more multiplayer games, then the player ID. The older keeps a name both hold.
+function comparePlayersByAge(a, b) {
+  const age = (pid) => { const p = profiles.getProfile(pid); return { at: (p && p.createdAt) || 0, games: p ? (profiles.computeCombinedStats(p) || {}).gamesPlayed | 0 : 0 }; };
+  const x = age(a), y = age(b);
+  return x.at - y.at || y.games - x.games || String(a).localeCompare(String(b));
+}
+// Every known player's name (saved profile, leaderboard row, or the name they are online under).
+function knownPlayerNames() {
+  const names = new Map();
+  for (const pid of profiles.getAllPlayerIds()) { const n = profiles.getProfile(pid)?.profile.mpDisplayName; if (n) names.set(pid, n); }
+  for (const [pid, row] of leaderboard) if (row && row.displayName && !names.has(pid)) names.set(pid, row.displayName);
+  for (const [pid, peer] of onlineByPlayerId) if (peer && peer.displayName) names.set(pid, peer.displayName);
+  return names;
+}
+// Each name's holder: its oldest player (worked out at most every few seconds, and again after anyone registers).
+let playerNameHolders = null, playerNameHoldersAt = 0;
+function playerNameHolderMap() {
+  if (playerNameHolders && Date.now() - playerNameHoldersAt < 5000) return playerNameHolders;
+  const out = new Map();
+  for (const [pid, n] of knownPlayerNames()) {
+    const k = displayNameKey(n);
+    if (k === DEFAULT_NAME_KEY) continue;
+    const h = out.get(k);
+    if (!h || comparePlayersByAge(pid, h) < 0) out.set(k, pid);
   }
-  for (const [pid, peer] of onlineByPlayerId) {
-    if (excludePlayerId && pid === excludePlayerId) continue;
-    if (displayNameKey(peer.displayName) === key) return pid;
-  }
-  for (const pid of profiles.getAllPlayerIds()) {
-    if (excludePlayerId && pid === excludePlayerId) continue;
-    const prof = profiles.getProfile(pid);
-    if (!prof) continue;
-    if (displayNameKey(prof.profile.mpDisplayName) === key) return pid;
-  }
-  return '';
+  playerNameHolders = out; playerNameHoldersAt = Date.now();
+  return out;
+}
+/** A younger player with an older player's name: shown as the placeholder until they pick a new one. */
+function playerNameFlagged(pid, name) {
+  if (!name) return false;
+  if (isPlaceholderName(name)) return true;
+  const k = displayNameKey(name);
+  if (k === DEFAULT_NAME_KEY) return false;
+  const h = playerNameHolderMap().get(k);
+  return !!h && h !== pid;
+}
+function shownPlayerName(pid, name) {
+  return playerNameFlagged(pid, name) ? NAME_TAKEN_PLACEHOLDER : name;
 }
 
 function validateDisplayNameForPlayer(displayName, playerId) {
-  const raw = String(displayName || '').trim();
+  const raw = stripInvisible(displayName || '').trim();
   if (!raw) {
     return { ok: false, reason: 'display_name_required', msg: 'Enter a display name.' };
   }
   const name = sanitizeDisplayName(raw);
-  const owner = findPlayerIdByDisplayName(name, playerId);
-  if (owner) {
-    return { ok: false, reason: 'display_name_taken', msg: 'That display name is already taken.' };
+  if (isPlaceholderName(name)) return { ok: false, reason: 'display_name_taken', msg: 'Pick a different display name.' };
+  // A new name must be free. A player keeping their own name loses it only to an older player with the same name.
+  const key = displayNameKey(name), current = playerId ? profiles.getProfile(playerId)?.profile.mpDisplayName : '';
+  const keeping = !!current && displayNameKey(current) === key;
+  for (const [pid, n] of knownPlayerNames()) {
+    if (pid === playerId || displayNameKey(n) !== key) continue;
+    if (!keeping || comparePlayersByAge(pid, playerId) < 0) {
+      return { ok: false, reason: 'display_name_taken', msg: keeping
+        ? 'Another player had this name first. Pick a new display name: until you do, it shows as "' + NAME_TAKEN_PLACEHOLDER + '".'
+        : 'That display name is already taken.' };
+    }
   }
   return { ok: true, name };
 }
@@ -696,7 +730,7 @@ function buildLeaderboardRows(sortKey, filterIds) {
     })
             .map((r) => ({
       playerId: r.playerId,
-      displayName: r.displayName,
+      displayName: shownPlayerName(r.playerId, r.displayName),
       unitSkin: r.unitSkin,
       stats: r.stats,
       updatedAt: r.updatedAt,
@@ -735,6 +769,7 @@ function registerClientPlayer(client, payload) {
   profile.profile.mpDisplayName = nameCheck.name;
   profiles.attachClientProfile(client, nameCheck.name);
   onlineByPlayerId.set(playerId, client);
+  playerNameHolders = null;
   updateLeaderboardEntry(client, client.combinedStats);
   return { ok: true, playerId, profile: profiles.exportProfile(playerId) };
 }
@@ -1690,7 +1725,7 @@ wss.on('connection', (ws) => {
         if (!peer || peer.ws.readyState !== 1) continue;
         online.push({
           playerId: pid,
-          displayName: peer.displayName || '',
+          displayName: shownPlayerName(pid, peer.displayName || ''),
           unitSkin: peer.unitSkin || 'nato',
           inLobby: !!(peer.room && !peer.room.matchStarted),
           lobbyId: peer.room ? peer.room.id : null,
@@ -1787,11 +1822,11 @@ wss.on('connection', (ws) => {
         if (t === 'clan_leave') cwLeaveParty(client, 'Your 2v2 party ended: you left the clan.');
         if (t === 'clan_kick') {
           const kicked = cwOnline(sanitizePlayerId(msg.playerId));
-          if (kicked) { cwRemove(kicked); cwLeaveParty(kicked, 'Your 2v2 party ended.'); cwSend(kicked, clanInfoFor(kicked, null, { notice: 'You were removed from ' + r.clan.name + '.' })); }
+          if (kicked) { cwRemove(kicked); cwLeaveParty(kicked, 'Your 2v2 party ended.'); cwSend(kicked, clanInfoFor(kicked, null, { notice: 'You were removed from ' + clans.shownName(r.clan) + '.' })); }
         }
         const done = r.applied ? 'clan_apply' : t;
         cwSend(client, clanInfoFor(client, t === 'clan_leave' ? null : r.applied ? null : r.clan, { done }));
-        if (r.applied) clanTell(r.clan.leaderId, r.clan, cwName(pid) + ' applied to join ' + r.clan.name + '.');
+        if (r.applied) clanTell(r.clan.leaderId, r.clan, cwName(pid) + ' applied to join ' + clans.shownName(r.clan) + '.');
         else notifyClanMembers(t === 'clan_leave' ? before : r.clan, client);
         if (client.room && client.room.meta && client.room.meta.playerPublic && client.room.meta.playerPublic[String(client.slot)]) {
           client.room.meta.playerPublic[String(client.slot)].clan = clans.summary(clans.clanOf(pid));
@@ -1812,8 +1847,8 @@ wss.on('connection', (ws) => {
         const r = clans.answerApplication(pid, applicant, !!msg.approve);
         if (!r.ok) { refuse(r.msg); cwSend(client, clanInfoFor(client, clans.clanOf(pid))); return; }
         cwSend(client, clanInfoFor(client, r.clan, { done: msg.approve ? 'clan_approve' : 'clan_decline' }));
-        if (r.approved) { notifyClanMembers(r.clan, client); clanTell(applicant, r.clan, 'Your application was approved: welcome to ' + r.clan.name + '!'); }
-        else clanTell(applicant, null, r.clan.name + ' declined your application.');
+        if (r.approved) { notifyClanMembers(r.clan, client); clanTell(applicant, r.clan, 'Your application was approved: welcome to ' + clans.shownName(r.clan) + '!'); }
+        else clanTell(applicant, null, clans.shownName(r.clan) + ' declined your application.');
         return;
       }
       if (t === 'clan_invite') {
@@ -1821,7 +1856,7 @@ wss.on('connection', (ws) => {
         const r = clans.inviteFriend(pid, friend, (id) => profiles.getAllPlayerIds().includes(id));
         if (!r.ok) { refuse(r.msg); return; }
         cwSend(client, clanInfoFor(client, r.clan, { done: t }));
-        clanTell(friend, null, cwName(pid) + ' invited you to join ' + r.clan.name + '. Open the Clan tab to answer.');
+        clanTell(friend, null, cwName(pid) + ' invited you to join ' + clans.shownName(r.clan) + '. Open the Clan tab to answer.');
         return;
       }
       if (t === 'clan_invite_answer') {

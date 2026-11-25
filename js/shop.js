@@ -689,10 +689,32 @@ async function wodFetchShopMapData(entry) {
         return null;
     }
 }
+/** A shop mission's era: 'modern' for the Second World War and later. */
+function wodShopMissionEra(entry) {
+    return WOD_PERIOD_IDS.includes(entry?.gamePeriod) ? entry.gamePeriod : 'modern';
+}
+/** A mission from an older era is sold only to a player who owns that era's army (troop skin); modern ones need gold only.
+ *  (the server checks the same: store-catalog.js missionEraSkin) */
+function wodShopMissionEraOwned(entry) {
+    const era = wodShopMissionEra(entry);
+    return era === 'modern' || wodIsPeriodUnlocked(era);
+}
+/** Opens Shop → Troop skins at an era's army. */
+function wodShopShowEraArmy(era) {
+    switchShopTab('troops');
+    const card = document.getElementById('skin' + era.charAt(0).toUpperCase() + era.slice(1));
+    if(card) { card.scrollIntoView({ block: 'center' }); card.classList.add('shop-era-army-flash'); setTimeout(() => card.classList.remove('shop-era-army-flash'), 1600); }
+}
 function purchaseShopMap(entry) {
     if(!entry || !entry.id) return false;
     let shopId = wodShopMapShopId(entry.id);
     if(wodOwnsShopVisual(shopId)) return true;
+    if(!wodShopMissionEraOwned(entry)) {
+        const era = wodShopMissionEra(entry), price = Math.max(0, entry.price | 0) || WOD_SHOP_MAP_DEFAULT_PRICE;
+        showNotification('This mission needs the ' + wodPeriodLabel(era) + ' army. Unlock it in Shop → Troop skins, then the mission costs ' + price + 'g.');
+        wodShopShowEraArmy(era);
+        return false;
+    }
     if(WodSteamStore.native() || wodCloudCanSync()) {
         void wodCloudTryPurchase({ kind: 'map', itemId: shopId, price: Math.max(0, entry.price | 0) || WOD_SHOP_MAP_DEFAULT_PRICE }).then(ok => {
             if(!ok) return;
@@ -859,19 +881,42 @@ async function renderShopMapsTab() {
         host.innerHTML = '<div class="shop-empty-state"><p><strong>Missions coming soon</strong></p></div>';
         return;
     }
-    for(let entry of wodShopMapCatalog) {
+    // One section per era, the modern era (the army everyone starts with) first. A mission from an older era is bought
+    // with gold once its era's army is unlocked (wodShopMissionEraOwned).
+    const ordered = [];
+    for(const era of WOD_PERIOD_IDS) {
+        const entries = wodShopMapCatalog.filter(e => wodShopMissionEra(e) === era);
+        if(!entries.length) continue;
+        const armyOwned = era === 'modern' || wodIsPeriodUnlocked(era), label = wodPeriodLabel(era);
+        const head = document.createElement('div');
+        head.className = 'shop-mission-era' + (armyOwned ? '' : ' shop-mission-era-locked');
+        head.dataset.era = era;
+        head.innerHTML = '<span class="shop-mission-era-name">' + wodEscapeHtml(era === 'modern' ? 'Modern era' : label + ' era') + '</span>' +
+            '<span class="shop-mission-era-note">' + wodEscapeHtml(era === 'modern' ? 'Your starting army. Buy these missions with gold.'
+                : armyOwned ? 'You own the ' + label + ' army. Buy these missions with gold.'
+                : 'Needs the ' + label + ' army from Troop skins, then gold for each mission.') + '</span>' +
+            (armyOwned ? '' : '<button type="button" class="menu-btn shop-mission-era-get">Get the ' + wodEscapeHtml(label) + ' army</button>');
+        const get = head.querySelector('.shop-mission-era-get');
+        if(get) get.addEventListener('click', () => wodShopShowEraArmy(era));
+        ordered.push(head, ...entries);
+    }
+    for(let entry of ordered) {
+        if(entry instanceof HTMLElement) { host.appendChild(entry); continue; }
         let shopId = wodShopMapShopId(entry.id);
         let owned = wodOwnsShopVisual(shopId);
         let price = Math.max(0, entry.price | 0) || WOD_SHOP_MAP_DEFAULT_PRICE;
         let spent = wodIsStoreMissionSpent(entry.id);
         let oneshot = wodIsStoreMissionOneShot(entry);
+        let eraLocked = !owned && !wodShopMissionEraOwned(entry);
         let card = document.createElement('button');
         card.type = 'button';
         card.dataset.missionId=entry.id;
-        card.className = 'shop-codex-card shop-mission-card' + (owned ? '' : ' shop-visual-locked') + (spent ? ' shop-mission-spent' : '');
+        card.dataset.era = wodShopMissionEra(entry);
+        card.className = 'shop-codex-card shop-mission-card' + (owned ? '' : ' shop-visual-locked') + (spent ? ' shop-mission-spent' : '') + (eraLocked ? ' shop-mission-needs-army' : '');
         card.title = entry.description || entry.name || entry.id;
         let badge;
-        if(!owned) badge = price + 'g';
+        if(eraLocked) badge = 'Needs ' + wodPeriodLabel(wodShopMissionEra(entry)) + ' army · ' + price + 'g';
+        else if(!owned) badge = price + 'g';
         else if(spent && oneshot) badge = 'Done';
         else badge = entry.stages?entry.stages.filter(s=>wodIsStoreMissionCompleted(s.id)).length+' / '+entry.stages.length+' complete':'Owned';
         card.innerHTML =

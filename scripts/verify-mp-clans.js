@@ -18,7 +18,9 @@ const dataDir = fs.mkdtempSync(path.join(OUT, 'relay-')), errors = [], results =
 let relay, relayPort, relayLog = '', rpcId = 0;
 const requests = new Map();
 const harness = path.join(OUT, 'relay.cjs');
-fs.writeFileSync(harness, `require(${JSON.stringify(path.join(ROOT, 'server/index.js'))});const p=require(${JSON.stringify(path.join(ROOT, 'server/profiles.js'))});process.on('message',async m=>{try{let result;if(m.action==='profile')result=p.exportProfile(m.playerId);else if(m.action==='flush'){await p.flush();result=true;}process.send({id:m.id,result});}catch(e){process.send({id:m.id,error:e.message});}});`);
+// (Windows can hold a just-written file for a moment, so the relay's local profile file is renamed with a few retries
+// here, as in verify-mp-update-gate. The deployed relay keeps profiles in its database.)
+fs.writeFileSync(harness, `const fs=require('fs'),rename=fs.renameSync;fs.renameSync=(a,b)=>{for(let i=0;;i++){try{return rename(a,b);}catch(e){if(i>=20||!/EPERM|EBUSY|EACCES/.test(e.code))throw e;const t=Date.now()+25;while(Date.now()<t);}}};require(${JSON.stringify(path.join(ROOT, 'server/index.js'))});const p=require(${JSON.stringify(path.join(ROOT, 'server/profiles.js'))});process.on('message',async m=>{try{let result;if(m.action==='profile')result=p.exportProfile(m.playerId);else if(m.action==='flush'){await p.flush();result=true;}process.send({id:m.id,result});}catch(e){process.send({id:m.id,error:e.message});}});`);
 async function startRelay() {
     if(!relayPort) { const probe = http.createServer(); await new Promise(r => probe.listen(0, '127.0.0.1', r)); relayPort = probe.address().port; await new Promise(r => probe.close(r)); }
     relay = fork(harness, [], { cwd: ROOT, env: { ...process.env, PORT: String(relayPort), DATABASE_URL: '', STEAM_PURCHASES_ENABLED: '0', WOD_DATA_DIR: dataDir, WOD_CW_SETUP_MS: '90000', WOD_MP_GRACE_MS: '3000' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });

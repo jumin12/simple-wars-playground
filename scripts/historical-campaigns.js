@@ -3,6 +3,22 @@
 // vignettes, not a claim that one division fought every sector in a campaign.
 const SP=27,DIRS=[[1,0],[-1,0],[0,1],[0,-1]];
 const {buildBattlefield,catmull}=require('./historical-battlefields');
+const {STATS}=require('./era-battles');
+const TRANSPORT={hp:50,speed:15,damage:0,range:50,attackCooldown:2,radius:16,manpower:500};
+const ROMAN=['','II','III','IV','V','VI','VII','VIII'];
+// The formations each side fields, by unit type; a stage draws its player side from STAGE_SIDE. Every army mixes
+// infantry, armour, motorised troops and assault engineers or rangers, and keeps their names (nameCustom).
+const SIDES={
+ soviet:{key:'s',light:['Soviet rifle division','Guards rifle division','Shock Army rifle corps','Rifle regiment','Penal battalion'],heavy:['Guards tank brigade','IS-2 heavy tank regiment','Tank corps brigade'],motorized:['Motor rifle brigade','Guards cavalry corps'],mountaineer:['Assault engineers']},
+ us:{key:'u',light:['1st Infantry Division','29th Infantry Division','4th Infantry Division','9th Infantry Division','79th Infantry Division'],heavy:['2nd Armored Division','741st Tank Battalion','70th Tank Battalion'],motorized:['Cavalry reconnaissance squadron','Armored infantry battalion'],mountaineer:['2nd Ranger Battalion'],marine:['Assault company'],ship:['USS Texas','USS Arkansas','USS Nevada','USS McCook']},
+ usAirborne:{key:'a',light:['101st Airborne Division','82nd Airborne Division','502nd Parachute Infantry','506th Parachute Infantry','325th Glider Infantry'],heavy:['2nd Armored Division','Guards Armoured squadron','Sherman troop'],motorized:['Armored reconnaissance','Glider jeep column'],mountaineer:['Airborne engineers'],marine:['504th PIR assault boats']},
+ british:{key:'b',light:['50th Northumbrian Division','3rd Canadian Division','3rd British Division','Guards infantry','43rd Wessex Division'],heavy:['Guards Armoured Division','8th Armoured Brigade','27th Armoured Brigade'],motorized:['Household Cavalry','Armoured car squadron'],mountaineer:['Royal Marine Commando'],marine:['Assault company'],ship:['HMS Ajax','HMS Belfast','HMS Warspite','HMS Argonaut']},
+ britishAirborne:{key:'p',light:['6th Airborne Division','2nd Parachute Battalion','Ox and Bucks glider infantry','7th Parachute Battalion','1st Airborne Division'],heavy:['Airborne armour'],motorized:['Airborne reconnaissance'],mountaineer:['9th Parachute Battalion']},
+ german:{key:'g',light:['Grenadier regiment','Volksgrenadier battalion','Waffen-SS battalion','Fallschirmjager battalion','Volkssturm battalion','Static division'],heavy:['Panzer battalion','Assault gun brigade','Tiger company'],motorized:['Panzergrenadier battalion'],mountaineer:['Panzerfaust teams']}
+};
+const STAGE_SIDE={'berlin-01-seelow':'soviet','berlin-02-northeast':'soviet','berlin-03-southeast':'soviet','berlin-04-south':'soviet','berlin-05-spree':'soviet','berlin-06-reichstag':'soviet','berlin-07-center':'soviet',
+ 'normandy-01-tonga':'britishAirborne','normandy-02-omaha':'us','normandy-03-east':'british','normandy-04-carentan':'usAirborne','normandy-05-cherbourg':'us',
+ 'market-01-corridor':'british','market-02-son':'usAirborne','market-03-arnhem':'britishAirborne','market-04-nijmegen':'usAirborne','market-05-oosterbeek':'britishAirborne'};
 const SOURCE={
  berlin:['https://www.dhm.de/lemo/kapitel/der-zweite-weltkrieg/kriegsverlauf/schlacht-um-berlin-1945','https://www.bundesarchiv.de/themen-entdecken/online-entdecken/dokumente-zur-zeitgeschichte/lagekarte-zur-schlacht-um-berlin/','https://www.berlin.de/landesdenkmalamt/denkmale/highlight-denkmale-der-alliierten/die-alliierten-in-berlin/berlin-unter-verwaltung-der-vier-maechte-1945-1948-646239.php'],
  normandy:['https://www.nam.ac.uk/explore/d-day','https://www.army.mod.uk/news/by-air-to-battle-on-d-day/','https://www.abmc.gov/history/discover-the-history-of-utah-beach-american-memorial/','https://carentanlesmarais.fr/decouvrir/dday/'],
@@ -39,35 +55,72 @@ function buildHistoricalCampaigns({MapBuilder,ev}) {
   const stages=[];
   for(const [si,s]of pack.stages.entries()){
    const {b,towns,plan,routes,metadata}=buildBattlefield({MapBuilder,stage:s,seed:194400+pi*100+si});
-   const occupied=new Set();
-   const add=(type,owner,q,r,name)=>{
+   const occupied=new Set(),side=SIDES[STAGE_SIDE[s.id]],enemy=SIDES.german,counts={};
+   // (each unit keeps its formation's name: nameCustom, or the game numbers it by type)
+   const name=(names,type)=>{const list=names[type]||names.light,i=counts[type+names.key]=(counts[type+names.key]||0)+1,base=list[(i-1)%list.length],lap=Math.floor((i-1)/list.length);return lap?base+' '+ROMAN[lap]:base;};
+   const add=(type,owner,q,r,label)=>{
     const wet=type==='ship'||type==='transport'||type==='marine'&&owner===1&&['beach','river'].includes(s.kind);
     const wanted=b.nearestWhere(q,r,16,h=>!occupied.has(h.q+','+h.r)&&(wet?h.type==='water':h.type!=='water'&&h.type!=='mountain'&&h.owner===owner));
     if(!wanted)throw Error(s.id+': no '+type+' spawn');occupied.add(wanted.q+','+wanted.r);
-    const heavy=type==='heavy',ship=type==='ship',transport=type==='transport',hp=transport?50:heavy||ship?300:100,mp=ship?5000:transport?500:1000;
-    const u={uid:'mu_'+(++b.unitSeq),type,owner,name,x:wanted.x,y:wanted.y,target:null,hp,maxHp:hp,manpower:mp,maxManpower:mp,tanks:heavy?500:0,maxTanks:heavy?500:0,speed:ship?25:transport?22:heavy?10:15,damage:transport?4:ship?14:heavy?18:8,range:ship?80:heavy?60:50,attackCooldown:ship?2.4:heavy?2.8:2,radius:ship?20:transport||heavy?16:12,morale:100,maxMorale:100,xp:0,kills:0,losses:0};b.entities.push(u);return u;
+    const st=STATS[type]||TRANSPORT;
+    const u={uid:'mu_'+(++b.unitSeq),type,owner,name:label||name(owner===1?side:enemy,type),x:wanted.x,y:wanted.y,target:null,...st,maxHp:st.hp,manpower:st.manpower||1000,maxManpower:st.manpower||1000,tanks:type==='heavy'?500:0,maxTanks:type==='heavy'?500:0,morale:100,maxMorale:100,xp:0,kills:0,losses:0,nameCustom:true};
+    b.entities.push(u);return u;
    };
+   const c=towns[0],block=(types,q0,r0)=>types.forEach((type,i)=>add(type,1,q0-3+(i%4)*2,r0-3+Math.floor(i/4)*2));
+   const airborne=['normandy-01-tonga','market-03-arnhem'].includes(s.id);
    if(s.kind==='beach'){
-    const wave=catmull(plan.landing);for(let i=0;i<12;i++){const p=wave[Math.round(i*(wave.length-1)/11)];add('marine',1,Math.round(p[0]),Math.round(p[1]),'Landing infantry '+(i+1));}
-    for(let i=0;i<4;i++){const p=plan.fleet[i];add('ship',1,...p,'Naval support '+(i+1));add('transport',1,p[0]+3,p[1]+2,'Landing transport '+(i+1));}
-    const c=towns[0];for(let i=0;i<4;i++)add(i<2?'heavy':'light',1,c.q+(i%2)*2,c.r+2+Math.floor(i/2)*2,'Beachhead reserve '+(i+1));
+    // the assault waves in their landing craft, the bombardment ships and ferries offshore, a reserve at the beachhead
+    const wave=catmull(plan.landing);for(let i=0;i<10;i++){const p=wave[Math.round(i*(wave.length-1)/9)];add('marine',1,Math.round(p[0]),Math.round(p[1]));}
+    for(let i=0;i<4;i++){const p=plan.fleet[i];add('ship',1,...p);if(i<2)add('transport',1,p[0]+3,p[1]+2,'Landing transport '+(i+1));}
+    block(['heavy','heavy','light','light'],c.q,c.r+2);
    }else if(s.kind==='evacuate'){
     for(const [i,p]of plan.evacuees.entries())add('light',1,...p,'1st Airborne '+(i+1));
     for(const [i,p]of plan.ferries.entries())add('transport',1,...p,'Royal Engineers ferry '+(i+1));
+   }else if(airborne){
+    block(['light','light','light','light','light','light','light','light','light','light','mountaineer','mountaineer'],c.q,c.r);
+    // (the 6th Airborne flew in Tetrarch light tanks by glider)
+    if(s.id==='normandy-01-tonga')block(['heavy','heavy'],c.q+2,c.r+4);
    }else{
-    const airborne=s.id==='normandy-01-tonga'||s.kind==='hold',c=towns[0];
-    for(let i=0;i<14;i++)add(airborne||i<10?'light':'heavy',1,c.q-3+(i%4)*2,c.r-3+Math.floor(i/4)*2,(s.kind==='hold'?'2nd Battalion':s.id==='normandy-01-tonga'?'6th Airborne':'Assault formation')+' '+(i+1));
-    if(plan.marine)for(const [i,p]of plan.marine.entries())add('marine',1,...p,'504th PIR assault boats '+(i+1));
+    block(['light','light','light','light','heavy','heavy','heavy','light','light','light','light','motorized','motorized','mountaineer'],c.q,c.r);
+    if(plan.marine)for(const p of plan.marine)add('marine',1,...p);
+    // the hardest assaults bring more: IS-2 regiments and shock troops for the last of Berlin, armour at Carentan
+    const extra={'berlin-06-reichstag':['heavy','light'],'berlin-07-center':['heavy','heavy','light'],'normandy-04-carentan':['heavy','light']}[s.id];
+    if(extra)block(extra,c.q+2,c.r+4);
    }
-   for(const [ci,c]of towns.filter(c=>c.owner===2).entries())for(let i=0;i<8;i++)add(s.id==='normandy-01-tonga'||i<6?'light':'heavy',2,c.q-3+(i%4)*2,c.r-2+Math.floor(i/4)*2,'Defending formation '+ci+'-'+i);
+   // a garrison in every enemy town: infantry with an armoured company (paratroopers only at the Orne bridges)
+   const holding=s.kind==='hold';
+   // (three defended towns hold three units each, two hold four: a stage's whole garrison stays close to the attacker's)
+   const enemyTowns=towns.filter(t=>t.owner===2),tonga=s.id==='normandy-01-tonga';
+   const garrison=tonga?['light','light']:holding?['light','light','light','light','heavy']:enemyTowns.length>=3?['light','light','heavy']:['light','light','light','heavy'];
+   for(const t of enemyTowns)garrison.forEach((type,i)=>add(type,2,t.q-3+(i%4)*2,t.r-2+Math.floor(i/4)*2));
    const mode=s.kind==='hold'?'hold':s.kind==='evacuate'?'evacuate':'capture';
-   const objective={type:mode,label:s.objective,cityIds:mode==='hold'?[towns[0].id]:towns.filter(c=>c.owner===2).map(c=>c.id),duration:s.duration||0};
+   // (objectives listed nearest the assembly area first: the order a commander takes them, so an assault never bypasses
+   // a defended town that would then cut its supply)
+   const fromHome=t=>Math.hypot(t.q-towns[0].q,t.r-towns[0].r);
+   const objective={type:mode,label:s.objective,cityIds:mode==='hold'?[towns[0].id]:towns.filter(c=>c.owner===2).sort((a,b)=>fromHome(a)-fromHome(b)).map(c=>c.id),duration:s.duration||0};
    if(s.kind==='broken')objective.cityIds=towns.slice(1).map(c=>c.id);
    if(mode==='evacuate')Object.assign(objective,{minUnits:3,unitPrefix:'1st Airborne',zone:{x:towns[1].x,y:towns[1].y,radius:SP*4}});
    const adaptation='Scaled RTS adaptation: terrain, distances, forces and battle time are compressed. Generic unit classes represent formations; supplied assembly areas are gameplay logistics anchors.';
-   const events=[ev(s.id+'-brief','Historical briefing',{type:'timer',seconds:0},{title:s.name,kicker:s.date,body:s.history+'\n\n'+s.brief+'\n\nObjective: '+s.objective+'\n\n'+adaptation,style:'briefing'}),ev(s.id+'-pressure','Enemy pressure',{type:'timer',seconds:90},{title:'Local counterattack',body:'Enemy reserves are approaching the active sector. Keep a defense group behind your assault and protect your supply route.',style:'alert'},[{owner:2,type:'light',count:3,anchor:'enemy_city'}])];
-   if(mode!=='evacuate')events.push(ev(s.id+'-reserve','Reserve formations',{type:'timer',seconds:150},{title:'Reserves available',body:'A fresh infantry reserve reaches your supplied assembly area. Use it to support the next objective or defend your rear.',style:'briefing'},[{owner:1,type:'light',count:2,anchor:'player_city'}]));
-   const data=b.export({money:26000,manpower:24000,aiMoney:{2:19000},aiManpower:{2:20000},mission:{version:1,title:s.name,victoryMode:'domination',battlefield:metadata,objective,events}});data.gamePeriod='modern';data.hexRadius=20;data.roads=routes;
+   const home={x:towns[0].x,y:towns[0].y};
+   const events=[ev(s.id+'-brief','Historical briefing',{type:'timer',seconds:0},{title:s.name,kicker:s.date,body:s.history+'\n\n'+s.brief+'\n\nObjective: '+s.objective+'\n\n'+adaptation,style:'briefing'})];
+   if(mode==='capture'){
+    // (the enemy's reserves reinforce the objective nearest your assembly area, where your assault is heading: sent at the
+    // assembly area itself, they cut a whole assaulting army's supply at once)
+    const front=towns.filter(t=>t.owner===2).sort((a,b)=>Math.hypot(a.q-towns[0].q,a.r-towns[0].r)-Math.hypot(b.q-towns[0].q,b.r-towns[0].r))[0]||towns[0];
+    // (a pack's opening stage eases you in: two infantry companies come up, without the armour)
+    const opening=si===0;
+    events.push(ev(s.id+'-pressure','Enemy reserves',{type:'timer',seconds:120},{title:'Enemy reserves',body:'Enemy reserves are moving up to reinforce '+front.name+'. Keep a defence group behind your assault and watch your supply line.',style:'alert'},[{owner:2,type:'light',count:opening?2:3,anchor:'enemy_city'},...(opening?[]:[{owner:2,type:'heavy',count:1,anchor:'enemy_city'}])],[{owner:2,scope:'reinforcements',x:front.x,y:front.y}]));
+    events.push(ev(s.id+'-reserve','Reserve formations',{type:'timer',seconds:150},{title:'Reserves available',body:'Fresh infantry and armour reach your assembly area. Use them to carry the next objective.',style:'briefing'},[{owner:1,type:'light',count:3,anchor:'player_city'},{owner:1,type:'heavy',count:1,anchor:'player_city'}]));
+    events.push(ev(s.id+'-reserve2','Second reserve',{type:'timer',seconds:260},{title:'Second reserve',body:'More armour is available at your assembly area.',style:'briefing'},[{owner:1,type:'heavy',count:2,anchor:'player_city'}]));
+   }else{
+    // a hold or a withdrawal: the enemy attacks the perimeter in waves
+    events.push(ev(s.id+'-assault','First assault',{type:'timer',seconds:30},{title:'The first assault',body:'The enemy is attacking the perimeter.',style:'alert'},[],[{owner:2,scope:'all',...home}]));
+    events.push(ev(s.id+'-pressure','Armoured attack',{type:'timer',seconds:110},{title:'Armour against the perimeter',body:'Enemy infantry and armour are coming in against the perimeter.',style:'alert'},[{owner:2,type:'light',count:3,anchor:'enemy_city'},{owner:2,type:'heavy',count:1,anchor:'enemy_city'}],[{owner:2,scope:'reinforcements',...home}]));
+    events.push(ev(s.id+'-pressure2','Final attack',{type:'timer',seconds:180},{title:'The final attack',body:'One more push against the perimeter.',style:'alert'},[{owner:2,type:'heavy',count:2,anchor:'enemy_city'},{owner:2,type:'light',count:2,anchor:'enemy_city'}],[{owner:2,scope:'reinforcements',...home}]));
+   }
+   // (gold for every army's upkeep through the battle, manpower that limits recruiting; the defenders' towns raise a
+   // quarter of their usual manpower in the attacks, half in a hold or withdrawal)
+   const data=b.export({money:16000,manpower:2500,aiMoney:{2:16000},aiManpower:{2:1000},mission:{version:1,title:s.name,victoryMode:'domination',fullStartingArmy:true,enemyManpowerRate:mode==='capture'?.25:.5,battlefield:metadata,objective,events}});data.gamePeriod='modern';data.hexRadius=20;data.roads=routes;
    const sources=[...SOURCE[pack.theme]];
    if(s.id==='normandy-05-cherbourg')sources.push('https://history.army.mil/Publications/Publications-Catalog/Utah-Beach-to-Cherbourg/','https://www.nationalww2museum.org/war/articles/assault-on-fortress-cherbourg-june-1944');
    if(s.id==='berlin-01-seelow')sources.push('https://www.politische-bildung-brandenburg.de/lexikon/schlacht-um-die-seelower-hoehen');

@@ -34,6 +34,8 @@
   const premiumBase = id => /^(supporterGold|goldenChip)(?:_(ancient|medieval|napoleonic))?$/.exec(String(id || ''))?.[1] || '';
   const premiumPeriod = id => /_(ancient|medieval|napoleonic)$/.exec(String(id || ''))?.[1] || 'modern';
   const premiumVariants = base => [base, ...['napoleonic','medieval','ancient'].map(period => base + '_' + period)];
+  /** The era army (unit skin) a mission needs before it can be bought: null for modern missions. */
+  const missionEraSkin = entry => ['napoleonic', 'medieval', 'ancient'].includes(entry?.gamePeriod) ? entry.gamePeriod : null;
   const achievementIds = ['brokenShield','townTaker','tankHunter','depthCharge','merchantMarine','industrial','admiralty','fortunesOfWar','grandHost','warmaster','firstLanding','missionChain','fullDeployment','ashenVictory','regionalCommander','periodNapoleonic','periodAncient','periodMedieval'];
   function shopItems(request, missionManifest) {
     const req = request || {}, id = String(req.itemId || '');
@@ -43,9 +45,10 @@
     if (req.kind === 'map') {
       const key = id.replace(/^shop_map_/, '');
       const entry = [...(missionManifest?.maps || []), ...(missionManifest?.missions || [])].find(e => e.id === key);
-      if (entry) return [{ kind: 'visual', id: 'shop_map_' + key, price: price(entry.price || 150), grants: ['shop_map_' + key] }];
+      // (a mission from an older era also needs that era's army, bought separately: requiresSkin)
+      if (entry) return [{ kind: 'visual', id: 'shop_map_' + key, price: price(entry.price || 150), grants: ['shop_map_' + key], requiresSkin: missionEraSkin(entry) }];
     }
     throw new Error('Unknown shop item');
   }
-  return Object.freeze({ version: 3, PRICE_MULTIPLIER, products, ancient, sections, skins, visuals, mapPacks, visualCost, price, skinCost, shopItems, premiumBase, premiumPeriod, premiumVariants, achievementIds });
+  return Object.freeze({ version: 3, PRICE_MULTIPLIER, products, ancient, sections, skins, visuals, mapPacks, visualCost, price, skinCost, shopItems, missionEraSkin, premiumBase, premiumPeriod, premiumVariants, achievementIds });
 });

@@ -858,8 +858,30 @@ function isWorldPositionBlockedByUnits(mover,wx,wy,gapExtra=2) {
         const min=(mover.radius||10)+(u.radius||10)+Math.max(1,gapExtra);
         const d2=(u.x-wx)**2+(u.y-wy)**2,old2=(u.x-mover.x)**2+(u.y-mover.y)**2;
         if(old2<min*min&&d2>old2+.0001)return;
-        if(d2<min*min)blocked=true;
+        if(d2>=min*min)return;
+        // (one queueing behind it gives way, down to a part overlap that the bodies' separation eases apart)
+        if(d2>=(min*.6)**2&&wodQueuedBehind(mover,u))return;
+        blocked=true;
     });return blocked;
+}
+// In a one-cell pass a comrade marching to the very spot this unit stands on (the corner of the pass it has just
+// reached) is queueing behind it. He does not keep it from moving on (isWorldPositionBlockedByUnits,
+// wodSteerAroundFriendlyUnits), while he stays blocked by it, so the one ahead goes first. Without this the head of a
+// column could not turn a corner of the pass: the unit behind pressed into the inside of the turn, and each waited on
+// the other until a sidestep timed out (verify-terrain-ui, the bend). (Not on open ground, a coast or a wider pass:
+// there a group settling into its places keeps its spacing, verify-coastal-group-movement.)
+function wodQueuedBehind(mover,u) {
+    if(!mover.target||!u.target||wodIsNavalUnit(mover)||!wodIsFriendlyOwner(u.owner,mover.owner))return false;
+    const sp=(gameData.hexRadius||20)*1.35;
+    if(Math.hypot(u.target.x-mover.x,u.target.y-mover.y)>=sp*.75||Math.hypot(mover.target.x-u.x,mover.target.y-u.y)<sp*.75)return false;
+    return wodInOneCellPass(mover,getNearestHexToPoint(mover.x,mover.y));
+}
+// A cell of a pass one cell wide: land hemmed in by terrain, with at most four of its eight neighbours passable (a
+// corner or a stretch of the pass; a coast or a wider pass has more). Not a bridge deck.
+function wodInOneCellPass(unit,h) {
+    if(!h||isBridgeHex(h)||wodUnitOnBridgeDeck(unit)||wodHexIsDeepLand(h))return false;
+    let open=0;for(const n of getNeighborHexes(h))if(n&&wodPathTileWalkable(unit,n,false))open++;
+    return open<=4;
 }
 /** A retreat that cannot get past comrades standing in its way (a line holding the front, a
  *  crowd round a town): step-by-step steering only swings from one side of them to the other,
@@ -983,13 +1005,15 @@ function wodRetreatGoRoundHeadway(unit) {
 }
 function wodSteerAroundFriendlyUnits(unit,nx,ny,dt=1/60) {
     const sx=nx-unit.x,sy=ny-unit.y,step=Math.hypot(sx,sy);if(step<.00001)return null;
-    const speed=step/Math.max(.001,dt),friends=[],blockers=[];let hostile=false;
+    const speed=step/Math.max(.001,dt),friends=[],blockers=[],queued=new Set();let hostile=false;
     // An unarmed boat (a transport or supply ship) has no fight to stay in: it steers round an enemy vessel as it does
     // round a comrade. Two enemy landing craft that met bow to bow used to stop there for good, each waiting on the other.
     const unarmedBoat=wodIsNavalUnit(unit)&&!(unit.damage>0);
     forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,(unit.radius||12)+100,u=>{
         if(u===unit||u.hp<=0||u.type==='convoy'||!wodBodiesMeet(unit,u,nx,ny))return;
         blockers.push(u);if(u.boardTransportUid)return;
+        // (a comrade queueing behind it in a pass gives way: no risk to steer round, and only a deep overlap blocks)
+        if(wodQueuedBehind(unit,u)){queued.add(u);return;}
         if(!wodIsFriendlyOwner(u.owner,unit.owner)&&!(unarmedBoat&&wodIsNavalUnit(u))){if(Math.hypot(u.x-nx,u.y-ny)<(unit.radius||12)+(u.radius||12)+6)hostile=true;return;}
         const goal=u._trafficYield?.route?.target||u.target,dx=goal?goal.x-u.x:0,dy=goal?goal.y-u.y:0,len=Math.hypot(dx,dy)||1;
         const recent=goal&&u._wodVelocityAt!=null&&(gameData._aiEconomyClock||0)-u._wodVelocityAt<.3;
@@ -1009,7 +1033,7 @@ function wodSteerAroundFriendlyUnits(unit,nx,ny,dt=1/60) {
     // Reuse one conservative broad phase, then apply the original
     // exact overlap/escaping-overlap predicate to each candidate.
     const blockedAt=(x,y)=>step>35?isWorldPositionBlockedByUnits(unit,x,y):blockers.some(u=>{
-        const min=(unit.radius||10)+(u.radius||10)+2,min2=min*min;
+        const min=((unit.radius||10)+(u.radius||10)+2)*(queued.has(u)?.6:1),min2=min*min;
         const old2=(u.x-unit.x)**2+(u.y-unit.y)**2,d2=(u.x-x)**2+(u.y-y)**2;
         return !(old2<min2&&d2>old2+.0001)&&d2<min2;
     });
@@ -1258,11 +1282,36 @@ function wodStepAsideForTraffic(mover,blocker,loser,dx,dy) {
         sites.push({h,score:Math.hypot(x,y)+lateral*.35});
     }
     sites.sort((a,b)=>a.score-b.score);
+    const pass=!wodIsNavalUnit(loser)&&wodInOneCellPass(loser,center);
     for(const {h} of sites.slice(0,4)) {
         const points=wodUnitRemainingMarchPoints(loser).map(p=>({x:p.x,y:p.y})),idle=!points.length;
         if(idle)points.push({x:loser.x,y:loser.y});
         const record={points,idle,internal:wodIsNavalUnit(loser)||loser.type==='marine',owner:loser.owner,leader:ensureUnitId(leader),x:h.x,y:h.y,ax:dx,ay:dy,until:(gameData._aiEconomyClock||0)+25};
-        if(wodPlanTrafficDetour(loser,[{x:h.x,y:h.y}],record))return true;
+        if(!wodPlanTrafficDetour(loser,[{x:h.x,y:h.y}],record))continue;
+        // In a one-cell pass the way to open ground runs back along the column: the comrades behind stand on it, so the
+        // unit could not get there, gave up after three seconds and was sent again (verify-terrain-ui, the bend). Such
+        // a place is no use; the next is tried, or nobody steps aside and the column waits its turn. (Not on a bridge,
+        // where a short deck clears by backing off it, nor in a wider pass, where the place is beside the road.)
+        if(pass&&record.route&&wodTrafficDetourRunsIntoComrades(loser,record.route)){loser._trafficYield=null;continue;}
+        return true;
+    }
+    return false;
+}
+// Whether the first six cells of a planned way to step aside lead into another unit's body (closer to it than the
+// unit stands now).
+function wodTrafficDetourRunsIntoComrades(unit,route) {
+    const pts=[route.target,...(route.path||[])].filter(Boolean);if(!pts.length)return false;
+    const hr=gameData.hexRadius||20,limit=hr*1.35*6,r0=unit.radius||12;
+    const others=gameData.entities.filter(u=>u!==unit&&u.hp>0&&u.type!=='convoy'&&!u.boardTransportUid&&
+        Math.hypot(u.x-unit.x,u.y-unit.y)<limit+hr*2&&wodBodiesMeet(unit,u));
+    let a={x:unit.x,y:unit.y},walked=0;
+    for(const b of pts){
+        const len=Math.hypot(b.x-a.x,b.y-a.y),steps=Math.max(1,Math.ceil(len/(hr*.4)));
+        for(let i=1;i<=steps;i++){
+            const x=a.x+(b.x-a.x)*i/steps,y=a.y+(b.y-a.y)*i/steps;
+            if(others.some(u=>{const min=(r0+(u.radius||12))*.9,d=(u.x-x)**2+(u.y-y)**2;return d<min*min&&d<(u.x-unit.x)**2+(u.y-unit.y)**2;}))return true;
+        }
+        walked+=len;if(walked>limit)break;a=b;
     }
     return false;
 }
@@ -4995,7 +5044,10 @@ function wodMoveUnitAlongRoute(unit, dt) {
         // (The corner of a way round comrades is kept: cutting it leads into the end of their line.)
         while(unit.target&&!unit.target.goRound&&unit.path?.length&&turns++<4) {
             const next=unit.path[0],near=Math.hypot(unit.target.x-unit.x,unit.target.y-unit.y)<Math.max((gameData.hexRadius||20)*1.35*1.2,(unit.radius||12)*2+4);
-            if(!near||!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,next.x,next.y))break;
+            // (or already past it: comrades pressing through a pass can shove a unit cells beyond its corner, and it
+            // walked back for it against the column, which then stood nose to nose with it; verify-terrain-ui, the bend)
+            const past=Math.hypot(next.x-unit.x,next.y-unit.y)<Math.hypot(next.x-unit.target.x,next.y-unit.target.y);
+            if(!near&&!past||!wodSegmentClearsTerrainForUnit(unit,unit.x,unit.y,next.x,next.y))break;
             if(unit._wodRiskRetreat&&!wodRetreatShortcutSafe(unit,next))break;
             if(!wodTakeNextPathTarget(unit))break;
         }
