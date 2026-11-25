@@ -6,6 +6,15 @@
 // check (wodClientBuild in js/game.js, multiplayer-client.js, server/index.js): after changing it, run
 // scripts/stamp-assets.js, which also writes the relay's copy (server/game-build.json).
 const WOD_CHANGELOG = [
+    {at:"2026-11-24T22:40:00Z",title:"Saved games, steadier fog of war and a better game browser",items:[
+        "You can now save your games. Skirmish battles, the campaign and missions each have five save slots. Save a battle from the pause menu, or your campaign from the war map with Save campaign.",
+        "All saves are in one Saved games menu, with a tab each for skirmish, campaign and missions. Open it from the main menu, Play vs AI or the campaign screen. Load a save to carry on where you left off. You can name your saves, and rename or delete them.",
+        "A save made during a campaign battle keeps the campaign too, so loading it takes you back into that battle. Loading a campaign save replaces the campaign you are fighting now.",
+        "After saving, you can quit to the main menu and finish the battle later. It isn't counted as a loss, and in the campaign it doesn't count as a failed assault.",
+        "Multiplayer matches and the tutorial can't be saved.",
+        "With fog of war on, enemy units at the edge of your vision no longer keep disappearing and reappearing. When an enemy steps out of sight, it stays on screen for a moment and then fades out, instead of vanishing the instant it leaves your view. One standing right at the edge now stays in view.",
+        "The multiplayer game browser now lists ongoing matches in their own section below the lobbies, with who is playing and how long the match has been going. A new filter shows all games, only open games, or only games with a password. It shows all games unless you pick another."
+    ]},
     {at:"2026-11-23T09:15:00Z",title:"Update checks and a clan browser",items:[
         "Multiplayer now checks that you have the latest version. If your game is out of date, you can't host or join multiplayer matches until you update, and the game shows you how to update.",
         "If your game is out of date, the main menu reminds you to update once. If you already saw the reminder in multiplayer, it won't show it again.",

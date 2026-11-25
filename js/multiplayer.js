@@ -4063,19 +4063,73 @@ function wodMpMergeFriendEntries(localArr, remoteArr) {
     }
     return out;
 }
+// The game browser (Browse games): lobbies waiting for players, then the matches being played, each with who is in
+// it. A filter shows all games (the default), only open ones or only those with a password.
+let wodMpLobbyFilter = 'all', wodMpLastLobbies = [];
+const WOD_MP_LOBBY_FILTERS = { all: () => true, open: l => !l.locked, locked: l => !!l.locked };
+function wodMpLobbyInProgress(l) {
+    const meta = (l && l.meta) || {};
+    return !!(l && (l.inProgress || l.matchInProgress || meta.matchInProgress));
+}
+function wodMpWireLobbyFilterOnce() {
+    const bar = document.querySelector('#mpPaneBrowse .mp-lobby-filter');
+    if(!bar || bar._wodWired) return;
+    bar._wodWired = true;
+    bar.addEventListener('click', ev => {
+        const btn = ev.target.closest && ev.target.closest('[data-lobby-filter]');
+        if(!btn) return;
+        wodMpLobbyFilter = WOD_MP_LOBBY_FILTERS[btn.dataset.lobbyFilter] ? btn.dataset.lobbyFilter : 'all';
+        wodMpRenderLobbyList(wodMpLastLobbies);
+    });
+}
+/** Who is in a game: the players' names ("Ana, Ben"; the computer seats are in the line above). */
+function wodMpLobbyPlayersLine(l) {
+    const meta = (l && l.meta) || {}, seats = Array.isArray(meta.seatTypes) ? meta.seatTypes : [], pub = meta.playerPublic || {};
+    const names = [];
+    seats.forEach((type, i) => {
+        if(type !== 'human') return;
+        const n = pub[String(i + 1)] && pub[String(i + 1)].displayName;
+        if(n && String(n).trim()) names.push(String(n).trim());
+    });
+    return names.join(', ');
+}
+function wodMpPlayingForLabel(sec) {
+    if(sec == null || !Number.isFinite(+sec)) return '';
+    const m = Math.floor(sec / 60);
+    if(m < 1) return 'just started';
+    return 'playing for ' + (m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min');
+}
 function wodMpRenderLobbyList(lobbies) {
     let el = document.getElementById('mpLobbyList');
     if(!el) return;
+    wodMpWireLobbyFilterOnce();
+    wodMpLastLobbies = Array.isArray(lobbies) ? lobbies : [];
     wodEnsurePlayerId();
     let myLobbyId = (typeof WodMultiplayer !== 'undefined' && WodMultiplayer.api.code) ? WodMultiplayer.api.code : '';
     let myPlayerId = (wodProgress && wodProgress.profile && wodProgress.profile.playerId) ? wodProgress.profile.playerId : '';
-    if(!lobbies || lobbies.length === 0) {
-        el.innerHTML = '<p class="mp-hub-pane-lead" style="margin:12px">No open lobbies. Switch to the Host tab to create one, or check back for ongoing matches to rejoin.</p>';
+    const all = wodMpLastLobbies;
+    const counts = { all: all.length, open: all.filter(WOD_MP_LOBBY_FILTERS.open).length, locked: all.filter(WOD_MP_LOBBY_FILTERS.locked).length };
+    document.querySelectorAll('#mpPaneBrowse [data-lobby-filter]').forEach(b => {
+        const f = b.dataset.lobbyFilter, on = f === wodMpLobbyFilter;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+        const n = b.querySelector('.mp-lobby-filter-n');
+        if(n) n.textContent = counts[f] ? String(counts[f]) : '';
+    });
+    if(!all.length) {
+        el.innerHTML = '<p class="mp-hub-pane-lead mp-lobby-empty">No games right now. Switch to the Host tab to start one.</p>';
         return;
     }
-    el.innerHTML = lobbies.map(l => {
+    const shown = all.filter(WOD_MP_LOBBY_FILTERS[wodMpLobbyFilter] || WOD_MP_LOBBY_FILTERS.all);
+    if(!shown.length) {
+        el.innerHTML = '<p class="mp-hub-pane-lead mp-lobby-empty">' + (wodMpLobbyFilter === 'open' ? 'No open games right now. Every game listed needs a password.' : 'No games with a password right now.') +
+            ' <button type="button" class="mp-lobby-show-all">Show all games</button></p>';
+        el.querySelector('.mp-lobby-show-all').onclick = () => { wodMpLobbyFilter = 'all'; wodMpRenderLobbyList(wodMpLastLobbies); };
+        return;
+    }
+    const row = l => {
         let meta = l.meta || {};
-        let inProgress = !!(l.inProgress || l.matchInProgress || meta.matchInProgress);
+        let inProgress = wodMpLobbyInProgress(l);
         let detail = [meta.mapSizeLabel, meta.mapShapeLabel, meta.aiCount != null ? (meta.aiCount + ' AI') : '', meta.victoryLabel, meta.fogOfWar ? 'Fog' : '', meta.mapBalance === false ? 'Random map' : (meta.mapShapeLabel ? 'Balanced' : ''), meta.aiCount ? wodAiDifficultyLabel(meta.aiDifficulty) + ' AI' : '']
             .filter(Boolean).join(' · ');
         if(!detail) detail = inProgress ? 'Match in progress' : 'Host still configuring map';
@@ -4083,9 +4137,11 @@ function wodMpRenderLobbyList(lobbies) {
         let selfNm = (wodProgress && wodProgress.profile && wodProgress.profile.mpDisplayName) ? String(wodProgress.profile.mpDisplayName).trim() : '';
         let canRejoin = inProgress && myPlayerId && Array.isArray(l.rejoinPlayerIds) && l.rejoinPlayerIds.indexOf(myPlayerId) >= 0;
         let rowClass = 'mp-lobby-row' + (inProgress ? ' mp-lobby-row--match' : '') + (inProgress && (l.players | 0) === 0 ? ' mp-lobby-row--waiting' : '');
+        let players = wodMpLobbyPlayersLine(l);
         let status = '';
         if(inProgress) {
-            if((l.players | 0) > 0) status = '<div class="mp-lobby-status">Match in progress · ' + (l.players | 0) + ' connected</div>';
+            let since = wodMpPlayingForLabel(l.startedAgoSec);
+            if((l.players | 0) > 0) status = '<div class="mp-lobby-status">Match in progress' + (since ? ' · ' + since : '') + '</div>';
             else status = '<div class="mp-lobby-status">Waiting for players to rejoin</div>';
         }
         let joinPart = '';
@@ -4097,16 +4153,24 @@ function wodMpRenderLobbyList(lobbies) {
             joinPart = '<button type="button" class="build-btn mp-join-btn" data-id="' + wodMpEscapeHtml(l.id) + '" data-locked="' + (l.locked ? '1' : '0') + '">Join</button>';
         else
             joinPart = '<span style="font-size:12px;opacity:0.65">In progress</span>';
-        return '<div class="' + rowClass + '">' +
+        let count = inProgress
+            ? [(l.players | 0) + ' online', (l.disconnectedCount | 0) ? (l.disconnectedCount | 0) + ' dropped out' : ''].filter(Boolean).join(' · ')
+            : ((l.players | 0) + ' / ' + (l.max || WOD_MP_MAX_PLAYERS) + ' players');
+        return '<div class="' + rowClass + '" data-lobby-id="' + wodMpEscapeHtml(l.id) + '">' +
             '<div class="mp-lobby-info">' +
             '<div class="mp-lobby-name">' + name + (l.locked ? ' <span class="mp-lobby-lock" title="Password required">🔒</span>' : '') + '</div>' +
             '<div class="mp-lobby-detail">' + wodMpEscapeHtml(detail) + '</div>' +
             status +
-            '<div class="mp-lobby-count">' + (inProgress
-                ? ((l.disconnectedCount | 0) + ' disconnected · ' + (l.players | 0) + ' online')
-                : ((l.players | 0) + ' / ' + (l.max || WOD_MP_MAX_PLAYERS) + ' players')) + '</div>' +
+            (players ? '<div class="mp-lobby-players">Players: ' + wodMpEscapeHtml(players) + '</div>' : '') +
+            '<div class="mp-lobby-count">' + count + '</div>' +
             '</div><div class="mp-lobby-action">' + joinPart + '</div></div>';
-    }).join('');
+    };
+    const waiting = shown.filter(l => !wodMpLobbyInProgress(l)), ongoing = shown.filter(wodMpLobbyInProgress);
+    let html = '';
+    if(waiting.length) html += '<div class="mp-lobby-section">Lobbies <span>' + waiting.length + '</span></div>' + waiting.map(row).join('');
+    else html += '<p class="mp-lobby-none">No lobbies are waiting for players' + (wodMpLobbyFilter === 'open' ? ' without a password' : wodMpLobbyFilter === 'locked' ? ' with a password' : '') + '. Host one from the Host tab.</p>';
+    if(ongoing.length) html += '<div class="mp-lobby-section mp-lobby-section--match">Ongoing matches <span>' + ongoing.length + '</span></div>' + ongoing.map(row).join('');
+    el.innerHTML = html;
     el.querySelectorAll('.mp-join-btn, .mp-rejoin-btn').forEach(btn => {
         btn.onclick = () => wodMpJoinLobbyFromList(btn.getAttribute('data-id'), btn.getAttribute('data-locked') === '1', {
             rejoin: btn.classList.contains('mp-rejoin-btn')

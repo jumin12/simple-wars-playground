@@ -1108,6 +1108,9 @@ function toggleEscMenu(forceOpen, opts) {
     }
     menu.classList.toggle('hidden', !shouldOpen);
     wodSyncPopupsForEscMenu(shouldOpen);
+    if(shouldOpen && typeof wodSyncEscSaveButton === 'function') wodSyncEscSaveButton();
+    // (the saved games menu sits over the pause menu; closing the pause menu closes it too)
+    if(!shouldOpen && typeof wodGameSavesOpen === 'function' && wodGameSavesOpen() && wodGameSavesUi.returnTo === 'game') document.getElementById('savesPanel').classList.add('hidden');
     if(shouldOpen && opts.skipDefaultSection !== true)
         showEscSection(opts.defaultSection || 'helpSection');
 }
@@ -1445,7 +1448,10 @@ function startGame(mode, opts) {
     })();
 }
 function returnToMenu() {
-    if(gameState==='PLAYING'&&!gameData.menuAttractMode)wodFinishLifetimeMatch('defeat','quit');
+    // Quitting straight after saving is "continue later" (js/game-saves.js): not a lost match, and not a failed assault
+    // in the campaign. The save carries the match on and it is counted when it ends.
+    const continueLater=gameState==='PLAYING'&&!gameData.menuAttractMode&&!gameData.mp?.enabled&&typeof wodGameSavedAndUnchanged==='function'&&wodGameSavedAndUnchanged();
+    if(gameState==='PLAYING'&&!gameData.menuAttractMode&&!continueLater)wodFinishLifetimeMatch('defeat','quit');
     wodFlushLifetimeProgress();
     hideCampaignSummaryOverlay();
     gameData._spectator=null;gameData._mpSurrenderedToAi=false;wodSyncSpectatorUi();
@@ -1461,8 +1467,11 @@ function returnToMenu() {
     }
     // Quitting a campaign battle mid-fight counts as a failed assault: the roster
     // syncs to the units' current state and the node is not captured.
-    if(gameData._campaignRun && !gameData._campaignRun.synced && gameState === 'PLAYING')
+    if(gameData._campaignRun && !gameData._campaignRun.synced && gameState === 'PLAYING' && !continueLater)
         wodCampaignAfterBattle(false);
+    gameData._wodSaveClock = null;
+    gameData._wodSavedSlot = null;
+    { const saves = document.getElementById('savesPanel'); if(saves) saves.classList.remove('wod-saves-ingame'); }
     gameData._campaignRun = null;
     gameData._campaignRegionMap = null;
     gameData._campaignAiAggressive = false;
@@ -2167,6 +2176,7 @@ function wodClearLiveMapForNewMatch() {
 }
 function wodPrepareForNewMatch(opts) {
     gameData._wodDeepEpoch = (gameData._wodDeepEpoch | 0) + 1;
+    gameData._wodSaveClock = null; gameData._wodSavedSlot = null;
     gameData._spectator=null;gameData._mpSurrenderedToAi=false;wodSyncSpectatorUi();
     if(!opts?.keepLifetimeMatch){gameData._lifetimeMatch=null;gameData._lifetimeStatsByOwner={};gameData._lifetimeEndReason=null;}
     gameData.controlGroups = {};

@@ -1,7 +1,7 @@
 /**
  * Simple Wars — multiplayer relay
  * Host-authoritative: host runs full sim; server forwards snapshots & player commands.
- * Lobby browser: list open games, optional password, online count.
+ * Lobby browser: list open games and ongoing matches, optional password, online count.
  */
 const http = require('http');
 const fs = require('fs');
@@ -1289,6 +1289,8 @@ function getLobbyListPublic() {
       inProgress,
       matchInProgress: inProgress,
       disconnectedCount: disc,
+      // (the game browser shows how long an ongoing match has been going)
+      startedAgoSec: inProgress && room.startedAt ? Math.max(0, Math.round((Date.now() - room.startedAt) / 1000)) : null,
       listRank,
       rejoinPlayerIds: Object.keys(seatMap).filter((id) => sanitizePlayerId(id)),
       meta: inProgress
@@ -2236,6 +2238,7 @@ wss.on('connection', (ws) => {
     if (t === 'start' && client.isHost) {
       for(const peer of client.room.clients)peer.spectating=false;
       client.room.matchStarted = true;
+      client.room.startedAt = Date.now();
       client.room.lobbyPreview = null;
       client.room._matchEndRecorded = false;
       client.room.pendingReconnect = new Map();

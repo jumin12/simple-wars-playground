@@ -1450,6 +1450,7 @@ function wodRefreshCampaignNodeInfoOnly() {
 function wodRefreshCampaignPanel() {
     wodRogueWirePanelOnce();
     let c = wodRogueLoad();
+    if(typeof wodSyncCampaignSaveButtons === 'function') wodSyncCampaignSaveButtons();
     const panel=document.querySelector('#campaignPanel .wod-camp-panel'),panelScroll=panel?.scrollTop||0;
     document.getElementById('campaignPanel').dataset.phase=c?'active':'setup';
     let setup = document.getElementById('wodCampSetup');

@@ -8,9 +8,10 @@
     <link rel="icon" type="image/png" href="branding/favicon-32.png" sizes="32x32">
     <link rel="icon" type="image/png" href="branding/favicon-192.png" sizes="192x192">
     <link rel="apple-touch-icon" href="branding/favicon-192.png">
-    <link rel="stylesheet" href="css/game.css?v=9e39ca53a4">
+    <link rel="stylesheet" href="css/game.css?v=e0e88ab7be">
     <link rel="stylesheet" href="css/tutorial.css?v=a83c6a4334">
     <link rel="stylesheet" href="css/clans.css?v=055c674539">
+    <link rel="stylesheet" href="css/saves.css?v=75b8b98e34">
 <link rel="stylesheet" href="commerce-shop.css?v=778f1f8dcd">
     <link rel="stylesheet" href="campaign-ui.css?v=251b7a8796">
 </head>
@@ -66,6 +67,7 @@
                 </header>
                 <div class="main-menu-btns">
                     <button class="menu-btn" onclick="showPanel('playMode')">Play vs AI</button>
+                    <button class="menu-btn" id="wodMainSavesBtn" onclick="wodOpenGameSaves({ mode: 'load', returnTo: 'menu' })">Saved games</button>
                     <button class="menu-btn" onclick="showPanel('multiplayer')">Multiplayer</button>
                     <button class="menu-btn" onclick="showPanel('shop')">Shop</button>
                     <button class="menu-btn" onclick="openMapEditor()">Map Editor</button>
@@ -103,6 +105,7 @@
                     <button type="button" class="menu-btn wod-play-mode-btn" onclick="showPanel('campaign')">Campaign</button>
                     <button type="button" class="menu-btn wod-play-mode-btn" onclick="showPanel('missions')">Missions</button>
                     <button type="button" class="menu-btn wod-play-mode-btn" onclick="wodOpenSkirmishSetup()">Skirmish</button>
+                    <button type="button" class="menu-btn wod-play-mode-btn" onclick="wodOpenGameSaves({ mode: 'load', returnTo: 'playMode' })">Saved games</button>
                 </div>
                 <div class="wod-panel-footer">
                     <button type="button" class="menu-btn" onclick="hidePanels()">Back</button>
@@ -201,11 +204,30 @@
                     <div class="wod-camp-footer">
                         <div class="wod-camp-footer-left">
                             <button type="button" class="menu-btn" onclick="showPanel('playMode')">Back</button>
+                            <button type="button" class="menu-btn" id="wodCampLoadBtn" onclick="wodOpenCampaignSaves(false)">Saved games</button>
                         </div>
                         <div class="wod-camp-footer-right">
+                            <button type="button" class="menu-btn hidden" id="wodCampSaveBtn" onclick="wodOpenCampaignSaves(true)">Save campaign</button>
                             <button type="button" class="menu-btn wod-camp-danger" id="wodCampResetBtn">Surrender</button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="savesPanel" class="overlay hidden wod-saves-overlay">
+            <div class="panel panel-wide wod-saves-panel" role="dialog" aria-modal="true" aria-labelledby="wodSavesTitle">
+                <h2 id="wodSavesTitle">Saved games</h2>
+                <p class="wod-map-lib-sub" id="wodSavesLead"></p>
+                <nav class="shop-tabs wod-saves-tabs" role="tablist" aria-label="Kinds of saved game">
+                    <button type="button" class="shop-tab active" data-save-tab="skirmish" role="tab" aria-selected="true" id="wodSavesTabSkirmish">Skirmish</button>
+                    <button type="button" class="shop-tab" data-save-tab="campaign" role="tab" aria-selected="false" id="wodSavesTabCampaign">Campaign</button>
+                    <button type="button" class="shop-tab" data-save-tab="missions" role="tab" aria-selected="false" id="wodSavesTabMissions">Missions</button>
+                </nav>
+                <div class="wod-saves-slots" id="wodSavesSlots" role="tabpanel" aria-live="polite"></div>
+                <div class="wod-panel-footer wod-saves-footer">
+                    <button type="button" class="menu-btn" id="wodSavesBack">Back</button>
+                    <button type="button" class="menu-btn hidden" id="wodSavesQuit">Quit to main menu</button>
                 </div>
             </div>
         </div>
@@ -454,7 +476,12 @@
                                 <button type="button" class="mp-hub-tab" id="mpTabRankings" data-mp-tab="rankings" role="tab" aria-selected="false">Rankings</button>
                             </div>
                             <div id="mpPaneBrowse" class="mp-hub-pane active" data-mp-pane="browse" role="tabpanel">
-                                <p class="mp-hub-pane-lead">Open lobbies appear first. Ongoing matches are listed below — rejoin if you were disconnected.</p>
+                                <p class="mp-hub-pane-lead">Lobbies waiting for players come first, then the matches being played. Rejoin a match if you dropped out of it.</p>
+                                <div class="mp-lobby-filter" role="radiogroup" aria-label="Which games to show">
+                                    <button type="button" class="mp-lobby-filter-btn active" data-lobby-filter="all" role="radio" aria-checked="true">All games <span class="mp-lobby-filter-n"></span></button>
+                                    <button type="button" class="mp-lobby-filter-btn" data-lobby-filter="open" role="radio" aria-checked="false">Open <span class="mp-lobby-filter-n"></span></button>
+                                    <button type="button" class="mp-lobby-filter-btn" data-lobby-filter="locked" role="radio" aria-checked="false">Password <span class="mp-lobby-filter-n"></span></button>
+                                </div>
                                 <div id="mpLobbyList"></div>
                             </div>
                             <div id="mpPaneHost" class="mp-hub-pane" data-mp-pane="host" role="tabpanel" hidden>
@@ -2302,6 +2329,7 @@
                 <h2>Paused</h2>
                 <div class="esc-actions">
                     <button class="menu-btn" onclick="toggleEscMenu(false)">Back to game</button>
+                    <button class="menu-btn" id="wodEscSaveBtn" onclick="wodOpenGameSavesFromGame()">Save game</button>
                     <button class="menu-btn" onclick="showEscSection('helpSection')">Help</button>
                     <button class="menu-btn" onclick="showEscSection('settingsSection')">Settings</button>
                     <button class="menu-btn danger-btn" onclick="confirmSurrender()">Surrender</button>
@@ -2404,7 +2432,7 @@
     <script src="battle-audio.js?v=a7356989e2"></script>
     <script src="campaign-ui.js?v=1654292d2f"></script>
     <!-- Game script, in load order: functions and constants per area first, js/main.js (startup) last. -->
-    <script src="js/changelog.js?v=8f200d9298"></script>
+    <script src="js/changelog.js?v=46927fbcf1"></script>
     <script src="js/core.js?v=199d2a05eb"></script>
     <script src="js/world.js?v=e7a508f5fc"></script>
     <script src="js/units.js?v=115c6e136f"></script>
@@ -2419,7 +2447,7 @@
     <script src="js/economy.js?v=a205123616"></script>
     <script src="js/production.js?v=43e60b4da9"></script>
     <script src="js/sim.js?v=5b3f34986b"></script>
-    <script src="js/fog.js?v=6c75af57d5"></script>
+    <script src="js/fog.js?v=1202a9511b"></script>
     <!-- The AI, by concern (js/ai/brain.js explains the parts and the engine's entry points). -->
     <script src="js/ai/brain.js?v=77a01c4d7a"></script>
     <script src="js/ai/knowledge.js?v=58227c0736"></script>
@@ -2434,19 +2462,20 @@
     <script src="js/render-terrain.js?v=017040371c"></script>
     <script src="js/render-units.js?v=af7d589cb2"></script>
     <script src="js/render-orders.js?v=dd9c691ac4"></script>
-    <script src="js/render.js?v=2e23ff1e19"></script>
+    <script src="js/render.js?v=66d57ba0ba"></script>
     <script src="js/ui.js?v=06d9c6dd50"></script>
     <script src="js/report.js?v=b17f8c088e"></script>
     <script src="js/input.js?v=7b0853fdae"></script>
     <script src="js/saves.js?v=b764a76290"></script>
+    <script src="js/game-saves.js?v=86746df21e"></script>
     <script src="js/progress.js?v=222591aa90"></script>
     <script src="js/shop.js?v=829f5f5666"></script>
     <script src="js/audio.js?v=e47e9ed124"></script>
     <script src="js/missions.js?v=b05444b202"></script>
-    <script src="js/campaign.js?v=cebebae274"></script>
-    <script src="js/multiplayer.js?v=6d89fe3c37"></script>
+    <script src="js/campaign.js?v=b35573a4ee"></script>
+    <script src="js/multiplayer.js?v=31cb5bb836"></script>
     <script src="js/clans.js?v=a9313edd40"></script>
-    <script src="js/game.js?v=6d83647359"></script>
+    <script src="js/game.js?v=40cae83d27"></script>
     <script src="js/dev.js?v=8099438850"></script>
     <script src="js/tutorial.js?v=72f8c931fb"></script>
     <script src="js/main.js?v=8a5bbe8e15"></script>

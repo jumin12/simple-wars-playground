@@ -276,11 +276,14 @@ function wodDrawUnitsLayer(ctx, view) {
         const focusTargets=new Set(gameData.selection.filter(u=>u.owner===wodLocalPlayerOwner()).map(u=>u.preferredTargetUid).filter(Boolean));
         for(let ui = 0, ul = uo.length; ui < ul; ui++) {
             let unit = uo[ui];
-            if(!wodFogCanSeeUnit(unit)) continue;
+            // (an enemy that just left your sight fades out rather than vanishing: js/fog.js wodFogUnitAlpha)
+            let fogAlpha = wodFogUnitAlpha(unit);
+            if(fogAlpha <= 0) continue;
             let dx = unit._drawX != null ? unit._drawX : unit.x;
             let dy = unit._drawY != null ? unit._drawY : unit.y;
             if(wodCull && !unit.selected && !wodInView(unit.x, unit.y, culPad) && !wodInView(dx, dy, culPad)) continue;
             ctx.save();
+            if(fogAlpha < 1) ctx.globalAlpha *= fogAlpha;
             let dp = wodUnitSmoothDrawXY(unit, gameData._frameSimDt);
             ctx.translate(dp.x, dp.y);
 

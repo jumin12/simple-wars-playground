@@ -124,10 +124,43 @@ function wodFogHexExplored(hex) {
     if(!wodFogActive() || !hex) return true;
     return !!(gameData._fogExplored && gameData._fogExplored.has(getHexKey(hex)));
 }
+// An enemy at the edge of your vision no longer blinks. Vision is worked out afresh about four times a second with a
+// hard edge, so an enemy standing on it (or a front line jostling across it, or your own unit stepping into the next
+// cell) used to vanish and reappear many times a minute. Now:
+// - an enemy you have seen stays shown while its cell is next to one you can see (one cell of give at the edge: going
+//   out of sight takes a step further than coming into it);
+// - past that it is held at full strength for WOD_FOG_UNIT_HOLD_MS, then fades out over WOD_FOG_UNIT_FADE_MS;
+// - back in sight, it is shown at once. An enemy you have not seen is shown only in sight, as before.
+// (Page-clock times per unit object, never saved: js/game-saves.js leaves _fogSeenAt out.)
+const WOD_FOG_UNIT_HOLD_MS = 400, WOD_FOG_UNIT_FADE_MS = 800;
+const WOD_FOG_EDGE_STEPS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+function wodFogCellBesideVision(hex) {
+    if(!hex || !gameData._fogVisible) return false;
+    for(const [dq, dr] of WOD_FOG_EDGE_STEPS) {
+        const n = wodHexAt(hex.q + dq, hex.r + dr);
+        if(n && gameData._fogVisible.has(getHexKey(n))) return true;
+    }
+    return false;
+}
+/** How strongly to draw a unit: 1 in sight (or ours), between 0 and 1 while it fades after leaving sight, 0 hidden. */
+function wodFogUnitAlpha(unit) {
+    if(!wodFogActive() || !unit) return 1;
+    if(unit.owner === wodLocalPlayerOwner()) return 1;
+    const seen = gameData._fogSeenAt instanceof WeakMap ? gameData._fogSeenAt : (gameData._fogSeenAt = new WeakMap());
+    const now = performance.now(), hex = getNearestHexToPoint(unit.x, unit.y);
+    if(wodFogHexVisible(hex)) { seen.set(unit, now); return 1; }
+    const at = seen.get(unit);
+    if(at === undefined) return 0;
+    if(now - at <= WOD_FOG_UNIT_HOLD_MS && wodFogCellBesideVision(hex)) { seen.set(unit, now); return 1; }
+    const since = now - at;
+    if(since <= WOD_FOG_UNIT_HOLD_MS) return 1;
+    const left = 1 - (since - WOD_FOG_UNIT_HOLD_MS) / WOD_FOG_UNIT_FADE_MS;
+    if(left > 0) return left;
+    seen.delete(unit);
+    return 0;
+}
 function wodFogCanSeeUnit(unit) {
-    if(!wodFogActive() || !unit) return true;
-    if(unit.owner === wodLocalPlayerOwner()) return true;
-    return wodFogHexVisible(getNearestHexToPoint(unit.x, unit.y));
+    return wodFogUnitAlpha(unit) > 0;
 }
 function wodFogCanSeeCity(city) {
     if(!wodFogActive() || !city) return true;
