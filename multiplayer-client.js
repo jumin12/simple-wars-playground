@@ -26,7 +26,7 @@
     isHost: false,
     max: 6,
     connected: false,
-    registered:false,playerId:'',
+    registered:false,admin:false,playerId:'',
     socketOpen: false,
     lastSeq: 0,
     online: 0,
@@ -137,8 +137,8 @@
           emit('LobbyList', { online: api.online, lobbies: api.lobbies });
           break;
         case 'registered':
-          api.registered=true;api.playerId=msg.playerId||'';api.clan=msg.clan||null;
-          emit('Registered', { playerId: msg.playerId || '', profile: msg.profile || null, clan: msg.clan || null });
+          api.registered=true;api.playerId=msg.playerId||'';api.clan=msg.clan||null;api.admin=!!msg.admin;
+          emit('Registered', { playerId: msg.playerId || '', profile: msg.profile || null, clan: msg.clan || null, admin: !!msg.admin });
           break;
         case 'profile':
           emit('Profile', { profile: msg.profile || null });
@@ -156,7 +156,7 @@
           emit('MpResultDisputed', { msg: msg.msg || 'The match result was disputed and not recorded.' });
           break;
         case 'register_failed':
-          api.registered=false;
+          api.registered=false;api.admin=false;
           emit('RegisterFailed', { reason: msg.reason || '', msg: msg.msg || 'Registration failed' });
           break;
         case 'profile_failed':
@@ -350,6 +350,8 @@
             if (msg.t === 'clan_info' && 'mine' in msg) api.clan = msg.mine || null;
             emit('Clan', msg);
           }
+          // Admin tools (js/admin.js; the relay answers admins only).
+          else if (/^admin_/.test(String(msg.t || ''))) emit('Admin', msg);
           break;
       }
     };
@@ -360,7 +362,7 @@
       const prevCode = api.code;
       const prevSlot = api.slot;
       const prevHost = api.isHost;
-      api.socketOpen = false;api.registered=false;
+      api.socketOpen = false;api.registered=false;api.admin=false;
       api.connected = false;
       if (!keepSession) {
         api.code = '';
@@ -423,6 +425,9 @@
     },
     requestLobbyList() {
       send({ t: 'list_lobbies' });
+    },
+    adminSend(obj) {
+      if (obj && /^admin_/.test(String(obj.t || ''))) send(obj);
     },
     clanSend(obj) {
       if (obj && obj.t === 'cw_queue' && api.outdated) { emit('Outdated', { latestVersion: api.latestVersion }); return; }

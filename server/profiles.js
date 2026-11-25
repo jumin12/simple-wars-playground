@@ -442,6 +442,9 @@ function hydrateProfile(playerId, row) {
   base.profile.ownedUnitSkins.nato = true;
   base.profile.equippedShopMapId = p.equippedShopMapId ? String(p.equippedShopMapId).slice(0, 64) : null;
   base.profile.mpDisplayName = String(p.mpDisplayName || '').trim().slice(0, 24);
+  // (an admin renamed this player away from a name, kept as its match key: a game still holding that name is given the
+  // admin's instead when it connects, server/admin.js)
+  if (p.adminRenamedFrom) base.profile.adminRenamedFrom = String(p.adminRenamedFrom).slice(0, 64);
   base.profile.friends = sanitizeFriendsList(p.friends);
   base.profile.friendRequestsOut = sanitizeFriendRequests(p.friendRequestsOut);
   base.profile.friendRequestsIn = sanitizeFriendRequests(p.friendRequestsIn);

@@ -493,10 +493,69 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
     }
 
     load();
+    // ---- Admin (server/admin.js): any clan, whoever leads it. Each change is told in the clan's chat like a leader's.
+    function adminRow(clan) {
+        return { id: clan.id, name: clan.name, shownName: shownName(clan), nameFlagged: nameFlagged(clan), leaderId: clan.leaderId, leaderName: nameOf(clan.leaderId),
+            members: clan.members.length, visibility: clan.visibility, createdAt: clan.createdAt || 0, wins: clan.stats.wins | 0 };
+    }
+    // Clans whose name (read the same way names are matched) contains the query, or with that ID; newest first.
+    function adminList(query, limit = 60) {
+        const q = nameMatchKey(String(query || '')), id = String(query || '').trim().toUpperCase();
+        return [...clans.values()].filter(c => !q || c.id === id || nameKey(c.name).includes(q))
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, limit).map(adminRow);
+    }
+    function adminDetail(clanId) {
+        const clan = clans.get(String(clanId || ''));
+        if(!clan) return null;
+        return { ...adminRow(clan), description: clan.description || '', code: clan.code,
+            memberList: rankedMembers(clan).map(m => ({ playerId: m.playerId, name: nameOf(m.playerId), leader: m.playerId === clan.leaderId, joinedAt: m.joinedAt || 0, lastSeenAt: m.lastSeenAt || 0, online: isOnline(m.playerId) })) };
+    }
+    // A new name must still be free (and not the placeholder); the clan's own claim to its old name does not matter.
+    function adminRename(clanId, rawName) {
+        const clan = clans.get(String(clanId || ''));
+        if(!clan) return { ok: false, msg: 'That clan no longer exists.' };
+        const key = nameKey(rawName), other = [...clans.values()].find(c => c !== clan && nameKey(c.name) === key);
+        if(other) return { ok: false, msg: 'Another clan (' + other.name + ', ' + other.id + ') has that name.' };
+        const v = validate({ name: rawName, emblem: clan.emblem, visibility: clan.visibility, description: clan.description }, clan.id);
+        if(!v.ok) return v;
+        const old = clan.name;
+        clan.name = v.name;
+        say(clan, 'An admin renamed the clan from ' + old + ' to ' + v.name + '.');
+        changed(clan);
+        return { ok: true, clan, old };
+    }
+    function adminKick(clanId, playerId) {
+        const clan = clans.get(String(clanId || ''));
+        if(!clan || !memberOf(clan, playerId)) return { ok: false, msg: 'That player is not in the clan.' };
+        clan.members = clan.members.filter(m => m.playerId !== playerId); byPlayer.delete(playerId);
+        if(!clan.members.length) { clans.delete(clan.id); removed(clan.id); return { ok: true, clan, disbanded: true }; }
+        let note = nameOf(playerId) + ' was removed from the clan by an admin.';
+        if(clan.leaderId === playerId) { clan.leaderId = rankedMembers(clan)[0].playerId; note += ' ' + nameOf(clan.leaderId) + ' now leads it.'; }
+        say(clan, note);
+        changed(clan);
+        return { ok: true, clan };
+    }
+    function adminSetLeader(clanId, playerId) {
+        const clan = clans.get(String(clanId || ''));
+        if(!clan || !memberOf(clan, playerId)) return { ok: false, msg: 'That player is not in the clan.' };
+        if(clan.leaderId === playerId) return { ok: false, msg: 'That player already leads the clan.' };
+        clan.leaderId = playerId;
+        say(clan, 'An admin made ' + nameOf(playerId) + ' the clan leader.');
+        changed(clan);
+        return { ok: true, clan };
+    }
+    function adminDisband(clanId) {
+        const clan = clans.get(String(clanId || ''));
+        if(!clan) return { ok: false, msg: 'That clan no longer exists.' };
+        for(const m of clan.members) byPlayer.delete(m.playerId);
+        clans.delete(clan.id); removed(clan.id);
+        return { ok: true, clan, memberIds: clan.members.map(m => m.playerId) };
+    }
+
     return {
         init, post, EMBLEM_IDS, PRESET_EMBLEMS, FLAG_EMBLEMS, TIERS, MAX_MEMBERS, clanOf, summary, detail, create, join, apply, useCode, cancelApplication, answerApplication,
         inviteFriend, answerInvite, pendingFor, leave, update, kick, touch, checkInactiveLeaders, rankedMembers, list, leaderboard, recordWar, flush, get: id => clans.get(id) || null,
-        shownName, nameFlagged,
+        shownName, nameFlagged, adminList, adminDetail, adminRename, adminKick, adminSetLeader, adminDisband,
     };
 }
 

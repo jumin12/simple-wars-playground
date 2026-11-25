@@ -13,6 +13,7 @@ const profiles = require('./profiles');
 const commerceHttp = require('./commerce-http').createCommerceHttp();
 const profileHttp = require('./profile-http').createProfileHttp(profiles);
 const { createClans } = require('./clans');
+const { createAdmin, parseAdminIds } = require('./admin');
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
@@ -99,6 +100,43 @@ const clans = createClans({
   profiles,
   nameOf: (pid) => shownPlayerName(pid, String((profiles.getProfile(pid) && profiles.getProfile(pid).profile.mpDisplayName) || 'Player')),
   isOnline: (pid) => onlineByPlayerId.has(pid),
+});
+// Admins: the player IDs in WOD_ADMIN_PLAYER_IDS (server/admin.js), the game's owner when it is not set (set it empty
+// for none). Nobody else is told the tools exist. (Knowing an ID is no way in: an ID belongs to the device or Steam
+// account it was first bound to, and anyone else asking for it is given a new one, server/profile-store.js bind.)
+const DEFAULT_ADMIN_PLAYER_IDS = 'WOD-AM4P-MUAM';
+const admin = createAdmin({
+  adminIds: parseAdminIds(process.env.WOD_ADMIN_PLAYER_IDS ?? DEFAULT_ADMIN_PLAYER_IDS, sanitizePlayerId),
+  profiles, clans, sanitizePlayerId, knownPlayerNames, validateDisplayNameForPlayer, displayNameKey, playerNameFlagged,
+  isOnline: (pid) => onlineByPlayerId.has(pid),
+  // (a renamed player who is online takes the new name at once: their game is told it as if they had just registered)
+  onPlayerRenamed(pid, name) {
+    playerNameHolders = null;
+    const c = onlineByPlayerId.get(pid);
+    if (c) {
+      c.displayName = name;
+      profiles.attachClientProfile(c, name);
+      updateLeaderboardEntry(c, c.combinedStats);
+      cwSend(c, { t: 'registered', playerId: pid, profile: profiles.exportProfile(pid), clan: clans.summary(clans.clanOf(pid)), ...(admin.isAdmin(pid) ? { admin: true } : {}) });
+    } else {
+      const row = leaderboard.get(pid);
+      if (row) { row.displayName = name; row.updatedAt = Date.now(); scheduleLeaderboardSave(); }
+    }
+    void profiles.flush();
+  },
+  onClanChanged(clan) { notifyClanMembers(clan); },
+  onMemberRemoved(pid, clan) {
+    const c = cwOnline(pid);
+    if (c) { cwRemove(c); cwLeaveParty(c, 'Your 2v2 party ended.'); cwSend(c, clanInfoFor(c, null, { notice: 'An admin removed you from ' + clan.name + '.' })); }
+    cwBroadcastStatus();
+  },
+  onClanDisbanded(clan, memberIds) {
+    for (const pid of memberIds) {
+      const c = cwOnline(pid);
+      if (c) { cwRemove(c); cwLeaveParty(c, 'Your 2v2 party ended.'); cwSend(c, clanInfoFor(c, null, { notice: 'An admin disbanded ' + clan.name + '.' })); }
+    }
+    cwBroadcastStatus();
+  },
 });
 // ---- Clan wars ----
 // 1v1: members queue alone and are only ever paired with a player of another clan, never a clanmate.
@@ -1520,14 +1558,16 @@ wss.on('connection', (ws) => {
       client.identityKey=identity.identityKey;
       const steamId=profiles.steamIdForPlayer(identity.playerId);
       if(steamId){try{const result=await commerceHttp.profileWallet(steamId,profiles.exportProfile(identity.playerId));profiles.applySteamWallet(identity.playerId,result?.wallet);}catch(_){ws.send(JSON.stringify({t:'register_failed',reason:'temporarily_unavailable',msg:'Your saved Steam wallet is temporarily unavailable. Please reconnect shortly.'}));return;}}
-      const savedName=profiles.getProfile(identity.playerId)?.profile.mpDisplayName;
-      const result = registerClientPlayer(client, {...msg,playerId:identity.playerId,displayName:msg.autoName&&savedName?savedName:msg.displayName});
+      const savedProfile=profiles.getProfile(identity.playerId)?.profile,savedName=savedProfile?.mpDisplayName;
+      // (a game still holding a name an admin renamed this player away from gets the admin's name back: server/admin.js)
+      const staleName=!!(savedProfile?.adminRenamedFrom&&savedName&&displayNameKey(msg.displayName||'')===savedProfile.adminRenamedFrom);
+      const result = registerClientPlayer(client, {...msg,playerId:identity.playerId,displayName:(msg.autoName||staleName)&&savedName?savedName:msg.displayName});
       if (!result.ok) {
         ws.send(JSON.stringify({ t: 'register_failed', reason: result.reason, msg: result.msg }));
         return;
       }
       await profiles.flush();
-      ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId, profile: result.profile || null, clan: clans.summary(clans.clanOf(result.playerId)) }));
+      ws.send(JSON.stringify({ t: 'registered', playerId: result.playerId, profile: result.profile || null, clan: clans.summary(clans.clanOf(result.playerId)), ...(admin.isAdmin(result.playerId) ? { admin: true } : {}) }));
       clans.touch(result.playerId);
       flushFriendRemovalsForClient(client);
       flushFriendRequestsForClient(client);
@@ -1794,6 +1834,8 @@ wss.on('connection', (ws) => {
       ws.send(JSON.stringify({ t: 'friend_invite_sent', targetPlayerId: targetId }));
       return;
     }
+
+    if (/^admin_/.test(String(t || ''))) { cwSend(client, admin.handle(client, msg)); await profiles.flush(); return; }
 
     if (/^(clan|cw)_/.test(String(t || ''))) {
       const pid = client.playerId;

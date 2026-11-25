@@ -2035,6 +2035,7 @@ function wodMpSwitchHubTab(tabId) {
         wodMpQueryFriendPresence();
     }
     if(typeof wodClanOnHubTab === 'function') wodClanOnHubTab(tabId);
+    if(typeof wodAdminOnHubTab === 'function') wodAdminOnHubTab(tabId);
     if(tabId === 'rankings') {
         wodMpQueryFriendPresence();
         wodMpRequestLeaderboard(window._wodMpLbSort || 'wins', window._wodMpLbScope || 'global');
