@@ -165,8 +165,10 @@ const WOD_GAME_SAVE_OMIT_FIELDS = new Set([
     '_wodPfRelaxUntil', '_wodAmpFailUntil', '_wodPathGiveUpUntil', '_wodReplanLandUntil', '_wodPfDeepAt', '_wodBlockedRepathUntil',
     '_netAt', '_netFromX', '_netFromY', 'selected',
 ]);
+// (and every "...Cache": the game rebuilds its caches, and one holding a WeakMap came back without it, so the computer's
+// naval planning threw on every turn of a loaded game, _harborUtilityCache)
 function wodGameSaveSkipKey(k) {
-    return WOD_GAME_SAVE_SKIP_KEYS.has(k) || k.startsWith('_mp') || k.endsWith('FrameDone');
+    return WOD_GAME_SAVE_SKIP_KEYS.has(k) || k.startsWith('_mp') || k.endsWith('FrameDone') || k.endsWith('Cache');
 }
 
 /* ------------------------------------------------------------------------------------------------------------------
@@ -372,6 +374,8 @@ function wodAdoptCampaignState(rogue) {
 /** Put a decoded battle back into gameData and rebuild what the game keeps beside it. */
 function wodApplySavedMatchState(state, payload) {
     for(const k of Object.keys(state)) {
+        // (what a save leaves out is not taken from an older save either: saves made before a cache was left out carry it)
+        if(wodGameSaveSkipKey(k)) continue;
         if(k === 'camera' && state.camera && gameData.camera) { Object.assign(gameData.camera, state.camera); continue; }
         gameData[k] = state[k];
     }
@@ -456,10 +460,11 @@ function wodStartSavedMatch(state, payload, from) {
             // (the match goes on from the save: it was counted as started when it first began)
             if(!gameData._lifetimeMatch) wodBeginLifetimeMatch();
             gameData._matchReadyForEndChecks = true;
-            setGameSpeed(payload.speed > 0 ? payload.speed : 1, true);
+            // (it opens paused, to look round before carrying on; the speed it was saved at is the one 1x/2x/3x pick up)
+            setGameSpeed(0, true);
             wodSyncCampaignBattleHud();
             if(typeof wodUpdateCampaignDefenseHoldBanner === 'function') wodUpdateCampaignDefenseHoldBanner();
-            showNotification('Saved game loaded.');
+            showNotification('Saved game loaded and paused. Pick a speed to carry on.', 'info');
         } catch(e) {
             console.error(e);
             wodMatchLoadHide();

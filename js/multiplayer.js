@@ -750,7 +750,10 @@ function wodMpTryMarkReady(slot) {
 // WOD_MP_MAX_CMD_UNITS unit ids (no repeats), at most WOD_MP_MAX_CMD_POINTS points per path, and every
 // coordinate a finite number. A command that fails these checks is dropped.
 const WOD_MP_MAX_CMD_UNITS = 500;
-const WOD_MP_MAX_CMD_POINTS = 400;
+// (a march may have any number of waypoints; 2000 bounds what one guest command can make the host do)
+const WOD_MP_MAX_CMD_POINTS = 2000;
+// A guest's waypoint march carries each unit's laid-out path up to this many points in all, else the waypoints only.
+const WOD_MP_SHIFT_MARCH_PATH_POINTS = 3000;
 function wodMpSanitizeRemoteCmd(cmd) {
     if(!cmd || typeof cmd !== 'object' || typeof cmd.kind !== 'string') return null;
     const out = Object.assign({}, cmd);
@@ -1395,7 +1398,7 @@ function wodMpDisconnectAndReset() {
 }
 function wodMpEscapeHtml(s) {
     if(s == null) return '';
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 /** Lobby / match seat label from synced profiles; falls back to local saved name for your slot, else "Seat N". */
 function wodMpDisplayNameForSlot(slot, context) {

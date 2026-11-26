@@ -192,6 +192,14 @@ async function skirmishPhase(browser, url) {
     const loaded = await page.evaluate(() => window.__loadedSig);
     for(const k of Object.keys(before)) assert.deepEqual(loaded[k], before[k], 'the loaded battle matches the saved one: ' + k);
     assert.equal(await page.evaluate(() => window.__loadedTimers), 0, 'no unit waits on a page-clock deadline from the old page');
+    // it opens paused, at the moment it was saved
+    await page.waitForFunction(() => !wodMatchLoadActive() && gameData._matchReadyForEndChecks, null, { timeout: 60000 });
+    const opened = await page.evaluate(() => ({ speed: gameData.speed, clock: +(gameData._aiEconomyClock).toFixed(4) }));
+    assert.equal(opened.speed, 0, 'a loaded battle opens paused');
+    await page.waitForTimeout(1500);
+    assert.equal(await page.evaluate(() => +(gameData._aiEconomyClock).toFixed(4)), opened.clock, 'and stays paused until a speed is picked');
+    // (no caches in a save: one holding a WeakMap came back without it and the computer's naval planning threw every turn)
+    assert.equal(await page.evaluate(async () => Object.keys(wodSaveDecode((await wodReadGameSave('skirmish', 0)).state)).filter(k => k.endsWith('Cache')).length), 0, 'a save keeps no caches');
     const lost2 = await page.evaluate(() => ({ lost: wodProgress.lifetime.matchesLost || 0, started: wodProgress.lifetime.gamesStarted || 0 }));
     assert.equal(lost2.started, lost1.started, 'loading is not counted as a new match');
     // it plays on: the clock runs, units move and the computer gives orders
@@ -237,6 +245,8 @@ async function skirmishPhase(browser, url) {
     assert.equal(await page.evaluate(() => wodProgress.lifetime.matchesLost || 0), lostBefore + 1, 'the battle left behind counted as lost');
     await shot(page, 'skirmish-menu');
     assert.deepEqual(errors.pageErrors, [], 'no page errors');
+    // (errors inside the computer's turn are caught and logged, so the game ran on: they are checked here too)
+    assert.deepEqual(errors.consoleErrors.filter(e => /TypeError|ReferenceError|RangeError|Cannot read/.test(e)), [], 'no script errors in the console after loading and playing on');
     await context.close();
     console.log('skirmish: OK (' + before.units + ' units, ' + Math.round(entry.bytes / 1024) + ' KB save, clock ' + before.clock + ')');
 }

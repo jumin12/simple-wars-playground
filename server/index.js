@@ -19,12 +19,23 @@ const PORT = parseInt(process.env.PORT || '8080', 10);
 const MAX_PLAYERS = 4;
 // Only a host inside a room sends big messages (the match start payload and snapshots). Everyone else is
 // limited to small control messages, checked before the message is parsed.
-const MAX_INIT_BYTES = 48 * 1024 * 1024;
+// (a Large map's match start is about 2.5 MB; 12 MB leaves room for custom maps. It used to be 48 MB for every socket,
+// so one message could make the relay hold 48 MB, and 64 queued ones three gigabytes)
+const MAX_INIT_BYTES = 12 * 1024 * 1024;
 const MAX_CONTROL_BYTES = 2 * 1024 * 1024;
 // Per-connection rate limit (token bucket). A host sends about ten snapshots a second plus commands.
 const RATE_BURST = 240;
 const RATE_PER_SECOND = 120;
 const MAX_QUEUED_MESSAGES = 64;
+const MAX_QUEUED_BYTES = 16 * 1024 * 1024;
+// A guest's command to the host (a move, a march with its waypoints): no more than this.
+const MAX_CMD_BYTES = 256 * 1024;
+// Connections: at most this many from one address (a family or a LAN party plays from one), and in all. The address is
+// the one the hosting proxy passes on; a connection with none (a game and relay on one machine) is not counted.
+const MAX_CONNECTIONS_PER_IP = 32;
+const MAX_CONNECTIONS = 4000;
+// A match shorter than this is not counted (tests on a local relay set WOD_MIN_MATCH_SECONDS=0).
+const MIN_MATCH_SECONDS = Math.max(0, Number(process.env.WOD_MIN_MATCH_SECONDS ?? 60) || 0);
 const ABUSE_DROPS_BEFORE_CLOSE = 2000;
 // Results reported by the host wait this long for the other players' clients to confirm or dispute them.
 const RESULT_CONFIRM_MS = 15000;
@@ -82,6 +93,13 @@ const FRIEND_REQUESTS_SAVE_DEBOUNCE_MS = 2000;
 let leaderboardSaveTimer = null;
 let friendRemovalsSaveTimer = null;
 const friendRequestCooldown = new Map();
+const friendRequestsSent = new Map();
+// (the cooldown maps forget entries once they have run out, instead of keeping one for every pair ever seen)
+setInterval(() => {
+  const now = Date.now();
+  for (const map of [friendRequestCooldown, lobbyInviteCooldown]) for (const [k, at] of map) if (now - at > 3600000) map.delete(k);
+  for (const [k, v] of friendRequestsSent) if (now - v.since > 3600000) friendRequestsSent.delete(k);
+}, 600000).unref?.();
 const lobbyInviteCooldown = new Map();
 const recentLobbyInvites = new Map();
 const FRIEND_REQUEST_COOLDOWN_MS = 30000;
@@ -386,14 +404,48 @@ function notifyClanMembers(clan, exceptClient) {
 }
 setInterval(() => { try { if (clans.checkInactiveLeaders()) for (const ws of wss.clients) { const c = ws._wodClient; if (c && c.playerId && clans.clanOf(c.playerId)) cwSend(c, clanInfoFor(c, clans.clanOf(c.playerId))); } } catch (e) { console.warn('[clans] leader check failed', e.message); } }, 6 * 3600000).unref();
 
+// The few fields of a host's match data the relay reads itself (outcomes from the last snapshot, seats, eliminations,
+// per-seat match totals for clan wars) are put into shape as they arrive: a host's game sending {cities:[null]} or
+// {factionSlots:"x"} used to throw inside a timer or the match-end commit, and that took the whole relay down.
+const HOST_SLOT_FIELDS = ['humanSlots', 'factionSlots', 'eliminatedSlots', 'forfeitedSlots', 'surrenderedSlots', 'connectedSlots', 'observerSlots'];
+function sanitizeHostPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const out = { ...payload };
+  for (const k of HOST_SLOT_FIELDS) {
+    if (!(k in out)) continue;
+    out[k] = Array.isArray(out[k]) ? [...new Set(out[k].filter((v) => Number.isInteger(v) && v >= 0 && v <= 16))].slice(0, 16) : [];
+  }
+  if ('cities' in out) {
+    out.cities = Array.isArray(out.cities) ? out.cities.filter((c) => c && typeof c === 'object' && !Array.isArray(c)).slice(0, 4000) : [];
+  }
+  if ('lifetimeStatsByOwner' in out) {
+    const src = out.lifetimeStatsByOwner, clean = {};
+    if (src && typeof src === 'object' && !Array.isArray(src)) {
+      for (const [owner, row] of Object.entries(src).slice(0, 16)) {
+        if (!/^\d{1,2}$/.test(owner) || !row || typeof row !== 'object' || Array.isArray(row)) continue;
+        const r = {};
+        for (const [k, v] of Object.entries(row).slice(0, 80)) if (typeof v === 'number' && Number.isFinite(v)) r[k] = Math.max(0, Math.min(1e7, Math.floor(v)));
+        clean[owner] = r;
+      }
+    }
+    out.lifetimeStatsByOwner = clean;
+  }
+  return out;
+}
+
 function sanitizePlayerId(id) {
   const s = String(id || '').trim().toUpperCase().slice(0, 32);
   if (!/^WOD-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(s)) return '';
   return s;
 }
 
+// (names never carry markup characters or control codes: the game escapes them wherever it shows a name, and this
+// keeps a name harmless anywhere it might not)
+function cleanShownText(raw, max) {
+  return stripInvisible(String(raw || '')).replace(/[\u0000-\u001f\u007f<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
 function sanitizeDisplayName(raw) {
-  return stripInvisible(raw || '').replace(/\s+/g, ' ').trim().slice(0, 24) || 'Player';
+  return cleanShownText(raw, 24) || 'Player';
 }
 
 // Two display names are one name when they read the same: case, spacing, punctuation, accents, invisible characters
@@ -644,7 +696,7 @@ function scheduleFriendRequestsSave() {
 function queueFriendRequest(targetId, entry) {
   if (!targetId || !entry || !entry.fromPlayerId) return;
   const list = pendingFriendRequests.get(targetId) || [];
-  if (!list.some((row) => row.fromPlayerId === entry.fromPlayerId)) {
+  if (list.length < 50 && !list.some((row) => row.fromPlayerId === entry.fromPlayerId)) {
     list.push({
       fromPlayerId: entry.fromPlayerId,
       fromName: sanitizeDisplayName(entry.fromName),
@@ -686,7 +738,7 @@ function flushFriendRequestsForClient(client) {
 function leaderboardRowFromProfile(playerId) {
   const pid = sanitizePlayerId(playerId);
   if (!pid) return null;
-  const prof = profiles.getProfile(pid);
+  const prof = profiles.peekProfile(pid);
   if (!prof) return null;
   const name = String(prof.profile.mpDisplayName || '').trim();
   if (!name) return null;
@@ -740,8 +792,11 @@ function markCooldown(map, key) {
   map.set(key, Date.now());
 }
 
+// (rebuilt from every profile at most every half minute, not on each request; at most LEADERBOARD_MAX_ROWS sent)
+const LEADERBOARD_MAX_ROWS = 500;
+let leaderboardHydratedAt = 0;
 function buildLeaderboardRows(sortKey, filterIds) {
-  hydrateLeaderboardFromProfiles();
+  if (Date.now() - leaderboardHydratedAt > 30000) { leaderboardHydratedAt = Date.now(); hydrateLeaderboardFromProfiles(); }
   const key = ['wins', 'kills', 'losses', 'defeats', 'gamesPlayed'].includes(sortKey)
     ? sortKey
     : 'wins';
@@ -767,6 +822,7 @@ function buildLeaderboardRows(sortKey, filterIds) {
       if (bv !== av) return bv - av;
       return (b.updatedAt || 0) - (a.updatedAt || 0);
     })
+    .slice(0, LEADERBOARD_MAX_ROWS)
             .map((r) => ({
       playerId: r.playerId,
       displayName: shownPlayerName(r.playerId, r.displayName),
@@ -1061,6 +1117,10 @@ function queueHostResult(hostClient, outcomes, participants, alreadyWatching) {
     waiting.add(peer.slot);
   }
   const pending = { hostClient, outcomes, participants, key: resolvedOutcomeKey(outcomes), waiting, disputed: false, timer: null };
+  // (a match of under MIN_MATCH_SECONDS, a minute, is not counted: a host could start and report a win at once, again and again; nor a clan
+  // war with nobody of the other side left to confirm it, which is decided when that side leaves, cwCheckSideGone)
+  if (Date.now() - (room.startedAt || 0) < MIN_MATCH_SECONDS * 1000) return;
+  if (room.clanWar && !waiting.size) return;
   room.pendingResults ||= [];
   room.pendingResults.push(pending);
   if (!waiting.size) {
@@ -1342,6 +1402,10 @@ function countOnline() {
   return n;
 }
 
+// A lobby's settings travel in every lobby list sent to every player: a host's game may not make them bigger than this
+// (they are a few kilobytes; one host used to be able to push megabytes to everyone at each list update).
+const MAX_LOBBY_META_BYTES = 64 * 1024;
+function lobbyMetaTooBig(meta) { try { return JSON.stringify(meta || {}).length > MAX_LOBBY_META_BYTES; } catch (_) { return true; } }
 function getLobbyListPublic() {
   const out = [];
   for (const room of rooms.values()) {
@@ -1380,7 +1444,17 @@ function getLobbyListPublic() {
   return out;
 }
 
+// The lobby list goes to every connected player at most every 400 ms: a burst of changes (players joining, a host
+// adjusting settings, colours picked) is sent as one list, not one per change.
+let lobbyListSentAt = 0, lobbyListTimer = null;
 function broadcastLobbyList() {
+  if (lobbyListTimer) return;
+  const wait = 400 - (Date.now() - lobbyListSentAt);
+  if (wait > 0) { lobbyListTimer = setTimeout(() => { lobbyListTimer = null; broadcastLobbyListNow(); }, wait); return; }
+  broadcastLobbyListNow();
+}
+function broadcastLobbyListNow() {
+  lobbyListSentAt = Date.now();
   const payload = JSON.stringify({
     t: 'lobby_list',
     lobbies: getLobbyListPublic(),
@@ -1475,7 +1549,20 @@ const wss = new WebSocketServer({
   },
 });
 
-wss.on('connection', (ws) => {
+// The address a connection comes from: the last hop the host's proxy added to X-Forwarded-For (the first can be written by
+// the client itself), else the socket's own address.
+function connectionIp(req) {
+  const fwd = String((req && req.headers && req.headers['x-forwarded-for']) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return fwd.length ? fwd[fwd.length - 1] : '';
+}
+const connectionsByIp = new Map();
+wss.on('connection', (ws, req) => {
+  const ip = connectionIp(req);
+  if (wss.clients.size > MAX_CONNECTIONS || ip && (connectionsByIp.get(ip) || 0) >= MAX_CONNECTIONS_PER_IP) { try { ws.close(1013, 'Too many connections'); } catch (_) {} return; }
+  if (ip) {
+    connectionsByIp.set(ip, (connectionsByIp.get(ip) || 0) + 1);
+    ws.once('close', () => { const n = (connectionsByIp.get(ip) || 1) - 1; if (n > 0) connectionsByIp.set(ip, n); else connectionsByIp.delete(ip); });
+  }
   const client = {
     ws,
     room: null,
@@ -1504,7 +1591,7 @@ wss.on('connection', (ws) => {
   broadcastLobbyList();
 
   let messageQueue=Promise.resolve();
-  let queued=0;
+  let queued=0,queuedBytes=0;
   const bucket={tokens:RATE_BURST,at:Date.now(),drops:0,dropsSince:Date.now()};
   function admitMessage(raw){
     const size=Buffer.isBuffer(raw)?raw.length:Array.isArray(raw)?raw.reduce((n,b)=>n+b.length,0):(raw&&raw.byteLength)||0;
@@ -1512,7 +1599,7 @@ wss.on('connection', (ws) => {
     if(size>limit)return false;
     const now=Date.now();
     bucket.tokens=Math.min(RATE_BURST,bucket.tokens+(now-bucket.at)/1000*RATE_PER_SECOND);bucket.at=now;
-    if(bucket.tokens<1||queued>=MAX_QUEUED_MESSAGES)return false;
+    if(bucket.tokens<1||queued>=MAX_QUEUED_MESSAGES||queuedBytes+size>MAX_QUEUED_BYTES)return false;
     bucket.tokens-=1;
     return true;
   }
@@ -1523,8 +1610,9 @@ wss.on('connection', (ws) => {
       if(++bucket.drops>ABUSE_DROPS_BEFORE_CLOSE)try{ws.close(1008,'Too many messages');}catch(_){}
       return;
     }
-    queued++;
-    messageQueue=messageQueue.then(()=>handleMessage(raw)).catch(()=>{if(ws.readyState===1)ws.send(JSON.stringify({t:'error',msg:'Profile service temporarily unavailable. Please reconnect; saved progress is preserved.'}));}).finally(()=>{queued--;});
+    const size=Buffer.isBuffer(raw)?raw.length:Array.isArray(raw)?raw.reduce((n,b)=>n+b.length,0):(raw&&raw.byteLength)||0;
+    queued++;queuedBytes+=size;
+    messageQueue=messageQueue.then(()=>handleMessage(raw)).catch((e)=>{if(!(e&&e.wodProfileUnavailable===false))console.warn('[relay] message failed:',e&&e.message);if(ws.readyState===1)ws.send(JSON.stringify({t:'error',msg:'Profile service temporarily unavailable. Please reconnect; saved progress is preserved.'}));}).finally(()=>{queued--;queuedBytes-=size;});
   });
   async function handleMessage(raw) {
     let msg;
@@ -1657,7 +1745,7 @@ wss.on('connection', (ws) => {
     if (t === 'leaderboard') {
       const sort = String(msg.sort || 'wins');
       const friendIds = Array.isArray(msg.friendIds)
-        ? msg.friendIds.map((id) => sanitizePlayerId(id)).filter(Boolean)
+        ? msg.friendIds.slice(0, 300).map((id) => sanitizePlayerId(id)).filter(Boolean)
         : null;
       ws.send(
         JSON.stringify({
@@ -1701,6 +1789,11 @@ wss.on('connection', (ws) => {
         return;
       }
       const reqKey = `${fromId}:${targetId}`;
+      // (thirty requests an hour from one player: one request each to thousands of made-up IDs used to be fine)
+      const sent = friendRequestsSent.get(fromId) || { since: Date.now(), n: 0 };
+      if (Date.now() - sent.since > 3600000) { sent.since = Date.now(); sent.n = 0; }
+      if (sent.n >= 30) { ws.send(JSON.stringify({ t: 'error', msg: 'You have sent a lot of friend requests. Try again later.' })); return; }
+      if (!profiles.peekProfile(targetId)) { ws.send(JSON.stringify({ t: 'error', msg: 'No player has that ID.' })); return; }
       if (cooldownBlocked(friendRequestCooldown, reqKey, FRIEND_REQUEST_COOLDOWN_MS)) {
         ws.send(JSON.stringify({ t: 'error', msg: 'Wait before sending another friend request to this player' }));
         return;
@@ -1712,6 +1805,7 @@ wss.on('connection', (ws) => {
         return;
       }
       markCooldown(friendRequestCooldown, reqKey);
+      sent.n++; friendRequestsSent.set(fromId, sent);
       const entry = {
         fromPlayerId: fromId,
         fromName,
@@ -1757,6 +1851,8 @@ wss.on('connection', (ws) => {
     }
 
     if (t === 'friend_presence') {
+      // (players with a profile only: anyone connected could watch any player come online and which lobby they joined)
+      if (!client.playerId) return;
       const ids = Array.isArray(msg.friendIds) ? msg.friendIds.slice(0, 100) : [];
       const online = [];
       for (const rawId of ids) {
@@ -1960,6 +2056,10 @@ wss.on('connection', (ws) => {
     }
 
     if (t === 'create_lobby') {
+      if (msg.meta && (typeof msg.meta !== 'object' || Array.isArray(msg.meta) || lobbyMetaTooBig(msg.meta))) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Those lobby settings are too large.' }));
+        return;
+      }
       if (!client.displayName || !client.playerId) {
         ws.send(JSON.stringify({ t: 'error', msg: 'Set a unique display name in your profile before hosting.' }));
         return;
@@ -1967,7 +2067,7 @@ wss.on('connection', (ws) => {
       leaveRoom(client);
       let id = genLobbyId();
       while (rooms.has(id)) id = genLobbyId();
-      const name = String((msg.name || 'Game').trim()).slice(0, 40) || 'Game';
+      const name = cleanShownText(msg.name || 'Game', 40) || 'Game';
       const password = msg.password ? String(msg.password).slice(0, 80) : null;
       const room = {
         id,
@@ -2156,7 +2256,7 @@ wss.on('connection', (ws) => {
 
     if (t === 'lobby_meta') {
       if (!client.room || !client.isHost || client.room.matchStarted) return;
-      const m = msg.meta && typeof msg.meta === 'object' ? { ...msg.meta } : null;
+      const m = msg.meta && typeof msg.meta === 'object' && !Array.isArray(msg.meta) && !lobbyMetaTooBig(msg.meta) ? { ...msg.meta } : null;
       if (m) {
         delete m.occupiedSlots;
         const prevPc = (client.room.meta && client.room.meta.playerColors) || {};
@@ -2213,7 +2313,7 @@ wss.on('connection', (ws) => {
       }
       try {
         if (victim.ws.readyState === 1)
-          victim.ws.send(JSON.stringify({ t: 'kicked', msg: msg.reason || 'Removed by host' }));
+          victim.ws.send(JSON.stringify({ t: 'kicked', msg: cleanShownText(msg.reason, 120) || 'Removed by host' }));
       } catch (_) {}
       try {
         victim.ws.close();
@@ -2314,6 +2414,16 @@ wss.on('connection', (ws) => {
     if (!client.room) return;
 
     if (t === 'start' && client.isHost) {
+      // (a room plays one match: a second start made a new match to report a result for, over and over)
+      if (client.room.matchStarted) return;
+      const startPayload = sanitizeHostPayload(msg.payload);
+      if (!startPayload) return;
+      // (a clan war starts only with every player of both sides seated: its host could start alone and report a win)
+      const war = client.room.clanWar;
+      if (war && !war.players.every((p) => client.room.clients.some((c) => c.playerId === p.playerId && c.ws.readyState === 1))) {
+        ws.send(JSON.stringify({ t: 'error', msg: 'Wait until every player of the war has joined.' }));
+        return;
+      }
       for(const peer of client.room.clients)peer.spectating=false;
       client.room.matchStarted = true;
       client.room.startedAt = Date.now();
@@ -2321,7 +2431,7 @@ wss.on('connection', (ws) => {
       client.room._matchEndRecorded = false;
       client.room.pendingReconnect = new Map();
       client.room.matchId=require('crypto').randomUUID();client.room.forfeitedSlots=new Set();client.room.surrenderedSlots=new Set();client.room.observerSlots=new Set();
-      const payload = {...msg.payload,serverMatchId:client.room.matchId};
+      const payload = {...startPayload,serverMatchId:client.room.matchId};
       client.room.matchInitPayload = payload;
       client.room.lastSnap = null;
       client.room.hostPlayerId = sanitizePlayerId(client.playerId);
@@ -2344,8 +2454,8 @@ wss.on('connection', (ws) => {
     if (t === 'snap' && client.isHost) {
       // Live clients retain fields omitted by the host's lightweight snapshots.
       // Rejoins and host transfers need the same complete state from the relay.
-      const cached = msg.payload && typeof msg.payload === 'object' && !Array.isArray(msg.payload)
-        ? { ...msg.payload } : msg.payload;
+      const cached = sanitizeHostPayload(msg.payload);
+      if (!cached || !client.room.matchStarted) return;
       const previous = client.room.lastSnap?.payload;
       if (cached && previous) {
         for (const field of ['hexOwners', 'battleLedger', 'lifetimeStatsByOwner']) {
@@ -2368,12 +2478,18 @@ wss.on('connection', (ws) => {
         if (c.ws === ws || c.ws.readyState !== 1) continue;
         if (!endsMatch && (c.ws.bufferedAmount | 0) > MP_SNAP_BACKLOG_BYTES) { c.snapBehind = true; continue; }
         if (c.snapBehind) { c.snapBehind = false; c.ws.send(full || (full = JSON.stringify({ t: 'snap', payload: cached, seq }))); continue; }
-        c.ws.send(raw || (raw = JSON.stringify({ t: 'snap', payload: msg.payload, seq })));
+        c.ws.send(raw || (raw = JSON.stringify({ t: 'snap', payload: cached, seq })));
       }
       return;
     }
     if (t === 'cmd' && !client.isHost) {
-      if(client.spectating||client.room.forfeitedSlots?.has(client.slot))return;
+      if(!client.room||client.spectating||client.room.forfeitedSlots?.has(client.slot))return;
+      if (String(raw).length > MAX_CMD_BYTES) return;
+      // (thirty commands a second, after a burst of sixty: a player gives a few; a flood froze the host's game)
+      const cb = client.cmdBucket || (client.cmdBucket = { tokens: 60, at: Date.now() }), cnow = Date.now();
+      cb.tokens = Math.min(60, cb.tokens + (cnow - cb.at) / 1000 * 30); cb.at = cnow;
+      if (cb.tokens < 1) return;
+      cb.tokens -= 1;
       if (msg.fromSlot !== client.slot) return;
       if (client.room.host && client.room.host.ws.readyState === 1) {
         client.room.host.ws.send(JSON.stringify({ t: 'cmd', fromSlot: client.slot, cmd: msg.cmd }));
@@ -2387,7 +2503,7 @@ wss.on('connection', (ws) => {
     }
   }
 
-  ws.on('close', () => {
+  ws.on('close', () => { try {
     if (client.playerId) { cwPartyInvites.delete(client.playerId); for (const [to, i] of [...cwPartyInvites]) if (i.from === client.playerId) cwPartyInvites.delete(to); }
     cwLeaveParty(client, (client.displayName || 'Your teammate') + ' disconnected, so the party ended.');
     if (cwRemove(client)) cwBroadcastStatus();
@@ -2396,7 +2512,7 @@ wss.on('connection', (ws) => {
     else leaveRoom(client);
     unregisterClientPlayer(client);
     broadcastLobbyList();
-  });
+  } catch (e) { console.error('[relay] close handler failed:', e && e.stack || e); } });
 });
 
 setInterval(() => {
@@ -2424,3 +2540,6 @@ profiles.initialize().then(()=>clans.init()).then(()=>{
 }).catch(()=>{console.error('[profiles] durable storage unavailable; refusing to start with empty profiles');process.exitCode=1;});
 let closing=false;async function shutdown(){if(closing)return;closing=true;try{await clans.flush();}catch(_){}server.close();for(const ws of wss.clients)ws.close();try{await profiles.close();await commerceHttp.close();}finally{process.exit(0);}}
 process.on('SIGTERM',shutdown);process.on('SIGINT',shutdown);
+// (one bad message or timer must not take every match down with it: logged, and the relay carries on)
+process.on('uncaughtException',(e)=>console.error('[relay] uncaught exception:',e&&e.stack||e));
+process.on('unhandledRejection',(e)=>console.error('[relay] unhandled rejection:',e&&e.stack||e));

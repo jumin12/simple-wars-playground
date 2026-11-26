@@ -149,7 +149,8 @@ function sanitizeLifetime(obj) {
 function sanitizeOwnedMap(obj) {
   const out = { nato: true };
   if (!obj || typeof obj !== 'object') return out;
-  for (const [k, v] of Object.entries(obj)) {
+  // (a few hundred items exist; a sync naming thousands made up kept them all, and every save carried them)
+  for (const [k, v] of Object.entries(obj).slice(0, 800)) {
     const key = String(k).slice(0, 48);
     if (key && v) out[key] = true;
   }
@@ -205,9 +206,12 @@ function recordFriendRequest(fromId, fromName, fromSkin, toId) {
   const from = sanitizePlayerId(fromId);
   const to = sanitizePlayerId(toId);
   if (!from || !to || from === to) return false;
-  const fp = getProfile(from);
-  const tp = getProfile(to);
+  // (to a player who exists: requests to made-up IDs used to make a profile for each)
+  const fp = peekProfile(from);
+  const tp = peekProfile(to);
+  if (!fp || !tp) return false;
   if ((tp.profile.friends || []).some((f) => f && f.playerId === from)) return false;
+  if ((tp.profile.friendRequestsIn || []).length >= 100) return false;
   const outEntry = { playerId: to, fromName: String(fromName || '').trim().slice(0, 24), unitSkin: sanitizeSkin(fromSkin) };
   const inEntry = { playerId: from, fromName: String(fromName || '').trim().slice(0, 24), unitSkin: sanitizeSkin(fromSkin) };
   fp.profile.friendRequestsOut = mergeFriendRequestsArrays(fp.profile.friendRequestsOut, [outEntry]);
@@ -222,8 +226,13 @@ function applyFriendRequestReply(fromId, toId, accept, toName, toSkin) {
   const from = sanitizePlayerId(fromId);
   const to = sanitizePlayerId(toId);
   if (!from || !to) return false;
-  const fp = getProfile(from);
-  const tp = getProfile(to);
+  const fp = peekProfile(from);
+  const tp = peekProfile(to);
+  if (!fp || !tp) return false;
+  // (accepting needs the request: the asker's own list of requests sent, which only the asker's game writes. Anyone
+  // could add themselves to anyone's friends by "accepting" a request that was never made)
+  const asked = (fp.profile.friendRequestsOut || []).some((r) => r && r.playerId === to);
+  if (accept && !asked) return false;
   fp.profile.friendRequestsOut = (fp.profile.friendRequestsOut || []).filter((r) => r && r.playerId !== to);
   tp.profile.friendRequestsIn = (tp.profile.friendRequestsIn || []).filter((r) => r && r.playerId !== from);
   if (accept) {
@@ -292,8 +301,9 @@ function mergeLifetimeByPeriod(serverMap, clientMap) {
   const out = Object.assign({}, serverMap || {});
   if (!clientMap || typeof clientMap !== 'object') return out;
   for (const [pid, block] of Object.entries(clientMap)) {
+    // (by era: the four eras only. Any key used to be kept, each a block of forty counters, without end)
     const key = String(pid).slice(0, 24);
-    if (!key) continue;
+    if (!['modern', 'ancient', 'medieval', 'napoleonic'].includes(key)) continue;
     out[key] = mergeLifetimeMonotonic(sanitizeLifetime(out[key]), sanitizeLifetime(block));
   }
   return out;
@@ -391,7 +401,7 @@ function loadProfilesFromDisk() {
 function sanitizeBoolMap(obj) {
   const out = {};
   if (!obj || typeof obj !== 'object') return out;
-  for (const [k, v] of Object.entries(obj)) {
+  for (const [k, v] of Object.entries(obj).slice(0, 4000)) {
     const key = String(k).slice(0, 64);
     if (key && v) out[key] = true;
   }
@@ -483,6 +493,13 @@ function getProfile(playerId) {
   return profiles.get(id);
 }
 
+// A saved profile, or null: unlike getProfile it never makes one (looking up IDs a client sends, the leaderboard's
+// friends, must not create a profile for each made-up one).
+function peekProfile(playerId) {
+  const id = sanitizePlayerId(playerId);
+  return id && profiles.has(id) ? profiles.get(id) : null;
+}
+
 function getAllPlayerIds() {
   return [...profiles.keys()].filter((id) => sanitizePlayerId(id));
 }
@@ -540,6 +557,8 @@ function validateEquippedSkin(profile, skinId) {
   return skinIsOwned(profile, id) ? id : 'nato';
 }
 
+const ACHIEVEMENT_KEYS = new Set([...Object.keys(defaultProfile('WOD-AAAA-AAAA').achievements), ...catalog.achievementIds]);
+const PAID_ONLY_SKINS = ['supporterGold', ...catalog.premiumVariants('supporterGold')];
 function syncProgress(playerId, payload) {
   const id = sanitizePlayerId(playerId);
   if (!id || !payload || typeof payload !== 'object') {
@@ -553,7 +572,14 @@ function syncProgress(playerId, payload) {
   }
   profile.matchGoldGranted = mergeMatchGoldClaims(profile.matchGoldGranted, payload.matchGoldGranted);
 
-  if(payload.statsByMode)profile.statsByMode=profile.progressImported?mergeModeStats(profile.statsByMode,payload.statsByMode):hydrateModeStats(payload.statsByMode);
+  // Multiplayer results are the relay's (recordMpMatchEnd): a game's own multiplayer wins, losses and kills, which the
+  // rankings and clan totals show, are not taken from it.
+  if(payload.statsByMode&&typeof payload.statsByMode==='object'){
+    const incoming={...payload.statsByMode};delete incoming.multiplayer;
+    const serverMp=profile.statsByMode?.multiplayer;
+    profile.statsByMode=profile.progressImported?mergeModeStats(profile.statsByMode,incoming):hydrateModeStats(incoming);
+    profile.statsByMode.multiplayer=serverMp||hydrateModeStats({}).multiplayer;
+  }
   if (payload.lifetime && typeof payload.lifetime === 'object') {
     profile.lifetime = profile.progressImported?mergeLifetimeMonotonic(profile.lifetime, payload.lifetime):sanitizeLifetime(payload.lifetime);
   }
@@ -561,8 +587,9 @@ function syncProgress(playerId, payload) {
     profile.lifetimeByPeriod = profile.progressImported?mergeLifetimeByPeriod(profile.lifetimeByPeriod, payload.lifetimeByPeriod):Object.fromEntries(Object.entries(payload.lifetimeByPeriod).filter(([era])=>['modern','ancient','medieval','napoleonic'].includes(era)).map(([era,row])=>[era,sanitizeLifetime(row)]));
   }
   if (payload.achievements && typeof payload.achievements === 'object') {
+    // (the game's achievements only: any key used to be kept)
     for (const [k, v] of Object.entries(payload.achievements)) {
-      if (v) profile.achievements[k] = true;
+      if (v && ACHIEVEMENT_KEYS.has(k)) profile.achievements[k] = true;
     }
   }
   if (payload.achievementGoldGranted && typeof payload.achievementGoldGranted === 'object') {
@@ -586,9 +613,6 @@ function syncProgress(playerId, payload) {
       payload.storeMissions.spent
     );
   }
-  if (payload.multiplayer && typeof payload.multiplayer === 'object') {
-    profile.multiplayer = mergeMpStatsMax(profile.multiplayer, payload.multiplayer);
-  }
 
   if (payload.profile && typeof payload.profile === 'object') {
     const cp = payload.profile;
@@ -597,7 +621,10 @@ function syncProgress(playerId, payload) {
       cur.gold = Math.max(cur.gold | 0, clampInt(cp.gold, 0, 999999999));
     }
     if (cp.ownedUnitSkins && typeof cp.ownedUnitSkins === 'object') {
-      cur.ownedUnitSkins = sanitizeOwnedMap(Object.assign({}, cur.ownedUnitSkins, cp.ownedUnitSkins));
+      // (the Supporter Pack's skins come with buying it, never from a game saying it owns them)
+      const claimed = { ...cp.ownedUnitSkins };
+      for (const id of PAID_ONLY_SKINS) if (!cur.ownedUnitSkins?.[id]) delete claimed[id];
+      cur.ownedUnitSkins = sanitizeOwnedMap(Object.assign({}, cur.ownedUnitSkins, claimed));
     }
     if (cp.ownedShopVisuals && typeof cp.ownedShopVisuals === 'object') {
       cur.ownedShopVisuals = sanitizeOwnedMap(Object.assign({}, cur.ownedShopVisuals, cp.ownedShopVisuals));
@@ -764,6 +791,7 @@ module.exports = {
   initialize,flush,close,bindBrowser,steamIdentity,webSteamIdentity,steamIdentityToken,steamIdForPlayer,applySteamWallet,
   loadProfilesFromDisk,
   getProfile,
+  peekProfile,
   getAllPlayerIds,
   exportProfile,
   syncProgress,

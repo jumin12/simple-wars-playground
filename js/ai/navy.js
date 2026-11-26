@@ -174,7 +174,7 @@ function wodAiPlanBeachhead(owner,supplyShips) {
 
 function wodAiHarborUseful(city,owner) {
     const fog=wodFogActive(),stamp=owner+'/'+(gameData._supplyTopologyVersion||0)+'/'+fog+'/'+Math.floor((gameData._aiEconomyClock||0)/6);
-    let cache=gameData._harborUtilityCache;if(!cache||cache.hexes!==gameData.hexes)cache=gameData._harborUtilityCache={hexes:gameData.hexes,cities:new WeakMap()};
+    let cache=gameData._harborUtilityCache;if(!cache||cache.hexes!==gameData.hexes||!(cache.cities instanceof WeakMap))cache=gameData._harborUtilityCache={hexes:gameData.hexes,cities:new WeakMap()};
     const old=cache.cities.get(city);if(old&&old.stamp===stamp)return old.value;
     const intel=fog?wodFogFactionIntel(owner):null,seen=new Set(),probe={type:'ship',owner,radius:16};let useful=false;
     for(const p of getHexesInRadius(city.q,city.r,3)){

@@ -663,17 +663,21 @@ function wodShiftWaypointNotice(n) {
 }
 function wodSendOrApplyShiftWaypointPaths(units, wps, line) {
     if(gameData.mp && gameData.mp.enabled && !wodMpMatchCanPlay()) return;
-    if(wps.length > 32) wps.splice(0, wps.length - 32);
+    // (as many waypoints as the player sets: a march plans one leg at a time. It used to keep the last 32 only, dropping
+    // the first legs of a longer route; a guest's command is still bounded by the host, WOD_MP_MAX_CMD_POINTS.)
     let order = units.slice();
     const grouped=wodGroupWaypointPaths(order,wps,line);
     let paths=order.map(u=>grouped.get(u));
     if(gameData.mp && gameData.mp.enabled && !gameData.mp.isHost) {
+        // (a long march for a big group sends the waypoints only, and the host lays out each unit's path from them as it
+        // does for its own orders: one path per unit per waypoint grew the command past what the relay passes on)
+        const perUnit = order.length * wps.length <= WOD_MP_SHIFT_MARCH_PATH_POINTS;
         if(wodMpSendCmd({
             kind: 'shiftMarch',
             uids: order.map(u => u.uid),
             wps: wps.map(w => ({ x: w.x, y: w.y })),
             line: line ? { start: { x: line.start.x, y: line.start.y }, end: { x: line.end.x, y: line.end.y } } : null,
-            paths: paths.map(p => (p || []).map(pt => ({ x: pt.x, y: pt.y })))
+            ...(perUnit ? { paths: paths.map(p => (p || []).map(pt => ({ x: pt.x, y: pt.y }))) } : {})
         })) {
             wodShiftWaypointNotice(wps.length);
             return;

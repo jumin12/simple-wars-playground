@@ -41,7 +41,7 @@ fs.writeFileSync(harness, `const fs=require('fs'),rename=fs.renameSync;fs.rename
 async function startRelay() {
     const probe = http.createServer(); await new Promise(r => probe.listen(0, '127.0.0.1', r)); relayPort = probe.address().port; await new Promise(r => probe.close(r));
     // (written loosely on purpose: lower case, spaces, a stray comma, and a malformed ID that must not count)
-    relay = fork(harness, [], { cwd: ROOT, env: { ...process.env, PORT: String(relayPort), DATABASE_URL: '', STEAM_PURCHASES_ENABLED: '0', WOD_DATA_DIR: dataDir, WOD_MIN_CLIENT_BUILD: '', WOD_VERSION_GATE: '',
+    relay = fork(harness, [], { cwd: ROOT, env: { ...process.env, PORT: String(relayPort), DATABASE_URL: '', STEAM_PURCHASES_ENABLED: '0', WOD_MIN_MATCH_SECONDS: '0', WOD_DATA_DIR: dataDir, WOD_MIN_CLIENT_BUILD: '', WOD_VERSION_GATE: '',
         WOD_ADMIN_PLAYER_IDS: ' ' + PA.toLowerCase() + ' , not-an-id,' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     relay.stdout.on('data', b => relayLog += b); relay.stderr.on('data', b => relayLog += b);
     for(let i = 0; i < 100; i++) { try { const r = await fetch('http://127.0.0.1:' + relayPort + '/health'); if(r.ok) { await sleep(300); return; } } catch(_) {} await sleep(50); }

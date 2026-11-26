@@ -1134,7 +1134,10 @@ function wodIdleTrafficReturnPath(unit,point) {
 }
 function wodReturnIdleTraffic(unit,record) {
     const point=record.points?.[0],clock=gameData._aiEconomyClock||0;
-    if(!point||Math.hypot(unit.x-point.x,unit.y-point.y)<1){unit._trafficYield=null;return;}
+    // (within eight pixels of the spot it stood on is back: wanting that very pixel, with comrades round it, it tried again
+    // every second for good, nudged a little each time, and jiggled on the spot; a formation's place is kept to nine,
+    // verify-coastal-group-movement)
+    if(!point||Math.hypot(unit.x-point.x,unit.y-point.y)<8){unit._trafficYield=null;return;}
     unit._trafficYield=record;record.returning=true;
     if((record.returnRetryAt||0)>clock)return;
     record.returnRetryAt=clock+1;
@@ -4994,6 +4997,32 @@ function wodAiEndSwimLeave(unit) {
     if(replanUnitOrder(unit)&&unit.target&&!wet()){clear();return;}
     clear();unit.target=null;unit.path=null;unit.orderTarget=null;unit.fullMarchWaypoints=null;unit.marchWpCursor=0;
 }
+// The last stretch of a march to a spot a comrade already stands on (or is making for the very same point), within a
+// cell or so of it. Only one can stand there: the other kept steering past him on one side, then the other, and went
+// back and forth around the spot for good (computer units sent to hold a town to one point, two groups sent to one
+// place). Not a retreat, nor a unit afloat, boarding, on a bridge deck or in a narrow lane, where stopping short blocks
+// the way.
+function wodDestinationTakenNearby(unit) {
+    const t=unit.target;
+    if(!t||t.goRound||t.detour||unit.path?.length||wodIsNavalUnit(unit)||unit.type==='convoy'||unit.boardTransportUid)return false;
+    if(unit.retreating||unit._wodRiskRetreat||unit.moraleBroken||unit._wodOrderIntoWater||unit._wodAiRescueWater)return false;
+    if(unit.fullMarchWaypoints?.length&&(unit.marchWpCursor||0)<unit.fullMarchWaypoints.length-1)return false;
+    const goal=unit.orderTarget||t.finalTarget||t,sp=(gameData.hexRadius||20)*1.35,d=Math.hypot(t.x-unit.x,t.y-unit.y);
+    if(Math.hypot(goal.x-t.x,goal.y-t.y)>2||d>sp*1.2||d<1)return false;
+    let taken=false;
+    forEachNearbyUnit(gameData.unitSpatialGrid,t.x,t.y,sp,f=>{
+        if(taken||f===unit||f.hp<=0||f.type==='convoy'||!wodIsFriendlyOwner(f.owner,unit.owner)||!wodBodiesMeet(unit,f))return;
+        // (on the spot itself, not a neighbour in a formation pressed a little into this unit's place: that one moves off
+        // as the formation settles, verify-coastal-group-movement)
+        if(Math.hypot(f.x-t.x,f.y-t.y)>=Math.max(unit.radius||12,f.radius||12)*.75)return;
+        // (one walking on past the spot is not standing on it)
+        if(f.target&&Math.hypot(f.target.x-t.x,f.target.y-t.y)>(f.radius||12))return;
+        taken=true;
+    });
+    if(!taken)return false;
+    if(unit._wodRouteUsesBridge&&(wodUnitOnBridgeDeck(unit)||wodPointOnBridgeForUnit(unit,unit.x,unit.y,1.15)))return false;
+    return !wodUnitNearNarrowLandLane(unit);
+}
 function wodMoveUnitAlongRoute(unit, dt) {
     if(wodIsNavalUnit(unit)||unit.type==='convoy'&&unit.convoySeaRoute)ensureUnitPixelOnWalkableHex(unit,18);
     if(!unit.target) return;
@@ -5036,6 +5065,19 @@ function wodMoveUnitAlongRoute(unit, dt) {
         replanUnitOrder(unit);if(!unit.target)return;}
     }
     if(unit.target.goRound&&!wodRetreatGoRoundHeadway(unit))return;
+    // The spot it is walking to is taken (wodDestinationTakenNearby): after half a second it waits where it is, beside
+    // it, keeping its order: it goes on if the spot comes free (a neighbour in a settling formation pressed onto it moves
+    // off), and walks back if a crowd pushing past shoves it away. Taken for eight seconds, the order is done with.
+    if(wodDestinationTakenNearby(unit)){
+        unit._wodSpotTakenT=(unit._wodSpotTakenT||0)+dt;
+        if(unit._wodSpotTakenT>8){
+            unit._wodSpotTakenT=0;
+            unit.target=null;unit.path=null;unit.orderTarget=null;unit.fullMarchWaypoints=null;unit.marchWpCursor=0;unit._wodRouteUsesBridge=false;
+            invalidateUnitOrderArrowCache(unit);
+            return;
+        }
+        if(unit._wodSpotTakenT>.5)return;
+    }else unit._wodSpotTakenT=0;
     // A column need not occupy the exact same corner point to advance. Keep
     // the turn only while it is needed to clear terrain, so friends cannot
     // deadlock on opposite sides of a one-cell entrance waypoint.

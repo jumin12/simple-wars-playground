@@ -58,7 +58,7 @@ function createCommerceHttp(env = process.env, testService) {
       const body = await readBody(req);
       let result;
       if (action === 'authenticate') {
-        const address = env.RENDER === 'true' ? String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',')[0] : req.socket.remoteAddress;
+        const address = env.RENDER === 'true' ? String(req.headers['x-forwarded-for'] || req.socket.remoteAddress).split(',').map((s) => s.trim()).filter(Boolean).pop() : req.socket.remoteAddress;
         const key = crypto.createHash('sha256').update(String(address)).digest('hex');
         const rate = authRates.get(key) || { count: 0, until: Date.now() + 60000 };
         if (++rate.count > 30) throw new CommerceError('Too many Steam sign-in attempts. Please wait a minute.', 429);

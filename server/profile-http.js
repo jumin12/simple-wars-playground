@@ -42,8 +42,8 @@ function createProfileHttp(profiles,env=process.env,request=fetch){
       const data=await body(req);
       if(!/^[a-f0-9]{64}$/.test(data.deviceSecret||''))throw Error('Your device profile could not be verified. Reload the game.');
       if(action==='start'){
-        const address=env.RENDER==='true'?String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',')[0]:req.socket.remoteAddress,key=digest(String(address));
-        const rate=rates.get(key)||{count:0,until:now+60000};rates.set(key,rate);if(++rate.count>10||pending.size>10000)return json(res,429,{ok:false,error:'Please wait a minute before signing in again.'});
+        const address=env.RENDER==='true'?String(req.headers['x-forwarded-for']||req.socket.remoteAddress).split(',').map(s=>s.trim()).filter(Boolean).pop():req.socket.remoteAddress,key=digest(String(address));
+        const rate=rates.get(key)||{count:0,until:now+60000};rates.set(key,rate);if(++rate.count>10||pending.size>500)return json(res,429,{ok:false,error:'Please wait a minute before signing in again.'});
         const identity=await profiles.bindBrowser(data.deviceSecret,data.playerId),state=crypto.randomBytes(32).toString('hex'),returnTo=base(req)+'/api/profile/callback?state='+state;
         pending.set(state,{expires:now+10*60000,secretHash:digest(data.deviceSecret),playerId:identity.playerId,returnTo,progress:data.progress});
         const login=new URL(STEAM);for(const [key,value]of Object.entries({'openid.ns':'http://specs.openid.net/auth/2.0','openid.mode':'checkid_setup','openid.return_to':returnTo,'openid.realm':base(req)+'/','openid.identity':'http://specs.openid.net/auth/2.0/identifier_select','openid.claimed_id':'http://specs.openid.net/auth/2.0/identifier_select'}))login.searchParams.set(key,value);
@@ -59,7 +59,12 @@ function createProfileHttp(profiles,env=process.env,request=fetch){
         json(res,200,{ok:true,...await profiles.webSteamIdentity(entry.verified,progress,data.deviceSecret)});return;
       }
       json(res,404,{ok:false,error:'Unknown profile action.'});
-    }catch(error){json(res,400,{ok:false,error:error.message||'Steam sign-in could not be completed.'});}
+    }catch(error){
+      // (only the messages written for players go back; anything else, a database error for one, is logged)
+      const shown=error&&error.wodPublic!==false&&/^(Steam|Your|Please|Open|Use|Unknown)/.test(String(error.message||''))?error.message:'Steam sign-in could not be completed.';
+      if(shown!==error?.message)console.warn('[profile-http]',error&&error.message);
+      json(res,400,{ok:false,error:shown});
+    }
   }
   return{handle};
 }

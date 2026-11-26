@@ -11,7 +11,7 @@ const dataDir=fs.mkdtempSync(path.join(OUT,'relay-'));let relay,relayPort,relayL
 const server=H.createStaticServer({rewrite:(p,b)=>p==='/index.html'?H.injectHead(b,"<script>window.WOD_MP_WS_URL='ws://127.0.0.1:"+relayPort+"';</script>"):undefined});
 const harness=path.join(OUT,'relay.cjs');fs.writeFileSync(harness,`require(${JSON.stringify(path.join(ROOT,'server/index.js'))});`);
 async function startRelay(){const probe=http.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));relayPort=probe.address().port;await new Promise(r=>probe.close(r));
- relay=fork(harness,[],{cwd:ROOT,env:{...process.env,PORT:String(relayPort),DATABASE_URL:'',STEAM_PURCHASES_ENABLED:'0',WOD_DATA_DIR:dataDir},stdio:['ignore','pipe','pipe','ipc']});
+ relay=fork(harness,[],{cwd:ROOT,env:{...process.env,PORT:String(relayPort),DATABASE_URL:'',STEAM_PURCHASES_ENABLED:'0',WOD_MIN_MATCH_SECONDS: '0', WOD_DATA_DIR:dataDir},stdio:['ignore','pipe','pipe','ipc']});
  relay.stdout.on('data',b=>relayLog+=b);relay.stderr.on('data',b=>relayLog+=b);
  for(let i=0;i<100&&!/listening|ws:\/\/|port/i.test(relayLog);i++)await new Promise(r=>setTimeout(r,100));}
 // a bad line: every incoming message is held back 150-1050 ms (in order); window.__cutSocket() drops the connection

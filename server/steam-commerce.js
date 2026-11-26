@@ -26,9 +26,13 @@ function wallet(data) {
     ownedVisuals: data.ownedVisuals };
 }
 function knownSkin(id) { return id === 'atlasUnits' || id === 'nato' || id === 'goldenChip' || catalog.skins.includes(id) || Object.values(catalog.ancient).flat().includes(id); }
+// Match gold a game claims (50 for each match it says it finished) is paid for at most MATCH_REWARDS_PER_DAY matches a
+// day (UTC): the match ids are the game's own, and a made-up list of two thousand used to pay 100,000 gold at once.
+// Ones over the day's limit stay unpaid and are paid on a later day. A first import keeps at most LEGACY_GOLD_MAX gold.
+const MATCH_REWARDS_PER_DAY = 30, LEGACY_GOLD_MAX = 50000, GRANTS_KEPT = 5000;
 function importAndReward(data, progress) {
   progress = safeMap(progress);
-  const matches = Object.entries(safeMap(progress.matchGoldGranted)).slice(-2000);
+  const matches = Object.entries(safeMap(progress.matchGoldGranted)).slice(-200);
   const badges = Object.entries(safeMap(progress.achievementGoldGranted)).slice(0, 200);
   const rewards = [...matches.filter(([id]) => /^[a-zA-Z0-9_:.\-]{1,128}$/.test(id)).map(([id, value]) => ['match:' + id, integer(value, 50)]),
     ...badges.filter(([id, yes]) => yes && catalog.achievementIds.includes(id)).map(([id]) => ['badge:' + id, 10])];
@@ -37,15 +41,24 @@ function importAndReward(data, progress) {
     // One-time import preserves earned currency and individually acquired items.
     // Launch flags/supporter fields never grant a paid product.
     const legacy = !progress.profile?.steamCommerceAccount;
-    data.gold = legacy ? integer(progress.profile?.gold ?? 100, 1000000) : 100;
+    data.gold = legacy ? integer(progress.profile?.gold ?? 100, LEGACY_GOLD_MAX) : 100;
     for (const [id, yes] of Object.entries(safeMap(legacy && progress.profile?.ownedUnitSkins))) if (yes && knownSkin(id)) data.ownedSkins[id] = true;
     const missionIds = [...(missionManifest.maps || []), ...(missionManifest.missions || [])].map(e => 'shop_map_' + e.id);
     for (const [id, yes] of Object.entries(safeMap(legacy && progress.profile?.ownedShopVisuals))) if (yes && (catalog.visuals.includes(id) || missionIds.includes(id))) data.ownedVisuals[id] = true;
     for (const [id] of rewards) data.grants[id] = true;
     data.migrated = true;
   } else {
-    for (const [id, amount] of rewards) if (!Object.hasOwn(data.grants, id)) { data.grants[id] = true; data.gold += amount; }
+    const day = new Date().toISOString().slice(0, 10);
+    if (data.matchRewardDay !== day) { data.matchRewardDay = day; data.matchRewardsToday = 0; }
+    for (const [id, amount] of rewards) {
+      if (Object.hasOwn(data.grants, id)) continue;
+      if (id.startsWith('match:')) { if ((data.matchRewardsToday | 0) >= MATCH_REWARDS_PER_DAY) continue; data.matchRewardsToday = (data.matchRewardsToday | 0) + 1; }
+      data.grants[id] = true; data.gold += amount;
+    }
   }
+  // (the record of paid rewards keeps its newest GRANTS_KEPT: it grew with every made-up id)
+  const granted = Object.keys(data.grants);
+  if (granted.length > GRANTS_KEPT) for (const id of granted.slice(0, granted.length - GRANTS_KEPT)) delete data.grants[id];
   if (progress.achievements?.goldenChipMaster) data.ownedSkins.goldenChip = true;
 }
 function applyPaidState(data, order, params) {
