@@ -50,10 +50,10 @@ function cleanName(raw) {
 function nameKey(name) { return nameMatchKey(cleanName(name)); }
 // Which of two clans is older (founded first): it keeps a name both hold.
 function olderClan(a, b) { return (a.createdAt || 0) - (b.createdAt || 0) || String(a.id).localeCompare(String(b.id)); }
-// Names settled by hand, before age: when clans share one of these names, the clan with this player (as its leader,
-// else as a member) keeps it, whichever was founded first; the others show as "thanks for noticing" until renamed.
-// (the live relay had two "the dev clan"s; the developer's, with jumin121, keeps it)
-const NAME_KEEPERS = [{ clan: 'the dev clan', player: 'jumin121' }];
+// Names settled by hand, before age: when clans share one of these names, the clan with one of these players (as its
+// leader, else as a member) keeps it, whichever was founded first; the others show as "thanks for noticing" until
+// renamed. Players by ID, so a rename changes nothing. (The developer's Dev Clan, led by Jumin121 with jumin in it.)
+const NAME_KEEPERS = [{ clans: ['dev clan', 'the dev clan'], players: ['WOD-AM4P-MUAM', 'WOD-THCE-WLFB'] }];
 const DESCRIPTION_MAX = 200;
 function cleanDescription(raw) { return String(raw || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, DESCRIPTION_MAX); }
 const LIST_PAGE_SIZE = 8;
@@ -147,21 +147,19 @@ function createClans({ dataDir, profiles, nameOf, isOnline, pool, now = Date.now
     // Each name's holder: the oldest clan with it. A younger clan with the same name is shown as the placeholder
     // ("thanks for noticing") until its leader renames it, and cannot change anything else before that.
     // (a NAME_KEEPERS clan first, its leader's before a member's; then the older clan)
-    const keepers = new Map(NAME_KEEPERS.map(k => [nameKey(k.clan), nameMatchKey(k.player)]));
+    const keepers = new Map(NAME_KEEPERS.flatMap(k => k.clans.map(name => [nameKey(name), new Set(k.players)])));
     function keeperRank(clan) {
         const who = keepers.get(nameKey(clan.name));
         if(!who) return 0;
-        const is = pid => nameMatchKey(String(nameOf(pid) || '')) === who;
-        return is(clan.leaderId) ? 2 : clan.members.some(m => is(m.playerId)) ? 1 : 0;
+        return who.has(clan.leaderId) ? 2 : clan.members.some(m => who.has(m.playerId)) ? 1 : 0;
     }
     function holdsBefore(a, b) { return keeperRank(b) - keeperRank(a) || olderClan(a, b); }
-    // (recounted when a clan changes, and every half minute: a keeper's display name can change without one)
-    let namesDirty = true, namesAt = 0, nameHolder = new Map();
+    let namesDirty = true, nameHolder = new Map();
     function holders() {
-        if(!namesDirty && now() - namesAt < 30000) return nameHolder;
+        if(!namesDirty) return nameHolder;
         nameHolder = new Map();
         for(const c of clans.values()) { const k = nameKey(c.name), h = nameHolder.get(k); if(!h || holdsBefore(c, h) < 0) nameHolder.set(k, c); }
-        namesDirty = false; namesAt = now();
+        namesDirty = false;
         return nameHolder;
     }
     function nameFlagged(clan) { return !!clan && (isPlaceholderName(clan.name) || holders().get(nameKey(clan.name)) !== clan); }

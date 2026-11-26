@@ -101,10 +101,11 @@ const clans = createClans({
   nameOf: (pid) => shownPlayerName(pid, String((profiles.getProfile(pid) && profiles.getProfile(pid).profile.mpDisplayName) || 'Player')),
   isOnline: (pid) => onlineByPlayerId.has(pid),
 });
-// Admins: the player IDs in WOD_ADMIN_PLAYER_IDS (server/admin.js), the game's owner when it is not set (set it empty
-// for none). Nobody else is told the tools exist. (Knowing an ID is no way in: an ID belongs to the device or Steam
-// account it was first bound to, and anyone else asking for it is given a new one, server/profile-store.js bind.)
-const DEFAULT_ADMIN_PLAYER_IDS = 'WOD-AM4P-MUAM';
+// Admins: the player IDs in WOD_ADMIN_PLAYER_IDS (server/admin.js), the game's owner's two accounts when it is not set
+// (Jumin121 on Steam, jumin in the browser; set it empty for none). Nobody else is told the tools exist. (Knowing an ID
+// is no way in: an ID belongs to the device or Steam account it was first bound to, and anyone else asking for it is
+// given a new one, server/profile-store.js bind.)
+const DEFAULT_ADMIN_PLAYER_IDS = 'WOD-AM4P-MUAM,WOD-THCE-WLFB';
 const admin = createAdmin({
   adminIds: parseAdminIds(process.env.WOD_ADMIN_PLAYER_IDS ?? DEFAULT_ADMIN_PLAYER_IDS, sanitizePlayerId),
   profiles, clans, sanitizePlayerId, knownPlayerNames, validateDisplayNameForPlayer, displayNameKey, playerNameFlagged,

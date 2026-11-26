@@ -7,7 +7,7 @@
 //   - the younger player cannot play under the name and is told why; with a new name they can
 //   - the younger clan's leader can change nothing until the clan is renamed; the older clan's leader can
 //   - nobody can take a used name in another spelling, or the placeholder itself
-//   - "the dev clan" (server/clans.js NAME_KEEPERS) stays with jumin121's clan although it was founded after the other one
+//   - "the dev clan" (server/clans.js NAME_KEEPERS) stays with Jumin121's clan although it was founded after the other one
 // Usage: node scripts/verify-unique-names.js
 const H = require('./lib/harness');
 const http = require('http'), fs = require('fs'), path = require('path'), assert = require('assert/strict'), crypto = require('crypto'), { fork } = require('child_process');
@@ -28,7 +28,8 @@ assert.ok(isPlaceholderName('Thanks, for noticing!') && !isPlaceholderName('Than
 const dataDir = fs.mkdtempSync(path.join(OUT, 'relay-'));
 const secret = () => crypto.randomBytes(32).toString('hex'), key = s => 'browser:' + crypto.createHash('sha256').update(s).digest('hex');
 const P1 = 'WOD-AAAA-1111', P2 = 'WOD-BBBB-2222', S1 = secret(), S2 = secret();
-const P4 = 'WOD-DDDD-4444', P5 = 'WOD-EEEE-5555', S4 = secret(), S5 = secret();
+// (P5 is Jumin121's real ID: NAME_KEEPERS in server/clans.js names players by ID)
+const P4 = 'WOD-DDDD-4444', P5 = 'WOD-AM4P-MUAM', S4 = secret(), S5 = secret();
 // (saved before profiles kept a creation date: the one with more multiplayer games is the older)
 fs.writeFileSync(path.join(dataDir, 'player-profiles.json'), JSON.stringify({
     profiles: {
@@ -118,8 +119,11 @@ async function connect(label) {
             assert.equal((await fresh.clan({ t: 'clan_create', name: n, emblem: 'p:wolf', visibility: 'public' })).t, 'clan_error', 'refused clan name: ' + JSON.stringify(n));
         assert.equal((await fresh.clan({ t: 'clan_create', name: 'Brand New Clan', emblem: 'p:wolf', visibility: 'public' })).t, 'clan_info');
         const early = await connect('early'), jumin = await connect('jumin');
-        assert.equal((await early.register(P4, S4, 'Early Bird')).t, 'registered');
-        assert.equal((await jumin.register(P5, S5, 'jumin121')).t, 'registered');
+        const earlyReg = await early.register(P4, S4, 'Early Bird');
+        assert.ok(earlyReg.t === 'registered' && !('admin' in earlyReg), 'a player who is not an admin is not told about admins');
+        const juminReg = await jumin.register(P5, S5, 'jumin121');
+        assert.equal(juminReg.t, 'registered');
+        assert.equal(juminReg.admin, true, "with no WOD_ADMIN_PLAYER_IDS set, the owner's accounts are the admins (server/index.js)");
         const notKept = await early.clan({ t: 'clan_update', emblem: 'p:star' });
         assert.equal(notKept.t, 'clan_error'); assert.match(notKept.msg, /had this name first/, 'the other dev clan has to be renamed');
         assert.equal((await jumin.clan({ t: 'clan_update', emblem: 'p:star' })).t, 'clan_info', "jumin121's dev clan can still be changed");
