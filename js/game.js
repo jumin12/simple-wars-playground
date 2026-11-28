@@ -1453,6 +1453,8 @@ function returnToMenu() {
     // Quitting straight after saving is "continue later" (js/game-saves.js): not a lost match, and not a failed assault
     // in the campaign. The save carries the match on and it is counted when it ends.
     const continueLater=gameState==='PLAYING'&&!gameData.menuAttractMode&&!gameData.mp?.enabled&&typeof wodGameSavedAndUnchanged==='function'&&wodGameSavedAndUnchanged();
+    // (a battle's last toast does not follow the player onto the menu or the war map)
+    document.querySelector('.wod-toast-note')?.remove?.();
     if(gameState==='PLAYING'&&!gameData.menuAttractMode&&!continueLater)wodFinishLifetimeMatch('defeat','quit');
     wodFlushLifetimeProgress();
     hideCampaignSummaryOverlay();
@@ -2501,7 +2503,7 @@ function wodRunInitialBootToMenu() {
             let out = work();
             if(out && typeof out.then === 'function') await out;
         }
-        await nextFrame();
+        // (no second frame here: the next stage waits for one before its work, so each caption is still painted)
     }
 
     let bootPanel = document.getElementById('wodBootPanel');
@@ -2543,15 +2545,13 @@ function wodRunInitialBootToMenu() {
     (async () => {
         try {
             // Music buffers during the splash. Playback starts when the changelog popup is closed.
-            await bootStage('Loading music…', 4, async () => {
+            // (the splash no longer waits for the first track: buffering it held the boot for a third of a second
+            // locally and up to 2.5 s over a slow connection; it carries on while the rest of the game warms up)
+            await bootStage('Loading music…', 4, () => {
                 if(!window.wodMusic || typeof window.wodMusic.preloadAll !== 'function') return;
                 try {
                     window.wodMusic.bindUi();
-                    await window.wodMusic.preloadAll((frac, label) => {
-                        let pct = 4 + Math.round(Math.max(0, Math.min(1, frac || 0)) * 40);
-                        if(caption && label) caption.textContent = label;
-                        wodSetBootSplashProgress(pct);
-                    });
+                    Promise.resolve(window.wodMusic.preloadAll()).catch(e => console.warn(e));
                 } catch(e) { console.warn(e); }
             }, 8);
             await bootStage('Loading interface…', 48, null, 16);
@@ -2591,12 +2591,13 @@ function wodRunInitialBootToMenu() {
             if(elapsed < 380) await sleep(380 - elapsed);
             let fillStart = performance.now();
             let fillFrom = Math.max(displayed, 92);
+            // (the last few percent ease in over a quarter of a second; it took 0.7 s)
             function fillTick(now) {
-                let u = Math.min(1, (now - fillStart) / 560);
+                let u = Math.min(1, (now - fillStart) / 260);
                 let eased = 1 - Math.pow(1 - u, 2.2);
                 wodSetBootSplashProgress(fillFrom + (100 - fillFrom) * eased);
                 if(u < 1) requestAnimationFrame(fillTick);
-                else setTimeout(showContinuePrompt, 120);
+                else setTimeout(showContinuePrompt, 40);
             }
             requestAnimationFrame(fillTick);
         } catch(err) {

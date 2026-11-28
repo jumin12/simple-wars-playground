@@ -189,15 +189,19 @@ function wodDiagonalCornerBlocksLandStep(unit, hex, forbidWater) {
 }
 function wodBridgePortalLinked(fromHex, toHex) {
     if(!fromHex || !toHex) return false;
+    return wodBridgePortalLinkedKnown(fromHex, toHex, isBridgeHex(fromHex), isBridgeHex(toHex));
+}
+/** wodBridgePortalLinked for a caller that already knows whether each cell is a bridge (fromBridge, toBridge). */
+function wodBridgePortalLinkedKnown(fromHex, toHex, fromBridge, toBridge) {
     let fk = getHexKey(fromHex), tk = getHexKey(toHex);
-    if(isBridgeHex(toHex) && gameData._bridgeLandEntry) {
+    if(toBridge && gameData._bridgeLandEntry) {
         let entries = gameData._bridgeLandEntry[fk];
         if(entries) {
             if(entries instanceof Set && entries.has(tk)) return true;
             if(Array.isArray(entries) && entries.indexOf(tk) >= 0) return true;
         }
     }
-    if(isBridgeHex(fromHex) && gameData._bridgeExitLand) {
+    if(fromBridge && gameData._bridgeExitLand) {
         let exits = gameData._bridgeExitLand[fk];
         if(exits) {
             if(exits instanceof Set && exits.has(tk)) return true;
@@ -235,13 +239,17 @@ function wodCanStepBetweenHexes(unit, fromHex, toHex, forbidWater) {
     if(unit && (wodIsNavalUnit(unit) || (unit.type === 'convoy' && unit.convoySeaRoute))) {
         return wodIsOpenWaterHex(fromHex) && wodIsOpenWaterHex(toHex);
     }
-    if(wodBridgePortalLinked(fromHex, toHex)) return true;
-    if(isBridgeHex(fromHex) && isBridgeHex(toHex)) {
+    // (every path search asks this for each neighbour of each cell it opens: whether either cell is a bridge is worked
+    // out once here instead of up to eight times, and the water-order test only for a step into open water, the one
+    // case where wodPathTileWalkable reads it; the answers are the same)
+    const fb = isBridgeHex(fromHex), tb = isBridgeHex(toHex);
+    if(wodBridgePortalLinkedKnown(fromHex, toHex, fb, tb)) return true;
+    if(fb && tb) {
         let bf = bridgeAtHex(fromHex),
             bt = bridgeAtHex(toHex);
         if(bf && bt && bf.id === bt.id) return true;
     }
-    if(!isBridgeHex(fromHex) && isBridgeHex(toHex)) {
+    if(!fb && tb) {
         let dq = Math.abs(toHex.q - fromHex.q),
             dr = Math.abs(toHex.r - fromHex.r);
         if(dq <= 1 && dr <= 1 && (dq + dr) > 0 && wodPathTileWalkable(unit, toHex, false)) return true;
@@ -253,13 +261,14 @@ function wodCanStepBetweenHexes(unit, fromHex, toHex, forbidWater) {
         unit.type === 'marine' ||
         (unit.type === 'convoy' && unit.convoySeaRoute)
     );
-    if(!wodPathTileWalkable(unit, toHex, allowWater || wodOrderIntoWater(unit, toHex))) return false;
-    if(forbidWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
-        isWaterHex(toHex) && !isBridgeHex(toHex) && !wodOrderIntoWater(unit, toHex)) return false;
+    const toOpenWater = !tb && isWaterHex(toHex);
+    if(!wodPathTileWalkable(unit, toHex, allowWater || (toOpenWater && wodOrderIntoWater(unit, toHex)))) return false;
+    if(forbidWater && toOpenWater && wodUnitUsesLandBridges(unit) && unit.type !== 'marine' &&
+        !wodOrderIntoWater(unit, toHex)) return false;
     let dq = toHex.q - fromHex.q;
     let dr = toHex.r - fromHex.r;
     if(dq !== 0 && dr !== 0) {
-        let bridgeStep = isBridgeHex(fromHex) || isBridgeHex(toHex);
+        let bridgeStep = fb || tb;
         if(!bridgeStep) {
             let sideA = wodHexAt(fromHex.q + dq,fromHex.r);
             let sideB = wodHexAt(fromHex.q,fromHex.r + dr);
@@ -853,15 +862,18 @@ function wodBodiesMeet(a,b,ax,ay) {
 }
 function isWorldPositionBlockedByUnits(mover,wx,wy,gapExtra=2) {
     let blocked=false;
+    // (the distance is tested before the body check, and the scan stops at the first unit in the way: the answer is the same)
     forEachNearbyUnit(gameData.unitSpatialGrid,wx,wy,(mover.radius||10)+65,u=>{
-        if(u===mover||u.hp<=0||u.type==='convoy'||!wodBodiesMeet(mover,u,wx,wy))return;
+        if(u===mover||u.hp<=0||u.type==='convoy')return;
         const min=(mover.radius||10)+(u.radius||10)+Math.max(1,gapExtra);
-        const d2=(u.x-wx)**2+(u.y-wy)**2,old2=(u.x-mover.x)**2+(u.y-mover.y)**2;
-        if(old2<min*min&&d2>old2+.0001)return;
+        const d2=(u.x-wx)**2+(u.y-wy)**2;
         if(d2>=min*min)return;
+        if(!wodBodiesMeet(mover,u,wx,wy))return;
+        const old2=(u.x-mover.x)**2+(u.y-mover.y)**2;
+        if(old2<min*min&&d2>old2+.0001)return;
         // (one queueing behind it gives way, down to a part overlap that the bodies' separation eases apart)
         if(d2>=(min*.6)**2&&wodQueuedBehind(mover,u))return;
-        blocked=true;
+        blocked=true;return true;
     });return blocked;
 }
 // In a one-cell pass a comrade marching to the very spot this unit stands on (the corner of the pass it has just
@@ -1009,8 +1021,23 @@ function wodSteerAroundFriendlyUnits(unit,nx,ny,dt=1/60) {
     // An unarmed boat (a transport or supply ship) has no fight to stay in: it steers round an enemy vessel as it does
     // round a comrade. Two enemy landing craft that met bow to bow used to stop there for good, each waiting on the other.
     const unarmedBoat=wodIsNavalUnit(unit)&&!(unit.damage>0);
+    const clock=gameData._aiEconomyClock||0;
     forEachNearbyUnit(gameData.unitSpatialGrid,unit.x,unit.y,(unit.radius||12)+100,u=>{
-        if(u===unit||u.hp<=0||u.type==='convoy'||!wodBodiesMeet(unit,u,nx,ny))return;
+        if(u===unit||u.hp<=0||u.type==='convoy')return;
+        // (most units in the grid cells looked at are too far off to matter: one is skipped when it is beyond both the
+        // distance at which it could block a step or be an enemy in contact, and the reach below even at the fastest it
+        // could be moving, 1.37 times its speed: the most getUnitSpeedMultiplier gives, a broken unit's 1.18, a
+        // mountaineer on a hill's 1.05 and a general's 1.10. Nothing it would have added changes the answer.)
+        {
+            const rr=(unit.radius||12)+(u.radius||12),d2=(u.x-unit.x)**2+(u.y-unit.y)**2,near=rr+7+step;
+            if(d2>near*near){
+                const goal=u._trafficYield?.route?.target||u.target;
+                const vmax=!goal?0:u._wodVelocityAt!=null&&clock-u._wodVelocityAt<.3?Math.hypot(u._wodVelocityX,u._wodVelocityY)+.001:Math.abs((u.speed||15)*WOD_MOVE_SPEED_FACTOR)*1.37+.001;
+                const far=rr+4+(speed+vmax)*3;
+                if(d2>far*far)return;
+            }
+        }
+        if(!wodBodiesMeet(unit,u,nx,ny))return;
         blockers.push(u);if(u.boardTransportUid)return;
         // (a comrade queueing behind it in a pass gives way: no risk to steer round, and only a deep overlap blocks)
         if(wodQueuedBehind(unit,u)){queued.add(u);return;}
@@ -3864,7 +3891,10 @@ function assignUnitMoveAlongWaypoints(unit, worldPoints, opt) {
     if(!fromAdvance) {
         unit.fullMarchWaypoints = marchPts;
         unit.marchWpCursor = 0;
-        if(marchPts.length>1||!wodMpIsHumanOwner(unit.owner))
+        // (the route arrow is drawn only for the local player's units, js/ui.js shouldDrawPlayerUnitOrderPath: building
+        // one for every computer order ran a full path search per order between frames and caused most of the long
+        // frames on big land maps; a selected computer convoy still gets its arrow built when drawn, wodEnsureOrderArrowFrozen)
+        if(marchPts.length>1&&wodMpIsHumanOwner(unit.owner))
             wodEnqueueOrderArrowPathBuild(unit, marchPts);
         if(unit.owner === 1) {
             unit.combatEngaged = false;
@@ -4947,7 +4977,10 @@ function moveUnitTowardTarget(unit,dt) {
     try {
     wodResumeTrafficYield(unit);
     if(unit.target&&!unit._trafficYield){
-        const key=unit.target.x.toFixed(1)+','+unit.target.y.toFixed(1),distance=Math.hypot(unit.x-unit.target.x,unit.y-unit.target.y),now=gameData._aiEconomyClock||0;
+        // (the key is the same text while the target point is the same: it is kept rather than formatted every tick)
+        const tx=unit.target.x,ty=unit.target.y;
+        if(unit._wodTpKeyX!==tx||unit._wodTpKeyY!==ty||unit._wodTpKey==null){unit._wodTpKey=tx.toFixed(1)+','+ty.toFixed(1);unit._wodTpKeyX=tx;unit._wodTpKeyY=ty;}
+        const key=unit._wodTpKey,distance=Math.hypot(unit.x-unit.target.x,unit.y-unit.target.y),now=gameData._aiEconomyClock||0;
         let progress=unit._wodTrafficProgress;
         if(!progress||progress.key!==key||distance<progress.distance-2)unit._wodTrafficProgress={key,distance,at:now};
         else if(now-progress.at>2){
@@ -5299,12 +5332,15 @@ function wodMoveUnitAlongRoute(unit, dt) {
             if(unit._wodFleeT>2.5&&!making&&!((unit._wodGoRoundAt||0)>(gameData._aiEconomyClock||0)-3)){unit._wodFleeT=0;unit._wodFleeD=null;if(wodRetreatGoRound(unit)){unit._wodGoRoundAt=gameData._aiEconomyClock||0;return;}}
         }
     }else if(unit._wodFleeD!=null){unit._wodFleeD=null;unit._wodFleeT=0;}
-    if(unit.type!=='convoy'&&(isWorldPositionBlockedByUnits(unit,nx,ny)||avoidance&&Math.hypot(nx-unit.x,ny-unit.y)<.001)) {
+    // (whether the next step is blocked is asked once and the answer used again below, unless a comrade was asked
+    // to step aside in between, which can change it)
+    const blockedHere=unit.type!=='convoy'&&isWorldPositionBlockedByUnits(unit,nx,ny);let askedYield=false;
+    if(unit.type!=='convoy'&&(blockedHere||avoidance&&Math.hypot(nx-unit.x,ny-unit.y)<.001)) {
         unit._trafficBlockT=(unit._trafficBlockT||0)+dt;
         // Asking the comrade in the way to step aside is tried first. One who is holding his
         // ground does not, and a retreat cannot wait for him: after a second and a half it
         // stops asking and goes round.
-        if(unit._trafficBlockT>.4&&!(unit._trafficBlockT>1.5&&(unit._wodRiskRetreat||unit.retreating||unit.moraleBroken))&&wodYieldFriendlyTraffic(unit))return;
+        if(unit._trafficBlockT>.4&&!(unit._trafficBlockT>1.5&&(unit._wodRiskRetreat||unit.retreating||unit.moraleBroken))){askedYield=true;if(wodYieldFriendlyTraffic(unit))return;}
 
     }else{unit._trafficBlockT=0;unit._wodRetreatJamT=0;}
     // Steering can answer "stand still" when every way round a comrade looks taken. A marching
@@ -5312,7 +5348,7 @@ function wodMoveUnitAlongRoute(unit, dt) {
     // treated as blocked, so that it replans and detours instead of standing behind him.
     const retreatStalled=unit.type!=='convoy'&&avoidance&&Math.hypot(nx-unit.x,ny-unit.y)<.001&&
         (unit._trafficBlockT||0)>.8&&(unit._wodRiskRetreat||unit.retreating||unit.moraleBroken);
-    if(unit.type !== 'convoy' && (retreatStalled || isWorldPositionBlockedByUnits(unit, nx, ny))) {
+    if(unit.type !== 'convoy' && (retreatStalled || (askedYield ? isWorldPositionBlockedByUnits(unit, nx, ny) : blockedHere))) {
         if(!retreatStalled&&!((unit._trafficBlockT||0)>1.5&&(unit._wodRiskRetreat||unit.retreating||unit.moraleBroken))&&wodYieldFriendlyTraffic(unit))return;
         const fleeing=unit._wodRiskRetreat||unit.retreating||unit.moraleBroken;
         if(unit.target.goRound){

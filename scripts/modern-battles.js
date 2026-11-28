@@ -7,6 +7,8 @@
 //   kursk-citadel    hold     the salient, against Model from the north and Hoth from the south
 //   midway-1942      fleet    sink the carrier force and the invasion fleet around the atoll
 //   normandy-dday    attack   land on Utah, Omaha and Gold and link them at Carentan and Bayeux
+//   stalingrad-1942  hold     Mamayev Kurgan and the central landing, with the Volga at your back
+//   bastogne-1944    attack   relieve the surrounded town: take Assenois while the perimeter holds
 const {catmull,distance}=require('./historical-battlefields');
 const {Field,finish,lerpPts,inEllipse,wind,at}=require('./era-battles');
 const ADAPTATION='Scaled RTS adaptation: geography, force sizes and time are compressed. Units stand for divisions and brigades; scripted waves stand for the formations of the day rather than exact orders of battle.';
@@ -197,7 +199,104 @@ function normandy(MapBuilder,ev){
   ]});
 }
 
+function stalingrad(MapBuilder,ev){
+ const f=new Field(MapBuilder,28,1942913);
+ // The city strings out along the west bank of the Volga: the Tractor Factory in the north, Mamayev Kurgan over the
+ // centre, the central landing on the river, and the Tsaritsa gorge to the south, beyond which the Germans have reached
+ // the water. West of the city is open steppe; across the Volga the east bank, where the Soviet guns and reserves wait.
+ const bank=r=>15+wind(r,.9,1.4),far=r=>bank(r)+6+wind(r,2.2,.8);
+ const gorge=catmull([[-28,9],[-14,8],[-2,10],[8,9],[15,9]]);
+ f.paint((h,n)=>{
+  const b=bank(h.r),e=far(h.r);
+  h.type=n<.35?'sand':'grass';
+  // (the ruined city: blocks of rubble with streets between them, cover for whoever holds them; only the town cores are
+  // streets that must be taken)
+  if(h.q>-7+wind(h.r,1.7,1.5)&&h.q<b-.5&&f.n(h.q,h.r,5)>.42&&(h.q+80)%5&&(h.r+80)%6)h.type='urban';
+  if(inEllipse(h.q,h.r,2,-6,4.5,3.2,1+(n-.5)*.4))h.type='hill';
+  if(distance(h.q,h.r,gorge).d<1.1)h.type='swamp';
+  if(h.q>=b&&h.q<e)h.type='water';else if(h.q>=e)h.type=n>.62?'forest':'grass';
+  h.owner=h.q>=e?1:h.q<-3+wind(h.r,2.6,1.4)||h.r>9.5?2:1;
+ });
+ const kurgan=f.town(2,-6,1,'Mamayev Kurgan'),landing=f.town(12,1,1,'Central landing'),tractor=f.town(6,-16,1,'Tractor Factory'),sloboda=f.town(25,3,1,'Krasnaya Sloboda');
+ const gumrak=f.town(-18,-5,2,'Gumrak'),gorod=f.town(-14,-17,2,'Gorodishche'),elshanka=f.town(3,16,2,'Elshanka');
+ f.road(gumrak,kurgan,[[-8,-6]]);f.road(kurgan,landing,[[7,-2]]);f.road(kurgan,tractor,[[4,-11]]);f.road(gorod,tractor,[[-4,-17]]);f.road(gumrak,elshanka,[[-8,12]]);
+ // 62nd Army: rifle divisions through the city, two tank brigades, the Volga flotilla's gunboats, guns on the east bank
+ [['284th Rifle Division',2,-6],['95th Rifle Division',0,-10],['308th Rifle Division',3,-14],['37th Guards Rifle Division',9,-19],['138th Rifle Division',8,-10],['10th NKVD Division',12,1]].forEach(([n,q,r])=>f.unit('light',1,q,r,n));
+ f.unit('heavy',1,6,-2,'84th Tank Brigade');f.unit('heavy',1,10,-13,'137th Tank Brigade');
+ f.unit('mountaineer',1,2,2,'Sniper group');f.unit('motorized',1,6,6,'42nd Rifle Brigade');
+ f.unit('ship',1,18,-4,'Volga flotilla');f.unit('ship',1,18,6,'Volga flotilla II');f.unit('light',1,24,7,'Front artillery group');
+ // Sixth Army: infantry divisions on the edge of the city, panzers and motorised divisions behind, assault pioneers
+ [['71st Infantry Division',-2,12],['94th Infantry Division',8,13],['76th Infantry Division',-7,-2],['295th Infantry Division',-7,-8],['389th Infantry Division',-6,-15],['305th Infantry Division',-10,-19]].forEach(([n,q,r])=>f.unit('light',2,q,r,n));
+ [['14th Panzer Division',-12,-3],['24th Panzer Division',-10,12],['16th Panzer Division',-12,-13]].forEach(([n,q,r])=>f.unit('heavy',2,q,r,n));
+ f.unit('motorized',2,-15,1,'3rd Motorized Division');f.unit('motorized',2,-16,-11,'60th Motorized Division');f.unit('mountaineer',2,-8,4,'Pioneer battalions');
+ f.label('Volga',18,-14,'water');f.label('Tsaritsa gorge',-10,7);f.label('Factory district',10,-21);f.label('East bank',25,-12);f.label('Steppe',-21,-14);
+ return finish(f,ev,{id:'stalingrad-1942',name:'Stalingrad: The Volga Bank',era:'modern',date:'September–November 1942',difficulty:'Hard',price:200,
+  objective:'Hold Mamayev Kurgan and the central landing for 5:00.',goal:{type:'hold',towns:['Mamayev Kurgan','Central landing'],duration:300},
+  brief:'You command the 62nd Army in the ruins of Stalingrad with the Volga at your back. The Sixth Army will throw division after division at Mamayev Kurgan, the hill that looks down on the whole river bank, and at the central landing, where every reinforcement comes across. Fight for each block: the rubble shelters the defender. The gunboats on the river can reach the streets near the bank.',
+  history:'From September 1942 the German Sixth Army fought its way into Stalingrad and pushed the 62nd Army back to a strip of the Volga bank, but never took the whole city. On 19 November the Soviet counter-offensive, Operation Uranus, broke through on both sides of the city and encircled the Sixth Army, which surrendered in February 1943.',
+  note:'A strip of ruined city along the west bank of the Volga, from the Tractor Factory past Mamayev Kurgan to the Tsaritsa gorge, with the steppe to the west and the east bank across the river.',
+  sources:['https://en.wikipedia.org/wiki/Battle_of_Stalingrad'],adaptation:ADAPTATION,
+  economy:{money:18000,manpower:2500,aiMoney:{2:20000},aiManpower:{2:1000}},
+  events:[
+   ev('stal-assault','The assault on the city',{type:'timer',seconds:15},{title:'Paulus attacks',body:'The Sixth Army is storming into the city, and its first blow is falling on Mamayev Kurgan. Hold the hill and the landing.',style:'alert'},[],[{owner:2,scope:'all',...at(2,-6)}]),
+   ev('stal-guards','13th Guards',{type:'timer',seconds:70},{title:'The 13th Guards cross the Volga',body:'General Rodimtsev\'s 13th Guards Rifle Division has crossed the river under fire and is coming up from the central landing.',style:'briefing'},
+    [{owner:1,type:'light',count:3,anchor:'coords',...at(11,4)}]),
+   ev('stal-gorge','Through the gorge',{type:'timer',seconds:130},{title:'Drive on the landing',body:'German armour and infantry are pushing along the Tsaritsa gorge toward the central landing. If it falls, nothing more can cross.',style:'alert'},
+    [{owner:2,type:'heavy',count:1,anchor:'coords',...at(-12,11)},{owner:2,type:'light',count:2,anchor:'coords',...at(-10,13)}],[{owner:2,scope:'reinforcements',...at(12,1)}]),
+   ev('stal-factories','The factory district',{type:'timer',seconds:190},{title:'The factory district',body:'Fresh German divisions are attacking from the north, past the Tractor Factory, toward Mamayev Kurgan.',style:'alert'},
+    [{owner:2,type:'light',count:2,anchor:'coords',...at(-12,-18)},{owner:2,type:'heavy',count:1,anchor:'coords',...at(-10,-20)}],[{owner:2,scope:'reinforcements',...at(2,-6)}]),
+   ev('stal-uranus','Operation Uranus',{type:'timer',seconds:255},{title:'Operation Uranus',body:'Far out on the steppe the Soviet fronts have broken through on both sides of the city, and the Sixth Army is being encircled. Hold on through its last attacks.',style:'briefing'})
+  ]});
+}
+
+function bastogne(MapBuilder,ev){
+ const f=new Field(MapBuilder,28,19441226);
+ // Wooded, hilly Ardennes country. The town of Bastogne and its perimeter sit in the north-middle, ringed by the
+ // besieging German divisions; south of the ring a German blocking force holds the villages of Assenois and Sibret on
+ // the roads up from the south, where Patton's Third Army has arrived.
+ f.paint((h,n)=>{
+  const ring=inEllipse(h.q,h.r,0,-6,8.5,7,1+(n-.5)*.35);
+  h.type=n>.62?'forest':f.n(h.q,h.r,4)>.7?'hill':'grass';
+  if(ring&&inEllipse(h.q,h.r,0,-6,3.5,3))h.type='grass';
+  h.owner=ring||h.r>15+wind(h.q,1.4,1.2)?1:h.r>2.5+wind(h.q,3.1,1.5)?3:2;
+ });
+ const bast=f.town(0,-6,1,'Bastogne'),vaux=f.town(-9,19,1,'Vaux-lez-Rosières'),mart=f.town(9,19,1,'Martelange');
+ const assenois=f.town(1,6,3,'Assenois'),sibret=f.town(-12,6,3,'Sibret'),noville=f.town(5,-19,2,'Noville'),champs=f.town(-17,-8,2,'Champs');
+ f.road(mart,assenois,[[4,13]]);f.road(assenois,bast,[[0,0]]);f.road(vaux,sibret,[[-11,13]]);f.road(sibret,bast,[[-6,-1]]);f.road(bast,noville,[[3,-13]]);f.road(champs,bast,[[-9,-7]]);
+ // the 101st Airborne and Combat Command B inside the perimeter; the 4th Armored Division in the south
+ [['501st Parachute Infantry',-4,-9],['502nd Parachute Infantry',-5,-3],['506th Parachute Infantry',3,-11],['327th Glider Infantry',4,-2],['326th Airborne Engineers',5,-8]].forEach(([n,q,r])=>f.unit('light',1,q,r,n));
+ f.unit('heavy',1,1,-2,'Combat Command B');f.unit('motorized',1,-2,-11,'705th Tank Destroyer Battalion');
+ [['37th Tank Battalion',-1,19],['8th Tank Battalion',4,20],['35th Tank Battalion',-6,20]].forEach(([n,q,r])=>f.unit('heavy',1,q,r,n));
+ f.unit('motorized',1,1,21,'53rd Armored Infantry Battalion');f.unit('motorized',1,-3,18,'10th Armored Infantry Battalion');f.unit('light',1,13,18,'318th Infantry Regiment');
+ // the besiegers round the ring, and the blocking force on the southern roads
+ [['26th Volksgrenadier Division',-11,-5],['Volksgrenadier Regiment 77',9,-11],['Volksgrenadier Regiment 78',-7,-16]].forEach(([n,q,r])=>f.unit('light',2,q,r,n));
+ f.unit('heavy',2,11,-3,'Panzer Lehr Division');f.unit('heavy',2,8,-19,'2nd Panzer Division');f.unit('motorized',2,-16,-12,'15th Panzergrenadier Division');
+ [['5th Fallschirmjäger Division',-3,8],['Fallschirmjäger Regiment 14',-11,10],['Fallschirmjäger Regiment 15',9,7],['Assenois garrison',1,10]].forEach(([n,q,r])=>f.unit('light',3,q,r,n));
+ f.unit('heavy',3,5,12,'Assault gun brigade');f.unit('mountaineer',3,-8,5,'Fallschirmjäger pioneers');
+ // (dug in on the road to Assenois)
+ f.fort(-2,10,3);f.fort(4,11,3);
+ f.label('Bastogne perimeter',6,-14);f.label('Ardennes forest',-20,-18);f.label('Road from Arlon',8,15);f.label('Third Army',-14,21);
+ return finish(f,ev,{id:'bastogne-1944',name:'Bastogne: Break the Ring',era:'modern',date:'19–26 December 1944',difficulty:'Hard',
+  objective:'Break through to Bastogne: capture Assenois and keep Bastogne.',goal:{type:'capture',towns:['Assenois','Bastogne']},
+  brief:'You command both the surrounded 101st Airborne in Bastogne and the 4th Armored Division south of it. Inside the ring, hold the perimeter: the Germans will attack it from every side. In the south, fight up the road through the woods, take Assenois and open the way into the town. Bastogne must still be yours when Assenois falls.',
+  history:'In the Battle of the Bulge the 101st Airborne Division and part of the 10th Armored Division were surrounded at Bastogne from 20 December 1944. Their commander answered a German demand to surrender with "Nuts!". On 26 December tanks of the 4th Armored Division broke through at Assenois and reached the perimeter.',
+  note:'Wooded Ardennes hills around Bastogne and its perimeter, with the villages of Assenois and Sibret on the roads from the south.',
+  sources:['https://en.wikipedia.org/wiki/Siege_of_Bastogne'],adaptation:ADAPTATION,
+  economy:{money:22000,manpower:2500,aiMoney:{2:20000,3:12000},aiManpower:{2:1500,3:800}},alliances:[[2,3]],aiCount:2,enemyManpowerRate:.25,
+  events:[
+   ev('bast-nuts','Nuts!',{type:'timer',seconds:15},{title:'"Nuts!"',body:'The Germans have surrounded Bastogne and demanded its surrender. General McAuliffe has answered in one word: "Nuts!". Hold the perimeter while the 4th Armored fights its way up from the south.',style:'alert'},[],[{owner:2,scope:'all',...at(0,-6)}]),
+   ev('bast-air','Supplies from the air',{type:'timer',seconds:70},{title:'Supplies from the air',body:'The skies have cleared. Supplies are coming down by parachute over Bastogne, and gliders have brought in fresh troops.',style:'briefing'},
+    [{owner:1,type:'light',count:2,anchor:'coords',...at(-1,-7)}]),
+   ev('bast-champs','The Christmas attack',{type:'timer',seconds:130},{title:'The Christmas attack',body:'Panzers and Volksgrenadiers are attacking the west of the perimeter from Champs.',style:'alert'},
+    [{owner:2,type:'heavy',count:1,anchor:'coords',...at(-17,-12)},{owner:2,type:'light',count:2,anchor:'coords',...at(-19,-10)}],[{owner:2,scope:'reinforcements',...at(0,-6)}]),
+   ev('bast-cobra','Cobra King',{type:'timer',seconds:160},{title:'Cobra King',body:'Fresh tanks of the 37th Tank Battalion are ready to dash up the road through Assenois to the perimeter.',style:'briefing'},
+    [{owner:1,type:'heavy',count:2,anchor:'coords',...at(0,20)}]),
+   ev('bast-last','The last assault',{type:'timer',seconds:250},{title:'The last assault on the perimeter',body:'The Germans make one more attempt to break into Bastogne from the north.',style:'alert'},
+    [{owner:2,type:'light',count:2,anchor:'coords',...at(6,-20)},{owner:2,type:'heavy',count:1,anchor:'coords',...at(4,-21)}],[{owner:2,scope:'reinforcements',...at(0,-6)}])
+  ]});
+}
+
 function buildModernBattles({MapBuilder,ev}){
- return [normandy,kursk,midway,elAlamein].map(build=>build(MapBuilder,ev));
+ return [normandy,kursk,midway,elAlamein,stalingrad,bastogne].map(build=>build(MapBuilder,ev));
 }
 module.exports={buildModernBattles};

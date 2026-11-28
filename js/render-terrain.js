@@ -678,31 +678,53 @@ function terrainElevProxy(hex) {
 }
 /** Continuous noise elevation — hex type only biases height, never radial hex blobs. */
 function wodSampleTopoElev(wx, wy) {
-    let center = getNearestHexToPoint(wx, wy);
+    return wodSampleTopoElevAt(wx, wy, getNearestHexToPoint(wx, wy), null);
+}
+/** A sampler for one bake: the noise lattice hashes of the last sample (wodFbmCached) and the neighbour blend of the
+ *  last cell, which the next samples along a row mostly share. The heights are exactly wodSampleTopoElev's. */
+function wodTopoSampler() {
+    return { lattice: new Float64Array(90).fill(NaN), hex: null, bias: 0 };
+}
+function wodSampleTopoElevAt(wx, wy, center, sampler) {
     let typeBias = 0.42;
     if(center) {
         if(isWaterHex(center)) return 0.05;
         if(center.type === 'bridge') return 0.22;
-        typeBias = terrainElevProxy(center);
-        // Soft neighbor blend so biome steps don't stamp hex discs.
-        let sum = typeBias * 2, wsum = 2;
-        for(let di = 0; di < hexDirections.length; di++) {
-            let dir = hexDirections[di];
-            let n = wodHexAt(center.q + dir.q,center.r + dir.r);
-            if(!n || isWaterHex(n)) continue;
-            sum += terrainElevProxy(n);
-            wsum++;
+        if(sampler && sampler.hex === center) typeBias = sampler.bias;
+        else {
+            typeBias = terrainElevProxy(center);
+            // Soft neighbor blend so biome steps don't stamp hex discs.
+            let sum = typeBias * 2, wsum = 2;
+            for(let di = 0; di < hexDirections.length; di++) {
+                let dir = hexDirections[di];
+                let n = wodHexAt(center.q + dir.q,center.r + dir.r);
+                if(!n || isWaterHex(n)) continue;
+                sum += terrainElevProxy(n);
+                wsum++;
+            }
+            typeBias = sum / wsum;
+            if(sampler) { sampler.hex = center; sampler.bias = typeBias; }
         }
-        typeBias = sum / wsum;
     }
 
     // Domain-warped multi-octave relief — long ridges / valleys, not circular mounds.
-    let warpX = (fbm(wx * 0.0048 + 17.1, wy * 0.0048 + 9.4, 3) - 0.5) * 38;
-    let warpY = (fbm(wx * 0.0048 + 61.2, wy * 0.0048 + 33.7, 3) - 0.5) * 38;
-    let x = wx + warpX, y = wy + warpY;
-    let n1 = fbm(x * 0.0062 + 3.1, y * 0.0062 + 1.7, 5);
-    let n2 = fbm(x * 0.0145 + 22.4, y * 0.0145 + 14.8, 4);
-    let n3 = fbm(x * 0.031 + 55.0, y * 0.031 + 41.2, 3);
+    let warpX, warpY, n1, n2, n3;
+    if(sampler) {
+        const L = sampler.lattice;
+        warpX = (wodFbmCached(wx * 0.0048 + 17.1, wy * 0.0048 + 9.4, 3, L, 0) - 0.5) * 38;
+        warpY = (wodFbmCached(wx * 0.0048 + 61.2, wy * 0.0048 + 33.7, 3, L, 15) - 0.5) * 38;
+        let x = wx + warpX, y = wy + warpY;
+        n1 = wodFbmCached(x * 0.0062 + 3.1, y * 0.0062 + 1.7, 5, L, 30);
+        n2 = wodFbmCached(x * 0.0145 + 22.4, y * 0.0145 + 14.8, 4, L, 55);
+        n3 = wodFbmCached(x * 0.031 + 55.0, y * 0.031 + 41.2, 3, L, 75);
+    } else {
+        warpX = (fbm(wx * 0.0048 + 17.1, wy * 0.0048 + 9.4, 3) - 0.5) * 38;
+        warpY = (fbm(wx * 0.0048 + 61.2, wy * 0.0048 + 33.7, 3) - 0.5) * 38;
+        let x = wx + warpX, y = wy + warpY;
+        n1 = fbm(x * 0.0062 + 3.1, y * 0.0062 + 1.7, 5);
+        n2 = fbm(x * 0.0145 + 22.4, y * 0.0145 + 14.8, 4);
+        n3 = fbm(x * 0.031 + 55.0, y * 0.031 + 41.2, 3);
+    }
     // Ridged component for mountain/hill spines
     let ridge = 1 - Math.abs(n2 * 2 - 1);
     ridge = ridge * ridge;
@@ -750,6 +772,7 @@ function drawTerrainTopography(ctx, offsetX, offsetY) {
     let sw = Math.ceil(w / step), sh = Math.ceil(h / step);
     let elevRaw = new Float32Array(sw * sh);
     let land = new Uint8Array(sw * sh);
+    let sampler = wodTopoSampler();
     for(let sy = 0; sy < sh; sy++) {
         let wy = sy * step - offsetY;
         for(let sx = 0; sx < sw; sx++) {
@@ -761,7 +784,7 @@ function drawTerrainTopography(ctx, offsetX, offsetY) {
                 land[i] = 0;
                 continue;
             }
-            elevRaw[i] = wodSampleTopoElev(wx, wy);
+            elevRaw[i] = wodSampleTopoElevAt(wx, wy, hex, sampler);
             land[i] = 1;
         }
     }

@@ -237,16 +237,34 @@ function hash(n) {
 }
 function mix(a, b, t) { return a + (b - a) * t; }
 function noise(x, y) {
-    let p = [Math.floor(x), Math.floor(y)];
-    let f = [x - p[0], y - p[1]];
-    f[0] = f[0]*f[0]*(3.0-2.0*f[0]);
-    f[1] = f[1]*f[1]*(3.0-2.0*f[1]);
-    let n = p[0] + p[1]*57.0;
-    return mix(
-        mix(hash(n+0.0), hash(n+1.0), f[0]),
-        mix(hash(n+57.0), hash(n+58.0), f[0]),
-        f[1]
-    );
+    // (the same arithmetic as mix(mix(hash(n), hash(n+1), fx), mix(hash(n+57), hash(n+58), fx), fy), without
+    // allocating two arrays per call: map generation and the terrain relief call this hundreds of thousands of times)
+    const px = Math.floor(x), py = Math.floor(y);
+    let fx = x - px, fy = y - py;
+    fx = fx*fx*(3.0-2.0*fx);
+    fy = fy*fy*(3.0-2.0*fy);
+    const n = px + py*57.0;
+    const a = hash(n+0.0), b = hash(n+1.0), c = hash(n+57.0), d = hash(n+58.0);
+    const m0 = a + (b - a) * fx, m1 = c + (d - c) * fx;
+    return m0 + (m1 - m0) * fy;
+}
+/** fbm(x, y, octaves) exactly, for callers that sample a field at many nearby points: each octave keeps the hashes of
+ *  the last lattice cell it used in `cache` (5 numbers per octave from `slot`), so neighbouring samples reuse them. */
+function wodFbmCached(x, y, octaves, cache, slot) {
+    let v = 0, a = 0.5;
+    for(let i = 0, o = slot; i < octaves; i++, o += 5) {
+        const px = Math.floor(x), py = Math.floor(y);
+        let fx = x - px, fy = y - py;
+        fx = fx*fx*(3.0-2.0*fx);
+        fy = fy*fy*(3.0-2.0*fy);
+        const n = px + py*57.0;
+        if(cache[o] !== n) { cache[o] = n; cache[o + 1] = hash(n+0.0); cache[o + 2] = hash(n+1.0); cache[o + 3] = hash(n+57.0); cache[o + 4] = hash(n+58.0); }
+        const h0 = cache[o + 1], h1 = cache[o + 2], h2 = cache[o + 3], h3 = cache[o + 4];
+        const m0 = h0 + (h1 - h0) * fx, m1 = h2 + (h3 - h2) * fx;
+        v += a * (m0 + (m1 - m0) * fy);
+        x *= 2; y *= 2; a *= 0.5;
+    }
+    return v;
 }
 function fbm(x, y, octaves) {
     let v = 0, a = 0.5;

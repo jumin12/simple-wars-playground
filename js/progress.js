@@ -455,8 +455,15 @@ function wodMergeProgressObject(o) {
         },
         achievementGoldGranted: Object.assign({}, base.achievementGoldGranted, o.achievementGoldGranted || {}),
         secrets: { creditsCoin: Math.max(0,Math.min(3,Number(o.secrets?.creditsCoin)|0)) },
-        matchGoldGranted: wodMergeMatchGoldClaims({},o.matchGoldGranted)
+        matchGoldGranted: wodMergeMatchGoldClaims({},o.matchGoldGranted),
+        // (the guided tutorial, completed or skipped: it was dropped here, so the menu's "Start here" came back after
+        // every reload)
+        tutorial: wodNormalizeTutorialProgress(o.tutorial)
     };
+}
+function wodNormalizeTutorialProgress(t) {
+    if(!t || typeof t !== 'object' || !(t.completed || t.skipped)) return undefined;
+    return { ...(t.completed ? { completed: true } : {}), ...(t.skipped && !t.completed ? { skipped: true } : {}), at: Number(t.at) || 0 };
 }
 function wodMergeMatchGoldClaims(a,b) {
     const claims={};
@@ -613,6 +620,7 @@ function wodApplyServerProfile(profile, opts) {
     mergedOwned.nato = true;
     let mergedVisuals = sp.steamWalletManaged?{...sp.ownedShopVisuals}:wodMergeBoolMap(local.profile.ownedShopVisuals, sp.ownedShopVisuals);
     wodProgress = wodMergeProgressObject({
+        tutorial: local.tutorial, // (kept on this device; the profile server doesn't store it)
         matchGoldGranted:wodMergeMatchGoldClaims(local.matchGoldGranted,profile.matchGoldGranted),
         secrets: {creditsCoin:Math.max(local.secrets?.creditsCoin||0,Number(profile.secrets?.creditsCoin)|0)},
         achievements: wodMergeAchievementsMax(local.achievements, profile.achievements),
@@ -816,8 +824,11 @@ function wodAwardMatchGold(match,outcome,reason) {
 }
 function wodMatchGoldReport() {
     const r=gameData._lifetimeMatch?.goldReward;if(!r)return '';
-    const item=(label,n)=>'<div><span>'+label+'</span><strong>'+n+'</strong></div>';
-    return '<section class="cs-card cs-gold-reward"><div class="cs-gold-title"><div><p class="cs-card-title">Match gold</p><p class="cs-gold-note">'+(r.alreadyClaimed?'Already collected':r.ineligibleReason|| (r.raw>50?'50 gold limit applied':'Added to your wallet'))+'</p></div><strong class="cs-gold-total"><span class="wod-gold-coin" aria-hidden="true"></span>+'+r.amount+'</strong></div><div class="cs-gold-breakdown">'+item(r.reason==='quit'?'Unfinished match':r.outcome==='victory'?'Victory':'Defeat',r.parts.result)+item('Active time',r.parts.time)+item('Enemy units',r.parts.combat)+item('Units built',r.parts.production)+item('Towns captured',r.parts.objectives)+'</div></section>';
+    // (each box is the gold that part earned, "+n", with what it counted beneath: "Towns captured 0" read like a count
+    // and contradicted the battle snapshot's real one when the match earned no gold)
+    const count=(n,one,many)=>Number.isFinite(n)?Math.floor(n)+' '+(Math.floor(n)===1?one:many):'';
+    const item=(label,n,detail)=>'<div><span>'+label+'</span><strong>+'+n+'</strong>'+(detail?'<small>'+detail+'</small>':'')+'</div>';
+    return '<section class="cs-card cs-gold-reward"><div class="cs-gold-title"><div><p class="cs-card-title">Match gold</p><p class="cs-gold-note">'+(r.alreadyClaimed?'Already collected':r.ineligibleReason|| (r.raw>50?'50 gold limit applied':'Added to your wallet'))+'</p></div><strong class="cs-gold-total"><span class="wod-gold-coin" aria-hidden="true"></span>+'+r.amount+'</strong></div><div class="cs-gold-breakdown">'+item(r.reason==='quit'?'Unfinished match':r.outcome==='victory'?'Victory':'Defeat',r.parts.result)+item('Active time',r.parts.time,count(Number(r.seconds)/60,'minute','minutes'))+item('Enemy units',r.parts.combat,count(r.killed,'destroyed','destroyed'))+item('Units built',r.parts.production,count(r.built,'built','built'))+item('Towns captured',r.parts.objectives,count(r.towns,'town','towns'))+'</div></section>';
 }
 function wodSyncCreditsCoin() {
     const coin=document.getElementById('creditsGoldCoin'),status=document.getElementById('creditsCoinStatus');

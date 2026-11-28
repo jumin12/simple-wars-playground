@@ -59,9 +59,11 @@ function formatPeople(value) {
     }
     return value.toString();
 }
+// (toLocaleString('en-US') builds a new number formatter on every call; the HUD formats several counts each frame)
+const wodFullCountFormat = (typeof Intl !== 'undefined' && Intl.NumberFormat) ? new Intl.NumberFormat('en-US') : null;
 function formatFullCount(value) {
     let n = Math.max(0, Math.round(Number(value) || 0));
-    return n.toLocaleString('en-US');
+    return wodFullCountFormat ? wodFullCountFormat.format(n) : n.toLocaleString('en-US');
 }
 function formatTanks(value) {
     return Math.max(0, Math.round(value || 0)).toString();

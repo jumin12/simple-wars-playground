@@ -1539,11 +1539,27 @@ function syncInfoCardPanelThrottled() {
 let wodToastTimer=0;
 function showNotification(msg,tone='warning') {
     if(wodEscMenuOpen() || wodMissionPopupOpen() || !msg) return;
+    // (not over the end-of-battle summary: an order's "Marching" toast sat across its gold card)
+    if(gameState==='PLAYING'&&document.getElementById('campaignSummaryOverlay')?.classList.contains('hidden')===false) return;
     // Repeated errors used to stack directly on top of one another.
     let el=document.querySelector('.wod-toast-note');
     if(!el){el=document.createElement('div');el.className='wod-toast-note';document.body.appendChild(el);}
     el.dataset.tone=tone;el.setAttribute('role',tone==='warning'?'alert':'status');el.textContent=msg;
+    wodPlaceToastNote(el);
     clearTimeout(wodToastTimer);wodToastTimer=setTimeout(()=>el.remove(),3500);
+}
+// A toast sits at the top centre of the screen, below whatever is already there: the map's layer buttons, the deployment
+// banner (and its Begin battle button), an end-of-battle countdown. It used to sit on top of them, covering their labels.
+function wodPlaceToastNote(el) {
+    el.style.top='';
+    const t=el.getBoundingClientRect();let top=t.top;
+    for(const sel of ['#inGameUI .layer-toggles','#wodDeployBanner','#wodEndCountdownBanner']) {
+        const e=document.querySelector(sel);if(!e||e.classList.contains('hidden'))continue;
+        const r=e.getBoundingClientRect();
+        if(r.width<2||r.height<2||r.top>window.innerHeight*.35||r.left>=t.right||r.right<=t.left||r.bottom<=top)continue;
+        top=r.bottom+8;
+    }
+    if(top>t.top+.5)el.style.top=Math.round(top)+'px';
 }
 // The skull beside a unit's name on its card disbands it: a first press arms it (red for three seconds), a second press
 // disbands. Only the player's own units, not convoys or a loaded transport.

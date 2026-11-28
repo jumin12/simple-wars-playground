@@ -164,6 +164,8 @@ const WOD_GAME_SAVE_OMIT_FIELDS = new Set([
     '_nbrs', '_supplyStamp', '_deepRev', '_deep',
     '_wodPfRelaxUntil', '_wodAmpFailUntil', '_wodPathGiveUpUntil', '_wodReplanLandUntil', '_wodPfDeepAt', '_wodBlockedRepathUntil',
     '_netAt', '_netFromX', '_netFromY', 'selected',
+    // (a formatted copy of the target point, kept only so it is not formatted again every tick: js/movement.js)
+    '_wodTpKey', '_wodTpKeyX', '_wodTpKeyY',
 ]);
 // (and every "...Cache": the game rebuilds its caches, and one holding a WeakMap came back without it, so the computer's
 // naval planning threw on every turn of a loaded game, _harborUtilityCache)

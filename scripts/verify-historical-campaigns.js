@@ -5,10 +5,10 @@ const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/historical-ca
 const server=H.createStaticServer();
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
 try{
- const manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'custom-maps/manifest.json'),'utf8'));assert.equal(manifest.missions.length,13);assert.equal(manifest.missions.filter(m=>m.stages).flatMap(m=>m.stages).length,17);
+ const manifest=JSON.parse(fs.readFileSync(path.join(ROOT,'custom-maps/manifest.json'),'utf8'));assert.equal(manifest.missions.length,21);assert.equal(manifest.missions.filter(m=>m.stages).flatMap(m=>m.stages).length,17);
  await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks&&!window._wodBootBusy&&!window._wodMenuBootstrapBusy,null,{timeout:180000});
  await page.evaluate(async()=>{setGameSpeed(0,true);wodDismissChangelogPopup();bootstrapMenuBackgroundBattle=async()=>{};wodPrewarmMenuBattleForSummary=()=>{};wodCloudCanSync=()=>false;returnToMenu();pauseMenuBackgroundBattle();gameData.gold=5000;flushGameProfileToWod();showPanel('shop');switchShopTab('missions');await renderShopMapsTab();});
- await page.waitForFunction(()=>document.querySelectorAll('#shopMapOptions .shop-mission-card').length===13&&Object.keys(wodShopMapDataCache).length===13);
+ await page.waitForFunction(n=>document.querySelectorAll('#shopMapOptions .shop-mission-card').length===n&&Object.keys(wodShopMapDataCache).length===n,manifest.missions.length);
  await page.screenshot({path:path.join(OUT,'shop-desktop.png')});
  for(const pack of manifest.missions.filter(m=>m.stages)){
   await page.locator(`[data-mission-id="${pack.id}"]`).click();await page.waitForFunction(id=>wodOwnsShopVisual(wodShopMapShopId(id)),pack.id);

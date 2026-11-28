@@ -540,6 +540,7 @@ function wodRogueGenerateWorld(seed, lengthKey) {
     }
     // Terrain profile per node → battle shape/size, name, brief, garrison.
     let nodes = [];
+    const waterBy = [];
     for(let i = 0; i < pts.length; i++) {
         let p = pts[i];
         let water = 0, mount = 0, forest = 0, sand = 0, tot = 0;
@@ -557,6 +558,7 @@ function wodRogueGenerateWorld(seed, lengthKey) {
             }
         }
         water /= tot; mount /= tot; forest /= tot; sand /= tot;
+        waterBy.push(water);
         let shape;
         if(water > 0.56) shape = 'archipelago';
         else if(water > 0.4) shape = 'island';
@@ -664,6 +666,44 @@ function wodRogueGenerateWorld(seed, lengthKey) {
         if(!bestPair) break;
         addEdge(bestPair[0], bestPair[1]);
         union(bestPair[0], bestPair[1]);
+    }
+    // A fair first battle: at least one region next to home is an easy land fight (one star, one enemy, a land map).
+    // Worlds used to open with only a sea landing or a three-faction mountain battle within reach. The battle map is cut
+    // from the war map's own terrain, so the region chosen must really be land (a small share of water round it).
+    const hqIdx = nodes.findIndex(n => n.hq);
+    if(hqIdx >= 0) {
+        const land = j => !nodes[j].hq && !nodes[j].capital && waterBy[j] <= 0.4;
+        // (an "island" or "archipelago" region is briefed as a landing from the sea, whatever its share of water, and a
+        // mountain one is a fight for the passes)
+        const easy = j => land(j) && nodes[j].diff <= 1 && nodes[j].ai === 1 && !['island', 'archipelago', 'mountain'].includes(nodes[j].shape);
+        const near = j => (nodes[j].x - nodes[hqIdx].x) ** 2 + (nodes[j].y - nodes[hqIdx].y) ** 2;
+        const nbs = edges.filter(e => e[0] === hqIdx || e[1] === hqIdx).map(e => e[0] === hqIdx ? e[1] : e[0]);
+        if(!nbs.some(easy)) {
+            const rank = (a, b) => (nodes[a].industry - nodes[b].industry) || ((nodes[a].shape === 'mountain') - (nodes[b].shape === 'mountain')) || (near(a) - near(b));
+            const flat = j => land(j) && nodes[j].shape !== 'mountain';
+            let pick = nbs.filter(flat).sort(rank)[0];
+            // (no open land next to home: a road to open land up to twice as far off as home's farthest neighbour, else
+            // a mountain neighbour, else a road to the nearest land of any kind)
+            if(pick == null) {
+                const reach = Math.max(0, ...nbs.map(near)) * 4;
+                const road = nodes.map((_, j) => j).filter(j => flat(j) && near(j) <= reach).sort(rank)[0];
+                if(road != null) { pick = road; addEdge(hqIdx, pick); }
+            }
+            if(pick == null) pick = nbs.filter(land).sort(rank)[0];
+            if(pick == null) { pick = nodes.map((_, j) => j).filter(land).sort(rank)[0]; if(pick != null) addEdge(hqIdx, pick); }
+            if(pick != null) {
+                const n = nodes[pick];
+                n.diff = 1; n.ai = 1; n.industry = false;
+                if(n.shape === 'island' || n.shape === 'archipelago') n.shape = 'rectangle';
+                n.size = wodRogueScaleMapSize(40, 1);
+                const m = D.mult * (0.82 + 0.22);
+                // (the garrison formula with its random parts at their middle values)
+                n.gar = { light: Math.max(2, Math.round((3 + 1.9 + 1) * m)), heavy: Math.max(0, Math.round((0.65 + 0.4) * m)), ship: 0 };
+                n.towns = n.towns.slice(0, 4);
+                n.generals = wodRoguePickGenerals(n, true);
+                n.brief = wodRogueMakeBrief(rng, n) + wodRogueGeneralBriefLine(n, 'field');
+            }
+        }
     }
     return { W, H, cells, nodes, edges };
 }
@@ -2397,6 +2437,11 @@ function wodCampaignOnBattleStart() {
         gameData.aiManpowerByOwner[o] = Math.round((4600 + diff * 2400) * D.mult);
     }
     let gar = Object.assign({}, node.gar || { light: 0, heavy: 0, ship: 0 });
+    // (home has no garrison of its own: a counterattack on it brings the army of the region it marches from)
+    if(run.defense && node.hq && !(gar.light || gar.heavy || gar.ship)) {
+        let fromNode = run.fromNodeId != null ? wodRogueNodeTemplate(run.fromNodeId) : null;
+        if(fromNode && fromNode.gar) gar = Object.assign({}, fromNode.gar);
+    }
     let bakedAi = Math.max(1, node.ai | 0);
     if(aiN > bakedAi) {
         let sc = aiN / bakedAi;
@@ -2692,7 +2737,7 @@ function wodEnterCampaignDeployPhase() {
         btn._wodDeployWired = true;
         btn.addEventListener('click', () => wodFinishCampaignDeployPhase());
     }
-    showNotification('Deployment — right-click, drag a line, or stroke a path to form up, then Begin battle.');
+    // (no toast as well: it repeated the banner's instructions word for word and covered its Begin battle button)
 }
 function wodFinishCampaignDeployPhase() {
     let run = gameData._campaignRun;
@@ -2744,9 +2789,22 @@ function wodCampaignAfterBattle(won) {
     }
     let before = c.roster.length;
     let kept = [];
+    // A lost battle does not cost the whole army: half of the campaign regiments destroyed in it (rounded down, the
+    // most experienced first) straggle back to the lines at a quarter of their strength, to be repaired on the war map.
+    // (A failed assault used to strike every one of them from the rolls.) Battlefield recruits that fell stay lost.
+    const fallen = c.roster.filter(r => (!run.deployedRosterIds || run.deployedRosterIds.includes(r.id)) && !survivors.has(r.id));
+    const stragglers = new Set(won ? [] : fallen.slice().sort((a, b) => (b.xp || 0) - (a.xp || 0)).slice(0, Math.floor(fallen.length / 2)).map(r => r.id));
     for(let r of c.roster) {
         if(run.deployedRosterIds && !run.deployedRosterIds.includes(r.id)) { kept.push(r); continue; }
         let u = survivors.get(r.id);
+        if(!u && stragglers.has(r.id)) {
+            r.hp = Math.max(1, Math.round((r.maxHp || 100) * 0.25));
+            r.manpower = Math.max(50, Math.round((r.maxManpower || 1000) * 0.25));
+            r.tanks = Math.round((r.maxTanks || 0) * 0.25);
+            r.battles = (r.battles || 0) + 1;
+            kept.push(r);
+            continue;
+        }
         if(!u) continue;
         if(u.name) r.name = u.name;
         r.hp = Math.max(1, Math.round(u.hp));
@@ -2829,8 +2887,24 @@ function wodCampaignAfterBattle(won) {
             c.blockedAdvance = false;
             nodeState.owner = 'enemy';
             wodRogueLogPush('Turn ' + c.turn + ': ' + node.name + ' is overrun by the Concord counterattack.');
+            if(stragglers.size) wodRogueLogPush(stragglers.size + ' shattered regiment' + (stragglers.size === 1 ? ' straggles' : 's straggle') + ' back to the lines at a quarter strength.');
         } else {
             wodRogueLogPush('Turn ' + c.turn + ': the assault on ' + node.name + ' fails.' + (lost ? ' Lost ' + lost + ' unit' + (lost === 1 ? '' : 's') + '.' : ''));
+            if(stragglers.size) wodRogueLogPush(stragglers.size + ' shattered regiment' + (stragglers.size === 1 ? ' straggles' : 's straggle') + ' back to the lines at a quarter strength.');
+            // The Concord follows up a beaten assault: from the second turn on it counterattacks the region the assault
+            // set out from, home included, which is otherwise safe until late in the war. Retrying a lost fight over and
+            // over used to cost nothing but troops. An attack on home seals the roads until it is beaten off (within the
+            // limit on forced defenses); losing home ends the war, as before.
+            const from = run.fromNodeId != null ? wodRogueNodeTemplate(run.fromNodeId) : null;
+            if(from && c.turn >= 2 && c.nodesState[from.id] && c.nodesState[from.id].owner === 'player' && !wodRogueHasActiveAlerts(c)) {
+                // (dated next turn, like the war's own counterattacks: there is a turn to answer it)
+                c.alerts[from.id] = { turn: c.turn + 1, fromId: node.id };
+                if(from.hq && (c.forcedDefenses | 0) < WOD_ROGUE_MAX_FORCED_DEFENSES) {
+                    c.blockedAdvance = true;
+                    c.forcedDefenses = (c.forcedDefenses | 0) + 1;
+                    wodRogueLogPush('The Concord pursues the beaten army to ' + from.name + ' — defend home before the front can advance again. If it falls, the war is lost.');
+                } else wodRogueLogPush('The Concord pursues the beaten army — columns from ' + node.name + ' march on ' + from.name + '. Defend it or lose it.');
+            }
         }
         c.points = (c.points | 0) + Math.max(80, Math.round(120 * D.rewardMult));
     }

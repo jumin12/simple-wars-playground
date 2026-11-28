@@ -18,5 +18,5 @@ for(const stage of stages){
   assert(d.roads.every(r=>r.points?.length>=2&&r.points.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))),'road plan lost '+stage.id);
  }
 }
-assert.equal(terrainHashes.size,27);assert.equal(riverHashes.size,17);assert.equal(townLayouts.size,17);
-console.log('24 distinct complete battlefields; all 17 campaign maps have unique waterways, town layouts, explicit road routes and named landmarks.');
+assert.equal(terrainHashes.size,35);assert.equal(riverHashes.size,17);assert.equal(townLayouts.size,17);
+console.log(terrainHashes.size+' distinct complete battlefields; all 17 campaign maps have unique waterways, town layouts, explicit road routes and named landmarks.');

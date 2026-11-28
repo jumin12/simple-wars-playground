@@ -274,6 +274,12 @@ function wodDrawUnitsLayer(ctx, view) {
 
         let spawnFxDrawn = 0;
         const focusTargets=new Set(gameData.selection.filter(u=>u.owner===wodLocalPlayerOwner()).map(u=>u.preferredTargetUid).filter(Boolean));
+        // Unit cards are cached at twice their size and drawn far smaller when zoomed out. Plain bilinear filtering then
+        // samples different texels as a unit moves by a fraction of a pixel, and marching units seemed to skip along
+        // (the drawn centre strayed nearly twice the step it was moved). Mipmapped filtering keeps the motion as smooth
+        // as zoomed in; enlarged cards (zoomed in) are filtered the same either way.
+        const unitSmoothingBefore = ctx.imageSmoothingQuality;
+        ctx.imageSmoothingQuality = 'medium';
         for(let ui = 0, ul = uo.length; ui < ul; ui++) {
             let unit = uo[ui];
             // (an enemy that just left your sight fades out rather than vanishing: js/fog.js wodFogUnitAlpha)
@@ -419,6 +425,7 @@ function wodDrawUnitsLayer(ctx, view) {
 
             ctx.restore();
         }
+        ctx.imageSmoothingQuality = unitSmoothingBefore;
     }
 }
 

@@ -1744,6 +1744,10 @@ function openCampaignBattleSummary(outcomeKind, headline, reasonLine) {
 
     statsEl.innerHTML+='<section class="cs-card battle-final-stats"><p class="cs-card-title">Territory & detailed faction totals</p>'+wodRenderFactionStats(true)+'</section>';
     statsEl.insertAdjacentHTML('afterbegin',wodMatchGoldReport());
+    // (a campaign battle goes back to the war map: dismissCampaignSummaryToMenu, js/game.js)
+    const menuBtn=document.getElementById('wodSummaryMenuBtn');
+    if(menuBtn)menuBtn.textContent=gameData._wodReturnToCampaign?'Return to war map':'Return to main menu';
+    document.querySelector('.wod-toast-note')?.remove?.();
     overlay.classList.remove('hidden');
     wodSyncSpectatorUi();
     wodPrewarmMenuBattleForSummary();

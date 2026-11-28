@@ -6,6 +6,22 @@
 // check (wodClientBuild in js/game.js, multiplayer-client.js, server/index.js): after changing it, run
 // scripts/stamp-assets.js, which also writes the relay's copy (server/game-build.json).
 const WOD_CHANGELOG = [
+    {at:"2026-11-28T18:05:00Z",title:"Eight new battles and a skippable tutorial",items:[
+        "Eight new battles in the shop, two for each era, so every era now has four.",
+        "Ancient: Salamis, a fleet battle where the Persian squadrons crowd into a narrow strait one line after another, and Cannae, where you hold Hannibal's crescent while the legions push into it and your cavalry closes the trap.",
+        "Medieval: Stirling Bridge, where the English must cross the Forth by one narrow bridge and you charge the half that gets over, and Hattin, where Saladin keeps a thirsty crusader army from the springs and the lake.",
+        "Napoleonic: Borodino, where you storm Bagration's flèches and the Great Redoubt, and Trafalgar, where Nelson's two columns break the line of the French and Spanish fleet.",
+        "Modern: Stalingrad, where you hold Mamayev Kurgan and the river landing in the ruined city with the Volga at your back, and Bastogne, where the surrounded paratroopers hold on while the 4th Armored fights its way up to Assenois.",
+        "You can now skip the tutorial. Skip tutorial, on its first page or in the corner of any later step, takes you back to the main menu, and a new player can also skip it from Tutorial & help. The menu then stops pointing you at it, and you can still play it from Tutorial & help.",
+        "Fixed the main menu forgetting that you had finished the tutorial: Start here came back every time you opened the game.",
+        "Big battles run more smoothly, new maps are made faster, and the game no longer waits for its music before it starts.",
+        "Fixed units seeming to skip along slightly when the map is zoomed far out.",
+        "In the campaign, a lost attack no longer costs every regiment that fell: half of them, the most experienced first, straggle back to the lines at a quarter of their strength.",
+        "From the second turn on, the enemy follows up a beaten attack: on the next turn it counterattacks the region you attacked from.",
+        "Every new campaign now has an easy first fight next to your home region: one enemy, on open land.",
+        "After a campaign battle, the summary's button now says Return to war map, and the gold you earned shows what each part was for.",
+        "Long mission briefings keep their buttons in view while you scroll, and pop-up messages no longer cover the map layer buttons, the deployment banner or the end-of-battle countdown."
+    ]},
     {at:"2026-11-25T19:45:00Z",title:"New and remade battles in the shop",items:[
         "The shop's Missions tab is now divided by era. The modern era, which every player starts with, comes first, then the Napoleonic, medieval and ancient eras.",
         "A mission from an older era now needs that era's army from Troop skins as well as its gold. If you don't have the army yet, the mission tells you, and Get the army takes you to it. Missions you already own stay yours.",
@@ -21,6 +37,10 @@ const WOD_CHANGELOG = [
         "In Köpenick to Neukölln, a second bridge now crosses the Spree where the road to Treptow meets the river, so you no longer have to push the whole attack over one bridge.",
         "Every shop battle now starts with its whole army, and the enemy no longer out-recruits you. Every side can pay its army's upkeep to the end, and defenders in an attack raise fresh troops slowly.",
         "At Midway you win by sinking the enemy warships. Transports that run away don't need to be hunted down.",
+        "Fixed loading a saved battle. It showed an error, and the computer's planning for its harbours stopped working for the rest of the battle. A loaded battle now opens paused, so you can look around before picking a speed.",
+        "You can now give units as many waypoints as you like. Before, a march kept only the last 32 and dropped the start of a longer route.",
+        "Fixed units going back and forth in one spot. Units sent to a place another unit already stands on now wait beside it instead of circling it, and a unit that stepped aside for a comrade no longer jiggles trying to get back to its exact spot.",
+        "Multiplayer is harder to cheat or disrupt. The rankings and clan totals count only match results the server saw, one player can no longer overload or crash the server, and lobbies, friend requests and the leaderboard have sensible limits.",
         "Fixed columns getting stuck where a narrow pass turns a corner. The unit in front now goes first while the ones behind wait their turn. Units no longer walk back for a corner they were pushed past, or try to step aside through the column behind them."
     ]},
     {at:"2026-11-25T17:39:00Z",title:"Battles that look like their era",items:[

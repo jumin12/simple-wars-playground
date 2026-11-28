@@ -4,7 +4,7 @@ const ROOT=path.resolve(__dirname,'..'),OUT=path.join(ROOT,'output/store-refresh
 const server=H.createStaticServer();
 (async()=>{await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await H.launchBrowser(),page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[],results={};page.on('pageerror',e=>errors.push(e.stack));
 try{
- const fullManifest=JSON.parse(fs.readFileSync(path.join(ROOT,'custom-maps/manifest.json'),'utf8')),manifest={...fullManifest,missions:fullManifest.missions.filter(m=>!m.stages)};assert.equal(manifest.missions.length,7);assert.equal(new Set(fullManifest.maps.map(m=>m.id)).size,10);
+ const fullManifest=JSON.parse(fs.readFileSync(path.join(ROOT,'custom-maps/manifest.json'),'utf8')),manifest={...fullManifest,missions:fullManifest.missions.filter(m=>!m.stages)},cost=manifest.missions.reduce((n,m)=>n+require('../store-catalog').price(m.price||150),0);assert.equal(manifest.missions.length,18);assert.equal(new Set(fullManifest.maps.map(m=>m.id)).size,21);
  await page.goto('http://127.0.0.1:'+server.address().port+'/?autostart=1');await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks&&!window._wodBootBusy&&!window._wodMenuBootstrapBusy,null,{timeout:180000});
  results.defaults=await page.evaluate(()=>{setGameSpeed(0,true);wodDismissChangelogPopup();const solo={...gameData.layers};gameData.layers.cities=true;gameData.layers.territory=true;wodMpEnsureDefaultMatchLayers(true);const multiplayer={...gameData.layers};gameState='MENU';pauseMenuBackgroundBattle();openMapEditor();const editor={...gameData.layers};closeMapEditor();return{solo,multiplayer,editor};});assert(Object.values(results.defaults).every(l=>!l.cities&&!l.territory));
  results.capture=await page.evaluate(()=>{
@@ -18,11 +18,11 @@ try{
   }
   return rows;
  });assert(results.capture.every(r=>(r.type==='ship'?r.count===0:r.count>0)&&r.outside===0));for(const r of results.capture){const mirror=results.capture.find(n=>n.owner!==r.owner&&n.type===r.type&&n.pressure===r.pressure);assert.deepEqual(r.keys,mirror.keys,'player and AI capture the identical footprint');}
- await page.evaluate(async()=>{gameData.mp=null;gameState='MENU';pauseMenuBackgroundBattle();bootstrapMenuBackgroundBattle=async()=>{};wodPrewarmMenuBattleForSummary=()=>{};wodCloudCanSync=()=>false;gameData.gold=2000;flushGameProfileToWod();showPanel('shop');switchShopTab('missions');await renderShopMapsTab();});
- await page.locator('#shopMapOptions .shop-mission-card').first().waitFor({state:'visible'});await page.waitForFunction(()=>Object.keys(wodShopMapDataCache).length===10);await page.waitForTimeout(250);
+ await page.evaluate(async cost=>{gameData.mp=null;gameState='MENU';pauseMenuBackgroundBattle();bootstrapMenuBackgroundBattle=async()=>{};wodPrewarmMenuBattleForSummary=()=>{};wodCloudCanSync=()=>false;gameData.gold=cost+800;gameData.ownedUnitSkins={...gameData.ownedUnitSkins,nato:true,ancient:true,medieval:true,napoleonic:true};flushGameProfileToWod();showPanel('shop');switchShopTab('missions');await renderShopMapsTab();},cost);
+ await page.locator('#shopMapOptions .shop-mission-card').first().waitFor({state:'visible'});await page.waitForFunction(n=>Object.keys(wodShopMapDataCache).length===n,fullManifest.missions.length);await page.waitForTimeout(250);
  await page.screenshot({path:path.join(OUT,'shop-desktop.png')});
  for(const e of manifest.missions){await page.locator(`[data-mission-id="${e.id}"]`).click();await page.waitForFunction(id=>wodOwnsShopVisual(wodShopMapShopId(id)),e.id);}
- assert.equal(await page.evaluate(()=>gameData.gold),800,'three existing 200g and four new 150g purchases');
+ assert.equal(await page.evaluate(()=>gameData.gold),800,'every standalone mission bought at its catalog price');
  await page.setViewportSize({width:390,height:844});await page.locator('#shopMapOptions .shop-mission-card').first().scrollIntoViewIfNeeded();await page.waitForTimeout(120);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));await page.screenshot({path:path.join(OUT,'shop-mobile.png')});await page.setViewportSize({width:1440,height:1000});
  results.maps=[];
  for(const e of manifest.missions){
@@ -36,7 +36,7 @@ try{
    return{id:e.id,cities:data.cities.length,units:data.entities.length,invalid,overlap,spacing,empty:data.cities.every(c=>!c.hasFactory&&!c.hasHarbor&&!c.hasFarm),era:data.gamePeriod,events:data.mission.events.length};
   },e);results.maps.push(row);assert(row.invalid===0&&row.overlap===0&&row.spacing>=8&&row.empty,JSON.stringify(row));await page.locator('#qaMissionPreview').screenshot({path:path.join(OUT,e.id+'.png')});
  }
- await page.evaluate(()=>{document.getElementById('qaMissionPreview').remove();_wodMissionListTab='store';showPanel('missions');});await page.waitForFunction(()=>document.querySelectorAll('#wodMissionList [data-mission-id]').length===7);
+ await page.evaluate(()=>{document.getElementById('qaMissionPreview').remove();_wodMissionListTab='store';showPanel('missions');});await page.waitForFunction(n=>document.querySelectorAll('#wodMissionList [data-mission-id]').length===n,manifest.missions.length);
  // Every catalog mission must load through the mission launcher, including its authored era.
  results.launches=[];
  for(const e of manifest.missions){
@@ -48,7 +48,7 @@ try{
  }
  // Losing keeps a purchased mission available; a victory consumes it once.
  results.entitlement=await page.evaluate(()=>{const e=gameData._selectedMissionEntry;triggerSurrenderDefeat();const retry=wodStoreMissionPlayable(e);gameData._campaignEnded=false;gameData._lifetimeMatch.finished=false;triggerCampaignVictory('Objective secured',false);const consumed=wodIsStoreMissionSpent(e.id)&&!wodStoreMissionPlayable(e);return{retry,consumed};});assert(results.entitlement.retry&&results.entitlement.consumed);
- await page.evaluate(()=>{returnToMenu();_wodMissionListTab='store';showPanel('missions');});await page.waitForFunction(()=>document.querySelectorAll('#wodMissionList [data-mission-id]').length===7);
+ await page.evaluate(()=>{returnToMenu();_wodMissionListTab='store';showPanel('missions');});await page.waitForFunction(n=>document.querySelectorAll('#wodMissionList [data-mission-id]').length===n,manifest.missions.length);
  await page.locator('#wodMissionList [data-mission-id="thermopylae-480"]').click();await page.evaluate(()=>{gameData._matchReadyForEndChecks=false;});await page.locator('#wodMissionStartBtn').click();
  await page.waitForFunction(()=>gameState==='PLAYING'&&gameData._matchReadyForEndChecks&&gameData._selectedMissionEntry?.id==='thermopylae-480',null,{timeout:180000});
  await page.evaluate(()=>{wodHideMissionPopup();setGameSpeed(0,true);gameData.fogOfWar=false;gameData.camera.zoom=.4;const c=gameData.cities.find(c=>c.owner===1);gameData.camera.x=c.x*.4-canvas.clientWidth/2;gameData.camera.y=c.y*.4-canvas.clientHeight/2;wodMarkTerrainFullDirty();updateTerrainCache();draw();});await page.screenshot({path:path.join(OUT,'historical-gameplay.png')});

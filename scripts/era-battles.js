@@ -1,9 +1,9 @@
 'use strict';
-// The shop's era battles: two for each older era, fought with that era's own troops (js/eras.js, js/game.js
-// WOD_SPECIALIST_ERAS). Each era has an attack and a defence:
-//   ancient     Gaugamela (attack)   Thermopylae (hold the pass)
-//   medieval    Hastings (attack)    Agincourt (hold the line)
-//   napoleonic  Austerlitz (attack)  Waterloo (hold the ridge)
+// The shop's era battles: four for each older era, fought with that era's own troops (js/eras.js, js/game.js
+// WOD_SPECIALIST_ERAS):
+//   ancient     Gaugamela (attack)   Thermopylae (hold the pass)   Salamis (fleet)          Cannae (hold the centre)
+//   medieval    Hastings (attack)    Agincourt (hold the line)     Stirling Bridge (attack) Hattin (hold the springs)
+//   napoleonic  Austerlitz (attack)  Waterloo (hold the ridge)     Borodino (attack)        Trafalgar (fleet)
 // One type plays a different part in each era: light = hoplites / men-at-arms / line infantry; motorized = cavalry /
 // mounted men-at-arms / dragoons; mountaineer = skirmishers with javelins / rangers with bows / chasseurs; heavy =
 // chariots / knights / heavy horse; ship = triremes. The maps are small and drawn cell by cell, the armies start at
@@ -69,6 +69,13 @@ class Field {
  line(type,owner,q0,r0,q1,r1,n,name){
   const roman=['I','II','III','IV','V','VI','VII','VIII','IX','X'];
   for(let i=0;i<n;i++){const t=n===1?.5:i/(n-1);this.unit(type,owner,q0+(q1-q0)*t,r0+(r1-r0)*t,n>1?name+' '+roman[i]:name);}
+ }
+ /** A bridge over a river drawn with river() (its samples), at the river cell nearest (q, r); the deck cells belong
+  *  to owner. Laid the way the campaign maps lay theirs (scripts/historical-battlefields.js applyPlan). */
+ bridge(q,r,samples,width,owner){
+  const near=distance(q,r,samples),i=near.index,a=samples[Math.max(0,i-2)],z=samples[Math.min(samples.length-1,i+2)],angle=Math.atan2(z[1]-a[1],z[0]-a[0])+Math.PI/2;
+  this.b.bridge(q,r,angle,0);const br=this.b.bridges.at(-1);br.w=SP*(width*2+2.4);br.h=SP*1.3;
+  this.b.each(h=>{const dx=h.q-q,dy=h.r-r,u=dx*Math.cos(angle)+dy*Math.sin(angle),v=-dx*Math.sin(angle)+dy*Math.cos(angle);if(Math.abs(u)<=br.w/SP/2&&Math.abs(v)<=.66){h.type='bridge';h.owner=owner;}});
  }
  fort(q,r,owner){this.b.fort(q,r,owner);}
  label(name,q,r,kind='land'){this.features.push({name,x:q*SP,y:r*SP,kind});}
@@ -208,6 +215,109 @@ function gaugamela(MapBuilder,ev){
   ]});
 }
 
+function salamis(MapBuilder,ev){
+ const f=new Field(MapBuilder,28,480920);
+ // Attica across the north and east, the island of Salamis in the south-west, and between them the strait, six or seven
+ // cells wide, opening onto the Saronic Gulf in the south-east past the islet of Psyttaleia. A narrow channel runs west
+ // round the north of the island. The Greek fleet waits in the strait, the Persian fleet comes in from the open gulf.
+ f.paint((h,n)=>{
+  const attica=lerpPts([[-28,-9],[-20,-9],[-12,-8],[-4,-6],[4,-6],[10,-3],[18,-1],[28,0]],h.q)+(n-.5)*1.4;
+  const island=inEllipse(h.q,h.r,-15,10,13,10,1+(n-.5)*.3)||inEllipse(h.q,h.r,-22,-1,6,4,1+(n-.5)*.3);
+  if(h.r<attica){
+   h.owner=3;
+   h.type=inEllipse(h.q,h.r,-10,-18,4,1.6)?'mountain':inEllipse(h.q,h.r,-10,-17,9,4,1+(n-.5)*.5)?'hill':h.r>attica-1.3?'sand':n>.68?'forest':'grass';
+  }else if(island){h.owner=1;h.type=n>.7?'hill':n<.3?'sand':'grass';}
+  else if(inEllipse(h.q,h.r,4,5,2.4,1.5)){h.owner=3;h.type='hill';}
+  else h.type='water';
+ });
+ const sal=f.town(-18,11,1,'Salamis'),amb=f.town(-6,8,1,'Ambelaki'),throne=f.town(-8,-13,3,"Xerxes' throne"),phal=f.town(18,-5,3,'Phaleron');
+ f.road(sal,amb,[[-12,10]]);f.road(throne,phal,[[2,-11],[10,-7]]);
+ // Greeks: the allied fleet in line across the strait, Aristides' hoplites on the island
+ // (the Greek crews know these waters and fight in close order: veterans)
+ const veteran=u=>Object.assign(u,{veteran:true,xp:100});
+ veteran(f.unit('ship',1,-10,-5,"Themistocles' flagship"));
+ for(const [q,r,n] of [[-15,-3,'Athenian triremes I'],[-11.7,-2.7,'Athenian triremes II'],[-8.3,-2.3,'Athenian triremes III'],[-5,-2,'Athenian triremes IV'],[-18,-5,'Corinthian triremes'],[-13,-6,'Spartan triremes'],[-7,-4,'Megarian triremes']])veteran(f.unit('ship',1,q,r,n));
+ f.line('light',1,-9,5,-9,10,2,"Aristides' hoplites");f.unit('mountaineer',1,-16,14,'Athenian archers');
+ // Persians: the fleet in the gulf, Phoenicians in front; the army watching from the shore of Attica
+ f.line('ship',2,6,12,20,6,3,'Phoenician squadron');
+ f.line('ship',2,8,16,20,11,2,'Ionian squadron');
+ f.unit('ship',2,2,18,"Artemisia's squadron");
+ f.line('light',3,-11,-10,-5,-10,2,'Immortals');f.line('mountaineer',3,-2,-8,4,-8,2,'Persian archers');f.unit('motorized',3,15,-8,'Persian cavalry');
+ f.label('Strait of Salamis',-9,-4,'water');f.label('Salamis',-20,16);f.label('Mount Aigaleos',-15,-20);f.label('Psyttaleia',4,2);
+ f.label('Saronic Gulf',12,20,'water');f.label('Western channel',-25,-7,'water');f.label('Bay of Phaleron',23,3,'water');
+ return finish(f,ev,{id:'salamis-480',name:'Salamis: The Narrow Strait',era:'ancient',date:'September 480 BCE',difficulty:'Standard',
+  objective:'Sink the Persian fleet.',goal:{type:'fleet',towns:[]},
+  brief:'You command the allied Greek fleet in the strait between Salamis and Attica. The Persians have more ships, coming in line after line, but in the narrows they cannot spread out or turn: keep your triremes together, beat each squadron before the next arrives, and keep clear of the Attic shore, where Persian archers are watching. Your crews know these waters. Ship counters stand for squadrons.',
+  history:'In September 480 BCE Themistocles lured the Persian fleet into the strait of Salamis, where the Greek triremes, fewer but better handled in the narrow water, broke it while Xerxes watched from the shore. The defeat ended the Persian invasion by sea.',
+  note:'The strait between the island of Salamis and the coast of Attica, the islet of Psyttaleia at its mouth, a narrow channel round the north of the island and Mount Aigaleos above the shore.',
+  sources:['https://www.livius.org/articles/battle/salamis-480-bce/'],
+  // (the Persian fleet holds no town and earns nothing: its gold pays its upkeep for well over the battle)
+  economy:{money:14000,manpower:2500,aiMoney:{2:40000,3:8000},aiManpower:{2:500,3:800}},alliances:[[2,3]],aiCount:2,
+  events:[
+   ev('salamis-dawn','Into the strait',{type:'timer',seconds:12},{title:'The Persians row into the strait',body:'At dawn the Persian fleet comes into the narrows in long columns. Here their numbers cannot spread out: meet the leading squadrons together and ram them as their lines bunch up.',style:'alert'},[],[{owner:2,scope:'all',...at(-8,-3)}]),
+   ev('salamis-egypt','The Egyptian squadron',{type:'timer',seconds:55},{title:'The Egyptian squadron',body:'Ships sent round Salamis in the night are coming down the western channel behind you. Turn part of your line to meet them.',style:'alert'},
+    [{owner:2,type:'ship',count:2,anchor:'coords',...at(-26,-7)}],[{owner:2,scope:'reinforcements',...at(-12,-3)}]),
+   ev('salamis-second','The second line',{type:'timer',seconds:110},{title:'The second line',body:'More Persian squadrons are pushing in behind the first and fouling one another in the narrows.',style:'alert'},
+    [{owner:2,type:'ship',count:3,anchor:'coords',...at(24,16)}],[{owner:2,scope:'reinforcements',...at(-6,-1)}]),
+   ev('salamis-aegina','The Aeginetans',{type:'timer',seconds:150},{title:'The Aeginetan ambush',body:'The Aeginetan squadron has been waiting at the mouth of the strait. Persian ships that turn back for the open gulf will run into it.',style:'briefing'},
+    [{owner:1,type:'ship',count:2,anchor:'coords',...at(-2,19)}]),
+   ev('salamis-xerxes','Xerxes watches',{type:'timer',seconds:230},{title:'Xerxes watches',body:'From his throne on Mount Aigaleos the king is watching his fleet break up. Sink what is left of it.',style:'briefing'})
+  ]});
+}
+
+function cannae(MapBuilder,ev){
+ const f=new Field(MapBuilder,30,216);
+ // The open plain south of the Aufidus. The river runs down the west side; the Romans face south with their right on it,
+ // the larger Roman camp behind them in the north and the smaller one across the river. Hannibal's line faces north:
+ // the Gauls and Spaniards bowed forward in a crescent, the Libyans held back on both flanks, the hill town of Cannae
+ // behind them.
+ const course=catmull([[-30,-20],[-22,-13],[-19,-6],[-18,2],[-21,10],[-17,17],[-12,24]]);
+ const bankAt=lerpPts.bind(null,course.map(([q,r])=>[r,q]).sort((a,b)=>a[0]-b[0]));
+ f.paint((h,n)=>{
+  h.type=n<.3?'sand':'grass';
+  if(inEllipse(h.q,h.r,-3,18,7,3.5,1+(n-.5)*.5))h.type='hill';
+  if(inEllipse(h.q,h.r,14,20,6,3,1+(n-.5)*.5)||h.r>21&&n>.6)h.type='hill';
+  const near=distance(h.q,h.r,course);
+  if(near.d<2.3&&f.n(h.q,h.r,4)>.55)h.type='forest';
+  if(near.d<.95&&!(Math.abs(h.r+6)<=1.2||Math.abs(h.r-12)<=1.2))h.type='water';
+  h.owner=h.q<bankAt(h.r)?(h.r<8?2:1):h.r<-3+wind(h.q,.6,1)?2:1;
+ });
+ const cannaeTown=f.town(-3,16,1,'Cannae'),camp=f.town(12,19,1,"Hannibal's camp"),roman=f.town(4,-18,2,'Roman camp'),small=f.town(-26,-6,2,'Small Roman camp',5);
+ f.fort(-6,14,1);
+ f.road(cannaeTown,camp,[[5,19]]);f.road(roman,cannaeTown,[[2,-8],[-1,6]]);f.road(small,roman,[[-19,-7],[-8,-14]]);
+ // Carthaginians: the crescent, the Libyans on its wings, Hasdrubal's horse by the river, the Numidians on the right
+ [['Gallic warriors I',-8,3],['Spanish infantry I',-5,1],['Gallic warriors II',-2,0],['Spanish infantry II',2,0],['Gallic warriors III',5,1],['Spanish infantry III',8,3]].forEach(([n,q,r])=>f.unit('light',1,q,r,n));
+ f.line('light',1,-11,5,-11,8,2,'Libyan infantry');f.line('light',1,11,5,11,8,2,'Libyan infantry (right)');
+ f.line('mountaineer',1,-3,-1,3,-1,2,'Balearic slingers');
+ f.line('motorized',1,-15,2,-14,8,3,"Hasdrubal's horse");
+ f.line('motorized',1,16,3,16,6,2,'Numidian horse');
+ // Romans: the legions in a deep block, velites in front, cavalry on both wings, the triarii and a camp guard behind
+ f.line('mountaineer',2,-6,-5,6,-5,3,'Velites');
+ f.line('light',2,-8,-7,8,-7,5,'Roman legion');
+ f.line('light',2,-8,-10,8,-10,5,'Allied legion');
+ f.line('motorized',2,-16,-8,-13,-8,2,'Roman cavalry');f.line('motorized',2,13,-8,16,-8,2,'Allied cavalry');
+ f.line('light',2,2,-14,6,-14,2,'Triarii');f.unit('light',2,-26,-3,'Small camp guard');
+ f.label('Aufidus',-20,-2,'water');f.label('Hill of Cannae',-11,19);f.label('Plain of Cannae',6,-2);f.label('Larger Roman camp',10,-20);
+ return finish(f,ev,{id:'cannae-216',name:'Cannae: The Double Envelopment',era:'ancient',date:'2 August 216 BCE',difficulty:'Hard',
+  objective:'Hold Cannae for 5:00.',goal:{type:'hold',towns:['Cannae'],duration:300},
+  brief:'You command Hannibal\'s army on the plain below Cannae. The Romans have nearly twice your infantry and mean to smash straight through your centre. Let them: the Gauls and Spaniards in the crescent give ground slowly while the Libyans on the flanks wait. When the legions are packed deep in the pocket, turn the Libyans inward and bring the cavalry round behind them. Hold Cannae until the trap closes.',
+  history:'On 2 August 216 BCE Hannibal let a much larger Roman army push into the centre of his line at Cannae, then closed his African infantry on its flanks and his cavalry on its rear. Most of the Roman army was killed or captured.',
+  note:'The plain of Cannae south of the Aufidus, with the river and its two fords on the west, the Roman camps north and across the river, and the hill of Cannae in the south.',
+  sources:['https://en.wikipedia.org/wiki/Battle_of_Cannae'],
+  economy:{money:12000,manpower:2500,aiMoney:{2:22000},aiManpower:{2:1500}},
+  events:[
+   ev('cannae-advance','The legions advance',{type:'timer',seconds:15},{title:'The legions advance',body:'Varro sends the legions straight at your centre, packed deep and narrow. Let the crescent bend back slowly, and keep the Libyans out of the fight until the Romans are deep inside it.',style:'alert'},[],[{owner:2,scope:'all',...at(-2,14)}]),
+   ev('cannae-hasdrubal','Hasdrubal by the river',{type:'timer',seconds:70},{title:'Hasdrubal by the river',body:'Hasdrubal\'s Spanish and Gallic horse have the Roman cavalry pinned against the Aufidus, and fresh squadrons are coming up. Break the Roman horse, then ride round behind the legions.',style:'briefing'},
+    [{owner:1,type:'motorized',count:2,anchor:'coords',...at(-15,12)}]),
+   ev('cannae-reserve','The Roman reserves',{type:'timer',seconds:120},{title:'The Roman reserves',body:'The last legions leave the Roman camp to push the attack through your centre.',style:'alert'},
+    [{owner:2,type:'light',count:4,anchor:'coords',...at(4,-16)}],[{owner:2,scope:'reinforcements',...at(-2,14)}]),
+   ev('cannae-trap','The trap closes',{type:'timer',seconds:180},{title:'The trap closes',body:'The legions are deep inside the crescent and packed too tight to fight. Turn the Libyans inward on their flanks. The Numidians are back from chasing the allied horse.',style:'briefing'},
+    [{owner:1,type:'motorized',count:2,anchor:'coords',...at(20,8)}]),
+   ev('cannae-last','The last push',{type:'timer',seconds:240},{title:'The garrison breaks out',body:'The guard of the small camp crosses the Aufidus to break through to Cannae.',style:'alert'},
+    [{owner:2,type:'light',count:3,anchor:'coords',...at(-25,-8)},{owner:2,type:'motorized',count:1,anchor:'coords',...at(-27,-9)}],[{owner:2,scope:'reinforcements',...at(-3,15)}])
+  ]});
+}
+
 // ---------------------------------------------------------------- medieval
 function hastings(MapBuilder,ev){
  const f=new Field(MapBuilder,30,1066);
@@ -302,6 +412,111 @@ function agincourt(MapBuilder,ev){
     [{owner:2,type:'motorized',count:2,anchor:'coords',...at(-22,12)}],[{owner:2,scope:'reinforcements',...at(-13,18)}]),
    ev('agin-rear','The rearguard',{type:'timer',seconds:245},{title:'The last French charge',body:'The French rearguard makes a final mounted charge.',style:'alert'},
     [{owner:2,type:'heavy',count:3,anchor:'coords',...at(0,-18)},{owner:2,type:'motorized',count:2,anchor:'coords',...at(6,-18)}],[{owner:2,scope:'reinforcements',...at(0,11)}])
+  ]});
+}
+
+function stirlingBridge(MapBuilder,ev){
+ const f=new Field(MapBuilder,28,1297);
+ // The Forth winds west to east across the middle. Its one bridge is narrow; north of it a causeway runs through the
+ // soft carse to Causewayhead below the Abbey Craig, where the Scots wait. Stirling and its castle crag are on the south
+ // bank, with the English camp east of them. Far upstream the ford at Drip is the only other crossing.
+ const points=[[-28,3],[-20,0],[-12,2],[-5,0],[0,-2],[5,1],[9,5],[14,2],[17,-3],[22,0],[28,-2]];
+ const riverAt=lerpPts.bind(null,catmull(points).slice().sort((a,b)=>a[0]-b[0]));
+ const causeway=catmull([[-5,-1],[-5,-6],[-6,-10],[-7,-13]]);
+ f.paint((h,n)=>{
+  const fr=riverAt(h.q),north=h.r<fr;
+  h.type=n>.7?'forest':'grass';
+  if(north&&h.r>fr-5.5+wind(h.q,1.1,1.2)&&f.n(h.q,h.r,4)>.5)h.type='swamp';
+  if(inEllipse(h.q,h.r,9,-14,6,4.5,1+(n-.5)*.5))h.type=n>.55?'forest':'hill';
+  if(h.r<-18+wind(h.q,2,1.5))h.type=f.n(h.q,h.r,6)>.55?'mountain':'hill';
+  if(inEllipse(h.q,h.r,-14,11,4.5,3.2,1+(n-.5)*.4))h.type='hill';
+  // (the English vanguard is already across, on the causeway at the north end of the bridge)
+  if(distance(h.q,h.r,causeway).d<1.2)h.type='grass';
+  h.owner=north?(inEllipse(h.q,h.r,-5,-3.5,4.2,3)?2:1):2;
+ });
+ const forth=f.river(points,.9,[[-22,1]]);
+ f.bridge(-5,0,forth,.9,2);
+ const craig=f.town(9,-13,1,'Abbey Craig'),cwh=f.town(-7,-14,1,'Causewayhead'),stirling=f.town(-14,11,2,'Stirling'),camp=f.town(6,12,2,'English camp');
+ f.road(cwh,craig,[[1,-15]]);f.road(cwh,stirling,[[-5,-6],[-5,0],[-6,5],[-10,9]]);f.road(stirling,camp,[[-4,10]]);
+ // Scots: Wallace's and Moray's spearmen on the slopes and at Causewayhead, archers from Selkirk forest, a few horse
+ f.line('light',1,3,-10,13,-10,5,"Wallace's spearmen");
+ f.line('light',1,-13,-9,-9,-9,3,"Moray's spearmen");f.unit('heavy',1,8,-12,'Scottish nobles');f.unit('light',1,-7,-11,'Causewayhead levy');
+ f.line('mountaineer',1,6,-16,10,-16,2,'Selkirk archers');
+ f.line('motorized',1,13,-15,15,-13,2,'Scottish horse');
+ // English: the vanguard across the bridge, the rest of the army forming up on the south bank
+ f.unit('heavy',2,-6,-3,'English knights');f.unit('light',2,-4,-2,'Vanguard foot');f.unit('light',2,-4,-5,'Vanguard foot II');
+ f.line('light',2,-8,5,-2,5,2,'English foot');
+ f.unit('mountaineer',2,-9,7,'Welsh archers');
+ f.unit('motorized',2,3,8,"Surrey's horse");
+ f.unit('light',2,-15,7,'Stirling Castle garrison');f.unit('light',2,6,15,'Camp guard');
+ f.label('River Forth',-14,1,'water');f.label('Abbey Craig',10,-19);f.label('Stirling Castle',-14,15);f.label('The carse',2,-6);f.label('Stirling Bridge',-1,2);f.label('Ford of Drip',-22,-2);
+ return finish(f,ev,{id:'stirling-bridge-1297',name:'Stirling Bridge: Catch Them Crossing',era:'medieval',date:'11 September 1297',difficulty:'Standard',
+  objective:'Capture Stirling and the English camp.',goal:{type:'capture',towns:['Stirling','English camp']},
+  brief:'You command the Scots under William Wallace and Andrew Moray on the Abbey Craig. The English must cross the Forth by one narrow bridge and a causeway through soft ground. Let their vanguard come over, then charge before the rest can follow: cut it off at the bridge foot, then cross yourself and take Stirling and the English camp. The ford at Drip, far upstream, is a long way round.',
+  history:'On 11 September 1297 the English army of the Earl of Surrey began crossing the narrow bridge over the Forth at Stirling. When about half of it was over, Wallace and Moray charged, seized the bridge end and destroyed the vanguard; the rest of the English army fell back.',
+  note:'The winding Forth with its single narrow bridge, the causeway through the carse to the Abbey Craig, Stirling Castle on its crag on the south bank and the ford at Drip upstream.',
+  sources:['https://en.wikipedia.org/wiki/Battle_of_Stirling_Bridge'],
+  economy:{money:14000,manpower:2500,aiMoney:{2:14000},aiManpower:{2:600}},enemyManpowerRate:.25,
+  events:[
+   ev('stirling-crossing','The vanguard crosses',{type:'timer',seconds:8},{title:'The vanguard crosses',body:'More of Surrey\'s vanguard is filing over the bridge two abreast onto the causeway. Let them come, but not too many: when the bridge is crowded, charge down and cut them off from it.',style:'alert'},
+    [{owner:2,type:'light',count:2,anchor:'coords',...at(-6,5)},{owner:2,type:'mountaineer',count:1,anchor:'coords',...at(-4,5)}],[{owner:2,scope:'reinforcements',...at(-5,-6)}]),
+   ev('stirling-charge','Charge',{type:'timer',seconds:60},{title:'Charge!',body:'Half the vanguard is across and the bridge is jammed. Send the spearmen down the causeway to seize the bridge foot, and let the carse swallow the English horse. Moray\'s men are coming down from Causewayhead.',style:'briefing'},
+    [{owner:1,type:'light',count:2,anchor:'coords',...at(-2,-12)}]),
+   ev('stirling-cressingham',"Cressingham's knights",{type:'timer',seconds:110},{title:"Cressingham's knights",body:'Hugh de Cressingham is leading more knights onto the bridge to rescue the vanguard.',style:'alert'},
+    [{owner:2,type:'heavy',count:1,anchor:'coords',...at(4,10)},{owner:2,type:'light',count:1,anchor:'coords',...at(2,10)}],[{owner:2,scope:'reinforcements',...at(-5,-4)}]),
+   ev('stirling-drip','The ford at Drip',{type:'timer',seconds:160},{title:'The ford at Drip',body:'Scots horse have reached the ford at Drip upstream. Cross there and ride on Stirling from the west while the English are held at the bridge.',style:'briefing'},
+    [{owner:1,type:'motorized',count:2,anchor:'coords',...at(-24,-6)}]),
+   ev('stirling-surrey','Surrey falls back',{type:'timer',seconds:170},{title:'Surrey falls back',body:'The Earl of Surrey has lost heart and is marching the English army away south, leaving Stirling and the camp to their guards. Cross now and take both.',style:'briefing'},
+    [],[{owner:2,scope:'all',...at(0,21)}]),
+   ev('stirling-guard','The camp guard',{type:'timer',seconds:175},{title:'',body:''},[{owner:2,type:'light',count:1,anchor:'coords',...at(6,15)},{owner:2,type:'light',count:1,anchor:'coords',...at(-14,13)}])
+  ]});
+}
+
+function hattin(MapBuilder,ev){
+ const f=new Field(MapBuilder,30,1187);
+ // A dry plateau falling east to the Sea of Galilee. The crusaders come from the springs of Sephoria and Turan in the west;
+ // Saladin's army blocks the road to the water: the village of Lubiya, the springs of Kafr Hattin below the twin peaks of
+ // the Horns of Hattin, and Tiberias on the lake shore.
+ const shore=r=>lerpPts([[-24,26],[-14,23],[-4,22],[6,23],[14,21],[24,24]],r);
+ f.paint((h,n)=>{
+  const s=shore(h.r);
+  h.type=n<.42?'sand':'grass';
+  if(f.n(h.q,h.r,7)>.6&&h.q>-6)h.type='hill';
+  if(h.q>s-6&&h.q<=s-2&&f.n(h.q,h.r,2)>.45)h.type='hill';
+  if(inEllipse(h.q,h.r,2,-2,2.6,2,1+(n-.5)*.3)||inEllipse(h.q,h.r,7,-3,2.4,1.8,1+(n-.5)*.3))h.type=inEllipse(h.q,h.r,2,-2,1.1,.9)||inEllipse(h.q,h.r,7,-3,1,.8)?'mountain':'hill';
+  if(h.q>s+(n-.5)*1.4)h.type='water';else if(h.q>s-1.2)h.type='sand';
+  h.owner=h.q<-9+wind(h.r,.8,1.6)?2:1;
+ });
+ const kafr=f.town(5,-10,1,'Kafr Hattin'),lubiya=f.town(-2,9,1,'Lubiya'),tiberias=f.town(19,4,1,'Tiberias'),turan=f.town(-18,3,2,'Turan'),sephoria=f.town(-25,-14,2,'Sephoria');
+ f.road(sephoria,turan,[[-22,-5]]);f.road(turan,lubiya,[[-10,6]]);f.road(lubiya,tiberias,[[8,7]]);f.road(kafr,tiberias,[[12,-4]]);
+ // Saladin: archers across the road, foot behind them, the two wings of horse, his own mamluks in reserve
+ f.line('mountaineer',1,-5,-8,-5,6,4,'Ayyubid archers');
+ f.line('light',1,-2,-6,-2,6,3,'Ayyubid foot');
+ f.line('motorized',1,1,-13,4,-14,2,"Taqi al-Din's horse");f.line('motorized',1,1,12,4,13,2,"Gokbori's horse");
+ f.unit('heavy',1,10,1,"Saladin's mamluks");f.unit('light',1,6,-7,'Kafr Hattin guard');f.unit('light',1,16,4,'Tiberias garrison');
+ // Crusaders: the knights of the military orders and the kingdom, the foot around them, crossbowmen and turcopoles
+ f.unit('heavy',2,-13,-3,'Templar knights');f.unit('heavy',2,-13,1,'Hospitaller knights');f.unit('heavy',2,-15,-1,"King Guy's knights");f.unit('heavy',2,-15,-7,"Count Raymond's knights");
+ f.line('light',2,-11,-7,-11,5,5,'Crusader foot');
+ f.line('mountaineer',2,-13,-9,-13,7,2,'Crossbowmen');
+ f.unit('motorized',2,-17,8,'Turcopoles');f.unit('light',2,-18,-1,'Guard of the True Cross');f.unit('light',2,-24,-10,'Sephoria garrison');
+ f.label('Horns of Hattin',5,1);f.label('Sea of Galilee',26,-8,'water');f.label('Dry plateau',-12,-14);f.label('Springs of Kafr Hattin',8,-17);
+ return finish(f,ev,{id:'hattin-1187',name:'Hattin: The Springs',era:'medieval',date:'4 July 1187',difficulty:'Standard',
+  objective:'Hold Kafr Hattin and Tiberias for 5:00.',goal:{type:'hold',towns:['Kafr Hattin','Tiberias'],duration:300},
+  brief:'You command Saladin\'s army between the crusaders and the water. King Guy\'s knights and foot have marched all night across the dry plateau and must reach the springs of Kafr Hattin or the lake at Tiberias. Hold both. Let your archers shoot into the column, keep your horse ready for the knights\' charges, and do not let anyone break through to the lake.',
+  history:'On 4 July 1187 Saladin trapped the army of the Kingdom of Jerusalem, exhausted by thirst, on the plateau below the Horns of Hattin. Count Raymond of Tripoli broke out with a few knights; the rest of the army was destroyed or captured, and Jerusalem fell that autumn.',
+  note:'A dry plateau falling to the Sea of Galilee, with the twin peaks of the Horns of Hattin, the springs of Kafr Hattin below them and Tiberias on the shore.',
+  sources:['https://en.wikipedia.org/wiki/Battle_of_Hattin'],
+  economy:{money:12000,manpower:2500,aiMoney:{2:24000},aiManpower:{2:1500}},
+  events:[
+   ev('hattin-march','March to the water',{type:'timer',seconds:15},{title:'March to the water',body:'The crusaders have spent the night on the plateau without water and are marching for the springs of Kafr Hattin. Shoot into the column, and hold the springs.',style:'alert'},[],[{owner:2,scope:'all',...at(5,-10)}]),
+   ev('hattin-fire','The brush fires',{type:'timer',seconds:60},{title:'The brush fires',body:'Your men have set the dry scrub alight upwind of the crusaders, and smoke and thirst are breaking their foot. Fresh archers have come up from Lubiya.',style:'briefing'},
+    [{owner:1,type:'mountaineer',count:2,anchor:'coords',...at(3,12)}]),
+   ev('hattin-raymond',"Raymond's charge",{type:'timer',seconds:100},{title:"Count Raymond's charge",body:'Count Raymond of Tripoli is charging your line to break through to the lake. Let him pass if you must, but do not lose Tiberias.',style:'alert'},
+    [{owner:2,type:'heavy',count:2,anchor:'coords',...at(-12,-9)}],[{owner:2,scope:'reinforcements',...at(19,4)}]),
+   ev('hattin-horns','The Horns of Hattin',{type:'timer',seconds:160},{title:'The Horns of Hattin',body:'The king has pitched his red tent on the Horns of Hattin, and his foot is gathering for another push to the springs.',style:'alert'},
+    [{owner:2,type:'light',count:3,anchor:'coords',...at(-12,0)},{owner:2,type:'mountaineer',count:1,anchor:'coords',...at(-13,2)}],[{owner:2,scope:'reinforcements',...at(5,-10)}]),
+   ev('hattin-last','The last charges',{type:'timer',seconds:230},{title:'The last charges',body:'The king\'s knights charge twice more toward your guard. Hold them, and the day is yours.',style:'alert'},
+    [{owner:2,type:'heavy',count:3,anchor:'coords',...at(-14,2)}],[{owner:2,scope:'reinforcements',...at(5,-10)}])
   ]});
 }
 
@@ -414,7 +629,111 @@ function waterloo(MapBuilder,ev){
   ]});
 }
 
+function borodino(MapBuilder,ev){
+ const f=new Field(MapBuilder,30,1812);
+ // The Kolocha runs along the north with fords at Borodino village and upstream. South of it the Russians hold a line of
+ // earthworks: the Great Redoubt on the Kurgan height, Bagration's flèches on a low rise to the south, the Semyonovka
+ // ravine between the flèches and the village behind them, and the Utitsa woods on the far left. The French are in the
+ // west around the captured Shevardino redoubt.
+ const kolocha=catmull([[-30,-14],[-20,-12],[-10,-10],[-2,-13],[6,-16],[14,-15],[22,-19],[30,-21]]);
+ const ravine=catmull([[3,-9],[1,-2],[2,5],[5,12],[8,20]]);
+ f.paint((h,n)=>{
+  h.type=n>.74?'forest':'grass';
+  if(h.r>12&&h.q>-14&&h.q<6&&f.n(h.q,h.r,3)>.38)h.type='forest';
+  if(inEllipse(h.q,h.r,4,-4,4,3,1+(n-.5)*.5)||inEllipse(h.q,h.r,-3,8,4,2.6,1+(n-.5)*.5)||inEllipse(h.q,h.r,-21,6,3.5,2.5)||inEllipse(h.q,h.r,18,-9,4,3,1+(n-.5)*.5))h.type='hill';
+  if(distance(h.q,h.r,ravine).d<1.1)h.type='swamp';
+  if(distance(h.q,h.r,kolocha).d<.95&&Math.abs(h.q+10)>1.2&&Math.abs(h.q-10)>1.2)h.type='water';
+  h.owner=h.q<-8+wind(h.r,.4,1.5)?1:2;
+ });
+ const shev=f.town(-21,6,1,'Shevardino'),boro=f.town(-10,-5,1,'Borodino');
+ const redoubt=f.town(4,-4,2,'Great Redoubt'),fleches=f.town(-2,8,2,'Bagration flèches'),semy=f.town(8,8,2,'Semyonovskaya'),gorki=f.town(18,-8,2,'Gorki');
+ f.fort(-5,8,2);f.fort(1,-4,2);
+ f.road(shev,fleches,[[-12,6]]);f.road(boro,redoubt,[[-3,-5]]);f.road(fleches,semy);f.road(redoubt,gorki,[[11,-7]]);f.road(shev,boro,[[-16,0]]);
+ // French: Davout and Ney against the flèches, Eugène by Borodino, voltigeurs ahead, Murat's cavalry, the Poles in the
+ // south and the Guard held back at Shevardino
+ f.line('light',1,-11,5,-11,12,4,"Davout's infantry");
+ f.line('light',1,-11,0,-11,3,2,"Ney's infantry");
+ f.line('light',1,-13,-6,-13,-2,2,"Eugène's infantry");
+ f.line('mountaineer',1,-9,-1,-9,10,3,'Voltigeurs');
+ f.line('heavy',1,-16,1,-16,5,2,'Cuirassiers');f.line('motorized',1,-17,-3,-17,-1,2,'Dragoons');
+ f.line('light',1,-15,15,-12,17,2,'Polish infantry');
+ f.line('light',1,-24,2,-24,4,2,'Imperial Guard');
+ // Russians: Raevsky at the Great Redoubt, Bagration's grenadiers at the flèches, jaegers forward, cavalry behind,
+ // Tuchkov in the Utitsa woods and the Guard at Gorki
+ f.unit('light',2,4,-8,"Raevsky's infantry");f.unit('light',2,7,-2,'Great Redoubt garrison');
+ f.line('light',2,-5,5,-5,11,2,"Bagration's grenadiers");
+ f.line('mountaineer',2,-6,-3,-6,2,2,'Russian jaegers');
+ f.unit('light',2,10,11,'Semyonovskaya garrison');f.unit('heavy',2,11,2,'Russian cuirassiers');f.unit('motorized',2,13,-6,'Cossacks');
+ f.line('light',2,-1,17,3,17,2,"Tuchkov's corps");f.unit('light',2,18,-5,'Russian Guard');
+ f.label('Kolocha',-20,-15,'water');f.label('Kurgan height',9,-1);f.label('Semyonovka ravine',4,15);f.label('Utitsa woods',-8,20);f.label('Shevardino redoubt',-22,10);
+ return finish(f,ev,{id:'borodino-1812',name:'Borodino: The Great Redoubt',era:'napoleonic',date:'7 September 1812',difficulty:'Hard',
+  objective:'Capture the Bagration flèches and the Great Redoubt.',goal:{type:'capture',towns:['Bagration flèches','Great Redoubt']},
+  brief:'You command Napoleon\'s Grand Army in front of the Russian earthworks on the road to Moscow. Send Davout and Ney at Bagration\'s flèches and Eugène across from Borodino at the Great Redoubt, with the voltigeurs ahead and the cuirassiers ready to ride into any gap. The forts and the ravine favour the defender: attack together, not one corps at a time.',
+  history:'At Borodino on 7 September 1812 Napoleon\'s army stormed the Russian earthworks after a day of repeated assaults: Bagration\'s flèches fell in the morning and the Great Redoubt in the afternoon, at terrible cost on both sides. Kutuzov withdrew in good order, and a week later the French entered Moscow.',
+  note:'The Kolocha along the north, the Great Redoubt on the Kurgan height, Bagration\'s flèches on a low rise, the Semyonovka ravine and the Utitsa woods to the south.',
+  sources:['https://en.wikipedia.org/wiki/Battle_of_Borodino'],
+  economy:{money:20000,manpower:2500,aiMoney:{2:16000},aiManpower:{2:1000}},enemyManpowerRate:.25,
+  events:[
+   ev('boro-battery','The grand battery',{type:'timer',seconds:12},{title:'The grand battery',body:'A hundred French guns open fire on the flèches at dawn. Send Davout and Ney at the flèches, and Eugène at the Great Redoubt.',style:'briefing'}),
+   ev('boro-bagration','Bagration counterattacks',{type:'timer',seconds:70},{title:'Bagration counterattacks',body:'Russian grenadiers and cuirassiers are coming forward from Semyonovskaya to retake the flèches.',style:'alert'},
+    [{owner:2,type:'light',count:2,anchor:'coords',...at(10,7)},{owner:2,type:'heavy',count:1,anchor:'coords',...at(11,9)}],[{owner:2,scope:'reinforcements',...at(-2,8)}]),
+   ev('boro-raid','Platov and Uvarov',{type:'timer',seconds:130},{title:'The Cossack raid',body:'Platov\'s Cossacks and Uvarov\'s cavalry have crossed the Kolocha upstream and are riding on Borodino behind your left. Turn something to meet them.',style:'alert'},
+    [{owner:2,type:'motorized',count:2,anchor:'coords',...at(2,-20)}],[{owner:2,scope:'reinforcements',...at(-10,-5)}]),
+   ev('boro-caulaincourt',"Caulaincourt's cuirassiers",{type:'timer',seconds:120},{title:"Caulaincourt's cuirassiers",body:'General Caulaincourt\'s cuirassiers are ready to ride into the back of the Great Redoubt while the infantry storms it from the front.',style:'briefing'},
+    [{owner:1,type:'heavy',count:2,anchor:'coords',...at(-18,-3)}]),
+   ev('boro-reserve','The Russian reserves',{type:'timer',seconds:240},{title:'The Russian reserves',body:'Kutuzov sends his last reserves from Gorki to retake the Great Redoubt.',style:'alert'},
+    [{owner:2,type:'light',count:2,anchor:'coords',...at(18,-4)}],[{owner:2,scope:'reinforcements',...at(4,-4)}])
+  ]});
+}
+
+function trafalgar(MapBuilder,ev){
+ const f=new Field(MapBuilder,30,1021);
+ // Open Atlantic off the Spanish coast: Cádiz in the north-east, Cape Trafalgar to the east, and Gibraltar (drawn much
+ // closer than it is) across the approach to the strait in the south-east. The Combined Fleet is strung out north to
+ // south across the middle; Nelson's two columns come at it from the west.
+ const coast=r=>lerpPts([[-24,21],[-17,17],[-11,22],[-4,23],[1,20],[5,18],[9,22],[11,31],[16,31],[18,23],[24,23]],r);
+ f.paint((h,n)=>{
+  const c=coast(h.r)+(n-.5)*1.2;
+  if(h.q<c)h.type='water';
+  else h.type=h.q<c+1.2?'sand':f.n(h.q,h.r,3)>.6?'hill':'grass';
+  h.owner=h.r>13?1:3;
+ });
+ const cadiz=f.town(20,-17,3,'Cádiz'),cape=f.town(21,5,3,'Cape Trafalgar'),gib=f.town(26,20,1,'Gibraltar');
+ f.fort(23,2,3);f.fort(25,17,1);
+ f.road(cadiz,cape,[[22,-6]]);
+ // British: the weather column under Nelson in the north, the lee column under Collingwood in the south
+ // (the Royal Navy's crews are veterans: their gunnery is faster and surer)
+ const veteran=u=>Object.assign(u,{veteran:true,xp:100});
+ [['HMS Victory',-12,-6],['HMS Téméraire',-15,-7],['HMS Neptune',-18,-8],['HMS Leviathan',-21,-9],['HMS Conqueror',-24,-10],['HMS Britannia',-27,-11]].forEach(([n,q,r])=>veteran(f.unit('ship',1,q,r,n)));
+ [['HMS Royal Sovereign',-10,6],['HMS Belleisle',-13,7],['HMS Mars',-16,8],['HMS Tonnant',-19,9],['HMS Bellerophon',-22,10],['HMS Colossus',-25,11]].forEach(([n,q,r])=>veteran(f.unit('ship',1,q,r,n)));
+ f.unit('light',1,27,23,'Gibraltar garrison');f.unit('marine',1,24,18,'Royal Marines');
+ // the Combined Fleet of France and Spain, in a long ragged line
+ // (its van, under Dumanoir, sails on north and only comes back later: the event below)
+ ['Héros','Santísima Trinidad','Bucentaure','Redoutable','Santa Ana','Fougueux','Monarca','Pluton','Algésiras','Bahama','Príncipe de Asturias']
+  .forEach((n,i)=>{const r=-14+i*2.8;f.unit('ship',2,6+2.5*(r/16)**2,r,n);});
+ f.line('light',3,23,-13,25,-15,2,'Cádiz garrison');f.unit('light',3,23,8,'Trafalgar battery');
+ f.label('Atlantic Ocean',-14,-18,'water');f.label('Cape Trafalgar',26,9);f.label('Cádiz',25,-21);f.label('Approach to the strait',20,14,'water');f.label('Gibraltar',27,16);
+ return finish(f,ev,{id:'trafalgar-1805',name:'Trafalgar: Break the Line',era:'napoleonic',date:'21 October 1805',difficulty:'Hard',
+  objective:'Sink the Combined Fleet.',goal:{type:'fleet',towns:[]},
+  brief:'You command the British fleet in two columns west of Cape Trafalgar. The French and Spanish ships outnumber yours, but they are strung out in a long line. Drive both columns through it, break it into pieces and fight each piece ship against ship before the far end can turn back to help. Your crews are veterans; keep your ships together and let the broadsides do the work. Ship counters stand for ships of the line and their consorts.',
+  history:'On 21 October 1805 Nelson\'s fleet attacked the Franco-Spanish Combined Fleet off Cape Trafalgar in two columns, broke its line and captured or destroyed eighteen ships without losing one. Nelson was killed in the battle.',
+  note:'The Atlantic west of Cape Trafalgar, with Cádiz to the north-east and Gibraltar, drawn much closer than it is, in the south-east.',
+  sources:['https://en.wikipedia.org/wiki/Battle_of_Trafalgar'],
+  // (the Combined Fleet holds no town and earns nothing: its gold pays its upkeep for well over the battle)
+  economy:{money:20000,manpower:2500,aiMoney:{2:45000,3:6000},aiManpower:{2:500,3:600}},alliances:[[2,3]],aiCount:2,
+  events:[
+   ev('traf-signal','England expects',{type:'timer',seconds:12},{title:'England expects',body:'Signal from the flagship: England expects that every man will do his duty. The Combined Fleet is turning to meet you. Break its line in two places and fight it ship against ship.',style:'briefing'},[],[{owner:2,scope:'all',...at(-4,0)}]),
+   ev('traf-rear',"Collingwood's rear",{type:'timer',seconds:70},{title:"Collingwood's rear",body:'The last ships of the lee column are coming up from the south-west.',style:'briefing'},
+    [{owner:1,type:'ship',count:2,anchor:'coords',...at(-28,14)}]),
+   ev('traf-dumanoir',"Dumanoir's van",{type:'timer',seconds:120},{title:"Dumanoir's van turns back",body:'Admiral Dumanoir has brought the van round at last and is coming back down the line to rescue the flagship.',style:'alert'},
+    [{owner:2,type:'ship',count:3,anchor:'coords',...at(12,-22)}],[{owner:2,scope:'reinforcements',...at(-2,-4)}]),
+   ev('traf-gravina',"Gravina's squadron",{type:'timer',seconds:170},{title:"Gravina's squadron",body:'Admiral Gravina\'s squadron of observation turns into the fight from the south.',style:'alert'},
+    [{owner:2,type:'ship',count:2,anchor:'coords',...at(14,14)}],[{owner:2,scope:'reinforcements',...at(0,4)}]),
+   ev('traf-storm','The storm',{type:'timer',seconds:240},{title:'A storm is coming',body:'The swell is rising from the west and a storm is on its way. Finish the Combined Fleet before it breaks.',style:'briefing'})
+  ]});
+}
+
 function buildEraBattles({MapBuilder,ev}){
- return [gaugamela,thermopylae,hastings,agincourt,austerlitz,waterloo].map(build=>build(MapBuilder,ev));
+ return [gaugamela,thermopylae,salamis,cannae,hastings,agincourt,stirlingBridge,hattin,austerlitz,waterloo,borodino,trafalgar].map(build=>build(MapBuilder,ev));
 }
 module.exports={buildEraBattles,Field,finish,lerpPts,inEllipse,wind,at,SP,STATS};

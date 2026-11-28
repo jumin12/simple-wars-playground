@@ -1,7 +1,8 @@
 'use strict';
-// The shop's era battles (scripts/era-battles.js, custom-maps/): two battles in every older era, sold only to a player
+// The shop's era battles (scripts/era-battles.js, custom-maps/): four battles in every older era, sold only to a player
 // who owns that era's army as well as the gold, listed in the shop by era with the modern era first.
-//   - every older era has an attack and a defence, marked with its era; the catalog and the server's copy know it
+//   - every older era has attacks and defences (and a fleet action at Salamis and Trafalgar), marked with its era; the
+//     catalog and the server's copy know it
 //   - the profile server and the Steam store refuse an era mission without the era's army (no gold taken) and sell
 //     it with the army or the Supporter Pack (the Steam side is in verify-steam-commerce)
 //   - Shop → Missions: one section per era, modern first; an era whose army you lack says so, its missions are marked
@@ -18,26 +19,29 @@ const catalog = require('../store-catalog');
 const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'custom-maps/manifest.json'), 'utf8'));
 const serverCatalog = JSON.parse(fs.readFileSync(path.join(ROOT, 'server/mission-catalog.json'), 'utf8'));
 const BATTLES = {
-    ancient: { attack: 'gaugamela-331', hold: 'thermopylae-480', named: 'Spartan hoplites I' },
-    medieval: { attack: 'hastings-1066', hold: 'agincourt-1415', named: 'English longbowmen I' },
-    napoleonic: { attack: 'austerlitz-1805', hold: 'waterloo-1815', named: 'British line I' }
+    ancient: [{ id: 'gaugamela-331', objective: 'capture' }, { id: 'thermopylae-480', objective: 'hold', named: 'Spartan hoplites I' },
+        { id: 'salamis-480', objective: 'fleet', named: "Themistocles' flagship" }, { id: 'cannae-216', objective: 'hold', named: 'Libyan infantry I' }],
+    medieval: [{ id: 'hastings-1066', objective: 'capture' }, { id: 'agincourt-1415', objective: 'hold', named: 'English longbowmen I' },
+        { id: 'stirling-bridge-1297', objective: 'capture', named: "Wallace's spearmen I" }, { id: 'hattin-1187', objective: 'hold', named: 'Ayyubid archers I' }],
+    napoleonic: [{ id: 'austerlitz-1805', objective: 'capture' }, { id: 'waterloo-1815', objective: 'hold', named: 'British line I' },
+        { id: 'borodino-1812', objective: 'capture', named: 'Voltigeurs I' }, { id: 'trafalgar-1805', objective: 'fleet', named: 'HMS Victory' }]
 };
 // the standalone modern missions, rebuilt the same way (scripts/modern-battles.js)
 const MODERN = [
     { id: 'normandy-dday', objective: 'capture', named: '1st Infantry Division', levy: .25 },
     { id: 'kursk-citadel', objective: 'hold', named: 'Kursk garrison', levy: null },
     { id: 'midway-1942', objective: 'fleet', named: 'Enterprise task group', levy: null },
-    { id: 'el-alamein-1942', objective: 'capture', named: '9th Australian Division', levy: .25 }
+    { id: 'el-alamein-1942', objective: 'capture', named: '9th Australian Division', levy: .25 },
+    { id: 'stalingrad-1942', objective: 'hold', named: '284th Rifle Division', levy: null },
+    { id: 'bastogne-1944', objective: 'capture', named: '501st Parachute Infantry', levy: .25 }
 ];
 const CASES = [
-    ...Object.entries(BATTLES).flatMap(([era, b]) => [
-        { id: b.attack, era, objective: 'capture', named: null, levy: .25, art: true },
-        { id: b.hold, era, objective: 'hold', named: b.named, levy: null, art: true }]),
+    ...Object.entries(BATTLES).flatMap(([era, list]) => list.map(b => ({ id: b.id, era, objective: b.objective, named: b.named || null, levy: b.objective === 'capture' ? .25 : null, art: true }))),
     ...MODERN.map(m => ({ ...m, era: 'modern', art: false }))
 ];
 
 // ---- the catalog
-for(const [era, b] of Object.entries(BATTLES)) for(const id of [b.attack, b.hold]) {
+for(const [era, list] of Object.entries(BATTLES)) for(const { id } of list) {
     const entry = manifest.missions.find(m => m.id === id);
     assert.equal(entry?.gamePeriod, era, id + ' is a ' + era + ' battle');
     assert.equal(catalog.shopItems({ kind: 'map', itemId: 'shop_map_' + id }, manifest)[0].requiresSkin, era, id + ' needs the ' + era + ' army');
@@ -75,7 +79,7 @@ assert.equal(catalog.shopItems({ kind: 'map', itemId: 'shop_map_normandy-dday' }
             gameData.gold = 3000; gameData.ownedUnitSkins = { nato: true, medieval: true }; gameData.ownedShopVisuals = {};
             showPanel('shop'); switchShopTab('missions'); await renderShopMapsTab();
         });
-        await page.waitForFunction(() => document.querySelectorAll('#shopMapOptions .shop-mission-card').length === 13);
+        await page.waitForFunction(() => document.querySelectorAll('#shopMapOptions .shop-mission-card').length === 21);
         const shop = await page.evaluate(() => {
             const rows = [...document.querySelectorAll('#shopMapOptions > .shop-mission-era, #shopMapOptions > .shop-mission-card')];
             const sections = [];
@@ -87,8 +91,8 @@ assert.equal(catalog.shopItems({ kind: 'map', itemId: 'shop_map_normandy-dday' }
         });
         assert.deepEqual(shop.map(s => s.era), ['modern', 'napoleonic', 'medieval', 'ancient'], 'one section per era, modern first');
         assert.ok(shop.every(s => s.cards.every(c => c.era === s.era)), 'each mission sits in its own era');
-        assert.equal(shop[0].cards.length, 7);
-        for(const s of shop.slice(1)) assert.deepEqual(s.cards.map(c => c.id).sort(), [BATTLES[s.era].attack, BATTLES[s.era].hold].sort(), s.era + ': its two battles');
+        assert.equal(shop[0].cards.length, 9);
+        for(const s of shop.slice(1)) assert.deepEqual(s.cards.map(c => c.id).sort(), BATTLES[s.era].map(b => b.id).sort(), s.era + ': its four battles');
         const by = era => shop.find(s => s.era === era);
         assert.ok(!by('modern').locked && !by('medieval').locked && by('napoleonic').locked && by('ancient').locked, 'only the eras whose army you lack are locked');
         assert.ok(by('napoleonic').get && by('ancient').get && !by('medieval').get, '"Get the army" only where the army is missing');

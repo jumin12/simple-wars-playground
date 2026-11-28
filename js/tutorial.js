@@ -134,10 +134,10 @@ function wodTutorialSteps() {
     const at = k => wodTutorialWorld(T[k].q, T[k].r);
     return [
         { id: 'welcome', info: true, title: 'Welcome, Commander',
-          text: 'This short battle teaches the basics: moving troops, taking towns, recruiting and supply. It takes about ten minutes. <b>Show me</b> points the camera at what a step needs, <b>Skip step</b> moves on, and <b>Exit</b> on this panel leaves the tutorial at any time.<br><br>Your goal in every battle is the same: <b>capture every enemy town</b>.' },
+          text: 'This short battle teaches the basics: moving troops, taking towns, recruiting and supply. It takes about ten minutes. <b>Show me</b> points the camera at what a step needs, <b>Skip step</b> moves on, and <b>Skip tutorial</b> on this panel leaves it at any time (it stays in Tutorial &amp; help).<br><br>Your goal in every battle is the same: <b>capture every enemy town</b>.' },
         { id: 'camera', title: 'Look around',
           text: touch ? 'Drag with one finger to move the map and pinch to zoom.'
-              : 'Move the map with <b>W A S D</b> or the <b>arrow keys</b>, or drag it with the right mouse button. Zoom with the <b>mouse wheel</b>.',
+              : 'Move the map with <b>W A S D</b> or the <b>arrow keys</b>, or drag it with the right mouse button (the middle button while troops are selected). Zoom with the <b>mouse wheel</b>.',
           enter: t => { t.cam0 = { x: gameData.camera.x, y: gameData.camera.y, z: gameData.camera.zoom }; },
           done: t => Math.hypot(gameData.camera.x - t.cam0.x, gameData.camera.y - t.cam0.y) > 140 || Math.abs(gameData.camera.zoom - t.cam0.z) > t.cam0.z * 0.12 },
         { id: 'select', title: 'Select your troops', worldTarget: () => wodTutorialArmyCentre(), radius: 4,
@@ -146,7 +146,7 @@ function wodTutorialSteps() {
           enter: () => wodTutorialCenterCamera(wodTutorialArmyCentre()),
           done: () => gameData.selection.some(s => s.owner === WOD_TUTORIAL_PLAYER && !s.isCity && !s.id && s.type !== 'convoy' && s.hp > 0) },
         { id: 'card', info: true, title: 'The unit card', target: ['#infoCard'],
-          text: 'The card shows the selected regiment: its <b>strength</b>, <b>manpower</b>, <b>morale</b> and experience. Morale drops under fire; a regiment whose morale breaks runs back on its own. The terrain page lists the ground it stands on.' },
+          text: 'The card shows the selected regiment: its <b>strength</b>, <b>manpower</b>, <b>morale</b> and experience. Morale drops under fire; a regiment whose morale breaks runs back on its own. The ground box at the top right of the card opens its <b>terrain effects</b>: how each kind of ground changes its attack and the damage it takes.' },
         { id: 'move', title: 'Give an order', worldTarget: () => at('mill'), radius: 3,
           text: touch ? 'With troops selected, tap <b>Move</b> on the unit card, then tap the ground near the highlighted town, <b>Millbrook</b>.'
               : 'With troops selected, <b>right-click</b> the ground to move there. Send them toward the highlighted town, <b>Millbrook</b>.',
@@ -452,6 +452,27 @@ function wodTutorialExit() {
     returnToMenu();
 }
 
+/** Remembers that the player chose to skip the tutorial: the main menu stops pointing them at it ("Start here"). */
+function wodTutorialMarkSkipped() {
+    if(!wodProgress || wodProgress.tutorial?.completed || wodProgress.tutorial?.skipped) return;
+    wodProgress.tutorial = { ...(wodProgress.tutorial || {}), skipped: true, at: Date.now() };
+    try { scheduleSaveWodProgress(); } catch(_) {}
+}
+
+/** Skip tutorial (on its panel): leave the battle for the main menu, and don't offer the tutorial first again. */
+function wodTutorialSkip() {
+    wodTutorialMarkSkipped();
+    wodTutorialExit();
+    wodRefreshMainMenuOrder();
+}
+
+/** Skip the tutorial from Tutorial & help, before starting it. */
+function wodTutorialSkipFromMenu() {
+    wodTutorialMarkSkipped();
+    wodRefreshMainMenuOrder();
+    hidePanels();
+}
+
 function wodTutorialRestart() {
     wodEndTutorial();
     returnToMenu();
@@ -508,12 +529,14 @@ function wodTutorialRenderPanel(t) {
     const shown = t.steps.length;
     panel.className = 'wod-tut-panel' + (step.info ? ' wod-tut-panel--info' : '');
     panel.classList.toggle('wod-tut-covered', wodTutorialCovered());
+    // (the welcome step offers Skip tutorial next to Start; later steps keep it in the corner)
     panel.innerHTML = '<div class="wod-tut-head"><p class="wod-tut-kicker">Tutorial · step ' + (t.index + 1) + ' of ' + shown + '</p>'
-        + '<button type="button" class="wod-tut-exit" onclick="wodTutorialExit()" title="Leave the tutorial">Exit</button></div>'
+        + (t.index > 0 ? '<button type="button" class="wod-tut-exit" onclick="wodTutorialSkip()" title="Leave the tutorial for the main menu. You can play it any time from Tutorial &amp; help.">Skip tutorial</button>' : '') + '</div>'
         + '<h2 id="wodTutTitle">' + step.title + '</h2>'
         + '<p class="wod-tut-text">' + body + '</p>'
         + '<div class="wod-tut-actions">'
         + (step.info ? '<button type="button" class="wod-tut-btn wod-tut-btn--primary" onclick="wodTutorialNext()">' + (t.index === 0 ? 'Start' : 'Next') + '</button>' : '')
+        + (t.index === 0 ? '<button type="button" class="wod-tut-btn wod-tut-btn--quiet" onclick="wodTutorialSkip()">Skip tutorial</button>' : '')
         + (!step.info && step.worldTarget && step.worldTarget() ? '<button type="button" class="wod-tut-btn" onclick="wodTutorialShowMe()">Show me</button>' : '')
         + (!step.info && step.id !== 'final' ? '<button type="button" class="wod-tut-btn wod-tut-btn--quiet" onclick="wodTutorialNext()">Skip step</button>' : '')
         + '</div>'
@@ -595,7 +618,7 @@ function wodHasPlayedAnyMatch() {
     const modes = wodProgress.statsByMode || {};
     const started = (L.gamesStarted || 0) + (L.matchesCompleted || 0) + (mp.gamesPlayed || 0)
         + (modes.multiplayer?.totals?.gamesStarted || 0) + (modes.singleplayer?.totals?.gamesStarted || 0);
-    return started > 0 || !!wodProgress.tutorial?.completed;
+    return started > 0 || !!wodProgress.tutorial?.completed || !!wodProgress.tutorial?.skipped;
 }
 
 /** New players see Tutorial & help first; everyone else finds it after Achievements. */
@@ -615,6 +638,9 @@ function wodRefreshMainMenuOrder() {
 
 function wodOpenTutorialHelp() {
     showPanel('tutorialHelp');
+    // (a player who hasn't played yet can say no to the tutorial here, without starting it)
+    const skip = document.getElementById('wodTutHelpSkip');
+    if(skip) skip.hidden = wodHasPlayedAnyMatch();
 }
 
 function wodTutorialHelpOpenGuide() {
